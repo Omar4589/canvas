@@ -25,6 +25,21 @@ If your team has **hand-corrected** any voter info (say, a phone number confirme
 
 **Corrected map pins are protected the same way.** If someone dragged a door's pin to where the house actually is, a later import **won't snap it back** to the file's coordinates — the person standing at the door knew better than the file. Everything else about that address still updates normally. The same **Overwrite** tick box also releases the pins, so it's one decision: keep what your team corrected, or let the file win.
 
+## Big files, and what the stages mean
+
+Files are analyzed **in the background** — even a very large file won't time out, and **refreshing the page doesn't lose a running import**; it picks the job back up where it was. While a job waits its turn the button reads **"Queued — waiting for a worker"** with a clock, and a **Cancel** button can pull back a job that hasn't started yet (one that's already running can't be cancelled).
+
+Uploads are capped at **50 MB and 300,000 rows**. If your file is bigger, split it — **by county is usually the natural cut** — and upload each piece; imports are safe to repeat, so the end result is the same.
+
+While an import runs you'll see its stage:
+
+- **Parsing** — reading and checking the file's rows.
+- **Geocoding** — looking up map coordinates for addresses that arrived without them. This only appears when some addresses actually need it.
+- **Linking** — connecting each voter to your organization's people records. On very large files this is the longest step before writing, and it deliberately shows no percentage.
+- **Importing** — writing doors and voters, with live progress.
+
+**A stuck import fails with a message instead of spinning forever.** If the import system dies mid-job — or never picks the job up — the import marks itself **Failed within a few minutes**, and the message says which happened. More on what's normal vs. stuck: [My import has said Analyzing or Linking for a while — is it stuck?](import-taking-long)
+
 ## What goes live, and what waits
 
 - A **new voter at a door a walk list already owns** joins that door automatically — **if that door hasn't been knocked yet.** The canvasser sees them when they reach it.

@@ -100,6 +100,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
 | `retention-triggers` | Daily 04:41 UTC | **Warns, then deletes organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then purges wind-down, dormancy, and due deletion requests. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. |
+| `sweep-stale-imports` | Daily 05:53 UTC | **Fails stuck imports and deletes orphaned upload files.** Expires import jobs whose worker died mid-run (no heartbeat for minutes) with a clear failure message, then deletes the **raw uploaded voter files** left behind by finished, failed, or vanished imports older than 24h — a crashed import used to keep the complete uploaded file forever — plus stray worker temp files. Cron override: `IMPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
 successful run is >48h old — because a silently-dead scheduled job is indistinguishable from one that
@@ -301,6 +302,25 @@ them at the disposable one. Everything else about it works normally.
 > insurance, but they are not what gets you approved: **a demo tenant with real doors, a real campaign and
 > an assigned walk list is.** An admin login into an empty org is a Guideline 2.1 rejection no matter how
 > many roles you provide.
+
+### Clean up stuck imports and orphaned upload files (once after the import-fix release; safe anytime)
+
+The nightly `sweep-stale-imports` job (table above) handles this from now on, but the orphans it
+exists to prevent **accumulated before the fix**: every import that ever crashed left its complete
+uploaded voter file sitting in the database with nothing to delete it. Run this once after deploying
+the release to purge that backlog immediately instead of waiting for the night:
+
+```
+npm run sweep:raw-imports
+```
+
+It prints how many stuck import jobs it expired and how many orphaned raw uploads it deleted. It's the
+same code the nightly job runs — idempotent, safe to run whenever an import looks wedged and you don't
+want to wait.
+
+> That release also adds a database index (`ImportJob {status, heartbeatAt}` — what the sweep and the
+> stuck-import timeout query). Indexes never build themselves in production, so the deploy needs
+> `npm run migrate:build-indexes -- --apply` (next section).
 
 ### Build database indexes (after a deploy that added one)
 
@@ -509,6 +529,7 @@ fraud audit).
 | `npm run lock:account` | Lists every deletion-locked account |
 | `npm run migrate:build-indexes -- --apply` | Any deploy that adds or changes a schema index |
 | `npm run purge:deleted-identities` | Dry run of the scheduled job, to see what it *would* do |
+| `npm run sweep:raw-imports` | Once after the import-fix release (purges the pre-fix backlog of orphaned raw voter-file uploads), or whenever an import looks wedged — same code as the nightly `sweep-stale-imports` job ([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)) |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
 | `npm run migrate:campaign-coordinators -- --preflight` | **Read-only.** Before the per-campaign crew seed — how many members hold a crew, and who has knocked a campaign they have no roster row for |

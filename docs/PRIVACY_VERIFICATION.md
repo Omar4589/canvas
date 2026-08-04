@@ -469,6 +469,66 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **Claim to keep true:** a replaced response is admin-visible, tenant-confined, structurally
   excluded from stats and exports, and dies with the organization.
 
+- *(v5 2026-08-04)* **POSITIVE fix: the crashed-import raw-upload orphan leak is CLOSED.** Gap 10
+  below and the B5 "best-effort" paragraph recorded that a failed or crashed import left the
+  **complete uploaded voter file** in the `rawImports` GridFS bucket forever — no TTL, no deletion
+  path, and (after an org-deletion retry) no key left to find it. Three mechanisms now close it,
+  each code-verified: **(i)** the import processor classifies a missing raw file, an oversized file,
+  or an unparseable one as `UnrecoverableError` and **deletes the raw upload immediately**
+  (`importProcessor.js` — terminal, no retry will read it again); **(ii)** a **nightly sweep**
+  (`sweepStaleImportJobs`, 05:53 UTC, `IMPORT_SWEEP_JOB` in the maintenance queue) scans the
+  **bucket itself** — `rawImports.files` older than 24h, resolving each file's `ImportJob` by the
+  filename convention — and deletes any whose job is terminal **or missing**, so pre-fix orphans and
+  files stranded by a swallowed delete are reached without needing the destroyed jobIds; it also
+  removes stray worker temp files (`tmp-*` ExcelJS spools, `import-spill-*`) older than 24h;
+  **(iii)** a one-off console script (`npm run sweep:raw-imports`, root-proxied for the Heroku Run
+  console) purges the accumulated backlog on demand. The same release makes a stuck import **fail
+  with a message within minutes** (heartbeat + CAS expiry in `GET /admin/imports/:importId` and the
+  sweep) instead of spinning in an active status forever. The per-call `.catch(() => {})` in
+  `rawImportStore.deleteRawImport` remains, but a swallowed delete is now retried nightly rather
+  than orphaned permanently. Retention effect: raw uploads now have a **bounded lifetime on every
+  path** — deleted at job completion (unchanged), at unrecoverable failure (new), or by the sweep
+  within ~24h of the job going terminal/vanishing (new).
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes — this makes the existing
+  "the original file is deleted after import" practice true on the failure paths too; no new
+  subprocessor; DPA §6 untouched.**
+
+- *(v5 2026-08-04)* **NEW disclosure: transient voter-file copies on dyno ephemeral disk.** The
+  import pipeline now deliberately uses **disk instead of heap** in three places, each holding voter
+  PII briefly: **(i)** web-dyno uploads land via multer **`diskStorage`** in the OS temp dir (never
+  in the web dyno's RSS) and are unlinked on the response `'close'` event — success, failure, or
+  client abort; **(ii)** the worker's apply path spills valid rows to
+  `import-spill-<jobId>.ndjson` (+ a `-linked` twin) in the OS temp dir, both removed in a
+  `finally` — success OR failure; **(iii)** ExcelJS's streaming reader spools decompressed sheet XML
+  to `tmp-*` files with its own cleanup callback. Lifetime is the **request or the job**; nothing is
+  at rest past it. Failure modes are bounded: a SIGKILL can beat a `finally` or skip ExcelJS's
+  cleanup, so the nightly sweep (entry above) removes both patterns after 24h — and the dyno
+  filesystem is itself ephemeral (destroyed on restart, daily on Heroku). No new audience, no new
+  storage service (the OS temp dir of dynos we already run), no export.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence becomes false — processing-time
+  copies on our own compute, shorter-lived than the GridFS staging copy already disclosed; no new
+  subprocessor; DPA §6 untouched.**
+
+- *(v5 2026-08-04)* **Recorded as a NEGATIVE: `saxes` + `unzipper` promoted to direct
+  dependencies — NOT a subprocessor event.** `server/package.json` now lists `saxes@^5.0.1` and
+  `unzipper@^0.10.14` directly (the xlsx header-peek, `peekUpload.js`). Both were **already
+  installed** as transitive dependencies of `exceljs` (their sole prior dependent) — the installed
+  tree is unchanged. They are in-process parsing libraries: no network, no telemetry, customer data
+  never leaves the dyno. Written down because "new third-party name in package.json" is exactly what
+  sends the next reviewer to the DPA §6 checklist, and the answer should not have to be re-derived.
+  **Assessment: no new third party processes personal data; the DPA §6 subprocessor list and the
+  Privacy Policy's service-providers paragraph are correct unchanged.**
+
+- *(v5 2026-08-04)* **Data-trim: `diff.samples.errors` is no longer produced or persisted.** The
+  §C-9 finding at "ImportJob permanently retains voter PII" listed the persisted preview `diff`
+  among the permanent PII carriers. One redundant slice of it is gone: `computeImportDiff` no longer
+  emits a `samples.errors` array (raw per-row error objects carrying `stateVoterId`), which the
+  preview path was persisting into `ImportJob.diff` while `ImportJob.errors` already held the same
+  rows — the client never read the copy. The moved-voter / near-dup / hand-edit samples and
+  `errors[]` itself remain exactly as recorded there; this deletes a duplicate, not the class.
+  **Assessment: strictly less PII persisted; NO published Privacy Policy / ToS / DPA sentence
+  affected; no new subprocessor; DPA §6 untouched.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -539,7 +599,12 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 10. **GridFS raw-upload deletes are still swallowed** (`rawImportStore.js` `.catch(() => {})`) and are
     now unrecoverable on a retried org deletion (the jobIds that locate them are destroyed in the same
     cascade); `deleteOrganization` still runs in no transaction. Pre-fix orphaned `PersonMergeLog`
-    snapshots have no back-clean.
+    snapshots have no back-clean. *[v5 2026-08-04: the raw-upload half is superseded — the nightly
+    `sweepStaleImportJobs` (05:53 UTC) scans the `rawImports` bucket itself and deletes any file >24h
+    old whose ImportJob is terminal **or missing**, so a swallowed delete is retried nightly and an
+    org-deletion orphan is reachable without its jobIds; unrecoverable import failures also delete the
+    upload immediately, and `npm run sweep:raw-imports` purges the pre-fix backlog on demand. See the
+    v5 entry above. The no-transaction cascade and the `PersonMergeLog` back-clean remain open.]*
 11. **The Help Center has zero articles on staff/support access** — end users cannot read in-product
     what the policy now promises. (A transparency gap, not a false sentence.)
 
@@ -879,7 +944,7 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 
 **The cascade runs in no transaction** (`Organization.deleteOne` is last, `:133`), so a mid-run failure leaves the customer partially deleted.
 
-**Raw upload deletion is best-effort.** `rawImportStore.js:33-39` swallows every GridFS delete error (`.catch(() => {})`). The `ImportJob` rows keyed to those files are then destroyed, so a failed blob delete leaves the complete uploaded voter file orphaned with no key to find it and no retry. The deletion receipt reports `jobIds.length`, not files actually deleted (`deleteOrganization.js:87`).
+**Raw upload deletion is best-effort.** `rawImportStore.js:33-39` swallows every GridFS delete error (`.catch(() => {})`). The `ImportJob` rows keyed to those files are then destroyed, so a failed blob delete leaves the complete uploaded voter file orphaned with no key to find it and no retry. The deletion receipt reports `jobIds.length`, not files actually deleted (`deleteOrganization.js:87`). *[v5 2026-08-04: still best-effort per call, but no longer orphaned forever — the nightly `sweepStaleImportJobs` scans `rawImports.files` directly (no jobIds needed) and deletes any file >24h old whose ImportJob is terminal or gone, so a swallowed delete is retried nightly. See the v5 "orphan leak CLOSED" entry in the v3 section.]*
 
 ## B6. What automatic retention timers exist? What triggers deletion?
 
@@ -1605,7 +1670,7 @@ I grepped `mobile/` (source and `app.json`) for `ExcludedFromBackup`, `NSURLIsEx
 
 ### 3. `ImportJob` permanently retains voter PII in import history. **VERIFIED.**
 Never mentioned in any inventory. `ImportJob` rows are retained forever (no TTL anywhere) and carry:
-- **`diff`** (`models/ImportJob.js:86`) — samples of **moved voters** as `{stateVoterId, name, fromAddress, toAddress}` (`services/import/computeImportDiff.js:129-137`, `:200-219`). **A voter's name plus their previous and new home address, permanently, in import history.** *[v3 2026-07-17: the persisted diff now also carries `handEditConflicts.sample` — capped (100) kept-value/file-value pairs for hand-edited identity fields (can include a phone or DOB). Same class as the moved-voter samples: org-scoped, both values already held by the org (its own edit + its own upload), same ImportJob lifecycle and org-delete cascade. No new audience, no new third party.]*
+- **`diff`** (`models/ImportJob.js:86`) — samples of **moved voters** as `{stateVoterId, name, fromAddress, toAddress}` (`services/import/computeImportDiff.js:129-137`, `:200-219`). **A voter's name plus their previous and new home address, permanently, in import history.** *[v3 2026-07-17: the persisted diff now also carries `handEditConflicts.sample` — capped (100) kept-value/file-value pairs for hand-edited identity fields (can include a phone or DOB). Same class as the moved-voter samples: org-scoped, both values already held by the org (its own edit + its own upload), same ImportJob lifecycle and org-delete cascade. No new audience, no new third party.]* *[v5 2026-08-04: trimmed — `diff.samples.errors` (raw per-row error objects with `stateVoterId`, a duplicate of `ImportJob.errors` the client never read) is no longer produced or persisted. The moved/near-dup/hand-edit samples and `errors[]` below remain as described.]*
 - **`errors[]`** (`ImportJob.js:61`) — `rowIndex`, `code`, `reason`, **`stateVoterId`** (`csvImporter.js:152-158`)
 - **`geocodeCheck.sample`** — sample **addresses**
 

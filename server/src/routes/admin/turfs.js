@@ -999,6 +999,20 @@ router.get('/doors', async (req, res, next) => {
       }
       return d;
     });
+    // format=geojson (additive — without it the response is byte-identical): the
+    // mobile Books map view feeds this straight to a file-backed ShapeSource so the
+    // native SDK parses it off the JS thread. At 100k+ doors the {doors} JSON
+    // crossed the RN bridge as one serialized string and froze the phone.
+    if (req.query.format === 'geojson') {
+      return res.json({
+        type: 'FeatureCollection',
+        features: doors.map(({ id, lng, lat, ...props }) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lng, lat] },
+          properties: { id, ...props },
+        })),
+      });
+    }
     res.json({ doors });
   } catch (err) {
     next(err);

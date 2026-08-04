@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import mongoose from 'mongoose';
 
 // The web dyno receives the upload but the worker is a separate dyno with its
@@ -18,6 +20,23 @@ export function saveRawImport(importJobId, filename, buffer) {
     stream.on('finish', () => resolve(stream.id));
     stream.end(buffer);
   });
+}
+
+// Disk→GridFS without ever holding the upload in memory (multer diskStorage
+// hands the routes a path, not a buffer — that keeps a 50 MB upload out of the
+// web dyno's RSS entirely).
+export async function saveRawImportFromFile(importJobId, filename, filePath) {
+  const upload = bucket().openUploadStream(String(importJobId), {
+    metadata: { importJobId: String(importJobId), filename },
+  });
+  await pipeline(fs.createReadStream(filePath), upload);
+  return upload.id;
+}
+
+// Orphan-sweep support (mirrors exportArtifactStore.listArtifactJobIds): the
+// distinct ImportJob ids present in the bucket.
+export async function listRawImportJobIds() {
+  return mongoose.connection.db.collection(`${BUCKET}.files`).distinct('filename');
 }
 
 export function loadRawImport(importJobId) {

@@ -17,7 +17,7 @@ async function findInChunks(Model, field, values, projection, extraFilter = {}) 
     const slice = values.slice(i, i + CHUNK);
     if (!slice.length) continue;
     const docs = await Model.find({ ...extraFilter, [field]: { $in: slice } }, projection).lean();
-    out.push(...docs);
+    for (const d of docs) out.push(d); // no spread-push: 100k args overflows the stack
   }
   return out;
 }
@@ -47,18 +47,25 @@ async function forecastPersons(validRows, uidSource, orgId) {
   const uidVals = uidSource ? [...new Set(validRows.map((r) => r.voter.uid).filter(Boolean))] : [];
   const proj = { uidKeys: 1, svidKeys: 1 };
   const scope = { organizationId: orgId, mergedInto: null };
-  const found = [
-    ...(svidVals.length ? await findInChunks(Person, 'svidKeys.stateVoterId', svidVals, proj, scope) : []),
-    ...(uidVals.length ? await findInChunks(Person, 'uidKeys.uid', uidVals, proj, scope) : []),
-  ];
+  // Fold matches straight into the key→person maps via cursors — never accumulate
+  // the docs (a person matching on both svid AND uid used to be materialized twice,
+  // +75 MB on a 100k-row re-import). The maps retain only the compact key strings.
   const svidToPerson = new Map();
   const uidToPerson = new Map();
   const seen = new Set();
-  for (const p of found) {
-    if (seen.has(String(p._id))) continue;
+  const fold = (p) => {
+    if (seen.has(String(p._id))) return;
     seen.add(String(p._id));
     for (const k of p.svidKeys || []) svidToPerson.set(`${String(k.registeredState || '').toUpperCase()}|${k.stateVoterId}`, String(p._id));
     for (const k of p.uidKeys || []) uidToPerson.set(`${k.uidSource}|${k.uid}`, String(p._id));
+  };
+  for (const [field, values] of [['svidKeys.stateVoterId', svidVals], ['uidKeys.uid', uidVals]]) {
+    for (let i = 0; i < values.length; i += CHUNK) {
+      const slice = values.slice(i, i + CHUNK);
+      if (!slice.length) continue;
+      const cursor = Person.find({ ...scope, [field]: { $in: slice } }, proj).lean().cursor();
+      for await (const p of cursor) fold(p);
+    }
   }
 
   const matchedPersonIds = new Set();
@@ -165,12 +172,18 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
     const newDoorZips = new Set(
       newDoorEntries.map(([, h]) => String(h.zipCode ?? '').slice(0, 5)).filter(Boolean)
     );
-    const existingForDup = await Household.find(
-      { campaignId },
-      { normalizedAddress: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
-    ).lean();
+    // Zip-scoped + cursor-folded: this was an UNCHUNKED full-collection scan of every
+    // household in the campaign (+22 MB at 107k doors, growing linearly forever) with
+    // the zip filter applied client-side. $in mixes exact strings and anchored regexes
+    // so zip9-stored rows ("33065-1234") still match their file zip5 — both forms ride
+    // the index. Only the loose-key map is retained.
+    const zipMatchers = [...newDoorZips].flatMap((z) => [z, new RegExp(`^${z}-`)]);
     const looseToExisting = new Map(); // looseKey -> existing normalizedAddress (first wins)
-    for (const h of existingForDup) {
+    const dupCursor = Household.find(
+      { campaignId, zipCode: { $in: zipMatchers } },
+      { normalizedAddress: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
+    ).lean().cursor();
+    for await (const h of dupCursor) {
       const zip5 = String(h.zipCode ?? '').slice(0, 5);
       if (!newDoorZips.has(zip5)) continue;
       const key = looseAddressKey(h);
@@ -261,7 +274,9 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       moved,
       orphans,
       nearDups,
-      errors: errors.slice(0, SAMPLE_CAP),
+      // No errors sample: the client never read it, and the preview path persisted
+      // the whole diff to ImportJob.diff — raw per-row error objects (with voter
+      // ids) were being stored twice for nothing (ImportJob.errors already has them).
     },
   };
 }

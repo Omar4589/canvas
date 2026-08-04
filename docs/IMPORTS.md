@@ -77,15 +77,35 @@ import also records how many voters moved doors and how many doors were emptied,
 
 ## File size & large files
 
-Uploads are capped at **50 MB** (roughly 150k–250k voter rows). Picking a bigger file is blocked up
-front with a "split it" message — and since imports are **additive and idempotent** (re-uploading rows
-just refreshes them), splitting a very large file by region/county and uploading each piece produces the
-**same end result**. When you pick a file the page shows its size and an estimated row count.
+Uploads are capped at **50 MB and 300,000 rows** (a 50 MB file is roughly 150k–250k voter rows). An
+oversized file is refused up front with a "split it" message — and since imports are **additive and
+idempotent** (re-uploading rows just refreshes them), splitting a very large file — **by county is
+usually the natural cut** — and uploading each piece produces the **same end result**. When you pick
+a file the page shows its size and an estimated row count, instantly even on a huge file (it reads
+just the first few rows, never the whole thing).
 
-Most files preview in a second or two. A **large file** (≥ ~15 MB) is analyzed in the **background** so
-it can't hit the request timeout — you'll see "Analyzing in the background…" and the diff appears when
-it's ready. That background preview, like the actual import, needs the **import worker** running (the
-worker-offline banner will warn you if it isn't).
+**Every preview is analyzed in the background** by the import worker — there's no size cutoff
+anymore, and no file is big enough to hit a request timeout. While the job waits its turn the button
+reads **"Queued — waiting for a worker"** with an elapsed clock, and a **Cancel** button can pull a
+still-queued job back (a job that's actively running can't be cancelled). Once a worker picks it up
+you see the stage and percentage. **Refreshing the page no longer loses a running preview or
+import** — the page picks the job back up where it was. Background analysis, like the actual import,
+needs the **import worker** running (the worker-offline banner will warn you if it isn't).
+
+**What the stages mean** while an import runs:
+
+- **Parsing** — reading and validating the file's rows.
+- **Geocoding** — looking up map coordinates for addresses that arrived without them. This stage only
+  appears when at least one address actually needs it; a file that arrives fully geocoded skips it.
+- **Linking** — connecting each voter to your organization's People records. On very large files this
+  is the longest step before writing, and it deliberately shows no percentage — a stage label beats a
+  made-up number.
+- **Importing** — writing doors and voters, with live progress.
+
+**A stuck import now fails instead of spinning forever.** If the worker dies mid-job — or never picks
+the job up at all — the import marks itself **Failed within a few minutes**, with a message that says
+which of the two happened ("no worker picked this up" vs. "the worker stopped responding mid-job")
+instead of an endless spinner.
 
 ## Undo an import
 
@@ -134,7 +154,10 @@ walkthrough — including when to use **Claim all Intake** vs. a saved search �
 # Part 2 — Technical reference
 
 Import pipeline: [services/import/csvImporter.js](../server/src/services/import/csvImporter.js),
+[services/import/parseUpload.js](../server/src/services/import/parseUpload.js),
+[services/import/peekUpload.js](../server/src/services/import/peekUpload.js),
 [services/import/importProcessor.js](../server/src/services/import/importProcessor.js),
+[services/import/sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js),
 [utils/normalizeAddress.js](../server/src/utils/normalizeAddress.js).
 
 ## A. Matching keys
@@ -199,20 +222,31 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
 - **Forecast vs. actual:** the preview is a forecast against current data; the apply re-parses the same
   file and computes the authoritative counts. The CLI `runImport` path skips the worker's post-apply
   step (no deactivation), same as it skips the other post-apply recomputes.
-- **Sync vs. async preview:** the synchronous `POST /csv/preview` parses + diffs in the request — fine
-  for city-sized files but at risk of the platform's 30s request timeout on very large files. So the
-  client routes files **≥ 15 MB** to `POST /csv/preview-enqueue`, which stashes the file
-  (`saveRawImport`) and queues an `ImportJob` with **`kind: 'preview'`** on the same import queue. The
-  worker branch in [importProcessor.js](../server/src/services/import/importProcessor.js) runs
-  `parseAndValidate` + `computeImportDiff`, stores the result on `ImportJob.diff`, and deletes the raw
-  file (no `applyImport`). The page polls `GET /admin/imports/:id` for `job.diff`. Preview jobs are
-  excluded from the Recent-imports list (`kind: { $ne: 'preview' }`).
-- **Size cap:** Multer rejects files over **50 MB**; a `uploadCsv` wrapper maps that to a friendly
+- **Previews always run on the worker:** the client sends **every** preview to
+  `POST /csv/preview-enqueue` (the old ≥ 15 MB size fork is deleted — one path, no request-timeout
+  cliff), which stashes the file (`saveRawImportFromFile`) and queues an `ImportJob` with
+  **`kind: 'preview'`** on the same import queue. The worker branch in
+  [importProcessor.js](../server/src/services/import/importProcessor.js) runs `buildImportRows` +
+  `computeImportDiff`, stores the result on `ImportJob.diff`, and deletes the raw file (no
+  `applyImport`). The page polls `GET /admin/imports/:id` for `job.diff` and persists the job id in
+  `sessionStorage` (`import.previewJobId` / `import.geocodeCheckJobId`), so a refresh re-attaches to
+  the running job instead of orphaning it. Preview jobs are excluded from the Recent-imports list.
+  The synchronous `POST /csv/preview` remains (API callers, tests); an oversized file 400s there with
+  `code: 'file-too-many-rows'`.
+- **Size caps:** Multer rejects files over **50 MB**; a `uploadCsv` wrapper maps that to a friendly
   **413** (`code: 'file-too-large'`) instead of a generic 500, and the client also blocks oversized
-  files before upload.
+  files before upload. Past the byte cap, `streamParse` enforces **`MAX_IMPORT_ROWS`** (default
+  300,000) and **`MAX_IMPORT_CELLS`** (default 8,000,000; both env-overridable) **during** the parse —
+  `ImportTooLargeError` carries the count and the split-by-county remedy, and the worker marks it
+  unrecoverable instead of burning the retry schedule (§E, §G).
+- **The `GET /:importId` poll projects out the big arrays**
+  (`insertedHouseholdIds`/`insertedVoterIds`/`sourceHouseholdIds`/`duplicateStateVoterIds` — ~5 MB of
+  JSON on a 100k-row import that the 1.5s poller must not re-download every tick; undo reads them from
+  the DB), validates the ObjectId, and runs the lazy stale-job expiry (§E).
 
-Still open (not built): reopening an already-knocked door when a new voter is added there; streaming the
-upload to disk + a sampled preview if single files ever need to exceed 50 MB.
+Still open (not built): reopening an already-knocked door when a new voter is added there. (The other
+former entry here — streaming the upload to disk + a sampled preview — shipped: multer `diskStorage`
+plus `peekUpload`, see §E and §G.)
 
 ## E. Operations — the import worker
 
@@ -222,8 +256,69 @@ that dyno is scaled to 0, the web app still **enqueues** jobs but nothing **cons
 BullMQ **"waiting"** forever. `GET /admin/imports/worker-status`
 ([routes/admin/imports.js](../server/src/routes/admin/imports.js)) reports whether a worker is consuming
 the queue (`queue.getWorkers()` + job counts) and drives an **"import worker offline" banner** on the
-Import page, so a stopped worker is obvious instead of a silent stuck "pending". Keep the `worker` dyno
-on (a Basic, always-on dyno) so imports always process.
+Import page, so a stopped worker is obvious instead of a silent stuck "pending". Its Redis calls are
+bounded by a **3 s `Promise.race`**: with `maxRetriesPerRequest: null` (required by BullMQ) ioredis
+queues commands *forever* against a dead Redis and never rejects, so an unbounded await would ride to
+the router's H12 and the offline banner would never render in the one case it exists for — Redis
+unreachable now answers `{ online: false, reason: 'redis-unreachable' }`. Keep the `worker` dyno on (a
+Basic, always-on dyno) so imports always process.
+
+**Heartbeat + stale-job expiry**
+([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)). A worker V8 OOM-abort
+(or SIGKILL) skips every catch, so an `ImportJob` used to freeze in an active status forever while the
+client polled it — the "Analyzing…" spinner that never ends. Now **`heartbeatAt` rides every progress
+write** (per 2000-row apply batch, per geocode batch, per link batch — no extra writes), and two
+enforcement points share one CAS expiry:
+
+- **Lazy, per poll — `GET /admin/imports/:importId`.** Deliberately enforced on the **web** dyno,
+  because the dead component in this failure is the worker. `pending` older than **2 minutes** means
+  no worker ever claimed the job; any later active status **3 minutes** past its heartbeat means the
+  worker died mid-job. Either way the doc CAS-flips to `failed` (the `{ _id, status }` filter leaves a
+  job that resumed or finished between read and write alone), with a human `errors[]` message
+  distinguishing **"No import worker picked this up"** (worker dyno off — check Heroku → Resources)
+  from **"The import worker stopped responding mid-job"** (retry, or split the file), plus
+  `lastError: 'stale-unclaimed' | 'stale-heartbeat'`. The poll itself is the watchdog — a stranded job
+  self-fails within minutes with a real message.
+- **The nightly sweep — 05:53 UTC, `IMPORT_SWEEP_JOB`** — the backstop for jobs nobody is polling.
+  Registered in the scheduler's `MAINTENANCE_JOBS` and deliberately **not** in `REPEATABLE_JOBS`
+  (hygiene going quiet must never read as "Retention: NOT ENFORCED" on the health banner). It also
+  deletes **rawImports GridFS files** whose `ImportJob` is terminal or missing and that are older than
+  24 h — crashed imports used to orphan the complete uploaded voter file with no TTL and no deletion
+  path (see [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)) — and stray worker temp files
+  (`tmp-*` ExcelJS spools, `import-spill-*`) older than 24 h. One-off console run:
+  `npm run sweep:raw-imports` ([OPERATIONS.md](OPERATIONS.md)).
+
+**Redis→Mongo failure reconcile.** When BullMQ exhausts a job's retries, the failure lands in Redis
+only — nothing else writes `failed` onto the doc the client polls. The import worker's `failed`
+listener ([worker.js](../server/src/worker.js)) CAS-writes `{ status: 'failed', lastError }` (active
+statuses only) once the last attempt dies. In the processor, a missing raw file, an oversized file, or
+an unparseable one is classified **`UnrecoverableError`** — no retry burn — and its raw upload is
+deleted immediately (the sweep covers every other failure path). The worker's boot probe and
+`registerMaintenanceJobs` are time-bounded for the same ioredis reason as worker-status: a dead Redis
+must not wedge `main()` before any `Worker` exists.
+
+**Cancel.** `POST /admin/imports/:importId/cancel` cancels a **queued** job: pull it from the queue,
+CAS-fail the doc, drop the raw upload. A job a worker is actively heartbeating returns **409**
+("running — it can only be cancelled once it stops responding") — cancelling one mid-write would let
+the processor's completion overwrite the cancel — unless the heartbeat shows the worker dead, in which
+case the stale expiry takes it.
+
+**Memory & sizing.** The worker script pins V8's heap —
+`node --max-old-space-size=${WORKER_MAX_OLD_SPACE:-384}` ([server/package.json](../server/package.json)),
+default **384 MB**. After this batch a **166k-row / 50 MB-class file fits under that cap**: the apply
+path spills valid rows to NDJSON on the dyno's ephemeral disk and processes 2000-row batches, so worker
+heap stays roughly **flat in file size** (measured record in [PERFORMANCE.md](PERFORMANCE.md) —
+raising the cap is no longer the fix for big files). `IMPORT_JOB_CONCURRENCY` (default 2) multiplies
+whatever a single job still holds; if imports ever OOM again, drop it to 1 before reaching for a
+bigger dyno + a higher `WORKER_MAX_OLD_SPACE`. `ImportJob` gained `heartbeatAt` / `phase` /
+`lastError` and a **`{status: 1, heartbeatAt: 1}` index** — prod autoIndex is off, so
+`npm run migrate:build-indexes -- --apply` after deploy is a **gate**.
+
+The **web** side stopped holding uploads in memory too: multer uses **`diskStorage`** (OS temp dir,
+ephemeral on Heroku) instead of `memoryStorage`, so a 50 MB upload never sits in the web dyno's RSS;
+`saveRawImportFromFile` streams disk → GridFS, and the temp file is unlinked on the response's
+`'close'` event (success, failure, or client abort — the file holds voter PII, so its lifetime is the
+request).
 
 ## F. Undo (`POST /admin/imports/:importId/undo`)
 
@@ -241,19 +336,65 @@ Idempotent: `undone` blocks a second run. The result
 the Recent-imports history. Undo also tears down any **Person** this import created that now has
 **zero** linked voters (plus its candidate/proposal/log rows) — see [PERSONS.md](PERSONS.md) §H.
 
-## G. Smart import — formats, explode & detection
+## G. Smart import — formats, explode, detection & the streaming engine
 
-One parse seam: `parseUpload(buffer, filename)`
+**The mapping peek is O(5 rows), never O(file).** `POST /preview-headers` calls
+[`peekUpload`](../server/src/services/import/peekUpload.js) for headers + 5 sample rows + an
+`estimatedRows` count. CSV: decode only the first 1 MB and Papa-parse with `preview` (row estimate =
+size ÷ average line length). XLSX: **unzipper** opens the zip **central directory** — random access to
+exactly the entries needed, in the order we want — and a **saxes** SAX parse makes two bounded passes:
+the sheet until 6 `<row>`s have been seen (the stream is destroyed mid-entry), then
+`sharedStrings.xml` retaining **only** the string indices those cells cite (stops at the max needed
+index, with a 64 MB text backstop so a crafted file can't turn the peek into a full read).
+`styles.xml` supplies the date-format style indexes (built-in numFmtIds + the y/m/d token heuristic),
+so per-cell semantics — shared strings, booleans, date serials, float stringification — match
+`parseUpload`'s `readCell` exactly. Measured on a 166,738-row xlsx: **~283 ms / ~90 MB peak** vs the
+old full-parse path's **~6 s / ~620 MB** on the web dyno (the R14s). **Why not ExcelJS with an early
+break:** its streaming reader spools the *entire* decompressed sheet (~150 MB for that file) to a temp
+file whenever the zip lists the sheet before sharedStrings, and breaking out early skips its cleanup
+callback — a leaked spool per preview. `estimatedRows` (xlsx `<dimension>`; the CSV extrapolation)
+feeds the client's oversized warning before the user maps 24 columns. `peekUpload` takes a Buffer or a
+**file path** (multer `diskStorage`, §E — the upload never enters the web dyno's heap).
+
+**One parse seam, now streaming:** `streamParse(buffer, filename, { onRow, maxRows, maxCells })`
 ([services/import/parseUpload.js](../server/src/services/import/parseUpload.js)) reads **CSV via
-Papa** and **XLSX via exceljs** (formatted strings, so IDs keep leading zeros). `csvImporter.js`
-splits **parse** (`buildImportRows`) from **validate**; the CSV path is byte-for-byte unchanged
-after the split. Multi-member files are detected by **numbered siblings of the mapped
-`stateVoterId` column** (`FLVoterId1..N`); only **voter-group** columns are suffix-substituted
-per member (household columns stay shared, so `Address1/2/3` never mis-explode). The explode
-decision persists on the `ImportJob` so the worker apply explodes identically to the preview.
-Detection (`{ format, multiMember, warnings[] }`) flows through `computeImportDiff` to the
-**"What we detected"** panel; warnings cover `leading_zero_risk` and `date_serial` (a bare
-numeric date is converted from the Excel serial **only** when the column maps to a date field).
+Papa** (`step` mode) and **XLSX via exceljs's `WorkbookReader`** (row-at-a-time; sharedStrings/styles
+cached, so IDs keep leading zeros and date cells keep their type via the shared `readCell`), calling
+`onRow` once per non-empty row — **no rows array ever exists**. Materializing every row as a JS object
+was ~299 MB of live heap on a 166k-row file, which OOM'd the worker's 384 MB cap (§E); the streamed
+pipeline finishes the same file in 9.5 s under `--max-old-space-size=384` with identical outputs.
+`maxRows` / `maxCells` (env **`MAX_IMPORT_ROWS`** / **`MAX_IMPORT_CELLS`**, defaults 300,000 /
+8,000,000) are enforced **during** the parse — `ImportTooLargeError` (`code: 'file-too-many-rows'`)
+fires the moment a counter trips, not after materializing everything. `parseUpload` survives as the
+array-mode wrapper for small-file callers and tests. **Deviation from the plan, on purpose:** no
+`loadRawImportStream` was added — `streamParse` takes buffers (Papa's sync mode needs the whole CSV
+string anyway, and the 50 MB upload cap bounds it), so the worker still loads the raw file from GridFS
+as one buffer; the win is never materializing *rows*, which is where the 8.8× blow-up lived.
+
+`csvImporter.js` still splits **parse** (`buildImportRows`) from **validate**, but validation is now a
+**streaming sink**: `makeRowValidator` (the extracted per-row core — semantics identical to the old
+loop) is fed one row at a time, `explodeRow` explodes a multi-member row per-row (never holding the
+exploded set; the transform binds lazily on the first row, when headers become known), and with
+`{ spill }` valid rows are appended to an **NDJSON spill file** instead of an array (`validRows: null`,
+`validCount` set). `applyImport` accepts either `validRows` (array — small files, CLI, tests) or
+`validRowsFile` + `validCount` (the worker's large-file path) and reads whichever exists via
+`ndjsonBatches` — **one 2000-row batch in heap at a time**. Multi-member files are detected by
+**numbered siblings of the mapped `stateVoterId` column** (`FLVoterId1..N`); only **voter-group**
+columns are suffix-substituted per member (household columns stay shared, so `Address1/2/3` never
+mis-explode). The explode decision persists on the `ImportJob` so the worker apply explodes
+identically to the preview. Detection (`{ format, multiMember, warnings[] }`) flows through
+`computeImportDiff` to the **"What we detected"** panel; warnings cover `leading_zero_risk` and
+`date_serial` (a bare numeric date is converted from the Excel serial **only** when the column maps to
+a date field).
+
+**Mapping auto-suggest is deliberately narrow**
+([canonicalFields.js](../server/src/services/import/canonicalFields.js)). Exact normalized alias
+matches win, and a header that *is* some field's alias can never be substring-claimed by a different
+field — the unrestricted bidirectional substring it replaced once suggested `stateVoterId → STATE`
+(`'statevoterid' ⊇ 'state'`), which would have collapsed an entire file to **one voter**. Substring
+fallbacks are gated both ways: alias-inside-header needs the alias ≥ 4 chars (so `cd`/`sd`/`hd` can't
+hit inside unrelated headers), header-inside-alias needs the header ≥ 6 chars (so short generic
+headers like `state` can't claim a longer alias of an unrelated field).
 
 ## H. Geocoding (when `GEOCODE_ENABLED`)
 
@@ -319,7 +460,18 @@ geocoding is off) per-row.
 
 `reconcileIdentityFromImport` runs **after geocoding, before `applyImport`**, stamping `personId`
 (+ `uidSource`) onto each row so the upsert carries them; `computeImportDiff` adds a read-only
-`persons` forecast (`existingPeople`/`newPeople`). The **vendor namespace** (`uidSource`) is
+`persons` forecast (`existingPeople`/`newPeople`).
+
+**Linking is its own visible stage now.** The worker stamps `status: 'linking'` (+ `phase`) before
+`reconcileIdentityFromImport` — at 100k+ voters this is the longest pre-write step, and it used to run
+under whatever label came before it (usually "Geocoding" frozen at 0%). Progress deliberately holds at
+the geocode floor during it: the step has no cheap row-granular progress, and a stage label beats a
+lying percentage. Relatedly, the **geocoding status is only stamped when ≥ 1 household actually needs
+geocoding** — a file that arrives fully geocoded never flashes a phantom "Geocoding" stage (resolve()
+would no-op, but the client polls every 1.5 s and used to catch the stamp). In spill mode (§G) the
+link pass streams the raw spill in 5000-row batches — dropping geocode-unmatched rows, reconciling
+each batch (which stamps `personId`), and re-writing the stamped rows to the `-linked` spill that
+`applyImport` consumes — one batch in heap at a time, heartbeating per batch. The **vendor namespace** (`uidSource`) is
 resolved at upload (inline or from the `ImportProfile`), stored on the `ImportJob`, and threaded
 into matching. It is **per-org matching only** — Persons are org-scoped, and the import screen's
 copy says so (the old "matched across orgs" wording described the pre-July-2026 behavior that was

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import { Router } from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
@@ -9,9 +11,10 @@ import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
-import { saveRawImport } from '../../services/import/rawImportStore.js';
+import { saveRawImportFromFile, deleteRawImport } from '../../services/import/rawImportStore.js';
+import { maybeExpireStaleImportJob } from '../../services/import/sweepStaleImports.js';
 import { buildImportRows } from '../../services/import/csvImporter.js';
-import { parseUpload } from '../../services/import/parseUpload.js';
+import { peekUpload } from '../../services/import/peekUpload.js';
 import { computeImportDiff } from '../../services/import/computeImportDiff.js';
 import { undoFileImport } from '../../services/import/undoImport.js';
 import {
@@ -34,8 +37,11 @@ async function manages(req, res, campaignId) {
   return false;
 }
 
+// Disk storage, not memoryStorage: a 50 MB upload used to sit in the web dyno's
+// RSS for the whole request. Files land in the OS temp dir (ephemeral on Heroku)
+// and every route deletes its file in a finally — see dropUpload.
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({ destination: os.tmpdir() }),
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
@@ -50,6 +56,13 @@ function uploadCsv(req, res, next) {
       });
     }
     if (err) return next(err);
+    // The uploaded temp file holds voter PII — its lifetime is the request,
+    // success, failure, or client abort ('close' fires for all three). Routes
+    // must therefore finish reading it before responding (they do — every
+    // consumer is awaited). Best-effort: the dyno filesystem is ephemeral anyway.
+    res.on('close', () => {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+    });
     next();
   });
 }
@@ -72,12 +85,14 @@ router.get('/fields', (req, res) => {
 });
 
 // Read a file's headers + a few sample rows and auto-suggest a mapping.
+// peekUpload reads O(5 rows), not O(file) — parseUpload here materialized all
+// 166k rows of a big xlsx on the web dyno (~620 MB, the R14s) to return five.
 router.post('/preview-headers', uploadCsv, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const { headers, rows } = await parseUpload(req.file.buffer, req.file.originalname);
-    res.json({ columns: headers, sample: rows.slice(0, 5), suggestedMapping: suggestMapping(headers) });
+    const { headers, rows, estimatedRows } = await peekUpload(req.file.path, req.file.originalname, { rows: 5 });
+    res.json({ columns: headers, sample: rows, suggestedMapping: suggestMapping(headers), estimatedRows });
   } catch (err) {
     next(err);
   }
@@ -181,7 +196,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
       revisitNewVoters: req.body?.revisitNewVoters === 'true',
       overwriteHandEdits: req.body?.overwriteHandEdits === 'true',
     });
-    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await saveRawImportFromFile(job._id, req.file.originalname, req.file.path);
     await getQueue(QUEUE_NAMES.IMPORT).add(
       'csv-import',
       { importJobId: String(job._id) },
@@ -212,11 +227,15 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
 
     const explode = req.body?.explode !== 'false';
     const { totalRows, errors, validRows, householdMap, dupSvids, detection } =
-      await buildImportRows(req.file.buffer, req.file.originalname, resolved.mapping, { explode });
+      await buildImportRows(fs.readFileSync(req.file.path), req.file.originalname, resolved.mapping, { explode });
     const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: resolved.uidSource });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {
+    // Oversized files refuse with the count + remedy, not a generic 500.
+    if (err?.name === 'ImportTooLargeError') {
+      return res.status(400).json({ error: err.message, code: err.code });
+    }
     next(err);
   }
 });
@@ -251,7 +270,7 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
       explode: req.body?.explode !== 'false',
       uidSource: resolved.uidSource ?? null,
     });
-    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await saveRawImportFromFile(job._id, req.file.originalname, req.file.path);
     await getQueue(QUEUE_NAMES.IMPORT).add(
       'csv-preview',
       { importJobId: String(job._id) },
@@ -297,7 +316,7 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
       explode: req.body?.explode !== 'false',
       uidSource: resolved.uidSource ?? null,
     });
-    await saveRawImport(job._id, req.file.originalname, req.file.buffer);
+    await saveRawImportFromFile(job._id, req.file.originalname, req.file.path);
     await getQueue(QUEUE_NAMES.IMPORT).add('geocode-check', { importJobId: String(job._id) }, { jobId: String(job._id) });
     res.status(201).json({ job });
   } catch (err) {
@@ -308,18 +327,34 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
 // Health: is a worker actually consuming the import queue? Powers the Import
 // page's "worker offline" banner so a stopped worker dyno isn't a silent failure.
 // Registered BEFORE `/:importId` so the literal path wins over the param route.
+// Redis commands here must be time-bounded: with `maxRetriesPerRequest: null`
+// (required by BullMQ) ioredis queues commands FOREVER against a dead Redis and
+// never rejects — so an unbounded await rides to the router's H12 and the
+// offline banner never renders in the one case it exists for.
+const raceTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('redis-timeout')), ms).unref?.()),
+  ]);
+
 router.get('/worker-status', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const q = getQueue(QUEUE_NAMES.IMPORT);
     let workers = null;
     try {
-      const list = await q.getWorkers();
+      const list = await raceTimeout(q.getWorkers(), 3000);
       workers = Array.isArray(list) ? list.length : null;
     } catch {
       workers = null; // some managed Redis restrict the CLIENT introspection getWorkers uses
     }
-    const counts = await q.getJobCounts('waiting', 'active', 'delayed', 'failed');
+    let counts;
+    try {
+      counts = await raceTimeout(q.getJobCounts('waiting', 'active', 'delayed', 'failed'), 3000);
+    } catch {
+      // Redis unreachable — the queue is effectively down, which IS "worker offline".
+      return res.json({ online: false, workers: null, waiting: null, active: null, reason: 'redis-unreachable' });
+    }
     const waiting = counts.waiting || 0;
     const active = counts.active || 0;
     // With a worker count, trust it; otherwise flag only a genuine stuck backlog.
@@ -357,16 +392,94 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Big-array fields the 1.5s poller must not re-download every tick; undo reads
+// them from the DB, never from this response. (On a 100k-row import the inserted-id
+// arrays alone are ~5 MB of JSON.)
+const IMPORT_DETAIL_PROJECTION = {
+  insertedHouseholdIds: 0,
+  insertedVoterIds: 0,
+  sourceHouseholdIds: 0,
+  duplicateStateVoterIds: 0,
+};
+
 router.get('/:importId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.importId)) {
+      return res.status(400).json({ error: 'Invalid import id' });
+    }
+    let job = await ImportJob.findOne(
+      { _id: req.params.importId, organizationId: activeOrgId(req) },
+      IMPORT_DETAIL_PROJECTION
+    ).populate('uploadedBy', 'firstName lastName email');
+    if (!job) return res.status(404).json({ error: 'Import not found' });
+    if (!(await manages(req, res, job.campaignId))) return;
+    // Stuck-job expiry runs HERE, on the web dyno, because the failure it exists
+    // for is a dead worker: an OOM-abort skips every catch and freezes the doc in
+    // an active status while the client polls forever. The poll itself is the
+    // watchdog — a stranded job self-fails within minutes with a real message.
+    if (await maybeExpireStaleImportJob(job)) {
+      job = await ImportJob.findById(job._id, IMPORT_DETAIL_PROJECTION).populate(
+        'uploadedBy',
+        'firstName lastName email'
+      );
+    }
+    res.json({ job });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Cancel a queued (not yet running) import/preview: pull it from the queue, fail
+// the doc, drop the raw upload. A job a worker is actively heartbeating returns
+// 409 — cancelling one mid-write would let the processor's completion overwrite
+// the cancel, so we only cancel what is provably not running.
+router.post('/:importId/cancel', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.importId)) {
+      return res.status(400).json({ error: 'Invalid import id' });
+    }
     const job = await ImportJob.findOne({
       _id: req.params.importId,
       organizationId: activeOrgId(req),
-    }).populate('uploadedBy', 'firstName lastName email');
+    });
     if (!job) return res.status(404).json({ error: 'Import not found' });
     if (!(await manages(req, res, job.campaignId))) return;
-    res.json({ job });
+    if (['completed', 'failed'].includes(job.status)) {
+      return res.json({ job }); // already terminal — nothing to cancel
+    }
+
+    // Bull jobId === String(ImportJob._id) (set at enqueue). remove() throws on a
+    // locked/active job — that means a worker holds it, so refuse unless the
+    // heartbeat shows the worker is dead (then the stale expiry takes it).
+    let removedFromQueue = false;
+    try {
+      const bullJob = await raceTimeout(getQueue(QUEUE_NAMES.IMPORT).getJob(String(job._id)), 3000);
+      if (bullJob) {
+        await bullJob.remove();
+        removedFromQueue = true;
+      } else {
+        removedFromQueue = true; // nothing queued (already consumed + reconciled, or Redis lost it)
+      }
+    } catch {
+      removedFromQueue = false;
+    }
+    if (!removedFromQueue && !(await maybeExpireStaleImportJob(job))) {
+      return res.status(409).json({ error: 'Import is running — it can only be cancelled once it stops responding.' });
+    }
+
+    await ImportJob.updateOne(
+      { _id: job._id, status: job.status },
+      {
+        $set: { status: 'failed', lastError: 'cancelled', completedAt: new Date() },
+        $push: { errors: { reason: 'Cancelled before it ran.' } },
+        $inc: { errorCount: 1 },
+      }
+    );
+    await deleteRawImport(job._id).catch(() => {});
+    const fresh = await ImportJob.findById(job._id, IMPORT_DETAIL_PROJECTION);
+    res.json({ job: fresh });
   } catch (err) {
     next(err);
   }

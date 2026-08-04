@@ -27,3 +27,4 @@ Format: one question per line, optionally with a note on where the answer lives.
 
 - "I uploaded a second voter file — now what?" → add-a-second-voter-file.md
 - "I forgot my password" → reset-my-password.md
+- "My import has been on Analyzing / Linking forever — is it stuck?" → import-taking-long.md (stages explained; a genuinely stuck import now fails itself within minutes with a reason)

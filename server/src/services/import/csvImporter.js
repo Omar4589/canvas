@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import readline from 'node:readline';
 import Papa from 'papaparse';
 import mongoose from 'mongoose';
 import { Campaign } from '../../models/Campaign.js';
@@ -6,7 +8,7 @@ import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress } from '../../utils/normalizeAddress.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
-import { parseUpload } from './parseUpload.js';
+import { streamParse } from './parseUpload.js';
 import { bumpLive } from '../platform/platformStats.js';
 import { IDENTITY_FIELDS, identityEq } from '../person/propagateIdentity.js';
 
@@ -139,15 +141,31 @@ export function parseAndValidate(csvString, mapping) {
  * the smart-import path (buildImportRows).
  */
 export function validateRows(rows, mapping, headers) {
-  const resolved = resolveMapping(mapping, headers && headers.length ? headers : rows[0] ? Object.keys(rows[0]) : []);
+  const v = makeRowValidator(mapping, headers && headers.length ? headers : rows[0] ? Object.keys(rows[0]) : []);
+  rows.forEach((raw) => v.push(raw));
+  return v.finish();
+}
 
-  const totalRows = rows.length;
+/**
+ * The per-row validation core, extracted so the streaming path can feed it one
+ * row at a time (never holding a rows array). Semantics are identical to the old
+ * validateRows loop; `sink` (optional) receives each valid row instead of the
+ * validRows array — when provided, finish() reports validRows: null.
+ */
+export function makeRowValidator(mapping, headers, { sink } = {}) {
+  const resolved = resolveMapping(mapping, headers || []);
   const errors = [];
-  const validRows = [];
+  const validRows = sink ? null : [];
   const seenSvids = new Set();
   const dupSvids = new Set();
+  const householdMap = new Map();
+  let totalRows = 0;
+  let validCount = 0;
+  const geocodeEnabled = process.env.GEOCODE_ENABLED === 'true';
 
-  rows.forEach((raw, i) => {
+  const push = (raw) => {
+    const i = totalRows;
+    totalRows += 1;
     const mapped = mapRow(raw, resolved);
     const missing = missingRequired(mapped);
     if (missing.length) {
@@ -164,7 +182,6 @@ export function validateRows(rows, mapping, headers) {
       // error. Missing coords (no coord columns) survive to grouping ONLY when
       // geocoding is enabled — the geocode step then fills or drops them. With
       // geocoding off, behavior is byte-for-byte unchanged.
-      const geocodeEnabled = process.env.GEOCODE_ENABLED === 'true';
       if (mapped.household.coordsProvided || !geocodeEnabled) {
         errors.push({
           rowIndex: i + 2,
@@ -181,23 +198,22 @@ export function validateRows(rows, mapping, headers) {
       return; // first occurrence wins
     }
     seenSvids.add(svid);
-    validRows.push(mapped);
-  });
-
-  // Group into unique households. First row with valid coords wins.
-  const householdMap = new Map();
-  for (const row of validRows) {
-    const normAddr = normalizeAddress(row.household);
+    validCount += 1;
+    // Group into unique households as rows arrive. First row with valid coords wins.
+    const normAddr = normalizeAddress(mapped.household);
     const existing = householdMap.get(normAddr);
     if (!existing) {
-      householdMap.set(normAddr, { ...row.household, normalizedAddress: normAddr });
-    } else if (existing.latitude == null && row.household.latitude != null) {
-      existing.latitude = row.household.latitude;
-      existing.longitude = row.household.longitude;
+      householdMap.set(normAddr, { ...mapped.household, normalizedAddress: normAddr });
+    } else if (existing.latitude == null && mapped.household.latitude != null) {
+      existing.latitude = mapped.household.latitude;
+      existing.longitude = mapped.household.longitude;
     }
-  }
+    if (sink) sink(mapped);
+    else validRows.push(mapped);
+  };
 
-  return { totalRows, errors, validRows, householdMap, dupSvids };
+  const finish = () => ({ totalRows, errors, validRows, householdMap, dupSvids, validCount });
+  return { push, finish, resolved };
 }
 
 // ── Smart import: Excel parsing, multi-member explode, quality detection ──────
@@ -250,34 +266,31 @@ function detectMembers(headers, resolved) {
   return { detected: true, maxMembers, idBase, perMember };
 }
 
-// Explode each source row into one row per non-empty member. Per-member voter
+// Explode ONE source row into one row per non-empty member. Per-member voter
 // columns are pulled from member N and written under member 1's column key (so
-// validateRows reads them via the same mapping); household columns are shared;
+// the validator reads them via the same mapping); household columns are shared;
 // non-per-member voter fields (e.g. a Party only member 1 has) are left blank for
-// members 2+ rather than fabricated.
-function explodeRows(rows, resolved, members) {
-  const out = [];
-  const idCol1 = resolved.stateVoterId;
-  for (const row of rows) {
-    if (nonEmpty(row[idCol1])) out.push(row); // member 1: as-is
-    for (let n = 2; n <= members.maxMembers; n += 1) {
-      if (!nonEmpty(row[members.idBase + n])) continue;
-      const nr = {};
-      for (const hf of HOUSEHOLD_FIELDS) {
-        const col = resolved[hf];
-        if (col) nr[col] = row[col];
-      }
-      for (const info of Object.values(members.perMember)) {
-        nr[info.col1] = row[info.base + n] ?? '';
-      }
-      out.push(nr);
+// members 2+ rather than fabricated. Per-row so the streaming path never holds
+// the exploded set.
+function explodeRow(row, resolved, members, out) {
+  if (nonEmpty(row[resolved.stateVoterId])) out(row); // member 1: as-is
+  for (let n = 2; n <= members.maxMembers; n += 1) {
+    if (!nonEmpty(row[members.idBase + n])) continue;
+    const nr = {};
+    for (const hf of HOUSEHOLD_FIELDS) {
+      const col = resolved[hf];
+      if (col) nr[col] = row[col];
     }
+    for (const info of Object.values(members.perMember)) {
+      nr[info.col1] = row[info.base + n] ?? '';
+    }
+    out(nr);
   }
-  return out;
 }
 
 // Advisory quality warnings surfaced in the preview (no row mutation).
-function buildWarnings(rows, resolved, cellMeta, format) {
+// `anyCoords` is accumulated during the streaming parse — this never re-reads rows.
+function buildWarnings(resolved, cellMeta, format, anyCoords) {
   const warnings = [];
   if (format === 'xlsx') {
     for (const f of ['stateVoterId', 'zipCode']) {
@@ -293,9 +306,6 @@ function buildWarnings(rows, resolved, cellMeta, format) {
         detail: `"${dob}" looks like Excel date serials; they are converted to real dates on import.` });
     }
   }
-  // Missing coordinates — the app requires lat/long for map pins.
-  const hasCoordCols = resolved.latitude && resolved.longitude;
-  const anyCoords = hasCoordCols && rows.some((r) => nonEmpty(r[resolved.latitude]) && nonEmpty(r[resolved.longitude]));
   if (!anyCoords) {
     warnings.push({ type: 'missing_coordinates', column: null, field: 'latitude',
       detail: 'This file has no latitude/longitude. With geocoding enabled, the app looks up coordinates from each address during import; otherwise these rows are skipped (the app needs coordinates for map pins).' });
@@ -304,29 +314,96 @@ function buildWarnings(rows, resolved, cellMeta, format) {
 }
 
 /**
- * Smart-import entry point: parse a CSV or XLSX buffer, detect multi-member files
- * and quality issues, optionally explode multi-member rows, then validate.
- * Returns the same shape as parseAndValidate plus a `detection` object.
+ * Smart-import entry point: stream-parse a CSV or XLSX buffer, detect multi-member
+ * files and quality issues, optionally explode multi-member rows, and validate —
+ * all row-at-a-time. No rows array ever exists (the 299 MB live set that OOM'd
+ * the worker's 384 MB heap on a 166k-row file).
+ *
+ * Returns the same shape as before plus `detection`. With { spill }, valid rows
+ * are appended to that NDJSON file via appendFileSync and `validRows` comes back
+ * null with `validCount` set — the processor then streams the spill in batches.
+ *
+ * One subtlety: member detection needs headers, which the streaming parse only
+ *_learns at row 1 — so the explode transform is bound lazily on the first row.
  */
-export async function buildImportRows(buffer, filename, mapping, { explode = true } = {}) {
-  const { headers, rows, format, cellMeta } = await parseUpload(buffer, filename);
-  const resolved = resolveMapping(mapping, headers);
-  const warnings = buildWarnings(rows, resolved, cellMeta, format);
-  const members = detectMembers(headers, resolved);
+export async function buildImportRows(buffer, filename, mapping, { explode = true, spill = null, maxRows, maxCells } = {}) {
+  const limits = {
+    maxRows: maxRows ?? Number(process.env.MAX_IMPORT_ROWS || 300000),
+    maxCells: maxCells ?? Number(process.env.MAX_IMPORT_CELLS || 8000000),
+  };
+  let validator = null;
+  let resolved = null;
+  let members = { detected: false };
+  let sourceRows = 0;
+  let explodedVoters = 0;
+  let anyCoords = false;
+  const sink = spill
+    ? (mapped) => fs.appendFileSync(spill, `${JSON.stringify(mapped)}\n`)
+    : null;
 
-  const detection = { format, warnings, multiMember: { detected: members.detected } };
-  let workRows = rows;
-  if (members.detected) {
-    detection.multiMember = {
-      detected: true, memberCount: members.maxMembers, sourceRows: rows.length, exploded: !!explode, explodedVoters: null,
-    };
-    if (explode) {
-      workRows = explodeRows(rows, resolved, members);
-      detection.multiMember.explodedVoters = workRows.length;
+  const handleExploded = (raw) => {
+    explodedVoters += 1;
+    validator.push(raw);
+  };
+
+  const { headers, format, cellMeta, totalRows } = await streamParse(buffer, filename, {
+    ...limits,
+    onRow: (raw) => {
+      if (!validator) {
+        // First row: headers are now known — bind mapping, member detection, sink.
+        resolved = resolveMapping(mapping, Object.keys(raw));
+        members = detectMembers(Object.keys(raw), resolved);
+        validator = makeRowValidator(mapping, Object.keys(raw), sink ? { sink } : {});
+      }
+      sourceRows += 1;
+      if (!anyCoords && resolved.latitude && resolved.longitude &&
+          nonEmpty(raw[resolved.latitude]) && nonEmpty(raw[resolved.longitude])) {
+        anyCoords = true;
+      }
+      if (members.detected && explode) explodeRow(raw, resolved, members, handleExploded);
+      else validator.push(raw);
+    },
+  });
+
+  if (!validator) {
+    // Empty file — bind against the parsed headers so the shape is consistent.
+    resolved = resolveMapping(mapping, headers);
+    members = detectMembers(headers, resolved);
+    validator = makeRowValidator(mapping, headers, sink ? { sink } : {});
+  }
+
+  const detection = {
+    format,
+    warnings: buildWarnings(resolved, cellMeta, format, anyCoords),
+    multiMember: members.detected
+      ? { detected: true, memberCount: members.maxMembers, sourceRows, exploded: !!explode, explodedVoters: explode ? explodedVoters : null }
+      : { detected: false },
+  };
+  void totalRows; // the validator's own count is authoritative (explode changes it)
+  return { ...validator.finish(), detection };
+}
+
+/**
+ * Stream an NDJSON spill file back as row batches. One batch in memory at a time —
+ * this is what keeps the worker's heap flat in file size (validRows for a 166k-row
+ * file is ~160 MB live; a 2000-row batch is ~2 MB).
+ */
+export async function* ndjsonBatches(file, size) {
+  const rl = readline.createInterface({ input: fs.createReadStream(file, 'utf8'), crlfDelay: Infinity });
+  let batch = [];
+  for await (const line of rl) {
+    if (!line) continue;
+    batch.push(JSON.parse(line));
+    if (batch.length >= size) {
+      yield batch;
+      batch = [];
     }
   }
-  const validated = validateRows(workRows, mapping, headers);
-  return { ...validated, detection };
+  if (batch.length) yield batch;
+}
+
+async function* arrayBatches(arr, size) {
+  for (let i = 0; i < arr.length; i += size) yield arr.slice(i, i + size);
 }
 
 // Distinct people (stateVoterId) in the org. Voter rows are per-campaign, so a raw row
@@ -350,8 +427,13 @@ async function countOrgPeople(orgId) {
  * Counts are computed by countDocuments diff so they're correct even if the
  * job is retried.
  */
-export async function applyImport({ campaign, orgId, validRows, householdMap, batchSize = 2000, overwriteHandEdits = false, onProgress }) {
+export async function applyImport({ campaign, orgId, validRows, validRowsFile = null, validCount = null, householdMap, batchSize = 2000, overwriteHandEdits = false, onProgress }) {
   const campaignId = campaign._id;
+  // Rows arrive either as an in-memory array (small files, CLI, tests) or as an
+  // NDJSON spill file (the worker's large-file path) — batches() reads whichever
+  // exists, one batch in memory at a time. rowCount drives totals + progress.
+  const rowCount = validRows ? validRows.length : validCount ?? 0;
+  const batches = () => (validRows ? arrayBatches(validRows, batchSize) : ndjsonBatches(validRowsFile, batchSize));
   // Migration guard: the per-campaign upsert filter below can't match a legacy row (no
   // campaignId), so it would insert a duplicate for the old unique index to reject.
   // Fail with the fix instead of a cryptic E11000 mid-write.
@@ -465,32 +547,26 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   const SHIELD_PROJ = { stateVoterId: 1, locallyEditedFields: 1 };
   for (const f of IDENTITY_FIELDS) SHIELD_PROJ[f] = 1;
   const shieldBySvid = new Map();
-  const allSvids = validRows.map((r) => r.voter.stateVoterId);
-  for (let i = 0; i < allSvids.length; i += batchSize) {
-    const docs = await Voter.find(
-      {
-        campaignId,
-        stateVoterId: { $in: allSvids.slice(i, i + batchSize) },
-        'locallyEditedFields.0': { $exists: true },
-      },
+  // Svid-keyed prefetches (shield + DNC): batch the $in queries straight off the
+  // row batches — the svid strings themselves are the only thing retained.
+  const dncBySvid = new Map();
+  for await (const batch of batches()) {
+    const svids = batch.map((r) => r.voter.stateVoterId);
+    const shieldDocs = await Voter.find(
+      { campaignId, stateVoterId: { $in: svids }, 'locallyEditedFields.0': { $exists: true } },
       SHIELD_PROJ
     ).lean();
-    for (const d of docs) shieldBySvid.set(d.stateVoterId, d);
-  }
-
-  // 2.6. DNC seeding: "never contact this person" is an ORG-wide promise but rows are
-  // per-campaign — a person flagged in a sibling campaign must arrive here already flagged.
-  // Prefetch flagged rows org-wide by svid and copy the full subdoc onto INSERTS only
-  // ($setOnInsert — existing rows keep import-survival-by-omission, and the preserved
-  // uploadId keeps an upload's undo able to revert seeded copies too). Doors that gain a
-  // seeded flag are returned so the caller folds them into the fullyDnc recompute.
-  const dncBySvid = new Map();
-  for (let i = 0; i < allSvids.length; i += batchSize) {
-    const docs = await Voter.find(
-      { organizationId: orgId, stateVoterId: { $in: allSvids.slice(i, i + batchSize) }, 'doNotContact.flagged': true },
+    for (const d of shieldDocs) shieldBySvid.set(d.stateVoterId, d);
+    // 2.6. DNC seeding: "never contact this person" is an ORG-wide promise but rows are
+    // per-campaign — a person flagged in a sibling campaign must arrive here already
+    // flagged. Prefetch flagged rows org-wide by svid and copy the full subdoc onto
+    // INSERTS only ($setOnInsert — existing rows keep import-survival-by-omission, and
+    // the preserved uploadId keeps an upload's undo able to revert seeded copies too).
+    const dncDocs = await Voter.find(
+      { organizationId: orgId, stateVoterId: { $in: svids }, 'doNotContact.flagged': true },
       { stateVoterId: 1, doNotContact: 1 }
     ).lean();
-    for (const d of docs) dncBySvid.set(d.stateVoterId, d.doNotContact);
+    for (const d of dncDocs) dncBySvid.set(d.stateVoterId, d.doNotContact);
   }
 
   // 3. Voters (org-scoped upsert). For armed rows the admin's decision governs: default keeps the
@@ -501,7 +577,7 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   // — the same definition the preview's handEditConflicts uses, so preview ≈ outcome.
   let keptHandEdits = 0;
   let overwrittenHandEdits = 0;
-  const voterOps = validRows.map((row) => {
+  const opForRow = (row) => {
     const householdId = addressToId.get(normalizeAddress(row.household));
     const set = { ...row.voter, householdId, campaignId, organizationId: orgId };
     const setOnInsert = { surveyStatus: 'not_surveyed' };
@@ -538,29 +614,28 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
         upsert: true,
       },
     };
-  });
+  };
   const insertedVoterIds = [];
   const seededDncHouseholdIds = new Set();
-  for (let i = 0; i < voterOps.length; i += batchSize) {
-    const res = await Voter.bulkWrite(voterOps.slice(i, i + batchSize), { ordered: false });
+  let processed = 0;
+  for await (const batch of batches()) {
+    const ops = batch.map(opForRow);
+    const res = await Voter.bulkWrite(ops, { ordered: false });
     if (res?.upsertedIds) {
       insertedVoterIds.push(...Object.values(res.upsertedIds));
-      // voterOps was mapped 1:1 from validRows, so slice index i+idx points back at the
-      // source row — that's how a seeded insert finds the door needing a fullyDnc recompute.
+      // ops was mapped 1:1 from this batch, so idx points back at the source row —
+      // that's how a seeded insert finds the door needing a fullyDnc recompute.
       for (const idx of Object.keys(res.upsertedIds)) {
-        const row = validRows[i + Number(idx)];
+        const row = batch[Number(idx)];
         if (row && dncBySvid.has(row.voter.stateVoterId)) {
           const hh = addressToId.get(normalizeAddress(row.household));
           if (hh) seededDncHouseholdIds.add(String(hh));
         }
       }
     }
+    processed += batch.length;
     if (onProgress) {
-      await onProgress({
-        phase: 'voters',
-        processed: Math.min(i + batchSize, voterOps.length),
-        total: voterOps.length,
-      });
+      await onProgress({ phase: 'voters', processed, total: rowCount });
     }
   }
 
@@ -577,13 +652,13 @@ export async function applyImport({ campaign, orgId, validRows, householdMap, ba
   await bumpLive('votersProcessed', Math.max(0, afterOrgPeople - beforeOrgPeople), { orgId });
 
   return {
-    uniqueVoters: validRows.length,
+    uniqueVoters: rowCount,
     uniqueHouseholds: householdMap.size,
     newHouseholds,
     // "New to this campaign" — a person imported from a sibling campaign counts as new
     // here (their row here is new) even though the org already knew them.
     newVoters,
-    updatedVoters: Math.max(0, validRows.length - newVoters),
+    updatedVoters: Math.max(0, rowCount - newVoters),
     // Hand-edit outcome: (voter, field) instances where the file disagreed with an armed edit.
     keptHandEdits,
     overwrittenHandEdits,

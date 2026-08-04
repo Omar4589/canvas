@@ -8,7 +8,8 @@ import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // server-enforced upload cap
-const LARGE_FILE_BYTES = 15 * 1024 * 1024; // at/above this, route the preview to the background worker
+// Previews always run on the worker (enqueued + polled) — the old 15 MB sync/async
+// fork was a memory cliff: a 14.9 MB file parsed inline on the web dyno.
 const fmtMB = (b) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
 function fmt(n) {
@@ -19,21 +20,44 @@ const STATUS_LABEL = {
   pending: 'Pending',
   parsing: 'Parsing',
   geocoding: 'Geocoding',
+  linking: 'Linking',
   importing: 'Importing',
   completed: 'Completed',
   failed: 'Failed',
+  // phase-only value (a preview's status stays 'parsing' while it diffs)
+  diffing: 'Comparing',
 };
+
+// Every non-terminal server status. Poll predicates and progress display key off
+// this — a status missing here silently stops the jobs list from polling mid-run.
+const ACTIVE_STATUSES = ['pending', 'parsing', 'geocoding', 'linking', 'importing'];
+
+// Pending-preview button text: "queued" and "working" must read as different
+// states — a job stuck at pending means no worker has claimed it, and the elapsed
+// clock is what makes that visibly wrong. Re-renders ride the 1.5s poll.
+function previewPendingLabel(job) {
+  if (!job) return 'Analyzing…';
+  if (job.status === 'pending') {
+    const ms = Date.now() - new Date(job.createdAt).getTime();
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return `Queued — waiting for a worker (${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')})`;
+  }
+  const stage = STATUS_LABEL[job.phase] || STATUS_LABEL[job.status] || 'Analyzing';
+  const pct = job.progress != null && job.status !== 'pending' ? ` ${job.progress}%` : '';
+  return `${stage}${pct}…`;
+}
 
 function StatusBadge({ job }) {
   const cls = {
     pending: 'bg-sunken text-fg-muted',
     parsing: 'bg-warning-tint text-warning-fg',
     geocoding: 'bg-warning-tint text-warning-fg',
+    linking: 'bg-warning-tint text-warning-fg',
     importing: 'bg-brand-tint text-brand-accent',
     completed: 'bg-success-tint text-success',
     failed: 'bg-danger-tint text-danger',
   }[job.status] || 'bg-sunken text-fg-muted';
-  const inProgress = ['pending', 'parsing', 'geocoding', 'importing'].includes(job.status);
+  const inProgress = ACTIVE_STATUSES.includes(job.status);
   const showPct = inProgress && job.progress != null;
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${cls}`}>
@@ -333,10 +357,30 @@ export default function ImportPage() {
   const [profileName, setProfileName] = useState('');
   const [step, setStep] = useState('select'); // 'select' | 'map' | 'review'
   const [justImported, setJustImported] = useState(null); // campaignId of the last queued import
-  const [previewJobId, setPreviewJobId] = useState(null); // async (large-file) preview job
-  const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows, large }
+  // Job ids survive a refresh via sessionStorage — losing them orphaned the queued
+  // job with no way to see its result or cancel it.
+  const [previewJobId, setPreviewJobIdState] = useState(() => {
+    try { return sessionStorage.getItem('import.previewJobId') || null; } catch { return null; }
+  });
+  const setPreviewJobId = (id) => {
+    setPreviewJobIdState(id);
+    try {
+      if (id) sessionStorage.setItem('import.previewJobId', id);
+      else sessionStorage.removeItem('import.previewJobId');
+    } catch { /* storage unavailable — state alone still works */ }
+  };
+  const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows }
   const [explode, setExplode] = useState(true); // smart import: explode multi-voter-per-row files
-  const [geocodeCheckJobId, setGeocodeCheckJobId] = useState(null); // opt-in "See exact placement" job
+  const [geocodeCheckJobId, setGeocodeCheckJobIdState] = useState(() => {
+    try { return sessionStorage.getItem('import.geocodeCheckJobId') || null; } catch { return null; }
+  });
+  const setGeocodeCheckJobId = (id) => {
+    setGeocodeCheckJobIdState(id);
+    try {
+      if (id) sessionStorage.setItem('import.geocodeCheckJobId', id);
+      else sessionStorage.removeItem('import.geocodeCheckJobId');
+    } catch { /* ignore */ }
+  };
   const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
   const [revisitNewVoters, setRevisitNewVoters] = useState(false); // collect already-worked homes that gain a new voter into a revisit walk list
   const [overwriteHandEdits, setOverwriteHandEdits] = useState(false); // let this file replace values the team hand-corrected (default: keep the edits)
@@ -359,7 +403,7 @@ export default function ImportPage() {
     queryFn: () => api(`/admin/imports?campaignId=${campaignId}`),
     refetchInterval: (q) => {
       const jobs = q.state.data?.jobs || [];
-      return jobs.some((j) => ['pending', 'parsing', 'geocoding', 'importing'].includes(j.status)) ? 1500 : false;
+      return jobs.some((j) => ACTIVE_STATUSES.includes(j.status)) ? 1500 : false;
     },
   });
   const workerStatusQ = useQuery({
@@ -393,21 +437,8 @@ export default function ImportPage() {
     },
   });
 
-  const previewDiff = useMutation({
-    mutationFn: async ({ file, campaignId, mapping, explode }) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('campaignId', campaignId);
-      fd.append('mapping', JSON.stringify(mapping));
-      fd.append('uidSource', uidSource || '');
-      fd.append('explode', String(explode !== false));
-      return api('/admin/imports/csv/preview', { method: 'POST', formData: fd });
-    },
-    onSuccess: () => setStep('review'),
-  });
-
-  // Large files: the parse+diff can exceed the 30s request timeout, so run it on
-  // the worker and poll. Same diff shape as the sync path; the render unifies both.
+  // Previews run on the worker (parse+diff can exceed the 30s request timeout AND
+  // the web dyno's memory) — enqueue, then poll GET /:importId for job.diff.
   const enqueuePreview = useMutation({
     mutationFn: async ({ file, campaignId, mapping, explode }) => {
       const fd = new FormData();
@@ -433,6 +464,15 @@ export default function ImportPage() {
   useEffect(() => {
     if (previewAsyncJob?.status === 'completed') setStep('review');
   }, [previewAsyncJob?.status]);
+
+  // Cancel a queued preview/import job. 409 means a worker is actively running it.
+  const cancelPreview = useMutation({
+    mutationFn: (jobId) => api(`/admin/imports/${jobId}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      setPreviewJobId(null);
+      enqueuePreview.reset();
+    },
+  });
 
   // "See exact placement" — opt-in live geocode (worker-backed, cached), then poll.
   const runGeocodeCheck = useMutation({
@@ -510,13 +550,11 @@ export default function ImportPage() {
     setUidSource('');
     setRevisitNewVoters(false);
     setOverwriteHandEdits(false);
-    previewDiff.reset();
     enqueuePreview.reset();
   }
 
   // Any change to the inputs makes a computed diff stale — drop back to mapping.
   function dropReview() {
-    previewDiff.reset();
     enqueuePreview.reset();
     setPreviewJobId(null);
     setGeocodeCheckJobId(null);
@@ -525,7 +563,6 @@ export default function ImportPage() {
 
   function onPickFile(f) {
     setPreviewJobId(null);
-    previewDiff.reset();
     enqueuePreview.reset();
     if (!f) { setFile(null); setFileNote(null); setStep('select'); return; }
     setFile(f);
@@ -534,7 +571,7 @@ export default function ImportPage() {
       setStep('select');
       return;
     }
-    setFileNote({ sizeText: fmtMB(f.size), estRows: Math.round(f.size / 250), large: f.size >= LARGE_FILE_BYTES });
+    setFileNote({ sizeText: fmtMB(f.size), estRows: Math.round(f.size / 250) });
     preview.mutate(f); // header read is cheap (5-row peek) even for big files
   }
 
@@ -551,27 +588,23 @@ export default function ImportPage() {
   const campaign = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId)) || null;
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
 
-  // Unify the sync (small-file) and async (large-file) preview so the render reads
-  // one diff / pending / error regardless of path.
   const tooBig = !!fileNote?.tooBig;
-  const isLargeFile = !!file && file.size >= LARGE_FILE_BYTES;
-  const diff = isLargeFile ? previewAsyncJob?.diff : previewDiff.data?.diff;
-  const previewPending = isLargeFile
-    ? enqueuePreview.isPending ||
-      Boolean(previewJobId && previewAsyncJob?.status !== 'completed' && previewAsyncJob?.status !== 'failed')
-    : previewDiff.isPending;
-  const previewError = isLargeFile
-    ? enqueuePreview.error ||
-      (previewAsyncJob?.status === 'failed' ? { message: 'Background preview failed — check the file and try again.' } : null)
-    : previewDiff.error;
+  const diff = previewAsyncJob?.diff;
+  const previewPending =
+    enqueuePreview.isPending ||
+    Boolean(previewJobId && previewAsyncJob?.status !== 'completed' && previewAsyncJob?.status !== 'failed');
+  const previewError =
+    enqueuePreview.error ||
+    (previewAsyncJob?.status === 'failed'
+      ? { message: previewAsyncJob?.errors?.[0]?.reason || 'Background preview failed — check the file and try again.' }
+      : null);
 
   // Not gated on step === 'map': if a race leaves step === 'review' with the diff
   // cleared, the fallback "Preview changes" button must still be usable to recover.
   const canPreview = file && campaignId && requiredUnmapped.length === 0 && !previewPending && !tooBig;
   function triggerPreview() {
     if (!canPreview) return;
-    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping, explode });
-    else previewDiff.mutate({ file, campaignId, mapping, explode });
+    enqueuePreview.mutate({ file, campaignId, mapping, explode });
   }
 
   // Toggling explode changes the voter count, so re-run the preview with the new value.
@@ -579,8 +612,7 @@ export default function ImportPage() {
     setExplode(next);
     setGeocodeCheckJobId(null); // explode change invalidates a prior exact-placement check
     if (!file || !campaignId || requiredUnmapped.length > 0 || tooBig) return;
-    if (isLargeFile) enqueuePreview.mutate({ file, campaignId, mapping, explode: next });
-    else previewDiff.mutate({ file, campaignId, mapping, explode: next });
+    enqueuePreview.mutate({ file, campaignId, mapping, explode: next });
   }
 
   return (
@@ -632,9 +664,7 @@ export default function ImportPage() {
             {fileNote && !fileNote.tooBig && (
               <p className="mt-1 text-xs text-fg-muted">
                 {fileNote.sizeText} · ~{fileNote.estRows.toLocaleString()} rows (est.)
-                {fileNote.large && (
-                  <span className="text-warning-fg"> · large file — analyzed in the background (needs the import worker running)</span>
-                )}
+                <span className="text-fg-subtle"> · analyzed in the background (needs the import worker running)</span>
               </p>
             )}
             {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Reading columns…</p>}
@@ -792,13 +822,27 @@ export default function ImportPage() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={triggerPreview}
-            disabled={!canPreview}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
-          >
-            {previewPending ? (isLargeFile ? 'Analyzing in the background…' : 'Analyzing…') : 'Preview changes'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={triggerPreview}
+              disabled={!canPreview}
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+            >
+              {previewPending ? previewPendingLabel(previewAsyncJob) : 'Preview changes'}
+            </button>
+            {previewPending && previewJobId && (
+              <button
+                onClick={() => cancelPreview.mutate(previewJobId)}
+                disabled={cancelPreview.isPending}
+                className="rounded-md border border-border px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-sunken disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            )}
+            {cancelPreview.error && (
+              <span className="text-xs text-fg-muted">{cancelPreview.error.message}</span>
+            )}
+          </div>
         )}
         {previewError && (
           <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">

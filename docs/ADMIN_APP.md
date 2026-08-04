@@ -46,6 +46,13 @@ read-only). Below it, a "Round 1 · 340/600 doors done" line and a "N books · M
   optionally replacing existing assignments.
 - **By canvasser** — each canvasser shows their book count; tap to expand and give/remove their books.
 
+By-book view also has a **Map** chip: the whole round drawn as book outlines (green = assigned, gray =
+not, red = selected) over a neutral dot for every door, so you can see *where* the unassigned turf
+actually sits before handing it out. Tap a book to promote it — its own doors color by status and its
+sheet offers the same assign actions (and **Mark restricted…**, below). This view stays smooth at any
+campaign size — a round of **100k+ doors** renders without freezing the phone, and every door stays an
+individual dot (nothing is clustered).
+
 Tapping a book opens a **map detail**: the book's homes color-coded by status (with its outline, framed
 to the area), tap a house for its address/status/voters, and assign/unassign canvassers right there.
 
@@ -575,6 +582,20 @@ by book or by canvasser.
   bulk `POST …/turfs/assign-bulk {turfIds,userIds,mode:'distribute'|'everyone',replace}` from the
   **Select-mode** action bar (explicit book selection). All invalidate the assignments + efforts queries.
 - Tap a book (outside Select mode) → the **book detail** screen.
+- **Map view's round-wide door dots are a FILE-backed GeoJSON source**
+  ([mobile/lib/doorDots.js](../mobile/lib/doorDots.js) + unit test). `doorDotsRequest(campaignId,
+  passId, epoch)` names both the request — `GET …/turfs/doors?passId=&slim=1&format=geojson` (the
+  `format` param is additive; the plain response is byte-identical without it) — and a cache filename;
+  the response is downloaded with `FileSystem.downloadAsync` to `cacheDirectory` and the `ShapeSource`
+  gets the **`file://` URL**, so the native map SDK fetches and parses it **off the JS thread**. The
+  old flow — `api()` `JSON.parse` on the JS thread, 100k feature objects, `shape={…}` serialized
+  across the RN bridge — froze the phone at 106k doors. A `ShapeSource` refetches only when its URL
+  *changes*, so invalidation bumps `doorEpoch`, which is baked into the filename → native refetches
+  and the previous epoch's file is deleted. `doorDotFilterExpr` filters in the layer: a cheap
+  to-boolean test when no chip narrows (never a ~3k-id literal `in` against 100k features for a
+  no-op), the literal `in` only when chips narrow, and the promoted book excluded (its doors come from
+  the status-colored layer). Camera fit + promoted density read `promotedQ` (the tapped book's own
+  households) — the round-wide feed never enters JS. JS-only change → OTA-safe.
 - Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign.
 
 ## The book detail screen

@@ -28,6 +28,12 @@ import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { outlineRing, doorsPerAcre } from '../../../lib/bookDensity';
+// Legacy subpath: the v19+ main entry drops cacheDirectory/downloadAsync (same note as csv.js).
+import * as FileSystem from 'expo-file-system/legacy';
+import { API_BASE_URL } from '../../../lib/config';
+import { getToken } from '../../../lib/auth';
+import { loadActiveOrgId } from '../../../lib/cache';
+import { doorDotsRequest, doorDotFilterExpr } from '../../../lib/doorDots';
 import { restrictCountsFromStatusCounts } from '../../../lib/restrictBooks';
 import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../lib/restrictBooksConfirm';
 
@@ -168,13 +174,37 @@ export default function AdminBooks() {
     enabled: !!cId && !!passId,
   });
   // Round-wide door dots — density is the whole point, so this is always on in
-  // map view. One fetch per (campaign, pass); assignment never moves doors, so
-  // no polling. slim=1 drops the address fields this screen never reads (a
-  // JSON.parse/heap saving at 16k+ doors; wire bytes are already gzipped).
+  // map view. Downloaded as GeoJSON straight to a FILE (artifactDownload.js
+  // pattern) and handed to the ShapeSource as a file:// URL: the native SDK
+  // parses it off the JS thread. The old api() flow — JSON.parse + 100k feature
+  // objects + shape={} serialized across the RN bridge — froze the phone on a
+  // 106k-door walk-list effort. doorEpoch bumps on invalidation so the filename
+  // (and therefore the URL) changes, which is what makes native refetch.
   // keepPreviousData so a round/effort switch never blanks the map.
+  const [doorEpoch, setDoorEpoch] = useState(0);
   const doorsQ = useQuery({
-    queryKey: ['admin', 'turf-doors', cId, passId],
-    queryFn: () => api(`/admin/campaigns/${cId}/turfs/doors?passId=${passId}&slim=1`),
+    queryKey: ['admin', 'turf-doors', cId, passId, doorEpoch],
+    queryFn: async () => {
+      const token = await getToken();
+      const orgId = await loadActiveOrgId();
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (orgId) headers['X-Org-Id'] = orgId;
+      const { path, fileName } = doorDotsRequest(cId, passId, doorEpoch);
+      const uri = `${FileSystem.cacheDirectory}${fileName}`;
+      // Drop the superseded epoch's file — cacheDirectory is OS-purgeable, but
+      // don't wait for the OS to notice.
+      if (doorEpoch > 0) {
+        const prev = `${FileSystem.cacheDirectory}${doorDotsRequest(cId, passId, doorEpoch - 1).fileName}`;
+        await FileSystem.deleteAsync(prev, { idempotent: true }).catch(() => {});
+      }
+      const res = await FileSystem.downloadAsync(`${API_BASE_URL}/api${path}`, uri, { headers });
+      if (res.status !== 200) {
+        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        throw new Error(`Door dots download failed: ${res.status}`);
+      }
+      return uri;
+    },
     enabled: !!cId && !!passId && view === 'book' && bookView === 'map',
     placeholderData: keepPreviousData,
   });
@@ -332,7 +362,9 @@ export default function AdminBooks() {
   const invalidateRestrict = () => {
     setAssignError(null);
     qc.invalidateQueries({ queryKey: ['admin', 'turfs', cId, passId] });
-    qc.invalidateQueries({ queryKey: ['admin', 'turf-doors', cId, passId] });
+    // Door dots are a file-backed source: bumping the epoch changes the filename
+    // (and so the ShapeSource URL), which is what makes native re-download it.
+    setDoorEpoch((e) => e + 1);
     qc.invalidateQueries({ queryKey: ['admin', 'turf-progress', cId, passId] });
     if (mapSheetBookId) qc.invalidateQueries({ queryKey: ['admin', 'book-households', cId, mapSheetBookId] });
   };
@@ -471,25 +503,16 @@ export default function AdminBooks() {
   // promotion/scoping happen in the LAYER filter below. Uncut doors (turfId
   // null) are hidden by design: this screen is about book workloads; never-
   // booked doors live on the web Turf Cutting page.
-  const doorDotFeatures = useMemo(
-    () => ({
-      type: 'FeatureCollection',
-      features: (doorsQ.data?.doors || [])
-        .filter((d) => d.turfId)
-        .map((d) => ({
-          type: 'Feature',
-          properties: { turfId: d.turfId },
-          geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
-        })),
-    }),
-    [doorsQ.data]
-  );
+  // No feature building here anymore — doorsQ.data IS the file:// URL the
+  // ShapeSource reads natively. Uncut doors (turfId null) are in the file now
+  // (the server no longer pre-filters) and are hidden by the LAYER filter:
+  // this screen is about book workloads; never-booked doors live on the web
+  // Turf Cutting page.
   const visibleBookIds = useMemo(() => visibleBooks.map((b) => b.id), [visibleBooks]);
-  const doorDotFilter = useMemo(() => {
-    const inVisible = ['in', ['get', 'turfId'], ['literal', visibleBookIds]];
-    // The promoted book's doors come from the status-colored layer instead.
-    return promotedId ? ['all', inVisible, ['!=', ['get', 'turfId'], promotedId]] : inVisible;
-  }, [visibleBookIds, promotedId]);
+  const doorDotFilter = useMemo(
+    () => doorDotFilterExpr(visibleBookIds, books.length, promotedId),
+    [visibleBookIds, books.length, promotedId]
+  );
 
   // Promoted book's homes — the only status-colored dots on this map.
   const promotedFeatures = useMemo(
@@ -523,13 +546,17 @@ export default function AdminBooks() {
   }, [promotedQ.data]);
   // Density chip, from the book's own loaded door coordinates (not the stored
   // display hull, which lags newly-added homes).
+  // promotedQ (the tapped book's own households) is the coordinate source now —
+  // the round-wide door feed is a file:// URL parsed natively, invisible to JS.
   const promotedDensity = useMemo(() => {
     if (!promotedId) return null;
-    const pts = (doorsQ.data?.doors || []).filter((d) => d.turfId === promotedId).map((d) => [d.lng, d.lat]);
+    const pts = (promotedQ.data?.households || [])
+      .filter((h) => h.lng != null && h.lat != null)
+      .map((h) => [h.lng, h.lat]);
     if (pts.length < 3) return null;
     const dpa = doorsPerAcre(pts.length, outlineRing(pts));
     return dpa ? Math.round(dpa * 10) / 10 : null;
-  }, [doorsQ.data, promotedId]);
+  }, [promotedQ.data, promotedId]);
 
   // Fit the camera to the round's books once, per scope.
   useEffect(() => {
@@ -579,7 +606,9 @@ export default function AdminBooks() {
   // afterwards doesn't move the camera).
   useEffect(() => {
     if (!promotedId || !cameraRef.current) return;
-    const pts = (doorsQ.data?.doors || []).filter((d) => d.turfId === promotedId).map((d) => [d.lng, d.lat]);
+    const pts = (promotedQ.data?.households || [])
+      .filter((h) => h.lng != null && h.lat != null)
+      .map((h) => [h.lng, h.lat]);
     if (!pts.length) return;
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     for (const [lng, lat] of pts) {
@@ -599,7 +628,7 @@ export default function AdminBooks() {
     } else {
       cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [40, 40, bottomPad, 40], 600);
     }
-  }, [promotedId, doorsQ.data]);
+  }, [promotedId, promotedQ.data, insets.bottom]);
 
   function onBookPress(e) {
     const id = e.features?.[0]?.properties?.id;
@@ -823,7 +852,12 @@ export default function AdminBooks() {
             {/* Always-on density dots — neutral gray, NEVER status-colored (the
                 round-wide feed carries global status; see promotedQ). Dots merge
                 into an honest mass zoomed out and separate when zoomed in. */}
-            <Mapbox.ShapeSource id="door-dots" shape={doorDotFeatures}>
+            <Mapbox.ShapeSource
+              id="door-dots"
+              {...(doorsQ.data
+                ? { url: doorsQ.data }
+                : { shape: { type: 'FeatureCollection', features: [] } })}
+            >
               <Mapbox.CircleLayer
                 id="door-dot"
                 filter={doorDotFilter}

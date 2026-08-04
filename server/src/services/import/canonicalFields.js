@@ -103,17 +103,36 @@ const FIELD_ALIASES = {
 
 /**
  * Given a vendor's column headers, propose a { canonicalField: header } mapping.
- * Exact normalized matches win; otherwise the first alias substring match.
+ * Exact normalized matches win; substring matches are deliberately narrow — an
+ * unrestricted bidirectional substring once suggested stateVoterId → STATE
+ * ('statevoterid' ⊇ 'state'), which would collapse an entire file to one voter.
  */
 export function suggestMapping(headers = []) {
   const normedHeaders = headers.map((h) => ({ header: h, n: norm(h) }));
+  // A header that IS some field's alias belongs to that field alone — it must
+  // never be substring-claimed by a different field ('STATE' vs stateVoterId).
+  const exactlyClaimed = new Set();
+  for (const field of CANONICAL_FIELDS) {
+    const aliases = FIELD_ALIASES[field.key] || [norm(field.label)];
+    for (const h of normedHeaders) if (aliases.includes(h.n)) exactlyClaimed.add(h.n);
+  }
   const mapping = {};
   for (const field of CANONICAL_FIELDS) {
     const aliases = FIELD_ALIASES[field.key] || [norm(field.label)];
-    let match =
+    const match =
       normedHeaders.find((h) => aliases.includes(h.n)) ||
-      normedHeaders.find((h) => aliases.some((a) => h.n === a)) ||
-      normedHeaders.find((h) => aliases.some((a) => h.n.includes(a) || a.includes(h.n)));
+      // Header more specific than an alias ('officialstatehousedistrict' ⊇
+      // 'statehousedistrict'). Alias must be ≥4 chars so 'cd'/'sd'/'hd'/'lat'
+      // can't hit inside unrelated headers.
+      normedHeaders.find(
+        (h) => !exactlyClaimed.has(h.n) && aliases.some((a) => a.length >= 4 && h.n.includes(a))
+      ) ||
+      // Header a fragment of an alias ('congressionaldist' ⊂ 'congressionaldistrict').
+      // Header must be ≥6 chars so short generic headers ('state', 'tier') can't
+      // claim a longer alias of an unrelated field.
+      normedHeaders.find(
+        (h) => !exactlyClaimed.has(h.n) && h.n.length >= 6 && aliases.some((a) => a.includes(h.n))
+      );
     if (match) mapping[field.key] = match.header;
   }
   return mapping;

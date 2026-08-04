@@ -181,6 +181,10 @@ answering *"how is this round going?"* — without leaving the page.
 - **Click a house** for its status, who knocked it, when, and any survey answers recorded there this
   round, alongside the usual "move to another book".
 - **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway.
+- **Big campaigns don't drown the map.** Building markers exist only for the part of the map you're
+  looking at, and past ~300 buildings in view they stand down behind a chip — *"N buildings in view —
+  zoom in for building markers"* — while every building stays visible **and clickable** as a dot at
+  any zoom. Zoom in and the markers come back. Nothing is ever clustered.
 - **More room for the map.** The chevron on the *Generate books* header collapses that panel so the map
   fills the width (a floating button top-left of the map brings it back; the collapsed state is remembered);
   the top-left **fullscreen** button blows the map up to cover the whole screen (**Esc** or the button exits).
@@ -601,7 +605,7 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/merge` `{ turfIds[] }` ([:930](../server/src/routes/admin/turfs.js#L930)) | Merge ≥2 books of the **same pass** into `turfs[0]` (survivor). Union the doors onto the survivor; **fold assignments** (`findOneAndUpdate` upsert on `{turfId:survivor, userId}` → same-user dedups, different-users **both survive**); **hard-delete** the absorbed `Turf`s + their `TurfAssignment`s; `recomputeTurf`/`recomputePassTerritories`. **No snapshot → irreversible.** Survivor = DB order of the `$in`, not request order. |
 | `POST .../turfs/:turfId/split` `{ householdIds[], name? }` ([:970](../server/src/routes/admin/turfs.js#L970)) | Peel `householdIds` out of the book into a **new** `Turf` (same pass/mode/params, `status` copied). `recomputeTurf` on both. **Creates no `TurfAssignment`** — the split-off book comes out unassigned. |
 | `POST .../turfs/unassign-bulk` `{ turfIds[], userIds[] }` ([:151](../server/src/routes/admin/turfs.js#L151)) | Campaign-scoped `TurfAssignment.deleteMany` for the given (book, user) pairs — the "unassign everywhere" path. Touches no `Household`. |
-| `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. |
+| `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. **`format=geojson`** (additive — without it the response is byte-identical) returns the same doors as a `FeatureCollection`, for the mobile Books map's file-backed `ShapeSource` (see [ADMIN_APP.md](ADMIN_APP.md) → *The Books screen*). |
 | `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. Also read by the mobile books screen, which ignores `statusCounts`. |
 | `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. |
 
@@ -695,6 +699,29 @@ canvasser's own book scope, projected to the bootstrap's identity-cache fields. 
 
 Bottom line: **membership/assignment edits are eventually-consistent on the client, reconciled at the
 next full bootstrap; billing stays correct throughout** because it dedups per `(household, pass)` (§E).
+
+## H. Cut-map rendering at scale (building markers + building dots)
+
+Building markers on the Turf Cutting map ([TurfsPage.jsx](../client/src/pages/TurfsPage.jsx)) are
+**HTML DOM overlays** (`mapboxgl.Marker`) — they have to be, to render the `5/12 hit` badge. At 107k
+doors a campaign can hold ~3,100 stacked-coordinate buildings; creating a DOM node for every one, and
+tearing them **all** down on every toggle change, is what made the cut map jank. Two mechanisms fix
+it, both in [client/src/lib/buildingMarkers.js](../client/src/lib/buildingMarkers.js) (pure helpers +
+unit test):
+
+- **Viewport culling with diff-sync.** Only markers inside the viewport **padded 20% per side**
+  exist (`inBoundsWithMargin` — slow pans hit pre-created markers instead of pop-in), re-synced on
+  `moveend`. The sync **diffs** the wanted set against what's already on the map (`diffMarkers`,
+  keyed by building + a render signature `markerSig(color, badgeText, dimmed, dark)`), so a marker is
+  rebuilt only when something it *draws* changed — a toggle flip reuses everything still visible.
+- **A stand-down ceiling.** Past `MAX_DOM_MARKERS` (**300**) in view, the DOM layer stands down
+  entirely behind the *"N buildings in view — zoom in for building markers"* chip. What keeps every
+  building visible and clickable at any zoom is the always-on **`building-dots`** GPU circle layer
+  (its own `buildings` GeoJSON source, one book-colored feature per building, drawn slightly larger
+  than a door dot); the map's click handler falls through to it, so a building is tappable even with
+  no DOM marker, and it honors the book-narrowing chips via a layer filter. **Nothing is clustered
+  anywhere** — the dots merge visually when zoomed out and separate when zoomed in, which is the
+  honest version of density.
 
 **Wrong Address** is one of the `KNOCK_ACTIONS` ([aggregations.js:8](../server/src/services/reports/aggregations.js#L8)) —
 a real **billable knock that counts as coverage**, non-sticky in `Household.status` (`resolveStatus`

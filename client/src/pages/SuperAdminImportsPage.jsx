@@ -19,6 +19,8 @@ function formatDate(d) {
 const STATUS_STYLE = {
   completed: 'bg-success-tint text-success',
   failed: 'bg-danger-tint text-danger',
+  linking: 'bg-warning-tint text-warning-fg',
+  importing: 'bg-brand-tint text-brand-accent',
 };
 
 const inputCls =

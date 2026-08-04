@@ -241,11 +241,37 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   live-aggregation fallback for any campaign not yet seeded. Backfill/repair:
   `npm run migrate:campaign-stats -- --apply`. Full semantics + parity test in
   [METRICS.md](METRICS.md) § H.
-- **Import memory** — the one un-chunked `$in` in
+- **Import memory** — hardened in two waves. First wave: the one un-chunked `$in` in
   [csvImporter.js](../server/src/services/import/csvImporter.js) (normalizedAddress→\_id resolution)
-  is now chunked + `.lean()`, matching the rest of the batched pipeline. Proven by
-  [importStress.int.test.js](../server/test/importStress.int.test.js) (big messy CSV → completes,
-  counts right, idempotent, undoes; crank with `STRESS_IMPORT_HOUSEHOLDS`).
+  chunked + `.lean()`, matching the rest of the batched pipeline. Second wave (August 2026), the
+  measured record — every number from a real 166,738-row / ~50 MB xlsx:
+  - **Preview-headers peek**: `parseUpload` materialized all 166k rows on the **web** dyno to return
+    five — **~620 MB / ~6 s** (the R14s). [`peekUpload`](../server/src/services/import/peekUpload.js)
+    (unzipper central-directory random access + a two-pass saxes SAX parse) reads O(5 rows):
+    **~283 ms / ~90 MB peak**. ExcelJS-with-early-break was rejected — its streaming reader spools the
+    whole decompressed sheet (~150 MB) to tmpdir and an early break leaks the spool.
+  - **The rows array is gone**: materializing every parsed row as a JS object was **~299 MB live
+    heap** — an 8.8× blow-up over the file that OOM'd the worker's 384 MB cap
+    (`--max-old-space-size=${WORKER_MAX_OLD_SPACE:-384}`, `server/package.json`). `streamParse`
+    ([parseUpload.js](../server/src/services/import/parseUpload.js)) hands rows out one at a time;
+    verified: the full 166k xlsx **completes under `--max-old-space-size=384` in 9.5 s** with
+    identical outputs (166,149 valid / 106,958 households / 589 skips).
+  - **Apply-path spill**: valid rows go to an NDJSON spill file on the dyno's ephemeral disk instead
+    of a ~160 MB heap array; the link pass re-writes them stamped with `personId`, and `applyImport`
+    consumes `ndjsonBatches` — **one 2000-row batch (~2 MB) in heap at a time**, so worker heap is
+    roughly flat in file size. Both spills die in a `finally`; the nightly sweep is the crash backstop.
+  - **Diff cursors** ([computeImportDiff.js](../server/src/services/import/computeImportDiff.js)):
+    the near-duplicate scan was an **unchunked full-collection Household scan** (+22 MB at 107k doors,
+    growing linearly forever) with the zip filter applied client-side — now zip-scoped (`$in` mixing
+    exact zip5 strings + anchored zip9 regexes, both riding the index) and cursor-folded into just the
+    loose-key map. `forecastPersons` accumulated matched Person docs (a person matching on both svid
+    **and** uid was materialized twice — **+75 MB** on a 100k-row re-import) — now cursor-folded into
+    key→person maps that retain only compact strings.
+
+  Guard: [importStress.int.test.js](../server/test/importStress.int.test.js) (big messy CSV →
+  completes, counts right, idempotent, undoes; crank with `STRESS_IMPORT_HOUSEHOLDS`). Row/cell
+  ceilings (`MAX_IMPORT_ROWS` 300k / `MAX_IMPORT_CELLS` 8M) are enforced *during* the parse. Full
+  pipeline design: [IMPORTS.md](IMPORTS.md) §E/§G.
 - **Storage: GeocodeCache `raw`** — each cache entry stored the full Geocodio response blob, written
   but **never read** (reads project it out; the useful `accuracyType/accuracy/confidence` are already
   separate fields). Dropped it — cuts each entry ~5–6×. Reclaim existing rows with

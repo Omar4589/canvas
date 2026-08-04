@@ -18,10 +18,20 @@ const importJobSchema = new mongoose.Schema(
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
-      enum: ['pending', 'parsing', 'geocoding', 'importing', 'completed', 'failed'],
+      enum: ['pending', 'parsing', 'geocoding', 'linking', 'importing', 'completed', 'failed'],
       default: 'pending',
       index: true,
     },
+    // Liveness + stage detail for the stuck-job expiry (GET /:importId and the
+    // nightly sweep). A worker OOM-abort skips every catch, so the doc can freeze
+    // in an active status — heartbeatAt is how a reader tells alive from dead.
+    heartbeatAt: { type: Date, default: null },
+    // Finer-grained than status (e.g. 'diffing' while a preview's status is
+    // 'parsing'): queued|parsing|geocoding|linking|diffing|importing.
+    phase: { type: String, default: null },
+    // Terminal failure detail written by the worker's `failed` listener when
+    // BullMQ exhausts retries — reconciles Redis-only failures back into Mongo.
+    lastError: { type: String, default: null },
     totalRows: { type: Number, default: 0 },
     uniqueVoters: { type: Number, default: 0 },
     uniqueHouseholds: { type: Number, default: 0 },
@@ -103,5 +113,8 @@ const importJobSchema = new mongoose.Schema(
 importJobSchema.index({ organizationId: 1, campaignId: 1, createdAt: -1 });
 // Super-admin cross-org Imports page sorts all orgs by createdAt desc (routes/superAdmin/imports.js).
 importJobSchema.index({ createdAt: -1 });
+// Stale-job sweep: find active-status jobs whose heartbeat lapsed. Prod autoIndex
+// is OFF — needs `npm run migrate:build-indexes -- --apply` after deploy.
+importJobSchema.index({ status: 1, heartbeatAt: 1 });
 
 export const ImportJob = mongoose.model('ImportJob', importJobSchema);

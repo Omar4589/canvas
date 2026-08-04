@@ -9,6 +9,7 @@ import { processExportJob } from './services/export/exportProcessor.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
+import { ImportJob } from './models/ImportJob.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
@@ -44,14 +45,41 @@ async function main() {
   // buildIndexes migration remains the primary path — this is the no-op belt-and-braces).
   await ExportJob.syncIndexes().catch((e) => console.error('[worker] ExportJob.syncIndexes failed', e?.message || e));
 
+  // Bound the boot probe: against an unreachable Redis, ioredis
+  // (maxRetriesPerRequest: null) queues the CONFIG GET forever and this await
+  // would wedge main() BEFORE any Worker is constructed — dyno "up", consuming
+  // nothing. The probe is advisory; log and let the Workers' own connections
+  // retry into a recovered Redis.
   const probe = createRedis();
-  await assertNoeviction(probe);
+  await Promise.race([
+    assertNoeviction(probe),
+    new Promise((resolve) => setTimeout(resolve, 10000).unref()),
+  ]).catch((err) => console.error('[worker] noeviction probe failed:', err?.message || err));
   await probe.quit().catch(() => {});
 
   // Declare the repeatable schedule (the 180-day identity purge) before the consumer starts. This is
   // what replaces the Heroku Scheduler add-on: the promise is now kept by code that ships with the
   // app, is covered by a test, and shows up in a diff.
-  await registerMaintenanceJobs();
+  // Bounded for the same reason as the probe above — a dead Redis would wedge this await forever.
+  // The declaration must still happen, so on timeout keep retrying in the background until it lands.
+  const declareMaintenance = async () => {
+    for (;;) {
+      try {
+        await Promise.race([
+          registerMaintenanceJobs(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('redis-timeout')), 15000).unref()),
+        ]);
+        return;
+      } catch (err) {
+        console.error('[worker] registerMaintenanceJobs failed, retrying in 60s:', err?.message || err);
+        await new Promise((resolve) => setTimeout(resolve, 60000).unref());
+      }
+    }
+  };
+  await Promise.race([
+    declareMaintenance(),
+    new Promise((resolve) => setTimeout(resolve, 20000).unref()),
+  ]); // proceed to construct Workers either way; the retry loop keeps running if needed
 
   const workers = [
     new Worker(QUEUE_NAMES.IMPORT, processImportJob, {
@@ -86,6 +114,36 @@ async function main() {
     // processors make that safe. Log it so a silent reclaim isn't invisible.
     w.on('stalled', (jobId) => console.warn(`[worker:${w.name}] job ${jobId} stalled — will be retried`));
   }
+  // Redis→Mongo ledger reconcile: when BullMQ exhausts an import job's retries
+  // (thrown errors, stall-limit after a crash loop, drain races), the failure
+  // lands in Redis only — nothing else writes `failed` onto the ImportJob doc the
+  // client polls. The CAS status filter leaves completed/failed docs alone.
+  const importWorker = workers.find((w) => w.name === QUEUE_NAMES.IMPORT);
+  importWorker.on('failed', async (job, err) => {
+    if (!job?.data?.importJobId) return;
+    const attemptsAllowed = job.opts?.attempts || 1;
+    if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
+    try {
+      await ImportJob.updateOne(
+        {
+          _id: job.data.importJobId,
+          status: { $in: ['pending', 'parsing', 'geocoding', 'linking', 'importing'] },
+        },
+        {
+          $set: {
+            status: 'failed',
+            lastError: String(err?.message || err || 'unknown'),
+            completedAt: new Date(),
+          },
+          $push: { errors: { reason: 'The import failed after retries. Check the file and try again.' } },
+          $inc: { errorCount: 1 },
+        }
+      );
+    } catch (e) {
+      console.error('[worker] failed-listener reconcile error:', e?.message || e);
+    }
+  });
+
   console.log(`[worker] up; consuming: ${workers.map((w) => w.name).join(', ')}`);
 
   let shuttingDown = false;

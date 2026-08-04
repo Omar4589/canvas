@@ -6,6 +6,7 @@ import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
 import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformStats.js';
 import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
 import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExports.js';
+import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
 import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
@@ -43,6 +44,13 @@ export const CAMPAIGN_STATS_CRON = process.env.CAMPAIGN_STATS_CRON || '7 4 * * *
 // recomputes (03:47 / 04:07), and the triggers (04:41).
 export const EXPORT_SWEEP_CRON = process.env.EXPORT_SWEEP_CRON || '23 5 * * *';
 
+// Nightly import sweep: expire stuck ImportJobs nobody is polling (a worker OOM-abort
+// skips every catch, freezing the doc in an active status) and delete orphaned raw
+// voter-file uploads in GridFS — a crashed import used to leave the complete uploaded
+// file behind with no TTL. 05:53 keeps it clear of the export sweep (05:23) and the
+// rest of the overnight ladder.
+export const IMPORT_SWEEP_CRON = process.env.IMPORT_SWEEP_CRON || '53 5 * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -70,6 +78,8 @@ export const MAINTENANCE_JOBS = [
   // Deliberately here and NOT in REPEATABLE_JOBS: an export sweep going quiet must never
   // read as "Retention: NOT ENFORCED" on the health banner.
   { name: EXPORT_SWEEP_JOB, cron: EXPORT_SWEEP_CRON, label: 'The nightly export-artifact sweep' },
+  // Same reasoning — hygiene, not the retention promise.
+  { name: IMPORT_SWEEP_JOB, cron: IMPORT_SWEEP_CRON, label: 'The nightly stale-import sweep' },
 ];
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
@@ -144,6 +154,13 @@ export async function processMaintenanceJob(job) {
     const res = await sweepExpiredExports();
     console.log(
       `[maintenance] ${EXPORT_SWEEP_JOB}: expired ${res.expired}, failed-job leftovers ${res.failedCleaned}, orphan file(s) ${res.orphans}`
+    );
+    return res;
+  }
+  if (job.name === IMPORT_SWEEP_JOB) {
+    const res = await sweepStaleImportJobs();
+    console.log(
+      `[maintenance] ${IMPORT_SWEEP_JOB}: expired ${res.expired} stuck job(s), deleted ${res.rawDeleted} orphaned raw upload(s)`
     );
     return res;
   }

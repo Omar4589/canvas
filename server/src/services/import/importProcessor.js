@@ -1,8 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { UnrecoverableError } from 'bullmq';
 import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
-import { buildImportRows, applyImport } from './csvImporter.js';
+import { buildImportRows, applyImport, ndjsonBatches } from './csvImporter.js';
 import { resolve as geocodeResolve, needsGeocode } from './geocode/geocodeService.js';
 import { reconcileIdentityFromImport } from '../person/reconcileIdentityFromImport.js';
 import { normalizeAddress } from '../../utils/normalizeAddress.js';
@@ -51,16 +54,31 @@ export async function processImportJob(job) {
 
   await ImportJob.updateOne(
     { _id: importJobId },
-    { status: 'parsing', startedAt: new Date(), progress: 0, queueJobId: String(job.id) }
+    {
+      status: 'parsing',
+      phase: 'parsing',
+      startedAt: new Date(),
+      heartbeatAt: new Date(),
+      progress: 0,
+      queueJobId: String(job.id),
+    }
   );
 
+  // Spill files (apply kind only): valid rows go to NDJSON on the dyno's ephemeral
+  // disk instead of a ~160MB-per-166k-rows heap array; the link pass re-writes them
+  // stamped with personId. Both are deleted in the finally — transient processing
+  // storage, never at rest past the job (see PRIVACY_VERIFICATION).
+  const spillRaw = path.join(os.tmpdir(), `import-spill-${importJobId}.ndjson`);
+  const spillLinked = path.join(os.tmpdir(), `import-spill-${importJobId}-linked.ndjson`);
   try {
     const buffer = await loadRawImport(importJobId);
-    const { totalRows, errors, validRows, householdMap, dupSvids, detection } = await buildImportRows(
+    const useSpill = importJob.kind !== 'preview' && importJob.kind !== 'geocode_check';
+    if (useSpill) fs.writeFileSync(spillRaw, '');
+    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, detection } = await buildImportRows(
       buffer,
       importJob.filename,
       importJob.fieldMapping || {},
-      { explode: importJob.explode !== false }
+      { explode: importJob.explode !== false, ...(useSpill ? { spill: spillRaw } : {}) }
     );
 
     // "See exact placement" (kind 'geocode_check'): geocode the missing-coord addresses
@@ -72,7 +90,7 @@ export async function processImportJob(job) {
         onProgress: async (processed, total) => {
           const pct = total ? Math.round((processed / total) * 100) : 100;
           await job.updateProgress(pct);
-          await ImportJob.updateOne({ _id: importJobId }, { progress: pct });
+          await ImportJob.updateOne({ _id: importJobId }, { progress: pct, heartbeatAt: new Date() });
         },
       });
       const sample = [];
@@ -100,6 +118,7 @@ export async function processImportJob(job) {
     // Preview kind: read-only forecast (same diff the sync /csv/preview shows), no
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
+      await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'diffing', heartbeatAt: new Date() } });
       const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: importJob.uidSource });
       diff.detection = detection;
       await ImportJob.updateOne(
@@ -128,39 +147,93 @@ export async function processImportJob(job) {
     // (plus their voters) that can't be placed — so every imported door keeps a walkable
     // pin (no location:null doors, no orphan voters).
     let geoStats = null;
-    if (process.env.GEOCODE_ENABLED === 'true') {
-      await ImportJob.updateOne({ _id: importJobId }, { $set: { status: 'geocoding', progress: 0 } });
+    let geocodeUnmatched = null; // read by the spill-mode link pass below
+    // Guarded on households actually MISSING coords — a file that arrives fully
+    // geocoded must never flash a "Geocoding" stage (resolve() would no-op, but
+    // the client polls every 1.5s and catches the stamp).
+    const needingGeocode = householdMap.size - householdsWithFileCoords;
+    if (process.env.GEOCODE_ENABLED === 'true' && needingGeocode > 0) {
+      await ImportJob.updateOne(
+        { _id: importJobId },
+        { $set: { status: 'geocoding', phase: 'geocoding', heartbeatAt: new Date(), progress: 0 } }
+      );
       const { unmatched, stats } = await geocodeResolve(householdMap, {
         onProgress: async (processed, total) => {
           const overall = total ? Math.round((processed / total) * 20) : 20; // geocode = 0–20%
           await job.updateProgress(overall);
-          await ImportJob.updateOne({ _id: importJobId }, { progress: overall });
+          await ImportJob.updateOne({ _id: importJobId }, { progress: overall, heartbeatAt: new Date() });
         },
       });
       geoStats = stats;
       if (unmatched.size) {
         for (const normAddr of unmatched.keys()) householdMap.delete(normAddr);
-        for (let i = validRows.length - 1; i >= 0; i -= 1) {
-          const info = unmatched.get(normalizeAddress(validRows[i].household));
-          if (info) {
-            errors.push({ code: info.code, reason: info.detail, stateVoterId: validRows[i].voter.stateVoterId || null });
-            validRows.splice(i, 1);
+        if (validRows) {
+          for (let i = validRows.length - 1; i >= 0; i -= 1) {
+            const info = unmatched.get(normalizeAddress(validRows[i].household));
+            if (info) {
+              errors.push({ code: info.code, reason: info.detail, stateVoterId: validRows[i].voter.stateVoterId || null });
+              validRows.splice(i, 1);
+            }
           }
         }
+        // Spill mode: rows at unmatched addresses are dropped during the link pass
+        // below (the spill is streamed there anyway — no extra read).
       }
+      geocodeUnmatched = unmatched;
     }
 
     // ── Link voters to canonical Persons + reconcile identity (shared voter DB) ──
     // Always-on (the sharedVoters branch is the rollout gate). Runs on the POST-geocode
     // rows so only voters that will actually import get linked; stamps personId +
     // uidSource onto each row.voter so applyImport's {...row.voter} upsert carries them.
-    await reconcileIdentityFromImport(validRows, { orgId, uidSource: importJob.uidSource || null });
+    // Its own stage: at 100k+ voters this is the longest pre-write step, and it used
+    // to run under whatever label came before it (usually "geocoding" at 0%).
+    // Progress deliberately stays at the geocode floor — this step has no cheap
+    // row-granular progress, and a stage label beats a lying percentage.
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      { $set: { status: 'linking', phase: 'linking', heartbeatAt: new Date() } }
+    );
+    let svids;
+    let linkedCount = 0;
+    if (validRows) {
+      await reconcileIdentityFromImport(validRows, { orgId, uidSource: importJob.uidSource || null });
+      svids = validRows.map((r) => r.voter.stateVoterId);
+      linkedCount = validRows.length;
+    } else {
+      // Spill mode: stream the raw spill in batches — drop geocode-unmatched rows,
+      // reconcile each batch (stamps personId on the batch's rows), and re-write the
+      // stamped rows to the linked spill applyImport will consume. One batch in heap
+      // at a time; svids (short strings) are the only full-file accumulation.
+      fs.writeFileSync(spillLinked, '');
+      svids = [];
+      for await (const batch of ndjsonBatches(spillRaw, 5000)) {
+        let rows = batch;
+        if (geocodeUnmatched?.size) {
+          rows = [];
+          for (const row of batch) {
+            const info = geocodeUnmatched.get(normalizeAddress(row.household));
+            if (info) errors.push({ code: info.code, reason: info.detail, stateVoterId: row.voter.stateVoterId || null });
+            else rows.push(row);
+          }
+        }
+        if (!rows.length) continue;
+        await reconcileIdentityFromImport(rows, { orgId, uidSource: importJob.uidSource || null });
+        const out = [];
+        for (const row of rows) {
+          svids.push(row.voter.stateVoterId);
+          out.push(JSON.stringify(row));
+        }
+        fs.appendFileSync(spillLinked, `${out.join('\n')}\n`);
+        linkedCount += rows.length;
+        await ImportJob.updateOne({ _id: importJobId }, { $set: { heartbeatAt: new Date() } });
+      }
+    }
 
     // Re-housing audit: capture each incoming voter's CURRENT household BEFORE the
     // upsert reassigns it, so we can detect moves + emptied doors afterward. Campaign-
     // scoped: a sibling campaign's row of the same person is not "where they live" in
     // THIS campaign, and importing them here must not read as a move there.
-    const svids = validRows.map((r) => r.voter.stateVoterId);
     const priorVoters = await findInChunks(
       Voter, { campaignId: campaign._id }, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1 }
     );
@@ -177,14 +250,18 @@ export async function processImportJob(job) {
       }
     }
 
-    // Write phase — switch the status off "geocoding" so the UI shows the real stage, and
+    // Write phase — switch the status off "linking" so the UI shows the real stage, and
     // floor progress at 20% (geocode is 0–20%) even when geocoding was all cache hits.
-    await ImportJob.updateOne({ _id: importJobId }, { $set: { status: 'importing', progress: 20 } });
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      { $set: { status: 'importing', phase: 'importing', heartbeatAt: new Date(), progress: 20 } }
+    );
 
     const counts = await applyImport({
       campaign,
       orgId,
       validRows,
+      ...(validRows ? {} : { validRowsFile: spillLinked, validCount: linkedCount }),
       householdMap,
       batchSize: 2000,
       overwriteHandEdits: importJob.overwriteHandEdits === true,
@@ -193,7 +270,12 @@ export async function processImportJob(job) {
         // Geocoding 0-20% (when it ran), households 20-60%, voters 60-100%.
         const overall = phase === 'households' ? 20 + Math.round(pct * 40) : 60 + Math.round(pct * 40);
         await job.updateProgress(overall);
-        await ImportJob.updateOne({ _id: importJobId }, { progress: overall, processedRows: processed });
+        // heartbeatAt rides the progress write (per 2000-row batch — no extra write);
+        // the stale-job expiry in GET /:importId reads it to tell alive from dead.
+        await ImportJob.updateOne(
+          { _id: importJobId },
+          { progress: overall, processedRows: processed, heartbeatAt: new Date() }
+        );
       },
     });
 
@@ -304,10 +386,34 @@ export async function processImportJob(job) {
     await deleteRawImport(importJobId).catch(() => {});
     return { ok: true, importJobId: String(importJobId), newVoters: counts.newVoters };
   } catch (err) {
+    // Classify before rethrowing: a missing raw file (cascade-deleted, or a retry
+    // after a success+crash) and a file that won't parse are permanently
+    // unrecoverable — retrying them just burns the backoff schedule.
+    const unrecoverable =
+      err instanceof UnrecoverableError ||
+      /FileNotFound|file not found/i.test(String(err?.message)) ||
+      err?.name === 'ImportTooLargeError';
     await ImportJob.updateOne(
       { _id: importJobId },
-      { status: 'failed', errors: [{ reason: err.message }], errorCount: 1, completedAt: new Date() }
+      {
+        status: 'failed',
+        errors: [{ reason: err.message }],
+        errorCount: 1,
+        lastError: String(err?.message || err),
+        completedAt: new Date(),
+      }
     );
-    throw err; // retried per the queue's backoff policy
+    if (unrecoverable) {
+      // Terminal: no retry will read the raw upload again — drop it now (the
+      // nightly sweep is the backstop for every other failure path).
+      await deleteRawImport(importJobId).catch(() => {});
+      throw err instanceof UnrecoverableError ? err : new UnrecoverableError(err.message);
+    }
+    throw err; // retried per the queue's backoff policy; sweep cleans the raw file if all retries die
+  } finally {
+    // The spills hold voter PII on the dyno's ephemeral disk — their lifetime is
+    // the job, success OR failure. Never leave them for the success path only.
+    fs.rmSync(spillRaw, { force: true });
+    fs.rmSync(spillLinked, { force: true });
   }
 }

@@ -17,6 +17,7 @@ import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { passBookIds, visibleCutDoors, countLooseDoors } from '../lib/cutMapDoors.js';
+import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -320,6 +321,24 @@ function registerBookLayers(map, dark) {
       'circle-color': ['get', 'color'],
       'circle-stroke-color': '#ffffff',
       'circle-stroke-width': 1,
+      'circle-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
+      'circle-stroke-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
+    },
+  });
+  // Buildings as a GPU circle layer, ALWAYS on: the HTML building markers below
+  // are viewport-culled (capped at MAX_DOM_MARKERS), so this layer is what keeps
+  // every building visible — and clickable — at any zoom. Slightly larger than a
+  // door dot; book-colored via the same per-feature 'color' property.
+  map.addSource('buildings', { type: 'geojson', data: empty });
+  map.addLayer({
+    id: 'building-dots',
+    type: 'circle',
+    source: 'buildings',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 15, 6.5],
+      'circle-color': ['get', 'color'],
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 1.2,
       'circle-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
       'circle-stroke-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
     },
@@ -876,7 +895,9 @@ export default function TurfsPage() {
   const fittedSigRef = useRef(null);
   const openPopupRef = useRef(() => {});
   const openBuildingPopupRef = useRef(() => {});
-  const buildingMarkersRef = useRef([]);
+  const buildingMarkersRef = useRef(new Map()); // key -> { marker, sig } (viewport-culled diff-sync)
+  const syncRef = useRef(() => {}); // freshest sync closure, for the once-registered moveend handler
+  const [culledBuildings, setCulledBuildings] = useState(0); // >0 → too many in view for DOM markers
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
   const turfsQ = useQuery({
@@ -1358,6 +1379,16 @@ export default function TurfsPage() {
     // a book click. Building HTML markers handle their own click (stopPropagation).
     const DOT_TOL = 6;
     map.on('click', (e) => {
+      // Buildings first: when the DOM markers are viewport-culled, the circle
+      // layer is the only clickable representation of a stacked building.
+      const bHits = map.queryRenderedFeatures(
+        [[e.point.x - DOT_TOL, e.point.y - DOT_TOL], [e.point.x + DOT_TOL, e.point.y + DOT_TOL]],
+        { layers: map.getLayer('building-dots') ? ['building-dots'] : [] }
+      );
+      if (bHits.length && bHits[0].properties?.key) {
+        openBuildingPopupRef.current(bHits[0].properties.key);
+        return;
+      }
       const near = map.queryRenderedFeatures(
         [[e.point.x - DOT_TOL, e.point.y - DOT_TOL], [e.point.x + DOT_TOL, e.point.y + DOT_TOL]],
         { layers: map.getLayer('doors') ? ['doors'] : [] }
@@ -1437,6 +1468,23 @@ export default function TurfsPage() {
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks, progressByTurf));
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks, progressByTurf, statusMode));
     map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet, statusMode, darkBase));
+    // Buildings ride their own circle layer so they stay visible/clickable even
+    // when the DOM markers are viewport-culled (see the building sync effect).
+    if (map.getSource('buildings')) {
+      map.getSource('buildings').setData({
+        type: 'FeatureCollection',
+        features: grouped.buildings.map((b) => ({
+          type: 'Feature',
+          properties: {
+            key: b.key,
+            turfId: b.turfId ? String(b.turfId) : null,
+            color: colorByTurf.get(String(b.turfId)) || '#9ca3af',
+            dim: targetedSet ? !(b.units || []).some((u) => targetedSet.has(String(u.id))) : false,
+          },
+          geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
+        })),
+      });
+    }
 
     // Status filter (Assigned / Unassigned / Completed / In-progress / Not-started): hide
     // non-matching books + their dots via cheap Mapbox filter expressions — full GeoJSON
@@ -1450,6 +1498,9 @@ export default function TurfsPage() {
     // dots would vanish while their halos stayed behind.
     map.setFilter('doors', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
     map.setFilter('door-book-ring', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
+    if (map.getLayer('building-dots')) {
+      map.setFilter('building-dots', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
+    }
 
     // Fit to the books (or raw house dots before any cut) ONCE per data set — keyed
     // by the book-id signature so selection toggles and assignment refetches never
@@ -1468,15 +1519,35 @@ export default function TurfsPage() {
   // Building markers (HTML overlays) for stacked apartment units — synced apart from paint()
   // so book-select toggles don't churn the DOM. Hidden when Houses/Buildings is toggled off
   // or the building's book is filtered out; the "N units" badge shows at zoom ≥ 16 or on hover.
-  useEffect(() => {
+  // Viewport-culled diff-sync. The old effect created a DOM marker for EVERY
+  // building and tore them ALL down on any input change — ~3,100 markers on a
+  // 107k-door campaign, rebuilt per toggle. Now: only in-viewport buildings get
+  // DOM markers (re-synced on moveend, diffed by key + render signature so a pan
+  // reuses everything still visible), and past MAX_DOM_MARKERS the DOM layer
+  // stands down behind a "zoom in" chip — the building-dots circle layer keeps
+  // every building visible/clickable at any zoom regardless.
+  const sync = () => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    buildingMarkersRef.current.forEach((m) => m.remove());
-    buildingMarkersRef.current = [];
-    if (!(layerVis.houses && layerVis.buildings)) return;
-    const badgesOn = () => map.getZoom() >= 16;
+    const current = buildingMarkersRef.current; // Map<key, { marker, sig }>
+    const removeAll = () => {
+      for (const { marker } of current.values()) marker.remove();
+      current.clear();
+    };
+    if (!(layerVis.houses && layerVis.buildings)) {
+      removeAll();
+      setCulledBuildings(0);
+      return;
+    }
+    const raw = map.getBounds();
+    const bounds = { west: raw.getWest(), south: raw.getSouth(), east: raw.getEast(), north: raw.getNorth() };
+    const badgesOn = map.getZoom() >= 16;
+
+    // What SHOULD be on the map right now.
+    const wanted = new Map(); // key -> { b, color, badgeText, dimmed, sig }
     for (const b of grouped.buildings) {
       if (visibleBookIds && !visibleBookIds.has(String(b.turfId))) continue;
+      if (!inBoundsWithMargin(bounds, b.lng, b.lat)) continue;
       const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
       // The glyph stays BOOK-colored (a building is a book-membership object, and its units
       // can hold several different statuses). In status mode the badge answers "how many of
@@ -1484,31 +1555,67 @@ export default function TurfsPage() {
       const hit = statusMode
         ? (b.units || []).filter((u) => (u.passStatus || 'unknocked') !== 'unknocked').length
         : 0;
-      const el = buildingMarkerEl(b.total, color, darkBase, statusMode ? `${hit}/${b.total} hit` : null);
+      const badgeText = statusMode ? `${hit}/${b.total} hit` : null;
+      const dimmed = !!(targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id))));
+      wanted.set(b.key, { b, color, badgeText, dimmed, sig: markerSig(color, badgeText, dimmed, darkBase) });
+    }
+    if (wanted.size > MAX_DOM_MARKERS) {
+      removeAll();
+      setCulledBuildings(wanted.size);
+      return;
+    }
+    setCulledBuildings(0);
+
+    const { remove, create, rebuild } = diffMarkers(current, wanted);
+    for (const key of remove) {
+      current.get(key).marker.remove();
+      current.delete(key);
+    }
+    for (const key of [...rebuild, ...create]) {
+      const prev = current.get(key);
+      if (prev) { prev.marker.remove(); current.delete(key); }
+      const { b, color, badgeText, dimmed } = wanted.get(key);
+      const el = buildingMarkerEl(b.total, color, darkBase, badgeText);
       // Live target preview: dim a building unless one of its units is targeted.
-      if (targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id)))) {
-        el.style.opacity = '0.2';
-      }
+      if (dimmed) el.style.opacity = '0.2';
       const badge = el.querySelector('.units-badge');
       if (badge) {
-        badge.style.display = badgesOn() ? 'block' : 'none';
+        badge.style.display = badgesOn ? 'block' : 'none';
         el.addEventListener('mouseenter', () => { badge.style.display = 'block'; });
-        el.addEventListener('mouseleave', () => { badge.style.display = badgesOn() ? 'block' : 'none'; });
+        el.addEventListener('mouseleave', () => { badge.style.display = map.getZoom() >= 16 ? 'block' : 'none'; });
       }
       el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
-      buildingMarkersRef.current.push(marker);
+      current.set(key, { marker, sig: wanted.get(key).sig });
     }
+  };
+  syncRef.current = sync;
+
+  // Inputs changed → re-sync (and once at mapReady).
+  useEffect(() => {
+    syncRef.current();
+  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
+
+  // Pan/zoom → re-sync from the ref (registered ONCE, so no listener churn), and
+  // keep the zoom≥16 badge behavior for the markers that exist.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const onMoveEnd = () => syncRef.current();
     const onZoom = () => {
-      const on = badgesOn();
-      for (const m of buildingMarkersRef.current) {
-        const badge = m.getElement().querySelector('.units-badge');
+      const on = map.getZoom() >= 16;
+      for (const { marker } of buildingMarkersRef.current.values()) {
+        const badge = marker.getElement().querySelector('.units-badge');
         if (badge) badge.style.display = on ? 'block' : 'none';
       }
     };
+    map.on('moveend', onMoveEnd);
     map.on('zoomend', onZoom);
-    return () => map.off('zoomend', onZoom);
-  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
+    return () => {
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onZoom);
+    };
+  }, [mapReady]);
 
   // Layer visibility toggles (Houses/Buildings/Fills/Labels). Flip the Mapbox layers here;
   // the HTML building markers are handled in the marker effect above. Re-applies on styleEpoch
@@ -1521,6 +1628,9 @@ export default function TurfsPage() {
     set('book-outline', layerVis.fills);
     set('book-labels', layerVis.labels);
     set('doors', layerVis.houses);
+    // Building dots follow Houses (they ARE doors); the Buildings toggle governs
+    // only the HTML glyph markers, handled in the building sync effect.
+    set('building-dots', layerVis.houses);
     // Only meaningful in status mode — off, the dot already IS the book color.
     set('door-book-ring', layerVis.houses && statusMode);
   }, [layerVis, mapReady, styleEpoch, statusMode]);
@@ -2264,6 +2374,11 @@ export default function TurfsPage() {
           )}
           {tokenQ.data?.isReady && !!turfs.length && (
             <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+              {culledBuildings > 0 && (
+                <div className="mb-1 rounded-full border border-border bg-card/95 px-3 py-1 text-center text-xs text-fg-muted shadow backdrop-blur">
+                  {culledBuildings.toLocaleString()} buildings in view — zoom in for building markers
+                </div>
+              )}
               {crewOpen && crewLoad.length > 0 && (
                 <div className="mb-1 max-h-56 w-72 overflow-auto rounded-lg border border-border bg-card/95 p-2 shadow-xl backdrop-blur">
                   <ul className="space-y-0.5 text-xs">
