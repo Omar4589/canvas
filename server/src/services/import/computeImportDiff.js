@@ -89,7 +89,7 @@ async function forecastPersons(validRows, uidSource, orgId) {
  * a person who exists only in a SIBLING campaign forecasts as a NEW voter here (their
  * row here will be an insert), and never as a move/orphan.
  */
-export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, totalRows = 0, uidSource = null }) {
+export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null }) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
@@ -239,7 +239,16 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
 
   const missingRequired = errors.filter((e) => e.code === 'missing_required').length;
   const noCoordinates = errors.filter((e) => e.code === 'bad_coords').length;
-  const duplicateInFile = dupSvids ? dupSvids.size : 0;
+  const spreadsheetErrors = errors.filter((e) => e.code === 'spreadsheet_error').length;
+  // Dropped ROWS, not distinct duplicated values — this used to be dupSvids.size,
+  // which reported one junk value repeated 37,875 times as "1 duplicate" and let a
+  // 75%-loss import review as healthy.
+  const duplicateInFile = dupRows || 0;
+  // Top repeated values with their dropped-row counts: `"=#NUM!" — 37,874 rows` on
+  // the review screen instantly names a broken or mis-mapped ID column.
+  const dupValues = dupSvids
+    ? [...dupSvids.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([value, dropped]) => ({ value, dropped }))
+    : [];
 
   // Cache-only geocoding forecast (no provider calls). Only meaningful when geocoding
   // is enabled — otherwise no-coords rows were dropped and householdMap has none.
@@ -269,11 +278,12 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       orphanedDoors,
       nearDuplicates,
     },
-    rowIssues: { missingRequired, noCoordinates, duplicateInFile },
+    rowIssues: { missingRequired, noCoordinates, duplicateInFile, spreadsheetErrors },
     samples: {
       moved,
       orphans,
       nearDups,
+      dupValues,
       // No errors sample: the client never read it, and the preview path persisted
       // the whole diff to ImportJob.diff — raw per-row error objects (with voter
       // ids) were being stored twice for nothing (ImportJob.errors already has them).

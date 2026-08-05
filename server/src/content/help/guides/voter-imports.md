@@ -21,7 +21,9 @@ tags: import, voters, intake
 
 ## Preview before you commit
 
-After you map the columns, click **Preview changes** to see exactly what the import will do — new vs. existing doors, new vs. updated voters, voters that would change doors, and near-duplicate addresses — before you **Confirm & import**.
+After you map the columns, click **Preview changes** to see exactly what the import will do — new vs. existing doors, new vs. updated voters, voters that would change doors, and near-duplicate addresses — before you **Confirm & import**. The preview also says plainly how many of the file's rows will import, and lists every skipped row with its reason.
+
+**If the file's Voter ID column is broken, the preview says so in red.** Some vendor files arrive with a spreadsheet error — the literal text `=#NUM!` or `#REF!` — where the ID should be, because a formula failed before the file was exported. Those rows are skipped, the preview names the repeated values and how many rows each one costs, and if more than a fifth of the file would be skipped, **Confirm & import** stays off until you tick **Import anyway**. Usually the right move instead is **Back** → map a different column that uniquely identifies each person (a vendor ID) as State Voter ID — or ask whoever sent the file to re-export it with the IDs fixed. See [My file shows =#NUM! or #REF! where the Voter IDs should be](file-shows-spreadsheet-errors).
 
 If your team has **hand-corrected** any voter info (say, a phone number confirmed at the door), the preview also lists every hand edit this file would change. **Your edits are kept by default** — the file updates everything else. To take the file's values instead, tick **Overwrite these hand edits with the file's values** on the review screen; that replaces the listed values and can't be undone.
 

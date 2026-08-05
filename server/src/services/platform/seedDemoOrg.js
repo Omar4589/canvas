@@ -1010,7 +1010,7 @@ export async function seedDemoOrg({
       totalRows: built.totalRows, processedRows: built.totalRows, progress: 100,
       uniqueVoters: counts.uniqueVoters, uniqueHouseholds: counts.uniqueHouseholds,
       newVoters: counts.newVoters, updatedVoters: counts.updatedVoters, newHouseholds: counts.newHouseholds,
-      duplicateStateVoterIds: Array.from(built.dupSvids),
+      duplicateStateVoterIds: Array.from(built.dupSvids.keys()),
       errors: [], errorCount: 0,
       insertedHouseholdIds: counts.insertedHouseholdIds, insertedVoterIds: counts.insertedVoterIds,
       fieldMapping: DEFAULT_PROFILE_MAPPING, explode: true, uidSource: null,

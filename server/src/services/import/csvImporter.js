@@ -122,6 +122,15 @@ function missingRequired(mapped) {
   return missing;
 }
 
+// Excel error literals ("#NUM!", "#REF!", …, with or without the leading "=" some
+// exports keep): a formula that failed in the source spreadsheet, frozen into text
+// on export. In the ID column these are non-empty — so they pass the required check
+// — and then thousands of rows carrying the SAME literal collapse into one
+// "duplicate" voter (an i360 walk file lost 37,874 of 50,440 rows this way while
+// the preview read "1 duplicate"). They get their own error code instead of ever
+// reaching the dedup. Mirrored client-side in ImportPage.jsx — keep in sync.
+export const SPREADSHEET_ERROR_RE = /^=?#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!)$/i;
+
 /**
  * Parse a CSV string with a field mapping, validate rows, and group households.
  * Pure (no DB). Returns { totalRows, errors, validRows, householdMap, dupSvids }.
@@ -157,10 +166,11 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
   const errors = [];
   const validRows = sink ? null : [];
   const seenSvids = new Set();
-  const dupSvids = new Set();
+  const dupSvids = new Map(); // duplicated ID value → dropped-row count (first occurrence kept)
   const householdMap = new Map();
   let totalRows = 0;
   let validCount = 0;
+  let dupRows = 0; // total rows dropped as in-file duplicates — NOT dupSvids.size
   const geocodeEnabled = process.env.GEOCODE_ENABLED === 'true';
 
   const push = (raw) => {
@@ -174,6 +184,16 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
         code: 'missing_required',
         reason: `Missing required: ${missing.join(', ')}`,
         stateVoterId: mapped.voter.stateVoterId || null,
+      });
+      return;
+    }
+    if (SPREADSHEET_ERROR_RE.test(mapped.voter.stateVoterId)) {
+      // Before the dedup, or every such row after the first reads as a "duplicate".
+      errors.push({
+        rowIndex: i + 2,
+        code: 'spreadsheet_error',
+        reason: `State Voter ID is a spreadsheet error value (${mapped.voter.stateVoterId})`,
+        stateVoterId: mapped.voter.stateVoterId,
       });
       return;
     }
@@ -194,7 +214,8 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
     }
     const svid = mapped.voter.stateVoterId;
     if (seenSvids.has(svid)) {
-      dupSvids.add(svid);
+      dupSvids.set(svid, (dupSvids.get(svid) || 0) + 1);
+      dupRows += 1;
       return; // first occurrence wins
     }
     seenSvids.add(svid);
@@ -212,7 +233,7 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
     else validRows.push(mapped);
   };
 
-  const finish = () => ({ totalRows, errors, validRows, householdMap, dupSvids, validCount });
+  const finish = () => ({ totalRows, errors, validRows, householdMap, dupSvids, dupRows, validCount });
   return { push, finish, resolved };
 }
 

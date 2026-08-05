@@ -236,9 +236,9 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const explode = req.body?.explode !== 'false';
-    const { totalRows, errors, validRows, householdMap, dupSvids, detection } =
+    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection } =
       await buildImportRows(fs.readFileSync(req.file.path), req.file.originalname, resolved.mapping, { explode });
-    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: resolved.uidSource });
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {

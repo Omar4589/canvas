@@ -78,8 +78,20 @@ Picking a file no longer applies it straight away. After you map the columns, cl
 to see exactly what the import will do — **new vs existing doors**, **new vs updated voters**, **voters
 that would change doors** (re-housing), **near-duplicate addresses** (formatting drift that won't merge),
 **doors that would be emptied**, and any **skipped rows** (missing fields / bad coordinates / duplicate
-Voter IDs). Review it, then **Confirm & import** to apply (or **Back** to fix the mapping). Each finished
-import also records how many voters moved doors and how many doors were emptied, in the history table.
+Voter IDs / spreadsheet error values). Review it, then **Confirm & import** to apply (or **Back** to fix
+the mapping). Each finished import also records how many voters moved doors and how many doors were
+emptied, in the history table.
+
+**Broken ID columns are caught, loudly.** Some vendor files arrive with a *formula error* — the literal
+text `=#NUM!`, `#REF!`, `#N/A`, … — where the Voter ID should be, because the lookup that built that
+column failed before the file was exported. Those rows are skipped with their own reason ("spreadsheet
+error value"), never silently folded together as one repeated voter. The mapping step warns as soon as
+the sample rows show an error value in the ID column; the preview shows a red callout naming the repeated
+values and how many rows each one drops, plus a plain **"N of M rows in the file will import"** line. And
+when more than **20%** of a file would be skipped, **Confirm & import** stays disabled until you tick an
+explicit *"Import anyway — skip N rows"* acknowledgment — the escape hatch when the file can't be
+re-exported is to map a different column that uniquely identifies each person (a vendor ID) as State
+Voter ID.
 
 ## File size & large files
 
@@ -154,6 +166,8 @@ walkthrough — including when to use **Claim all Intake** vs. a saved search �
   canvasser won't be sent back automatically.
 - **Bad/odd addresses aren't validated** beyond requiring coordinates; a coordinate-less row is skipped
   (the preview counts it under *Rows skipped*).
+- **Duplicate-ID skips are counted as rows, not values.** 37,000 rows all carrying the same junk ID read
+  as 37,000 skipped rows — with the repeated value named — never as "1 duplicate".
 
 ---
 
@@ -222,6 +236,20 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   back to it). A voter absent from the file keeps its door alive.
 - **Near-duplicate** is advisory only — the loose key never affects the upsert (still exact
   `normalizeAddress`) and never auto-merges.
+- **Spreadsheet error literals** (`SPREADSHEET_ERROR_RE` in
+  [csvImporter.js](../server/src/services/import/csvImporter.js), `/^=?#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!)$/i`,
+  mirrored in `ImportPage.jsx` — keep them in sync): a mapped `stateVoterId` matching it becomes a
+  per-row **`spreadsheet_error`** *before* the dedup — otherwise a broken export where 37k rows share
+  the literal `=#NUM!` collapses them into one voter and "1 duplicate" (the FL-22 i360 incident this
+  guard exists for). `rowIssues.spreadsheetErrors` carries the count.
+- **`rowIssues.duplicateInFile` is dropped ROWS**, not distinct duplicated values — the validator tracks
+  `dupRows` alongside `dupSvids` (now a `Map` of value → dropped count; `duplicateStateVoterIds` on the
+  job persists its keys). `samples.dupValues` lists the top 5 repeated values with per-value dropped
+  counts for the review callout. The client sums `spreadsheetErrors` into *Rows skipped*, renders
+  `validCount` of `totalRows`, and past a **20% skip share** (`SKIP_ACK_SHARE`) disables
+  **Confirm & import** behind an explicit "Import anyway" checkbox (`ackSkip`, reset by
+  `dropReview`/`resetSelection`). The mapping step also warns early when the 5-row peek shows an error
+  literal in the column mapped to State Voter ID (best-effort; the full-file preview is authoritative).
 - **On apply**, `importProcessor` captures each incoming voter's prior household, then after `applyImport`
   runs `recomputeHouseholdActive` over the touched (source ∪ destination) households and stamps
   `movedVoters`/`deactivatedDoors` onto the `ImportJob` (shown in the Recent-imports history).

@@ -74,7 +74,7 @@ export async function processImportJob(job) {
     const buffer = await loadRawImport(importJobId);
     const useSpill = importJob.kind !== 'preview' && importJob.kind !== 'geocode_check';
     if (useSpill) fs.writeFileSync(spillRaw, '');
-    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, detection } = await buildImportRows(
+    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection } = await buildImportRows(
       buffer,
       importJob.filename,
       importJob.fieldMapping || {},
@@ -119,7 +119,7 @@ export async function processImportJob(job) {
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
       await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'diffing', heartbeatAt: new Date() } });
-      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, totalRows, uidSource: importJob.uidSource });
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource });
       diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },
@@ -361,7 +361,7 @@ export async function processImportJob(job) {
           newVoters: counts.newVoters,
           updatedVoters: counts.updatedVoters,
           newHouseholds: counts.newHouseholds,
-          duplicateStateVoterIds: Array.from(dupSvids),
+          duplicateStateVoterIds: Array.from(dupSvids.keys()),
           errors: errors.slice(0, 100),
           errorCount: errors.length,
           processedRows: totalRows,

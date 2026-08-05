@@ -69,6 +69,19 @@ function StatusBadge({ job }) {
 
 const addr1 = (norm) => String(norm || '').split('|')[0];
 
+// Excel error literals ("=#NUM!", "#REF!", …) frozen into cell text by a failed
+// formula in the source spreadsheet. Mirrors SPREADSHEET_ERROR_RE in
+// server/src/services/import/csvImporter.js — keep in sync.
+const SPREADSHEET_ERROR_RE = /^=?#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CALC!)$/i;
+
+// Above this share of skipped rows, Confirm & import requires an explicit
+// acknowledgment — a broken or mis-mapped ID column silently losing most of a
+// file should never be one unread click away.
+const SKIP_ACK_SHARE = 0.2;
+
+const skippedRowCount = (rowIssues) =>
+  rowIssues.missingRequired + rowIssues.noCoordinates + rowIssues.duplicateInFile + (rowIssues.spreadsheetErrors || 0);
+
 function DiffStat({ label, value, amber }) {
   const hot = amber && value > 0;
   return (
@@ -91,7 +104,9 @@ function SampleList({ title, count, children }) {
 
 function ReviewPanel({ diff }) {
   const { totals, rowIssues, samples } = diff;
-  const skipped = rowIssues.missingRequired + rowIssues.noCoordinates + rowIssues.duplicateInFile;
+  const spreadsheetErrors = rowIssues.spreadsheetErrors || 0; // pre-upgrade persisted diffs lack the field
+  const skipped = skippedRowCount(rowIssues);
+  const skipShare = totals.totalRows ? skipped / totals.totalRows : 0;
   const hasWarnings = totals.movedVoters > 0 || totals.orphanedDoors > 0 || totals.nearDuplicates > 0;
   return (
     <div className="mb-4 rounded border border-border bg-sunken p-4">
@@ -106,6 +121,44 @@ function ReviewPanel({ diff }) {
         <DiffStat label="Near-dup addresses" value={totals.nearDuplicates} amber />
         <DiffStat label="Rows skipped" value={skipped} amber />
       </div>
+
+      <p className="mt-2 text-xs text-fg-muted">
+        {fmt(totals.validCount)} of {fmt(totals.totalRows)} rows in the file will import.
+      </p>
+
+      {/* A broken ID column (spreadsheet error literals) or a heavy skip share is a
+          file problem, not routine cleanup — say so in red, with the repeated values
+          named, before the operator reads the healthy-looking counts above. */}
+      {(spreadsheetErrors > 0 || skipShare > SKIP_ACK_SHARE) && (
+        <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
+          <p className="text-sm font-semibold">
+            {spreadsheetErrors > 0
+              ? 'The column mapped to State Voter ID is broken in this file.'
+              : 'Most of this file would be skipped.'}
+          </p>
+          <p className="mt-1">
+            {spreadsheetErrors > 0 &&
+              `${fmt(spreadsheetErrors)} rows have a spreadsheet error value (like =#NUM!) where their ID should
+              be — the formula that built that column failed before the file was exported. `}
+            {rowIssues.duplicateInFile > 0 &&
+              `${fmt(rowIssues.duplicateInFile)} rows repeat an earlier row's ID and would be dropped (first kept). `}
+            Only {fmt(totals.validCount)} of {fmt(totals.totalRows)} rows would import.
+          </p>
+          {samples.dupValues?.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {samples.dupValues.map((d, i) => (
+                <li key={i}>
+                  <code className="rounded bg-danger-tint px-1">{d.value}</code> — {fmt(d.dropped)} row{d.dropped === 1 ? '' : 's'} dropped
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1">
+            Fix the file and re-export it, or go Back and map a column that uniquely identifies each
+            person (a vendor ID) as State Voter ID.
+          </p>
+        </div>
+      )}
 
       {diff.persons?.enabled && (
         <p className="mt-3 text-xs text-fg-muted">
@@ -158,7 +211,8 @@ function ReviewPanel({ diff }) {
         <SampleList title="Rows skipped" count={skipped}>
           {rowIssues.missingRequired > 0 && <div>{fmt(rowIssues.missingRequired)} missing required fields</div>}
           {rowIssues.noCoordinates > 0 && <div>{fmt(rowIssues.noCoordinates)} missing/invalid coordinates</div>}
-          {rowIssues.duplicateInFile > 0 && <div>{fmt(rowIssues.duplicateInFile)} duplicate Voter IDs within the file (first kept)</div>}
+          {rowIssues.duplicateInFile > 0 && <div>{fmt(rowIssues.duplicateInFile)} rows repeating an earlier row&apos;s Voter ID (first kept)</div>}
+          {spreadsheetErrors > 0 && <div>{fmt(spreadsheetErrors)} rows with a spreadsheet error value (=#NUM!, #REF!, …) as their Voter ID</div>}
         </SampleList>
       </div>
     </div>
@@ -385,6 +439,8 @@ export default function ImportPage() {
   const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
   const [revisitNewVoters, setRevisitNewVoters] = useState(false); // collect already-worked homes that gain a new voter into a revisit walk list
   const [overwriteHandEdits, setOverwriteHandEdits] = useState(false); // let this file replace values the team hand-corrected (default: keep the edits)
+  const [sampleRows, setSampleRows] = useState([]); // preview-headers' 5-row peek — powers the mapping-step error-literal warning
+  const [ackSkip, setAckSkip] = useState(false); // explicit "import anyway" consent when most of the file would be skipped
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -428,6 +484,7 @@ export default function ImportPage() {
       // response in flight; landing it would paint the wrong file's columns.
       if (pickedFile !== latestFileRef.current) return;
       setColumns(res.columns || []);
+      setSampleRows(res.sample || []);
       setMapping(res.suggestedMapping || {});
       // Only the first tab of a workbook is imported — name it, and say what was
       // skipped. Also swap the crude size-based row guess for the real estimate:
@@ -551,6 +608,8 @@ export default function ImportPage() {
     setFile(null);
     latestFileRef.current = null; // mirror setFile — else a peek still in flight repaints the cleared form
     setColumns([]);
+    setSampleRows([]);
+    setAckSkip(false);
     setMapping({});
     setStep('select');
     setFileNote(null);
@@ -568,6 +627,7 @@ export default function ImportPage() {
     enqueuePreview.reset();
     setPreviewJobId(null);
     setGeocodeCheckJobId(null);
+    setAckSkip(false); // consent was given to the OLD diff's skip count
     setStep((s) => (s === 'review' ? 'map' : s));
   }
 
@@ -599,8 +659,22 @@ export default function ImportPage() {
   const campaign = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId)) || null;
   const requiredUnmapped = requiredKeys.filter((k) => !mapping[k]);
 
+  // Mapping-step early warning: does the column mapped to State Voter ID carry an
+  // Excel error literal in the 5-row peek? Best-effort (the full-file preview is
+  // authoritative) but on real broken exports the head of the file is riddled.
+  const idColumnLooksBroken =
+    !!mapping.stateVoterId &&
+    sampleRows.some((r) => SPREADSHEET_ERROR_RE.test(String(r?.[mapping.stateVoterId] ?? '').trim()));
+
   const tooBig = !!fileNote?.tooBig;
   const diff = previewAsyncJob?.diff;
+
+  // "Import anyway" gate: past SKIP_ACK_SHARE of the file skipped, confirming
+  // requires ticking the acknowledgment — the decide-and-continue moment for a
+  // broken ID column, made explicit instead of silent.
+  const skippedRows = diff ? skippedRowCount(diff.rowIssues) : 0;
+  const skipShare = diff?.totals?.totalRows ? skippedRows / diff.totals.totalRows : 0;
+  const needsSkipAck = skipShare > SKIP_ACK_SHARE;
   const previewPending =
     enqueuePreview.isPending ||
     Boolean(previewJobId && previewAsyncJob?.status !== 'completed' && previewAsyncJob?.status !== 'failed');
@@ -754,6 +828,20 @@ export default function ImportPage() {
               })}
             </div>
 
+            {/* Early best-effort warning off the 5-row peek: an error literal in the
+                ID column here means the full-file preview will skip those rows. The
+                preview's own (authoritative, full-file) callout still runs — this
+                just surfaces the problem before a 50k-row background parse. */}
+            {idColumnLooksBroken && (
+              <div className="mt-3 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+                The <strong>{mapping.stateVoterId}</strong> column contains spreadsheet error values (like{' '}
+                <code>=#NUM!</code>) in this file&apos;s first rows — the formula that built it failed before the
+                file was exported. Rows with an error value where their ID should be are skipped. If you
+                can&apos;t fix and re-export the file, map a different column that uniquely identifies each
+                person (a vendor ID) as State Voter ID instead.
+              </div>
+            )}
+
             {requiredUnmapped.length > 0 && (
               <p className="mt-3 text-xs text-danger">
                 Map all required (*) fields to continue: {requiredUnmapped.join(', ')}
@@ -835,21 +923,42 @@ export default function ImportPage() {
         )}
 
         {step === 'review' && diff ? (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setStep('map')}
-              className="rounded border border-border-strong px-4 py-2 text-sm font-medium hover:bg-sunken"
-            >
-              Back
-            </button>
-            <button
-              onClick={() => upload.mutate({ file, campaignId, mapping, explode })}
-              disabled={upload.isPending}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
-            >
-              {upload.isPending ? 'Importing…' : 'Confirm & import'}
-            </button>
-          </div>
+          <>
+            {needsSkipAck && (
+              <label className="mb-3 flex items-start gap-2 rounded border border-danger/30 bg-danger-tint p-3 text-sm text-danger">
+                <input
+                  type="checkbox"
+                  checked={ackSkip}
+                  onChange={(e) => setAckSkip(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">
+                    Import anyway — skip {fmt(skippedRows)} of {fmt(diff.totals.totalRows)} rows ({Math.round(skipShare * 100)}%).
+                  </span>
+                  <span className="mt-0.5 block text-xs">
+                    Most of this file won&apos;t import. Usually the right move is Back → fix the mapping
+                    (or the file) instead of confirming.
+                  </span>
+                </span>
+              </label>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStep('map')}
+                className="rounded border border-border-strong px-4 py-2 text-sm font-medium hover:bg-sunken"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => upload.mutate({ file, campaignId, mapping, explode })}
+                disabled={upload.isPending || (needsSkipAck && !ackSkip)}
+                className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+              >
+                {upload.isPending ? 'Importing…' : 'Confirm & import'}
+              </button>
+            </div>
+          </>
         ) : (
           <div className="flex items-center gap-3">
             <button
