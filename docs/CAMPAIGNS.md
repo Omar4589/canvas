@@ -113,6 +113,11 @@ list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaig
 `/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
 switcher are how you pick which campaign you're working in.
 
+The switcher lists **active campaigns only** — archived ones are reached from **Campaigns** or
+**Overview**, each of which has an archived section, and that is also where you reactivate them.
+An archived campaign you are *currently in* stays in the switcher (labelled `· Archived`) so the
+control is never blank and you can always switch back out of it.
+
 ### The Setup progress card
 
 On a campaign's dashboard, the **Setup progress** card shows where you are in that setup chain —
@@ -335,6 +340,16 @@ The cold-start readiness chain is a pure derivation in
   level + `CAMPAIGN_NAV` for the in-campaign tabs), rendered by
   [Layout.jsx](../client/src/components/Layout.jsx) (sidebar with the "‹ Campaigns" exit + campaign
   switcher) and [BottomNav.jsx](../client/src/components/BottomNav.jsx).
+  The switcher's `pickerCampaigns` filters the shared `['admin','campaigns']` cache to
+  `isActive !== false`, **plus the current campaign whichever it is**. Three things that filter
+  must not become: (1) the request — the endpoint stays unfiltered, because ~25 call sites share
+  that one cache entry and eleven screens render *"Campaign not found"* or redirect on a
+  `find()` miss; (2) the validity test — an archived campaign you are in must still resolve
+  (`currentCampaign`, and the `openMockFlags` badge, both read the **unfiltered** list); (3)
+  `!isActive` — a row from an older server that omits the field must read as active. Mobile's
+  `CampaignChip` deliberately lists archived campaigns and is **not** to be "made consistent"
+  with this; [campaignSelection.js](../mobile/lib/campaignSelection.js) records why (an
+  active-only validity check once left an all-archived org with nothing selectable).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
 - Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the KPI `StatCard`

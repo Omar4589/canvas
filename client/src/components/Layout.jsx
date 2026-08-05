@@ -105,6 +105,17 @@ export default function Layout() {
   // Mock-GPS nudge: open mock-location flags for this campaign (61-day window, server-
   // computed). Drives the red badge on the Audit nav item below.
   const openMockFlags = currentCampaign?.openMockFlags || 0;
+  // The switcher LISTS active campaigns only — archived ones live on the Campaigns and
+  // Overview pages, which is also where you reactivate them. It deliberately does NOT
+  // validate against that filtered list: the current campaign stays listed even when
+  // archived, because both org pages link straight into an archived campaign and a <select>
+  // whose value matches no <option> renders blank. (mobile/lib/campaignSelection.js has the
+  // full story — an active-only *validity* check once stranded an all-archived org with
+  // nothing to pick.) `isActive === false`, never `!isActive`: a row from an older server
+  // that omits the field must read as active, not drop out of the list.
+  const pickerCampaigns = campaigns.filter(
+    (c) => c.isActive !== false || String(c._id) === String(campaignId)
+  );
 
   const isFullBleed =
     location.pathname.endsWith('/map') || location.pathname.endsWith('/turfs') || location.pathname === '/queues';
@@ -184,8 +195,13 @@ export default function Layout() {
                     title="Switch campaign"
                     className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm font-semibold text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                   >
-                    {!campaigns.length && <option value={campaignId}>{currentCampaign?.name || 'Campaign'}</option>}
-                    {campaigns.map((c) => (
+                    {/* Covers every case the list can't: still loading, and a campaign this
+                        viewer's list doesn't contain (a lead's scope, or one deleted under a
+                        stale cache). Without it the select would render blank. */}
+                    {!pickerCampaigns.some((c) => String(c._id) === String(campaignId)) && (
+                      <option value={campaignId}>{currentCampaign?.name || 'Campaign'}</option>
+                    )}
+                    {pickerCampaigns.map((c) => (
                       <option key={c._id} value={c._id}>{c.name}{c.isActive === false ? ' · Archived' : ''}</option>
                     ))}
                   </select>
