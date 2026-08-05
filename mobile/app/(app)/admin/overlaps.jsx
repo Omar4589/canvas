@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,14 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
-import { useAdminCampaign } from '../../../lib/useAdminCampaign';
+import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
+import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
 import { spacing } from '../../../lib/theme';
@@ -52,12 +54,20 @@ export default function AdminOverlaps() {
     typeof params.preset === 'string' ? params.preset : 'today'
   );
 
-  // VALIDATED campaign context (focus-resynced): the raw cache can hold a campaign a team
-  // lead doesn't manage — the hook checks it against the lead-filtered /admin/campaigns
-  // list and returns null instead of leaking an unmanaged campaign's context here.
-  const campaign = useAdminCampaign();
+  // Campaign scoping via CampaignChip (like Notes/Timeline/Audit), re-synced on focus. This
+  // screen used to take the cached pick with no picker at all, so an empty or unmanaged cache
+  // dead-ended it — and its empty state told you to pick from the Overview, which never writes
+  // that cache. undefined = the focus read hasn't landed; null = nothing selected.
+  const [campaign, setCampaign] = useState(undefined);
+  useFocusEffect(
+    useCallback(() => {
+      loadActiveCampaign().then((c) =>
+        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
+      );
+    }, [])
+  );
 
-  const cId = campaign?.id;
+  const cId = campaign?.id ? String(campaign.id) : null;
   // Anchor presets to the campaign's tz; the query is already gated on cId (campaign loaded),
   // so it never fetches a device-tz window.
   const range = useMemo(() => rangeFor(preset, null, campaign?.timeZone), [preset, campaign?.timeZone]);
@@ -93,6 +103,11 @@ export default function AdminOverlaps() {
         <View style={{ width: 80 }} />
       </View>
 
+      <View style={styles.chipWrap}>
+        <CampaignChip value={campaign} onChange={setCampaign} />
+      </View>
+      <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
+
       <Text style={styles.intro}>
         Houses knocked by 2+ canvassers within the same pass.
       </Text>
@@ -106,11 +121,13 @@ export default function AdminOverlaps() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />
         }
       >
-        {campaign === null ? (
+        {campaign === undefined ? (
           <InsetGroup>
-            <InsetNoteRow>
-              No campaign selected — pick a campaign you manage from the Overview, then come back here.
-            </InsetNoteRow>
+            <InsetNoteRow loading />
+          </InsetGroup>
+        ) : campaign === null ? (
+          <InsetGroup>
+            <InsetNoteRow>No campaign selected — pick one from the chip above.</InsetNoteRow>
           </InsetGroup>
         ) : overlapsQ.error ? (
           <InsetGroup>
@@ -214,6 +231,9 @@ function makeStyles(t) {
     },
     back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
+
+    chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+    bannerWrap: { marginHorizontal: spacing.lg },
 
     intro: {
       ...type.caption,

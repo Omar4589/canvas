@@ -35,4 +35,4 @@ An admin can set an Election Day, an early-voting window, and a short note. Elec
 
 ## Archive vs. delete
 
-**Archive** is the normal "we're done" action — reversible, makes the campaign read-only, and hides it from canvassers. Reactivate anytime. **Delete** is permanent and only allowed before any canvassing; once knocks or surveys exist, it's disabled and you'll archive instead. More in [Archive vs. delete a campaign](archive-vs-delete-campaign).
+**Archive** is the normal "we're done" action — reversible, and it makes the campaign **read-only**: canvassers stop seeing it, and books, turf, the roster and house pins are all frozen. You can still open it and read everything, on the web or on your phone, and you can still [export](exports) it. Reactivate anytime. **Delete** is permanent and only allowed before any canvassing; once knocks or surveys exist, it's disabled and you'll archive instead. More in [Archive vs. delete a campaign](archive-vs-delete-campaign).

@@ -6,7 +6,7 @@ kind: page
 order: 107
 sourceDoc: METRICS.md
 summary: Who knocked when, each team's numbers, and an All time view of everyone who's ever worked the campaign.
-tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors, live, refresh
+tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors, live, refresh, mobile
 ---
 
 The **Timeline** page shows an hourly grid of your canvassers' activity — who knocked when — with a day stepper to move between days and a toggle between knocks and surveys. It's the quickest way to see how a shift actually unfolded and to spot two canvassers overlapping on the same doors. On a campaign with more than one [walk list](walk-lists), a walk-list filter narrows everything on the page — the grid, the teams, and the totals — to that one list.
@@ -42,3 +42,7 @@ The grid adapts to how much you're looking at. A range of **62 days or less** sh
 > **"Knocking 3 of 5"** means three of the five people who were expected to work this range actually knocked. The five includes anyone who worked the campaign in that range, even if they've since left the team.
 
 For what the underlying numbers mean, see [Understanding the numbers](metrics).
+
+## On the phone
+
+Admin → the **Timeline** tab is the same dashboard: the hourly grid, the day stepper, the knocks/surveys toggle, the crew and walk-list filters, and the same live pill while you're looking at today. Which campaign you're looking at is whichever one the **campaign chip** at the top names — archived campaigns included, so a finished campaign's whole shift record is still there. Widen the range to **All time** to see all of it.

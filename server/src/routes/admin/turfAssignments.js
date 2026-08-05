@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
@@ -33,6 +34,9 @@ async function loadTurf(req, res, next) {
   }
 }
 router.use(loadTurf);
+// After loadTurf so a missing book still answers 404 — an archived campaign is a
+// different refusal from a book that isn't there.
+router.use(requireActiveCampaign());
 
 router.get('/', async (req, res, next) => {
   try {

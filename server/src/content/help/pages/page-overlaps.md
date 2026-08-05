@@ -6,7 +6,7 @@ kind: page
 order: 110
 sourceDoc: METRICS.md
 summary: Doors that more than one canvasser knocked in the same round, with who knocked and when.
-tags: overlaps, double knock, turf collision, coaching, page, rounds
+tags: overlaps, double knock, turf collision, coaching, page, rounds, mobile
 ---
 
 The **Overlaps** page lists doors that **more than one canvasser knocked in the same round**. Once a round has covered a door, nobody should go back until the next round starts — so an overlap usually means two walk lists ran into each other, or someone worked a book that wasn't theirs.
@@ -31,3 +31,7 @@ If a collision includes **two surveys of the same voter in the same round**, the
 - **On the Timeline** — a reconciliation line that explains the gap between the raw sum of everyone's knocks and the billable count. That one only reconciles collisions where **both** knocks fall inside the range you picked, so for the split-across-days case above, trust this page or the map.
 
 Nobody is ever billed twice for an overlap: a door counts once per round no matter how many canvassers knocked it. These surfaces exist to help you coach and coordinate, not to adjust your invoice.
+
+## On the phone
+
+Admin → **More → Overlaps** is this page in the app: one summary row per house (*N canvassers · M passes · latest*), tapping through to the same per-house detail with a map of the door and **Open on live map**. It works the campaign named in the **campaign chip** at the top, archived campaigns included — so you can still review how a finished campaign's turf collided.

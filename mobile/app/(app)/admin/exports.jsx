@@ -13,6 +13,7 @@ import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { mergeTypeMeta } from '../../../lib/exportTypes';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import SectionHeader from '../../../components/SectionHeader';
 import ExportSheet from '../../../components/ExportSheet';
 import InsetGroup, {
@@ -234,6 +235,7 @@ export default function AdminExports() {
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
+      <ArchivedCampaignBanner campaignId={cId} extra="Exports still work — this campaign's data stays downloadable." style={styles.bannerWrap} />
 
       {workerOffline ? (
         <View style={styles.workerBanner}>
@@ -330,6 +332,7 @@ function makeStyles(t) {
     back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+    bannerWrap: { marginHorizontal: spacing.lg },
 
     workerBanner: {
       marginHorizontal: spacing.lg,

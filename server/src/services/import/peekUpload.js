@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import unzipper from 'unzipper';
 import { SaxesParser } from 'saxes';
 import { StringDecoder } from 'node:string_decoder';
-import { looksXlsx } from './parseUpload.js';
+import { looksXlsx, resolveFirstSheetTarget, listWorkbookSheets } from './parseUpload.js';
 
 // A true N-row peek for the mapping step: headers + a few sample rows, at a cost
 // of O(rows peeked), never O(file). parseUpload materializes EVERY row to serve
@@ -79,19 +79,34 @@ function streamEntry(entry, { onOpen, onText, onClose, onEnd }) {
   });
 }
 
-/** Resolve the FIRST sheet's zip path via workbook.xml + its rels (tiny entries). */
-async function firstSheetPath(byPath) {
+/**
+ * Resolve the FIRST sheet — its zip path AND the workbook's tab names — via
+ * workbook.xml + its rels (tiny entries). Both rules live in parseUpload so the
+ * real import reads the SAME tab this preview shows, and so the name we display
+ * is the name of the tab we read. See resolveFirstSheetTarget.
+ */
+async function resolveSheet(byPath) {
   const wb = byPath['xl/workbook.xml'] ? await entryToString(byPath['xl/workbook.xml']) : '';
   const rels = byPath['xl/_rels/workbook.xml.rels'] ? await entryToString(byPath['xl/_rels/workbook.xml.rels']) : '';
-  const sheetMatch = wb.match(/<sheet\b[^>]*\br:id="([^"]+)"/);
-  if (sheetMatch && rels) {
-    const rel = rels.match(new RegExp(`<Relationship\\b[^>]*\\bId="${sheetMatch[1]}"[^>]*\\bTarget="([^"]+)"`));
-    if (rel) {
-      const target = rel[1].replace(/^\//, '');
-      return target.startsWith('xl/') ? target : `xl/${target}`;
-    }
-  }
-  return 'xl/worksheets/sheet1.xml'; // Excel's overwhelmingly common layout
+  const path = resolveFirstSheetTarget(wb, rels);
+  // Name the tab by the entry we actually READ, never by position: when the rels
+  // are unreadable the path above falls back to sheet1.xml, and position would
+  // then label the columns with some other tab's name.
+  const sheets = listWorkbookSheets(wb, rels);
+  const readIdx = sheets.findIndex((s) => s.target === path);
+  // Can't prove which tab the fallback landed on → say nothing at all. Listing
+  // "ignored" tabs here would include the one we actually read.
+  if (readIdx === -1) return { path, name: null, others: [] };
+  return {
+    path,
+    name: sheets[readIdx].name,
+    // Only tabs the user can SEE — a hidden sheet named as "ignored" would send
+    // them looking through a tab strip it isn't on.
+    others: sheets
+      .filter((s, i) => i !== readIdx && !s.hidden)
+      .map((s) => s.name)
+      .filter(Boolean),
+  };
 }
 
 /** styles.xml → Set of cellXfs style indexes that render as dates. */
@@ -118,9 +133,9 @@ async function dateStyleIndexes(byPath) {
 
 async function peekXlsx(dir, rows) {
   const byPath = Object.fromEntries(dir.files.map((f) => [f.path, f]));
-  const sheetPath = await firstSheetPath(byPath);
+  const { path: sheetPath, name: sheetName, others: otherSheets } = await resolveSheet(byPath);
   const sheetEntry = byPath[sheetPath];
-  if (!sheetEntry) return { headers: [], rows: [], format: 'xlsx', estimatedRows: 0 };
+  if (!sheetEntry) return { headers: [], rows: [], format: 'xlsx', estimatedRows: 0, sheetName, otherSheets };
   const dateStyles = await dateStyleIndexes(byPath);
 
   // ── Pass 1: the sheet, first rows+1 <row>s only ─────────────────────────────
@@ -231,6 +246,8 @@ async function peekXlsx(dir, rows) {
     rows: sampleRows,
     format: 'xlsx',
     estimatedRows: estimatedRows ?? Math.round(sheetEntry.uncompressedSize / 900),
+    sheetName,
+    otherSheets,
   };
 }
 
@@ -253,7 +270,8 @@ function peekCsv(headBuffer, totalBytes, rows) {
   const estimatedRows = wholeFile
     ? Math.max(0, lines - 1 - (text.endsWith('\n') ? 0 : 0))
     : Math.max(0, Math.round(totalBytes / (text.length / lines)) - 1);
-  return { headers, rows: parsed.data, format: 'csv', estimatedRows };
+  // A CSV has no tabs — null/[] so the mapping step says nothing about sheets.
+  return { headers, rows: parsed.data, format: 'csv', estimatedRows, sheetName: null, otherSheets: [] };
 }
 
 /**

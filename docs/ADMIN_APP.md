@@ -434,6 +434,35 @@ permanently) and what is not (the knock stays on the timeline, the door still re
 the Surveys total moves). **Team leads see the whole report and no Delete or Restore** — the row
 explains why, and the server refuses a lead's delete or restore regardless of what the app shows.
 
+### The campaign chip (how a More screen knows which campaign you mean)
+
+The web console puts the campaign in the address bar. A phone has none, so every campaign-scoped
+admin screen — **GPS audit, Notes, Exports, Overlaps, Duplicate surveys, Timeline, Books** and the
+**Map** — carries a **campaign chip** at the top instead. Tap it, pick one, and the pick is
+**remembered across all of them**: switch campaign on Notes and the Map is on that campaign too.
+
+- **It opens on an active campaign, never an archived one.** With nothing picked yet the chip
+  seats you in your first active campaign. That default is deliberately active-only — you are
+  never quietly dropped into finished work.
+- **Archived campaigns are in the list**, under an **Archived · read-only** divider at the bottom.
+  Picking one is a deliberate act, and it's how you read a finished campaign's notes, maps and
+  reports from your phone. Before this, the chip hid them entirely — so an org whose campaigns had
+  all finished offered nothing to pick, and every one of these screens sat on its empty state with
+  no way forward.
+- **An archived campaign is read-only, and the screen says so.** An **Archived — read-only** banner
+  appears and the actions that would change the field come off: assigning books and turf, the
+  Select/bulk bar, the restrict actions, adding or removing people, moving a pin, deleting a
+  duplicate survey, restoring a replaced response. That isn't the app being shy — the server
+  refuses those writes on an archived campaign, on the web dashboard too (see
+  [CAMPAIGNS.md](CAMPAIGNS.md) → *Archive vs. delete*).
+- **Exports stay fully enabled**, with a second banner line saying so. An export is a read, and a
+  finished race's data still being yours is the whole point of archiving rather than deleting.
+  **Reviewing a GPS flag** stays enabled for the same reason — it records a decision about work
+  already done.
+- **Opening a screen from a campaign's own page scopes it to that campaign.** Every Quick-action
+  tile seats the campaign before it navigates, so drilling in and tapping **Notes** gives you
+  *that* campaign's notes rather than whichever one the chip was last left on.
+
 ### The More hub
 It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
 profile screen), then small all-caps section captions over rows that each carry an icon, a label and
@@ -446,12 +475,16 @@ where relevant a grey line of explanation.
   campaign KPIs, a **Coordinator dropdown**, recent doors (each taps through to the live map, "See
   all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
   reactivate. The Add sheet creates a canvasser straight onto the selected campaign with an optional
-  **coordinator** picked at birth. **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
+  **coordinator** picked at birth. Every screen in this group works the campaign named in its **campaign chip** (above).
+**GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
   entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Exports** —
-  queues the everyday CSV types with a live row-count preview ([EXPORTS.md](EXPORTS.md));
-  **Overlaps** — entries open a detail screen with a map of the house and "Open on live map";
+  queues the everyday CSV types with a live row-count preview, and keeps working on an archived
+  campaign ([EXPORTS.md](EXPORTS.md));
+  **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
+  picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
+  house and "Open on live map";
   **Duplicate surveys** — voters with more than one response, where an admin deletes the extra one
-  (below); Voter search; Switch to canvass mode.
+  (below; Delete is hidden on an archived campaign); Voter search; Switch to canvass mode.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Support:** Help center.
@@ -569,7 +602,11 @@ way back short of restarting the app.
 [app/(app)/admin/books.jsx](../mobile/app/(app)/admin/books.jsx) — the active round's books, assignable
 by book or by canvasser.
 
-- Context: `CampaignChip` + `EffortPicker`. Efforts come from `GET /admin/campaigns/:id/efforts`, whose
+- Context: `CampaignChip` (archived campaigns selectable — see *The campaign chip* above) +
+  `EffortPicker`. It also re-syncs the cached campaign on FOCUS like its sibling chip screens;
+  without that, this always-mounted tab kept whatever the chip seated on first mount, so drilling
+  into another campaign elsewhere and coming back showed one campaign's banner over another
+  campaign's Assign buttons. Efforts come from `GET /admin/campaigns/:id/efforts`, whose
   rows include `activeRound` — so the active **pass** is `effort.activeRound._id` (no extra passes call).
 - Data (active pass): books `GET /admin/campaigns/:id/turfs?passId=` (**published** only — `canvasserBooks`
   doesn't filter status, so assigning a draft book would expose it); assignments
@@ -596,7 +633,10 @@ by book or by canvasser.
   no-op), the literal `in` only when chips narrow, and the promoted book excluded (its doors come from
   the status-colored layer). Camera fit + promoted density read `promotedQ` (the tapped book's own
   households) — the round-wide feed never enters JS. JS-only change → OTA-safe.
-- Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign.
+- Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign
+  / **archived campaign** — banner, and every assign path suppressed (Select mode and the bulk bar,
+  the map sheet's `⋯` restrict menu, both `AssignRow` buttons; the rows stay, so who held which
+  book is still readable).
 
 ## The book detail screen
 [app/(app)/admin/book/[turfId].jsx](../mobile/app/(app)/admin/book/[turfId].jsx) — a Mapbox map of one

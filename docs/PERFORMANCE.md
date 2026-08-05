@@ -256,7 +256,7 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
     ([parseUpload.js](../server/src/services/import/parseUpload.js)) hands rows out one at a time;
     verified: the full 166k xlsx **completes under `--max-old-space-size=384` in ~7 s at 219 MB
     peak RSS** with identical outputs (166,149 valid / 106,958 households / 589 skips) — that
-    includes the zip entry-order normalization pass (`normalizeXlsxOrder`, IMPORTS.md §G), which
+    includes the zip entry-order normalization pass (`preflightXlsx`, IMPORTS.md §G), which
     rewrites hostile-order workbooks to a transient deps-first copy so exceljs's order-sensitive
     streaming reader can never crash or mis-resolve shared strings.
   - **Apply-path spill**: valid rows go to an NDJSON spill file on the dyno's ephemeral disk instead

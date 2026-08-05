@@ -65,6 +65,12 @@ knocked %, setup progress) sit above the list, and **archived campaigns collapse
 section** at the bottom so finished work doesn't crowd the live view. Each card/row's **⋮ menu**
 holds View dashboard, Assignments, and — for org admins — Edit, Archive/Reactivate, and Delete.
 
+Archived campaigns are reachable from the **phone** too: the mobile admin Overview has a **Show
+archived campaigns** reveal (rows tagged *Read-only*), and every campaign-scoped admin screen's
+**campaign chip** lists them under an **Archived · read-only** divider. So a finished campaign's
+notes, maps, reports and exports are two taps away on either client — see
+[ADMIN_APP.md](ADMIN_APP.md) → *The campaign chip*.
+
 ## Key dates (Election Day, early voting, a note)
 
 Every campaign can carry three optional dates plus a note, set in the create/edit drawer (org
@@ -155,8 +161,16 @@ in the drawer). The rules protect your data once canvassing has started:
 
 ### Archive vs. delete
 
-- **Archive** is always available and **reversible**: the campaign becomes read-only (canvassers
-  stop seeing it) and you can **Reactivate** it anytime. This is the normal "we're done" action.
+- **Archive** is always available and **reversible**: the campaign becomes **read-only** and you
+  can **Reactivate** it anytime. Read-only is literal, not shorthand for "hidden": canvassers stop
+  seeing it, and the server itself refuses the writes that would change the field — assigning or
+  unassigning books and turf, cutting or re-cutting them, adding or removing people from the
+  campaign, and moving a house pin — on the web dashboard and the phone alike. Everything that
+  only *reads* stays open: every dashboard, map, Timeline, Notes, Overlaps, GPS audit and
+  duplicate-survey report, and **exports keep working**, so a finished race is still yours to take
+  with you. Two things are deliberately not frozen: **reviewing a GPS flag** (that records a
+  decision about past work — it doesn't change the field) and **editing the campaign itself**,
+  which is how you reactivate it. This is the normal "we're done" action.
   **It is also what stops the campaign billing** — a live campaign bills every month whether or not
   anyone knocks, so a finished race left un-archived quietly keeps costing money. Once a campaign's
   `electionDay` has passed and it is still active, the Campaigns page and the campaign dashboard show
@@ -229,6 +243,23 @@ collapses "inherit" into "off"). ISO date strings order chronologically as plain
 window checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
 campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
 is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
+
+**`isActive: false` is enforced, not decorative.** [middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)
+refuses field-mutating writes on an archived campaign with **409 `{ code: 'campaign-archived' }`**,
+mounted on the turf/books router, turf assignments, the campaign roster, and the campaign-nested
+household pin move — plus an inline assert on the second pin door in
+[routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js), because an identical write must
+never be 200 through one door and 409 through the other. Deliberately **not** guarded: exports
+(a read, and the reason archiving isn't deletion — `middleware/entitlement.js` already exempts them
+for read-only *orgs*), flag review (bookkeeping about past work), the `*-preview` POSTs (they
+persist nothing), and campaign `PATCH` — guarding that last one would make an archived campaign
+impossible to reactivate. The guard gates on write METHODS so every read still passes, and it lives
+at the **route layer only**: `deleteOrganization`, `deleteAccount`/`releaseAssignedWork`,
+`deleteCampaign`, coordinator re-stamp and the demo seeders all write assignments through the
+shared services and must keep working on orgs holding archived campaigns. 409 rather than 403 is
+deliberate — `mobile/lib/api.js` inspects 400/403/404 for `ORG_CONTEXT`/`FORBIDDEN_ROLE`, so a 403
+an already-released bundle doesn't recognise can eject the user to the org picker. Pinned by
+[test/archivedCampaign.int.test.js](../server/test/archivedCampaign.int.test.js).
 
 ## Endpoints — [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js)
 

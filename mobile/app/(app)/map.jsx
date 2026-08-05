@@ -754,13 +754,32 @@ export default function MapScreen() {
       </SafeAreaView>
     );
   }
+  // An archived (or deleted) campaign answers 404 "Campaign inactive" from /mobile/bootstrap, and
+  // Retry against that can never succeed — the screen was a trap you could only leave by
+  // force-quitting. Name it, and make the escape the primary action.
   if (error) {
+    const gone = error?.status === 404;
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={styles.errorText}>{error.message}</Text>
-        <Pressable onPress={onRefresh} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Retry</Text>
-        </Pressable>
+        <Text style={styles.errorText}>
+          {gone
+            ? "This campaign has been archived — it's read-only now. Pick another campaign to keep canvassing."
+            : error.message}
+        </Text>
+        {gone ? (
+          <Pressable onPress={switchCampaign} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>Choose a different campaign</Text>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable onPress={onRefresh} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Retry</Text>
+            </Pressable>
+            <Pressable onPress={switchCampaign} style={[styles.secondaryButton, { marginTop: 10 }]}>
+              <Text style={styles.secondaryButtonText}>Choose a different campaign</Text>
+            </Pressable>
+          </>
+        )}
       </SafeAreaView>
     );
   }

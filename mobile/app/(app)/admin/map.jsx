@@ -23,6 +23,8 @@ import { useMapStyle } from '../../../lib/mapStyles';
 import { formatDistance } from '../../../lib/geo';
 import MapStyleControl from '../../../components/MapStyleControl';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
+import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
@@ -380,6 +382,9 @@ export default function AdminMap() {
   );
 
   const cId = campaign?.id;
+  // Archived campaign ⇒ read-only. Flag review deliberately stays enabled — it records a decision
+  // about work already done, and the server keeps accepting it.
+  const { canWrite } = useCampaignArchived(cId);
   const tz = campaign?.timeZone || deviceTimezone();
 
   // When the campaign changes underneath this mounted screen, drop any door
@@ -1375,6 +1380,8 @@ export default function AdminMap() {
           </View>
         </View>
 
+        <ArchivedCampaignBanner campaignId={cId} style={styles.archivedBanner} />
+
         <View style={styles.chromeCard}>
           {/* Row 1: the filters, horizontally scrollable (content-width chips). */}
           <ScrollView
@@ -1890,12 +1897,14 @@ export default function AdminMap() {
           </ScrollView>
 
           <View style={styles.sheetButtons}>
-            <Pressable
-              onPress={() => enterMoveMode(selected)}
-              style={[styles.primaryButton, { flex: 1, marginRight: 6, alignItems: 'center' }]}
-            >
-              <Text style={styles.primaryButtonText}>Move pin</Text>
-            </Pressable>
+            {canWrite && (
+              <Pressable
+                onPress={() => enterMoveMode(selected)}
+                style={[styles.primaryButton, { flex: 1, marginRight: 6, alignItems: 'center' }]}
+              >
+                <Text style={styles.primaryButtonText}>Move pin</Text>
+              </Pressable>
+            )}
             <Pressable
               onPress={() => setSelected(null)}
               style={[styles.closeButton, { flex: 1, marginLeft: 6, marginTop: 0 }]}
@@ -2166,6 +2175,9 @@ function makeStyles(t) {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+
+  // Sits between the chip bar and the map chrome — never over the map itself.
+  archivedBanner: { marginHorizontal: spacing.md, marginTop: spacing.sm },
 
   subBar: {
     flexDirection: 'row',

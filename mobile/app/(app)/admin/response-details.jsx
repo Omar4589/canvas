@@ -19,6 +19,7 @@ import InsetGroup, {
 } from '../../../components/InsetGroup';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { Alert } from 'react-native';
+import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import { useConsoleRole } from '../../../lib/useConsoleRole';
 import { buildRestorePrompt } from '../../../lib/duplicateSurveys';
 import { radius, spacing } from '../../../lib/theme';
@@ -69,7 +70,10 @@ export default function ResponseDetails() {
   // undefined while resolving, and a lead must never see the button flash.
   const qc = useQueryClient();
   const viewerRole = useConsoleRole();
-  const canRestore = viewerRole === 'admin' || viewerRole === 'super';
+  // ...and gone entirely on an archived campaign: restoring writes a response back onto a
+  // campaign whose records are read-only. Same positive form — false until the list resolves.
+  const { canWrite } = useCampaignArchived(campaignId);
+  const canRestore = (viewerRole === 'admin' || viewerRole === 'super') && canWrite;
   const restoreMut = useMutation({
     mutationFn: () =>
       api(`/admin/voters/${d.response.voterId}/surveys/${d.response.id}/restore`, { method: 'POST' }),

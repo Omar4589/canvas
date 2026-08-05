@@ -24,6 +24,12 @@ export function bootstrapQueryFn(qc, campaignId) {
       saveBootstrap(fresh);
       return fresh;
     } catch (err) {
+      // A 404 is the server giving an ANSWER — this campaign is not canvassable any more
+      // (archived, deleted, access revoked) — not a transport failure. Falling back to the disk
+      // snapshot here opened the canvasser flow on stale doors whose knocks could never be
+      // recorded, with no error shown at all. Offline failures carry no `.status` (lib/api.js),
+      // so the cache fallback below still covers the case it was written for.
+      if (err?.status === 404) throw err;
       const live = qc.getQueryData(['bootstrap']);
       if (live && String(live.campaign?.id) === String(campaignId)) throw err;
       const cached = await loadBootstrap();

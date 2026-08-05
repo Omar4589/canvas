@@ -66,6 +66,10 @@ including records made before they asked. Dashboards still count the historical 
 export can show fewer rows than the screen it mirrors. Each export tells you how many rows were
 withheld, so the difference is never a mystery.
 
+## Archived campaigns still export
+
+Archiving a campaign makes it read-only — but reading is what an export does, so the Exports page keeps working exactly as before. Open the archived campaign (on the web it's in the archived section at the bottom of **Campaigns**; on the phone, pick it from the campaign chip under the **Archived · read-only** divider) and queue whatever you need. See [Archive vs. delete a campaign](archive-vs-delete-campaign).
+
 ## If your subscription ends
 
 Your data stays exportable. During the 60-day wind-down the account is read-only, but queueing

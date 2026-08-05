@@ -1,6 +1,6 @@
 // streamParse vs hostile zip entry order — no DB, always run.
 //
-// exceljs's streaming reader is entry-order sensitive (see normalizeXlsxOrder in
+// exceljs's streaming reader is entry-order sensitive (see preflightXlsx in
 // parseUpload.js): a sheet after sharedStrings but before workbook.xml crashed
 // the inline path; a sheet BEFORE sharedStrings in a data-descriptor zip (what
 // streaming writers emit) silently swallowed the rest of the stream, so text
@@ -104,6 +104,72 @@ test('streaming-writer workbook (exceljs WorkbookWriter) parses with resolved st
   } finally {
     await fs.promises.unlink(tmpPath).catch(() => {});
   }
+});
+
+// ── Which TAB gets read ─────────────────────────────────────────────────────
+// The preview resolves the workbook's first <sheet> (the leftmost tab); the
+// import used to take whichever sheet the zip streamed first. When a workbook
+// stores its tabs out of order those disagree, and the user maps one tab's
+// columns onto another tab's rows with no error anywhere. Both must now agree.
+
+async function buildTabbed() {
+  const wb = new ExcelJS.Workbook();
+  const m = wb.addWorksheet('Master');
+  m.addRow(['CSP_ID', 'FIRST_NAME', 'ADDRESS']);
+  m.addRow([1, 'Emilio', '3790 NW 79th Ave']);
+  m.addRow([2, 'Patricia', '100 Main St']);
+  const s = wb.addWorksheet('Summary');
+  s.addRow(['TIER', 'VOTERS']);
+  s.addRow(['T1', 999]);
+  const r = wb.addWorksheet('README');
+  r.addRow(['Built by CSP - do not edit']);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+const MASTER_HEADERS = ['CSP_ID', 'FIRST_NAME', 'ADDRESS'];
+
+async function assertReadsMaster(buf) {
+  const peek = await peekUpload(buf, 'f.xlsx', { rows: 3 });
+  const { headers, rows } = await collect(buf);
+  assert.deepEqual(headers, MASTER_HEADERS, 'import must read the first TAB, not the first stored sheet');
+  assert.deepEqual(peek.headers, MASTER_HEADERS, 'preview must read the same tab');
+  assert.deepEqual(headers, peek.headers, 'preview and import must never read different tabs');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].FIRST_NAME, 'Emilio');
+}
+
+test('multi-tab: normal order reads the first tab', async () => {
+  await assertReadsMaster(await buildTabbed());
+});
+
+test('multi-tab: tabs stored in reverse order still read the first tab', async () => {
+  await assertReadsMaster(
+    await rezip(await buildTabbed(), [
+      'xl/workbook.xml',
+      'xl/_rels/workbook.xml.rels',
+      'xl/sharedStrings.xml',
+      'xl/styles.xml',
+      'xl/worksheets/sheet3.xml',
+      'xl/worksheets/sheet2.xml',
+      'xl/worksheets/sheet1.xml',
+    ])
+  );
+});
+
+test('multi-tab: reversed tabs AND a hostile dep order (both hazards at once)', async () => {
+  // Sheets first (forces the deps-first rewrite) and reversed (forces tab
+  // selection) — the rewrite must preserve which tab is which.
+  await assertReadsMaster(
+    await rezip(await buildTabbed(), [
+      'xl/worksheets/sheet3.xml',
+      'xl/worksheets/sheet2.xml',
+      'xl/worksheets/sheet1.xml',
+      'xl/workbook.xml',
+      'xl/_rels/workbook.xml.rels',
+      'xl/sharedStrings.xml',
+      'xl/styles.xml',
+    ])
+  );
 });
 
 test('safe order (deps before sheets) parses untouched', async () => {

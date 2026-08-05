@@ -26,6 +26,8 @@ import {
 } from '../../../lib/duplicateSurveys';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
+import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import TabSwitcher from '../../../components/TabSwitcher';
 import DuplicateVoterCard from '../../../components/DuplicateVoterCard';
 import InsetGroup, {
@@ -62,7 +64,7 @@ export default function AdminDuplicateSurveys() {
   // undefined while it reads the cache, so `!== 'lead'` would flash a Delete button at a lead for
   // a frame (the household/[id].jsx trap — "defaults FALSE because loadRoleContext is async").
   const viewerRole = useConsoleRole();
-  const canDelete = viewerRole === 'admin' || viewerRole === 'super';
+  const isAdmin = viewerRole === 'admin' || viewerRole === 'super';
 
   // Hidden Tabs screens stay mounted forever, so re-sync the active campaign on focus.
   const [campaign, setCampaign] = useState(undefined);
@@ -76,6 +78,12 @@ export default function AdminDuplicateSurveys() {
 
   const cId = campaign?.id ? String(campaign.id) : null;
   const tz = campaign?.timeZone || deviceTimezone();
+
+  // An archived campaign is read-only, so Delete goes with it. Same positive form as the role
+  // check above — canWrite is false until the campaign list resolves, so the button appears once
+  // rather than flashing and retracting.
+  const { canWrite } = useCampaignArchived(cId);
+  const canDelete = isAdmin && canWrite;
 
   const [kind, setKind] = useState(KIND_ALL);
   const [userId, setUserId] = useState('');
@@ -225,6 +233,7 @@ export default function AdminDuplicateSurveys() {
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
+      <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
       <Text style={styles.intro}>
         Voters with more than one survey response. Same round · overwritten means a second submit
@@ -288,7 +297,9 @@ export default function AdminDuplicateSurveys() {
                   footer={
                     canDelete
                       ? null
-                      : 'Only an organization admin can delete a response. Ask an admin to remove the extra one.'
+                      : isAdmin
+                        ? 'This campaign is archived, so its responses are read-only. Reactivate it from the web to make changes.'
+                        : 'Only an organization admin can delete a response. Ask an admin to remove the extra one.'
                   }
                   onOpenVoter={(id) => router.push(`/(app)/voters/${id}?from=duplicates`)}
                   onOpenResponse={(r) =>
@@ -393,6 +404,7 @@ function makeStyles(t) {
     back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+    bannerWrap: { marginHorizontal: spacing.lg },
     intro: { ...type.caption, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     tzLine: {
       paddingHorizontal: spacing.lg,

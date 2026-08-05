@@ -264,8 +264,18 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   an admin who canvasses is scoped to their own books (from the walk lists they're on), so two people never
   knock the same block — there is no "admin sees all houses" mobile map. **"Switch to canvass mode"**
   ([more.jsx](../mobile/app/(app)/admin/more.jsx) `onCanvassMode`, campaign screen `goCanvass`) just enters
-  the normal canvasser flow at the Books picker: assigned → their books → map; **unassigned → the "No turf
-  assigned yet" screen**. Admin *oversight* (campaign-wide counts/coverage) lives in the `/admin` screens +
+  the normal canvasser flow at the Books picker. **Three outcomes, not two** — the third is the cached
+  campaign, and it used to dead-end: assigned → their books → map; **unassigned → the "No turf assigned
+  yet" screen**; **cached pick is ARCHIVED → the campaign picker**, not Books. `onCanvassMode` routed on
+  the strength of an id alone, but `/mobile/bootstrap` 404s `Campaign inactive` for an archived campaign,
+  which Books rendered as a Retry button with nothing behind it — an admin who had deliberately opened an
+  archived campaign on an admin screen could not reach canvass mode again without force-quitting. It now
+  checks `isActive` (via `archiveStateOf`) and sends an archived — or not-yet-resolved — pick to
+  `/(app)/campaigns`, which is never a dead end because `/mobile/campaigns` is active-only and has its own
+  empty state. Both canvasser error branches also gained a **"Choose a different campaign"** escape, and
+  `bootstrapQuery` no longer serves its disk snapshot on a **404** — that fallback exists for connectivity
+  failures, and using it here opened the field flow on stale doors whose knocks could never be recorded.
+  Admin *oversight* (campaign-wide counts/coverage) lives in the `/admin` screens +
   web, on the separate `/admin/*` endpoints — never the canvass bootstrap.
 
 ## E. Reporting

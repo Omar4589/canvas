@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
@@ -56,6 +57,10 @@ async function loadCampaign(req, res, next) {
   }
 }
 router.use(loadCampaign);
+// Archived campaign ⇒ read-only: no cutting, assigning, restricting or moving doors.
+// The two *-preview endpoints are POSTs that persist nothing, so they stay open — the
+// same carve-out entitlement.js makes for the exports estimate.
+router.use(requireActiveCampaign({ readOnlyPosts: /-preview$/ }));
 
 // Bulk-assign many books to many people in one call.
 //   mode 'distribute' = round-robin: spread the books evenly across the crew (one

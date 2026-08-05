@@ -27,6 +27,7 @@ import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import CanvasserCard from '../../../components/CanvasserCard';
@@ -581,6 +582,7 @@ export default function AdminTimeline() {
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
+      <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} requireFrom />
 
@@ -1082,6 +1084,7 @@ function makeStyles(t) {
     headerTitle: { ...type.title },
     headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xs },
+    bannerWrap: { marginHorizontal: spacing.lg },
 
     controls: {
       paddingHorizontal: spacing.lg,

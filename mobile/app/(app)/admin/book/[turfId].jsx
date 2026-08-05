@@ -24,6 +24,8 @@ import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
 import { outlineRing } from '../../../../lib/bookDensity';
 import { restrictCounts } from '../../../../lib/restrictBooks';
+import { useCampaignArchived } from '../../../../lib/useCampaignArchived';
+import ArchivedCampaignBanner from '../../../../components/ArchivedCampaignBanner';
 import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../../lib/restrictBooksConfirm';
 
 initMapbox();
@@ -59,6 +61,10 @@ export default function AdminBookDetail() {
     if (cId) return;
     loadActiveCampaign().then((c) => c?.id && setCId(c.id));
   }, [cId]);
+
+  // Archived campaign ⇒ read-only: every mutation on this screen (assign, self-assign, unassign,
+  // assign-all, unassign-all, restrict, unrestrict) is one the server now refuses.
+  const { canWrite } = useCampaignArchived(cId);
 
   // Current user, so an admin/lead/super can self-assign this book (they're filtered out of
   // the canvasser roster by role, so we inject them, badged "You").
@@ -335,7 +341,7 @@ export default function AdminBookDetail() {
         title={turf?.name || 'Book'}
         styles={styles}
         right={
-          turf ? (
+          turf && canWrite ? (
             <Pressable onPress={() => setMenuOpen((v) => !v)} hitSlop={8}>
               <Text style={styles.menuDots}>⋯</Text>
             </Pressable>
@@ -375,10 +381,14 @@ export default function AdminBookDetail() {
               : 'No one assigned'}
           </Text>
         </View>
-        <Pressable onPress={() => setAssignOpen(true)} style={styles.barBtn}>
-          <Text style={styles.barBtnText}>Assign</Text>
-        </Pressable>
+        {canWrite && (
+          <Pressable onPress={() => setAssignOpen(true)} style={styles.barBtn}>
+            <Text style={styles.barBtnText}>Assign</Text>
+          </Pressable>
+        )}
       </View>
+
+      <ArchivedCampaignBanner campaignId={cId} style={styles.archivedBanner} />
 
       <View style={{ flex: 1 }}>
         <Mapbox.MapView
@@ -625,6 +635,7 @@ function makeStyles(t) {
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.sm,
     },
+    archivedBanner: { marginHorizontal: spacing.lg },
     topBarCount: { ...type.caption, color: colors.textSecondary },
     topBarNames: { ...type.bodyStrong, fontSize: 14, marginTop: 1 },
     barBtn: { backgroundColor: colors.brand, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },

@@ -5,13 +5,17 @@ audience: lead
 kind: faq
 order: 29
 sourceDoc: CAMPAIGNS.md
-summary: Archive is the normal, reversible "we're done"; delete is permanent and only before any canvassing.
-tags: archive, delete, campaign
+summary: Archive is the normal, reversible "we're done" — read-only, still fully readable and exportable; delete is permanent and only before any canvassing.
+tags: archive, delete, campaign, read-only, archived
 ---
 
 Almost always: **archive**.
 
-- **Archive** is reversible. The campaign becomes read-only (canvassers stop seeing it) and you can **reactivate** it anytime. This is the normal "this one's finished" move, and it's also what stops the campaign's billing: the month you archive in bills in full, and the campaign is free from the next month on. If you archive in the **first 3 days** of a month and nobody has been out that month, you don't owe that month either. (Reactivating it later starts the billing up again, including for any months it spent archived.)
+- **Archive** is reversible, and it makes the campaign **read-only**. Canvassers stop seeing it, and nobody can change the field any more: books and turf can't be assigned or unassigned, people can't be added to or removed from the campaign, and house pins can't be moved. Everything else stays open to you — the dashboard, the map, the [Timeline](page-timeline), [Notes](page-notes), [Overlaps](page-overlaps), the [GPS audit](audit) and the duplicate-survey report all still open, on the web and on your phone, and **[exports](exports) keep working**, so a finished campaign's data is still yours to take. You can **reactivate** it anytime. This is the normal "this one's finished" move, and it's also what stops the campaign's billing: the month you archive in bills in full, and the campaign is free from the next month on. If you archive in the **first 3 days** of a month and nobody has been out that month, you don't owe that month either. (Reactivating it later starts the billing up again, including for any months it spent archived.)
 - **Delete** is permanent and is **only allowed before any canvassing** — no knocks or surveys recorded. When allowed, it removes the campaign and everything it owns — its own voters, doors, walk lists, and books. **Your other campaigns are untouched**, even if they target the same people: each campaign has its own copies, so deleting one never removes another's voters. A **Do not contact** request always survives, too — if the deleted campaign was the only place that person existed, the app remembers the request and re-applies it the moment they're imported again. Once a campaign has any field activity, Delete is disabled and you'll archive instead, so you can never destroy real canvassing history.
+
+## Reading an archived campaign later
+
+You don't lose access when you archive. On the web, archived campaigns sit in their own section at the bottom of the **Campaigns** page — open one and every tab works as before, just read-only. On your phone, tap **Show archived campaigns** on the admin **Overview**, or open the campaign chip at the top of any admin screen and pick one from under the **Archived · read-only** divider. Either way you'll see an **Archived — read-only** note, and the buttons that would change something are gone rather than failing when you press them.
 
 See [Creating and managing campaigns](campaigns-manage).

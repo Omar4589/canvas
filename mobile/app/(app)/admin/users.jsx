@@ -24,6 +24,8 @@ import InsetGroup, {
   InsetNoteRow,
 } from '../../../components/InsetGroup';
 import CreateCanvasserSheet from '../../../components/CreateCanvasserSheet';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
+import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
 import { radius, spacing } from '../../../lib/theme';
@@ -146,12 +148,19 @@ export default function AdminUsers() {
     }
   }, [isLead, campaignFilter, activeCampaigns]);
   const cId = campaignFilter || null;
+  // Resolve against ALL campaigns, not just active ones: the campaign page's Team tile can hand
+  // over an archived ?campaignId=, and matching only actives left cId set with no
+  // selectedCampaign — the roster queries fired while the campaign context UI never rendered.
+  // The auto-pick above stays ACTIVE-only, so a lead is still seated in live work by default.
   const selectedCampaign = cId
     ? (() => {
-        const c = activeCampaigns.find((x) => String(x._id) === String(cId));
+        const c = (campaignsQ.data?.campaigns || []).find((x) => String(x._id) === String(cId));
         return c ? { id: String(c._id), name: c.name, type: c.type } : null;
       })()
     : null;
+  // Roster writes (add to campaign, assign all, coordinator changes) are refused on an archived
+  // campaign by the server, so the affordances come off here.
+  const { canWrite } = useCampaignArchived(cId);
 
   // /admin/memberships is now lead-scoped server-side (their campaigns' rosters, deduped).
   const usersQ = useQuery({
@@ -330,6 +339,12 @@ export default function AdminUsers() {
               onPress={() => setCampaignFilter(String(c._id))}
             />
           ))}
+          {/* An ARCHIVED campaign can arrive from the campaign page's Team tile. It gets its own
+              pill so the filter row still shows what you're looking at — the row above is
+              active-only, and a selected campaign with no pill reads as a bug. */}
+          {selectedCampaign && !activeCampaigns.some((c) => String(c._id) === String(cId)) && (
+            <FilterPill active label={`${selectedCampaign.name} · archived`} onPress={() => {}} />
+          )}
         </ScrollView>
         <ScrollView
           horizontal
@@ -393,6 +408,7 @@ export default function AdminUsers() {
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       >
+        <ArchivedCampaignBanner campaignId={cId} />
         {usersQ.isLoading || usersQ.isError || visibleUsers.length === 0 ? (
           <InsetGroup>
             {usersQ.isLoading ? (
@@ -443,7 +459,7 @@ export default function AdminUsers() {
                   set the reader can actually see — it used to be able to fire against dozens of
                   people who were never on screen. Every row in this section is unassigned by
                   construction, so the section IS the predicate; no per-row filter is needed. */}
-              {offOpen && !isLead && offCampaign.length > 0 ? (
+              {offOpen && !isLead && canWrite && offCampaign.length > 0 ? (
                 <InsetActionRow
                   label={assignAll.isPending ? 'Assigning…' : `Assign all shown (${offCampaign.length})`}
                   onPress={() => assignAll.mutate(offCampaign.map((u) => u.id))}
@@ -492,7 +508,7 @@ export default function AdminUsers() {
         : null}
 
       {/* Campaign-scoped create (both roles; coordinator picker included). */}
-      {showCreate && cId ? (
+      {showCreate && cId && canWrite ? (
         <CreateCanvasserSheet
           campaignName={selectedCampaign?.name}
           coordinators={coordinators}

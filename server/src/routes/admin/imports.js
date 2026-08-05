@@ -91,8 +91,18 @@ router.post('/preview-headers', uploadCsv, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const { headers, rows, estimatedRows } = await peekUpload(req.file.path, req.file.originalname, { rows: 5 });
-    res.json({ columns: headers, sample: rows, suggestedMapping: suggestMapping(headers), estimatedRows });
+    const { headers, rows, estimatedRows, sheetName, otherSheets } = await peekUpload(req.file.path, req.file.originalname, { rows: 5 });
+    // sheetName/otherSheets: only the first tab of a workbook is ever imported, so
+    // the mapping step names the tab these columns came from and lists the ignored
+    // ones — otherwise a data-on-the-second-tab file just looks like wrong columns.
+    res.json({
+      columns: headers,
+      sample: rows,
+      suggestedMapping: suggestMapping(headers),
+      estimatedRows,
+      sheetName,
+      otherSheets,
+    });
   } catch (err) {
     next(err);
   }

@@ -12,6 +12,7 @@ import {
   clearBootstrap,
   clearActiveOrgId,
 } from '../../../lib/cache';
+import { archiveStateOf } from '../../../lib/campaignSelection';
 import Logo from '../../../components/Logo';
 import ThemeToggle from '../../../components/ThemeToggle';
 import InsetGroup, {
@@ -92,7 +93,15 @@ export default function AdminMore() {
     const c = await loadActiveCampaign();
     // Enter the canvasser flow (book picker) — admins canvass scoped to their own
     // assigned books, exactly like a canvasser; unassigned → "No turf assigned".
-    router.push(c?.id ? '/(app)/books' : '/(app)/campaigns');
+    //
+    // Third outcome: an ARCHIVED pick goes to the picker instead. /mobile/bootstrap 404s
+    // "Campaign inactive" for one, which Books rendered as a Retry button with nothing behind
+    // it — an admin who had deliberately opened an archived campaign on an admin screen could
+    // not reach canvass mode again without force-quitting. The picker is never a dead end:
+    // /mobile/campaigns is active-only and has its own empty state. 'unknown' (list not loaded
+    // yet) routes there too — one extra tap beats a trap.
+    const state = archiveStateOf(campaignsQ.data?.campaigns, c?.id);
+    router.push(c?.id && state === 'active' ? '/(app)/books' : '/(app)/campaigns');
   }
 
   const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();

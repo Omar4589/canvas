@@ -6,7 +6,7 @@ kind: guide
 order: 14
 sourceDoc: PASSES_AND_TURF.md
 summary: Cut a pass into walkable books, accept and assign them, and reshape or recut safely.
-tags: turf, books, recut, cutting, assign, supplemental
+tags: turf, books, recut, cutting, assign, supplemental, mobile
 ---
 
 A **book** is a walkable, ordered slice of households — one canvasser's turf for a single [Pass](passes). Turf-cutting is how you turn a pass into books.
@@ -42,3 +42,11 @@ Don't like the layout, or the voter list changed? If the books are still drafts,
 - A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. See [The Turf Cutting page](page-turf-cutting).
 
 > Tip: Knocks follow the *door*, not the book — so moving, merging, or splitting never changes your [coverage or knock counts](coverage-vs-knocks).
+
+## Assigning from your phone
+
+Cutting books is web work — you're drawing on a map. **Handing them out isn't.** The mobile admin app's **Books** tab works the campaign's active round: switch between **By book** (each book's doors, its knocked/total progress, and who's on it) and **By canvasser** (each person's book count — tap to give or take books). **Select** several books and hand them out in one go: **Distribute** splits them across people, **Everyone** gives all of them to each. A **Map** chip draws the whole round as book outlines so you can see where the unassigned turf actually sits before you hand it out, and tapping a book opens its own map to assign in context.
+
+Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Canvassers pick up changes on their next sync.
+
+The Books tab follows the **campaign chip** at the top. Pick an **archived** campaign and it becomes a viewer: you'll see the book layout and how the round finished, but assigning is off, because an archived campaign is read-only.

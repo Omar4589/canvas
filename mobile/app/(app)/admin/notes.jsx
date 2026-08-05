@@ -22,6 +22,7 @@ import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import DateRangeBar from '../../../components/DateRangeBar';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import SourceChips from '../../../components/SourceChips';
 import TabSwitcher from '../../../components/TabSwitcher';
 import InsetGroup, {
@@ -270,6 +271,7 @@ export default function AdminNotes() {
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>
+      <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
       <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={PRESETS} />
 
@@ -371,6 +373,7 @@ function makeStyles(t) {
     back: { color: colors.brand, fontWeight: '700', fontSize: 16, width: 80 },
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+    bannerWrap: { marginHorizontal: spacing.lg },
     searchWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     search: {
       backgroundColor: colors.card,

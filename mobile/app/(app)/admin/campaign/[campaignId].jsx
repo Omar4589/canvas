@@ -348,6 +348,22 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/audit');
   }
 
+  // Set this campaign active, then open the live map (it reads the active campaign via
+  // CampaignChip). Without the save this tile landed on whatever campaign was seated last.
+  async function goMap() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push('/(app)/admin/map');
+  }
+
+  // Same for the Users hub: the ?campaignId= param scopes the list, but the screens it hands off
+  // to read the seated campaign.
+  async function goTeam() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push(`/(app)/admin/users?campaignId=${cId}`);
+  }
+
   // Set this campaign active, then open the Notes hub (it reads the active campaign).
   async function goNotes() {
     if (!campaign) return;
@@ -647,13 +663,13 @@ export default function CampaignDetail() {
           <View style={styles.quickActions}>
             <NavTileGrid
               items={[
-                { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: () => router.push('/(app)/admin/map') },
+                { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: goMap },
                 { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
                 { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
                 // "Team" opens the Users hub pre-filtered to this campaign — the old
                 // standalone Team page merged into Users (one people surface, lead-scoped
                 // server-side, so it is safe for every console role).
-                { label: 'Team', subtitle: 'Crew & assignments', onPress: () => router.push(`/(app)/admin/users?campaignId=${cId}`) },
+                { label: 'Team', subtitle: 'Crew & assignments', onPress: goTeam },
               ]}
             />
           </View>

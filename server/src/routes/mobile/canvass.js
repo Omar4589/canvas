@@ -18,6 +18,7 @@ import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
+import { assertCampaignWritable } from '../../middleware/campaignWritable.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
@@ -414,6 +415,13 @@ router.post('/households/:householdId/location', async (req, res, next) => {
     if (!(await canManageCampaign(req, household.campaignId))) {
       return res.status(403).json({ error: PIN_ROLE_MESSAGE, code: 'FORBIDDEN_ROLE' });
     }
+
+    // The archived-campaign refusal has to live on BOTH pin doors for the same reason the role
+    // gate above does: this is literally the same write as the campaign-nested web route, and an
+    // identical write must never be 200 through one door and 409 through the other. Inline rather
+    // than the router middleware because this path carries no :campaignId to resolve.
+    const pinCampaign = await Campaign.findById(household.campaignId).select('isActive').lean();
+    if (!assertCampaignWritable(res, pinCampaign)) return;
 
     const data = locationCorrectionSchema.parse(req.body);
     try {

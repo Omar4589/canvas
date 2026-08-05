@@ -7,6 +7,7 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
 import { canvasserStanding } from '../../services/reports/canvasserIdentity.js';
 import { sendMail } from '../../services/mail/mailer.js';
@@ -14,6 +15,8 @@ import { addedToCampaign } from '../../services/mail/templates.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
+// Archived campaign ⇒ read-only: the roster is frozen (GET still lists who walked it).
+router.use(requireActiveCampaign());
 
 const assignSchema = z.object({
   userIds: z.array(z.string()).min(1),

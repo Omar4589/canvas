@@ -5,6 +5,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 
 // Campaign-nested household admin actions. Today: correcting a door's pin
@@ -12,6 +13,8 @@ import { updateHouseholdLocation } from '../../services/households/updateHouseho
 // /admin/campaigns/:campaignId/households (mergeParams to read :campaignId).
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
+// Archived campaign ⇒ read-only: a finished race's pins stay where the field left them.
+router.use(requireActiveCampaign());
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

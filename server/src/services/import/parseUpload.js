@@ -53,6 +53,75 @@ function readCell(cell) {
   }
 }
 
+/**
+ * WHICH worksheet is "the" worksheet: the first **visible** tab on Excel's tab
+ * strip, resolved through the rels to its zip path.
+ *
+ * Pure string logic on purpose, so the preview (`peekUpload`) and the real import
+ * (`streamParse`) share ONE rule. They used to disagree: the preview read the
+ * first TAB while the streaming import read whichever sheet was stored first
+ * INSIDE the zip. Those usually coincide, but when they don't the user maps one
+ * tab's columns onto a different tab's rows — silently, with no error.
+ *
+ * Hidden sheets are skipped because a workbook that leads with a hidden scratch
+ * tab would otherwise import that tab, and every remedy we could offer the user
+ * is unperformable: Excel's Move-or-Copy dialog doesn't list hidden sheets, so
+ * "move your data to the front" cannot be done without unhiding first. Reading
+ * the first tab they can actually SEE is both the likely intent and the only
+ * claim our docs can honestly make. All sheets hidden → fall back to the first.
+ */
+export function resolveFirstSheetTarget(workbookXml, relsXml) {
+  const sheets = listWorkbookSheets(workbookXml, relsXml);
+  const first = sheets.find((s) => !s.hidden) || sheets[0];
+  return first?.target || 'xl/worksheets/sheet1.xml'; // Excel's overwhelmingly common layout
+}
+
+const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+function decodeXmlEntities(s) {
+  return String(s).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (full, body) => {
+    if (body[0] !== '#') return XML_ENTITIES[body] ?? full;
+    const code = /^#x/i.test(body) ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+    return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
+  });
+}
+
+function normalizeRelTarget(target) {
+  const t = String(target).replace(/^\//, '');
+  return t.startsWith('xl/') ? t : `xl/${t}`;
+}
+
+/**
+ * Every worksheet as `{ name, target, hidden }` in TAB order (first tab first) —
+ * the labels on Excel's tab strip, each paired with the zip entry that holds it.
+ *
+ * Pairing them here is the point: the mapping step must name the tab we actually
+ * READ, so the caller matches on `target` rather than trusting position. Both the
+ * preview and the real import resolve their sheet from this one list.
+ */
+export function listWorkbookSheets(workbookXml, relsXml) {
+  const block = String(workbookXml || '').match(/<sheets\b[^>]*>([\s\S]*?)<\/sheets>/);
+  if (!block) return [];
+  const rels = new Map();
+  for (const rel of String(relsXml || '').matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = rel[0].match(/\sId="([^"]+)"/);
+    const target = rel[0].match(/\sTarget="([^"]+)"/);
+    if (id && target) rels.set(id[1], normalizeRelTarget(target[1]));
+  }
+  const sheets = [];
+  for (const tag of block[1].matchAll(/<sheet\b[^>]*>/g)) {
+    const name = tag[0].match(/\sname="([^"]*)"/);
+    const rid = tag[0].match(/\sr:id="([^"]+)"/);
+    const state = tag[0].match(/\sstate="([^"]*)"/);
+    sheets.push({
+      name: name ? decodeXmlEntities(name[1]) : null,
+      target: (rid && rels.get(rid[1])) || null,
+      hidden: !!state && /^(hidden|veryHidden)$/i.test(state[1]),
+    });
+  }
+  return sheets;
+}
+
 // exceljs's streaming reader is zip-entry-order sensitive: a worksheet that
 // arrives before sharedStrings/rels is spooled to a tmp file and deferred, and
 // in data-descriptor zips (what streaming writers like exceljs's own
@@ -67,16 +136,37 @@ function readCell(cell) {
 // Files already in the safe order (everything Excel itself writes) skip this.
 const XLSX_DEPS = ['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/sharedStrings.xml', 'xl/styles.xml'];
 
-async function normalizeXlsxOrder(buffer) {
+/**
+ * One central-directory read (milliseconds) that answers both order questions:
+ *   - targetSheetIndex: WHICH emitted worksheet to read, as a position in zip
+ *     stream order, so the import reads the same tab the preview showed.
+ *   - normalizedPath: a rewritten deps-first copy, only when the stored order
+ *     would break the streaming reader. Sheets keep their relative order in the
+ *     rewrite, so targetSheetIndex stays valid across it.
+ */
+async function preflightXlsx(buffer) {
   const dir = await unzipper.Open.buffer(buffer);
   const files = dir.files
     .filter((f) => f.type !== 'Directory')
     // Central-directory record order isn't guaranteed to match stream order —
     // sort by local-header offset, which is what the streaming reader sees.
     .sort((a, b) => a.offsetToLocalFileHeader - b.offsetToLocalFileHeader);
-  const firstSheet = files.findIndex((f) => /^xl\/worksheets\/sheet\d+\.xml$/.test(f.path));
-  if (firstSheet === -1) return null;
-  if (!files.some((f, i) => i > firstSheet && XLSX_DEPS.includes(f.path))) return null;
+  const sheets = files.filter((f) => /^xl\/worksheets\/sheet\d+\.xml$/.test(f.path));
+  if (!sheets.length) return { normalizedPath: null, targetSheetIndex: 0 };
+
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const readText = async (p) => (byPath.has(p) ? (await byPath.get(p).buffer()).toString('utf8') : '');
+  const targetPath = resolveFirstSheetTarget(
+    await readText('xl/workbook.xml'),
+    await readText('xl/_rels/workbook.xml.rels')
+  );
+  const found = sheets.findIndex((f) => f.path === targetPath);
+  const targetSheetIndex = found === -1 ? 0 : found;
+
+  const firstSheetPos = files.indexOf(sheets[0]);
+  if (!files.some((f, i) => i > firstSheetPos && XLSX_DEPS.includes(f.path))) {
+    return { normalizedPath: null, targetSheetIndex };
+  }
 
   const tmpPath = path.join(os.tmpdir(), `xlsx-norm-${crypto.randomUUID()}.zip`);
   const out = fs.createWriteStream(tmpPath);
@@ -91,7 +181,7 @@ async function normalizeXlsxOrder(buffer) {
   for (const f of [...deps, ...rest]) archive.append(f.stream(), { name: f.path });
   await archive.finalize();
   await done;
-  return tmpPath;
+  return { normalizedPath: tmpPath, targetSheetIndex };
 }
 
 // A file that trips the row/cell ceiling. Typed so the route can 400 with a clear
@@ -157,9 +247,10 @@ export async function streamParse(buffer, filename, { onRow, maxRows = Infinity,
   // XLSX: stream the workbook row-by-row instead of `wb.xlsx.load(buffer)`, which
   // hydrates the ENTIRE workbook into memory. sharedStrings/styles are cached so
   // string cells resolve to text and date cells keep their type, via the shared
-  // readCell(). Only the first worksheet is read (matches the old wb.worksheets[0]).
-  // Rewritten to a safe entry order first when needed — see normalizeXlsxOrder.
-  const normalizedPath = await normalizeXlsxOrder(buffer);
+  // readCell(). Only ONE worksheet is read — the workbook's first tab, the same
+  // one the preview showed (resolveFirstSheetTarget), NOT merely the first sheet
+  // the zip happens to stream. See preflightXlsx for both order concerns.
+  const { normalizedPath, targetSheetIndex } = await preflightXlsx(buffer);
   try {
     const input = normalizedPath ? fs.createReadStream(normalizedPath) : Readable.from([buffer]);
     const reader = new ExcelJS.stream.xlsx.WorkbookReader(input, {
@@ -169,7 +260,7 @@ export async function streamParse(buffer, filename, { onRow, maxRows = Infinity,
       hyperlinks: 'ignore',
       entries: 'ignore',
     });
-    // Belt to normalizeXlsxOrder's suspenders: a workbook with NO workbook.xml at
+    // Belt to preflightXlsx's suspenders: a workbook with NO workbook.xml at
     // all would still crash the reader's sheet-name lookup on `this.model.sheets`
     // (exceljs 4.4.0, workbook-reader.js:303 — `workbookRels` is guarded, `model`
     // isn't). _parseWorkbook overwrites the stub whenever the entry exists, and
@@ -179,15 +270,16 @@ export async function streamParse(buffer, filename, { onRow, maxRows = Infinity,
     const headerByCol = {}; // colNumber -> header label
     let headers = [];
     const cellMeta = {};
-    let sawSheet = false;
+    let sheetIdx = -1;
 
     for await (const ws of reader) {
-      if (sawSheet) {
-        // Drain any further worksheets so the underlying stream finishes cleanly.
+      sheetIdx += 1;
+      if (sheetIdx !== targetSheetIndex) {
+        // Every other tab still has to be drained — the reader is one stream, and
+        // breaking early strands its tmp spool.
         for await (const _row of ws) { void _row; }
         continue;
       }
-      sawSheet = true;
       for await (const row of ws) {
         if (row.number === 1) {
           row.eachCell({ includeEmpty: false }, (cell, col) => {

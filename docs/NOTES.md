@@ -42,7 +42,12 @@ about this campaign?" without clicking through voters and doors one by one.
 showing **today's** notes; widen the date range for more.
 
 **On mobile:** admins/leads get a **Notes** screen reached two ways — the **📝 Notes** row in the
-**More** menu, and a **Notes** tile on a campaign's page. Same three sources, same filters.
+**More** menu, and a **Notes** tile on a campaign's page. Same three sources, same filters. A phone
+has no address bar to hold the campaign, so the screen carries a **campaign chip** at the top: tap
+it to switch, and your pick carries across the other admin screens. Coming in from a campaign's own
+**Notes** tile scopes the screen to *that* campaign. The chip lists **archived** campaigns too,
+under an **Archived · read-only** divider, so a finished campaign's notes stay readable from the
+phone — it never seats you in one on its own, you pick it.
 
 ## How you filter it
 
@@ -148,8 +153,8 @@ no native rebuild, no server deploy.
 
 | File | Role |
 |---|---|
-| [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) | The screen. Hidden Tabs `href:null` (inherits admin/lead gating). `CampaignChip` scope + `useFocusEffect` re-sync + `prevCid` reset (this Tabs screen stays mounted); `DateRangeBar` default **Today** (full presets, incl. All time); source/author/walk-list filters; debounced search; **`useInfiniteQuery` "Load more"** (endpoint caps `limit` at 100, so it pages). |
-| [mobile/components/NoteCard.jsx](../mobile/components/NoteCard.jsx) | One note row: source badge/dot, action label, "edited" tag, quoted body, `author · time · voter · address`. Whole card taps through. |
+| [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) | The screen. Hidden Tabs `href:null` (inherits admin/lead gating). `CampaignChip` scope (archived campaigns selectable, auto-default active-only) + `ArchivedCampaignBanner` + `useFocusEffect` re-sync + `prevCid` reset (this Tabs screen stays mounted); `DateRangeBar` default **Today** (full presets, incl. All time); source/author/walk-list filters; debounced search; **`useInfiniteQuery` "Load more"** (endpoint caps `limit` at 100, so it pages). |
+| [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) `noteRow` | One note as an inset row: source dot as the leading glyph, quoted body as the label, `author · time · voter · address` on the sub line. A note with a target is an `InsetNavRow` (taps through to the voter, or the map focused on that door); one with neither is an inert `InsetRow`. (The standalone `NoteCard.jsx` went when the inset-group grammar landed — the past-tense comment naming it at `notes.jsx` is the only surviving reference and is correct.) |
 | [mobile/components/SourceChips.jsx](../mobile/components/SourceChips.jsx) | **New** multi-select chip row with counts (`TabSwitcher` is single-select only). |
 | `admin/_layout.jsx`, `admin/more.jsx`, `admin/campaign/[campaignId].jsx` | Register the screen + two entry points (More-menu row, campaign Quick-actions tile), mirroring the GPS-audit screen. |
 

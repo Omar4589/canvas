@@ -11,6 +11,8 @@ tags: import, voters, intake
 
 **Voter Import** lives inside a campaign — open the campaign, then pick **Voter Import** in the sidebar. You can upload a `.csv` or `.xlsx` directly, and you can upload **more than one file** over the life of a campaign.
 
+**If your Excel file has several tabs, only the first one is imported** — the leftmost tab you can see (hidden sheets are skipped; note it isn't always the tab Excel opens on, which is whichever one was showing when the file was last saved). Extra `Summary` or `README` tabs after the data are simply ignored. The **Map columns** step names the tab it read and lists the ones it skipped, so you can check it picked the right one. If your voter data is on a different tab, move that tab to the front of the workbook and upload again.
+
 ## How an upload is matched
 
 - A row matches an existing **door by its address** (after light normalization). A different or misspelled address becomes a separate door.

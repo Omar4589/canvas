@@ -41,7 +41,13 @@ history below only lists that campaign's imports.
 
 ## Any vendor file — CSV or Excel
 
-You can upload **`.csv` or `.xlsx`** directly. Some vendors pack **multiple voters into one row**
+You can upload **`.csv` or `.xlsx`** directly. **If an Excel file has several tabs, only the first
+one is imported** — the leftmost tab you can see (hidden sheets are skipped, and it isn't necessarily
+the tab Excel opens on, which is whichever one was showing when the file was last saved). Vendor files
+often carry extra `Summary` or `README` tabs after the data; those are ignored, which is usually what
+you want. **The mapping step tells you which tab it read and which ones it skipped**, so you can see
+at a glance whether it picked the right one. If the data isn't on the first tab, move it there (or
+delete the tabs in front of it) and upload again. Some vendors pack **multiple voters into one row**
 (e.g. `FLVoterId1..4`); the importer **detects** this and offers an **"Explode multi-member
 rows"** toggle (on by default) that splits each row into one voter per person — the preview
 counts update live. It also warns about **leading-zero risk** (IDs/zips stored as numbers) and
@@ -364,7 +370,7 @@ cached, so IDs keep leading zeros and date cells keep their type via the shared 
 was ~299 MB of live heap on a 166k-row file, which OOM'd the worker's 384 MB cap (§E); the streamed
 pipeline finishes the same file in ~7 s under `--max-old-space-size=384` with identical outputs
 (219 MB peak RSS, normalization included). **Zip entry order is normalized first when needed**
-(`normalizeXlsxOrder`): exceljs's streaming reader is entry-order sensitive — a sheet arriving after
+(`preflightXlsx`): exceljs's streaming reader is entry-order sensitive — a sheet arriving after
 sharedStrings but before `workbook.xml` crashed its inline path (`this.model.sheets`, exceljs 4.4.0),
 and a sheet arriving *before* sharedStrings in a **data-descriptor zip** (what streaming writers like
 exceljs's own `WorkbookWriter` emit) silently swallowed the rest of the stream, surfacing text cells
@@ -373,9 +379,42 @@ access. So `streamParse` reads the central directory (milliseconds), and only wh
 (`workbook.xml`, rels, sharedStrings, styles) trails the first worksheet does it rewrite the zip
 deps-first to a transient `xlsx-norm-*.zip` temp file (streamed entry-by-entry, archiver level 1,
 unlinked in a `finally`, swept nightly). Files already in the safe order — everything desktop Excel
-writes — skip the rewrite entirely. Pinned by
-[test/parseUploadOrder.test.js](../server/test/parseUploadOrder.test.js) across both hostile orders, a
-genuine streaming-writer workbook, and the untouched safe order.
+writes — skip the rewrite entirely.
+
+**Which tab gets read — ONE rule, shared.** A workbook can hold many worksheets; the importer reads
+exactly one: the workbook's **first non-hidden `<sheet>` element** — the leftmost tab the user can
+actually see. Hidden sheets (`state="hidden"`/`"veryHidden"`) are skipped deliberately: a workbook
+leading with a hidden scratch tab would otherwise import that tab, and *no* remedy we could print is
+performable, because Excel's Move-or-Copy dialog does not list hidden sheets. (Everything hidden →
+fall back to the first sheet, so a file always resolves to something.)
+`resolveFirstSheetTarget(workbookXml, relsXml)` (pure string logic in `parseUpload.js`) is that rule,
+and **both** `peekUpload` (the preview) and `streamParse` (the real import) call it — `peekUpload` to
+pick the entry to sample, `streamParse` via `preflightXlsx`, which converts it to a *position in zip
+stream order* (`targetSheetIndex`) and reads that emitted worksheet, draining the others. They must
+never diverge: the preview resolved the first tab while the streaming reader took whichever sheet the
+zip stored first, so a workbook with out-of-order tabs showed **tab A's columns in the mapping step
+and imported tab B's rows**, silently. The zip rewrite above preserves the sheets' relative order, so
+the index survives it. Pinned by
+[test/parseUploadOrder.test.js](../server/test/parseUploadOrder.test.js): both hostile entry orders, a
+genuine streaming-writer workbook, the untouched safe order, and three multi-tab cases (normal,
+reversed tabs, reversed tabs *plus* a hostile dep order) each asserting preview and import land on the
+same tab.
+
+**And the mapping step says so.** `listWorkbookSheets(workbookXml, relsXml)` returns every tab as
+`{ name, target }` in tab order — the same list `resolveFirstSheetTarget` picks from, so the two can't
+drift. `peekUpload` names the tab by **matching on `target`**, never by position: when the rels are
+unreadable the target falls back to `sheet1.xml` and position would print a guess as fact, so instead
+`sheetName` goes `null` and the mapping step stays silent. That yields **`sheetName`** and
+**`otherSheets`**, both passed straight through `POST /preview-headers`. When a workbook has more than
+one tab, `ImportPage` renders an info note above the column grid — *"These columns come from the
+**Master** tab — the first tab in the file, and the only one imported. 2 other tabs are ignored
+(Summary, README)…"* — and the required-fields error gains a matching hint. Silent for CSVs and
+single-tab workbooks, so the common case gains no chrome. The client also stopped discarding the
+server's `estimatedRows` in favour of its own `file.size / 250` guess: a workbook whose data hides
+behind a README tab now reads *"~9 rows (est.)"* next to nine rows of README columns, instead of
+*"~200,000 rows"* next to them. Same fix closed a latent race — a second file picked while the first
+peek was still in flight could paint the earlier file's columns; the peek's `onSuccess` now drops any
+response whose file is no longer the current pick.
 `maxRows` / `maxCells` (env **`MAX_IMPORT_ROWS`** / **`MAX_IMPORT_CELLS`**, defaults 300,000 /
 8,000,000) are enforced **during** the parse — `ImportTooLargeError` (`code: 'file-too-many-rows'`)
 fires the moment a counter trips, not after materializing everything. `parseUpload` survives as the

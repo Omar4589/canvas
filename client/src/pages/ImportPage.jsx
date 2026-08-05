@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -369,7 +369,8 @@ export default function ImportPage() {
       else sessionStorage.removeItem('import.previewJobId');
     } catch { /* storage unavailable — state alone still works */ }
   };
-  const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows }
+  const [fileNote, setFileNote] = useState(null); // { tooBig } | { sizeText, estRows, sheetName?, otherSheets? }
+  const latestFileRef = useRef(null); // the pick a returning peek must still match
   const [explode, setExplode] = useState(true); // smart import: explode multi-voter-per-row files
   const [geocodeCheckJobId, setGeocodeCheckJobIdState] = useState(() => {
     try { return sessionStorage.getItem('import.geocodeCheckJobId') || null; } catch { return null; }
@@ -422,9 +423,17 @@ export default function ImportPage() {
       fd.append('file', f);
       return api('/admin/imports/preview-headers', { method: 'POST', formData: fd });
     },
-    onSuccess: (res) => {
+    onSuccess: (res, pickedFile) => {
+      // Picking a second file before the first peek returns leaves that first
+      // response in flight; landing it would paint the wrong file's columns.
+      if (pickedFile !== latestFileRef.current) return;
       setColumns(res.columns || []);
       setMapping(res.suggestedMapping || {});
+      // Only the first tab of a workbook is imported — name it, and say what was
+      // skipped. Also swap the crude size-based row guess for the real estimate:
+      // a file whose data isn't on the first tab otherwise still reads "~200,000
+      // rows" while the mapping step shows nine rows of a README.
+      setFileNote((n) => (n ? { ...n, sheetName: res.sheetName || null, otherSheets: res.otherSheets || [], estRows: Number.isFinite(res.estimatedRows) ? res.estimatedRows : n.estRows } : n));
       setStep('map');
     },
   });
@@ -540,6 +549,7 @@ export default function ImportPage() {
 
   function resetSelection() {
     setFile(null);
+    latestFileRef.current = null; // mirror setFile — else a peek still in flight repaints the cleared form
     setColumns([]);
     setMapping({});
     setStep('select');
@@ -564,6 +574,7 @@ export default function ImportPage() {
   function onPickFile(f) {
     setPreviewJobId(null);
     enqueuePreview.reset();
+    latestFileRef.current = f; // in-flight peeks for any earlier pick are now stale
     if (!f) { setFile(null); setFileNote(null); setStep('select'); return; }
     setFile(f);
     if (f.size > MAX_FILE_BYTES) {
@@ -701,6 +712,22 @@ export default function ImportPage() {
               </div>
             </div>
 
+            {/* Only the workbook's first tab is imported. Silent for CSVs and
+                single-tab files; when tabs WERE skipped, saying so turns "these
+                columns are wrong" into a fixable, self-explanatory problem. */}
+            {fileNote?.sheetName && fileNote.otherSheets?.length > 0 && (
+              <div className="mb-3 rounded border border-info/30 bg-info-tint px-3 py-2 text-xs text-info">
+                These columns come from the <strong>{fileNote.sheetName}</strong> tab — the first tab in the
+                file, and the only one imported.{' '}
+                {fileNote.otherSheets.length === 1
+                  ? `The ${fileNote.otherSheets[0]} tab is ignored.`
+                  : `${fileNote.otherSheets.length} other tabs are ignored (${fileNote.otherSheets
+                      .slice(0, 6)
+                      .join(', ')}${fileNote.otherSheets.length > 6 ? `, and ${fileNote.otherSheets.length - 6} more` : ''}).`}{' '}
+                If your voter data is on a different tab, move it to the front of the workbook and upload again.
+              </div>
+            )}
+
             <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {fields.map((f) => {
                 const isReqUnmapped = f.required && !mapping[f.key];
@@ -730,6 +757,8 @@ export default function ImportPage() {
             {requiredUnmapped.length > 0 && (
               <p className="mt-3 text-xs text-danger">
                 Map all required (*) fields to continue: {requiredUnmapped.join(', ')}
+                {fileNote?.otherSheets?.length > 0 &&
+                  ' — if none of the columns above look like voter data, it is probably on one of the other tabs (see the note above).'}
               </p>
             )}
 

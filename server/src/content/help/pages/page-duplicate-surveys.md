@@ -50,3 +50,5 @@ Admin → **More → Duplicate surveys** gives you the same report: the same thr
 An admin can delete an extra response straight from the expanded card: tap **Delete** on the response you want gone, and confirm. The confirmation names the canvasser, the round, and the time, so you can be sure which one you're removing.
 
 Replaced responses look different: instead of Delete they read **Preserved**. Tap one to open its full detail — that's where an admin finds **Restore**, which makes those earlier answers current again (the answers they displace are preserved in their place, so nothing is lost either way).
+
+On an **archived** campaign the report still opens and every filter still works, but **Delete** and **Restore** are gone — an archived campaign is read-only, and the server refuses the change even if a button were there. Reactivate it from the web if you genuinely need to remove or restore a response.

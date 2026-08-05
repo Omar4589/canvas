@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,18 +11,20 @@ import {
   Dimensions,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import Mapbox from '@rnmapbox/maps';
 import PullableSheet, { SHEET_TIMING } from '../../../components/PullableSheet';
 import { api } from '../../../lib/api';
-import { loadCurrentUser } from '../../../lib/cache';
+import { loadActiveCampaign, loadCurrentUser } from '../../../lib/cache';
 import { useMapStyle } from '../../../lib/mapStyles';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
 import CampaignChip from '../../../components/CampaignChip';
+import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
+import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import EffortPicker from '../../../components/EffortPicker';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -85,7 +87,21 @@ export default function AdminBooks() {
   const camInit = useRef(false);
 
   const [campaign, setCampaign] = useState(null);
+  // Re-sync on focus like every sibling chip screen. Without it this always-mounted tab kept
+  // whatever the chip seated on first mount, so drilling into a different campaign elsewhere and
+  // coming back showed one campaign's banner over another campaign's assign buttons.
+  useFocusEffect(
+    useCallback(() => {
+      loadActiveCampaign().then((c) =>
+        setCampaign((prev) => (String(c?.id) !== String(prev?.id) ? c || null : prev))
+      );
+    }, [])
+  );
   const cId = campaign?.id || null;
+  // An archived campaign is read-only: the server refuses every assignment write on it, so the
+  // affordances come off rather than failing under a finger. Positive form — false until the
+  // campaign list resolves, so a button never flashes and retracts.
+  const { canWrite } = useCampaignArchived(cId);
   // Current user, so admins/leads/super can self-assign (they're filtered out of the
   // canvasser roster by role, so we inject them explicitly, badged "You").
   const [self, setSelf] = useState(null);
@@ -689,6 +705,7 @@ export default function AdminBooks() {
             <Text style={styles.passChipText}>{passLabel} · active</Text>
           </View>
         )}
+        <ArchivedCampaignBanner campaignId={cId} style={{ marginTop: spacing.sm }} />
       </View>
 
       {/* View toggle */}
@@ -787,9 +804,11 @@ export default function AdminBooks() {
               </Pressable>
             </View>
           ) : (
-            <Pressable onPress={() => setSelectMode(true)} style={styles.filterChip}>
-              <Text style={styles.filterChipText}>Select</Text>
-            </Pressable>
+            canWrite && (
+              <Pressable onPress={() => setSelectMode(true)} style={styles.filterChip}>
+                <Text style={styles.filterChipText}>Select</Text>
+              </Pressable>
+            )
           )}
         </View>
       )}
@@ -941,13 +960,15 @@ export default function AdminBooks() {
                 </View>
                 {/* ⋯ = book actions (bulk restrict) — off the roster's scroll
                     path so it can't be fat-fingered; Alert confirms remain. */}
-                <Pressable
-                  onPress={() => setSheetMenuOpen((v) => !v)}
-                  hitSlop={8}
-                  style={{ paddingRight: spacing.lg }}
-                >
-                  <Text style={styles.modalClose}>⋯</Text>
-                </Pressable>
+                {canWrite && (
+                  <Pressable
+                    onPress={() => setSheetMenuOpen((v) => !v)}
+                    hitSlop={8}
+                    style={{ paddingRight: spacing.lg }}
+                  >
+                    <Text style={styles.modalClose}>⋯</Text>
+                  </Pressable>
+                )}
                 <Pressable
                   onPress={() => {
                     setMapSheetBookId(null);
@@ -1029,6 +1050,7 @@ export default function AdminBooks() {
                         sub={c.email}
                         assigned={assigned}
                         disabled={mutating}
+                        canAssign={canWrite}
                         onToggle={() => toggleAssign(mapSheetBook.id, c.id, assigned)}
                       />
                     );
@@ -1135,6 +1157,7 @@ export default function AdminBooks() {
                           sub={`${b.doors} doors`}
                           assigned={assigned}
                           disabled={mutating}
+                          canAssign={canWrite}
                           onToggle={() => toggleAssign(b.id, c.id, assigned)}
                         />
                       );
@@ -1151,7 +1174,9 @@ export default function AdminBooks() {
       {/* (The single-book assign sheet now renders INSIDE the map container as a
           half-height panel — the old scrim Modal occluded the map it revealed.) */}
 
-      {selectMode && selectedBooks.size > 0 && (() => {
+      {/* canWrite belt-and-braces: Select is already hidden on an archive, but selectMode can
+          survive a campaign switch under the chip, and this bar is all bulk writes. */}
+      {canWrite && selectMode && selectedBooks.size > 0 && (() => {
         const selected = books.filter((b) => selectedBooks.has(b.id));
         // Web can unmark its whole selection in one go — parity: offer it whenever the
         // selection holds any bulk marks. Bulk marks only; field marks always survive.
@@ -1217,7 +1242,9 @@ function Empty({ children, styles }) {
   );
 }
 
-function AssignRow({ title, sub, assigned, disabled, onToggle, styles }) {
+// `canAssign` false (archived campaign) keeps the row — WHO holds this book is data worth
+// reading on a finished campaign — and drops only the button.
+function AssignRow({ title, sub, assigned, disabled, canAssign, onToggle, styles }) {
   return (
     <View style={styles.assignRow}>
       <View style={{ flex: 1 }}>
@@ -1228,15 +1255,19 @@ function AssignRow({ title, sub, assigned, disabled, onToggle, styles }) {
           </Text>
         ) : null}
       </View>
-      <Pressable
-        onPress={onToggle}
-        disabled={disabled}
-        style={[styles.action, assigned ? styles.actionUnassign : styles.actionAssign]}
-      >
-        <Text style={[styles.actionText, assigned ? styles.actionTextUnassign : styles.actionTextAssign]}>
-          {assigned ? 'Unassign' : 'Assign'}
-        </Text>
-      </Pressable>
+      {canAssign ? (
+        <Pressable
+          onPress={onToggle}
+          disabled={disabled}
+          style={[styles.action, assigned ? styles.actionUnassign : styles.actionAssign]}
+        >
+          <Text style={[styles.actionText, assigned ? styles.actionTextUnassign : styles.actionTextAssign]}>
+            {assigned ? 'Unassign' : 'Assign'}
+          </Text>
+        </Pressable>
+      ) : assigned ? (
+        <Text style={styles.assignSub}>Assigned</Text>
+      ) : null}
     </View>
   );
 }
