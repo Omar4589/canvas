@@ -4,6 +4,7 @@ import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
@@ -48,7 +49,8 @@ async function loadCampaign(req, res, next) {
     if (!orgId) return res.status(400).json({ error: 'Active organization required' });
     const { campaignId } = req.params;
     if (!mongoose.isValidObjectId(campaignId)) return res.status(400).json({ error: 'Invalid campaignId' });
-    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId });
+    // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId, ...NOT_DELETING });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     req.campaign = campaign;
     next();

@@ -18,10 +18,18 @@ const KEY = { key: 'singleton' };
 // it names, mirroring JOB_NAME in retention/purgeDeletedIdentities.js.
 export const STATS_JOB = 'platform-stats-reconcile';
 
-// The org ids that must be excluded everywhere (Doorline's own demo/internal orgs).
-async function internalOrgIds() {
-  const subs = await Subscription.find({ status: 'internal' }, 'organizationId').lean();
-  return subs.map((s) => s.organizationId);
+// The org ids that must be excluded everywhere: Doorline's own demo/internal orgs, PLUS any org
+// currently being deleted. The second half matters because captureOrgBeforeDelete banks a
+// condemned org into the permanent `deleted` bucket at the START of its cascade, while its rows
+// (and the Organization doc) still exist — so counting it in `live` too would double it in the
+// total. That window used to be seconds; since the cascade moved to the worker it is minutes to
+// hours, long enough to span the nightly reconcile and PERSIST the inflated number.
+async function excludedOrgIds() {
+  const [subs, deleting] = await Promise.all([
+    Subscription.find({ status: 'internal' }, 'organizationId').lean(),
+    Organization.find({ 'deletion.requestedAt': { $ne: null } }, '_id').lean(),
+  ]);
+  return [...subs.map((s) => s.organizationId), ...deleting.map((o) => o._id)];
 }
 
 async function isInternalOrg(orgId) {
@@ -122,21 +130,37 @@ export async function captureCampaignBeforeDelete(campaign) {
   // campaign with NO sibling row in another campaign. A person shared with a sibling
   // campaign lives on there — banking them into `deleted` while their surviving row still
   // counts in `live` would double them in the total.
-  const campSvids = await Voter.find({ campaignId }).distinct('stateVoterId');
+  // Aggregation cursor, NOT distinct(): distinct returns one BSON document hard-capped at
+  // 16MB, which ~600k stateVoterIds would blow — making a huge campaign permanently
+  // undeletable. The $group rides the unique {campaignId, stateVoterId} index; batches of
+  // 5000 keep each sibling distinct() far under the cap.
+  const cursor = Voter.aggregate([{ $match: { campaignId } }, { $group: { _id: '$stateVoterId' } }])
+    .allowDiskUse(true)
+    .cursor();
+  let total = 0;
   let survivors = 0;
-  for (let i = 0; i < campSvids.length; i += 5000) {
+  let batch = [];
+  const flushBatch = async () => {
+    if (!batch.length) return;
     const s = await Voter.find({
       organizationId: campaign.organizationId,
-      stateVoterId: { $in: campSvids.slice(i, i + 5000) },
+      stateVoterId: { $in: batch },
       campaignId: { $ne: campaignId },
     }).distinct('stateVoterId');
     survivors += s.length;
+    batch = [];
+  };
+  for await (const doc of cursor) {
+    total += 1;
+    batch.push(doc._id);
+    if (batch.length >= 5000) await flushBatch();
   }
+  await flushBatch();
   const [doorsKnocked, surveyResponses] = await Promise.all([
     CanvassActivity.countDocuments({ campaignId, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
     SurveyResponse.countDocuments({ campaignId }),
   ]);
-  const votersProcessed = Math.max(0, campSvids.length - survivors);
+  const votersProcessed = Math.max(0, total - survivors);
   const captured = { organizations: 0, campaigns: 1, doorsKnocked, surveyResponses, votersProcessed };
   await moveLiveToDeleted(captured);
   return captured;
@@ -152,7 +176,7 @@ export async function captureCampaignBeforeDelete(campaign) {
  * dry run (to preview without writing) and by recomputeLive (to persist).
  */
 export async function computeLiveCounts() {
-  const internal = await internalOrgIds();
+  const internal = await excludedOrgIds();
   const orgNin = internal.length ? { $nin: internal } : { $exists: true };
   const [organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
     Organization.countDocuments({ _id: orgNin }),
@@ -195,7 +219,7 @@ const DAILY_SOURCES = {
  * Days are UTC ('%Y-%m-%d' with no timezone) — a platform series has no campaign anchor tz.
  */
 export async function computeDailySeries() {
-  const internal = await internalOrgIds();
+  const internal = await excludedOrgIds();
   const orgNin = internal.length ? { $nin: internal } : { $exists: true };
   const matches = {
     organizations: [Organization, { _id: orgNin }],

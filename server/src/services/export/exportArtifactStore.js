@@ -60,12 +60,33 @@ export async function listArtifactJobIds() {
 
 // Cascade purge for org/campaign deletion — finds files by metadata, not by job list, so
 // artifacts survive-proof even when ExportJob docs were removed first.
-export async function deleteArtifactsForScope({ organizationId, campaignId }) {
+//
+// Cursor + bounded parallelism, not `find().toArray()` + `Promise.all` over everything: an ORG
+// delete can match every artifact the tenant ever produced, and each bucket.delete is two
+// collection deletes (the .files row plus a whole .chunks range). 100 in flight is plenty of
+// parallelism with bounded memory. `onProgress` lets a long cascade stamp liveness; both new
+// options default, so existing callers are unchanged.
+export async function deleteArtifactsForScope({ organizationId, campaignId, chunk = 100, onProgress } = {}) {
   const b = bucket();
   const q = {};
   if (organizationId) q['metadata.organizationId'] = String(organizationId);
   if (campaignId) q['metadata.campaignId'] = String(campaignId);
-  const files = await mongoose.connection.db.collection(`${BUCKET}.files`).find(q).toArray();
-  await Promise.all(files.map((f) => b.delete(f._id).catch(() => {})));
-  return files.length;
+  const cursor = mongoose.connection.db
+    .collection(`${BUCKET}.files`)
+    .find(q, { projection: { _id: 1 } });
+  let deleted = 0;
+  let batch = [];
+  const flush = async () => {
+    if (!batch.length) return;
+    await Promise.all(batch.map((id) => b.delete(id).catch(() => {})));
+    deleted += batch.length;
+    batch = [];
+    onProgress?.(deleted);
+  };
+  for await (const f of cursor) {
+    batch.push(f._id);
+    if (batch.length >= chunk) await flush();
+  }
+  await flush();
+  return deleted;
 }

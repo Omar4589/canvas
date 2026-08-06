@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Campaign } from '../../models/Campaign.js';
+import { isDeleting } from '../../services/campaigns/deletionState.js';
 import { Membership } from '../../models/Membership.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
@@ -30,6 +31,8 @@ async function loadOwnedCampaign(req) {
   if (!mongoose.isValidObjectId(req.params.campaignId)) return null;
   const campaign = await Campaign.findById(req.params.campaignId);
   if (!campaign) return null;
+  // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+  if (isDeleting(campaign)) return null;
   if (!activeOrgId(req)) return null;
   if (String(campaign.organizationId) !== String(activeOrgId(req))) return null;
   return campaign;

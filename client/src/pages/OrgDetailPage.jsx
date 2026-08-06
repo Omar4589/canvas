@@ -31,6 +31,20 @@ export default function OrgDetailPage() {
         <h1 className="text-2xl font-semibold text-fg">{o.name}</h1>
         <span className="font-mono text-xs text-fg-subtle">{o.slug}</span>
         {!o.isActive && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">Inactive</span>}
+        {/* Shown here even though the list hides deleting orgs in their own array: an operator who
+            opens a tenant mid-delete needs to see what is happening and why. */}
+        {o.deletion && (
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              o.deletion.status === 'failed'
+                ? 'bg-danger-tint text-danger-fg'
+                : 'bg-warning-tint text-warning-fg'
+            }`}
+            title={o.deletion.error || `Requested ${formatDate(o.deletion.requestedAt)} · ${o.deletion.source}`}
+          >
+            {o.deletion.status === 'failed' ? 'Delete failed' : 'Deleting…'}
+          </span>
+        )}
         {o.isInternal && <InternalBadge label="Internal org" />}
         <BillingPill effective={b.effective} />
       </div>

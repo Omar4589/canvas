@@ -9,7 +9,14 @@ import mongoose from 'mongoose';
 // ACCOUNTS survive (decision, Jul 2026) while their memberships don't; a
 // sibling org is untouched; and EVERY Person belonging to the deleted org is purged
 // (Persons are org-scoped now — there is no shared identity graph to preserve).
+//
+// The cascade moved to a background job (2026-08), so the route answers 202 and stamps
+// organization.deletion; each test here drives the REAL processor straight after, which keeps
+// every DB assertion below exact while still exercising the claim/heartbeat wiring. The
+// exhaustive-sweep assertion reads the processor's returned summary — same counts, same meaning.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-org-delete';
+// No Redis in the harness: the enqueue must fail fast so the stamp rolls back predictably.
+process.env.ORG_DELETE_ENQUEUE_TIMEOUT_MS = process.env.ORG_DELETE_ENQUEUE_TIMEOUT_MS || '400';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -24,7 +31,18 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { PersonEditProposal } = await import('../src/models/PersonEditProposal.js');
 const { ORG_SCOPED } = await import('../src/services/platform/deleteOrganization.js');
+const { processOrgDeleteJob } = await import('../src/services/platform/deleteOrgProcessor.js');
 const { openArtifactUploadStream } = await import('../src/services/export/exportArtifactStore.js');
+
+// The route stamps but cannot enqueue (no Redis here), so it rolls the stamp back and 503s. Stamp
+// it ourselves the way stampAndEnqueueOrgDelete would, then run the real processor.
+const runOrgDelete = async (orgId, { source = 'break_glass', requestId = null } = {}) => {
+  await Organization.updateOne(
+    { _id: orgId },
+    { $set: { deletion: { requestedAt: new Date(), requestedBy: null, source, requestId, status: 'pending', heartbeatAt: null, error: null } } }
+  );
+  return processOrgDeleteJob({ data: { organizationId: String(orgId), source, requestId: requestId ? String(requestId) : null }, id: `t-${orgId}` });
+};
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -163,13 +181,23 @@ test('wrong or missing confirmSlug is refused', { skip }, async () => {
 });
 
 test('cascade delete: org-scoped rows die; users and the sibling org live; the org\'s Persons do NOT', { skip }, async () => {
+  // The route no longer deletes: it stamps + enqueues. With no Redis the enqueue fails and the
+  // stamp is rolled back — the assertion that matters is that a valid confirmSlug got that far.
   const r = await call('DELETE', `/super-admin/organizations/${ctx.doomed._id}`, {
     token: ctx.superTok,
     body: { confirmSlug: 'doomed-org' },
   });
-  assert.strictEqual(r.status, 200);
-  assert.strictEqual(r.json.organization.slug, 'doomed-org');
-  assert.strictEqual(r.json.personsPurged, 2, 'both of the doomed org\'s Persons are purged');
+  assert.strictEqual(r.status, 503, 'passed the gates and reached the (Redis-less) enqueue');
+  assert.strictEqual(r.json.code, 'queue-unavailable');
+  assert.strictEqual(
+    (await Organization.findById(ctx.doomed._id).lean()).deletion?.requestedAt ?? null,
+    null,
+    'a failed enqueue must not leave the tenant walled off'
+  );
+
+  const summary = await runOrgDelete(ctx.doomed._id);
+  assert.strictEqual(summary.organization.slug, 'doomed-org');
+  assert.strictEqual(summary.personsPurged, 2, 'both of the doomed org\'s Persons are purged');
 
   // Everything org-scoped is gone.
   assert.strictEqual(await Organization.countDocuments({ _id: ctx.doomed._id }), 0);
@@ -239,12 +267,8 @@ test('exhaustive sweep: every org-scoped collection empties; no reference surviv
     'artifact seeded'
   );
 
-  const r = await call('DELETE', `/super-admin/organizations/${org2._id}`, {
-    token: ctx.superTok,
-    body: { confirmSlug: 'sweep-org' },
-  });
-  assert.strictEqual(r.status, 200);
-  assert.strictEqual(Object.keys(r.json.counts).length >= ORG_SCOPED.length, true, 'every seeded collection must report a deletion');
+  const summary = await runOrgDelete(org2._id);
+  assert.strictEqual(Object.keys(summary.counts).length >= ORG_SCOPED.length, true, 'every seeded collection must report a deletion');
 
   const db = mongoose.connection.db;
   const collections = await db.listCollections().toArray();

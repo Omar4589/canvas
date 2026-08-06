@@ -176,7 +176,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   *not* in `deleteCampaign.js`'s `CAMPAIGN_SCOPED` list, so deleting a campaign leaves its rows behind
   naming a campaign that no longer exists. No promise breaks — they stay org-scoped and staff-only, die
   with the org, and that cascade only ever runs on a never-walked campaign — but this is the row class
-  to name if a customer-facing *"deleting a campaign removes…"* sentence is ever written.]*
+  to name if a customer-facing *"deleting a campaign removes…"* sentence is ever written.
+  *[v5 2026-08-05: **wrinkle CLOSED** — `CoordinatorChange` is now in `CAMPAIGN_SCOPED`
+  (`deleteCampaign.js`), so a campaign delete removes its `campaignId`-bearing rows; null-campaignId
+  (old-model) rows survive by the filter's construction and still die with the org. See the
+  2026-08-05 background-deletion entry in the v5 list.]*]*
 - *(v4 2026-07-22)* **New field: `User.lastSeenAt`.** The All Users console's "Last active" column was
   derived from `CanvassActivity` — the last *door knocked* — so every admin, lead and staff account who
   never canvasses rendered the literal word "Never" beside "Last login: Just now". `requireAuth` now
@@ -532,6 +536,102 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **Assessment: strictly less PII persisted; NO published Privacy Policy / ToS / DPA sentence
   affected; no new subprocessor; DPA §6 untouched.**
 
+- *(v5 2026-08-05)* **Campaign hard-delete is now a BACKGROUND JOB, `CoordinatorChange` joined its
+  cascade, and the 16MB undeletable-campaign cliff is closed.** Retention/deletion trigger class —
+  examined in full. What changed: `DELETE /admin/campaigns/:id` no longer runs the cascade inside
+  the web request (a 106,958-door delete blew Heroku's 30s router limit — the browser got a 503
+  while the dyno finished the delete anyway, i.e. the *reported* outcome of a deletion diverged
+  from the *actual* one). The route now stamps `Campaign.deletion` and enqueues on a dedicated
+  `campaign-delete-queue`; the worker runs the same `deleteCampaignCascade`
+  (`services/campaigns/deleteCampaignProcessor.js`). Deletion therefore **completes within minutes
+  rather than within one request** — while in flight the campaign is quarantined everywhere (404s
+  on every campaign-scoped route, out of every list, canvassing walled, imports/exports/turf jobs
+  refused), so no *new* reads of the data occur during the window. Four privacy-relevant facts:
+  **(i) New metadata, not about voters:** `deletion.requestedBy` records WHICH admin requested the
+  delete (plus timestamps/status/error). Same class as `User.lastSeenAt` (v4): an identified-staff
+  behavioral signal, tenant-internal, org-admin-visible via the Campaigns list only while the
+  campaign still exists, and it is destroyed WITH the campaign row at cascade end (a failed delete
+  retains it until Retry completes — on a row already scheduled for destruction). No published
+  sentence enumerates campaign-level metadata; nothing to change.
+  **(ii) `CoordinatorChange` now cascades** — the v4 wrinkle reserved exactly this: campaignId-bearing
+  team-change rows no longer orphan when their campaign dies (null-campaignId rows still die with
+  the org, as before). Strictly MORE deletion than recorded.
+  **(iii) The 16MB cliff (retention-promise robustness):** two `distinct()` calls in the delete path
+  (`deleteCampaign.js` VoterNote join, `platformStats.js` capture) returned single BSON documents
+  hard-capped at 16MB — at roughly ~600k voter rows a campaign would have become **permanently
+  undeletable through the product** (the cascade would throw before destroying anything). Both are
+  now cursors/reversed joins; deletion works at any size. A failure mode in which we could not
+  honor "delete this campaign's data" is gone.
+  **(iv) Failure is now visible:** a mid-cascade crash used to be an anonymous 500; now the campaign
+  reads "Delete failed" with Retry for the org admin, and failed/stuck deletions surface on the
+  super-admin retention-health endpoint (`campaignDeletionHealth` in
+  `routes/superAdmin/access.js /health/retention`) — a half-deleted campaign can no longer sit
+  silently. The half-deleted state itself is quarantined (invisible-inert) until Retry finishes.
+  No new third party, no new export, no new access path; the wire shape adds a `deletingCampaigns`
+  array on `GET /admin/campaigns` carrying the same fields the list already served plus
+  `deletionStatus`/`deletionError` (no voter data). Exercised end-to-end by
+  `test/campaignDeleteJob.int.test.js` (13 cases incl. the CoordinatorChange sweep, DNC parking,
+  and note re-pointing).
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes — no published sentence
+  promises synchronous campaign deletion, and the v4 entry above explicitly reserved the
+  campaign-delete sentence for this event. Flagged for owner confirmation per the repo rule. No
+  new subprocessor; DPA §6 untouched.**
+
+- *(v5 2026-08-05)* **ORGANIZATION deletion is now a background job on one queue for all four
+  paths, the cascade is chunked, and three defects in it are closed — one of them a leak of
+  do-not-contact identifiers.** Retention/deletion trigger class — examined in full. The four
+  callers of `deleteOrganization` (break-glass route + wind-down + dormancy + delete-on-request)
+  now all CAS-stamp `Organization.deletion` and enqueue on `org-delete-queue`
+  (`services/platform/enqueueOrgDelete.js` → `deleteOrgProcessor.js`). Seven things a reviewer
+  should know, in order of how much they matter:
+  **(i) A do-not-contact leak between the two cascades is CLOSED.** `deleteCampaignCascade` *upserts*
+  a `DncPendingId` row (organizationId + stateVoterId) when a flagged person loses their last voter
+  row — and `DncPendingId` is in the org cascade's `ORG_SCOPED` sweep. A campaign-delete job parking
+  one AFTER the org sweep had passed that collection left a real person's **state voter identifier,
+  held precisely because they asked never to be contacted, surviving the deletion of the
+  organization that held it.** `deleteCampaignProcessor` now refuses at claim time when its org is
+  stamped (`UnrecoverableError`, no retry — the org cascade owns those rows). The same guard closes
+  a second, quieter corruption: `captureOrgBeforeDelete` and `captureCampaignBeforeDelete` banking
+  the same rows twice into the permanent `deleted` marketing bucket, which the nightly reconcile
+  never corrects.
+  **(ii) The per-org error-isolation gap is CLOSED** (see the stamped bullet in §B6): one bad org
+  can no longer abort the nightly sweep and silently skip the delete-on-request stage that backs the
+  30-day promise.
+  **(iii) A retention-tombstone bug is FIXED.** `DeletedUserRecord.deleteMany({organizationIds:
+  {$size: 0}})` was **unscoped**, so deleting org A destroyed the tombstone of any unrelated user
+  who happened to hold no memberships — and that tombstone is what backs the published 180-day
+  identity-retention window. Now scoped to the records this cascade actually detached.
+  **(iv) Scale, which is a retention-promise property here, not a performance one.** The Person
+  purge ran FOUR sequential queries per Person (~2.4M round trips at 600k people — hours) behind a
+  `Voter.distinct('personId')` whose single-BSON-document 16MB cap would eventually have made a
+  large org **undeletable outright**. Both are now cursor-fed chunks (4 queries per 5000). GridFS
+  artifact deletion is bounded too. A failure mode in which we could not honor "delete this
+  customer" is gone.
+  **(v) New metadata, not about voters:** `deletion.{requestedAt, requestedBy, source, requestId,
+  status, heartbeatAt, error}`. `requestedBy` names WHICH staff member ordered a break-glass delete
+  (null for the crons — there is no user behind a nightly sweep; `source` carries the attribution
+  that exists). Same class as `User.lastSeenAt` (v4): identified-staff, staff-visible only, and
+  destroyed WITH the org at cascade end.
+  **(vi) Reduced exposure during the window.** A stamped org is walled at
+  `middleware/orgContext.js` — every `/admin` and `/mobile` request 404s, for members AND for
+  platform staff — so nobody reads (or writes into) a half-destroyed tenant, and no `AccessLog` row
+  is created naming an org that is about to stop existing. The identity console repeats the wall in
+  `requirePersonOrgGrant`, the one staff surface that bypasses `orgContext` by design.
+  **(vii) Failure is visible.** Stuck/failed org deletions surface on
+  `GET /super-admin/access/health/retention` as `orgDeletions`, and an overdue deletion **request**
+  whose org is genuinely in flight no longer reads RED (it reports `inFlight` instead) — that was a
+  new false alarm the async path would otherwise have introduced.
+  No new third party, no new export, no new access path. Wire change: `GET /super-admin/organizations`
+  gains a `deletingOrganizations` array (same fields, plus `deletionStatus`/`Error`/`Source`; no
+  customer data), and the break-glass DELETE answers `202` instead of a counts summary. Exercised by
+  `test/orgDeleteJob.int.test.js` (12 cases) plus the rewritten `orgDelete` and `retentionTriggers`
+  suites, whose exhaustive-sweep guarantee is preserved verbatim.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes — verified: `privacy.html`
+  says "we **aim to complete** verified deletion requests within 30 days" and DPA §9 "which Doorline
+  **aims to** complete within 30 days"; neither says "immediately", and a job finishing in minutes
+  sits inside both. §B6's "executes immediately" line is stamped above. Flagged for owner
+  confirmation per the repo rule. No new subprocessor; DPA §6 untouched.**
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -820,7 +920,7 @@ The operator CLI has **no override** ("Deliberately no `--force`", `deleteAccoun
 > **Do NOT write:** *"We delete this information after 180 days."*
 > **Write:** *"We retain this information for up to 180 days after your deletion request, after which the name, email address and telephone number on the deletion record are erased on our next scheduled retention run. A record of the deletion — an internal identifier, the organizations you belonged to, and the date — is retained."*
 
-**Retention can also end EARLY, and by an unrelated event.** `deleteOrganization` pulls the org from `organizationIds` and then runs `DeletedUserRecord.deleteMany({organizationIds: {$size: 0}})` (`server/src/services/platform/deleteOrganization.js:94-98`). That `deleteMany` is **not scoped to the org being deleted** — it sweeps *every* zero-org record in the database. A user who had no active membership at deletion time (a platform user; someone removed from their org first) gets `organizationIds: []` (`deleteAccount.js:104`, `:186`, `:199`) and is destroyed as collateral by the next unrelated organization deletion.
+**Retention can also end EARLY, and by an unrelated event.** `deleteOrganization` pulls the org from `organizationIds` and then runs `DeletedUserRecord.deleteMany({organizationIds: {$size: 0}})` (`server/src/services/platform/deleteOrganization.js:94-98`). That `deleteMany` is **not scoped to the org being deleted** — it sweeps *every* zero-org record in the database. A user who had no active membership at deletion time (a platform user; someone removed from their org first) gets `organizationIds: []` (`deleteAccount.js:104`, `:186`, `:199`) and is destroyed as collateral by the next unrelated organization deletion. *[v5 2026-08-05: **FIXED.** The delete is now scoped to the ids the preceding `$pull` actually detached (`_id: { $in: touchedIds }`), so an unrelated zero-org tombstone survives an organization deletion it has nothing to do with. The early-end-of-retention hazard described here is closed; retention for a collateral user now runs its full 180 days. See the 2026-08-05 background-org-deletion entry.]*
 
 ## A3. After the retention window lapses, is the remaining data anonymous?
 
@@ -1015,7 +1115,7 @@ docs/DEPLOY_RUNBOOK.md:321                   (an index note)
 
 **No route. No service. No CLI. No admin UI. No cancel path.** The constant `DELETE_REQUEST_SLA_DAYS` (`triggers.js:25`) is **read by nothing in production** — nothing computes `scheduledFor`. Setting `RETENTION_DELETE_SLA_DAYS` in the environment changes nothing. In production this collection is empty; a row could only appear by direct database manipulation.
 
-The only human-triggerable org deletion is the break-glass `DELETE /super-admin/organizations/:orgId` (`server/src/routes/superAdmin/organizations.js:181-196`), which requires `requireBreakGlass` + typed slug and executes **immediately** — no SLA, no request record, no cancellation window.
+The only human-triggerable org deletion is the break-glass `DELETE /super-admin/organizations/:orgId` (`server/src/routes/superAdmin/organizations.js:181-196`), which requires `requireBreakGlass` + typed slug and executes **immediately** — no SLA, no request record, no cancellation window. *[v5 2026-08-05: the route no longer executes the cascade **synchronously** — it CAS-stamps `Organization.deletion` and enqueues on `org-delete-queue`, answering `202`, and the worker destroys the tenant minutes later. The substance of this finding is unchanged and still correct: still break-glass + typed slug, still **no SLA, no request record, and no cancellation window** — the stamp is not a grace period, it is the point of no return. What changed is that the tenant is walled off (every `/admin` and `/mobile` request 404s) from the instant of the stamp rather than after the last row dies. See the 2026-08-05 background-org-deletion entry.]*
 
 > **Do NOT write:** *"A customer organization may request deletion of its data and we will complete it within 30 days,"* or anything implying a cancellable request window. **The code does not back it.**
 > If the business intends to honour such a promise, it is a **manual, human process today**, and the policy must say so — or engineering must build the intake.
@@ -1026,7 +1126,7 @@ per-request try/catch keeps a failed request `scheduled` for retry (≤5 attempt
 red; never a green receipt. The second (no per-org isolation in the two org-purge loops) is still
 true.]*
 - A **failed** deletion request produces a **green** `RetentionRun` receipt. `executeDueDeletionRequests` catches per-org failures, marks the request `status: 'failed'`, and **returns normally** (`triggers.js:121-136`), so `runRetentionTriggers` stamps `ok: true` (`:164-167`). The due-query filters `status: 'scheduled'` (`:113`), so a `'failed'` request is **never picked up again by any code path**. It is permanently dropped behind a successful-looking receipt and a green health banner (`purgeDeletedIdentities.js:68`; `routes/superAdmin/access.js:149-159`).
-- `purgeWoundDownOrgs` has **no per-org error isolation** (`triggers.js:64-68`) and the three triggers run sequentially in one function (`:157-159`), so a single throwing organization aborts the whole nightly sweep.
+- `purgeWoundDownOrgs` has **no per-org error isolation** (`triggers.js:64-68`) and the three triggers run sequentially in one function (`:157-159`), so a single throwing organization aborts the whole nightly sweep. *[v5 2026-08-05: **CLOSED.** The three stages no longer call `deleteOrganization` at all — each due org is CAS-stamped and handed to `org-delete-queue` inside a per-org `try/catch`, so one org that cannot be enqueued increments `failedToEnqueue` and the sweep continues, including the delete-on-request stage that was previously skipped. Each org then carries its own BullMQ retry ladder instead of "wait for tomorrow's cron". Regression test: `test/retentionTriggers.int.test.js` — *"a single org that cannot be enqueued does NOT abort the sweep or the SLA stage"*. The `RetentionRun` receipt now reports `enqueued`; `purged` keeps its original meaning and is 0, because this sweep no longer destroys anything itself.]*
 
 ## B7. During the 60-day wind-down, can the customer access or export their own data?
 
@@ -1703,9 +1803,9 @@ Also permanently retained and never inventoried: `Voter.identityBackup` (a Mixed
 > **Do NOT write:** *"Residual copies of deleted data persist in backups only until they rotate out on our provider's schedule."* **That is false while the laptop archive exists.** Either the policy covers operator-held dumps, or the company destroys that archive.
 
 ### 5. Deleting a campaign leaves orphans. **VERIFIED.**
-A campaign can only be hard-deleted if it has no canvassing history — **but that gate is a live-row existence check, not a latch.** `campaignHasCanvassed()` (`routes/admin/campaigns.js:54-58`) tests `CanvassActivity.exists()`. `POST /admin/turfs/discard` with `clearKnocks` **hard-deletes those very rows** (`routes/admin/turfs.js:343-344`) and is a **checkbox in the web console** (`client/src/pages/TurfsPage.jsx:425`). **Clearing every non-archived pass re-opens the hard-delete gate on a campaign that WAS canvassed.**
+A campaign can only be hard-deleted if it has no canvassing history — **but that gate is a live-row existence check, not a latch.** `campaignHasCanvassed()` (`routes/admin/campaigns.js:54-58`) tests `CanvassActivity.exists()`. `POST /admin/turfs/discard` with `clearKnocks` **hard-deletes those very rows** (`routes/admin/turfs.js:343-344`) and is a **checkbox in the web console** (`client/src/pages/TurfsPage.jsx:425`). **Clearing every non-archived pass re-opens the hard-delete gate on a campaign that WAS canvassed.** *[v5 2026-08-05: `campaignHasCanvassed()` moved to `services/campaigns/deletionState.js` (the background delete worker re-checks it at claim time — a second enforcement of the same gate, not a change to it); the live-row-not-latch finding stands unchanged.]*
 
-The campaign cascade removes 20 collections + the Voter rows housed in that campaign's households + the raw spreadsheets. **It does NOT remove:** `VoterNote` (keyed by voterId, no campaignId — **free-text notes about voters survive as orphans after the voter rows are gone**), `Person` (org-scoped — canonical identity rows with name, DOB, phone, party, gender simply left behind), `FlagReview`, `PersonMergeLog`/`Candidate`/`EditProposal`, and `GeocodeCache`.
+The campaign cascade removes 20 collections + the Voter rows housed in that campaign's households + the raw spreadsheets. **It does NOT remove:** `VoterNote` (keyed by voterId, no campaignId — **free-text notes about voters survive as orphans after the voter rows are gone**), `Person` (org-scoped — canonical identity rows with name, DOB, phone, party, gender simply left behind), `FlagReview`, `PersonMergeLog`/`Candidate`/`EditProposal`, and `GeocodeCache`. *[v5 2026-08-05: two halves of this list are superseded — the cascade has since gained VoterNote hygiene (a deleted row's notes re-point to a surviving sibling row, or delete with the person's last row; recorded in the per-campaign-voters entry of "What changed since v2"), and `CoordinatorChange` (campaignId-bearing rows) moved INTO the cascade with this release. The cascade also became a background job — same collections removed, same gate, different dyno. Person / FlagReview / merge-artifacts / GeocodeCache remain left behind exactly as recorded. See the 2026-08-05 v5 entry.]*
 
 ### 6. Two smaller items.
 - **`middleware/error.js:7-10` returns `err.message` to the caller on any 500 in production** — which surfaces raw Mongo errors. A duplicate-key error quotes the offending value (e.g. an email address, a street address, a state voter ID).

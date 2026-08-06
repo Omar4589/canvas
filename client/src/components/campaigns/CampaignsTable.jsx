@@ -32,16 +32,23 @@ export default function CampaignsTable({ campaigns, menuItems }) {
       {campaigns.map((c) => {
         const households = c.counts?.households || 0;
         const pct = households ? Math.round((100 * (c.counts?.knocked || 0)) / households) : 0;
+        // Mid-delete rows are inert: plain name (drill-in 404s), menu shrinks to Retry/nothing.
+        const gone = !!c.deletionStatus;
+        const items = menuItems(c);
         return (
           <tr key={c._id} className="hover:bg-sunken">
             <td className="px-4 py-3 font-medium text-fg">
-              <Link
-                to={`/campaigns/${c._id}`}
-                className="text-fg hover:text-brand-accent hover:underline"
-              >
-                {c.name}
-              </Link>
-              {c.stepsTotal != null && !c.setupComplete && (
+              {gone ? (
+                <span className="text-fg">{c.name}</span>
+              ) : (
+                <Link
+                  to={`/campaigns/${c._id}`}
+                  className="text-fg hover:text-brand-accent hover:underline"
+                >
+                  {c.name}
+                </Link>
+              )}
+              {!gone && c.stepsTotal != null && !c.setupComplete && (
                 <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
                   <span className="h-1 w-1 rounded-full bg-brand-accent" />
                   Setup {c.stepsDone}/{c.stepsTotal}
@@ -78,10 +85,10 @@ export default function CampaignsTable({ campaigns, menuItems }) {
               {c.type === 'survey' ? fmt(c.counts?.surveysSubmitted) : fmt(c.counts?.litDropped)}
             </td>
             <td className="px-4 py-3">
-              <StatusBadge isActive={c.isActive} />
+              <StatusBadge isActive={c.isActive} deletionStatus={c.deletionStatus} />
             </td>
             <td className="px-4 py-3 text-right">
-              <RowMenu items={menuItems(c)} />
+              {items.length > 0 && <RowMenu items={items} />}
             </td>
           </tr>
         );

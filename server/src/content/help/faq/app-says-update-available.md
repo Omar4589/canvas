@@ -10,8 +10,9 @@ tags: update, version, app store, play store, banner, outdated
 ---
 
 Doorline sometimes needs you to install a newer version of the app itself — the kind of update
-that comes from the **App Store** or **Google Play**, not the small automatic refreshes the app
-does on its own.
+that comes from the **App Store** or **Google Play**. That's different from the small refreshes
+the app handles on its own (those just show a quick
+[restart banner](app-asks-to-restart), no store involved).
 
 You'll see one of two things:
 

@@ -30,8 +30,24 @@ export async function orgContext(req, res, next) {
         return res.status(400).json({ error: 'Invalid X-Org-Id', code: 'ORG_CONTEXT' });
       }
       const org = await Organization.findById(orgIdRaw);
-      if (!org || !org.isActive) {
-        return res.status(404).json({ error: 'Organization not found', code: 'ORG_CONTEXT' });
+      // A mid-delete organization reads as GONE here, and this is the single chokepoint that walls
+      // the entire tenant: every /admin and /mobile router mounts this middleware, so one check
+      // stops reads, writes and canvassing against a tenant whose rows are being destroyed under
+      // it. 404 + ORG_CONTEXT is deliberate and load-bearing — the already-shipped mobile bundle
+      // recovers on {400,403,404} + (code ORG_CONTEXT | a known error string), and 'Organization
+      // not found' is in that string set, so this is recognized twice over and routes the user to
+      // the org picker. A NEW code would match neither and dead-end every screen on a Retry button
+      // that can never succeed. `reason` is purely additive for the newer clients.
+      // Note this sits ABOVE the staff branches below on purpose: platform staff must not enter an
+      // org mid-cascade either — they would read half-destroyed data and their AccessLog rows
+      // would name an org that is about to stop existing. Break-glass keeps the super-admin list
+      // and detail surfaces, neither of which routes through here.
+      if (!org || !org.isActive || org.deletion?.requestedAt) {
+        return res.status(404).json({
+          error: 'Organization not found',
+          code: 'ORG_CONTEXT',
+          ...(org?.deletion?.requestedAt ? { reason: 'deleting' } : {}),
+        });
       }
       // ── Platform staff entering a customer organization. ───────────────────────────────────────
       //
@@ -130,7 +146,10 @@ export async function orgContext(req, res, next) {
     });
     if (memberships.length === 1) {
       const org = await Organization.findById(memberships[0].organizationId);
-      if (org && org.isActive) {
+      // Same wall as the explicit-header path above: a single-org user whose only org is being
+      // deleted resolves to no active org, and the downstream gates answer exactly as they
+      // already do for a deactivated one.
+      if (org && org.isActive && !org.deletion?.requestedAt) {
         req.activeOrg = org;
         req.activeMembership = memberships[0];
       }

@@ -110,6 +110,13 @@ export async function requirePersonOrgGrant(req, res, organizationId) {
     res.status(409).json({ error: 'This identity record is not scoped to an organization.' });
     return null;
   }
+  // The identity console is the one staff surface that does NOT route through
+  // middleware/orgContext.js (it has this gate instead), so the tenant wall has to be repeated
+  // here — otherwise a name search could still read a deleting org's half-destroyed PII.
+  if (await Organization.exists({ _id: organizationId, 'deletion.requestedAt': { $ne: null } })) {
+    res.status(404).json({ error: 'Organization not found', code: 'ORG_CONTEXT', reason: 'deleting' });
+    return null;
+  }
   const grant = await activeGrant(req.user._id, organizationId);
   if (grant) return grant;
   const org = await Organization.findById(organizationId, 'name').lean();

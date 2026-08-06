@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -30,7 +31,8 @@ async function assertCampaignAccess(req, campaignId) {
   if (!mongoose.isValidObjectId(campaignId)) return { error: 400, message: 'Invalid campaignId' };
   const orgId = activeOrgId(req);
   if (!orgId) return { error: 400, message: 'Active organization required' };
-  const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+  // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+  const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
   if (!campaign) return { error: 404, message: 'Campaign not found' };
   if (isOrgAdminOrSuper(req)) return { campaign };
   const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });

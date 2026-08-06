@@ -9,6 +9,7 @@ import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../service
 import { ImportJob } from '../../models/ImportJob.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { saveRawImportFromFile, deleteRawImport } from '../../services/import/rawImportStore.js';
@@ -190,7 +191,9 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
     const { mapping, importProfileId } = resolved;
 
     // Campaign must exist + belong to the active org (preserves today's 400).
-    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    // NOT_DELETING: no new imports into a mid-delete campaign (deletionState.js) — an
+    // import writing rows during the cascade would orphan voters.
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req), ...NOT_DELETING });
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const job = await ImportJob.create({
@@ -232,7 +235,9 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     if (!(await manages(req, res, campaignId))) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
-    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    // NOT_DELETING: no new imports into a mid-delete campaign (deletionState.js) — an
+    // import writing rows during the cascade would orphan voters.
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req), ...NOT_DELETING });
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const explode = req.body?.explode !== 'false';
@@ -265,7 +270,9 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;
-    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    // NOT_DELETING: no new imports into a mid-delete campaign (deletionState.js) — an
+    // import writing rows during the cascade would orphan voters.
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req), ...NOT_DELETING });
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const job = await ImportJob.create({
@@ -311,7 +318,9 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;
-    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req) });
+    // NOT_DELETING: no new imports into a mid-delete campaign (deletionState.js) — an
+    // import writing rows during the cascade would orphan voters.
+    const campaign = await Campaign.findOne({ _id: campaignId, organizationId: activeOrgId(req), ...NOT_DELETING });
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const job = await ImportJob.create({

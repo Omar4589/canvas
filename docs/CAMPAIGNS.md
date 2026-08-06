@@ -185,12 +185,20 @@ in the drawer). The rules protect your data once canvassing has started:
   skipped months billable again on any statement that hasn't been issued.
 - **Delete** is permanent and is **only allowed before any canvassing** (no knocks or surveys
   recorded). When allowed, it cascades — it removes the campaign and everything it owns (its
-  imported voters and doors, efforts, draft rounds, books, walk lists, early-vote marks, reports).
-  **If your org runs other campaigns, they are untouched** — voter records are per-campaign, so
-  deleting one campaign removes only *its* copies; a person shared with another campaign lives on
-  there, and a **Do not contact** request is preserved even if their last record dies (a later
-  import re-flags them automatically). Once a campaign has field activity, **Delete is disabled**
-  ("Archive instead") — you can't destroy real canvassing history.
+  imported voters and doors, efforts, draft rounds, books, walk lists, early-vote marks, reports,
+  team-change history). **If your org runs other campaigns, they are untouched** — voter records
+  are per-campaign, so deleting one campaign removes only *its* copies; a person shared with
+  another campaign lives on there, and a **Do not contact** request is preserved even if their
+  last record dies (a later import re-flags them automatically). Once a campaign has field
+  activity, **Delete is disabled** ("Archive instead") — you can't destroy real canvassing history.
+  **Removal runs in the background**: confirming the dialog answers instantly, the campaign shows
+  a **"Deleting…"** badge on the Campaigns page (it can't be opened, edited, or canvassed while it
+  shows), and it disappears from the list when removal finishes — usually within a minute, a few
+  minutes for very large campaigns. There is no cancel after you confirm. If something interrupts
+  the removal (say the worker restarts mid-run), the badge turns to **"Delete failed"** with a
+  **Retry delete** action that finishes the job; a campaign in that state stays hidden and inert
+  everywhere else until the retry completes. Deleting also waits its turn: if an import or export
+  is still running for the campaign, Delete asks you to let it finish first.
 
 ## Add more doors later (a new walk list on a live campaign)
 
@@ -295,17 +303,44 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   "use the organization default" resolves to); every report surface ships the **resolved** boolean
   alongside the numbers it affects. Covered by
   [billableRestricted.int.test.js](../server/test/billableRestricted.int.test.js).
-- **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`).
-  Cascades via [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js):
-  `deleteCampaignCascade()` first parks DNC stickiness (a flagged person whose LAST row lives here
-  → `DncPendingId` with the flag's original attribution, so a future import re-flags) and
-  re-points org-level `VoterNote`s to a surviving sibling row (deleting them only when no sibling
-  survives), then `Voter.deleteMany({ campaignId })` — **exactly this campaign's rows; sibling
-  campaigns' voters are structurally unreachable** — then `deleteMany({ campaignId })` over
-  **every** campaignId-scoped collection (Household, Effort, EffortMember, Pass, Turf,
-  TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter, VotedPendingId,
-  CampaignAssignment, ClientReport, ClientReportMapPoint, ReportShareLink, CanvassActivity,
-  SurveyResponse, ImportJob — raw GridFS import files deleted first), then the campaign. The
+- **DELETE `/admin/campaigns/:id`** — **only when `!hasCanvassed`** (else `400 { code: 'has-activity' }`),
+  and `409 { code: 'campaign-busy' }` while an ImportJob/ExportJob is active for the campaign (an
+  import writing rows mid-cascade would orphan voters). **A background job since 2026-08**: a
+  106,958-door delete ran inline for minutes, Heroku's 30s router limit 503'd the browser while the
+  dyno finished anyway. The route now CAS-stamps `Campaign.deletion`
+  (`{requestedAt, requestedBy, status pending|running|failed, heartbeatAt, error}`), enqueues on
+  `campaign-delete-queue` (stable `jobId` = campaignId + `removeOnComplete/Fail: true` so a Retry's
+  re-add is never silently deduped against a finished job), and answers **`202 {queued: true}`** —
+  idempotently while a fresh stamp exists; a `failed` stamp re-stamps and re-enqueues (Retry). While
+  stamped, the campaign is **quarantined**: `GET /admin/campaigns` moves it from `campaigns` into a
+  separate **`deletingCampaigns`** array (so every picker/drill-in surface treats it as gone with
+  zero client changes; only the Campaigns page renders those rows), every campaign-scoped resolver
+  spreads `NOT_DELETING` ([deletionState.js](../server/src/services/campaigns/deletionState.js)) →
+  404, PATCH answers `409 campaign-deleting`, and the import/turf/export processors fail a job that
+  claims into a stamped campaign. The worker
+  ([deleteCampaignProcessor.js](../server/src/services/campaigns/deleteCampaignProcessor.js))
+  re-checks `campaignHasCanvassed` at claim (a knock can land between gate and run), heartbeats
+  every 30s through even single multi-minute `deleteMany` awaits, marks `failed` on every failed
+  attempt, and runs the cascade; stale stamps (pending >2min unclaimed, running >3min silent) are
+  CAS-expired to `failed` by the list GET — the poll is the watchdog (the imports pattern). Success
+  writes nothing: the row being gone is the completed state, and the Campaigns page polls (2s,
+  predicate) until it vanishes. **No cancel after confirm** — a cancel racing the cascade would
+  manufacture half-deleted campaigns. Failed deletions also surface on the super-admin retention
+  health endpoint (`campaignDeletionHealth`). Cascade order via
+  [deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js): `deleteCampaignCascade()`
+  first parks DNC stickiness (a flagged person whose LAST row lives here → `DncPendingId` with the
+  flag's original attribution, so a future import re-flags) and re-points org-level `VoterNote`s to
+  a surviving sibling row (deleting them only when no sibling survives; the join runs from the
+  small note side, and the platform-stats distinct runs as an aggregation cursor — both formerly
+  `distinct()` calls that hit Mongo's 16MB cap around ~600k voters, which would have made huge
+  campaigns permanently undeletable), then `Voter.deleteMany({ campaignId })` — **exactly this
+  campaign's rows; sibling campaigns' voters are structurally unreachable** — then
+  `deleteMany({ campaignId })` over **every** campaignId-scoped collection (Household, Effort,
+  EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter,
+  VotedPendingId, CampaignAssignment, CampaignManager, **CoordinatorChange** (added 2026-08 — was
+  the documented orphan class), ClientReport, ClientReportMapPoint, ReportShareLink,
+  CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
+  ExportJob — raw GridFS import files + export artifacts deleted first), then the campaign. The
   platform-stats capture banks only people whose **last** row dies (shared people keep counting
   in `live`).
 

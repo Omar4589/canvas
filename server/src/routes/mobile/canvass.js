@@ -269,7 +269,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   if (access.error) return access;
 
   const campaign = await Campaign.findById(household.campaignId).lean();
-  if (!campaign) return { error: { status: 404, message: 'Campaign not found' } };
+  // A mid-delete campaign reads as gone — this closes the knock-after-stamp race
+  // (services/campaigns/deletionState.js).
+  if (!campaign || campaign.deletion?.requestedAt) return { error: { status: 404, message: 'Campaign not found' } };
   if (requireCampaignType && campaign.type !== requireCampaignType) {
     return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
   }
@@ -420,7 +422,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
     // gate above does: this is literally the same write as the campaign-nested web route, and an
     // identical write must never be 200 through one door and 409 through the other. Inline rather
     // than the router middleware because this path carries no :campaignId to resolve.
-    const pinCampaign = await Campaign.findById(household.campaignId).select('isActive').lean();
+    const pinCampaign = await Campaign.findById(household.campaignId).select('isActive deletion.requestedAt').lean();
     if (!assertCampaignWritable(res, pinCampaign)) return;
 
     const data = locationCorrectionSchema.parse(req.body);
@@ -602,7 +604,8 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     if (voter.doNotContact?.flagged) return sendRouteError(res, DO_NOT_CONTACT);
 
     const campaign = await Campaign.findById(household.campaignId).lean();
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found' });
     if (campaign.type !== 'survey') {
       return res
         .status(400)

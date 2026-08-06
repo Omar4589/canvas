@@ -42,6 +42,6 @@ A few ordinary reasons, worth checking before you ask anyone:
 - **Your phone is too old** for the version the store is offering.
 - **A work or school phone** that blocks installs you didn't request. Those are managed by whoever issued the phone, not by Doorline.
 
-If it installs but you can't get to any doors, that's usually not an install problem — you may not be assigned a book yet. Tell your team lead; they can check. See [Get started as a canvasser](canvasser-first-day) for the whole first-day flow, and [The app says an update is available (or required) — what do I do?](app-says-update-available) if you're being asked to update.
+If it installs but you can't get to any doors, that's usually not an install problem — you may not be assigned a book yet. Tell your team lead; they can check. See [Get started as a canvasser](canvasser-first-day) for the whole first-day flow, and [The app says an update is available (or required) — what do I do?](app-says-update-available) if you're being asked to update — or [the restart banner](app-asks-to-restart) if the app just offers a quick restart.
 
 > Tip: One account covers every organization you belong to. The app lets you switch between all of them, so if you canvass for more than one group you still only install Doorline once.

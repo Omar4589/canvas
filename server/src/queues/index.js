@@ -15,6 +15,15 @@ export const QUEUE_NAMES = {
   // Export Center: background CSV/ZIP builds (services/export/exportProcessor.js). Isolated
   // so a heavy full-backup can never head-of-line-block an import or turf cut.
   EXPORT: 'export-queue',
+  // Campaign hard-delete cascades (services/campaigns/deleteCampaignProcessor.js) — a 100k-door
+  // cascade runs for minutes, so it gets its own lane rather than starving imports.
+  CAMPAIGN_DELETE: 'campaign-delete-queue',
+  // Organization hard-delete cascades (services/platform/deleteOrgProcessor.js). All FOUR paths
+  // converge here — break-glass and the three retention triggers — so each org is its own job with
+  // its own retry, and one org that throws can no longer abort the nightly sweep (which is what
+  // enforces the 30-day delete-on-request promise). Own lane: an org cascade is every campaign's
+  // rows at once and the heaviest thing the worker runs.
+  ORG_DELETE: 'org-delete-queue',
   // Future: GEOCODE: 'geocode-queue'
 };
 

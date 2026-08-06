@@ -5,6 +5,7 @@ import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { refuseVendorStaffTarget } from '../../services/memberships/vendorGuards.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
@@ -57,7 +58,8 @@ async function loadOwnedCampaign(req) {
   if (!mongoose.isValidObjectId(req.params.campaignId)) return null;
   const orgId = activeOrgId(req);
   if (!orgId) return null;
-  const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
+  // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+  const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId, ...NOT_DELETING });
   return campaign || null;
 }
 

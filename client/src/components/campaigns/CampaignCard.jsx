@@ -32,7 +32,12 @@ export function TypePill({ type }) {
   );
 }
 
-export function StatusBadge({ isActive }) {
+export function StatusBadge({ isActive, deletionStatus }) {
+  // Mid-delete states outrank active/archived — the row is on its way out. `deletionStatus`
+  // only exists on rows from the deletingCampaigns array (Campaigns page); other callers
+  // (DashboardPage) never pass it and are unchanged.
+  if (deletionStatus === 'failed') return <Badge variant="danger" dot>Delete failed</Badge>;
+  if (deletionStatus) return <Badge variant="warning" dot>Deleting…</Badge>;
   return isActive ? (
     <Badge variant="success" dot>Active</Badge>
   ) : (
@@ -62,23 +67,31 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
   const days = daysUntil(c.electionDay, c.timeZone);
   const ev = earlyVotingState(c.earlyVotingStart, c.earlyVotingEnd, c.timeZone);
   const hasDates = !!(c.electionDay || c.earlyVotingStart || c.earlyVotingEnd || c.datesNote);
+  // Mid-delete rows are inert: no drill-in (campaign-scoped routes already 404), no
+  // Assignments; the page's menuItems() shrinks to Retry (failed) or nothing.
+  const gone = !!c.deletionStatus;
+  const items = menuItems(c);
 
   return (
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between gap-2">
-        <Link
-          to={`/campaigns/${c._id}`}
-          className="font-semibold text-fg hover:text-brand-accent hover:underline"
-        >
-          {c.name}
-        </Link>
+        {gone ? (
+          <span className="font-semibold text-fg">{c.name}</span>
+        ) : (
+          <Link
+            to={`/campaigns/${c._id}`}
+            className="font-semibold text-fg hover:text-brand-accent hover:underline"
+          >
+            {c.name}
+          </Link>
+        )}
         <div className="flex shrink-0 items-center gap-1.5">
           <TypePill type={c.type} />
-          <StatusBadge isActive={c.isActive} />
+          <StatusBadge isActive={c.isActive} deletionStatus={c.deletionStatus} />
         </div>
       </div>
 
-      {c.stepsTotal != null && !c.setupComplete && (
+      {!gone && c.stepsTotal != null && !c.setupComplete && (
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg">
           <span className="h-1.5 w-1.5 rounded-full bg-brand-accent" />
           Setup {c.stepsDone}/{c.stepsTotal} · not live
@@ -127,18 +140,31 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
       </div>
 
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
-        <Button variant="secondary" size="sm" onClick={() => onAssign(c)}>
-          Assignments
-        </Button>
-        <div className="flex items-center gap-1">
-          <Link
-            to={`/campaigns/${c._id}`}
-            className="text-xs font-medium text-fg-muted hover:text-brand-accent"
-          >
-            Open dashboard →
-          </Link>
-          <RowMenu items={menuItems(c)} />
-        </div>
+        {gone ? (
+          <>
+            <p className={`text-xs ${c.deletionStatus === 'failed' ? 'text-danger' : 'text-fg-muted'}`}>
+              {c.deletionStatus === 'failed'
+                ? c.deletionError || 'The delete stopped partway. Retry to finish removing this campaign.'
+                : 'Removing doors and voters in the background…'}
+            </p>
+            {items.length > 0 && <RowMenu items={items} />}
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" size="sm" onClick={() => onAssign(c)}>
+              Assignments
+            </Button>
+            <div className="flex items-center gap-1">
+              <Link
+                to={`/campaigns/${c._id}`}
+                className="text-xs font-medium text-fg-muted hover:text-brand-accent"
+              >
+                Open dashboard →
+              </Link>
+              <RowMenu items={items} />
+            </div>
+          </>
+        )}
       </div>
     </Card>
   );

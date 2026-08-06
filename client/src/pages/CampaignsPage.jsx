@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -125,6 +125,9 @@ export default function CampaignsPage() {
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
     queryFn: () => api('/admin/campaigns'),
+    // Poll only while a delete runs in the background (the ImportPage predicate pattern):
+    // the row vanishing — or flipping to failed — is the only completion signal.
+    refetchInterval: (q) => (q.state.data?.deletingCampaigns?.length ? 2000 : false),
   });
 
   const surveysQ = useQuery({
@@ -163,17 +166,41 @@ export default function CampaignsPage() {
 
   const del = useMutation({
     mutationFn: (id) => api(`/admin/campaigns/${id}`, { method: 'DELETE' }),
+    // The 202 lands in under a second — the campaign is now "Deleting…" in the list, not
+    // gone, so only the list key refreshes here; the rollup/report keys refresh when the
+    // row actually vanishes (the effect below).
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
-      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
       setDeleting(null);
     },
   });
 
   const campaigns = campaignsQ.data?.campaigns || [];
+  // Mid-delete campaigns ship in their own array — every other consumer of this query key
+  // (pickers, drill-in resolvers) reads `campaigns` and treats them as gone; only this page
+  // merges them back in, to render the Deleting… / failed-Retry cards in place.
+  const deletingCampaigns = campaignsQ.data?.deletingCampaigns || [];
+  const allCampaigns = [...campaigns, ...deletingCampaigns];
   const surveys = surveysQ.data?.surveys || [];
 
+  // When a previously-deleting campaign disappears between polls the delete finished —
+  // refresh the cross-campaign surfaces (the TurfsPage completed-cut precedent).
+  const prevDeletingIds = useRef(new Set());
+  useEffect(() => {
+    if (!campaignsQ.data) return;
+    const current = new Set(deletingCampaigns.map((c) => String(c._id)));
+    const present = new Set(allCampaigns.map((c) => String(c._id)));
+    const vanished = [...prevDeletingIds.current].some((id) => !present.has(id));
+    prevDeletingIds.current = current;
+    if (vanished) {
+      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      qc.invalidateQueries({ queryKey: ['reports'] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignsQ.data]);
+
   // KPIs — exact sums over ACTIVE campaigns; only the percent hint is rounded.
+  // Deleting campaigns are excluded (they read from `campaigns`' sibling array).
   const activeCampaigns = campaigns.filter((c) => c.isActive);
   const activeHouseholds = activeCampaigns.reduce((s, c) => s + (c.counts?.households || 0), 0);
   const activeKnocked = activeCampaigns.reduce((s, c) => s + (c.counts?.knocked || 0), 0);
@@ -186,32 +213,48 @@ export default function CampaignsPage() {
     !q ||
     (c.name || '').toLowerCase().includes(q) ||
     (c.state || '').toLowerCase().includes(q);
-  const filteredActive = sortCampaigns(activeCampaigns.filter(matches), sort);
+  // Deleting rows render IN PLACE in their section (a separate section would shuffle rows
+  // under the admin's eyes on every poll tick) — the badge carries the state.
+  const filteredActive = sortCampaigns(
+    allCampaigns.filter((c) => c.isActive && matches(c)),
+    sort
+  );
   const filteredArchived = sortCampaigns(
-    campaigns.filter((c) => !c.isActive && matches(c)),
+    allCampaigns.filter((c) => !c.isActive && matches(c)),
     sort
   );
   const noMatches = !!q && !filteredActive.length && !filteredArchived.length;
 
   // Same actions for both card and table renderings.
-  const menuItems = (c) => [
-    { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
-    { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
-    // Edit / Archive / Delete are org-admin acts — a lead runs the
-    // campaign but doesn't reshape or remove it.
-    ...(isOrgAdmin
-      ? [
-          { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
-          {
-            label: c.isActive ? 'Archive' : 'Reactivate',
-            onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }),
-          },
-          c.deletable === true
-            ? { label: 'Delete', danger: true, onClick: () => setDeleting(c) }
-            : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
-        ]
-      : []),
-  ];
+  const menuItems = (c) => {
+    // A mid-delete row is inert: its only action is retrying a failed delete (org admins,
+    // same confirm modal — re-confirming an irreversible act is never wrong).
+    if (c.deletionStatus) {
+      return c.deletionStatus === 'failed' && isOrgAdmin
+        ? [{ label: 'Retry delete', danger: true, onClick: () => { del.reset(); setDeleting(c); } }]
+        : [];
+    }
+    return [
+      { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
+      { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
+      // Edit / Archive / Delete are org-admin acts — a lead runs the
+      // campaign but doesn't reshape or remove it.
+      ...(isOrgAdmin
+        ? [
+            { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
+            {
+              label: c.isActive ? 'Archive' : 'Reactivate',
+              onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }),
+            },
+            c.deletable === true
+              // del.reset(): without it, an error from a previous campaign's failed attempt
+              // renders inside a freshly opened modal.
+              ? { label: 'Delete', danger: true, onClick: () => { del.reset(); setDeleting(c); } }
+              : { label: 'Delete', disabled: true, title: 'Archive instead — this campaign has canvassing data' },
+          ]
+        : []),
+    ];
+  };
 
   function renderList(list) {
     if (view === 'table') return <CampaignsTable campaigns={list} menuItems={menuItems} />;
@@ -268,7 +311,7 @@ export default function CampaignsPage() {
         <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
           Error loading campaigns: {campaignsQ.error.message}
         </div>
-      ) : campaigns.length === 0 ? (
+      ) : allCampaigns.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-sunken">
           {isOrgAdmin ? (
             <EmptyState
@@ -399,7 +442,7 @@ export default function CampaignsPage() {
             <>
               <Button variant="secondary" size="sm" onClick={() => setDeleting(null)}>Cancel</Button>
               <Button variant="danger" size="sm" loading={del.isPending} onClick={() => del.mutate(deleting._id)}>
-                Delete permanently
+                {deleting.deletionStatus === 'failed' ? 'Retry delete' : 'Delete permanently'}
               </Button>
             </>
           }
@@ -408,6 +451,10 @@ export default function CampaignsPage() {
             This permanently removes the campaign along with its {fmt(deleting.counts?.households)} doors and their
             voters, plus any walk lists and draft passes. This can't be undone. Campaigns with canvassing activity
             can't be deleted — archive them instead.
+          </p>
+          <p className="mt-2 text-sm text-fg-muted">
+            Removal runs in the background — the campaign shows as “Deleting…” and disappears from this list when
+            it finishes, usually within a minute (a few minutes for very large campaigns).
           </p>
           {del.error && <p className="mt-2 text-sm text-danger">{del.error.message}</p>}
         </Modal>

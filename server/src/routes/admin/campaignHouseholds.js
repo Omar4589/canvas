@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Household } from '../../models/Household.js';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
@@ -33,7 +34,8 @@ router.patch('/:householdId/location', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.campaignId) || !mongoose.isValidObjectId(req.params.householdId)) {
       return res.status(400).json({ error: 'Invalid id' });
     }
-    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId }).lean();
+    // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const household = await Household.findOne({
       _id: req.params.householdId,

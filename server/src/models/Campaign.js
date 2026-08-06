@@ -73,6 +73,22 @@ const campaignSchema = new mongoose.Schema(
     // marketing counters (services/platform/platformStats.js), so a RETRIED hard-delete can't capture
     // its counts twice into the permanent `deleted` bucket. Deleted with the campaign.
     platformStatsCaptured: { type: Boolean, default: false },
+    // Hard-delete runs as a background job on the worker dyno (a 107k-door cascade blows Heroku's
+    // 30s router limit inline), and the campaign doc itself is the job record — success is the row
+    // being GONE, so only in-flight/failed state lives here. `requestedAt` is THE truth flag
+    // (null ⇒ not deleting; services/campaigns/deletionState.js exports the shared filter): while
+    // set, the campaign is quarantined — excluded from every list and 404/409'd by every
+    // campaign-scoped route except the admin campaigns list, which surfaces it as "Deleting…".
+    // A `failed` deletion keeps requestedAt set on purpose (the cascade may have half-run); the
+    // only exits are Retry (re-stamp + re-enqueue) or completion. No index: ≈0-1 deleting rows
+    // per org, and every read rides an existing _id/organizationId key.
+    deletion: {
+      requestedAt: { type: Date, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      status: { type: String, enum: ['pending', 'running', 'failed'], default: null },
+      heartbeatAt: { type: Date, default: null },
+      error: { type: String, default: null },
+    },
     // Denormalized ALL-TIME ledger counters, maintained by services/reports/campaignCounters.js
     // so the no-date-window dashboards (rollup "All time", campaigns list) read the campaign doc
     // instead of re-aggregating the whole CanvassActivity/SurveyResponse ledgers on every load.

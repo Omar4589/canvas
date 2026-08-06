@@ -19,6 +19,7 @@ import { loadRoleContext } from '../lib/role';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import RootErrorBoundary from '../components/RootErrorBoundary';
 import UpdateGate from '../components/UpdateGate';
+import OtaUpdatePrompt from '../components/OtaUpdatePrompt';
 
 // Bar icons must contrast the bar background: light icons on dark, dark on light.
 function ThemedStatusBar() {
@@ -154,6 +155,10 @@ export default function RootLayout() {
                 <Stack.Screen name="update-required" />
                 <Stack.Screen name="(app)" />
               </Stack>
+              {/* Above the whole Stack (login included): a downloaded OTA update, offered
+                  politely (never auto-applied). Renders BEFORE UpdateGate so the store
+                  nag's hard wall paints above this banner if both ever fire. */}
+              <OtaUpdatePrompt />
               {/* Above the whole Stack (login included): the store-update nag/wall for
                   superseded native builds. Server-driven; fails open. */}
               <UpdateGate />

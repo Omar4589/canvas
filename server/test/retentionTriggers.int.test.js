@@ -28,6 +28,7 @@ const {
   WIND_DOWN_DAYS, DORMANCY_MONTHS, DELETE_REQUEST_SLA_DAYS, TRIGGER_JOB,
 } = await import('../src/services/retention/triggers.js');
 const { REPEATABLE_JOBS } = await import('../src/services/retention/scheduler.js');
+const { processOrgDeleteJob } = await import('../src/services/platform/deleteOrgProcessor.js');
 const { entitlementFor } = await import('../src/services/billing/entitlement.js');
 const { windDownDeletionDate } = await import('../src/services/billing/windDown.js');
 
@@ -91,8 +92,32 @@ const markDormancyWarned = (org, deleteNotBefore, warnedAt = new Date(Date.now()
 
 before(async () => { if (URI) await mongoose.connect(URI); });
 after(async () => { if (URI) await mongoose.disconnect(); });
+// The sweeps no longer delete: they stamp each due org and hand it to org-delete-queue. There is
+// no Redis in this harness, so `stubEnqueue` does exactly what stampAndEnqueueOrgDelete does minus
+// the enqueue — which makes the sweep's DECISION observable — and `runStamped()` then runs the real
+// processor so every "org gone / voter file gone" assertion below stays exact. Together they are a
+// strictly stronger test than the old inline call: they prove the decision AND the execution.
+let stamped = [];
+const stubEnqueue = async ({ orgId, source, requestedBy = null, requestId = null }) => {
+  const org = await Organization.findById(orgId, 'deletion').lean();
+  if (!org) return { gone: true };
+  if (org.deletion?.requestedAt) return { alreadyDeleting: true };
+  await Organization.updateOne(
+    { _id: orgId },
+    { $set: { deletion: { requestedAt: new Date(), requestedBy, source, requestId, status: 'pending', heartbeatAt: null, error: null } } }
+  );
+  stamped.push({ organizationId: String(orgId), source, requestId: requestId ? String(requestId) : null });
+  return { queued: true, organization: { id: String(orgId) } };
+};
+const runStamped = async () => {
+  const queue = stamped;
+  stamped = [];
+  for (const s of queue) await processOrgDeleteJob({ data: s, id: `t-${s.organizationId}` });
+};
+
 beforeEach(async () => {
   if (!URI) return;
+  stamped = [];
   for (const M of [Organization, Subscription, Campaign, Household, Voter, CanvassActivity, User, OrgDeletionRequest, RetentionRun]) {
     await M.deleteMany({});
   }
@@ -108,8 +133,11 @@ test(`WIND-DOWN: a customer canceled >${WIND_DOWN_DAYS}d ago is purged; one canc
   await markWindDownWarned(old, new Date(Date.now() - 5 * DAY));
   await markWindDownWarned(recent, windDownDeletionDate(new Date(Date.now() - 1 * DAY)));
 
-  const res = await purgeWoundDownOrgs({ apply: true });
-  assert.strictEqual(res.purged, 1);
+  const res = await purgeWoundDownOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(res.enqueued, 1);
+  assert.ok((await Organization.findById(old._id).lean()).deletion?.requestedAt, 'the due org is stamped');
+  assert.strictEqual((await Organization.findById(old._id).lean()).deletion.source, 'wind_down');
+  await runStamped();
 
   assert.strictEqual(await Organization.countDocuments({ _id: old._id }), 0, 'wind-down elapsed → gone');
   assert.strictEqual(await votersOf(old), 0, 'their voter file went with them');
@@ -178,8 +206,10 @@ test(`DORMANCY: a NON-PAYING org with no activity for ${DORMANCY_MONTHS} months 
   await markDormancyWarned(dormant, new Date(Date.now() - 5 * DAY));
   await markDormancyWarned(revived, new Date(Date.now() - 5 * DAY));
 
-  const res = await purgeDormantOrgs({ apply: true });
-  assert.strictEqual(res.purged, 1);
+  const res = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(res.enqueued, 1);
+  assert.strictEqual((await Organization.findById(dormant._id).lean()).deletion.source, 'dormancy');
+  await runStamped();
   assert.strictEqual(await Organization.countDocuments({ _id: dormant._id }), 0);
 
   // The clock IS the last knock. One door knocked today buys another two years, by construction.
@@ -198,8 +228,8 @@ test('DORMANCY: a PAYING customer is NEVER purged for inactivity, however long',
     const org = await makeOrg(`Paying ${status}`, `paying-${status}`, status);
     await ageOrg(org, stale);
     await seedData(org, stale); // dormant for years
-    const res = await purgeDormantOrgs({ apply: true });
-    assert.strictEqual(res.purged, 0, `a '${status}' org must never be dormancy-purged`);
+    const res = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+    assert.strictEqual(res.enqueued, 0, `a '${status}' org must never be dormancy-purged`);
     assert.ok(await Organization.findById(org._id), `a '${status}' org survives dormancy`);
   }
 });
@@ -211,8 +241,8 @@ test('DORMANCY: a brand-new (non-paying) org that has not canvassed yet is NOT d
   const fresh = await makeOrg('Signed Up Today', 'fresh', 'suspended');
   await seedData(fresh); // imported their file, hasn't knocked yet
 
-  const res = await purgeDormantOrgs({ apply: true });
-  assert.strictEqual(res.purged, 0);
+  const res = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(res.enqueued, 0);
   assert.ok(await Organization.findById(fresh._id), 'a new account measured from createdAt is not dormant');
 });
 
@@ -222,7 +252,7 @@ test('INTERNAL orgs are exempt — the demo tenant does not evaporate', { skip }
   await ageOrg(demo, stale);
   await seedData(demo, stale);
 
-  await runRetentionTriggers({ apply: true });
+  await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   assert.ok(await Organization.findById(demo._id), 'our own demo/platform orgs must never be auto-purged');
 });
 
@@ -240,13 +270,20 @@ test(`DELETE-ON-REQUEST: executed on the SLA date (${DELETE_REQUEST_SLA_DAYS}d),
     scheduledFor: new Date(Date.now() + 10 * DAY), status: 'scheduled', // still in the window
   });
 
-  const res = await executeDueDeletionRequests({ apply: true });
-  assert.strictEqual(res.purged, 1);
+  const res = await executeDueDeletionRequests({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(res.enqueued, 1);
+  // The request row stays 'scheduled' until the JOB completes it — writing 'completed' at enqueue
+  // time would claim a deletion that has not happened yet.
+  const midFlight = await OrgDeletionRequest.findOne({ organizationId: asked._id }).lean();
+  assert.strictEqual(midFlight.status, 'scheduled', 'the enqueue must not close the request');
+  assert.ok(await Organization.findById(asked._id), 'not deleted until the job runs');
+
+  await runStamped();
 
   assert.strictEqual(await Organization.countDocuments({ _id: asked._id }), 0);
   assert.strictEqual(await votersOf(asked), 0);
   const done = await OrgDeletionRequest.findOne({ organizationId: asked._id }).lean();
-  assert.strictEqual(done.status, 'completed');
+  assert.strictEqual(done.status, 'completed', 'the JOB closes the request');
   assert.ok(done.completedAt);
 
   // The waiting window is what lets a mistaken or coerced request be cancelled.
@@ -261,17 +298,68 @@ test('a cancelled request is never executed', { skip }, async () => {
     status: 'cancelled', cancelledAt: new Date(),
   });
 
-  const res = await executeDueDeletionRequests({ apply: true });
-  assert.strictEqual(res.purged, 0);
+  const res = await executeDueDeletionRequests({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(res.enqueued, 0);
   assert.ok(await Organization.findById(saved._id), 'a cancelled request must not fire, ever');
 });
 
 test('every sweep leaves a RetentionRun receipt — silence is a failure state', { skip }, async () => {
-  await runRetentionTriggers({ apply: true });
+  await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   const run = await RetentionRun.findOne({ job: TRIGGER_JOB }).lean();
   assert.ok(run, 'the sweep recorded that it ran');
   assert.strictEqual(run.ok, true);
   assert.ok(run.finishedAt);
+});
+
+// REGRESSION: purgeWoundDownOrgs and purgeDormantOrgs used to call deleteOrganization inline and
+// BARE. One org that threw took down runRetentionTriggers — so the stages after it, including
+// delete-on-request (the 30-day promise with actual legal teeth), silently never ran that night,
+// and the only trace was an ok:false receipt. Each org is now its own job with its own failure.
+test('a single org that cannot be enqueued does NOT abort the sweep or the SLA stage', { skip }, async () => {
+  const bad = await makeOrg('Explodes', 'boom', 'canceled', new Date(Date.now() - (WIND_DOWN_DAYS + 5) * DAY));
+  const good = await makeOrg('Also Due', 'alsodue', 'canceled', new Date(Date.now() - (WIND_DOWN_DAYS + 5) * DAY));
+  const asked = await makeOrg('Asked To Go', 'askedtogo', 'active');
+  for (const o of [bad, good, asked]) await seedData(o);
+  await markWindDownWarned(bad, new Date(Date.now() - 5 * DAY));
+  await markWindDownWarned(good, new Date(Date.now() - 5 * DAY));
+  await OrgDeletionRequest.create({
+    organizationId: asked._id, requestedByEmail: 'ada@asked.com',
+    scheduledFor: new Date(Date.now() - 1 * DAY), status: 'scheduled',
+  });
+
+  const flaky = async (args) => {
+    if (String(args.orgId) === String(bad._id)) throw new Error('redis is on fire');
+    return stubEnqueue(args);
+  };
+  const res = await runRetentionTriggers({ apply: true, enqueue: flaky });
+
+  assert.strictEqual(res.ok, true, 'the sweep completes despite one org failing');
+  assert.strictEqual(res.windDown.failedToEnqueue, 1);
+  assert.strictEqual(res.windDown.enqueued, 1, 'the OTHER due org still went out');
+  assert.strictEqual(res.requested.enqueued, 1, 'the delete-on-request stage still ran');
+  assert.ok((await Organization.findById(good._id).lean()).deletion?.requestedAt);
+  assert.strictEqual((await Organization.findById(bad._id).lean()).deletion?.requestedAt ?? null, null);
+
+  await runStamped();
+  assert.strictEqual(await Organization.countDocuments({ _id: good._id }), 0);
+  assert.strictEqual(await Organization.countDocuments({ _id: asked._id }), 0);
+  assert.ok(await Organization.findById(bad._id), 'the failed one survives for the next sweep');
+});
+
+test('the receipt reports what the sweep DID: enqueued, not purged', { skip }, async () => {
+  const due = await makeOrg('Due Org', 'dueorg', 'canceled', new Date(Date.now() - (WIND_DOWN_DAYS + 5) * DAY));
+  await seedData(due);
+  await markWindDownWarned(due, new Date(Date.now() - 5 * DAY));
+
+  const res = await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
+  const run = await RetentionRun.findOne({ job: TRIGGER_JOB }).lean();
+  // `purged` keeps its meaning — organizations THIS RUN destroyed — and is 0 by construction now.
+  // It must never be repurposed to mean "condemned": the deletion is confirmed by the org row
+  // being gone, never by a number this sweep wrote before the worker had run.
+  assert.strictEqual(run.purged, 0, 'the sweep itself destroys nothing');
+  assert.strictEqual(run.enqueued, 1);
+  assert.strictEqual(run.scanned, res.scanned);
+  assert.ok(await Organization.findById(due._id), 'still present — the job has not run yet');
 });
 
 test('the trigger sweep is SCHEDULED in code — deleting it fails this test', { skip }, () => {

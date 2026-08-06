@@ -15,7 +15,9 @@ import { ImportJob } from '../../models/ImportJob.js';
 
 export const IMPORT_SWEEP_JOB = 'sweep-stale-imports';
 
-const ACTIVE_STATUSES = ['pending', 'parsing', 'geocoding', 'linking', 'importing'];
+// Exported for the campaign-delete route's busy-check (routes/admin/campaigns.js): a
+// campaign with an import in any of these statuses must not start deleting under it.
+export const ACTIVE_STATUSES = ['pending', 'parsing', 'geocoding', 'linking', 'importing'];
 // 'pending' means no worker ever claimed it — that verdict is safe to reach quickly.
 // Anything later means a worker died mid-job; heartbeats ride every progress batch,
 // so minutes of silence is death, not slowness.

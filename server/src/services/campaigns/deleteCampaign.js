@@ -26,6 +26,7 @@ import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js
 import { Campaign } from '../../models/Campaign.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
 import { VoterNote } from '../../models/VoterNote.js';
+import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { captureCampaignBeforeDelete } from '../platform/platformStats.js';
 
 const CHUNK = 5000;
@@ -42,7 +43,13 @@ const CHUNK = 5000;
 // VoterNotes re-point to a surviving sibling row (or delete with their last row).
 //
 // Sequential (no transaction), matching the rest of the app. Returns delete counts.
-export async function deleteCampaignCascade(campaign) {
+// Safe to RE-RUN after a partial failure: every step is a deleteMany/upsert that
+// converges, and the platform-stats bank is claim-guarded (platformStatsCaptured).
+//
+// `heartbeat` (optional, fire-and-forget) is called between stages and inside chunk
+// loops so the background delete job (deleteCampaignProcessor.js) can stamp liveness;
+// the sync callers (deleteTestCampaigns, seedDemoOrg) pass nothing.
+export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } = {}) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
   const counts = {};
@@ -51,14 +58,18 @@ export async function deleteCampaignCascade(campaign) {
   // are destroyed (no-op for internal orgs). A deletable campaign is never-walked, so this is mostly
   // its campaign count and never-walked voters — but capturing keeps the numbers whole either way.
   await captureCampaignBeforeDelete(campaign);
+  heartbeat();
 
   // DNC stickiness: for each flagged person whose ONLY row(s) live in this campaign, park
   // the request as a DncPendingId carrying the flag's original attribution (uploadId, or
   // null + reason for admin-set) — a future import graduates it back onto the real row
   // (reapplyDncLists). A person with a surviving sibling row needs nothing: the flag
   // lives on there.
+  // organizationId is redundant with campaignId but load-bearing: it prefix-matches the
+  // partial {organizationId, 'doNotContact.flagged'} index (Voter.js), which campaignId
+  // alone cannot use — without it this is a full campaign scan.
   const flaggedRows = await Voter.find(
-    { campaignId, 'doNotContact.flagged': true },
+    { organizationId: orgId, campaignId, 'doNotContact.flagged': true },
     { stateVoterId: 1, doNotContact: 1 }
   ).lean();
   let dncParked = 0;
@@ -72,6 +83,7 @@ export async function deleteCampaignCascade(campaign) {
         campaignId: { $ne: campaignId },
       }).distinct('stateVoterId');
       for (const s of found) surviving.add(s);
+      heartbeat();
     }
     const dncBySvid = new Map();
     for (const v of flaggedRows) if (!dncBySvid.has(v.stateVoterId)) dncBySvid.set(v.stateVoterId, v.doNotContact);
@@ -83,6 +95,7 @@ export async function deleteCampaignCascade(campaign) {
         { upsert: true }
       );
       dncParked += 1;
+      heartbeat();
     }
   }
   counts.dncParked = dncParked;
@@ -90,17 +103,22 @@ export async function deleteCampaignCascade(campaign) {
   // Note hygiene: VoterNotes are org-level but keyed by voterId. Re-point a deleted row's
   // notes to a surviving sibling (the person keeps their history), and delete notes whose
   // person leaves the org entirely — before this, deleting a campaign orphaned them.
-  const deletedVoterIds = await Voter.find({ campaignId }).distinct('_id');
-  const notedVoterIds = [];
-  for (let i = 0; i < deletedVoterIds.length; i += CHUNK) {
-    const ids = await VoterNote.find({
-      organizationId: orgId,
-      voterId: { $in: deletedVoterIds.slice(i, i + CHUNK) },
-    }).distinct('voterId');
-    notedVoterIds.push(...ids);
+  // Join from the NOTE side: the org's noted voterIds are bounded by human note volume,
+  // while this campaign can hold hundreds of thousands of voter rows — the old
+  // distinct('_id') over the campaign risked Mongo's 16MB distinct cap and cost
+  // ~voters/5000 round trips even for an org with zero notes. Same intersection
+  // ({noted voterIds} ∩ {this campaign's rows}), so the writes below are unchanged.
+  const notedOrgVoterIds = await VoterNote.find({ organizationId: orgId }).distinct('voterId');
+  const noted = [];
+  for (let i = 0; i < notedOrgVoterIds.length; i += CHUNK) {
+    const rows = await Voter.find(
+      { _id: { $in: notedOrgVoterIds.slice(i, i + CHUNK) }, campaignId },
+      { stateVoterId: 1 }
+    ).lean();
+    noted.push(...rows);
+    heartbeat();
   }
-  if (notedVoterIds.length) {
-    const noted = await Voter.find({ _id: { $in: notedVoterIds } }, { stateVoterId: 1 }).lean();
+  if (noted.length) {
     const notedSvids = [...new Set(noted.map((v) => v.stateVoterId))];
     const siblingBySvid = new Map();
     for (let i = 0; i < notedSvids.length; i += CHUNK) {
@@ -109,6 +127,7 @@ export async function deleteCampaignCascade(campaign) {
         { stateVoterId: 1 }
       ).lean();
       for (const s of sibs) if (!siblingBySvid.has(s.stateVoterId)) siblingBySvid.set(s.stateVoterId, s._id);
+      heartbeat();
     }
     for (const v of noted) {
       const sib = siblingBySvid.get(v.stateVoterId);
@@ -119,15 +138,19 @@ export async function deleteCampaignCascade(campaign) {
 
   const voters = await Voter.deleteMany({ campaignId });
   counts.voters = voters.deletedCount || 0;
+  heartbeat();
 
   // Every campaignId-scoped collection (audited via grep over models/). ExportJob rows with
   // campaignId:null (org-wide backups) survive a campaign delete on purpose — a point-in-time
   // bundle outliving one deleted campaign by ≤ the export TTL is the same exposure as a copy
-  // someone already downloaded, and the sweep expires it.
+  // someone already downloaded, and the sweep expires it. CoordinatorChange rows with
+  // campaignId:null (org-level moves) likewise survive by the filter's construction.
+  // Deliberately absent: Statement (frozen billing history outlives the campaign) and
+  // FlagReview (flags require canvassing; a deletable campaign is never-walked, so zero rows).
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
-    CampaignManager, ClientReport, ClientReportMapPoint, ReportShareLink,
+    CampaignManager, CoordinatorChange, ClientReport, ClientReportMapPoint, ReportShareLink,
     CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
     ExportJob,
   ];
@@ -139,17 +162,22 @@ export async function deleteCampaignCascade(campaign) {
   // Voter rows and left the source spreadsheet sitting in GridFS forever — so "delete my data"
   // deleted the copy and kept the original.
   const jobIds = await ImportJob.find({ campaignId }).distinct('_id');
-  for (const id of jobIds) await deleteRawImport(id);
+  for (const id of jobIds) {
+    await deleteRawImport(id);
+    heartbeat();
+  }
   counts.rawImportFiles = jobIds.length;
 
   // Export Center artifacts scoped to this campaign — same original-vs-copy lesson as the
   // raw imports above. Keyed by bucket metadata, so a stranded file is caught even if its
   // ExportJob doc is already gone.
   counts.exportArtifactFiles = await deleteArtifactsForScope({ organizationId: orgId, campaignId });
+  heartbeat();
 
   for (const Model of CAMPAIGN_SCOPED) {
     const res = await Model.deleteMany({ campaignId });
     counts[Model.modelName] = res.deletedCount || 0;
+    heartbeat();
   }
 
   await Campaign.deleteOne({ _id: campaignId });

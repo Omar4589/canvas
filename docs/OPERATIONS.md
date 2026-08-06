@@ -99,7 +99,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | --- | --- | --- |
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
-| `retention-triggers` | Daily 04:41 UTC | **Warns, then deletes organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then purges wind-down, dormancy, and due deletion requests. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. |
+| `retention-triggers` | Daily 04:41 UTC | **Warns, then condemns organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then hands each due org (wind-down, dormancy, due deletion requests) to **`org-delete-queue`** — one job per org, so a failure is isolated to that org instead of aborting the sweep, and the worker does the destroying minutes later. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. The run receipt reports `enqueued`; `purged` is 0 because this job no longer destroys anything itself. |
 | `sweep-stale-imports` | Daily 05:53 UTC | **Fails stuck imports and deletes orphaned upload files.** Expires import jobs whose worker died mid-run (no heartbeat for minutes) with a clear failure message, then deletes the **raw uploaded voter files** left behind by finished, failed, or vanished imports older than 24h — a crashed import used to keep the complete uploaded file forever — plus stray worker temp files. Cron override: `IMPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
@@ -117,6 +117,10 @@ had nothing to do, unless something is counting.
 | `SUPPORT_GRANT_HOURS` | **4** | How long a support access session lasts. |
 | `RETENTION_WARN_LEAD_DAYS` | **30** | How far ahead of a wind-down/dormancy deletion the warning email goes out. |
 | `RETENTION_WARN_GRACE_DAYS` | **14** | Minimum time between the warning actually being delivered and the deletion — even for an org already past its deadline when first warned. |
+| `ORG_DELETE_JOB_CONCURRENCY` | **1** | How many organization cascades the worker runs at once. Leave at 1 — it is the heaviest job on that dyno, and two at once starve each other's heartbeat into looking dead. |
+| `ORG_DELETE_ENQUEUE_TIMEOUT_MS` | **5000** | How long a delete request waits on Redis before answering 503 rather than hanging. |
+| `ORG_DELETE_CHUNK` | **5000** | Batch size for the identity purge inside the org cascade. A test-only knob; there is no reason to change it in production. |
+| `CAMPAIGN_DELETE_JOB_CONCURRENCY` | **1** | Same, for campaign deletes. |
 
 ### Email (Resend) — the dormant/live switch
 

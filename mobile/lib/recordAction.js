@@ -133,6 +133,12 @@ export function reconcilePendingLocations(households) {
 // Cleared when the submit settles.
 const inFlightPaths = new Set();
 
+// The OTA restart offer (components/OtaUpdatePrompt.jsx) consults this before reloading the
+// JS bundle: an action still in this set is neither confirmed nor queued — the lock is taken
+// at optimisticSubmit entry (before the GPS gate) and released only when the submit settles —
+// so a reload at that instant would lose the knock silently.
+export const hasInFlightActions = () => inFlightPaths.size > 0;
+
 // Per-code "you're blocked" alert for a failed location gate. Cancel resolves the
 // caller's blocked result; Try again re-enters the same submit. Deliberately NO copy
 // for mock locations — mock detection is recorded silently server-side, never shown here.

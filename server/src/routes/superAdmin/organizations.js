@@ -15,7 +15,11 @@ import { currentUsage, currentMonth } from '../../services/billing/statement.js'
 import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
 import { createOrgMember, MemberError } from '../../services/memberships/createMember.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
-import { deleteOrganization } from '../../services/platform/deleteOrganization.js';
+import { stampAndEnqueueOrgDelete } from '../../services/platform/enqueueOrgDelete.js';
+import { NOT_DELETING, isDeleting, maybeExpireStaleDeletion } from '../../services/platform/orgDeletionState.js';
+import { ImportJob } from '../../models/ImportJob.js';
+import { ExportJob } from '../../models/ExportJob.js';
+import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { provisioningWelcome } from '../../services/mail/templates.js';
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
@@ -68,6 +72,15 @@ router.get('/', async (req, res, next) => {
       filter.$or = [{ name: rx }, { slug: rx }];
     }
     const orgs = await Organization.find(filter).sort({ createdAt: -1 }).lean();
+    // Stuck-deletion watchdog rides this poll (the imports / campaign-list pattern): the web dyno
+    // expires a run whose worker died, so the row reads failed + Retry instead of "Deleting…"
+    // forever — and, since a stamp walls the entire tenant, forever would mean a locked-out customer.
+    for (const o of orgs) {
+      if (isDeleting(o) && (await maybeExpireStaleDeletion(o))) {
+        const fresh = await Organization.findById(o._id, { deletion: 1 }).lean();
+        if (fresh) o.deletion = fresh.deletion;
+      }
+    }
     const ids = orgs.map((o) => o._id);
     const memberCounts = await Membership.aggregate([
       { $match: { organizationId: { $in: ids }, isActive: true } },
@@ -100,6 +113,9 @@ router.get('/', async (req, res, next) => {
         slug: o.slug,
         isActive: o.isActive,
         isInternal: !!o.isInternal,
+        // Carried only so the split below can route this row into deletingOrganizations; it is
+        // stripped there and never reaches a client as the raw subdoc.
+        deletion: o.deletion || null,
         memberCount: memberMap.get(String(o._id)) || 0,
         campaignCount: camp?.count || 0,
         campaignsActive: camp?.active || 0,
@@ -126,13 +142,35 @@ router.get('/', async (req, res, next) => {
       });
     } // default: createdAt desc, already the query order
 
+    // Deleting orgs ship in their OWN array, not flagged inline: every consumer of
+    // `organizations` (the web switcher, the mobile org picker, the mobile super-admin list) must
+    // treat a mid-delete tenant as gone, and splitting gets that right with zero client changes.
+    // Only the Organizations page reads the second array, to render "Deleting…" / Retry rows.
+    // Split BEFORE the slice so page sizes and `total` stay exact.
+    const deletingRows = [];
+    const liveRows = [];
+    for (const r of rows) {
+      const { deletion, ...rest } = r;
+      if (deletion?.requestedAt) {
+        deletingRows.push({
+          ...rest,
+          deletionStatus: deletion.status || 'pending',
+          deletionError: deletion.error || null,
+          deletionSource: deletion.source || null,
+        });
+      } else {
+        liveRows.push(rest);
+      }
+    }
+    rows = liveRows;
+
     const total = rows.length;
     if (req.query.skip !== undefined || req.query.limit !== undefined) {
       const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
       const skip = Math.max(Number(req.query.skip) || 0, 0);
       rows = rows.slice(skip, skip + limit);
     }
-    res.json({ organizations: rows, total });
+    res.json({ organizations: rows, deletingOrganizations: deletingRows, total });
   } catch (err) {
     next(err);
   }
@@ -147,7 +185,9 @@ router.get('/', async (req, res, next) => {
 // services/billing/statement.js). Internal orgs are not revenue and are excluded entirely.
 router.get('/billing-rollup', async (req, res, next) => {
   try {
-    const orgs = await Organization.find({}, 'name slug isActive').sort({ name: 1 }).lean();
+    // NOT_DELETING: never walk a statement for a tenant we are destroying — the numbers are
+    // meaningless mid-cascade and Statement is swept moments later anyway.
+    const orgs = await Organization.find(NOT_DELETING, 'name slug isActive').sort({ name: 1 }).lean();
     const subs = await Subscription.find({}).lean();
     const subMap = new Map(subs.map((s) => [String(s.organizationId), s]));
     const rows = [];
@@ -195,7 +235,9 @@ router.get('/at-risk', async (req, res, next) => {
   try {
     const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 30);
     const [orgs, subs, idle] = await Promise.all([
-      Organization.find({ isActive: true }, 'name slug').lean(),
+      // NOT_DELETING: a mid-delete org matches every at-risk/zombie criterion by construction
+      // (campaigns vanish, activity stops) — it must not light up the "needs a human" queue.
+      Organization.find({ isActive: true, ...NOT_DELETING }, 'name slug').lean(),
       Subscription.find({}).lean(),
       idleZeroDollarOrgs(),
     ]);
@@ -271,6 +313,16 @@ router.get('/:orgId', async (req, res, next) => {
         isActive: org.isActive,
         isInternal: !!org.isInternal,
         createdAt: org.createdAt,
+        // Deliberately SHOWN here (unlike the list, which hides deleting orgs in their own array):
+        // when an operator opens a tenant mid-delete they need to see what is happening and why.
+        deletion: org.deletion?.requestedAt
+          ? {
+              status: org.deletion.status,
+              requestedAt: org.deletion.requestedAt,
+              source: org.deletion.source,
+              error: org.deletion.error || null,
+            }
+          : null,
       },
       billing: {
         status: sub?.status ?? null,
@@ -427,8 +479,13 @@ router.patch('/:orgId', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid orgId' });
     }
     const data = updateSchema.parse(req.body);
-    const existing = await Organization.findById(req.params.orgId, 'slug isInternal').lean();
+    const existing = await Organization.findById(req.params.orgId, 'slug isInternal deletion').lean();
     if (!existing) return res.status(404).json({ error: 'Organization not found' });
+    // A mid-delete (or failed-delete, possibly half-destroyed) org takes no edits. Without this,
+    // "Reactivate" on a Deleting… row would appear to succeed and lie about it.
+    if (isDeleting(existing)) {
+      return res.status(409).json({ error: 'This organization is being deleted.', code: 'org-deleting' });
+    }
     // An internal org's slug is its identity for internal tooling (the demo refresh and the
     // billing migration key on it) — renaming would silently break the Control Room button.
     // Flag-scoped so any future internal org gets the same protection. (`isInternal` itself
@@ -462,12 +519,19 @@ router.patch('/:orgId', async (req, res, next) => {
 // caller must type the org's slug back: a mismatched confirmSlug is a 400, so
 // no single stray click can destroy an org.
 // Break-glass only: this destroys a customer's entire account, irreversibly.
+//
+// Runs as a BACKGROUND JOB on the worker dyno (services/platform/deleteOrgProcessor.js): an org
+// cascade is every campaign's rows at once plus the whole identity graph, which ran for minutes to
+// hours inline and blew Heroku's 30s router limit. This route stamps `organization.deletion`,
+// enqueues, and answers 202 in well under a second; the org is walled off from every /admin and
+// /mobile request the instant the stamp lands (middleware/orgContext.js), and the Organizations
+// page polls until the row disappears (success) or reads failed (re-issuing this DELETE is Retry).
 router.delete('/:orgId', requireBreakGlass, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.orgId)) {
       return res.status(400).json({ error: 'Invalid orgId' });
     }
-    const org = await Organization.findById(req.params.orgId, { slug: 1, name: 1 }).lean();
+    const org = await Organization.findById(req.params.orgId, { slug: 1, name: 1, deletion: 1 }).lean();
     if (!org) return res.status(404).json({ error: 'Organization not found' });
     const confirmSlug = String(req.body?.confirmSlug || '').trim().toLowerCase();
     if (confirmSlug !== org.slug) {
@@ -476,13 +540,51 @@ router.delete('/:orgId', requireBreakGlass, async (req, res, next) => {
         code: 'confirm-slug-mismatch',
       });
     }
-    const summary = await deleteOrganization(org._id);
+
+    // Already deleting: a double-click / second tab is an idempotent 202 (the stable jobId dedupes
+    // in the queue too). Expire a stale run first so a dead worker's stamp can't wedge the retry
+    // path; a `failed` stamp falls through to re-stamp + re-enqueue.
+    if (isDeleting(org)) {
+      const expired = await maybeExpireStaleDeletion(org);
+      if (!expired && ['pending', 'running'].includes(org.deletion.status)) {
+        return res.status(202).json({ queued: true, organization: { id: String(org._id), name: org.name, slug: org.slug } });
+      }
+    }
+
+    // An import writing rows mid-cascade would re-materialize voter data into an org we are
+    // destroying; a running export would read a half-destroyed dataset. Wait them out.
+    // THIS ROUTE ONLY — on the three retention paths a running import must never be able to defer
+    // a legally-required deletion, so there the deletion wins and the import job is failed instead.
+    const [importBusy, exportBusy] = await Promise.all([
+      ImportJob.exists({ organizationId: org._id, status: { $in: IMPORT_ACTIVE_STATUSES } }),
+      ExportJob.exists({ organizationId: org._id, status: { $in: ['pending', 'running'] } }),
+    ]);
+    if (importBusy || exportBusy) {
+      return res.status(409).json({
+        error: 'An import or export is still running for this organization — wait for it to finish, then delete.',
+        code: 'org-busy',
+      });
+    }
+
+    const result = await stampAndEnqueueOrgDelete({
+      orgId: org._id,
+      source: 'break_glass',
+      requestedBy: req.user._id,
+    });
+    if (result.gone) return res.status(404).json({ error: 'Organization not found' });
     console.warn(
-      `[org-delete] ${req.user.email || req.user._id} deleted org '${summary.organization.name}' (${summary.organization.slug})`,
-      summary.counts
+      `[org-delete] ${req.user.email || req.user._id} enqueued delete of org '${org.name}' (${org.slug})`
     );
-    res.json(summary);
+    res.status(202).json({
+      queued: true,
+      organization: { id: String(org._id), name: org.name, slug: org.slug },
+    });
   } catch (err) {
+    if (err?.code === 'queue-unavailable') {
+      return res
+        .status(503)
+        .json({ error: 'Could not queue the delete — try again in a moment.', code: 'queue-unavailable' });
+    }
     if (err?.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }

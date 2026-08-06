@@ -10,6 +10,7 @@ import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Effort } from '../../models/Effort.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange } from '../../utils/timezone.js';
@@ -73,7 +74,8 @@ const updateSchema = z.object({
 
 async function loadCampaignInOrg(orgId, campaignId) {
   if (!mongoose.isValidObjectId(campaignId)) return null;
-  return Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+  // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+  return Campaign.findOne({ _id: campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
 }
 async function resolveTemplate(orgId, campaign) {
   if (!campaign?.surveyTemplateId) return null;

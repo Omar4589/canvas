@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requireSuperAdmin } from '../../middleware/auth.js';
 import { Organization } from '../../models/Organization.js';
+import { NOT_DELETING } from '../../services/platform/orgDeletionState.js';
 import { Statement } from '../../models/Statement.js';
 import { Subscription } from '../../models/Subscription.js';
 import { monthDayBounds, monthlyStatement } from '../../services/billing/statement.js';
@@ -25,7 +26,9 @@ router.get('/statements', async (req, res, next) => {
     const wantLive = req.query.live === '1' || req.query.live === 'true';
 
     const [orgs, subs, issued] = await Promise.all([
-      Organization.find({}, 'name slug isActive isInternal').sort({ name: 1 }).lean(),
+      // NOT_DELETING: never put an invoice in front of a tenant we are destroying (and Statement
+      // is swept by the cascade moments later anyway).
+      Organization.find(NOT_DELETING, 'name slug isActive isInternal').sort({ name: 1 }).lean(),
       Subscription.find({}, 'organizationId status').lean(),
       Statement.find({ month, status: 'issued' }, { lines: 0 })
         .populate('issuedByUserId', 'firstName lastName')

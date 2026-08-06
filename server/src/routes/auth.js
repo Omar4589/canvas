@@ -49,9 +49,13 @@ const updateProfileSchema = z.object({
 
 async function loadMembershipsForUser(userId) {
   const rows = await Membership.find({ userId, isActive: true })
-    .populate({ path: 'organizationId', select: 'name slug isActive timeZone' })
+    .populate({ path: 'organizationId', select: 'name slug isActive timeZone deletion' })
     .lean();
-  const active = rows.filter((m) => m.organizationId && m.organizationId.isActive);
+  // A mid-delete org drops out of the user's org list the moment it is stamped — the same wall
+  // middleware/orgContext.js applies, so the picker never offers a tenant every request will 404.
+  const active = rows.filter(
+    (m) => m.organizationId && m.organizationId.isActive && !m.organizationId.deletion?.requestedAt
+  );
 
   // For a team lead, ship the campaigns they manage (per org) so the client can scope
   // its console + nav to those campaigns without an extra round-trip on load.

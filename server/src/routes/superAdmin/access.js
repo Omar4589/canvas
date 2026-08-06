@@ -12,6 +12,8 @@ import { sendMail } from '../../services/mail/mailer.js';
 import { supportGrantNotice } from '../../services/mail/templates.js';
 import { retentionHealth } from '../../services/retention/purgeDeletedIdentities.js';
 import { deletionRequestHealth } from '../../services/retention/triggers.js';
+import { campaignDeletionHealth } from '../../services/campaigns/deletionState.js';
+import { orgDeletionHealth } from '../../services/platform/orgDeletionState.js';
 import { requestOrgDeletion, cancelOrgDeletion, listDeletionRequests, DeletionRequestError } from '../../services/retention/deletionRequests.js';
 import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
 import { getPlatformStats, recomputeLive, recomputeDaily } from '../../services/platform/platformStats.js';
@@ -262,18 +264,35 @@ router.get('/log-facets', async (req, res, next) => {
 // to watch. Green here has to mean every promise is being kept, or it means nothing.
 router.get('/health/retention', async (req, res, next) => {
   try {
-    const [jobs, delReq] = await Promise.all([
+    const [jobs, delReq, campDel, orgDel] = await Promise.all([
       Promise.all(REPEATABLE_JOBS.map((j) => retentionHealth(j.name, j.label))),
       deletionRequestHealth(),
+      campaignDeletionHealth(),
+      orgDeletionHealth(),
     ]);
     const broken = jobs.filter((j) => !j.healthy);
     // The banner is red if a retention JOB has gone quiet OR a customer's deletion request is stuck /
     // failed. A green "job ran fine" is not the whole promise — a request that ran and errored, or is
-    // overdue, is exactly the silent failure a customer would be harmed by.
+    // overdue, is exactly the silent failure a customer would be harmed by. Campaign hard-deletes
+    // (background jobs since 2026-08) are the same class of promise: a failed one leaves a
+    // half-deleted campaign that only the org admin's Retry can finish — surface it here so it
+    // isn't hostage to that admin ever revisiting their Campaigns page.
     const delMsgs = [];
     if (delReq.failed) delMsgs.push(`${delReq.failed} deletion request(s) FAILED and need a human.`);
     if (delReq.stuck) delMsgs.push(`${delReq.stuck} deletion request(s) are overdue and not yet completed.`);
-    const healthy = broken.length === 0 && delReq.healthy;
+    if (campDel.failed) delMsgs.push(`${campDel.failed} campaign deletion(s) FAILED and need a retry.`);
+    if (campDel.stuck) delMsgs.push(`${campDel.stuck} campaign deletion(s) are stuck mid-run.`);
+    // Organization deletions carry the most weight of the three: while one is stamped the entire
+    // tenant is walled off, so a delete that dies is a customer locked out of an org nobody is
+    // actually deleting — and on the delete-on-request path it is a legal promise going unkept.
+    // `queued` is deliberately NOT a red condition: a sweep night legitimately leaves several orgs
+    // waiting behind a concurrency-1 queue, and a banner that cries wolf gets ignored.
+    if (orgDel.failed) delMsgs.push(`${orgDel.failed} organization deletion(s) FAILED and need a retry.`);
+    if (orgDel.stuck) delMsgs.push(`${orgDel.stuck} organization deletion(s) are stuck mid-run.`);
+    if (orgDel.unstarted) {
+      delMsgs.push(`${orgDel.unstarted} organization deletion(s) have not started — is the worker running?`);
+    }
+    const healthy = broken.length === 0 && delReq.healthy && campDel.healthy && orgDel.healthy;
     res.json({
       ...jobs[0], // the identity purge's detail fields, kept for the existing client contract
       healthy,
@@ -282,6 +301,8 @@ router.get('/health/retention', async (req, res, next) => {
         : [...broken.map((j) => j.message), ...delMsgs].join(' '),
       jobs,
       deletionRequests: delReq,
+      campaignDeletions: campDel,
+      orgDeletions: orgDel,
     });
   } catch (err) {
     next(err);

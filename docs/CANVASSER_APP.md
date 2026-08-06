@@ -250,7 +250,13 @@ optimistic, never-wait-on-the-network behavior as the door buttons.
 
 ## When the app asks you to update
 
-Most improvements arrive silently — the app refreshes itself in the background and you never notice.
+Most improvements arrive on their own — the app quietly downloads them in the background. When one
+is ready, a small banner appears at the top: **"A new version of Doorline is ready."** Tap
+**Restart** and the app reloads itself in a few seconds — no store, nothing to install, no signing
+back in. Tap **Later** to keep working; the new version simply applies the next time you open the
+app. The banner deliberately stays away while you're on a door or in the middle of a survey — it
+waits until you're back on your list or map.
+
 Once in a while, though, a change needs a genuinely new version from the **App Store** or **Google
 Play**, and the app will tell you in one of two ways:
 
@@ -260,8 +266,8 @@ Play**, and the app will tell you in one of two ways:
 - **A full "Update Doorline" screen** that won't go away. The version on your phone is too old to
   keep using safely; tap **Get the update**, install it, and reopen the app.
 
-Either way, updating never costs you work — every door you've knocked and every survey you've saved
-is already on the server (or safely queued on the phone).
+Either way — restart or store update — it never costs you work: every door you've knocked and every
+survey you've saved is already on the server (or safely queued on the phone).
 
 ---
 
@@ -371,9 +377,9 @@ positioning:
   `followUserLocation`, and a real pan/zoom gesture (`onCameraChanged`) drops follow — same as the
   houses map.
 
-## The update surfaces (two gates, two different questions)
+## The update surfaces (three surfaces, three different questions)
 
-Two mechanisms steer people to newer versions, and they answer different questions on purpose:
+Three mechanisms steer people to newer versions, and they answer different questions on purpose:
 
 - **The contract gate** — "is this **JS bundle** too old for the API?" `CLIENT_API_VERSION`
   ([lib/config.js](../mobile/lib/config.js)) vs the server's `minClientApiVersion`
@@ -391,8 +397,24 @@ Two mechanisms steer people to newer versions, and they answer different questio
   banner (session-scoped dismissal); `hard` → an opaque wall drawn **above the navigator**, not a
   route — nothing to navigate around, no redirect loop possible, with an "I've updated — check
   again" refetch as the ops escape valve.
+- **The OTA restart offer** — "is a newer **JS bundle** already downloaded and waiting?" Plain
+  expo-updates defaults fetch an update at cold start and apply it on the *next* cold start — and
+  field phones essentially never cold start, so a published fix could sit unused for days.
+  [OtaUpdatePrompt.jsx](../mobile/components/OtaUpdatePrompt.jsx), mounted in the root layout
+  beside UpdateGate (before it, so the nag's hard wall paints on top if both ever fire), checks
+  and downloads on launch and on every foreground, with `Updates.useUpdates()` driving visibility —
+  so it also notices a bundle the native launch check downloaded on its own. It then **offers** a
+  restart, never forces one: `reloadAsync()` destroys in-memory state, and survey answers are plain
+  component state until Save. Politeness rules: the banner never renders on the canvass-flow
+  screens (`/household/*`, `/voter/*`) — the download still happens there, only the offer waits;
+  **Restart** first waits (bounded, ≤5 s) for any in-flight door POST to settle
+  (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js) — an action
+  mid-POST is neither confirmed nor queued, so a reload at that instant would lose the knock);
+  **Later** dismisses that update for the session, keyed by `updateId`, so only a newer publish
+  re-arms the banner — the dismissed one applies on the next cold start anyway. Needs no server
+  and no store: the bundle is already on the phone.
 
-Shared invariants: both surfaces link to the same `STORE_URL` (single copy in
+Shared invariants: the two store-pointing surfaces link to the same `STORE_URL` (single copy in
 [lib/config.js](../mobile/lib/config.js)) — though the nag prefers a server-supplied
 `storeUrl` when the response carries one (`MOBILE_STORE_URL_IOS`/`_ANDROID`; exists because the
 baked-in URL is the public store page, which iOS didn't have until the 2026-07-28 App Store
@@ -400,7 +422,8 @@ release — so that override is a no-op now — and which on Android still names
 `com.canvassapp.mobile` rather than the new `com.doorline.app` listing, making `_ANDROID` the lever
 that walks stragglers across at the Play cutover); the nag **fails open** on every error path (no
 runtimeVersion in dev, timeout, 429, malformed response → render nothing — a wrong wall would lock
-the fleet out of a working app); and enforcement is UI-only — no server middleware rejects old
+the fleet out of a working app), and the restart offer fails quiet the same way (dev, a failed
+check, a failed download → nothing); and enforcement is UI-only — no server middleware rejects old
 builds, because a 4xx mid-sync is exactly the offline-queue-eating failure the queue was hardened
 against.
 

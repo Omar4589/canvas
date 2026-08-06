@@ -4,6 +4,7 @@ import path from 'node:path';
 import { UnrecoverableError } from 'bullmq';
 import { ImportJob } from '../../models/ImportJob.js';
 import { Campaign } from '../../models/Campaign.js';
+import { Organization } from '../../models/Organization.js';
 import { loadRawImport, deleteRawImport } from './rawImportStore.js';
 import { buildImportRows, applyImport, ndjsonBatches } from './csvImporter.js';
 import { resolve as geocodeResolve, needsGeocode } from './geocode/geocodeService.js';
@@ -49,6 +50,26 @@ export async function processImportJob(job) {
       { status: 'failed', errors: [{ reason: 'Campaign not found' }], errorCount: 1, completedAt: new Date() }
     );
     throw new UnrecoverableError('Campaign not found');
+  }
+  // Claimed AFTER a delete stamped the campaign (the route refuses new imports, but this
+  // job may have been queued before the stamp): importing rows mid-cascade would orphan
+  // voters into a half-deleted campaign (services/campaigns/deletionState.js).
+  if (campaign.deletion?.requestedAt) {
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      { status: 'failed', errors: [{ reason: 'This campaign is being deleted.' }], errorCount: 1, completedAt: new Date() }
+    );
+    throw new UnrecoverableError('Campaign is being deleted');
+  }
+  // Same guard one level up: an import that started before an ORG delete was stamped would
+  // re-materialize voter rows into a tenant whose data is being destroyed — the customer's data
+  // surviving their own deletion.
+  if (await Organization.exists({ _id: campaign.organizationId, 'deletion.requestedAt': { $ne: null } })) {
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      { status: 'failed', errors: [{ reason: 'This organization is being deleted.' }], errorCount: 1, completedAt: new Date() }
+    );
+    throw new UnrecoverableError('Organization is being deleted');
   }
   const orgId = campaign.organizationId;
 

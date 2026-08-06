@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { ExportJob } from '../../models/ExportJob.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { EXPORT_TYPES } from '../../services/export/exportTypes.js';
 import { ExportUserError } from '../../services/export/exportErrors.js';
@@ -79,7 +80,8 @@ async function resolveExportScope(req, res) {
       res.status(400).json({ error: 'campaignId is required.' });
       return null;
     }
-    campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+    // NOT_DELETING: no new exports against a mid-delete campaign (deletionState.js).
+    campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
       return null;

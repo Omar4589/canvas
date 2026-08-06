@@ -120,6 +120,12 @@ still the gate — but you now know what's behind the door.*
 
 **Open [`/admin/queues`](https://doorline.app/admin/queues) (Bull Board) NOW, before maintenance.**
 Confirm **`import-queue`** and **`turf-queue`** have **zero** active / waiting / delayed jobs.
+**`campaign-delete-queue` and `org-delete-queue` aren't in Bull Board** — check them from the product
+instead: the Campaigns page of any org mid-delete shows a "Deleting…" card, and the super-admin
+**Organizations** page shows "Deleting…" rows; none anywhere means both queues are idle. (A delete
+interrupted by the maintenance window fails safe: the row flips to "Delete failed" with a Retry, and
+the campaign — or the whole organization — stays walled off until that retry finishes. Don't create
+the mess when a minute's wait avoids it; a half-deleted ORG locks its customer out entirely.)
 
 ***Do this first because you cannot do it later.*** *Bull Board is mounted on the **web** dyno
 ([`app.js:77`](../server/src/app.js#L77)) — the moment maintenance goes on, it serves the maintenance page
@@ -284,11 +290,14 @@ It prints three numbers. **They must match what STEP 0c computed from your backu
 >
 > ### ⚠️ Orphans are NOT a stop condition — even though they're a deletion.
 > *I had this wrong.* Orphan Persons are produced by an ordinary, supported operation:
-> [`deleteCampaign.js:40`](../server/src/services/campaigns/deleteCampaign.js#L40) deletes a campaign's
-> Voters, and `Person` is **absent from its cascade list** — so every campaign you've ever deleted left
-> orphan Persons behind. The cross-org audit never measured orphans and makes **no prediction** about
-> them. On your data it's currently **0**. If it's ever non-zero, sanity-check that it's plausible for
-> the campaigns you've deleted, then proceed — nothing references them.
+> [`deleteCampaign.js`](../server/src/services/campaigns/deleteCampaign.js) (`deleteCampaignCascade`)
+> deletes a campaign's Voters, and `Person` is **absent from its cascade list** — so every campaign
+> you've ever deleted left orphan Persons behind. (Since 2026-08 that cascade — and the **org**
+> cascade, which does purge Persons — run on the **worker** dyno as background jobs; one more reason
+> the worker must be OFF during this procedure, since either one draining mid-dump is the same
+> hazard as the import above.) The cross-org audit never measured orphans and makes **no prediction**
+> about them. On your data it's currently **0**. If it's ever non-zero, sanity-check that it's
+> plausible for the campaigns you've deleted, then proceed — nothing references them.
 
 If it matches:
 

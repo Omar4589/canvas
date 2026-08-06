@@ -4,6 +4,7 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { Household } from '../../models/Household.js';
@@ -534,7 +535,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
     const organizationId = activeOrgId(req);
     const scope = req.query.scope || 'active';
 
-    const filter = { organizationId };
+    // NOT_DELETING: a mid-delete campaign is out of every rollup scope, including an
+    // explicit ?campaignId (services/campaigns/deletionState.js).
+    const filter = { organizationId, ...NOT_DELETING };
     // Optional campaignId scopes the rollup to one campaign (used by the mobile
     // detail so its in-range numbers match the landing exactly). Otherwise scope
     // by active/archived/all.

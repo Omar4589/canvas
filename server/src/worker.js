@@ -6,16 +6,25 @@ import { QUEUE_NAMES } from './queues/index.js';
 import { processImportJob } from './services/import/importProcessor.js';
 import { processTurfJob } from './services/turf/turfProcessor.js';
 import { processExportJob } from './services/export/exportProcessor.js';
+import { processCampaignDeleteJob } from './services/campaigns/deleteCampaignProcessor.js';
+import { processOrgDeleteJob } from './services/platform/deleteOrgProcessor.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
 import { ImportJob } from './models/ImportJob.js';
+import { Campaign } from './models/Campaign.js';
+import { Organization } from './models/Organization.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
 // Exports are full-collection scans sharing this dyno with imports/turf — default 1 so a
 // heavy backup can never head-of-line-block real canvassing work.
 const EXPORT_CONCURRENCY = Number(process.env.EXPORT_JOB_CONCURRENCY || 1);
+// Campaign hard-deletes are multi-minute cascade runs — 1 for the same reason as exports.
+const CAMPAIGN_DELETE_CONCURRENCY = Number(process.env.CAMPAIGN_DELETE_JOB_CONCURRENCY || 1);
+// Org hard-deletes are the heaviest thing this dyno runs (every campaign's rows at once). 1:
+// two concurrent cascades would each starve the other's heartbeat and look dead to the watchdog.
+const ORG_DELETE_CONCURRENCY = Number(process.env.ORG_DELETE_JOB_CONCURRENCY || 1);
 
 // A long-lived worker must survive transient Redis/Mongo faults instead of
 // exiting. Without these, a stray unhandled rejection — or a Worker 'error'
@@ -98,6 +107,14 @@ async function main() {
       connection: createRedis(),
       concurrency: EXPORT_CONCURRENCY,
     }),
+    new Worker(QUEUE_NAMES.CAMPAIGN_DELETE, processCampaignDeleteJob, {
+      connection: createRedis(),
+      concurrency: CAMPAIGN_DELETE_CONCURRENCY,
+    }),
+    new Worker(QUEUE_NAMES.ORG_DELETE, processOrgDeleteJob, {
+      connection: createRedis(),
+      concurrency: ORG_DELETE_CONCURRENCY,
+    }),
   ];
 
   for (const w of workers) {
@@ -141,6 +158,53 @@ async function main() {
       );
     } catch (e) {
       console.error('[worker] failed-listener reconcile error:', e?.message || e);
+    }
+  });
+  // Same reconcile for campaign deletes: the campaign doc is the job record, so when BullMQ
+  // exhausts retries the doc must read `failed` (with Retry in the UI) rather than freeze in
+  // pending/running until the poll-side expiry happens to notice. Belt-and-braces for
+  // OOM-abort exits that skip the processor's own catch.
+  const campaignDeleteWorker = workers.find((w) => w.name === QUEUE_NAMES.CAMPAIGN_DELETE);
+  campaignDeleteWorker.on('failed', async (job) => {
+    if (!job?.data?.campaignId) return;
+    const attemptsAllowed = job.opts?.attempts || 1;
+    if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
+    try {
+      await Campaign.updateOne(
+        { _id: job.data.campaignId, 'deletion.status': { $in: ['pending', 'running'] } },
+        {
+          $set: {
+            'deletion.status': 'failed',
+            // Generic on purpose — never echo campaign/voter content into the error.
+            'deletion.error': 'The delete failed after retries. Retry from the Campaigns page.',
+          },
+        }
+      );
+    } catch (e) {
+      console.error('[worker] campaign-delete reconcile error:', e?.message || e);
+    }
+  });
+  // Same reconcile for org deletes. Extra weight here: while the stamp reads pending/running the
+  // WHOLE TENANT is walled off, so a job that died in Redis without flipping the doc would leave
+  // a customer locked out of a org that is not actually being deleted by anyone.
+  const orgDeleteWorker = workers.find((w) => w.name === QUEUE_NAMES.ORG_DELETE);
+  orgDeleteWorker.on('failed', async (job) => {
+    if (!job?.data?.organizationId) return;
+    const attemptsAllowed = job.opts?.attempts || 1;
+    if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
+    try {
+      await Organization.updateOne(
+        { _id: job.data.organizationId, 'deletion.status': { $in: ['pending', 'running'] } },
+        {
+          $set: {
+            'deletion.status': 'failed',
+            // Generic on purpose — never echo org or voter content into an operator-visible field.
+            'deletion.error': 'The delete failed after retries. Retry from the Organizations page.',
+          },
+        }
+      );
+    } catch (e) {
+      console.error('[worker] org-delete reconcile error:', e?.message || e);
     }
   });
 

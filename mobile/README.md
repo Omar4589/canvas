@@ -306,12 +306,16 @@ Three things `--help` buries, all three verified against the installed `eas-cli`
 
 **Two facts that make a working rollback look broken.**
 
-- **Budget two launches, not one.** `app.json`'s `updates` block sets only `url` — no
+- **Budget one accepted prompt — or two launches.** `app.json`'s `updates` block sets only `url` — no
   `checkAutomatically`, no `fallbackToCacheTimeout` — so `expo-updates` runs its defaults: check on
   every cold start, but wait **0 ms** for the answer. A phone therefore launches on the bundle it
-  already has, fetches yours in the background, and runs it on the **next** cold start. The first
-  relaunch after you republish still shows the bug. Force-quit and reopen before concluding the
-  rollback failed.
+  already has and fetches yours in the background. The in-app restart offer
+  (`components/OtaUpdatePrompt.jsx`) then surfaces the downloaded bundle: an open app shows
+  "A new version of Doorline is ready" and tapping **Restart** applies it on the spot. If the user
+  taps **Later** — or is parked on a door/survey screen, where the banner never shows — the old
+  rhythm applies: the bundle runs on the **next** cold start, so the first relaunch after you
+  republish still shows the bug. Force-quit and reopen — or accept the prompt — before concluding
+  the rollback failed.
 - **A staging rollback can't reach store users — and the bug couldn't either.** `staging` and
   `production` are separate channels compiled into the binary (`eas.json`), so publishing to one
   never touches the other. Undo the lane that broke; if the bad update reached both lanes, that's two
@@ -402,9 +406,12 @@ whether it is receiving updates.
 
 ### Applying it
 
-Default expo-updates behavior is **download in the background, apply on the *next* launch**. So after
-publishing: open the app, wait ~30s, force-quit, reopen. Relaunching once and seeing the old bundle
-proves nothing.
+Default expo-updates behavior is **download in the background, apply on the *next* launch** — and the
+in-app restart offer (`components/OtaUpdatePrompt.jsx`) closes the gap for open apps: it checks on
+launch and on every foreground, downloads, and offers **Restart** (suppressed on door/survey screens;
+**Later** defers to the next cold start). So after publishing: open the app, wait ~30s, background and
+foreground it, and accept the restart prompt — or force-quit and reopen. Relaunching once with no
+prompt accepted and seeing the old bundle proves nothing.
 
 ---
 

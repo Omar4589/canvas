@@ -57,6 +57,25 @@ const organizationSchema = new mongoose.Schema(
     // status change, clears both: a stale warning must never license a deletion.
     dormancyWarnedAt: { type: Date, default: null },
     dormancyDeleteNotBefore: { type: Date, default: null },
+    // Hard-delete runs as a background job on the worker dyno (services/platform/deleteOrgProcessor.js),
+    // and the Organization doc itself is the job record — success is the row being GONE, so only
+    // in-flight/failed state lives here. `requestedAt` is THE truth flag (null ⇒ not deleting;
+    // services/platform/orgDeletionState.js exports the shared filter): while set, the WHOLE TENANT is
+    // walled — middleware/orgContext.js resolves the org as gone, so every /admin and /mobile request
+    // 404s and every picker drops it. All FOUR delete paths stamp this (break-glass, and the three
+    // retention triggers), which is why `source` exists; `requestId` lets the job close the
+    // OrgDeletionRequest row that asked for it. A `failed` deletion keeps requestedAt set on purpose
+    // (the cascade may have half-run); the only exits are Retry or completion. No index: ≈0-1 deleting
+    // rows platform-wide, and every read rides _id or a few-hundred-doc scan.
+    deletion: {
+      requestedAt: { type: Date, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      source: { type: String, enum: ['break_glass', 'wind_down', 'dormancy', 'requested'], default: null },
+      requestId: { type: mongoose.Schema.Types.ObjectId, ref: 'OrgDeletionRequest', default: null },
+      status: { type: String, enum: ['pending', 'running', 'failed'], default: null },
+      heartbeatAt: { type: Date, default: null },
+      error: { type: String, default: null },
+    },
   },
   { timestamps: true }
 );

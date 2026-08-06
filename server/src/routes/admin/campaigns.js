@@ -16,7 +16,11 @@ import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
-import { deleteCampaignCascade } from '../../services/campaigns/deleteCampaign.js';
+import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
+import { ImportJob } from '../../models/ImportJob.js';
+import { ExportJob } from '../../models/ExportJob.js';
+import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
+import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 
 const router = Router();
@@ -57,13 +61,17 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
-// True once the campaign has any canvassing history — gates the type flip (which
-// would corrupt door-status resolution + orphan responses) and hard delete.
-async function campaignHasCanvassed(campaignId) {
-  return Boolean(
-    (await CanvassActivity.exists({ campaignId })) || (await SurveyResponse.exists({ campaignId }))
-  );
-}
+// campaignHasCanvassed moved to services/campaigns/deletionState.js — the background
+// delete processor re-checks it at claim time, and routes must not import from routes.
+
+// Queue calls are time-bounded: ioredis buffers commands while disconnected, so without
+// this a wedged/absent Redis would HANG the request rather than failing it — the 503 path
+// below would be unreachable exactly when it matters (the exports enqueue pattern).
+const queueOp = (promise, ms = Number(process.env.CAMPAIGN_DELETE_ENQUEUE_TIMEOUT_MS || 5000)) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('queue timeout')), ms).unref?.()),
+  ]);
 
 async function withCounts(campaigns, organizationId) {
   const ids = campaigns.map((c) => c._id);
@@ -138,12 +146,35 @@ router.get('/', async (req, res, next) => {
       .sort({ isActive: -1, createdAt: -1 })
       .populate('surveyTemplateId', 'name version')
       .lean();
+    // Stuck-deletion watchdog rides this poll (the imports GET /:importId pattern): the web
+    // dyno expires a run whose worker died so the row flips to failed + Retry instead of
+    // reading "Deleting…" forever. Re-read on expiry so the response carries the reason.
+    for (const c of campaigns) {
+      if (isDeleting(c) && (await maybeExpireStaleDeletion(c))) {
+        const fresh = await Campaign.findById(c._id, { deletion: 1 }).lean();
+        if (fresh) c.deletion = fresh.deletion;
+      }
+    }
     const withMetrics = await withCounts(campaigns, activeOrgId(req));
+    // Deleting campaigns ship in their OWN array, not flagged inline: ~20 client surfaces
+    // (pickers, drill-in resolvers, KPI sums, mobile CampaignChip) read `campaigns` and must
+    // treat a deleting campaign as gone — only the Campaigns page renders these, as
+    // "Deleting…" cards (or failed + Retry). The raw deletion subdoc stays server-side.
+    const live = [];
+    const deleting = [];
+    for (const c of withMetrics) {
+      const { deletion, ...row } = c;
+      if (deletion?.requestedAt) {
+        deleting.push({ ...row, deletionStatus: deletion.status || 'pending', deletionError: deletion.error || null });
+      } else {
+        live.push(row);
+      }
+    }
     // The org default for the billable-door policy, so the edit drawer can LABEL what
     // "use the organization default" currently resolves to. Every campaign row already
     // carries its own tri-state override via the lean spread.
     const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
-    res.json({ campaigns: withMetrics, orgBillRestrictedDoors: Boolean(org?.billRestrictedDoors) });
+    res.json({ campaigns: live, deletingCampaigns: deleting, orgBillRestrictedDoors: Boolean(org?.billRestrictedDoors) });
   } catch (err) {
     next(err);
   }
@@ -218,6 +249,11 @@ router.patch('/:campaignId', async (req, res, next) => {
     }
     const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    // Mid-delete (or failed-delete, possibly half-destroyed) campaigns take no edits —
+    // the only exits from that state are Retry or the row disappearing.
+    if (isDeleting(campaign)) {
+      return res.status(409).json({ error: 'This campaign is being deleted.', code: 'campaign-deleting' });
+    }
 
     // Type is locked once canvassing has started: flipping survey⇄lit_drop would
     // corrupt door-status resolution and orphan SurveyResponse rows.
@@ -311,8 +347,12 @@ router.patch('/:campaignId', async (req, res, next) => {
   }
 });
 
-// Hard delete — allowed ONLY before any canvassing (no knocks/surveys). Cascades
-// every campaign-scoped collection + the voters housed here. Otherwise: archive.
+// Hard delete — allowed ONLY before any canvassing (no knocks/surveys). Otherwise: archive.
+// Runs as a BACKGROUND JOB on the worker dyno (services/campaigns/deleteCampaignProcessor.js):
+// a 100k-door cascade takes minutes, and inline it blew Heroku's 30s router limit — the
+// request 503'd while the dyno finished the delete anyway. This route stamps
+// campaign.deletion, enqueues, and answers 202 in well under a second; the Campaigns page
+// polls the list until the row disappears (success) or reads failed (Retry re-enters here).
 router.delete('/:campaignId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -324,14 +364,110 @@ router.delete('/:campaignId', async (req, res, next) => {
     }
     const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Already deleting: a double-click / second tab is a harmless idempotent 202 (the stable
+    // jobId dedupes in the queue too). Expire a stale run first so a dead worker's stamp
+    // can't wedge the retry path; `failed` falls through to re-stamp + re-enqueue.
+    if (isDeleting(campaign)) {
+      const expired = await maybeExpireStaleDeletion(campaign);
+      if (!expired && ['pending', 'running'].includes(campaign.deletion.status)) {
+        return res.status(202).json({ queued: true });
+      }
+    }
+
     if (await campaignHasCanvassed(campaign._id)) {
       return res.status(400).json({
         error: 'This campaign has canvassing activity; archive it instead of deleting.',
         code: 'has-activity',
       });
     }
-    const counts = await deleteCampaignCascade(campaign);
-    res.json({ deleted: 1, counts });
+
+    // An import writing rows mid-cascade would orphan voters into a half-deleted campaign
+    // (and a running export would read garbage) — wait jobs out rather than racing them.
+    const [importBusy, exportBusy] = await Promise.all([
+      ImportJob.exists({ campaignId: campaign._id, status: { $in: IMPORT_ACTIVE_STATUSES } }),
+      ExportJob.exists({ campaignId: campaign._id, status: { $in: ['pending', 'running'] } }),
+    ]);
+    if (importBusy || exportBusy) {
+      return res.status(409).json({
+        error: 'An import or export is still running for this campaign — wait for it to finish, then delete.',
+        code: 'campaign-busy',
+      });
+    }
+
+    // If we fell through holding an existing stamp, it is (by the gate above) a failed run —
+    // remember it so an enqueue failure restores the quarantine instead of silently lifting
+    // it off a possibly half-deleted campaign.
+    const prevDeletion = isDeleting(campaign)
+      ? {
+          requestedAt: campaign.deletion.requestedAt,
+          requestedBy: campaign.deletion.requestedBy || null,
+          status: 'failed',
+          heartbeatAt: campaign.deletion.heartbeatAt || null,
+          error: campaign.deletion.error || null,
+        }
+      : null;
+
+    // Stamp (CAS): the $or admits a fresh request and a failed-run retry, and refuses to
+    // stomp a concurrent pending/running stamp from another admin — that race is a 202 too.
+    const requestedAt = new Date();
+    const stamped = await Campaign.findOneAndUpdate(
+      {
+        _id: campaign._id,
+        organizationId: orgId,
+        $or: [{ 'deletion.requestedAt': null }, { 'deletion.status': 'failed' }],
+      },
+      {
+        $set: {
+          deletion: {
+            requestedAt,
+            requestedBy: req.user._id,
+            status: 'pending',
+            heartbeatAt: null,
+            error: null,
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!stamped) return res.status(202).json({ queued: true });
+
+    try {
+      await queueOp(
+        getQueue(QUEUE_NAMES.CAMPAIGN_DELETE).add(
+          'campaign-delete',
+          { campaignId: String(campaign._id), organizationId: String(orgId) },
+          // Stable id so a duplicate submit can't double-run. removeOnComplete/Fail matter:
+          // a finished job squatting on this id would make the NEXT add a silent no-op —
+          // which is exactly what Retry is.
+          { jobId: String(campaign._id), removeOnComplete: true, removeOnFail: true }
+        )
+      );
+    } catch (err) {
+      // No wedged "Deleting…" for a job that never entered the queue: restore whatever the
+      // stamp replaced (nothing for a fresh delete, the failed quarantine for a retry) and
+      // say so honestly. Guarded on our own stamp so a racing worker claim is left alone.
+      console.error('[campaigns] delete enqueue failed:', err?.message || err);
+      await Campaign.updateOne(
+        { _id: campaign._id, 'deletion.requestedAt': requestedAt, 'deletion.status': 'pending' },
+        {
+          $set: {
+            deletion: prevDeletion || {
+              requestedAt: null,
+              requestedBy: null,
+              status: null,
+              heartbeatAt: null,
+              error: null,
+            },
+          },
+        }
+      ).catch(() => {});
+      return res
+        .status(503)
+        .json({ error: 'Could not queue the delete — try again in a moment.', code: 'queue-unavailable' });
+    }
+
+    res.status(202).json({ queued: true });
   } catch (err) {
     next(err);
   }

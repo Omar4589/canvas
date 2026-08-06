@@ -1,4 +1,5 @@
 import { Organization } from '../../models/Organization.js';
+import { NOT_DELETING } from '../platform/orgDeletionState.js';
 import { Subscription } from '../../models/Subscription.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -28,7 +29,10 @@ export async function idleZeroDollarOrgs({ months = PLATFORM_IDLE_MONTHS } = {})
   const cutoff = new Date(Date.now() - months * MONTH);
 
   const [orgs, subs] = await Promise.all([
-    Organization.find({ isActive: true }, 'name slug createdAt').lean(),
+    // NOT_DELETING: an org mid-delete matches every zombie criterion by construction (its
+    // campaigns and activity vanish as the cascade runs), and it must not land in the
+    // "needs a human decision" queue for a decision that has already been made.
+    Organization.find({ isActive: true, ...NOT_DELETING }, 'name slug createdAt').lean(),
     Subscription.find({}, 'organizationId status').lean(),
   ]);
   const statusByOrg = new Map(subs.map((s) => [String(s.organizationId), s.status]));

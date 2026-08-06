@@ -65,6 +65,10 @@ export default function OrganizationsPage() {
     queryKey: ['super-admin', 'organizations', 'table', q, sort, skip],
     queryFn: () => api(`/super-admin/organizations?${tableParams.toString()}`),
     placeholderData: keepPreviousData,
+    // Poll only while a delete runs in the background: the row vanishing — or flipping to failed —
+    // is the only completion signal. 5s rather than the Campaigns page's 2s: an org cascade runs for
+    // minutes and this payload carries the billing joins.
+    refetchInterval: (query) => (query.state.data?.deletingOrganizations?.length ? 5000 : false),
   });
 
   // This month's revenue across all customer orgs (internal excluded) — the header rollup and the
@@ -132,11 +136,15 @@ export default function OrganizationsPage() {
   const deleteMut = useMutation({
     mutationFn: ({ id, slug }) =>
       api(`/super-admin/organizations/${id}`, { method: 'DELETE', body: { confirmSlug: slug } }),
-    onSuccess: (r) => {
+    // The response is a 202 — the cascade has not run yet, so there are no counts to report.
+    // `name` is threaded through mutate() rather than read off the response, and every `r.` access
+    // is guarded: this used to dereference r.organization.name and Object.entries(r.counts)
+    // unguarded, which throws a TypeError INSIDE onSuccess (react-query does not route that to
+    // onError) the moment the shape changes.
+    onSuccess: (r, vars) => {
+      const shownName = r?.organization?.name || vars?.name || 'organization';
       setDeleteMsg(
-        `Deleted '${r.organization.name}' — ${Object.entries(r.counts)
-          .map(([k, v]) => `${v} ${k}`)
-          .join(', ') || 'no content'}${r.personsPurged ? ` · ${r.personsPurged} orphaned people purged` : ''}.`
+        `Deleting '${shownName}'… this runs in the background; the row disappears when it finishes.`
       );
       setDeleteOrg(null);
       setConfirmSlug('');
@@ -500,6 +508,51 @@ export default function OrganizationsPage() {
                 </td>
               </tr>
             )}
+            {/* Organizations whose delete is running (or failed). They arrive in their own array
+                so every other consumer of `organizations` — this table's normal rows, the org
+                switcher, the mobile pickers — treats them as gone; here they render inert, with
+                Retry as the only action on a failure. */}
+            {orgsQ.data?.deletingOrganizations?.map((o) => (
+              <tr key={o.id} className="bg-sunken/40">
+                <td className="px-3 py-3">
+                  <div className="font-medium text-fg">
+                    {o.name}
+                    {o.deletionStatus === 'failed' ? (
+                      <span className="ml-2 inline-flex rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger-fg">
+                        Delete failed
+                      </span>
+                    ) : (
+                      <span className="ml-2 inline-flex rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-fg">
+                        Deleting…
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-fg-subtle">{o.slug}</div>
+                  {o.deletionStatus === 'failed' && o.deletionError && (
+                    <div className="mt-1 text-xs text-danger">{o.deletionError}</div>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-fg-subtle" colSpan={7}>
+                  {o.deletionStatus === 'failed'
+                    ? 'Removal stopped partway — the organization stays locked until a retry finishes it.'
+                    : `Removing all data in the background${o.deletionSource && o.deletionSource !== 'break_glass' ? ` (${o.deletionSource.replace('_', '-')})` : ''}…`}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {o.deletionStatus === 'failed' && (
+                    <button
+                      onClick={() => {
+                        setDeleteMsg(null);
+                        setConfirmSlug('');
+                        setDeleteOrg({ id: o.id, name: o.name, slug: o.slug, retry: true });
+                      }}
+                      className="text-xs font-semibold text-danger hover:opacity-80"
+                    >
+                      Retry delete…
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
             {orgsQ.data?.organizations?.map((o) => {
               const money = rollupQ.data?.organizations?.find((r) => r.organizationId === o.id);
               return (
@@ -603,12 +656,27 @@ export default function OrganizationsPage() {
 
       {deleteOrg && (
         <div className="rounded-xl border border-danger/30 bg-danger-tint p-4">
-          <h2 className="text-sm font-semibold text-danger">Permanently delete {deleteOrg.name}?</h2>
+          <h2 className="text-sm font-semibold text-danger">
+            {deleteOrg.retry ? `Retry deleting ${deleteOrg.name}?` : `Permanently delete ${deleteOrg.name}?`}
+          </h2>
           <p className="mt-1 text-sm text-danger">
-            This hard-deletes the org and <strong>everything in it</strong> — campaigns, doors, voters,
-            canvass history, surveys, books, imports, reports, and share links. It cannot be undone.
-            User accounts survive (people in other orgs keep that access; this org&apos;s memberships are
-            removed). Type the slug <span className="font-mono font-semibold">{deleteOrg.slug}</span> to confirm.
+            {deleteOrg.retry ? (
+              <>
+                A previous attempt stopped partway, so this organization is <strong>already partly
+                destroyed</strong> and stays locked to everyone until a retry finishes it. Retrying
+                resumes the same removal.{' '}
+              </>
+            ) : (
+              <>
+                This hard-deletes the org and <strong>everything in it</strong> — campaigns, doors, voters,
+                canvass history, surveys, books, imports, reports, and share links. It cannot be undone.
+                User accounts survive (people in other orgs keep that access; this org&apos;s memberships are
+                removed).{' '}
+              </>
+            )}
+            Removal runs in the background and can take several minutes for a large organization; the org
+            is locked to everyone the moment you confirm. Type the slug{' '}
+            <span className="font-mono font-semibold">{deleteOrg.slug}</span> to confirm.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
@@ -618,11 +686,17 @@ export default function OrganizationsPage() {
               className="rounded-md border border-danger/40 bg-card px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             />
             <button
-              onClick={() => deleteMut.mutate({ id: deleteOrg.id, slug: confirmSlug.trim().toLowerCase() })}
+              onClick={() =>
+                deleteMut.mutate({
+                  id: deleteOrg.id,
+                  slug: confirmSlug.trim().toLowerCase(),
+                  name: deleteOrg.name,
+                })
+              }
               disabled={confirmSlug.trim().toLowerCase() !== deleteOrg.slug || deleteMut.isPending}
               className="rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
             >
-              {deleteMut.isPending ? 'Deleting…' : 'Delete forever'}
+              {deleteMut.isPending ? 'Queueing…' : deleteOrg.retry ? 'Retry delete' : 'Delete forever'}
             </button>
             <button
               onClick={() => {

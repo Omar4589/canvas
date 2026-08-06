@@ -74,8 +74,11 @@ export async function api(
     //
     // Deliberately NOT done for code === 'FORBIDDEN_ROLE': that only means the caller hit an
     // endpoint above their role, which must not eject them from the org.
+    // 404 as well as 403: orgContext.js answers 404 ORG_CONTEXT for an org that is deactivated or
+    // being deleted, and without this those two land on an unretryable error instead of the picker.
+    // Safe to widen — ORG_CONTEXT is emitted by that middleware alone.
     if (
-      res.status === 403 &&
+      (res.status === 403 || res.status === 404) &&
       data?.code === 'ORG_CONTEXT' &&
       typeof window !== 'undefined' &&
       window.location.pathname !== '/select-org'

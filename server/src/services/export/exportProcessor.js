@@ -181,9 +181,29 @@ export async function processExportJob(job) {
   );
 
   const [org, campaign] = await Promise.all([
-    Organization.findById(doc.organizationId, 'name slug timeZone').lean(),
+    Organization.findById(doc.organizationId, 'name slug timeZone deletion').lean(),
     doc.campaignId ? Campaign.findOne({ _id: doc.campaignId, organizationId: doc.organizationId }).lean() : null,
   ]);
+  // A campaign-scoped export claimed AFTER a delete stamped the campaign would read a
+  // half-destroyed dataset — fail it honestly (services/campaigns/deletionState.js).
+  // Org-scoped exports (campaignId null) are untouched; a missing campaign stays
+  // tolerated as before (the export reads whatever rows remain).
+  if (doc.campaignId && campaign?.deletion?.requestedAt) {
+    await ExportJob.updateOne(
+      { _id: doc._id },
+      { $set: { status: 'failed', error: 'This campaign is being deleted.', completedAt: new Date() } }
+    );
+    throw new UnrecoverableError('Campaign is being deleted');
+  }
+  // Same one level up — and org-scoped exports matter here too, not just campaign-scoped ones:
+  // building a full backup out of a tenant mid-cascade produces a half-destroyed artifact.
+  if (org?.deletion?.requestedAt) {
+    await ExportJob.updateOne(
+      { _id: doc._id },
+      { $set: { status: 'failed', error: 'This organization is being deleted.', completedAt: new Date() } }
+    );
+    throw new UnrecoverableError('Organization is being deleted');
+  }
   const anchorTz = doc.params?.anchorTz || campaign?.timeZone || org?.timeZone || 'America/New_York';
 
   // Org-wide on purpose: the DNC flag is kept in lockstep across a person's per-campaign

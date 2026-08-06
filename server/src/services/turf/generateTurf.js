@@ -29,6 +29,9 @@ const CUT_COLUMNS = {
 export async function generateTurf({ campaignId, passId, mode, params = {}, generationJobId, generatedBy, onProgress }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
+  // A queued cut can be claimed AFTER a delete stamped the campaign — writing Turf rows
+  // mid-cascade would orphan them (services/campaigns/deletionState.js).
+  if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
 
@@ -190,6 +193,8 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
+  // Same mid-delete guard as generateTurf above.
+  if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
 

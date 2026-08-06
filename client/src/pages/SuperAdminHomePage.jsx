@@ -102,6 +102,20 @@ export default function SuperAdminHomePage() {
     queryFn: () => api('/super-admin/access/health/retention'),
     ...livePollOptions(live, true, 30_000),
   });
+  // Everything on the deletions pill that means "a human has to look at this", across all three
+  // deletion mechanisms. Deliberately excludes orgDeletions.queued: on a retention sweep night
+  // several orgs legitimately sit queued behind a concurrency-1 worker, and a pill that goes red
+  // every time the sweep works is a pill people stop reading.
+  const dh = healthQ.data;
+  const deletionsNeedingHuman =
+    (dh?.deletionRequests?.stuck || 0) +
+    (dh?.deletionRequests?.failed || 0) +
+    (dh?.campaignDeletions?.stuck || 0) +
+    (dh?.campaignDeletions?.failed || 0) +
+    (dh?.orgDeletions?.stuck || 0) +
+    (dh?.orgDeletions?.failed || 0) +
+    (dh?.orgDeletions?.unstarted || 0);
+
   const grantsQ = useQuery({
     queryKey: ['support-grants'],
     queryFn: () => api('/super-admin/access/grants?all=1'),
@@ -227,19 +241,17 @@ export default function SuperAdminHomePage() {
           <button
             onClick={() => navigate('/super-admin/access')}
             className={`rounded-full px-3 py-1 font-semibold ${
-              (healthQ.data?.deletionRequests?.stuck || 0) + (healthQ.data?.deletionRequests?.failed || 0) > 0
+              deletionsNeedingHuman > 0
                 ? 'bg-danger/10 text-danger'
                 : (deletionsQ.data?.total || 0) > 0
                   ? 'bg-warning-tint text-warning-fg'
                   : 'bg-sunken text-fg-muted'
             }`}
-            title="Scheduled org deletions (the delete-on-request SLA)"
+            title="Scheduled org deletions (the delete-on-request SLA) + background campaign and organization deletes"
           >
             {deletionsQ.data
               ? `${deletionsQ.data.total} deletion${deletionsQ.data.total === 1 ? '' : 's'} scheduled${
-                (healthQ.data?.deletionRequests?.stuck || 0) + (healthQ.data?.deletionRequests?.failed || 0) > 0
-                  ? ` · ${(healthQ.data.deletionRequests.stuck || 0) + (healthQ.data.deletionRequests.failed || 0)} need a human`
-                  : ''
+                deletionsNeedingHuman > 0 ? ` · ${deletionsNeedingHuman} need a human` : ''
               }`
               : 'Deletions…'}
           </button>

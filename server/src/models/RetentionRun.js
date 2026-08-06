@@ -25,6 +25,11 @@ const retentionRunSchema = new mongoose.Schema(
     ok: { type: Boolean, default: false },
     // What it actually did, so a run that "succeeded" while doing nothing is still legible.
     purged: { type: Number, default: 0 },
+    // Organizations handed to org-delete-queue this run (retention-triggers only). Distinct from
+    // `purged` on purpose: since the org cascade moved to the worker, this sweep decides and
+    // enqueues but destroys nothing itself, so `purged` is 0 for it and the deletion is confirmed
+    // by the org row being gone — never by a number written here.
+    enqueued: { type: Number, default: 0 },
     scanned: { type: Number, default: 0 },
     // Deletion warnings delivered this run (wind-down + dormancy) — the "we warned before we
     // deleted" half of the promise, countable next to the deletions themselves.

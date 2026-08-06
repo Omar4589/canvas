@@ -37,7 +37,13 @@ export const rejectArchivedCampaign = (res) =>
 
 // Inline form, for a handler that already holds the campaign (or resolves it from
 // something other than :campaignId). Returns false once it has sent the 409.
+// Deleting comes first: a mid-delete campaign is beyond "read-only" — it is going away —
+// and 409 (not 403/404) keeps the same already-shipped-mobile safety as the archived case.
 export const assertCampaignWritable = (res, campaign) => {
+  if (campaign && campaign.deletion?.requestedAt) {
+    res.status(409).json({ error: 'This campaign is being deleted.', code: 'campaign-deleting' });
+    return false;
+  }
   if (campaign && campaign.isActive === false) {
     rejectArchivedCampaign(res);
     return false;
@@ -49,7 +55,7 @@ const loadCampaignState = async (req) => {
   const orgId = req.activeOrg?._id;
   const { campaignId } = req.params;
   if (!orgId || !campaignId || !mongoose.isValidObjectId(campaignId)) return null;
-  return Campaign.findOne({ _id: campaignId, organizationId: orgId }).select('isActive').lean();
+  return Campaign.findOne({ _id: campaignId, organizationId: orgId }).select('isActive deletion.requestedAt').lean();
 };
 
 // Router-level form, for the routers mounted under /admin/campaigns/:campaignId. Reads

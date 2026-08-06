@@ -4,6 +4,7 @@ import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
@@ -81,7 +82,9 @@ async function assertCampaignAccess(req, campaignId) {
   if (!mongoose.isValidObjectId(campaignId)) return { error: 400, message: 'Invalid campaignId' };
   const orgId = activeOrgId(req);
   if (!orgId) return { error: 400, message: 'Active organization required' };
-  const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId }).lean();
+  // NOT_DELETING: a mid-delete campaign reads as gone — the 404 walls canvassing against
+  // it the instant the delete is requested (services/campaigns/deletionState.js).
+  const campaign = await Campaign.findOne({ _id: campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
   if (!campaign) return { error: 404, message: 'Campaign not found' };
   if (isOrgAdminOrSuper(req)) return { campaign };
   const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
@@ -180,7 +183,7 @@ router.get('/campaigns', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
-    let campaignFilter = { organizationId: orgId, isActive: true };
+    let campaignFilter = { organizationId: orgId, isActive: true, ...NOT_DELETING };
     if (!isOrgAdminOrSuper(req)) {
       const assignedIds = await CampaignAssignment.find({
         userId: req.user._id,

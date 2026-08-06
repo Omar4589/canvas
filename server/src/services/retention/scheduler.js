@@ -110,14 +110,15 @@ export async function processMaintenanceJob(job) {
   }
   if (job.name === TRIGGER_JOB) {
     const res = await runRetentionTriggers({ apply: true });
-    // Loud on purpose: this job DELETES CUSTOMERS. If it ever purges something unexpected, the line
-    // that says so should be findable in a log without knowing what to grep for.
+    // Loud on purpose: this job CONDEMNS CUSTOMERS. It no longer swings the axe itself — each org
+    // goes to org-delete-queue and the worker destroys it minutes later — but the decision is made
+    // here, so the line that says so should be findable in a log without knowing what to grep for.
     console.log(
-      `[maintenance] ${TRIGGER_JOB}: wind-down ${res.windDown.purged}/${res.windDown.due}, ` +
-      `dormant ${res.dormant.purged}/${res.dormant.due}, requested ${res.requested.purged}/${res.requested.due}`
+      `[maintenance] ${TRIGGER_JOB}: wind-down ${res.windDown.enqueued}/${res.windDown.due}, ` +
+      `dormant ${res.dormant.enqueued}/${res.dormant.due}, requested ${res.requested.enqueued}/${res.requested.due}`
     );
-    if (res.purged > 0) {
-      console.warn(`[maintenance] ${TRIGGER_JOB}: PURGED ${res.purged} ORGANIZATION(S):`,
+    if (res.enqueued > 0) {
+      console.warn(`[maintenance] ${TRIGGER_JOB}: ENQUEUED ${res.enqueued} ORGANIZATION DELETE(S):`,
         [...res.windDown.orgs, ...res.dormant.orgs].join(', '));
     }
     return res;

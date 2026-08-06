@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
@@ -47,7 +48,8 @@ async function resolveCampaign(req, res) {
     res.status(400).json({ error: 'campaignId required' });
     return null;
   }
-  const campaign = await Campaign.findOne({ _id: cid, organizationId: activeOrgId(req) }).lean();
+  // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+  const campaign = await Campaign.findOne({ _id: cid, organizationId: activeOrgId(req), ...NOT_DELETING }).lean();
   if (!campaign) {
     res.status(404).json({ error: 'Campaign not found' });
     return null;

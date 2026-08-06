@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
+import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Household } from '../../models/Household.js';
 import { Effort } from '../../models/Effort.js';
 import { Pass } from '../../models/Pass.js';
@@ -28,7 +29,8 @@ async function loadCampaign(req, res, next) {
     if (!mongoose.isValidObjectId(req.params.campaignId)) {
       return res.status(400).json({ error: 'Invalid campaignId' });
     }
-    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId });
+    // NOT_DELETING: a mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+    const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId, ...NOT_DELETING });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     req.campaign = campaign;
     next();

@@ -3,7 +3,8 @@ import { Subscription } from '../../models/Subscription.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { OrgDeletionRequest } from '../../models/OrgDeletionRequest.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
-import { deleteOrganization } from '../platform/deleteOrganization.js';
+import { stampAndEnqueueOrgDelete } from '../platform/enqueueOrgDelete.js';
+import { isDeleting } from '../platform/orgDeletionState.js';
 import { windDownDeletionDate } from '../billing/windDown.js';
 import { sendMail } from '../mail/mailer.js';
 import { windDownWarning, dormancyWarning } from '../mail/templates.js';
@@ -147,7 +148,7 @@ export async function warnWindDownOrgs({ apply = true } = {}) {
  * data lingers indefinitely on our servers "just in case" — that is exactly the retention we tell
  * people we don't do.
  */
-export async function purgeWoundDownOrgs({ apply = true } = {}) {
+export async function purgeWoundDownOrgs({ apply = true, enqueue = stampAndEnqueueOrgDelete } = {}) {
   const now = Date.now();
   const subs = await Subscription.find(
     { status: 'canceled' },
@@ -167,18 +168,41 @@ export async function purgeWoundDownOrgs({ apply = true } = {}) {
     if (!s.windDownWarnedAt || !s.windDownDeleteNotBefore) continue;
     if (new Date(s.windDownDeleteNotBefore).getTime() > now) continue;
     if (await isExempt(s.organizationId)) continue;
-    const org = await Organization.findById(s.organizationId, 'name slug').lean();
-    if (org) due.push({ org, since: s.statusChangedAt });
+    const org = await Organization.findById(s.organizationId, 'name slug deletion').lean();
+    // Already stamped by a previous sweep (or by break-glass) — its job owns it now, and
+    // re-reporting it as newly due every night would misstate what this run actually did.
+    if (org && !isDeleting(org)) due.push({ org, since: s.statusChangedAt });
   }
 
-  if (!apply) return { due: due.length, purged: 0, orgs: due.map((d) => d.org.slug) };
+  if (!apply) return { due: due.length, enqueued: 0, orgs: due.map((d) => d.org.slug) };
 
-  let purged = 0;
+  return enqueueEach(due, 'wind_down', enqueue);
+}
+
+/**
+ * Hand each due org to the org-delete queue, one job per org.
+ *
+ * The per-org try/catch is the entire point. These stages used to call deleteOrganization inline
+ * and BARE: one org that threw took down runRetentionTriggers, so the stages after it — including
+ * delete-on-request, which is what keeps the 30-day promise — never ran that night, and the only
+ * evidence was an `ok:false` RetentionRun. Now a failure is scoped to its own org and its own
+ * BullMQ retry ladder.
+ */
+async function enqueueEach(due, source, enqueue, extra = () => ({})) {
+  let enqueued = 0;
+  let alreadyDeleting = 0;
+  let failedToEnqueue = 0;
   for (const d of due) {
-    await deleteOrganization(d.org._id);
-    purged += 1;
+    try {
+      const r = await enqueue({ orgId: d.org._id, source, requestedBy: null, ...extra(d) });
+      if (r?.queued) enqueued += 1;
+      else alreadyDeleting += 1;
+    } catch (err) {
+      failedToEnqueue += 1;
+      console.error(`[retention] ${source}: could not enqueue ${d.org.slug}:`, err?.message || err);
+    }
   }
-  return { due: due.length, purged, orgs: due.map((d) => d.org.slug) };
+  return { due: due.length, enqueued, alreadyDeleting, failedToEnqueue, orgs: due.map((d) => d.org.slug) };
 }
 
 /**
@@ -249,17 +273,19 @@ export async function warnDormantOrgs({ apply = true } = {}) {
   return { due: candidates.length, warned, orgs: candidates.map((c) => c.org.slug) };
 }
 
-export async function purgeDormantOrgs({ apply = true } = {}) {
+export async function purgeDormantOrgs({ apply = true, enqueue = stampAndEnqueueOrgDelete } = {}) {
   const now = Date.now();
   const cutoff = new Date(now - DORMANCY_MONTHS * 30 * DAY);
   const orgs = await Organization.find(
     { createdAt: { $lte: cutoff } },
-    'name slug createdAt dormancyWarnedAt dormancyDeleteNotBefore'
+    'name slug createdAt dormancyWarnedAt dormancyDeleteNotBefore deletion'
   ).lean();
 
   const due = [];
   for (const org of orgs) {
     if (await isExempt(org._id)) continue;
+    // Already stamped (last night's sweep, the wind-down stage above, or break-glass).
+    if (isDeleting(org)) continue;
     // Gate on subscription status, not knock recency alone. Deleting a paying customer because
     // they did not canvass for two years would be catastrophic. Even with the warning emails
     // below, "only delete an account that is no longer a customer" stays a hard requirement:
@@ -295,14 +321,9 @@ export async function purgeDormantOrgs({ apply = true } = {}) {
     due.push({ org, lastTouch });
   }
 
-  if (!apply) return { due: due.length, purged: 0, orgs: due.map((d) => d.org.slug) };
+  if (!apply) return { due: due.length, enqueued: 0, orgs: due.map((d) => d.org.slug) };
 
-  let purged = 0;
-  for (const d of due) {
-    await deleteOrganization(d.org._id);
-    purged += 1;
-  }
-  return { due: due.length, purged, orgs: due.map((d) => d.org.slug) };
+  return enqueueEach(due, 'dormancy', enqueue);
 }
 
 /**
@@ -318,45 +339,71 @@ export async function purgeDormantOrgs({ apply = true } = {}) {
 // persistent failure becomes loudly visible — never a silent 'completed' the customer would trust.
 const MAX_DELETION_ATTEMPTS = Number(process.env.RETENTION_DELETE_MAX_ATTEMPTS || 5);
 
-export async function executeDueDeletionRequests({ apply = true } = {}) {
+export async function executeDueDeletionRequests({ apply = true, enqueue = stampAndEnqueueOrgDelete } = {}) {
   const now = new Date();
   const due = await OrgDeletionRequest.find({
     status: 'scheduled',
     scheduledFor: { $lte: now },
   }).lean();
 
-  if (!apply) return { due: due.length, purged: 0, failed: 0 };
+  if (!apply) return { due: due.length, enqueued: 0, failed: 0 };
 
-  let purged = 0;
+  let enqueued = 0;
+  let completed = 0;
   let failed = 0;
+  let failedToEnqueue = 0;
   for (const r of due) {
+    // Check the budget BEFORE spending another attempt, so an exhausted request escalates to the
+    // terminal 'failed' state (RED on the health surface) instead of retrying forever in silence.
+    const attempts = (r.attempts || 0) + 1;
+    if (attempts > MAX_DELETION_ATTEMPTS) {
+      await OrgDeletionRequest.updateOne(
+        { _id: r._id, status: 'scheduled' },
+        { $set: { status: 'failed', lastAttemptAt: new Date() } }
+      );
+      failed += 1;
+      continue;
+    }
     try {
-      await deleteOrganization(r.organizationId);
+      const res = await enqueue({
+        orgId: r.organizationId,
+        source: 'requested',
+        requestedBy: r.requestedBy || null,
+        requestId: r._id,
+      });
+      if (res?.gone) {
+        // The org is already destroyed — a prior run completed the cascade and died before closing
+        // this row. The promise WAS kept; say so rather than retrying a deletion of nothing.
+        await OrgDeletionRequest.updateOne(
+          { _id: r._id, status: 'scheduled' },
+          { $set: { status: 'completed', completedAt: new Date(), error: null } }
+        );
+        completed += 1;
+        continue;
+      }
+      // The row stays 'scheduled' ON PURPOSE: the JOB closes it, not the enqueue. Writing
+      // 'completed' here would record a deletion that has not happened yet.
       await OrgDeletionRequest.updateOne(
         { _id: r._id },
-        { $set: { status: 'completed', completedAt: new Date(), error: null }, $inc: { attempts: 1 } }
+        { $set: { lastAttemptAt: new Date() }, $inc: { attempts: 1 } }
       );
-      purged += 1;
+      enqueued += 1;
     } catch (err) {
-      const attempts = (r.attempts || 0) + 1;
-      const giveUp = attempts >= MAX_DELETION_ATTEMPTS;
-      // Keep it 'scheduled' (so the next sweep retries) until we've exhausted the budget; only then
-      // mark 'failed'. Either way, record the error and the attempt so it is never a silent success.
+      // Could not even reach the queue. Stay 'scheduled' so the next sweep retries within budget.
       await OrgDeletionRequest.updateOne(
         { _id: r._id },
         {
           $set: {
-            status: giveUp ? 'failed' : 'scheduled',
             error: String(err?.message || err),
             lastAttemptAt: new Date(),
           },
           $inc: { attempts: 1 },
         }
       );
-      if (giveUp) failed += 1;
+      failedToEnqueue += 1;
     }
   }
-  return { due: due.length, purged, failed };
+  return { due: due.length, enqueued, completed, failed, failedToEnqueue };
 }
 
 /**
@@ -365,14 +412,38 @@ export async function executeDueDeletionRequests({ apply = true } = {}) {
  * requests overdue by more than a day; `failed` counts terminal failures. Either being non-zero means
  * a customer's deletion promise is not being kept, and the retention banner must say so.
  */
+// An overdue request whose org deletion is genuinely IN FLIGHT is not stuck — it is being kept.
+// This matters because the sweep can enqueue a request with minutes of grace left (scheduledFor +
+// 1 day can fall just before the nightly run), so without this exclusion a correctly-running
+// deletion turns the SLA counter RED. The freshness bound is deliberate: a cascade "running" for
+// three days is not an excuse, it is the failure — and once the poll-side expiry flips that stamp
+// to `failed`, the request falls straight back into `stuck` here.
 export async function deletionRequestHealth() {
   const now = Date.now();
   const overdueCutoff = new Date(now - DAY); // a day's grace past the scheduled date
-  const [stuck, failed] = await Promise.all([
-    OrgDeletionRequest.countDocuments({ status: 'scheduled', scheduledFor: { $lte: overdueCutoff } }),
+  const [overdue, failed] = await Promise.all([
+    OrgDeletionRequest.find(
+      { status: 'scheduled', scheduledFor: { $lte: overdueCutoff } },
+      'organizationId'
+    ).lean(),
     OrgDeletionRequest.countDocuments({ status: 'failed' }),
   ]);
-  return { healthy: stuck === 0 && failed === 0, stuck, failed };
+  const orgIds = overdue.map((r) => r.organizationId);
+  const inFlightOrgs = orgIds.length
+    ? await Organization.find(
+        {
+          _id: { $in: orgIds },
+          'deletion.status': { $in: ['pending', 'running'] },
+          'deletion.requestedAt': { $gte: new Date(now - DAY) },
+        },
+        '_id'
+      ).lean()
+    : [];
+  const live = new Set(inFlightOrgs.map((o) => String(o._id)));
+  const stuck = overdue.filter((r) => !live.has(String(r.organizationId))).length;
+  // inFlight is REPORTED, not hidden — "1 deletion request is executing now" is a different
+  // sentence from silence, and an operator should be able to tell them apart.
+  return { healthy: stuck === 0 && failed === 0, stuck, failed, inFlight: live.size };
 }
 
 /**
@@ -387,9 +458,10 @@ export async function deletionRequestHealth() {
  * delete-on-request SLA down with it — while the banner stayed green off the purge beside it. The
  * health surface now asks about every job in scheduler.js's REPEATABLE_JOBS and lets the worst win.
  */
-export async function runRetentionTriggers({ apply = true } = {}) {
+export async function runRetentionTriggers({ apply = true, enqueue } = {}) {
   const startedAt = new Date();
   const run = await RetentionRun.create({ job: TRIGGER_JOB, startedAt });
+  const opts = enqueue ? { apply, enqueue } : { apply };
 
   try {
     // Warnings run FIRST, so a sweep's receipt always shows warns ahead of the purges they
@@ -397,19 +469,24 @@ export async function runRetentionTriggers({ apply = true } = {}) {
     // its deleteNotBefore is at least WARN_GRACE_DAYS in the future.
     const warnWindDown = await warnWindDownOrgs({ apply });
     const warnDormant = await warnDormantOrgs({ apply });
-    const windDown = await purgeWoundDownOrgs({ apply });
-    const dormant = await purgeDormantOrgs({ apply });
-    const requested = await executeDueDeletionRequests({ apply });
+    const windDown = await purgeWoundDownOrgs(opts);
+    const dormant = await purgeDormantOrgs(opts);
+    const requested = await executeDueDeletionRequests(opts);
 
-    const purged = windDown.purged + dormant.purged + requested.purged;
+    const enqueued = windDown.enqueued + dormant.enqueued + requested.enqueued;
     const scanned = windDown.due + dormant.due + requested.due;
     const warned = warnWindDown.warned + warnDormant.warned;
 
+    // `purged` keeps its original meaning — organizations THIS RUN destroyed — and is therefore 0
+    // now, by construction. It is not repurposed: this sweep no longer destroys anything, it
+    // decides and hands each org to org-delete-queue, which deletes it minutes later on the
+    // worker. `enqueued` is what this run actually did; the deletion itself is confirmed by the
+    // org row being gone, never by a number written here.
     await RetentionRun.updateOne(
       { _id: run._id },
-      { $set: { finishedAt: new Date(), ok: true, purged, scanned, warned } }
+      { $set: { finishedAt: new Date(), ok: true, purged: 0, enqueued, scanned, warned } }
     );
-    return { ok: true, warnWindDown, warnDormant, windDown, dormant, requested, purged, scanned, warned };
+    return { ok: true, warnWindDown, warnDormant, windDown, dormant, requested, purged: 0, enqueued, scanned, warned };
   } catch (err) {
     await RetentionRun.updateOne(
       { _id: run._id },
