@@ -16,9 +16,11 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // canvasser can be mid-survey — answers are plain component state until Save. Hence:
 //   · the banner never renders on the canvass-flow screens (/household/*, /voter/*) — the
 //     download still happens there; the offer just waits for a list or map screen;
-//   · Restart first waits (bounded) for any in-flight door POST to settle — an action
-//     mid-POST is neither confirmed nor queued (the offline queue only enqueues after a
-//     FAILED submit), so a reload at that instant would lose the knock silently;
+//   · Restart waits (bounded) for any in-flight door POST to settle, and REFUSES to reload
+//     while one is still unsettled — an action mid-POST is neither confirmed nor queued
+//     (the offline queue only enqueues after a FAILED submit, up to the 20 s API timeout
+//     later), so a reload at that instant would lose the knock silently. Same refusal if a
+//     canvass screen was opened during the wait; either way the banner just re-offers;
 //   · Later dismisses THIS update for the session, keyed by updateId — it applies on the
 //     next cold start anyway, and only a newer publish re-arms the banner.
 //
@@ -39,8 +41,13 @@ const OtaUpdatePrompt = () => {
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles(makeStyles);
   const pathname = usePathname();
-  // Reactive expo-updates state: isUpdatePending flips true once a new bundle is fully
-  // downloaded — by the fetch below, or by the native check-on-launch on its own.
+  // Mirrored into a ref so restart(), armed seconds earlier, can see where the user is
+  // NOW — the closure's own pathname is frozen at tap time.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  // Reactive expo-updates state: isUpdatePending flips true once a download completes —
+  // by the fetch below, or by the native check-on-launch on its own. It is NOT proof a
+  // bundle arrived (see the render gate), which is why downloadedUpdate matters too.
   const { isUpdatePending, downloadedUpdate } = Updates.useUpdates();
   const [dismissedId, setDismissedId] = useState(null);
   const [restarting, setRestarting] = useState(false);
@@ -55,8 +62,11 @@ const OtaUpdatePrompt = () => {
       if (checking.current) return; // two quick foregrounds collapse to one check
       checking.current = true;
       try {
-        const { isAvailable } = await Updates.checkForUpdateAsync();
-        if (!isAvailable || cancelled) return;
+        // A roll-back-to-embedded directive reports isAvailable:false with
+        // isRollBackToEmbedded:true — fetch that too, or an emergency rollback would
+        // only ever land via a cold start, the exact gap this component closes.
+        const { isAvailable, isRollBackToEmbedded } = await Updates.checkForUpdateAsync();
+        if ((!isAvailable && !isRollBackToEmbedded) || cancelled) return;
         await Updates.fetchUpdateAsync(); // useUpdates() flips isUpdatePending when done
       } catch (err) {
         // Never surfaced — see the fail-quiet contract above.
@@ -85,10 +95,23 @@ const OtaUpdatePrompt = () => {
     for (let tries = 0; tries < SETTLE_TRIES && hasInFlightActions(); tries += 1) {
       await new Promise((resolve) => setTimeout(resolve, SETTLE_INTERVAL_MS));
     }
+    // Never reload over anything unsettled. A weak-signal POST can outlive the wait
+    // (the API timeout is 20 s, and only a FAILED submit enqueues), and the canvasser
+    // may have opened a door screen while the wait ticked. Bail instead: isUpdatePending
+    // stays true, so the banner simply re-offers at the next safe moment.
+    if (hasInFlightActions() || CANVASS_FLOW.test(pathnameRef.current || '')) {
+      setRestarting(false);
+      return;
+    }
     Updates.reloadAsync().catch(() => setRestarting(false));
   };
 
-  if (!isUpdatePending || dismissedId === readyId) return null;
+  // downloadedUpdate as well as isUpdatePending: a FAILED fetch can leave isUpdatePending
+  // true with nothing downloaded (the native reducer never clears it short of a restart),
+  // and offering a reload into the same bundle would be pointless state destruction. A
+  // pending rollback still shows — useUpdates() synthesizes downloadedUpdate for it, with
+  // updateId undefined (hence readyId's 'pending' fallback).
+  if (!isUpdatePending || !downloadedUpdate || dismissedId === readyId) return null;
   if (CANVASS_FLOW.test(pathname || '')) return null;
 
   return (

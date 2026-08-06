@@ -253,9 +253,10 @@ optimistic, never-wait-on-the-network behavior as the door buttons.
 Most improvements arrive on their own — the app quietly downloads them in the background. When one
 is ready, a small banner appears at the top: **"A new version of Doorline is ready."** Tap
 **Restart** and the app reloads itself in a few seconds — no store, nothing to install, no signing
-back in. Tap **Later** to keep working; the new version simply applies the next time you open the
-app. The banner deliberately stays away while you're on a door or in the middle of a survey — it
-waits until you're back on your list or map.
+back in. Tap **Later** to keep working; the new version simply applies the next time you fully
+close and reopen the app. The banner deliberately stays away while you're on a door or in the
+middle of a survey — it waits until you're back on your list or map — and before restarting, the
+app waits for any save still in progress to finish.
 
 Once in a while, though, a change needs a genuinely new version from the **App Store** or **Google
 Play**, and the app will tell you in one of two ways:
@@ -407,9 +408,11 @@ Three mechanisms steer people to newer versions, and they answer different quest
   restart, never forces one: `reloadAsync()` destroys in-memory state, and survey answers are plain
   component state until Save. Politeness rules: the banner never renders on the canvass-flow
   screens (`/household/*`, `/voter/*`) — the download still happens there, only the offer waits;
-  **Restart** first waits (bounded, ≤5 s) for any in-flight door POST to settle
-  (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js) — an action
-  mid-POST is neither confirmed nor queued, so a reload at that instant would lose the knock);
+  **Restart** waits (bounded) for any in-flight door POST to settle and **refuses to reload while
+  one is still unsettled** — or if a canvass screen was opened during the wait — re-offering
+  instead (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js): an
+  action mid-POST is neither confirmed nor queued until the 20 s API timeout fails it into the
+  queue, so a reload at that instant would lose the knock);
   **Later** dismisses that update for the session, keyed by `updateId`, so only a newer publish
   re-arms the banner — the dismissed one applies on the next cold start anyway. Needs no server
   and no store: the bundle is already on the phone.

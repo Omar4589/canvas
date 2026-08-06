@@ -3,7 +3,7 @@ slug: doorline-staff-access
 title: Can Doorline staff see our data?
 audience: admin
 kind: faq
-order: 44
+order: 48
 sourceDoc: PLATFORM.md
 summary: Not without a time-limited support-access grant that names a reason — and you can open any voter's profile to check whether Doorline staff ever accessed that record.
 tags: privacy, staff, support, access, audit, security, data, trust
