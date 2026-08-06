@@ -31,6 +31,7 @@ export default function BookAssignmentPanel({
   // Only published (accepted) books can be assigned — re-cutting would wipe drafts.
   const draftSelected = books.some((b) => b.status && b.status !== 'published');
   const turfIds = books.map((b) => String(b._id));
+  const turfKey = turfIds.join(',');
   const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
 
   const [search, setSearch] = useState('');
@@ -38,6 +39,8 @@ export default function BookAssignmentPanel({
   const [mode, setMode] = useState('distribute');
   const [replace, setReplace] = useState(false);
   const [teamFilter, setTeamFilter] = useState('all'); // 'all' | coordinatorId | 'none'
+  const [confirmClear, setConfirmClear] = useState(false); // two-tap gate on "unassign everyone"
+  const [unassignErr, setUnassignErr] = useState(null);
 
   // Assignable = the campaign team (+ you, so admins can self-assign) — not the whole org.
   const { members, isLoading: membersLoading } = useCampaignTeam(campaignId);
@@ -89,6 +92,12 @@ export default function BookAssignmentPanel({
     return () => clearTimeout(t);
   }, [savedAt]);
   const flashSaved = () => setSavedAt(Date.now());
+  // The panel is reused across selections, so a staged confirm must never survive one —
+  // otherwise the second tap clears books the admin never armed.
+  useEffect(() => {
+    setConfirmClear(false);
+    setUnassignErr(null);
+  }, [turfKey]);
 
   // Refetch the assignment set (+ the modal's) after any write. The team roster is refreshed
   // only after an ASSIGN (a self-assign can add the admin) — and never blocks the UI, since
@@ -134,19 +143,49 @@ export default function BookAssignmentPanel({
     onSuccess: flashSaved,
     onSettled: settle,
   });
-  // One request to drop a person from MANY books (was N sequential DELETEs).
+  // One request to drop people from MANY books (was N sequential DELETEs). Two callers:
+  // a named person (`userIds`), or everyone holding the selection (`allInPass`).
   const unassignBulk = useMutation({
-    mutationFn: ({ turfIds: tids, userId }) =>
-      api(`/admin/campaigns/${campaignId}/turfs/unassign-bulk`, { method: 'POST', body: { turfIds: tids, userIds: [userId] } }),
-    onMutate: async ({ turfIds: tids, userId }) => {
+    mutationFn: async ({ turfIds: tids, userIds, allInPass }) => {
+      // "Everyone" resolves its user list from the SERVER rather than the cached union:
+      // this query has no refetchInterval and refetchOnWindowFocus is off, so a panel left
+      // open can be hours stale and would silently leave the newest assignee on the books.
+      // The pass-wide set is safe to send because the server pins the blast radius to the
+      // turfs — it re-scopes turfIds by campaign, then deletes the turf × user cross
+      // product, so a wider user list can only ever match books we already selected.
+      let uids = userIds;
+      if (allInPass) {
+        const fresh = await api(`/admin/campaigns/${campaignId}/turfs/assignments?passId=${passId}`);
+        uids = [...new Set((fresh.assignments || []).map((a) => String(a.user.id)))];
+        if (!uids.length) return { deleted: 0 }; // nobody in the round; the endpoint would 400
+      }
+      return api(`/admin/campaigns/${campaignId}/turfs/unassign-bulk`, {
+        method: 'POST',
+        body: { turfIds: tids, userIds: uids },
+      });
+    },
+    onMutate: async ({ turfIds: tids, userIds, allInPass }) => {
       await qc.cancelQueries({ queryKey: asgKey });
       const prev = qc.getQueryData(asgKey);
       const tset = new Set(tids.map(String));
-      setRows((rows) => rows.filter((r) => !(tset.has(String(r.turfId)) && String(r.user.id) === String(userId))));
+      // "Everyone" drops by turf alone: narrowing by the union we just refused to trust
+      // would leave a freshly-assigned row on screen after the server removed it.
+      const uset = allInPass ? null : new Set(userIds.map(String));
+      setRows((rows) =>
+        rows.filter((r) => !(tset.has(String(r.turfId)) && (!uset || uset.has(String(r.user.id)))))
+      );
       return { prev };
     },
-    onError: rollback,
-    onSuccess: flashSaved,
+    onError: (err, vars, ctx) => {
+      rollback(err, vars, ctx);
+      // The panel has no other error surface, and this page never gates on an archived
+      // campaign — so a 409 (or a 402 on a suspended org) would otherwise vanish.
+      setUnassignErr(err?.message || 'Could not unassign.');
+    },
+    onSuccess: () => {
+      setUnassignErr(null);
+      flashSaved();
+    },
     onSettled: settle,
   });
   const bulk = useMutation({
@@ -171,7 +210,11 @@ export default function BookAssignmentPanel({
     else assignOne.mutate([userId]);
   }
   function unassignEverywhere(entry) {
-    unassignBulk.mutate({ turfIds: [...entry.inBooks], userId: entry.user.id });
+    unassignBulk.mutate({ turfIds: [...entry.inBooks], userIds: [entry.user.id] });
+  }
+  function unassignAll() {
+    setConfirmClear(false);
+    unassignBulk.mutate({ turfIds, allInPass: true });
   }
   function assignAllShownSingle() {
     const ids = filtered.filter((m) => !assignedSet.has(m.user.id)).map((m) => m.user.id);
@@ -238,6 +281,50 @@ export default function BookAssignmentPanel({
               ))}
             </ul>
           )}
+          {/* Clear the whole selection at once. Only past one person — with a single
+              assignee the per-row Unassign above already is this button. */}
+          {union.length > 1 &&
+            (confirmClear ? (
+              <div className="mt-2 rounded-lg border border-danger/30 bg-danger-tint px-2.5 py-2">
+                <p className="text-xs font-medium text-danger-fg">
+                  Take all {union.length} people off{' '}
+                  {books.length === 1 ? 'this book' : `these ${books.length} books`}?
+                </p>
+                <p className="mt-1 text-[11px] text-fg-muted">
+                  The books go back in the pool, so you can hand them to someone else. This doesn't
+                  remove anyone from the campaign team.
+                </p>
+                <p className="mt-1 text-[11px] text-fg-muted">
+                  <strong className="font-medium text-fg">Their work is kept.</strong> Every door
+                  they knocked still counts. Anyone out canvassing right now keeps these books on
+                  their phone until their app reloads the campaign.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={unassignAll}
+                    disabled={busy}
+                    className="rounded-md border border-danger/30 bg-danger-tint px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+                  >
+                    Yes, unassign everyone
+                  </button>
+                  <button
+                    onClick={() => setConfirmClear(false)}
+                    className="rounded-md border border-border-strong px-2 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmClear(true)}
+                disabled={busy}
+                className="mt-1.5 text-[11px] font-semibold text-danger hover:underline disabled:opacity-50"
+              >
+                Unassign all ({union.length})
+              </button>
+            ))}
+          {unassignErr && <p className="mt-1.5 text-[11px] text-danger-fg">{unassignErr}</p>}
         </div>
 
         <div className="border-t border-border pt-3">

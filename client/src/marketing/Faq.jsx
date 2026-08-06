@@ -30,6 +30,14 @@ const ITEMS = [
     q: 'How do my canvassers get set up?',
     a: "You add them in the console and they get an email with a set-password link and install links for both phones. The app is free on the App Store and Google Play, and there's no separate app account to create — they sign in with the same email and password. Anyone who loses the email can start from doorline.app/app.",
   },
+  {
+    // The fuller answer behind the hero's price line. "Sized to the race" is deliberate: it
+    // signals bigger races cost more without publishing the tier table, which belongs in the
+    // account manager's proposal. What everything-included buys us is the comparison — the
+    // per-seat/support/storage/dashboard add-ons a consultant is used to pricing separately.
+    q: 'What does it cost?',
+    a: "A flat monthly rate per campaign, sized to the race — local campaigns start at $300 per campaign, per month, with every canvasser, every feature, and every door included. No per-seat fees, no per-door charges, no add-ons. Setup is free: billing doesn't start until your first knock. Request a demo and we'll quote your race.",
+  },
 ];
 
 export default function Faq() {

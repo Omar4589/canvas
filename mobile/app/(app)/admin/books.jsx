@@ -47,11 +47,14 @@ const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true
 // (the map owns the screen); expanded gives the roster real room.
 const BOOK_SHEET_PEEK = 220;
 
-// Scroll clearance for the select-mode action bar, which is now a two-row stack (label row +
-// wrapping button row): paddingTop 12 + label ~17 + gap 8 + 44pt buttons + paddingBottom 24
-// ≈ 105pt one-row, ~153pt with the buttons wrapped. An over-estimate is invisible at the
-// bottom of a scroll list; an under-estimate occludes the last book card.
-const ACTION_BAR_CLEARANCE = 160;
+// Starting scroll clearance for the select-mode action bar (label row + wrapping button row):
+// paddingTop 12 + label ~17 + gap 8 + 44pt buttons + paddingBottom 24 ≈ 105pt on one row,
+// ~209pt with four buttons wrapped onto three. It is only a FALLBACK — with four buttons and
+// no cap on text scaling (nothing in mobile/ sets allowFontScaling) there is no fixed worst
+// case, so the bar measures itself via onLayout and hands the list its real height. An
+// over-estimate is invisible at the bottom of a scroll list; an under-estimate occludes the
+// last book card.
+const ACTION_BAR_CLEARANCE = 210;
 
 const BOOK_STATUS_CHIPS = [
   { key: 'assigned', label: 'Assigned' },
@@ -129,9 +132,14 @@ export default function AdminBooks() {
   const bookSheetHeight = useSharedValue(0);
   const sheetSizedRef = useRef(false);
   // Inline assign-failure message (the entitlement gate 402s writes on a paused
-  // org — without this the row just silently un-toggles). Shown in the sheet
-  // and the bulk modal.
+  // org — without this the row just silently un-toggles). Shown in the sheet,
+  // the bulk modal, and the select-mode action bar.
   const [assignError, setAssignError] = useState(null);
+  // Measured action-bar height → the list's bottom padding (see ACTION_BAR_CLEARANCE).
+  const [actionBarH, setActionBarH] = useState(ACTION_BAR_CLEARANCE);
+  // Alert.alert is fire-and-forget, so a double tap queues TWO dialogs and confirming both
+  // fires the write twice — the second against an already-cleared selection.
+  const confirmOpenRef = useRef(false);
 
   // --- data ---
   const effortsQ = useQuery({
@@ -415,6 +423,41 @@ export default function AdminBooks() {
   });
   const restrictPending = restrictMut.isPending || unrestrictMut.isPending;
 
+  // Bulk unassign — one request for the whole selection, the same endpoint the web panel
+  // uses. Assignment rows ONLY: knocks and surveys stamp userId/turfId/coordinatorId at the
+  // door and never join back through these rows, and the campaign roster row (which gates
+  // door access at all) is deliberately left alone.
+  const unassignAllMut = useMutation({
+    mutationFn: async (turfIds) => {
+      // Resolve WHO from the server, not from the cached usersByBook: this query has no
+      // refetchInterval and refetchOnWindowFocus is off, so a tab left open can be a shift
+      // stale and would silently leave the newest assignee holding the books. Sending the
+      // pass-wide user set is safe because the server pins the blast radius to turfIds — it
+      // re-scopes them by campaign, then deletes the turf × user cross product, so a wider
+      // user list can only ever match books we already selected.
+      const fresh = await api(`/admin/campaigns/${cId}/turfs/assignments?passId=${passId}`);
+      const userIds = [...new Set((fresh.assignments || []).map((a) => String(a.user.id)))];
+      if (!userIds.length) return { deleted: 0 }; // nobody in the round; the endpoint would 400
+      return api(`/admin/campaigns/${cId}/turfs/unassign-bulk`, {
+        method: 'POST',
+        body: { turfIds, userIds },
+      });
+    },
+    onSuccess: (res) => {
+      invalidate();
+      setSelectMode(false);
+      setSelectedBooks(new Set());
+      // `deleted` counts (book, person) PAIRS, not people — say so.
+      Alert.alert(
+        'Unassigned',
+        res.deleted
+          ? `${res.deleted} book assignment${res.deleted === 1 ? '' : 's'} removed.`
+          : 'Nothing to remove — no one was on those books.'
+      );
+    },
+    onError: onAssignError,
+  });
+
   // Shared restrict flow (lib/restrictBooks*) — same prompts as the book-detail screen:
   // safe 'unknocked' default when the crew has reached doors, second confirm before the
   // reached-inclusive scope, and an always-explicit scope on the wire.
@@ -438,7 +481,46 @@ export default function AdminBooks() {
     });
   }
 
+  // Take every canvasser off the selected books. Deliberately NOT extracted to lib/ the way
+  // restrict is: restrictBooks.js exists to hold a RULE (safe 'unknocked' default, second
+  // confirm before reached doors) that three entry points were drifting on. There is no rule
+  // here — the prompt is the whole flow, and this bar is its only entry point.
+  function confirmUnassignAll(bookList, people) {
+    if (confirmOpenRef.current) return; // see confirmOpenRef
+    confirmOpenRef.current = true;
+    const done = () => {
+      confirmOpenRef.current = false;
+    };
+    const label = bookList.length === 1 ? `“${bookList[0].name}”` : `${bookList.length} books`;
+    Alert.alert(
+      `Unassign everyone from ${label}?`,
+      `${people} ${people === 1 ? 'person comes' : 'people come'} off ` +
+        `${bookList.length === 1 ? 'this book' : 'these books'}, so you can hand ` +
+        `${bookList.length === 1 ? 'it' : 'them'} to someone else.\n\n` +
+        'Their work is kept — every door they knocked still counts. Anyone out walking right ' +
+        'now keeps these books on their phone until their app reloads the campaign, and ' +
+        'anything they record before then still counts.',
+      [
+        { text: 'Cancel', style: 'cancel', onPress: done },
+        {
+          text: 'Unassign everyone',
+          style: 'destructive',
+          onPress: () => {
+            done();
+            // Capture the ids HERE: onSuccess clears selectedBooks, and `selected` is
+            // reconciled against the live books array while the raw id Set is not.
+            unassignAllMut.mutate(bookList.map((b) => b.id));
+          },
+        },
+      ]
+    );
+  }
+
   const mutating = assignMut.isPending || unassignMut.isPending || bulkMut.isPending || selfAssignMut.isPending;
+  // One gate for the whole action bar. Every button there is a bulk write, and until now
+  // "Assign to…" had no disabled state at all — you could open the assign modal on top of an
+  // in-flight restrict.
+  const barBusy = mutating || restrictPending || unassignAllMut.isPending;
 
   function toggleAssign(turfId, userId, isAssigned) {
     if (isAssigned) unassignMut.mutate({ turfId, userId });
@@ -1061,7 +1143,7 @@ export default function AdminBooks() {
           )}
         </View>
       ) : (
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? ACTION_BAR_CLEARANCE : spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: selectMode ? actionBarH + spacing.md : spacing.xxl }}>
         {!cId ? (
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
         ) : loading ? (
@@ -1181,24 +1263,42 @@ export default function AdminBooks() {
         // Web can unmark its whole selection in one go — parity: offer it whenever the
         // selection holds any bulk marks. Bulk marks only; field marks always survive.
         const selectedBulkMarks = selected.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+        // How many DISTINCT people hold any of these books. Doubles as the Unassign button's
+        // visibility rule, which is why loading and error need no branch of their own:
+        // usersByBook derives from `assignmentsQ.data?.assignments || []`, so in both states
+        // this is 0 and the button is simply absent rather than dead or lying.
+        const selectedAssignees = new Set(
+          selected.flatMap((b) => (usersByBook.get(b.id) || []).map((u) => u.id))
+        ).size;
         return (
-          <View style={styles.actionBar}>
+          <View
+            style={styles.actionBar}
+            onLayout={(e) => {
+              const h = Math.round(e.nativeEvent.layout.height);
+              setActionBarH((prev) => (prev === h ? prev : h)); // compare, or this re-renders forever
+            }}
+          >
             <Text style={styles.actionBarText}>
               {selectedBooks.size} book{selectedBooks.size === 1 ? '' : 's'} selected
             </Text>
+            {/* The bar's only error surface: assignError otherwise renders just in the map
+                sheet and the bulk modal, neither of which is open when these buttons fire —
+                so a 402 (paused org) or 409 (archived) used to fail silently here. Success
+                exits select mode and unmounts the bar, so this can only ever show a failure. */}
+            {assignError ? <Text style={styles.actionBarError}>{assignError}</Text> : null}
             <View style={styles.actionBarBtnRow}>
               <Pressable
                 onPress={() => confirmRestrictBooks(selected)}
-                disabled={restrictPending}
-                style={[styles.actionBarBtn, styles.actionBarBtnRestrict, restrictPending && { opacity: 0.6 }]}
+                disabled={barBusy}
+                style={[styles.actionBarBtn, styles.actionBarBtnRestrict, barBusy && { opacity: 0.6 }]}
               >
                 <Text style={styles.actionBarBtnText}>Restrict…</Text>
               </Pressable>
               {selectedBulkMarks > 0 && (
                 <Pressable
                   onPress={() => confirmUnrestrictBooks(selected)}
-                  disabled={restrictPending}
-                  style={[styles.actionBarBtn, restrictPending && { opacity: 0.6 }]}
+                  disabled={barBusy}
+                  style={[styles.actionBarBtn, barBusy && { opacity: 0.6 }]}
                 >
                   <Text style={styles.actionBarBtnText}>Unmark ({selectedBulkMarks.toLocaleString()})</Text>
                 </Pressable>
@@ -1208,10 +1308,20 @@ export default function AdminBooks() {
                   setAssignError(null);
                   setBulkOpen(true);
                 }}
-                style={styles.actionBarBtn}
+                disabled={barBusy}
+                style={[styles.actionBarBtn, barBusy && { opacity: 0.6 }]}
               >
                 <Text style={styles.actionBarBtnText}>Assign to…</Text>
               </Pressable>
+              {selectedAssignees > 0 && (
+                <Pressable
+                  onPress={() => confirmUnassignAll(selected, selectedAssignees)}
+                  disabled={barBusy}
+                  style={[styles.actionBarBtn, styles.actionBarBtnUnassign, barBusy && { opacity: 0.6 }]}
+                >
+                  <Text style={styles.actionBarBtnText}>Unassign all</Text>
+                </Pressable>
+              )}
             </View>
           </View>
         );
@@ -1602,7 +1712,12 @@ function makeStyles(t) {
       justifyContent: 'center',
     },
     actionBarBtnRestrict: { backgroundColor: colors.status.restricted },
+    // dangerFg, NOT danger: this text is 14pt bold on the fill, and raw `danger` is 3.08:1
+    // against textInverse (see the token's own note in lib/theme.js). dangerFg pairs with
+    // textInverse in BOTH palettes.
+    actionBarBtnUnassign: { backgroundColor: colors.dangerFg },
     actionBarBtnText: { color: colors.textInverse, fontWeight: '700', fontSize: 14 },
+    actionBarError: { ...type.caption, color: colors.dangerFg },
 
 
     // bulk modal

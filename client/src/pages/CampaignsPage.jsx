@@ -103,6 +103,7 @@ export default function CampaignsPage() {
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [reactivating, setReactivating] = useState(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('recent');
   const [archivedExpanded, setArchivedExpanded] = useState(false);
@@ -242,10 +243,15 @@ export default function CampaignsPage() {
       ...(isOrgAdmin
         ? [
             { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
-            {
-              label: c.isActive ? 'Archive' : 'Reactivate',
-              onClick: () => update.mutate({ id: c._id, body: { isActive: !c.isActive } }),
-            },
+            // Archiving stays one-click — it only ever stops billing. Reactivating is the one
+            // campaign action with a bill attached (the archived months become billable again),
+            // so it routes through a confirm modal. update.reset(): same reason as del.reset().
+            c.isActive
+              ? {
+                  label: 'Archive',
+                  onClick: () => update.mutate({ id: c._id, body: { isActive: false } }),
+                }
+              : { label: 'Reactivate', onClick: () => { update.reset(); setReactivating(c); } },
             c.deletable === true
               // del.reset(): without it, an error from a previous campaign's failed attempt
               // renders inside a freshly opened modal.
@@ -457,6 +463,41 @@ export default function CampaignsPage() {
             it finishes, usually within a minute (a few minutes for very large campaigns).
           </p>
           {del.error && <p className="mt-2 text-sm text-danger">{del.error.message}</p>}
+        </Modal>
+      )}
+
+      {reactivating && (
+        <Modal
+          size="md"
+          onClose={() => setReactivating(null)}
+          title={`Reactivate "${reactivating.name}"?`}
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setReactivating(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                loading={update.isPending}
+                onClick={() =>
+                  update.mutate(
+                    { id: reactivating._id, body: { isActive: true } },
+                    { onSuccess: () => setReactivating(null) }
+                  )
+                }
+              >
+                Reactivate
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-fg-muted">
+            Reactivating starts this campaign's monthly billing again — including the months it
+            spent archived. It then bills every month until you archive it again.
+          </p>
+          <p className="mt-2 text-sm text-fg-muted">
+            Just need the data? An archived campaign stays fully readable and exports keep
+            working — no need to reactivate.
+          </p>
+          {update.error && <p className="mt-2 text-sm text-danger">{update.error.message}</p>}
         </Modal>
       )}
     </div>

@@ -105,11 +105,23 @@ export default function Hero() {
                 {cta.label}
               </Link>
             </div>
+            {/* The STARTING price, and only that. A local race is the volume buyer and shops on
+                budget, so hiding the number reads as "enterprise, can't afford it" and loses the
+                lead before it exists. The tier card (District/Federal) stays an account-manager
+                document — a published ceiling only anchors the races worth negotiating. Says
+                "per campaign" because that IS the unit: a firm running three races pays three
+                times, and "$300/month" would be the kind of surprise that sours a first invoice.
+                Tracks DEFAULT_RATE_CENTS in server/src/services/billing/rate.js. */}
+            <p className="mt-4 text-[13px] text-stone-500">
+              Starts at{' '}
+              <span className="font-semibold text-stone-700">$300 per campaign, per month</span> —
+              everything included.
+            </p>
             {/* The app half of the sentence is a real link now — this line was the only place
                 above the footer that mentioned iOS/Android, and it pointed nowhere. It is also
                 the hero's whole nod to the field app: the download CTA belongs on /app, not in a
                 third hero button aimed at someone who can't create an account. */}
-            <p className="mt-4 text-[13px] text-stone-500">
+            <p className="mt-1.5 text-[13px] text-stone-500">
               Web console for the office ·{' '}
               <a
                 href="/app"

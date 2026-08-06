@@ -18,6 +18,12 @@ import { Subscription } from '../../models/Subscription.js';
 // routes/admin/campaigns.js, which org admins and team leads can reach — and the schema path
 // carries `select: false` so it can't ride along in a `...campaign` spread on some future route.
 
+// ⚠️ This number is PUBLISHED. Since Aug 2026 the marketing site names it as the starting price
+// — client/src/marketing/Hero.jsx (the line under the hero CTAs), the "What does it cost?" FAQ in
+// client/src/marketing/Faq.jsx, and the `offers` node in client/index.html's JSON-LD. Changing the
+// default rate means changing all three in the same commit, or doorline.app advertises a price we
+// don't charge. (Negotiated org/campaign overrides are private and unaffected — only this default
+// is public, and only as "starts at".)
 export const DEFAULT_RATE_CENTS = 30000;
 
 // Pure form, for callers that already hold both docs.

@@ -47,6 +47,10 @@ Don't like the layout, or the voter list changed? If the books are still drafts,
 
 Cutting books is web work — you're drawing on a map. **Handing them out isn't.** The mobile admin app's **Books** tab works the campaign's active round: switch between **By book** (each book's doors, its knocked/total progress, and who's on it) and **By canvasser** (each person's book count — tap to give or take books). **Select** several books and hand them out in one go: **Distribute** splits them across people, **Everyone** gives all of them to each. A **Map** chip draws the whole round as book outlines so you can see where the unassigned turf actually sits before you hand it out, and tapping a book opens its own map to assign in context.
 
-Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Canvassers pick up changes on their next sync.
+Need them back? The same bar has **Unassign all**, which takes every canvasser off the books you've selected in one action — handy when a shift ends or you're reshuffling turf. It only shows up when somebody is actually on one of them, and it asks you to confirm first. On the web Turf Cutting page, the selected-books panel does the same thing with **Unassign all (N)**.
+
+Unassigning is safe: **nobody loses any work.** Every door they knocked and every survey they saved still counts toward the campaign, and they stay on the campaign team — they just stop being pointed at those books, so you can hand them to someone else.
+
+Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Canvassers pick up changes on their next sync — including books taken away, so someone already out walking will still see them until their app reloads the campaign. Anything they record in the meantime still counts. See [Changes I make aren't showing up in the field](changes-not-showing-in-field).
 
 The Books tab follows the **campaign chip** at the top. Pick an **archived** campaign and it becomes a viewer: you'll see the book layout and how the round finished, but assigning is off, because an archived campaign is read-only.

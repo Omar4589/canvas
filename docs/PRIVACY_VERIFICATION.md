@@ -81,8 +81,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 - *"an organization with an active subscription is never deleted for inactivity"* —
   `DORMANCY_PROTECTED_STATUSES`.
 - The 60-day read-only export window — the `canceled` branch of `middleware/entitlement.js`,
-  **plus the export-creation carve-out** (`POST /admin/exports` is the one write a read-only org
-  may perform — see the v4 2026-08-01 Export Center entry below).
+  **plus the export-creation carve-outs** (`POST /admin/exports` and its count-only
+  `/estimate` preview are the two writes a read-only org may perform — see the v4 2026-08-01
+  Export Center entry below).
 - Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
 - Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
 - The 180-day name retention on deletion records — still cron-kept on the worker dyno.
@@ -355,8 +356,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   must not outlive the org**, or the "we aim to permanently delete" sentences (privacy.html
   "After termination", DPA §9) go false for a file at rest. Pinned by
   `test/orgDelete.int.test.js` + `test/exports.int.test.js`.
-  **The entitlement carve-out.** `POST /admin/exports` is the ONE write a read-only
-  (suspended / expired-trial / canceled) org may perform — method-and-path exact, in
+  **The entitlement carve-outs.** `POST /admin/exports` — and `POST /admin/exports/estimate`,
+  the count-only preview that returns numbers, never records *(correction stamped 2026-08-06;
+  it shipped with the same Export Center change)* — are the TWO writes a read-only
+  (suspended / expired-trial / canceled) org may perform — method-and-path exact ×2, in
   `middleware/entitlement.js` — so the published wind-down window ("may export its data
   during that period", privacy.html; terms.html §13; DPA §9) is real for the queued-export
   path, not just legacy GETs. The watchlist's 60-day line above anchors here too. Narrowness

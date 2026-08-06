@@ -193,6 +193,7 @@ test('archived: bulk book assignment and restrict/unrestrict are refused', { ski
 
   for (const [path, body] of [
     [`/admin/campaigns/${cid}/turfs/assign-bulk`, { turfIds: [String(archived.turf._id)], userIds: [String(walker._id)], mode: 'everyone' }],
+    [`/admin/campaigns/${cid}/turfs/unassign-bulk`, { turfIds: [String(archived.turf._id)], userIds: [String(walker._id)] }],
     [`/admin/campaigns/${cid}/turfs/restrict-bulk`, { turfIds: [String(archived.turf._id)] }],
     [`/admin/campaigns/${cid}/turfs/unrestrict-bulk`, { turfIds: [String(archived.turf._id)] }],
   ]) {

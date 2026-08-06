@@ -182,7 +182,10 @@ in the drawer). The rules protect your data once canvassing has started:
   an **archive nudge** ([ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)); archiving in
   the first 3 days of a month with no field activity that month also makes that month free. Full
   rules in [BILLING.md](BILLING.md). Note that **reactivating clears `archivedAt`**, which makes the
-  skipped months billable again on any statement that hasn't been issued.
+  skipped months billable again on any statement that hasn't been issued — which is why **Reactivate
+  confirms before it fires** (a modal on the Campaigns page saying exactly that: billing resumes,
+  archived months included, and an archived campaign is already fully readable if you only want the
+  data). Archiving stays one-click; it only ever stops billing.
 - **Delete** is permanent and is **only allowed before any canvassing** (no knocks or surveys
   recorded). When allowed, it cascades — it removes the campaign and everything it owns (its
   imported voters and doors, efforts, draft rounds, books, walk lists, early-vote marks, reports,

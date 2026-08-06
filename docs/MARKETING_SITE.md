@@ -29,6 +29,10 @@ That split decides the whole layout. There are two calls to action, and only two
 - **Request a demo** — the primary button, in the header, the hero, and the closing band.
 - **Sign in** — for people who already have an account.
 
+The starting-price line under those buttons is **copy, not a third CTA** — it carries no link and
+opens nothing. Its job is to answer the question that otherwise closes the tab, so the demo
+requests that do arrive come from people who already know the number.
+
 There is deliberately **no "Download the app" button on the homepage**. Installing Doorline without
 an invitation gets you a sign-in screen you cannot get past, so a download button aimed at the
 homepage's audience would send a buyer somewhere useless. The store badges live in the footer,
@@ -61,7 +65,17 @@ from the footer.
 ## What the site does not do
 
 - **No self-signup.** There is no "create account" anywhere, on the site or in the app.
-- **No pricing page.** Pricing is a conversation with an account manager (see [BILLING.md](BILLING.md)).
+- **No pricing page, but the starting price is published** *(ruling revised Aug 2026 — it used to
+  be "no price anywhere")*. Three places say the same sentence and no more: the line under the hero
+  buttons, the **"What does it cost?"** FAQ entry, and the `offers` node in `client/index.html`'s
+  JSON-LD — all reading **"starts at $300 per campaign, per month."** Nothing else is public: the
+  tier card (District, Federal) is an account-manager document, and every negotiated org/campaign
+  rate stays private. The reasoning is that the two directions cost different things. A local race
+  is the volume buyer and shops on budget, so a site with no number reads "enterprise, can't afford
+  it" and loses that lead before it ever becomes one; a published *ceiling*, meanwhile, only anchors
+  the big races down — which is why the top of the card stays off the site. It says **per campaign**
+  because that is the billing unit, and a firm running three races pays three times. See
+  [BILLING.md](BILLING.md).
 - **No tracking or analytics.** No third-party scripts of any kind run on the marketing site.
 
 ---
@@ -185,6 +199,9 @@ See the watchlist entry in [`PRIVACY_VERIFICATION.md`](PRIVACY_VERIFICATION.md).
 
 - `client/index.html` owns the head for **every** React route — treat any change there as a change
   to the homepage's identity.
+- Its JSON-LD carries an **`offers` node (`lowPrice: "300"`, USD)** so search results can show the
+  starting price. It must track the published number: it is one of the three places that move
+  together when `DEFAULT_RATE_CENTS` changes (the other two are `Hero.jsx` and `Faq.jsx`).
 - New public URL → add it to `client/public/sitemap.xml`.
 - `client/public/robots.txt` allows everything except `/api` and `/r/` (share links must stay
   unindexed).

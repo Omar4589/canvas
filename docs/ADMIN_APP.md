@@ -43,7 +43,12 @@ read-only). Below it, a "Round 1 · 340/600 doors done" line and a "N books · M
   who's assigned. **Tap a book → its map detail** (see below). An **"Unassigned only"** filter finds
   books with nobody. **Select** turns on checkboxes (+ Select all) → a bottom bar **"Assign N books →"**
   opens a canvasser multi-select with **Distribute** (split across people) or **Everyone** (all to each),
-  optionally replacing existing assignments.
+  optionally replacing existing assignments. The same bar offers **Unassign all**, which takes every
+  canvasser off the selected books in one action so you can hand them to someone else — it appears only
+  when somebody actually holds one of them, and confirms first. Nothing is destroyed: every door those
+  canvassers knocked still counts, and they stay on the campaign team. Anyone out walking keeps the
+  books on their phone until their app reloads the campaign, and anything they record before then still
+  counts (see [Changes not showing in the field](../server/src/content/help/faq/changes-not-showing-in-field.md)).
 - **By canvasser** — each canvasser shows their book count; tap to expand and give/remove their books.
 
 By-book view also has a **Map** chip: the whole round drawn as book outlines (green = assigned, gray =
@@ -574,7 +579,11 @@ carries over to the next book you open. Select mode's action bar has **Restrict�
 once — plus **Unmark (N)** when the selection holds bulk marks, clearing them all in one action — and the
 web Turf Cutting page has the same actions on the selected-books panel. (The bar stacks its
 "N books selected" label above a **wrapping** button row: label + three buttons in one line needed
-~451pt on a ~370pt screen, which pushed *Assign to…* off the right edge with no way to reach it.) All three mobile entry points
+~451pt on a ~370pt screen, which pushed *Assign to…* off the right edge with no way to reach it. With
+**Unassign all** the row is now up to four buttons, so the bar **measures itself** with `onLayout` and
+hands the list its real height — `ACTION_BAR_CLEARANCE` is only the starting estimate. Nothing in
+`mobile/` disables font scaling, so at large accessibility text every button becomes its own row and no
+fixed constant could be right; an under-estimate occludes the last book card.) All three mobile entry points
 share one scope-aware flow (`mobile/lib/restrictBooks.js`): when the crew has already reached doors
 (not-home / refused / wrong-address) you choose **Only unknocked** (the safe default, listed first) or
 **Every unfinished**, which takes a second confirm before it also marks the reached doors — matching the
@@ -616,8 +625,22 @@ by book or by canvasser.
   (`GET …/campaigns/:id/assignments` ∩ active canvassers from `GET /admin/memberships`). Books sorted by
   name (numeric-aware).
 - Actions: assign `POST …/turfs/:turfId/assignments {userIds}`; unassign `DELETE …/:turfId/assignments/:userId`;
-  bulk `POST …/turfs/assign-bulk {turfIds,userIds,mode:'distribute'|'everyone',replace}` from the
-  **Select-mode** action bar (explicit book selection). All invalidate the assignments + efforts queries.
+  bulk `POST …/turfs/assign-bulk {turfIds,userIds,mode:'distribute'|'everyone',replace}` and
+  `POST …/turfs/unassign-bulk {turfIds,userIds}` from the **Select-mode** action bar (explicit book
+  selection). All invalidate the assignments + efforts queries.
+- **Unassign all resolves WHO from the server, not from the cached assignment map.** `unassign-bulk`
+  has no "everyone" wildcard (empty `userIds` is a 400, deliberately — see
+  `server/test/unassignBulk.int.test.js`), so the client must enumerate. That query has no
+  `refetchInterval` and `refetchOnWindowFocus` is off, so a screen left open can be a shift stale and a
+  cached union would silently leave the newest assignee holding the books. The mutation therefore
+  re-reads `GET …/turfs/assignments?passId=` and sends the **pass-wide** user set — safe because the
+  server pins the blast radius to `turfIds` (re-scoped by campaign, then a turf × user cross-product
+  delete), so a wider user list can only ever match books already selected. Assignment rows only: the
+  `CampaignAssignment` roster row and every `CanvassActivity` survive.
+- The bar is the only place these errors can surface: `assignError` otherwise renders just in the map
+  sheet and the bulk modal, neither of which is open when the bar fires, so a 402 (paused org) or 409
+  (archived) used to fail silently for **Restrict/Unmark** too. One `barBusy` gate now disables all four
+  buttons during any write — *Assign to…* previously had none and could open on top of an in-flight restrict.
 - Tap a book (outside Select mode) → the **book detail** screen.
 - **Map view's round-wide door dots are a FILE-backed GeoJSON source**
   ([mobile/lib/doorDots.js](../mobile/lib/doorDots.js) + unit test). `doorDotsRequest(campaignId,
@@ -635,8 +658,9 @@ by book or by canvasser.
   households) — the round-wide feed never enters JS. JS-only change → OTA-safe.
 - Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign
   / **archived campaign** — banner, and every assign path suppressed (Select mode and the bulk bar,
-  the map sheet's `⋯` restrict menu, both `AssignRow` buttons; the rows stay, so who held which
-  book is still readable).
+  including **Unassign all**; the map sheet's `⋯` restrict menu, both `AssignRow` buttons; the rows
+  stay, so who held which book is still readable). The server refuses independently with a 409
+  `campaign-archived` — covered for this route in `server/test/archivedCampaign.int.test.js`.
 
 ## The book detail screen
 [app/(app)/admin/book/[turfId].jsx](../mobile/app/(app)/admin/book/[turfId].jsx) — a Mapbox map of one

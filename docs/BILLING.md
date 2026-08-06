@@ -25,8 +25,17 @@ month. (Separately, if *you* invoice your own client per door, see **Billable do
 [METRICS.md](METRICS.md) — that setting changes your reports, not your Doorline bill.)
 
 **Customers never see a price in the app.** The org's Billing page shows account status and which
-campaigns are canvassing; every dollar figure is stripped server-side. Pricing is a conversation with
-the account manager, not a dashboard number.
+campaigns are canvassing; every dollar figure is stripped server-side. What a customer is actually
+paying is a conversation with the account manager, not a dashboard number.
+
+> **The starting price IS public, as of Aug 2026.** The marketing site says **"starts at $300 per
+> campaign, per month"** in three places — the line under the hero buttons, the "What does it cost?"
+> FAQ, and the `offers` node in `client/index.html`'s JSON-LD (see
+> [MARKETING_SITE.md](MARKETING_SITE.md) → *What the site does not do*). That makes
+> `DEFAULT_RATE_CENTS` a **published number**: change it and those three move in the same commit, or
+> doorline.app advertises a price we don't charge. Nothing else went public — the tier card
+> (District, Federal) is an account-manager document, negotiated org and per-campaign rates stay
+> private, and the in-app surfaces stay dollar-free.
 
 ### The month is a calendar month, and it is never prorated
 
@@ -82,9 +91,9 @@ org's issued / not-issued / drifting state for one month.
 
 ## Trials, and what each account state means
 
-Every new organization starts a **free trial** with full access — **7 days by default, but you can
-set any length** (e.g. 14 days) when you create the client, and extend it later to any number of
-days or an explicit end date. The trial clock starts when the org is created. When a trial ends
+Every new organization starts a **free trial** with full access — **7 days by default, settable up
+to 90** (e.g. 14 days) when you create the client, and extend it later by up to 90 days at a time,
+or to an explicit end date. The trial clock starts when the org is created. When a trial ends
 without conversion the org automatically becomes **read-only** — nothing is deleted, nobody is
 locked out of *seeing* their work, but recording, importing, and cutting stop until the account is
 activated.
@@ -95,7 +104,7 @@ activated.
 | Active | Full access, no banners. |
 | Past due | Full access plus a persistent "invoice past due" banner — grace, not punishment. Suspending is a human decision. |
 | Suspended | **Read-only.** Admins can see everything they built; recording/imports/cuts are disabled; public share links stop resolving. Data is never deleted. |
-| Canceled | The org is closed — login lands on a contact notice. Data is retained. |
+| Canceled | **Read-only**, like Suspended — plus the wind-down: exports keep working, and the data is deleted **60 days** after cancellation (the banner shows the date). |
 | Internal | Doorline's own and demo orgs: permanently free, never gated, never on a statement. |
 
 A canvasser mid-shift when an org is paused is treated fairly: **work recorded while the org was
@@ -273,9 +282,10 @@ indexed `Subscription.findOne` per request. Rules, in order:
    `canceled` is read-only like `suspended` (the 60-day wind-down is a real export window;
    it has NOT blocked reads since the Change-1 rewrite).
 3. Writes pass when `canWrite`.
-4. **The export carve-out**: `POST /admin/exports` (creating an Export Center job — see
-   [EXPORTS.md](EXPORTS.md)) passes for every read-only status. It is the ONE write a
-   suspended/expired-trial/canceled org may perform, method-and-path exact, because the
+4. **The export carve-outs**: `POST /admin/exports` (creating an Export Center job — see
+   [EXPORTS.md](EXPORTS.md)) and `POST /admin/exports/estimate` (its count-only preview — a
+   read wearing POST) pass for every read-only status. They are the TWO writes a
+   suspended/expired-trial/canceled org may perform, method-and-path exact ×2, because the
    published wind-down promise ("may export its Customer Data during that period") is
    meaningless if queueing an export 402s. Guard-tested in `test/billing.int.test.js`.
 5. **Sync-boundary grace**: a `/mobile` write whose `body.timestamp` predates
@@ -349,6 +359,10 @@ absorbing it silently.
 - **Reactivating an archived campaign** clears `archivedAt`
   ([campaigns.js](../server/src/routes/admin/campaigns.js) — `campaign.archivedAt = data.isActive ? null : new Date()`),
   so every month it sat archived becomes billable again the next time a statement is read.
+  The customer knows: **Reactivate confirms before it fires**
+  ([CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) modal), and its copy says billing
+  resumes *including the archived months* — the same sentence the help FAQ publishes — so a
+  back-bill after a reactivation is never a surprise the org can dispute.
 - **Changing a rate** (org or per-campaign) re-prices all un-issued history, since `monthlyStatement`
   resolves the *current* rate for whatever month you ask about.
 
