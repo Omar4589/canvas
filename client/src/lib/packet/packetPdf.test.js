@@ -47,8 +47,11 @@ const SURVEY = {
 // Update this DELIBERATELY when the layout changes; an accidental jump means something grew.
 // 42 -> 47 when note rules went to a writable 20pt pitch, tick boxes to 10.5pt, and street
 // bands arrived. Unchanged at 47 when the header band grew to 68pt — the door blocks repack
-// into the same sheets.
-const PAGE_PIN_60_DOORS = 47;
+// into the same sheets. 47 -> 61 when doors became atomic: at three note lines a survey door
+// clears half a page, so one lands per sheet instead of one-and-a-bit. Dropping this fixture to
+// one note line puts it back under half a page and two fit again — that is the trade, and the
+// studio shows it live as the knob turns.
+const PAGE_PIN_60_DOORS = 61;
 
 const voter = (i, name) => ({
   id: `v${i}`, name, party: 'DEM', age: 30 + i, gender: 'F', phone: null, voted: i === 0,
@@ -121,6 +124,15 @@ test('no ink escapes the page, at every household size', async () => {
       }
     }
   }
+});
+
+test('a door that fits on a page is never split across two', async () => {
+  // Splitting puts the residents and "who answered" on one sheet and the questions on the next.
+  // Tear a packet at a page boundary — exactly where two volunteers divide it — and neither half
+  // is a workable door. It used to happen to two thirds of the doors in a real survey book.
+  const doc = await renderPacketPdf(makePayload(40, 2), { ...DEFAULT_SETTINGS, noteLines: 1 });
+  const split = pageTexts(doc).filter((t) => t.includes('cont.')).length;
+  assert.equal(split, 0, `${split} pages carried a continued door that should have fitted whole`);
 });
 
 test('a door taller than one page continues, reprinting its address with (cont.)', async () => {

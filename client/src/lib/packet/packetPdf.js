@@ -832,10 +832,21 @@ export const renderPacketPdf = async (payload, settings) => {
         lastStreet = street;
       }
 
+      // A DOOR IS ATOMIC where it can be. Splitting one puts the residents and "who answered"
+      // on one sheet and the questions on the next: tear a packet at a page boundary — which is
+      // exactly where two volunteers would divide it — and neither half is a workable door, and
+      // the "(cont.)" header reads like a second address to anyone skimming.
+      //
+      // Only a door genuinely taller than a whole page still splits, because there is nowhere
+      // else for it to go.
+      const headerH = 30;
+      const doorH = headerH + segs.reduce((n, sg) => n + sg.measure(doc, PAGE.MARGIN, 0, false), 0);
+      if (doorH <= PAGE.USABLE && y + doorH > PAGE.BODY_BOTTOM && y > PAGE.BODY_TOP) {
+        y = newPage(book);
+      }
+
       while (idx < segs.length) {
-        const headerH = 30;
-        // Does the header plus at least ONE atom fit in what's left? If not, turn the page
-        // rather than stranding a lone address at the bottom of a sheet.
+        // Fallback for the oversized door: at least keep the header with one atom.
         const firstH = segs[idx].measure(doc, PAGE.MARGIN, y, false);
         if (y + headerH + firstH > PAGE.BODY_BOTTOM && y > PAGE.BODY_TOP) {
           y = newPage(book);

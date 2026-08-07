@@ -33,7 +33,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 
 ## The other controls
 
-- **Lines to write on** — 0 to 6. Four is the default and is nearly free: going from two to four adds about five pages across a whole 200-door book.
+- **Lines to write on** — 0 to 6. On a **survey packet** this is the knob that decides your page count: a door is never split across two sheets, so if the writing lines push a door past half a page you get one door per page instead of two. On a 207-door book that is 208 pages at three lines versus 105 at one. The page count under the button updates as you change it. Four is the default and is nearly free: going from two to four adds about five pages across a whole 200-door book.
 - **What happened boxes** — Not home, Refused, Wrong address, Surveyed, Restricted. The same five on both layouts.
 - **Last round's result** — shows a small pill on doors that were already visited this round.
 - **What to say** — your opening, closing and any option scripts, printed once at the top of the first door page rather than repeated beside every door. It shares that page with the doors, so it costs no extra paper.

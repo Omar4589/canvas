@@ -330,6 +330,31 @@ a zigzag book must regroup, a rural book must not.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
 
+## A door is atomic
+
+A door is never split across two pages unless it is genuinely taller than one. Splitting put the
+residents and "who answered" on one sheet and the questions on the next — and a packet gets
+divided between volunteers **at a page boundary**, which is precisely where that break leaves two
+useless halves. The `(cont.)` header also reads as a second address to anyone skimming.
+
+This was not an edge case. On a 207-door survey book with a three-question survey, **138 of 207
+doors were splitting** — two thirds of the packet.
+
+The measured trade, same book, two residents per door:
+
+| | splitting allowed | atomic |
+|---|---:|---:|
+| 3 note lines | 140 pages, 138 split | 208 pages, 0 split |
+| **1 note line** | — | **105 pages, 0 split** |
+
+At three note lines a survey door is ~410pt, so two will not fit on a 606pt page and each door
+takes one. At **one** note line it drops under half a page, two fit, and the packet is **105
+pages — fewer than the 140 it took while breaking two thirds of its doors.** Note lines are the
+knob that decides this, and the studio shows the page count as you turn it.
+
+The field list is unaffected: its doors are ~120pt, five fit a page, and nothing split before
+or after.
+
 ## "What to say"
 
 The script opens the **first door page** and the doors flow underneath it — it does not get a
