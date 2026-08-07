@@ -434,6 +434,41 @@ test('the cover street list is alphabetical, numeric-aware', { skip }, async () 
   );
 });
 
+test('an apartment building is ONE street, not one street per unit', { skip }, async () => {
+  // streetOf strips the unit. Without that a 40-door building listed nineteen separate
+  // "Bay Harbor Blvd Apt NNN" streets on the cover and banded a new street every door.
+  const turf = await gridBook(ctx, Household, Turf, 'Apts', [
+    [0, 0, '11764 Bay Harbor Blvd Apt 202'], [10, 0, '11764 Bay Harbor Blvd Apt 304'],
+    [20, 0, '11820 Bay Harbor Blvd Apt 106'], [30, 0, '12231 Main St Unit 884'],
+  ]);
+  const { json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.deepEqual(json.books[0].streets.map((s) => s.name), ['Bay Harbor Blvd', 'Main St']);
+  assert.equal(json.books[0].streets.find((s) => s.name === 'Bay Harbor Blvd').count, 3);
+});
+
+test('apartments can be left out, and the count says so', { skip }, async () => {
+  const turf = await gridBook(ctx, Household, Turf, 'MixedUnits', [
+    [0, 0, '100 Oak St'], [10, 0, '11764 Bay Harbor Blvd Apt 202'],
+    [20, 0, '102 Oak St'], [30, 0, '12231 Main St Unit 884'],
+  ]);
+  const base = `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`;
+  const auth = { token: ctx.adminTok, orgId: ctx.org._id };
+
+  const included = await call(base, auth);
+  assert.equal(included.json.books[0].doors.length, 4, 'apartments print unless excluded');
+
+  const excluded = await call(`${base}&excludeApartments=1`, auth);
+  const book = excluded.json.books[0];
+  assert.equal(book.doors.length, 2);
+  assert.ok(book.doors.every((d) => !/Apt|Unit/i.test(d.addressLine1)));
+  // A deliberate cut, counted as its own reason — not folded into the suppressions.
+  assert.equal(book.omitted.reasons.apartment, 2);
+  assert.ok(excluded.json.warnings.some((w) => /apartment door/i.test(w)));
+});
+
 test('over the cap the request is REFUSED, never truncated', { skip }, async () => {
   // A book of cap+1 knockable doors. The refusal has to carry the real count so the UI can
   // say something a human can act on.

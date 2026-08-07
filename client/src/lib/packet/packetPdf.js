@@ -633,19 +633,30 @@ export const renderPacketPdf = async (payload, settings) => {
       drawScriptPage(doc, ctx.survey, ctx);
     }
 
-    // Where each street's run starts and ends, so a band can say "doors 17-33" and a
-    // volunteer knows how much of this street is left.
-    const runOf = new Map();
+    // CONTIGUOUS runs, in walk order. A route that leaves a street and comes back later gets
+    // a SECOND run, and each band describes the stretch in front of the volunteer.
+    //
+    // This used to be first-seen..last-seen for the whole book, which on a route-ordered book
+    // printed "Corbin Ridge St · doors 12-28" over a run that actually ended at 16 — the label
+    // claimed seventeen doors of one street where the walk had four separate chunks.
+    const runs = [];
+    const runIndexOf = new Array(book.doors.length);
     book.doors.forEach((d, i) => {
       const k = d.street || '';
-      const r = runOf.get(k);
-      if (r) r.to = i + 1;
-      else runOf.set(k, { from: i + 1, to: i + 1 });
+      const last = runs[runs.length - 1];
+      if (last && last.street === k) last.to = i + 1;
+      else runs.push({ street: k, from: i + 1, to: i + 1 });
+      runIndexOf[i] = runs.length - 1;
+    });
+    // A street the route returns to later says so, instead of looking like the whole street.
+    const laterRun = new Set();
+    runs.forEach((r, i) => {
+      if (runs.some((o, j) => j > i && o.street === r.street)) laterRun.add(i);
     });
 
     let y = newPage(book);
     let lastStreet = null;
-    for (const door of book.doors) {
+    for (const [doorIdx, door] of book.doors.entries()) {
       const segs = buildDoorSegments(door, ctx);
       let idx = 0;
       let continued = false;
@@ -659,8 +670,10 @@ export const renderPacketPdf = async (payload, settings) => {
         if (y + STREET_BAND_H + 30 + firstH > PAGE.BODY_BOTTOM && y > PAGE.BODY_TOP) {
           y = newPage(book);
         }
-        const r = runOf.get(street);
-        const label = r && r.to > r.from ? `doors ${r.from}-${r.to}` : r ? `door ${r.from}` : '';
+        const ri = runIndexOf[doorIdx];
+        const r = runs[ri];
+        const span = r.to > r.from ? `doors ${r.from}-${r.to}` : `door ${r.from}`;
+        const label = laterRun.has(ri) ? `${span} · back later` : span;
         drawStreetBand(doc, PAGE.MARGIN, y, street, label, ctx, true);
         y += STREET_BAND_H;
         lastStreet = street;

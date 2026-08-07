@@ -49,15 +49,29 @@ const ageOf = (dob) => {
   return age >= 0 && age < 130 ? age : null;
 };
 
-// "1418 N ORCHARD AVE" -> "N ORCHARD AVE". Purely for the cover's orientation list, so a
-// volunteer can answer "am I in the right neighborhood?" without a map. Text only — it
-// works for manual-mode books with no boundary and for walk lists with no geometry at all.
+// "1418 N ORCHARD AVE" -> "N ORCHARD AVE". Purely for the cover's orientation list and the
+// street bands, so a volunteer can answer "am I in the right neighborhood?" without a map.
+// Text only — it works for manual-mode books with no boundary and walk lists with no geometry.
+//
+// The UNIT has to come off or every apartment becomes its own street: a 40-door building
+// listed "Bay Harbor Blvd Apt 101 … Apt 308" as nineteen separate streets on the cover and
+// banded a fresh street every single door.
+const UNIT_SUFFIX = /\s+(?:apt|apartment|unit|ste|suite|bldg|building|lot|trlr|trailer|rm|room|fl|floor|#)\b\.?\s*\S*$/i;
+
 const streetOf = (line1) =>
   String(line1 || '')
     .trim()
     .replace(/^\d+[A-Za-z]?\s+/, '')
     .replace(/\s+#.*$/, '')
+    .replace(UNIT_SUFFIX, '')
     .trim() || '(no street)';
+
+// A door inside a multi-unit building. Either the unit is baked into the street line, or the
+// import put it in addressLine2. Campaigns often skip these on a paper day — locked lobbies,
+// no way in, and a volunteer standing outside a call box is a wasted hour.
+const isApartment = (h) =>
+  !!String(h.addressLine2 || '').trim() || UNIT_SUFFIX.test(String(h.addressLine1 || '')) ||
+  /\s+#\S/.test(String(h.addressLine1 || ''));
 
 const streetSummary = (doors) => {
   const counts = new Map();
@@ -197,13 +211,19 @@ const orderForPrint = (doors) => {
 
 // Doors + residents for one ordered id list, with every suppression rule applied.
 // `orderedIds` IS the book's stored sequence; orderForPrint may then regroup it for paper.
-const loadDoors = async (orderedIds, { includePhone }) => {
+const loadDoors = async (orderedIds, { includePhone, excludeApartments }) => {
   if (!orderedIds.length) return { doors: [], omitted: { total: 0, reasons: {} } };
 
-  const printable = await Household.find(
+  const all = await Household.find(
     { _id: { $in: orderedIds }, ...KNOCKABLE_DOOR_FILTER },
     { addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1, location: 1 }
   ).lean();
+
+  // Apartments are dropped by CHOICE, not by a suppression rule — a locked lobby is a door a
+  // paper volunteer cannot work, and a call box is a wasted hour. Counted separately from the
+  // suppressions so the cover can say which it was.
+  const printable = excludeApartments ? all.filter((h) => !isApartment(h)) : all;
+  const apartmentsExcluded = all.length - printable.length;
 
   // KNOCKABLE_DOOR_FILTER decides who prints; this second read only EXPLAINS the gap, so the
   // predicate is never re-implemented in JS where it could drift from the shared constant.
@@ -223,6 +243,7 @@ const loadDoors = async (orderedIds, { includePhone }) => {
     const seen = rows.length;
     if (omittedIds.length > seen) reasons.missing = omittedIds.length - seen;
   }
+  if (apartmentsExcluded) reasons.apartment = apartmentsExcluded;
 
   const fields = ['householdId', 'firstName', 'lastName', 'fullName', 'party', 'gender', 'dateOfBirth'];
   if (includePhone) fields.push('phone');
@@ -289,7 +310,11 @@ const loadDoors = async (orderedIds, { includePhone }) => {
     d.seq = i + 1;
     delete d._loc;
   });
-  return { doors: ordered, printOrder, omitted: { total: omittedIds.length, reasons } };
+  return {
+    doors: ordered,
+    printOrder,
+    omitted: { total: omittedIds.length + apartmentsExcluded, reasons },
+  };
 };
 
 // ── books ────────────────────────────────────────────────────────────────────
@@ -420,8 +445,8 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
 };
 
 // source: { kind: 'books', turfIds: [] } | { kind: 'walklist', walkListId }
-export const buildPacket = async (campaign, orgName, source, { includePhone = false } = {}) => {
-  const opts = { includePhone };
+export const buildPacket = async (campaign, orgName, source, { includePhone = false, excludeApartments = false } = {}) => {
+  const opts = { includePhone, excludeApartments };
   const { books, notFound } =
     source.kind === 'walklist'
       ? await buildFromWalkList(campaign, source.walkListId, opts)
@@ -432,6 +457,12 @@ export const buildPacket = async (campaign, orgName, source, { includePhone = fa
   if (notFound.length) warnings.push(`${notFound.length} selected item(s) no longer exist.`);
   if (source.kind === 'walklist') {
     warnings.push('Walk order for a saved search is computed for this printout and is not stored.');
+  }
+  // A deliberate cut has to be visible on screen. Without this it just inflated the cover's
+  // "held back" number and read as suppression the admin never asked for.
+  const apartments = books.reduce((n, b) => n + (b.omitted?.reasons?.apartment || 0), 0);
+  if (apartments) {
+    warnings.push(`${apartments} apartment door${apartments === 1 ? '' : 's'} left out — untick "Skip apartments" to include them.`);
   }
 
   return {

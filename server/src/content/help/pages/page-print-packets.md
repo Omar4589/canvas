@@ -38,6 +38,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 - **Last round's result** — shows a small pill on doors that were already visited this round.
 - **What to say page** — one reference sheet per packet carrying your opening, closing, and any option scripts, instead of repeating them beside every door.
 - **Hand-out sheet** — a front page listing every packet with ruled Out/In cells, so you can sign packets out to volunteers on the table. Appears when you're printing more than one book.
+- **Skip apartments** — leaves out doors in multi-unit buildings. A locked lobby or a call box is a door a volunteer can't work, so a lot of campaigns drop them on a paper day. Off by default, and the number left out is shown on screen. Whether apartments are in the book at all is decided when you cut it; this just keeps them off the printout.
 - **Phone numbers** — off by default. Phone numbers on paper can't be recalled.
 
 ## What's on each sheet
@@ -45,6 +46,8 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
+
+Each run of one street gets a **banded header** with the doors it covers — and if the route comes back to that street later, the band says **back later**, so the range never overpromises. Apartment units are grouped under their real street rather than appearing as one "street" per unit.
 
 **The doors are ordered street by street** — each street walked in one go, up one side and back down the other, with the streets in the order the book's route reaches them. The books themselves are cut as a shortest route, which suits the app because the phone draws that route on a map; on paper there's no map, so a route that cuts back and forth between two parallel streets is just confusing. The packet only regroups when it doesn't make the walk longer — on cul-de-sacs or a rural route it keeps the book's own order instead. The streets listed on the cover are alphabetical, so you can scan for a name.
 

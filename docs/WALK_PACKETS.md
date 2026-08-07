@@ -134,6 +134,11 @@ None of this changes the app: the phone still walks the book's stored route.
 **Off unless you turn it on:** phone numbers. They're useless at a door and they can't be
 recalled once they're on paper.
 
+**Skip apartments** drops every door in a multi-unit building — a locked lobby or a call box is
+a door a paper volunteer can't work. Off by default; the count that came out is shown on screen
+so it never looks like a suppression you didn't ask for. Whether apartments were in the book at
+all is still decided when the book is cut; this only removes them from the printout.
+
 **Never, at any setting:**
 
 - **Date of birth.** The packet prints an age instead. Same trade the app makes on a
@@ -307,6 +312,20 @@ a zigzag book must regroup, a rural book must not.
 `printOrder` (`'street' | 'route'`) rides on each book in the payload so the reason is visible.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
+
+## Street bands and the unit suffix
+
+Each contiguous run of one street gets a band naming it and the doors it covers. Two rules make
+that honest:
+
+- The range is the **contiguous run**, not the street's first-to-last appearance in the book. On
+  a route-ordered book a street is walked in several chunks, and the old first..last range
+  printed `Corbin Ridge St · doors 12-28` over a run that ended at 16. A street the route
+  returns to later is marked `· back later`.
+- `streetOf` strips the **unit suffix** (`Apt`, `Unit`, `Ste`, `Bldg`, `Lot`, `#`…) before
+  grouping. Without that a forty-door building listed nineteen separate
+  "Bay Harbor Blvd Apt NNN" entries on the cover and banded a fresh street on every single door.
+  The same helper backs `isApartment`, which is what **Skip apartments** filters on.
 
 ## The colour rule
 

@@ -94,6 +94,11 @@ export default function DesignPanel({
             checked={settings.showManifest} onChange={(v) => set({ showManifest: v })}
           />
           <Toggle
+            id="excludeApartments" label="Skip apartments"
+            hint="Drops units in multi-unit buildings — locked lobbies eat a shift."
+            checked={settings.excludeApartments} onChange={(v) => set({ excludeApartments: v })}
+          />
+          <Toggle
             id="includePhone" label="Phone numbers"
             hint="Phone numbers on paper can't be recalled."
             checked={settings.includePhone} onChange={(v) => set({ includePhone: v })}

@@ -95,10 +95,11 @@ export default function PrintPacketsPage() {
   );
 
   const dataQ = useQuery({
-    queryKey: ['admin', 'packet-data', campaignId, dataKey, debounced.includePhone],
+    queryKey: ['admin', 'packet-data', campaignId, dataKey, debounced.includePhone, debounced.excludeApartments],
     enabled: hasPick,
     // The payload is the same for every layout, so switching layout or note lines re-renders
-    // the PDF without going back to the server. Only the phone opt-in changes what is sent.
+    // the PDF without going back to the server. Only the phone opt-in and the apartment cut
+    // change what is sent.
     staleTime: 60 * 1000,
     retry: false,
     queryFn: ({ signal }) => {
@@ -106,6 +107,7 @@ export default function PrintPacketsPage() {
       if (selection.kind === 'walklist') qs.set('walkListId', selection.walkListId);
       else qs.set('turfIds', selection.turfIds.join(','));
       if (debounced.includePhone) qs.set('includePhone', '1');
+      if (debounced.excludeApartments) qs.set('excludeApartments', '1');
       return api(`/admin/campaigns/${campaignId}/packets/data?${qs}`, { signal });
     },
   });

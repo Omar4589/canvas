@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showScriptPage: true,
   showManifest: true,
   includePhone: false,
+  excludeApartments: false,
   inkSaver: false,
 });
 
