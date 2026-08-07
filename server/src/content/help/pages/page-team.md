@@ -3,7 +3,7 @@ slug: page-team
 title: The Team page
 audience: lead
 kind: page
-order: 106
+order: 107
 sourceDoc: USERS.md
 summary: Add canvassers to the campaign, see who's on the crew, and remove people who leave.
 tags: team, crew, canvassers, page, remove, quit, left the team

@@ -332,6 +332,7 @@ export const NAV_ICONS = {
   '/campaigns': IconFlag,
   '/import': IconUpload,
   '/exports': IconDownload,
+  '/packets': IconPrinter,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,
   '/timeline': IconClock,
@@ -358,6 +359,18 @@ export const NAV_ICONS = {
   '/organizations': IconBuilding,
   '/queues': IconLayers,
 };
+
+// Stacked sheets coming off a press — printing, not exporting (that one is a download arrow).
+function IconPrinter(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M6 9V3h12v6" />
+      <rect x="3" y="9" width="18" height="7" rx="2" />
+      <rect x="6" y="15" width="12" height="6" rx="1" />
+    </svg>
+  );
+}
 
 export function navIcon(to) {
   return NAV_ICONS[to] || IconDot;

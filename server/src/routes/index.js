@@ -19,6 +19,7 @@ import adminActivitiesRouter from './admin/activities.js';
 import adminQueuesRouter from './admin/queues.js';
 import adminTurfsRouter from './admin/turfs.js';
 import adminWalkListsRouter from './admin/walklists.js';
+import adminPacketsRouter from './admin/packets.js';
 import adminVotedRouter from './admin/voted.js';
 import adminVotersRouter from './admin/voters.js';
 import adminDncRouter from './admin/dnc.js';
@@ -129,6 +130,8 @@ router.use('/admin/campaigns/:campaignId/setup-status', adminSetupStatusRouter);
 router.use('/admin/campaigns/:campaignId/crew', adminLeadCrewRouter);
 router.use('/admin/campaigns/:campaignId/turfs/:turfId/assignments', adminTurfAssignmentsRouter);
 router.use('/admin/campaigns/:campaignId/turfs', adminTurfsRouter);
+// Printable walk packets — read-only, and after accessLog like every other voter-data path.
+router.use('/admin/campaigns/:campaignId/packets', adminPacketsRouter);
 router.use('/admin/activities', adminActivitiesRouter);
 router.use('/admin/client-reports', adminClientReportsRouter);
 router.use('/admin/queues', adminQueuesRouter);

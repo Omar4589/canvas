@@ -3,7 +3,7 @@ slug: page-notes
 title: The Notes page
 audience: lead
 kind: page
-order: 111
+order: 112
 sourceDoc: NOTES.md
 summary: A read-only feed of every door, survey, and admin note across the campaign.
 tags: notes, door notes, survey notes, campaign, mobile

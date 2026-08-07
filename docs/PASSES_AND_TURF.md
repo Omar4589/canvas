@@ -12,7 +12,8 @@ the numbers.
 Related: [EFFORTS.md](EFFORTS.md) (the layer above — see banner), [METRICS.md](METRICS.md) (a pass is
 the billing unit), [TURF_RUNBOOK.md](../TURF_RUNBOOK.md) (operational runbook),
 [SURVEYS.md](SURVEYS.md) (one survey per voter per pass), [VOTERS.md](VOTERS.md),
-[MAPS.md](MAPS.md) (how books/turf show on the map).
+[MAPS.md](MAPS.md) (how books/turf show on the map), [WALK_PACKETS.md](WALK_PACKETS.md) (printing a
+book on paper for volunteers who aren't using the app).
 
 > **Updated — a "pass" lives inside a walk list.** The user-facing term is **Pass** again (Pass 1,
 > Pass 2, …; the `Pass` model stores the counter as `roundNumber`). A campaign is split into **walk
@@ -169,6 +170,22 @@ the campaign team untouched — people keep their access to the campaign, they j
 those books — and neither touches a single recorded knock. Because assignment changes write nothing to
 `Household`, a canvasser already out walking keeps the books on their phone until their app reloads the
 campaign, and anything they record before then still counts.
+
+## Printing a book on paper
+
+A book can also be handed out as a **printed packet** for volunteers who aren't using the app —
+**Campaign → Print Packets**, or the **Print this book on paper** link in the assignment panel.
+Two layouts: a **survey packet** with the campaign's questions laid out to circle, and a **field
+list** with just addresses, residents, and lines to write on. The packet walks the book in the same
+order the cut produced, and honours the same suppression rules the app does — do-not-contact
+residents are dropped when the PDF is built, checked live at that moment.
+
+**It is print-only.** Nothing written on the paper comes back, so a book walked on paper keeps
+reading as **0 knocked** here, on the map, and in every report — and a later targeted round will
+re-cut those doors as untouched. If you're running a paper day alongside app canvassers, give the
+paper doors their own book and assign it to **nobody**: an unassigned book is invisible to every app
+canvasser, so the same street never gets walked twice. Full detail, including what prints and what
+never does, is in [WALK_PACKETS.md](WALK_PACKETS.md).
 
 ## Watching a round on the cut map
 

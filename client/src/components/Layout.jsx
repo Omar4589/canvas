@@ -118,7 +118,10 @@ export default function Layout() {
   );
 
   const isFullBleed =
-    location.pathname.endsWith('/map') || location.pathname.endsWith('/turfs') || location.pathname === '/queues';
+    location.pathname.endsWith('/map') ||
+    location.pathname.endsWith('/turfs') ||
+    location.pathname.endsWith('/packets') ||
+    location.pathname === '/queues';
 
   const [collapsed, setCollapsed] = useState(() => {
     try {

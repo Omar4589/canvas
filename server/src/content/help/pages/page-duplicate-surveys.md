@@ -3,7 +3,7 @@ slug: page-duplicate-surveys
 title: The Duplicate Surveys page
 audience: lead
 kind: page
-order: 115
+order: 116
 sourceDoc: METRICS.md
 summary: Voters who were surveyed more than once — filter by canvasser, duplicate type, or date to audit them.
 tags: duplicate surveys, audit, canvasser, surveys, page, mobile

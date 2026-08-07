@@ -3,7 +3,7 @@ slug: page-timeline
 title: The Timeline page
 audience: lead
 kind: page
-order: 107
+order: 108
 sourceDoc: METRICS.md
 summary: Who knocked when, each team's numbers, and an All time view of everyone who's ever worked the campaign.
 tags: timeline, knocks, hours, page, all time, former canvassers, team, coordinator, doors, live, refresh, mobile

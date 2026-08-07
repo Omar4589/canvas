@@ -3,7 +3,7 @@ slug: page-map
 title: The Map page
 audience: lead
 kind: page
-order: 108
+order: 109
 sourceDoc: MAPS.md
 summary: The admin map of your campaign's doors, colored by status and filterable by date.
 tags: map, doors, coverage, page, canvasser filter, overlaps, mobile

@@ -3,7 +3,7 @@ slug: page-overlaps
 title: The Overlaps page
 audience: lead
 kind: page
-order: 110
+order: 111
 sourceDoc: METRICS.md
 summary: Doors that more than one canvasser knocked in the same round, with who knocked and when.
 tags: overlaps, double knock, turf collision, coaching, page, rounds, mobile

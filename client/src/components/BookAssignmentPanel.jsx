@@ -445,6 +445,17 @@ export default function BookAssignmentPanel({
             ＋ Add someone to the team →
           </Link>
 
+          {/* For a volunteer who won't be using the app — the studio opens with this book
+              already picked. */}
+          {turfIds?.length > 0 && (
+            <Link
+              to={`/campaigns/${campaignId}/packets?turfIds=${turfIds.join(',')}`}
+              className="mt-1 block text-[11px] font-medium text-brand-accent hover:underline"
+            >
+              🖨 Print this book on paper →
+            </Link>
+          )}
+
           {!single && (
             <>
               <label className="mt-2 flex items-center gap-2 text-[11px] text-fg-muted">

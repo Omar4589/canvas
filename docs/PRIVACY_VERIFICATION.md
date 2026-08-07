@@ -635,6 +635,55 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   sits inside both. §B6's "executes immediately" line is stamped above. Flagged for owner
   confirmation per the repo rule. No new subprocessor; DPA §6 untouched.**
 
+- *(v5 2026-08-06)* **Recorded as a NEGATIVE: printable walk packets put voter PII on PAPER, and
+  it is not a new exposure.** "What we expose" trigger class (reports / exports / share links) —
+  examined in full because a new medium deserves the check even when the data is old. New surface:
+  `GET /admin/campaigns/:campaignId/packets/{sources,data}` (`routes/admin/packets.js` →
+  `services/packet/buildPacket.js`), rendering client-side with jsPDF into a printable PDF. Docs:
+  [WALK_PACKETS.md](WALK_PACKETS.md).
+  **Why it is not a new exposure — three code facts, not a judgment call.** (i) **Same audience.**
+  The gate is `requireAuth, orgContext, requireCampaignManager` — byte-identical to
+  `routes/admin/walklists.js:21`, and the same audience `exports.js` resolves for
+  `voters-filtered`, which is `adminOnly: false`. Nobody can print who cannot already queue a full
+  voter export. (ii) **Strictly narrower data.** The packet prints name · party · **derived age** ·
+  address · walk-order number · prior-round status, with phone opt-in. That is a strict subset of
+  `walklists.js:294`'s eleven columns, and far less than `exportBuilders.js:617-626`, which emits
+  raw `dateOfBirth`, `cellPhone`, `phoneType` and household `latitude`/`longitude`. (iii) **This
+  class is already ruled.** §B8's browser-generated-download category (no server record, no
+  artifact, no AccessLog row for a member reading their own tenant) already contains
+  `client/src/lib/reportPdf.js`; the packet is a second member of an existing list, not a new list.
+  **No artifact, no new store.** The PDF is built in the admin's browser and never touches the
+  server, GridFS, or a queue — there is no `ExportJob` analogue, nothing at rest, and no retention
+  question. **No new subprocessor: `jspdf` was already a client dependency and no customer data
+  reaches a third party. DPA §6 untouched — no customer notice event.**
+  **Suppression is STRICTER than the CSV path, deliberately.** Do-not-contact is joined live and
+  **per voter** at generation (`'doNotContact.flagged': { $ne: true }`), not merely via
+  `Household.fullyDnc` — that flag needs EVERY resident flagged
+  (`services/dnc/recomputeFullyDnc.js`), so a partially-flagged door would otherwise print the
+  flagged person. `KNOCKABLE_DOOR_FILTER` is spread for the door set. **No withheld marker of any
+  kind** — `exportScope.js:14` forbids it for CSVs and paper is strictly worse, because a volunteer
+  standing at the door can see the gap. `dateOfBirth` never leaves the service; `packet.int.test.js`
+  asserts the raw date string appears nowhere in the payload, the assertion shape
+  `voterPrivacy.int.test.js:155` uses for the mobile wire. `addAuditSubjects(res, 'voter', …)` tags
+  the post-suppression set, so a staff support-grant read logs exactly which records printed.
+  **The one honest asymmetry, stated rather than hidden.** `privacy.html:94` makes exactly one
+  revocation promise and it is scoped to the app — the cached walk list "is deleted when you sign
+  out". Paper has no sign-out, no TTL and no purge. But that is the position an already-downloaded
+  CSV is in today: `walklists.js:276-279` openly aims that file at a "phone bank, mail house" — it
+  is EXPECTED to leave the building, and neither the org-delete cascade nor `EXPORT_TTL_DAYS`
+  reaches a file on an admin's laptop. **Paper does not create the gap; it makes an existing gap
+  visible.** Whether that "materially decreases the overall protection" under DPA §4 is an owner
+  call, not a code question, and is flagged here rather than resolved.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes.** Verified: `terms.html:91`
+  ("The Customer retains all right, title, and interest in the voter files and other data it
+  uploads") and `terms.html:106` (self-export carved out of the anti-extraction clause by name)
+  frame this as the customer exporting its own data; `privacy.html:90`'s do-not-contact promise
+  covers "future canvassing lists and exports" and a packet IS a canvassing list, which is why the
+  live per-voter join is mandatory rather than optional. Nothing in `privacy.html`, `terms.html` or
+  `docs/DPA.md` contains the words print, paper or hard copy — that is consistent with policies
+  describing categories of data and recipients, never media, so **no paper sentence should be
+  added.** Flagged for owner confirmation per the repo rule.
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

@@ -54,3 +54,9 @@ Unassigning is safe: **nobody loses any work.** Every door they knocked and ever
 Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Canvassers pick up changes on their next sync — including books taken away, so someone already out walking will still see them until their app reloads the campaign. Anything they record in the meantime still counts. See [Changes I make aren't showing up in the field](changes-not-showing-in-field).
 
 The Books tab follows the **campaign chip** at the top. Pick an **archived** campaign and it becomes a viewer: you'll see the book layout and how the round finished, but assigning is off, because an archived campaign is read-only.
+
+## Handing a book out on paper
+
+A book doesn't have to go to a phone. **Campaign → Print Packets** turns any book into a printed packet — addresses in walk order, who lives there, and room to write — for volunteers who aren't using the app. There's a **Print this book on paper** shortcut in the assignment panel too.
+
+One thing to plan around: printed packets are **print-only**, so a book walked on paper keeps reading as **0 knocked** here and everywhere else. If a paper crew is working alongside app canvassers, cut the paper doors into their own book and leave it **unassigned** — an unassigned book is invisible to every canvasser in the app, so nobody walks the same street twice. See [Printing packets for a paper canvass](printing-walk-packets).

@@ -3,7 +3,7 @@ slug: page-audit
 title: The Audit page
 audience: lead
 kind: page
-order: 109
+order: 110
 sourceDoc: AUDIT.md
 summary: Review GPS-flagged entries to check canvassing quality.
 tags: audit, gps, quality, page, mobile

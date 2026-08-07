@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getToken, getActiveOrgId } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
@@ -603,6 +603,12 @@ export default function WalkListsPage() {
                       >
                         {exportingId === w._id ? 'Exporting…' : 'Export CSV'}
                       </button>
+                      <Link
+                        to={`/campaigns/${campaignId}/packets?walkListId=${w._id}`}
+                        className="text-xs text-brand-accent hover:underline"
+                      >
+                        Print packet
+                      </Link>
                       <button onClick={() => del.mutate(w._id)} className="text-xs text-danger hover:underline">Delete</button>
                     </div>
                   </div>

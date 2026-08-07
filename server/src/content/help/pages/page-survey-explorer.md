@@ -3,7 +3,7 @@ slug: page-survey-explorer
 title: The Survey Explorer page
 audience: lead
 kind: page
-order: 110
+order: 111
 sourceDoc: SURVEYS.md
 summary: Drill into any survey answer — see the voters behind it, who recorded it and when, the doors on a map, and export it.
 tags: survey explorer, answers, drill, audit, canvasser, export, page
