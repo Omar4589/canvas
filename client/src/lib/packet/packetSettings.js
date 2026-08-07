@@ -22,9 +22,9 @@ export const LAYOUTS = [
 
 export const DEFAULT_SETTINGS = Object.freeze({
   layout: 'survey',
-  // Ruled lines under each door. Measured: 2 -> 4 costs ~5 pages across a 200-door book,
-  // so generosity here is close to free and people always want more room than you think.
-  noteLines: 4,
+  // Ruled lines under each door, now at a 20pt (college-ruled) pitch. THREE real lines beat
+  // the four unwritable ones this used to default to — at 12pt they were 4.23mm apart.
+  noteLines: 3,
   showOutcome: true,
   showPriorStatus: true,
   showScriptPage: true,

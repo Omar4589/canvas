@@ -8,10 +8,15 @@
 
 export const BRAND = [220, 38, 38]; // #DC2626
 export const DARK = [17, 24, 39]; // #111827
-export const GRAY = [107, 114, 128]; // #6B7280
-export const SUBTLE = [156, 163, 175]; // #9CA3AF
+export const GRAY = [107, 114, 128]; // #6B7280 — 4.83:1 on white, passes AA
+// #9CA3AF — 2.54:1 on white, BELOW the 4.5:1 AA floor. Reserved for the two footer strings
+// that are skim-only (printed-on date, the print-only notice). Anything a volunteer has to
+// READ — a pen instruction, a field label, a page number — uses GRAY (4.83:1) instead.
+export const SUBTLE = [156, 163, 175];
 export const RULE = [229, 231, 235]; // #E5E7EB
-export const HAIRLINE = [209, 213, 219]; // #D1D5DB — what a volunteer writes ON
+// #D1D5DB — 1.47:1, and deliberately so: this is what a volunteer writes OVER, not something
+// they read. A darker rule competes with their own handwriting.
+export const HAIRLINE = [209, 213, 219];
 export const WHITE = [255, 255, 255];
 
 // Book stripe colours. These are the SAME twelve hues, in the SAME order, as
@@ -54,16 +59,19 @@ export const STATUS_LABEL = {
 
 // Page geometry, in points (1/72"). US Letter portrait. The derived values are spelled out
 // rather than assigned afterwards — the object is frozen, and a late `PAGE.X = …` throws.
+//
+// HEADER is 68, not 54: the band carries a WALKED BY / DATE write-in, and at 54 its rule
+// landed 2pt above the first address — the name line and door 1 read as one crowded block.
 export const PAGE = Object.freeze({
   W: 612,
   H: 792,
   MARGIN: 48,
-  HEADER: 54,
+  HEADER: 68,
   FOOTER: 22,
   CONTENT_W: 612 - 48 * 2, // 516
-  BODY_TOP: 48 + 54, // 102
+  BODY_TOP: 48 + 68, // 116
   BODY_BOTTOM: 792 - 48 - 22, // 722
-  USABLE: 792 - 48 - 22 - (48 + 54), // 620
+  USABLE: 792 - 48 - 22 - (48 + 68), // 606
 });
 
 // The type scale. Every size on the sheet comes from here — nothing is set inline.
@@ -75,10 +83,10 @@ export const TYPE = Object.freeze({
   voterNameCompact: 10.5,
   voterMeta: 8.5,
   questionLabel: 9,
-  penVerb: 7.5,
+  penVerb: 8.5, // the instruction for how to answer — must be readable, not decorative
   option: 8.5,
   gate: 8,
-  micro: 7.5,
+  micro: 8,
   headerCampaign: 10,
   headerOrg: 7.5,
   headerBook: 11,

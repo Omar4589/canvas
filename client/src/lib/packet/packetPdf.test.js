@@ -44,8 +44,11 @@ const SURVEY = {
 };
 
 // Pinned page count for makePayload(60, 2) at DEFAULT_SETTINGS — cover + script page + body.
-// Update this deliberately when the layout changes; an accidental jump means something grew.
-const PAGE_PIN_60_DOORS = 42;
+// Update this DELIBERATELY when the layout changes; an accidental jump means something grew.
+// 42 -> 47 when note rules went to a writable 20pt pitch, tick boxes to 10.5pt, and street
+// bands arrived. Unchanged at 47 when the header band grew to 68pt — the door blocks repack
+// into the same sheets.
+const PAGE_PIN_60_DOORS = 47;
 
 const voter = (i, name) => ({
   id: `v${i}`, name, party: 'DEM', age: 30 + i, gender: 'F', phone: null, voted: i === 0,
@@ -57,7 +60,7 @@ const makePayload = (doorCount, votersPerDoor, { survey = SURVEY } = {}) => ({
   generatedAt: '2026-08-06T14:14:00.000Z',
   books: [
     {
-      id: 'b1', name: 'Ward 5 — Book C', code: 'R2-B07', colorIndex: 0,
+      id: 'b1', name: 'Ward 5 — Book C', colorIndex: 0,
       passId: 'p1', passName: 'Round 2', roundNumber: 2,
       doorCount, voterCount: doorCount * votersPerDoor,
       streets: [{ name: 'N ORCHARD AVE', count: doorCount }],
@@ -226,12 +229,39 @@ test('every page carries a write-in name line, never a pre-printed assignee', as
   assert.ok(!/Assigned:/.test(pages.join('\n')), 'the in-app assignee must never be printed');
 });
 
-test('the per-page name line costs no extra pages — it lives in the header band', async () => {
-  // Drawn inside the 54pt band, below the colour stripe, so PAGE.BODY_TOP — and therefore
-  // pagination — is untouched. A regression pin: moving it into the body would push doors
-  // onto extra sheets and this count would climb.
+test('page count for a fixed payload is pinned', async () => {
+  // A straight regression pin. Layout changes are fine — they just have to be deliberate,
+  // and an accidental jump here means something started consuming vertical space.
   const doc = await renderPacketPdf(makePayload(60, 2), DEFAULT_SETTINGS);
   assert.equal(doc.getNumberOfPages(), PAGE_PIN_60_DOORS);
+});
+
+test('a street change is announced on the page', async () => {
+  // The packet groups doors street by street; without a band the page gave no sign of it and
+  // the whole reordering was invisible to the person holding the paper.
+  const payload = makePayload(12, 1);
+  payload.books[0].doors.forEach((d, i) => {
+    d.street = i < 6 ? 'N ORCHARD AVE' : 'S CEDAR ST';
+    d.addressLine1 = `${100 + i} ${d.street}`;
+  });
+  const doc = await renderPacketPdf(payload, DEFAULT_SETTINGS);
+  const all = pageTexts(doc).join('\n');
+  assert.ok(all.includes('N ORCHARD AVE'), 'the first street must be banded');
+  assert.ok(all.includes('S CEDAR ST'), 'the second street must be banded');
+  assert.ok(/doors 1-6/.test(all), 'a band should say how much of the street is in this run');
+  assert.ok(/doors 7-12/.test(all));
+});
+
+test('pen instructions and field labels clear the AA contrast floor', async () => {
+  // SUBTLE (#9CA3AF) is 2.54:1 on white. It is fine for the skim-only footer and nothing
+  // else — every string a volunteer has to be TOLD must be GRAY (4.83:1) or darker.
+  const { GRAY, SUBTLE } = await import('./packetTheme.js');
+  const lum = (c) => { const v = c.map((n) => n / 255)
+    .map((x) => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+  const ratio = (c) => 1.05 / (lum(c) + 0.05);
+  assert.ok(ratio(GRAY) >= 4.5, `GRAY is ${ratio(GRAY).toFixed(2)}:1`);
+  assert.ok(ratio(SUBTLE) < 4.5, 'SUBTLE is the known-low one — kept only for the footer');
 });
 
 test('the cover never overflows — long race names and huge street lists', async () => {
@@ -254,14 +284,16 @@ test('the cover never overflows — long race names and huge street lists', asyn
   }
 });
 
-test('the race is the masthead and the code plate is stable', async () => {
+test('the race is the masthead', async () => {
   const payload = makePayload(4, 2);
   payload.campaign.name = 'Riverside City Council 2026';
   const doc = await renderPacketPdf(payload, DEFAULT_SETTINGS);
   doc.setPage(1);
   const cover = doc.internal.pages[1].join('\n');
   assert.ok(cover.includes('Riverside City Council 2026'), 'the race must appear on the cover');
-  assert.ok(cover.includes('R2-B07'), 'the code plate must appear on the cover');
+  assert.ok(cover.includes('Ward 5'), 'the book name identifies the packet');
+  // The R2-B07 style plate was removed — the book name does that job now.
+  assert.ok(!/R\d+-B\d+/.test(pageTexts(doc).join('\n')), 'no packet code anywhere');
   // No clock on the paper — a packet goes stale by days, not minutes.
   assert.ok(!/\d:\d\d\s*(AM|PM)/.test(pageTexts(doc).join('\n')), 'no time of day anywhere');
 });

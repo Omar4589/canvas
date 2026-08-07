@@ -51,7 +51,7 @@ export default function SourcePicker({
               <button
                 type="button"
                 onClick={() => onSelectWalkList(groupIds, allOn)}
-                className="text-xs text-brand hover:underline shrink-0"
+                className="text-xs text-brand-accent hover:underline shrink-0"
               >
                 {allOn ? 'Clear' : 'All'}
               </button>
@@ -64,7 +64,7 @@ export default function SourcePicker({
                 <div key={round.id} className="mb-3 last:mb-0">
                   <div className="flex items-baseline justify-between gap-2 mb-1 pl-0.5">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-xs font-medium text-muted-fg truncate">
+                      <span className="text-xs font-medium text-fg-muted truncate">
                         Pass {round.roundNumber} · {round.name}
                       </span>
                       {round.status !== 'active' && <Badge tone="muted">{round.status}</Badge>}
@@ -73,7 +73,7 @@ export default function SourcePicker({
                       <button
                         type="button"
                         onClick={() => onSelectRound(ids, roundOn)}
-                        className="text-[11px] text-brand hover:underline shrink-0"
+                        className="text-[11px] text-brand-accent hover:underline shrink-0"
                       >
                         {roundOn ? 'Clear' : 'All'}
                       </button>
@@ -91,7 +91,7 @@ export default function SourcePicker({
                           aria-pressed={on}
                           title={book.assignedTo ? `In the app: ${book.assignedTo}` : undefined}
                           className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md border text-left transition-colors ${
-                            on ? 'border-brand bg-brand-tint' : 'border-border bg-card hover:bg-muted'
+                            on ? 'border-brand-accent bg-brand-tint' : 'border-border bg-card hover:bg-sunken'
                           }`}
                         >
                           <span
@@ -103,12 +103,18 @@ export default function SourcePicker({
                             {book.assignedTo && (
                               // Not printed on the paper — but worth seeing here, because a book
                               // someone is walking in the app is a double-walk risk on paper.
-                              <span className="block text-[11px] text-muted-fg truncate">
+                              <span className="block text-[11px] text-fg-muted truncate">
                                 In the app: {book.assignedTo}
                               </span>
                             )}
                           </span>
-                          <span className="text-xs text-muted-fg tabular-nums shrink-0">{book.doorCount}</span>
+                          <span className="text-xs text-fg-muted tabular-nums shrink-0">{book.doorCount}</span>
+                          <span
+                            aria-hidden="true"
+                            className={`shrink-0 text-xs font-bold ${on ? 'text-brand-accent' : 'text-transparent'}`}
+                          >
+                            ✓
+                          </span>
                         </button>
                       );
                     })}
@@ -123,7 +129,7 @@ export default function SourcePicker({
       {walkLists.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-fg mb-1">Saved searches</h3>
-          <p className="text-xs text-muted-fg mb-2">
+          <p className="text-xs text-fg-muted mb-2">
             Walk order is worked out for this printout and isn&apos;t saved, so a reprint can order
             neighbouring units differently.
           </p>
@@ -137,11 +143,17 @@ export default function SourcePicker({
                   onClick={() => onToggleBook(w.id, { walkList: true })}
                   aria-pressed={on}
                   className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md border text-left transition-colors ${
-                    on ? 'border-brand bg-brand-tint' : 'border-border bg-card hover:bg-muted'
+                    on ? 'border-brand-accent bg-brand-tint' : 'border-border bg-card hover:bg-sunken'
                   }`}
                 >
                   <span className="text-sm text-fg truncate flex-1">{w.name}</span>
-                  <span className="text-xs text-muted-fg tabular-nums shrink-0">{w.doorCount}</span>
+                  <span className="text-xs text-fg-muted tabular-nums shrink-0">{w.doorCount}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`shrink-0 text-xs font-bold ${on ? 'text-brand-accent' : 'text-transparent'}`}
+                  >
+                    ✓
+                  </span>
                 </button>
               );
             })}

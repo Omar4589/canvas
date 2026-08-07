@@ -272,6 +272,9 @@ const loadDoors = async (orderedIds, { includePhone }) => {
       city: h.city || '',
       state: h.state || '',
       zipCode: h.zipCode || '',
+      // The street on its own, so the paper can band each run. Derived here rather than
+      // re-parsed in the renderer, so the band and the grouping agree by construction.
+      street: streetOf(h.addressLine1),
       voters: byHousehold.get(String(h._id)) || [],
       status: 'unknocked',
       lastActionAt: null,
@@ -288,17 +291,6 @@ const loadDoors = async (orderedIds, { includePhone }) => {
   });
   return { doors: ordered, printOrder, omitted: { total: omittedIds.length, reasons } };
 };
-
-// R2-B07 — the code plate stamped on every sheet, the cover, and the manifest: how a packet
-// found on a desk three weeks later says what it is without anyone opening the app.
-//
-// The B-number is the book's STABLE position within its pass (the same index that picks its
-// colour), never its position in the current selection. Selection-relative numbering meant
-// printing books 3/7/9 produced B01/B02/B03, and printing book 7 alone produced B01 — the
-// same book carrying a different code on every print run, which is precisely the thing the
-// plate exists to prevent.
-const packetCode = (roundNumber, bookIndex) =>
-  `R${roundNumber || 1}-B${String(bookIndex + 1).padStart(2, '0')}`;
 
 // ── books ────────────────────────────────────────────────────────────────────
 const buildFromBooks = async (campaign, turfIds, opts) => {
@@ -361,7 +353,6 @@ const buildFromBooks = async (campaign, turfIds, opts) => {
     books.push({
       id: String(turf._id),
       name: turf.name,
-      code: packetCode(pass?.roundNumber, colorIndexByTurf.get(String(turf._id)) ?? i),
       colorIndex: colorIndexByTurf.get(String(turf._id)) ?? i % 12,
       passId: pass ? String(pass._id) : null,
       passName: pass?.name || null,
@@ -410,7 +401,6 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
       {
         id: String(list._id),
         name: list.name,
-        code: 'LIST',
         colorIndex: 0,
         passId: null,
         passName: null,

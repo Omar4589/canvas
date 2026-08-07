@@ -216,8 +216,8 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
 
   if (tokenQ.data && !tokenQ.data.isReady) {
     return (
-      <div className="flex-1 flex items-center justify-center rounded-lg border border-border bg-muted">
-        <p className="text-sm text-muted-fg">Set MAPBOX_PUBLIC_TOKEN to enable the map.</p>
+      <div className="flex-1 flex items-center justify-center rounded-lg border border-border bg-sunken">
+        <p className="text-sm text-fg-muted">Set MAPBOX_PUBLIC_TOKEN to enable the map.</p>
       </div>
     );
   }
@@ -234,8 +234,8 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
               aria-pressed={r.id === activeRound?.id}
               className={`px-2.5 py-1 rounded-md border text-xs transition-colors ${
                 r.id === activeRound?.id
-                  ? 'border-brand bg-brand-tint text-fg'
-                  : 'border-border bg-card text-muted-fg hover:bg-muted'
+                  ? 'border-brand-accent bg-brand-tint text-fg'
+                  : 'border-border bg-card text-fg-muted hover:bg-sunken'
               }`}
             >
               {r.effortName} · Pass {r.roundNumber}
@@ -254,14 +254,14 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
         />
         {!books.length && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-sm text-muted-fg bg-card/90 px-3 py-1.5 rounded-md">
+            <p className="text-sm text-fg-muted bg-card/90 px-3 py-1.5 rounded-md">
               This round&apos;s books have no map outline.
             </p>
           </div>
         )}
       </div>
 
-      <p className="pt-2 text-xs text-muted-fg">
+      <p className="pt-2 text-xs text-fg-muted">
         Click a book to add or remove it. Only books on this round are shown — rounds cover the
         same streets, so they can&apos;t be drawn together.
       </p>

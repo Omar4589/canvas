@@ -9,11 +9,12 @@ import { Button } from '../ui/index.js';
 //
 // Two things this component must never leak: the object URL behind the iframe, and a render
 // that finished after a newer one started.
-export default function PaperPreview({ payload, settings, onPages }) {
+export default function PaperPreview({ payload, settings, onPages, onReady }) {
   const [url, setUrl] = useState(null);
   const [pages, setPages] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [retry, setRetry] = useState(0);
   const urlRef = useRef(null);
   const genRef = useRef(0);
 
@@ -29,6 +30,9 @@ export default function PaperPreview({ payload, settings, onPages }) {
         const doc = await renderPacketPdf(payload, settings);
         // A slower earlier render must never paint over a newer one.
         if (cancelled || gen !== genRef.current) return;
+        // Hand the rendered document up so Download can save THESE bytes instead of
+        // spending another second re-rendering a PDF that is already in memory.
+        onReady?.(doc);
         const blob = doc.output('blob');
         const next = URL.createObjectURL(blob);
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -44,7 +48,7 @@ export default function PaperPreview({ payload, settings, onPages }) {
     })();
 
     return () => { cancelled = true; };
-  }, [payload, settings, onPages]);
+  }, [payload, settings, onPages, onReady, retry]);
 
   // Unmount: the last URL still has to go, or the blob is pinned for the tab's lifetime.
   useEffect(() => () => {
@@ -55,25 +59,25 @@ export default function PaperPreview({ payload, settings, onPages }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div className="flex items-center justify-between gap-3 pb-3">
-        <div className="text-sm text-muted-fg">
+        <div className="text-sm text-fg-muted" aria-live="polite">
           {busy ? 'Building preview…' : pages ? `${pages} pages · ${Math.ceil(pages / 2)} sheets double-sided` : ' '}
         </div>
         {url && (
-          <a href={url} target="_blank" rel="noreferrer" className="text-sm text-brand hover:underline">
+          <a href={url} target="_blank" rel="noreferrer" className="text-sm text-brand-accent hover:underline">
             Open in a new tab
           </a>
         )}
       </div>
 
       <div
-        className="flex-1 rounded-lg border border-border bg-muted overflow-hidden"
+        className="flex-1 rounded-lg border border-border bg-sunken overflow-hidden"
         style={{ minHeight: 0, position: 'relative' }}
       >
         {error ? (
           <div className="h-full flex items-center justify-center p-6 text-center">
             <div>
               <p className="text-sm font-medium text-fg">{error}</p>
-              <Button className="mt-3" onClick={() => { genRef.current++; setError(null); }}>
+              <Button className="mt-3" onClick={() => { setError(null); setRetry((n) => n + 1); }}>
                 Try again
               </Button>
             </div>
@@ -85,7 +89,7 @@ export default function PaperPreview({ payload, settings, onPages }) {
             style={{ width: '100%', height: '100%', border: 0, opacity: busy ? 0.5 : 1, transition: 'opacity .15s' }}
           />
         ) : (
-          <div className="h-full flex items-center justify-center text-sm text-muted-fg">
+          <div className="h-full flex items-center justify-center text-sm text-fg-muted">
             {busy ? 'Building preview…' : 'Pick a book to see the packet.'}
           </div>
         )}

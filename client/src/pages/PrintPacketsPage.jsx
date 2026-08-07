@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -135,12 +135,16 @@ export default function PrintPacketsPage() {
   );
   const unprintable = useMemo(() => (payload ? scanUnprintableNames(payload) : null), [payload]);
   const onPages = useCallback((n) => setPages(n), []);
+  // The preview has already rendered this exact document — Download saves those bytes rather
+  // than spending another ~1s re-rendering an identical PDF.
+  const docRef = useRef(null);
+  const onReady = useCallback((doc) => { docRef.current = doc; }, []);
 
   const download = async () => {
     if (!payload) return;
     setDownloading(true);
     try {
-      const doc = await renderPacketPdf(payload, effective);
+      const doc = docRef.current || (await renderPacketPdf(payload, effective));
       doc.save(packetFilename(payload, effective));
     } finally {
       setDownloading(false);
@@ -154,7 +158,7 @@ export default function PrintPacketsPage() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="px-6 pt-5 pb-3 border-b border-border">
         <h1 className="text-xl font-semibold text-fg">Print packets</h1>
-        <p className="text-sm text-muted-fg mt-1 max-w-3xl">
+        <p className="text-sm text-fg-muted mt-1 max-w-3xl">
           Paper walk packets for volunteers who aren&apos;t using the app.{' '}
           <strong className="text-fg">
             Nothing written on these sheets comes back into Doorline
@@ -170,7 +174,7 @@ export default function PrintPacketsPage() {
           style={{ width: 268, flex: 'none', minHeight: 0 }}
         >
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-fg mb-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted mb-3">
               What to print
             </h2>
             <SourcePicker
@@ -189,11 +193,11 @@ export default function PrintPacketsPage() {
                 <span className="text-fg font-medium">
                   {packetCount} packet{packetCount === 1 ? '' : 's'}
                 </span>
-                <span className={`tabular-nums ${overCap ? 'text-danger font-semibold' : 'text-muted-fg'}`}>
+                <span className={`tabular-nums ${overCap ? 'text-danger font-semibold' : 'text-fg-muted'}`}>
                   {doors.toLocaleString()} doors
                 </span>
               </div>
-              <p className="text-xs text-muted-fg mt-0.5">
+              <p className="text-xs text-fg-muted mt-0.5">
                 {pages
                   ? `${pages} pages · ${Math.ceil(pages / 2)} sheets double-sided`
                   : `about ${Math.ceil(doors / DOORS_PER_PAGE_HINT / 2).toLocaleString()} sheets`}
@@ -207,7 +211,7 @@ export default function PrintPacketsPage() {
               <button
                 type="button"
                 onClick={() => setSelection(EMPTY)}
-                className="mt-2 text-xs text-brand hover:underline"
+                className="mt-2 text-xs text-brand-accent hover:underline"
               >
                 Clear selection
               </button>
@@ -224,7 +228,7 @@ export default function PrintPacketsPage() {
                 onClick={() => setTab(t)}
                 aria-pressed={tab === t}
                 className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                  tab === t ? 'bg-brand-tint text-fg font-medium' : 'text-muted-fg hover:bg-muted'
+                  tab === t ? 'bg-brand-tint text-fg font-medium' : 'text-fg-muted hover:bg-sunken'
                 }`}
               >
                 {t === 'preview' ? 'Packet' : 'Map'}
@@ -251,7 +255,7 @@ export default function PrintPacketsPage() {
               <div className="flex-1 flex items-center justify-center">
                 <div className="max-w-sm text-center">
                   <p className="text-sm font-medium text-fg">{capError.message}</p>
-                  <p className="text-xs text-muted-fg mt-2">
+                  <p className="text-xs text-fg-muted mt-2">
                     Deselect a few books and print the rest separately — a packet that quietly
                     stopped short would send nobody to those doors.
                   </p>
@@ -259,26 +263,26 @@ export default function PrintPacketsPage() {
               </div>
             ) : dataQ.isError ? (
               <div className="flex-1 flex items-center justify-center">
-                <p className="text-sm text-muted-fg">
+                <p className="text-sm text-fg-muted">
                   {dataQ.error?.message || 'Could not load those doors.'}
                 </p>
               </div>
             ) : !hasPick ? (
               <div className="flex-1 flex items-center justify-center">
-                <p className="text-sm text-muted-fg">
+                <p className="text-sm text-fg-muted">
                   Pick a book on the left, or switch to the Map to find one.
                 </p>
               </div>
-            ) : dataQ.isLoading ? (
+            ) : dataQ.isLoading && !payload ? (
               <div className="flex-1 flex items-center justify-center">
-                <p className="text-sm text-muted-fg">Loading doors…</p>
+                <p className="text-sm text-fg-muted">Loading doors…</p>
               </div>
-            ) : (
-              <PaperPreview payload={payload} settings={effective} onPages={onPages} />
-            )}
+            ) : payload ? (
+              <PaperPreview payload={payload} settings={effective} onPages={onPages} onReady={onReady} />
+            ) : null}
 
             {payload?.warnings?.length > 0 && (
-              <ul className="mt-3 text-xs text-muted-fg space-y-1">
+              <ul className="mt-3 text-xs text-fg-muted space-y-1">
                 {payload.warnings.map((w) => <li key={w}>{w}</li>)}
               </ul>
             )}

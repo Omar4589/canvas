@@ -42,7 +42,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 
 ## What's on each sheet
 
-Every page carries the campaign, your organisation, the book name, and a **packet code** like `R2-B07` in a red box — so a packet found later says what it is without anyone opening the app. Under that is a coloured stripe matching the book's colour on the Turf Cutting map.
+Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
 

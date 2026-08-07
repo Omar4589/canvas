@@ -42,7 +42,7 @@ const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
   for (const item of items) {
     const label = asciiSafe(item.text ?? item);
     const tw = doc.getTextWidth(label);
-    const boxW = shape === 'pill' ? tw + 12 : tw + 11;
+    const boxW = shape === 'pill' ? tw + 12 : tw + 15;
     const advance = boxW + 6;
     if (cx + boxW > x + w && cx > x) { cx = x; cy += 17; rows += 1; }
     if (paint) {
@@ -54,9 +54,9 @@ const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
         setFont(doc, size, 'normal', item.muted ? GRAY : DARK);
         text(doc, label, cx + 6, cy + 9.8);
       } else {
-        doc.rect(cx, cy + 3.5, 7, 7, 'S');
+        doc.rect(cx, cy + 2, 10.5, 10.5, 'S');
         setFont(doc, size, 'normal', DARK);
-        text(doc, label, cx + 11, cy + 9.8);
+        text(doc, label, cx + 15, cy + 9.8);
       }
       // A write-in option ("Other:") needs somewhere to write.
       if (item.writeIn) {
@@ -76,21 +76,24 @@ const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
   return rows * 17 + 2;
 };
 
+// 20pt ≈ 7.1mm, i.e. college-ruled. The previous 12pt pitch was 4.23mm — tighter than any
+// ruled paper on sale — so a one-handed note written outdoors crossed three of them.
+const NOTE_PITCH = 20;
 const ruledLines = (doc, x, y, w, n, firstIndent, paint) => {
   if (paint) {
     doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
     doc.setLineWidth(0.5);
     for (let i = 0; i < n; i++) {
       const lx = x + (i === 0 ? firstIndent : 0);
-      doc.line(lx, y + 10 + i * 12, x + w, y + 10 + i * 12);
+      doc.line(lx, y + 12 + i * NOTE_PITCH, x + w, y + 12 + i * NOTE_PITCH);
     }
   }
-  return 4 + n * 12;
+  return 6 + n * NOTE_PITCH;
 };
 
 const microLabel = (doc, s, x, y, paint) => {
   if (paint) {
-    setFont(doc, TYPE.micro, 'bold', SUBTLE);
+    setFont(doc, TYPE.micro, 'bold', GRAY);
     text(doc, s.toUpperCase(), x, y + 9);
   }
   return 0;
@@ -121,7 +124,7 @@ const questionSegment = (q, ctx) => ({
     if (paint) {
       setFont(doc, TYPE.questionLabel, 'bold', DARK);
       text(doc, `${q.number}. ${q.label}`, x + indent, y + h + 8);
-      setFont(doc, TYPE.penVerb, 'italic', SUBTLE);
+      setFont(doc, TYPE.penVerb, 'italic', GRAY);
       text(doc, q.verb, x + ctx.contentW, y + h + 8, { align: 'right' });
     }
     h += 13;
@@ -289,6 +292,28 @@ const drawAddressHeader = (doc, x, y, door, ctx, continued, paint) => {
   return 30;
 };
 
+// A street band. The packet groups doors street by street, but until this existed the page
+// gave no sign of it — a volunteer flipping from door 16 to door 17 saw an identical red badge
+// and had to read the street words inside the address to notice they had crossed onto a new
+// road. The whole reordering was invisible on the one surface that matters.
+const STREET_BAND_H = 26;
+const drawStreetBand = (doc, x, y, street, range, ctx, paint) => {
+  if (paint) {
+    doc.setFillColor(249, 250, 251);
+    doc.rect(x, y, ctx.contentW, 20, 'F');
+    doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
+    doc.setLineWidth(2.5);
+    doc.line(x, y, x, y + 20);
+    setFont(doc, 12.5, 'bold', DARK);
+    text(doc, street, x + 9, y + 14);
+    if (range) {
+      setFont(doc, TYPE.micro, 'normal', GRAY);
+      text(doc, range, x + ctx.contentW - 6, y + 14, { align: 'right' });
+    }
+  }
+  return STREET_BAND_H;
+};
+
 // ── page furniture ───────────────────────────────────────────────────────────
 const drawBand = (doc, payload, book, ctx) => {
   const x = PAGE.MARGIN;
@@ -300,7 +325,7 @@ const drawBand = (doc, payload, book, ctx) => {
   setFont(doc, TYPE.headerOrg, 'normal', GRAY);
   text(doc, payload.organization.name, x + 24, y + 18);
 
-  const right = x + ctx.contentW - 106;
+  const right = x + ctx.contentW;
   setFont(doc, TYPE.headerBook, 'bold', DARK);
   text(doc, book.name, right, y + 8, { align: 'right' });
   setFont(doc, TYPE.headerMeta, 'normal', GRAY);
@@ -314,34 +339,26 @@ const drawBand = (doc, payload, book, ctx) => {
   ].filter(Boolean);
   text(doc, bits.join(' · '), right, y + 19, { align: 'right' });
 
-  // Code plate — how a packet found on a desk three weeks later says what it is.
-  const plateX = x + ctx.contentW - 96;
-  doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
-  doc.setLineWidth(1);
-  doc.roundedRect(plateX, y, 96, 24, 4, 4, 'S');
-  setFont(doc, TYPE.plate, 'bold', BRAND);
-  text(doc, book.code, plateX + 48, y + 16, { align: 'center' });
-
   const stripe = BOOK_COLORS[book.colorIndex % BOOK_COLORS.length];
   doc.setFillColor(stripe[0], stripe[1], stripe[2]);
   doc.rect(x, y + 30, ctx.contentW, 4, 'F');
 
   // Who walked THIS sheet — on every page, not just the cover, because one book routinely
-  // gets torn in half and handed to two volunteers. It lives in the band's own spare space,
-  // so putting it on all pages costs no extra paper at all.
-  const dateW = 96;
+  // gets torn in half and handed to two volunteers.
+  const dateW = 100;
   const nameEnd = x + ctx.contentW - dateW - 34;
-  setFont(doc, TYPE.micro, 'bold', SUBTLE);
-  text(doc, 'WALKED BY', x, y + 47);
-  text(doc, 'DATE', x + ctx.contentW - dateW - 26, y + 47);
+  setFont(doc, TYPE.micro, 'bold', GRAY);
+  text(doc, 'WALKED BY', x, y + 50);
+  text(doc, 'DATE', x + ctx.contentW - dateW - 30, y + 50);
   doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
   doc.setLineWidth(0.5);
-  doc.line(x + 48, y + 48, nameEnd, y + 48);
-  doc.line(x + ctx.contentW - dateW, y + 48, x + ctx.contentW, y + 48);
+  doc.line(x + 52, y + 52, nameEnd, y + 52);
+  doc.line(x + ctx.contentW - dateW, y + 52, x + ctx.contentW, y + 52);
 
-  doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
-  doc.setLineWidth(0.5);
-  doc.line(x, y + 52, x + ctx.contentW, y + 52);
+  // No closing rule. It used to sit 4pt under the write-in underline, which read as one
+  // smudged double line — and the colour stripe above already says where the header ends.
+  // What the first address needed was space, not another rule: BODY_TOP is now 24pt below
+  // the write-in line instead of 2pt.
 };
 
 const drawFooterRule = (doc, payload, ctx) => {
@@ -376,13 +393,12 @@ const drawManifest = (doc, payload, ctx) => {
   // The last three are ruled cells, not data — custody gets written in ink, at the table
   // where the packets actually are. Widths sum to CONTENT_W (516).
   const cols = [
-    { label: 'Code', w: 58 },
-    { label: 'Book', w: 146 },
-    { label: 'Doors', w: 38 },
-    { label: 'Pages', w: 42 },
-    { label: 'Walked by', w: 116, write: true },
-    { label: 'Out', w: 58, write: true },
-    { label: 'In', w: 58, write: true },
+    { label: 'Book', w: 186 },
+    { label: 'Doors', w: 42 },
+    { label: 'Pages', w: 46 },
+    { label: 'Walked by', w: 124, write: true },
+    { label: 'Out', w: 59, write: true },
+    { label: 'In', w: 59, write: true },
   ];
   setFont(doc, TYPE.micro, 'bold', SUBTLE);
   let cx = x;
@@ -396,13 +412,12 @@ const drawManifest = (doc, payload, ctx) => {
   for (const book of payload.books) {
     const range = ctx.pageRanges.get(book.id);
     cx = x;
-    setFont(doc, TYPE.option, 'bold', BRAND);
-    text(doc, book.code, cx, y + 11); cx += cols[0].w;
+    setFont(doc, TYPE.option, 'bold', DARK);
+    text(doc, book.name, cx, y + 11); cx += cols[0].w;
     setFont(doc, TYPE.option, 'normal', DARK);
-    text(doc, book.name, cx, y + 11); cx += cols[1].w;
-    text(doc, String(book.doorCount), cx, y + 11); cx += cols[2].w;
+    text(doc, String(book.doorCount), cx, y + 11); cx += cols[1].w;
     setFont(doc, TYPE.option, 'normal', GRAY);
-    text(doc, range ? `${range.from}-${range.to}` : '—', cx, y + 11); cx += cols[3].w;
+    text(doc, range ? `${range.from}-${range.to}` : '—', cx, y + 11); cx += cols[2].w;
     doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
     doc.setLineWidth(0.5);
     for (const c of cols.filter((k) => k.write)) {
@@ -440,19 +455,9 @@ const drawCover = (doc, payload, book, ctx) => {
   text(doc, payload.organization.name, mastheadX, y - 5);
   y += 16;
 
-  doc.setFillColor(BRAND[0], BRAND[1], BRAND[2]);
-  doc.rect(x, y, ctx.contentW, 2.5, 'F');
-  y += 26;
+  y += 14;
 
-  // ── the identifier: which book, and the code plate that sorts a stack ──
-  const plateW = 118;
-  const plateH = 38;
-  doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
-  doc.setLineWidth(1.5);
-  doc.roundedRect(x + ctx.contentW - plateW, y - 26, plateW, plateH, 5, 5, 'S');
-  setFont(doc, TYPE.coverPlate, 'bold', BRAND);
-  text(doc, book.code, x + ctx.contentW - plateW / 2, y - 1, { align: 'center' });
-
+  // ── the identifier: which book this is ──
   setFont(doc, TYPE.coverBook, 'bold', DARK);
   text(doc, book.name, x, y - 10);
   setFont(doc, TYPE.coverBody, 'normal', GRAY);
@@ -628,12 +633,38 @@ export const renderPacketPdf = async (payload, settings) => {
       drawScriptPage(doc, ctx.survey, ctx);
     }
 
+    // Where each street's run starts and ends, so a band can say "doors 17-33" and a
+    // volunteer knows how much of this street is left.
+    const runOf = new Map();
+    book.doors.forEach((d, i) => {
+      const k = d.street || '';
+      const r = runOf.get(k);
+      if (r) r.to = i + 1;
+      else runOf.set(k, { from: i + 1, to: i + 1 });
+    });
+
     let y = newPage(book);
+    let lastStreet = null;
     for (const door of book.doors) {
       const segs = buildDoorSegments(door, ctx);
       let idx = 0;
       let continued = false;
       let currentVoter = null;
+
+      const street = door.street || '';
+      if (street && street !== lastStreet) {
+        // The band plus the address header plus the first atom must fit together — a band
+        // stranded at the foot of a page announces a street that starts overleaf.
+        const firstH = segs[0].measure(doc, PAGE.MARGIN, y, false);
+        if (y + STREET_BAND_H + 30 + firstH > PAGE.BODY_BOTTOM && y > PAGE.BODY_TOP) {
+          y = newPage(book);
+        }
+        const r = runOf.get(street);
+        const label = r && r.to > r.from ? `doors ${r.from}-${r.to}` : r ? `door ${r.from}` : '';
+        drawStreetBand(doc, PAGE.MARGIN, y, street, label, ctx, true);
+        y += STREET_BAND_H;
+        lastStreet = street;
+      }
 
       while (idx < segs.length) {
         const headerH = 30;

@@ -10,7 +10,7 @@ const Toggle = ({ id, label, hint, checked, onChange, disabled }) => (
   >
     <span className="min-w-0">
       <span className="block text-sm text-fg">{label}</span>
-      {hint && <span className="block text-xs text-muted-fg mt-0.5">{hint}</span>}
+      {hint && <span className="block text-xs text-fg-muted mt-0.5">{hint}</span>}
     </span>
     <input
       id={id}
@@ -18,7 +18,7 @@ const Toggle = ({ id, label, hint, checked, onChange, disabled }) => (
       checked={checked}
       disabled={disabled}
       onChange={(e) => onChange(e.target.checked)}
-      className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+      className="mt-0.5 h-4 w-4 shrink-0 accent-brand-accent"
     />
   </label>
 );
@@ -32,7 +32,7 @@ export default function DesignPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-fg mb-2">Layout</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-muted mb-2">Layout</h3>
         <div className="space-y-1.5 mb-5">
           {LAYOUTS.map((l) => {
             const disabled = l.needsSurvey && !hasSurvey;
@@ -45,11 +45,11 @@ export default function DesignPanel({
                 onClick={() => set({ layout: l.id })}
                 aria-pressed={on}
                 className={`w-full text-left px-3 py-2.5 rounded-md border transition-colors ${
-                  on ? 'border-brand bg-brand-tint' : 'border-border bg-card hover:bg-muted'
+                  on ? 'border-brand-accent bg-brand-tint' : 'border-border bg-card hover:bg-sunken'
                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <span className="block text-sm font-medium text-fg">{l.label}</span>
-                <span className="block text-xs text-muted-fg mt-0.5">
+                <span className="block text-xs text-fg-muted mt-0.5">
                   {disabled ? 'This campaign has no survey set up.' : l.hint}
                 </span>
               </button>
@@ -57,7 +57,7 @@ export default function DesignPanel({
           })}
         </div>
 
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-fg mb-1">The page</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-muted mb-1">The page</h3>
         <div>
           <label htmlFor="noteLines" className="flex items-center justify-between gap-3 py-2.5 border-b border-border">
             <span className="text-sm text-fg">Lines to write on</span>
@@ -112,7 +112,7 @@ export default function DesignPanel({
         {/* Nothing picked yet means no numbers to show — a bare "0 doors" reads as an error. */}
         {hasPick && (
           <div className="flex items-baseline justify-between text-sm mb-2">
-            <span className="text-muted-fg tabular-nums">{doorCount.toLocaleString()} doors</span>
+            <span className="text-fg-muted tabular-nums">{doorCount.toLocaleString()} doors</span>
             <span className="font-medium text-fg tabular-nums">
               {pages ? `${pages} pages · ${sheets} sheets` : 'building…'}
             </span>
