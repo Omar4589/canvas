@@ -474,7 +474,21 @@ const drawCover = (doc, payload, book, ctx) => {
   const stripe = BOOK_COLORS[book.colorIndex % BOOK_COLORS.length];
   doc.setFillColor(stripe[0], stripe[1], stripe[2]);
   doc.rect(x, y, ctx.contentW, 4, 'F');
-  y += 30;
+  y += 22;
+
+  // Say which order the doors are in. Both orders are geographic, and both look "wrong" to
+  // anyone expecting alphabetical — a route revisits streets, and out here the postal city
+  // flips mid-route because the San Antonio / Dade City ZIP line cuts through the
+  // neighborhood. One sentence here stops the packet being reported as mis-sorted.
+  setFont(doc, TYPE.coverBody, 'italic', GRAY);
+  const orderNote = book.printOrder === 'street'
+    ? 'Doors run street by street, in walking order — up one side and back down the other.'
+    : 'Doors follow the walking route, not A-Z — a street can come up in more than one stretch, and the city name is postal, so it may alternate while the route stays local.';
+  doc.splitTextToSize(orderNote, ctx.contentW).forEach((ln) => {
+    text(doc, ln, x, y);
+    y += 12;
+  });
+  y += 10;
 
   // Who is carrying this — filled in with a pen, by whoever actually takes it. The app's
   // assignment is not printed anywhere: on a paper day the packet goes to whoever is

@@ -49,6 +49,8 @@ Each door gets a numbered red circle (its place in the walk order), the address 
 
 Each run of one street gets a **banded header** with the doors it covers — and if the route comes back to that street later, the band says **back later**, so the range never overpromises. Apartment units are grouped under their real street rather than appearing as one "street" per unit.
 
+The cover states which order the packet uses. And if you see the **city flip back and forth** between doors — San Antonio, then Dade City, then back — that's the postal address label, not a sorting problem: ZIP boundaries cut through neighborhoods, and the route is built from map coordinates, so it stays local even when the city name doesn't.
+
 **The doors are ordered street by street** — each street walked in one go, up one side and back down the other, with the streets in the order the book's route reaches them. The books themselves are cut as a shortest route, which suits the app because the phone draws that route on a map; on paper there's no map, so a route that cuts back and forth between two parallel streets is just confusing. The packet only regroups when it doesn't make the walk longer — on cul-de-sacs or a rural route it keeps the book's own order instead. The streets listed on the cover are alphabetical, so you can scan for a name.
 
 Every page has a **Walked by** and **Date** line, not just the cover — books get torn in half and shared between two volunteers all the time, and each half should say who walked it.

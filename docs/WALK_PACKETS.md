@@ -127,6 +127,13 @@ the actual door coordinates.
 
 None of this changes the app: the phone still walks the book's stored route.
 
+**The cover says which order the packet is in** — "street by street" or "follows the walking
+route" — because both orders look mis-sorted to anyone expecting A-Z. The route note also
+explains that the **city name is postal**: in places where a ZIP boundary cuts through a
+neighborhood (San Antonio 33576 against Dade City 33525, for instance), the city column
+alternates mid-route while the walk never leaves the area. That's the address label, not the
+order being wrong.
+
 ## What prints, and what never does
 
 **Prints:** name, party, age, address, walk-order number, and last round's result.

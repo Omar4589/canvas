@@ -284,6 +284,21 @@ test('the cover never overflows — long race names and huge street lists', asyn
   }
 });
 
+test('the cover says which order the doors are in', async () => {
+  // Both orders look "wrong" to anyone expecting A-Z — a route revisits streets and the
+  // postal city can flip mid-route — so the cover has to say what the order actually is.
+  const routeBook = makePayload(4, 1);
+  routeBook.books[0].printOrder = 'route';
+  const routeCover = (await renderPacketPdf(routeBook, DEFAULT_SETTINGS)).internal.pages[1].join('\n');
+  assert.ok(routeCover.includes('walking route'), 'route order must be named');
+  assert.ok(routeCover.includes('postal'), 'the postal-city flip must be explained');
+
+  const streetBook = makePayload(4, 1);
+  streetBook.books[0].printOrder = 'street';
+  const streetCover = (await renderPacketPdf(streetBook, DEFAULT_SETTINGS)).internal.pages[1].join('\n');
+  assert.ok(streetCover.includes('street by street'), 'street order must be named');
+});
+
 test('the race is the masthead', async () => {
   const payload = makePayload(4, 2);
   payload.campaign.name = 'Riverside City Council 2026';
