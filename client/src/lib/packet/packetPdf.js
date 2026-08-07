@@ -21,8 +21,10 @@ import { fetchCoverMap } from './packetMapImage.js';
 //    NOT reused: it adds a page and then draws the block anyway, which silently runs long
 //    blocks off the bottom of the sheet.
 
+// One set for both layouts. The field list used to say "Spoke with" on the theory that a packet
+// without questions can't produce a survey — but a volunteer ticks the same box either way, and
+// two vocabularies for one act made the tally on the cover disagree with the app.
 const OUTCOMES = ['Not home', 'Refused', 'Wrong address', 'Surveyed', 'Restricted'];
-const OUTCOMES_FIELD = ['Not home', 'Refused', 'Wrong address', 'Spoke with', 'Restricted'];
 
 const setFont = (doc, size, style = 'normal', color = DARK) => {
   doc.setFont('helvetica', style);
@@ -236,7 +238,7 @@ const buildDoorSegments = (door, ctx) => {
             lh += 13;
             lh += chipRow(
               doc, x + 6, y + lh, LEFT_W - 6,
-              OUTCOMES_FIELD.map((t) => ({ text: t })), 'square', paint
+              OUTCOMES.map((t) => ({ text: t })), 'square', paint
             );
           }
 
@@ -300,8 +302,7 @@ const buildDoorSegments = (door, ctx) => {
       if (ctx.showOutcome) {
         h += 4;
         microLabel(doc, 'Door outcome', x + 6, y + h, paint);
-        const labels = ctx.layout === 'field' ? OUTCOMES_FIELD : OUTCOMES;
-        h += chipRow(doc, x + 92, y + h, ctx.contentW - 92, labels.map((t) => ({ text: t })), 'square', paint);
+        h += chipRow(doc, x + 92, y + h, ctx.contentW - 92, OUTCOMES.map((t) => ({ text: t })), 'square', paint);
       }
       if (ctx.noteLines > 0) {
         microLabel(doc, 'Notes', x + 6, y + h, paint);
@@ -564,11 +565,11 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
   setFont(doc, TYPE.coverCampaign, 'bold', DARK);
   for (const line of doc.splitTextToSize(asciiSafe(payload.campaign.name), ctx.contentW)) {
     text(doc, line, x, y);
-    y += 27;
+    y += 23; // leading tracks the type size; 27 was set for a 25pt line and read as a gap
   }
   setFont(doc, TYPE.coverOrg, 'normal', GRAY);
-  text(doc, payload.organization.name, x, y - 6);
-  y += 16;
+  text(doc, payload.organization.name, x, y - 4);
+  y += 14;
 
   y += 14;
 
@@ -582,14 +583,14 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
     `${book.voterCount} residents`,
   ].filter(Boolean);
   text(doc, bits.join(' · '), x, y + 5);
-  y += 26;
+  y += 14; // 9pt clear of the baseline — 26 left a 21pt hole above the stripe
 
   // The book's colour, so the cover matches the stripe on every page behind it and the
   // swatch on the Turf Cutting map.
   const stripe = BOOK_COLORS[book.colorIndex % BOOK_COLORS.length];
   doc.setFillColor(stripe[0], stripe[1], stripe[2]);
   doc.rect(x, y, ctx.contentW, 4, 'F');
-  y += 22;
+  y += 18;
 
   // Say which order the doors are in. Both orders are geographic, and both look "wrong" to
   // anyone expecting alphabetical — a route revisits streets, and out here the postal city
@@ -662,9 +663,8 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
   doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
   doc.setLineWidth(0.5);
   doc.roundedRect(x, y, ctx.contentW, 54, 4, 4, 'S');
-  const labels = ctx.layout === 'field' ? OUTCOMES_FIELD : OUTCOMES;
-  const cw = ctx.contentW / labels.length;
-  labels.forEach((l, i) => {
+  const cw = ctx.contentW / OUTCOMES.length;
+  OUTCOMES.forEach((l, i) => {
     setFont(doc, TYPE.micro, 'normal', GRAY);
     text(doc, l, x + i * cw + cw / 2, y + 16, { align: 'center' });
     doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
@@ -891,9 +891,18 @@ export const renderPacketPdf = async (payload, settings) => {
   return doc;
 };
 
-export const packetFilename = (payload, settings) => {
-  const camp = String(payload.campaign.name || 'campaign').replace(/[^a-z0-9]+/gi, '-').slice(0, 40);
-  const kind = settings.layout === 'field' ? 'field-list' : 'walk-packet';
+// campaign · book · "packet" · the day it was built. A multi-book run has no single book name,
+// so it says how many. The date stays because a packet goes stale — the guidance is to print the
+// morning of, and without it a Wednesday file and a Saturday file are indistinguishable.
+export const packetFilename = (payload) => {
+  const slug = (v, max) =>
+    String(v || '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, max)
+      .replace(/-+$/, '');
+  const camp = slug(payload.campaign?.name, 40) || 'campaign';
+  const books = payload.books || [];
+  const which = books.length === 1
+    ? (slug(books[0].name, 30) || 'book')
+    : `${books.length}-books`;
   const day = new Date(payload.generatedAt).toISOString().slice(0, 10);
-  return `${camp}-${kind}-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
+  return `${camp}-${which}-packet-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
 };

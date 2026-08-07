@@ -93,12 +93,13 @@ export const TYPE = Object.freeze({
   headerMeta: 8,
   plate: 12,
   footer: 7.5,
-  // The cover's hierarchy: the RACE is the masthead, the book is the identifier under it.
-  // A volunteer already knows which campaign they turned up for — but a packet found later,
-  // or a table holding two campaigns' packets, is answered by the race name first.
-  coverCampaign: 25,
+  // The cover's hierarchy, top down: the Doorline wordmark (14.04pt, derived from the lockup's
+  // mark width), then the race, then the book, then the org. The race leads the page but no
+  // longer towers over it — 25pt dwarfed every other word on the sheet, and the lockup above
+  // already establishes where the eye starts.
+  coverCampaign: 18,
   coverOrg: 11,
-  coverBook: 15,
+  coverBook: 13,
   coverTitle: 24,
   coverPlate: 22,
   coverBody: 10,

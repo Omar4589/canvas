@@ -393,8 +393,19 @@ test('the race is the masthead', async () => {
   assert.ok(!/\d:\d\d\s*(AM|PM)/.test(pageTexts(doc).join('\n')), 'no time of day anywhere');
 });
 
-test('filename reflects the layout and the generation date', () => {
+test('the filename is campaign, book, packet, date', () => {
   const p = makePayload(1, 1);
-  assert.match(packetFilename(p, { layout: 'field' }), /field-list-2026-08-06\.pdf$/);
-  assert.match(packetFilename(p, { layout: 'survey' }), /walk-packet-2026-08-06\.pdf$/);
+  p.campaign.name = 'Florida - HD54 Randy Maggard';
+  p.books[0].name = 'Book 33';
+  assert.equal(packetFilename(p), 'florida-hd54-randy-maggard-book-33-packet-2026-08-06.pdf');
+
+  // A run of several books has no one book name to use, so it says how many.
+  p.books.push({ ...p.books[0], id: 'b2', name: 'Book 34' });
+  assert.equal(packetFilename(p), 'florida-hd54-randy-maggard-2-books-packet-2026-08-06.pdf');
+
+  // Punctuation collapses; nothing trails a hyphen into ".pdf".
+  const odd = makePayload(1, 1);
+  odd.campaign.name = "Mayor's Race — 2026!!";
+  odd.books[0].name = 'Ward 5 / Book C';
+  assert.equal(packetFilename(odd), 'mayor-s-race-2026-ward-5-book-c-packet-2026-08-06.pdf');
 });

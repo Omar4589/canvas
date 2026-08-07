@@ -89,12 +89,13 @@ Each door has:
 - The **address**, largest thing on the block, then city/state/ZIP and unit.
 - **Last round's result** as a small outlined pill, on doors that were already visited.
 - **Who lives there** — name, party, age.
-- **What happened** — Not home · Refused · Wrong address · Surveyed (or "Spoke with" on the
-  field list) · Restricted.
+- **What happened** — Not home · Refused · Wrong address · Surveyed · Restricted. One set for
+  both layouts: a volunteer ticks the same box either way, and two vocabularies for one act made
+  the cover's tally disagree with the app.
 - **Lines to write on.**
 
 Every packet also gets a **cover**, led by the **Doorline lockup** (mark plus wordmark), then
-the **race name** — the biggest, boldest thing on the page — then your organisation. Below that sits the book's own identity: its name,
+the **race name**, then your organisation. Below that sits the book's own identity: its name,
 round, and door and resident counts, then the book's colour bar so the cover matches the stripe
 on every page behind it. One rule, not two — the book's colour bar is the only line. Then a **Walked by / Date** line, the
 streets it covers **in alphabetical order** (you scan this list for a name, so findability beats
@@ -328,6 +329,25 @@ a zigzag book must regroup, a rural book must not.
 `printOrder` (`'street' | 'route'`) rides on each book in the payload so the reason is visible.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
+
+## The cover's type scale
+
+Top down: the **Doorline wordmark** at 14.04pt (derived — it is 0.78 × the lockup mark's width,
+the same ratio `Logo.jsx` uses), then the **race** at 18pt, the **book** at 13pt, the
+**organisation** at 11pt, body and streets at 10pt.
+
+The race led at 25pt when the lockup wasn't there. With the lockup above it establishing where
+the eye starts, 25 just dwarfed every other word on the sheet — 18 keeps it first among the
+words without shouting.
+
+## Filenames
+
+`{campaign}-{book}-packet-{YYYY-MM-DD}.pdf`, e.g.
+`florida-hd54-randy-maggard-book-33-packet-2026-08-07.pdf`. Punctuation collapses to single
+hyphens, the campaign truncates at 40 characters and the book at 30, and nothing trails a hyphen
+into the extension. A multi-book run is one PDF with no single book name, so it says how many:
+`…-5-books-packet-…`. The date stays because a packet goes stale — the guidance is to print the
+morning of, and without it a Wednesday file and a Saturday file are indistinguishable.
 
 ## The cover map
 

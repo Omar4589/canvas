@@ -34,7 +34,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 ## The other controls
 
 - **Lines to write on** — 0 to 6. Four is the default and is nearly free: going from two to four adds about five pages across a whole 200-door book.
-- **What happened boxes** — Not home, Refused, Wrong address, Surveyed (or "Spoke with" on the field list), Restricted.
+- **What happened boxes** — Not home, Refused, Wrong address, Surveyed, Restricted. The same five on both layouts.
 - **Last round's result** — shows a small pill on doors that were already visited this round.
 - **What to say page** — one reference sheet per packet carrying your opening, closing, and any option scripts, instead of repeating them beside every door.
 - **Map on the cover** — a map of the book with the walk drawn over it: the route, a dot per door, and **A** and **B** on your first and last. The line shows the **order** of the walk, drawn door to door — it isn't directions along the streets. Needs a Mapbox key set up; without one the map is simply absent and everything else prints as normal.
@@ -44,7 +44,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 
 ## What's on each sheet
 
-The cover opens with the Doorline mark and wordmark, then the race, then your organisation. Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
+The cover opens with the Doorline mark and wordmark, then the race, then your organisation. The downloaded file is named for the campaign, the book, and the day you printed it — `florida-hd54-randy-maggard-book-33-packet-2026-08-07.pdf` — so a Wednesday print and a Saturday print never look alike. Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
 
