@@ -281,6 +281,22 @@ test('a lead can bulk only on a campaign they manage (the guard this route is NO
   assert.strictEqual(other.status, 403, 'a camp2 lead gets nothing on camp1');
 });
 
+test('the flags LIST obeys the same lead scoping as the bulk write', { skip }, async () => {
+  const own = await call('GET', `/admin/reports/flags?campaignId=${ctx.camp1._id}`, { token: ctx.leadTok });
+  assert.strictEqual(own.status, 200);
+  const adminView = await call('GET', `/admin/reports/flags?campaignId=${ctx.camp1._id}`, { token: ctx.adminTok });
+  assert.strictEqual(own.json.total, adminView.json.total, 'a granted lead reads the same list an admin does');
+  assert.ok(own.json.total > 0, 'and the list is not vacuously empty');
+
+  // NB: these 403s come from the reports router's own scope gate (reports.js), which returns
+  // a plain {error} without the FORBIDDEN_ROLE code — so only the status is pinned here.
+  const foreign = await call('GET', `/admin/reports/flags?campaignId=${ctx.camp2._id}`, { token: ctx.leadTok });
+  assert.strictEqual(foreign.status, 403, 'an unmanaged campaign is refused');
+
+  const orgWide = await call('GET', '/admin/reports/flags', { token: ctx.leadTok });
+  assert.strictEqual(orgWide.status, 403, 'no campaignId means org-wide — never lead territory');
+});
+
 test('campaign scopes stay watertight under a real write', { skip }, async () => {
   const before1 = await FlagReview.countDocuments({ campaignId: ctx.camp1._id });
   const r = await bulk(`campaignId=${ctx.camp2._id}&reviewStatus=open`, { status: 'dismissed' });

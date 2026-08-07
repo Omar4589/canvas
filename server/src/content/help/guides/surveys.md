@@ -33,6 +33,10 @@ Counts tell you *how many* picked an answer; the drill tells you **who**. On the
 
 For the full workbench, open the campaign's **Survey Explorer** tab: filters (question, answer, canvasser, walk list, dates), a **By canvasser** ranking ("who's entering Opposed the most, and how much of their own answers is that?"), a map of exactly the matching doors, and a CSV export of the drill. See [The Survey Explorer page](page-survey-explorer) and [How do I see who recorded a survey answer?](who-entered-an-answer).
 
+## Who can edit what
+
+If you're a **team lead**, you can build new surveys and edit or duplicate the ones you authored or that are attached to a campaign you manage — that covers everything above. Two things stay with org admins: **archiving or deleting** a survey template, and the **tag library** — you pick from existing tags in the builder but can't create new ones. If an option is missing a tag you need, ask an admin to add it.
+
 ## Editing a live survey
 
 Once a survey has responses you can still edit almost everything freely — rename it, reword questions, rename options, reorder, add, or remove. Removed items are quietly retired, so past answers keep reporting.

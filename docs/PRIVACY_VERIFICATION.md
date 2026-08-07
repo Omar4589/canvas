@@ -33,7 +33,13 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
    export now writes a row. Guard test: `test/accessLogCoverage.int.test.js`.
 4. **Vendor self-mint is blocked** (was E13 Hole 3): any non-GET to `/admin/memberships` from a
    grant-holder 403s `VENDOR_READ_ONLY` (`memberships.js:33-43`); `leadCrew` writes carry
-   `denyVendorPrivilegeWrite`.
+   `denyVendorPrivilegeWrite`. *[v4 2026-07-29, stamped 2026-08-07: superseded by owner decision —
+   the blanket `VENDOR_READ_ONLY` rule was REMOVED and `denyVendorPrivilegeWrite` no longer exists.
+   A support grant now permits membership/crew writes, every one recorded by `accessLog`; the
+   surviving refusal is per-**target**: `refuseVendorStaffTarget`
+   (`services/memberships/vendorGuards.js`) 403s any membership write targeting a Doorline staff
+   account (`STAFF_SELF_MINT`) on `/admin/memberships` and all four `leadCrew` writes. Pinned by
+   `supportAccess.int.test.js` and `perCampaignCrews.int.test.js`. Never re-add the blanket.]*
 5. **Wind-down is a real export window** (was B7): `canceled` is now read-only — GETs, exports
    included, pass; writes 402. Customer-self-serve. Share links still die (410).
 6. **Dormancy shield** (was B6 Trigger 2): `DORMANCY_PROTECTED_STATUSES` = {active, trial, past_due,
@@ -58,7 +64,10 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
     `<meta name="robots" content="noindex, nofollow">` (client-JS only — no `X-Robots-Tag` header, so
     robots.txt is the load-bearing control). A password **can no longer be removed** from a link
     (`SHARE_PASSWORD_REQUIRED` — replace or rotate). An operator bulk **revoke-legacy** switch exists
-    (deliberately not automatic). Legacy links otherwise remain live — see gaps.
+    (deliberately not automatic). Legacy links otherwise remain live — see gaps. *[2026-08-07:
+    revoke-legacy now carries a per-route `requireOrgRole('admin')` — before this, any team lead
+    could enumerate and bulk-revoke the org's legacy-open links, including on campaigns they held no
+    grant for. Pinned in `reportSecurity.int.test.js`.]*
 11. **Device storage**: the bootstrap moved to `FileSystem.cacheDirectory` (excluded from iCloud and
     Android backup; a startup migration removes the old Documents copy; sign-out clears every copy),
     and `android.allowBackup: false` landed in `app.json`. **allowBackup is native-build-contingent**
@@ -1601,6 +1610,16 @@ I traced the mount chain myself.
 > downstream); `leadCrew`'s two write routes carry `denyVendorPrivilegeWrite`. Adversarial variants
 > (member super-admin, no `X-Org-Id`, no grant) each fail on `ALREADY_MEMBER`, `ensureOrgScoped`, or
 > `SUPPORT_ACCESS_REQUIRED` respectively.
+>
+> **[v4 2026-07-29, stamped 2026-08-07: STILL CLOSED, different mechanism.]** The blanket
+> `VENDOR_READ_ONLY` rule and `denyVendorPrivilegeWrite` were removed by owner decision — support
+> staff may now perform membership/crew writes, each recorded by `accessLog`. The self-mint hole this
+> section describes stays closed by a per-**target** guard: `refuseVendorStaffTarget`
+> (`services/memberships/vendorGuards.js`) 403s any membership write whose *target* is a Doorline
+> staff account (`STAFF_SELF_MINT`) — on `/admin/memberships` and all four `leadCrew` writes
+> (create, coordinator, deactivate, reactivate) — so a grant still cannot be converted into a
+> Membership for the staffer. Pinned by `supportAccess.int.test.js` and
+> `perCampaignCrews.int.test.js`.
 
 `requireOrgRole()` returns `next()` **unconditionally for any `isSuperAdmin` caller, before any role check** (`middleware/auth.js:58`). So a super-admin holding a grant passes the admin gate on `/admin/memberships` and can **create a Membership — including for themselves** (`routes/admin/memberships.js:24` is the only gate). Once a Membership exists, `orgContext`'s membership-first branch takes over, `req.supportGrant` is never set again, and `accessLog` short-circuits **forever**. `/admin/memberships` is also absent from `VOTER_CONTENT_ROUTES`, so the membership-creation request itself writes no audit row.
 

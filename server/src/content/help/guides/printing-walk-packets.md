@@ -11,6 +11,8 @@ tags: print, packets, paper, volunteers, saturday, gotv, pdf
 
 Sometimes a crew isn't going to use the app — a one-day volunteer surge, an older crowd, a dead-zone neighbourhood, a client who just doesn't want to. This is the runbook for that day.
 
+Anyone who manages the campaign can print — org admins, and **team leads** for the campaigns they've been granted. Canvassers can't: a packet carries the same resident details an export does, so printing stays a management action.
+
 **Know this before you start:** paper results never reach Doorline. Those doors will read as unknocked afterward, forever. Say that out loud to whoever asked for paper, before the day rather than after — [here's the full list of what it costs](paper-canvass-and-your-reports).
 
 ## The day before

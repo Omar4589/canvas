@@ -261,7 +261,18 @@ export default function UserProfileModal({ membership, onClose }) {
 
   function onToggleActive() {
     const verb = membershipActive ? 'deactivate' : 'reactivate';
-    if (window.confirm(`Are you sure you want to ${verb} this membership for ${user.email}?`)) {
+    // The switch is org-wide, so say which campaigns it reaches (crews is already loaded for
+    // the Crews block below and is not grant-filtered). Empty list → plain org-wide sentence.
+    const names = crews.map((c) => c.campaignName).filter(Boolean);
+    const shown = names.length > 5 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.join(', ');
+    const reach = membershipActive
+      ? names.length
+        ? `They lose access to this whole organization — including: ${shown}.`
+        : 'They lose access to this whole organization.'
+      : names.length
+        ? `Access comes back for the whole organization — they rejoin: ${shown}.`
+        : 'Access comes back for the whole organization.';
+    if (window.confirm(`Are you sure you want to ${verb} this membership for ${user.email}?\n\n${reach}`)) {
       toggleActive.mutate();
     }
   }

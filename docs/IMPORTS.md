@@ -570,3 +570,10 @@ humans onto one Person and then fan identity edits between them via `propagateId
 namespace, `hasUid` is false and a mis-mapped `UID` column is inert — hiding the one input disarms
 the whole path. The state/setter and the request field remain wired (a legacy `ImportProfile` value
 still loads), so restoring the input is the only change needed if a vendor-data customer appears.
+
+**Saved profiles are org-wide and lead-writable by design.** `GET`/`POST /admin/imports/profiles`
+sit behind the router's `('admin','lead')` gate with no per-route wall: a team lead can read every
+saved vendor mapping and save/overwrite one by name (upsert on `{organizationId, name}`).
+Owner-ruled 2026-08-07 — leads run imports, so they keep profile self-service; a profile holds
+column mappings and a `uidSource`, never voter data. The trade-off to know: two operators sharing a
+profile name overwrite each other silently, so name profiles by vendor, not by campaign.

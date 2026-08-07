@@ -224,6 +224,14 @@ export default function AdminUserDetail() {
     queryFn: () => api(`/admin/memberships/${userId}/campaigns`),
     enabled: !!userId,
   });
+  // Campaign NAMES for the activate/deactivate confirm. /crews resolves names and is not
+  // grant-filtered, so the disclosure names every campaign the switch reaches — the roster UI
+  // above keeps its own /campaigns id list (different query, different invalidation).
+  const crewsQ = useQuery({
+    queryKey: ['admin', 'member-crews', userId],
+    queryFn: () => api(`/admin/memberships/${userId}/crews`),
+    enabled: !!userId,
+  });
   const assignCampaign = useMutation({
     mutationFn: (campaignId) =>
       api(`/admin/campaigns/${campaignId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
@@ -302,7 +310,19 @@ export default function AdminUserDetail() {
 
   function onToggleActive() {
     const verb = user.isActive ? 'Deactivate' : 'Reactivate';
-    Alert.alert(`${verb} ${user.email}?`, '', [
+    // The switch is org-wide (Membership has no campaignId) — say which campaigns it reaches.
+    // If /crews hasn't settled, fall back to the org-wide sentence; never block on the fetch.
+    const names = (crewsQ.data?.crews || []).map((c) => c.campaignName).filter(Boolean);
+    const shown =
+      names.length > 5 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.join(', ');
+    const body = user.isActive
+      ? names.length
+        ? `They lose access to this whole organization — including: ${shown}.`
+        : 'They lose access to this whole organization.'
+      : names.length
+        ? `Access comes back for the whole organization — they rejoin: ${shown}.`
+        : 'Access comes back for the whole organization.';
+    Alert.alert(`${verb} ${user.email}?`, body, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: verb,

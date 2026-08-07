@@ -9,7 +9,7 @@ summary: Turn a book into a printed paper packet for volunteers who aren't using
 tags: print, packets, paper, pdf, volunteers, walk list, printable
 ---
 
-**Campaign → Print Packets** makes paper walk packets — addresses, who lives there, and room to write — for volunteers who aren't using the app.
+**Campaign → Print Packets** makes paper walk packets — addresses, who lives there, and room to write — for volunteers who aren't using the app. It's open to whoever manages the campaign: org admins, and **team leads** on the campaigns they've been granted.
 
 **Before anything else: nothing written on these sheets comes back into Doorline.** A book walked on paper keeps reading as **unknocked** in coverage, on the map, and in every report. That's not a bug you can work around; it's what paper is. [What a paper day costs you](paper-canvass-and-your-reports) spells it out.
 

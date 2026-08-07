@@ -30,7 +30,10 @@ link inside a book's assignment panel on Turf Cutting, and a **Print packet** ac
 saved search. Both open the studio with that source already selected.
 
 Anyone who can manage the campaign can print — the same people who can already export a walk
-list to CSV.
+list to CSV. That includes **team leads**: a lead prints packets for the campaigns they manage,
+exactly as an admin would, and cannot print for a campaign they weren't granted. Canvassers
+cannot print at all — packets carry the same resident details the export does, so printing stays
+a management action.
 
 ## The screen
 

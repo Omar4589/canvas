@@ -32,6 +32,7 @@ const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
+const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { Pass } = await import('../src/models/Pass.js');
 const { Turf } = await import('../src/models/Turf.js');
@@ -56,7 +57,7 @@ before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
   for (const M of [
-    Organization, User, Membership, Campaign, CampaignAssignment, Effort, Pass,
+    Organization, User, Membership, Campaign, CampaignAssignment, CampaignManager, Effort, Pass,
     Turf, TurfAssignment, Household, Voter, SurveyTemplate, SavedSearch, Subscription,
   ]) {
     await M.deleteMany({});
@@ -67,6 +68,13 @@ before(async () => {
   const walker = await User.create({ firstName: 'Mia', lastName: 'Ochoa', email: 'pw@t.co', passwordHash: 'x', isActive: true });
   await Membership.create({ userId: admin._id, organizationId: org._id, role: 'admin', isActive: true });
   await Membership.create({ userId: walker._id, organizationId: org._id, role: 'canvasser', isActive: true });
+
+  // Two leads: one granted this campaign, one granted nothing. Packets serve voter PII, so the
+  // requireCampaignManager gate needs pinning from BOTH sides, not just the canvasser refusal.
+  const lead = await User.create({ firstName: 'Lena', lastName: 'Lead', email: 'pl@t.co', passwordHash: 'x', isActive: true });
+  const lead2 = await User.create({ firstName: 'Nora', lastName: 'Nogrant', email: 'pn@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: lead._id, organizationId: org._id, role: 'lead', isActive: true });
+  await Membership.create({ userId: lead2._id, organizationId: org._id, role: 'lead', isActive: true });
 
   // Campaign survey, plus an effort-level override to prove per-effort resolution.
   const campaignSurvey = await SurveyTemplate.create({
@@ -182,9 +190,12 @@ before(async () => {
   server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
+  await CampaignManager.create({ campaignId: camp._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
+
   Object.assign(ctx, {
     org, camp, turf, turf2, pass, effort, a, b, c, restricted, dncDoor, votedDoor, excluded, inactive,
     noCoords, list, bookOrder, admin, walker, adminTok: signUserToken(admin), walkerTok: signUserToken(walker),
+    leadTok: signUserToken(lead), lead2Tok: signUserToken(lead2),
   });
 });
 
@@ -353,6 +364,28 @@ test('a canvasser cannot print — the gate is requireCampaignManager', { skip }
     token: ctx.walkerTok, orgId: ctx.org._id,
   });
   assert.ok(status === 403 || status === 404, `expected a refusal, got ${status}`);
+});
+
+test('a granted lead prints; an ungranted lead is refused on both routes', { skip }, async () => {
+  // The gate runs before loadCampaign, so the ungranted refusal is a strict 403 — never a 404.
+  const sources = await call(`/admin/campaigns/${ctx.camp._id}/packets/sources`, {
+    token: ctx.leadTok, orgId: ctx.org._id,
+  });
+  assert.equal(sources.status, 200);
+  const data = await call(`/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${ctx.turf._id}`, {
+    token: ctx.leadTok, orgId: ctx.org._id,
+  });
+  assert.equal(data.status, 200);
+  assert.ok(data.json.books[0].doors.length > 0, 'the granted lead gets the same packet an admin would');
+
+  for (const path of [
+    `/admin/campaigns/${ctx.camp._id}/packets/sources`,
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${ctx.turf._id}`,
+  ]) {
+    const { status, json } = await call(path, { token: ctx.lead2Tok, orgId: ctx.org._id });
+    assert.equal(status, 403);
+    assert.equal(json.code, 'FORBIDDEN_ROLE');
+  }
 });
 
 // Two parallel streets, and a book whose stored route alternates between them — the shape

@@ -29,11 +29,12 @@ few) of them to run end-to-end — they report to the admins, who usually create
 then hand it off. A lead avoids the all-or-nothing choice of making a campaign runner a full org admin
 (which would give them every other campaign and all the org settings too).
 
-Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, attach
-a survey, build walk lists, cut turf, create and activate passes (rounds), assign books — **including
-to themselves**, since a lead who runs a campaign shouldn't have to ask an admin to put them on a book —
-build and manage the crew (including creating new canvassers), and see all the reporting — map,
-timeline, insights, early voting, and client reports.
+Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, build
+and attach a survey (authoring their own templates, not just picking from the library), build walk
+lists, cut turf, create and activate passes (rounds), assign books — **including to themselves**, since
+a lead who runs a campaign shouldn't have to ask an admin to put them on a book — build and manage the
+crew (including creating new canvassers), print walk packets, export the campaign's data from the
+Export Center, and see all the reporting — map, timeline, insights, early voting, and client reports.
 
 ## What a team lead can never do
 
@@ -42,13 +43,24 @@ timeline, insights, early voting, and client reports.
   homes count toward invoiced door totals — see [BILLING.md](BILLING.md)). A lead edits their
   campaign's name, survey, and timezone; anything that changes what gets *invoiced* stays with org
   admins. The server refuses with a 403 naming the field, so this can't be bypassed from the UI.
-- **Touch org-wide libraries** — the **survey template library** and the **tag library**. A lead can
-  *read* both (to attach a survey to their campaign and to filter by tag) but not create/edit/delete
-  templates or tags.
+- **Run the org survey library, or touch the tag library.** Surveys are nuanced: a lead **can author**
+  survey templates — create new ones, and edit or duplicate their own or any survey attached to a
+  campaign they manage — but **archiving, un-archiving, and deleting** templates stay with org admins,
+  and the org-wide Surveys library page itself is admin-only (a lead works from their campaign's
+  Survey tab). The **tag library** is stricter: a lead can *read* tags (to filter by them) but never
+  create, edit, merge, or delete them.
+- **Flag a voter Do-Not-Contact, or clear the flag.** DNC is an org-wide fact about a person, not a
+  campaign fact — setting it anywhere silences that voter in every campaign — so it stays with org
+  admins.
+- **Run org-wide or admin-only exports.** The Export Center works for a lead campaign by campaign:
+  exports of a managed campaign are theirs to create and download; the org-wide scope and the
+  admin-only types (voter notes, the full backup) are refused.
 - **Org settings or the org voter directory.** Those stay admin-only.
 - **The org-WIDE Users view.** Since 2026-07-23 a lead **does** get the Users page — but scoped:
   their list is exactly the people rostered on campaigns they manage, deduped, never the whole
-  organization. On that scoped list a lead can **set temporary passwords** and **switch accounts off
+  organization. (That scoped surface lives in the **mobile** admin app's Users hub and the underlying
+  API; the **web** console's org Users page stays admin-only — on web a lead's people work happens on
+  the campaign Team page.) On that scoped list a lead can **set temporary passwords** and **switch accounts off
   and back on**, for **canvasser accounts only** — never an admin, another lead, or Doorline staff
   (the server refuses, not just the UI). Changing roles, creating org-level accounts, deleting, and
   editing someone's identity (name/email/phone) remain admin-only.
@@ -130,7 +142,7 @@ half-rolled-out lead (role set, no grants yet) simply sees nothing until granted
 
 `requireCampaignManager` ([middleware/auth.js](../server/src/middleware/auth.js)) gates a campaign-nested
 route on `canManageCampaign(req, req.params.campaignId)`. It runs after `orgContext` and **replaces**
-`requireOrgRole('admin')` on the nine campaign routers; each keeps its own `loadCampaign` org-ownership
+`requireOrgRole('admin')` on the eleven campaign routers; each keeps its own `loadCampaign` org-ownership
 check, so ownership and management are enforced independently.
 
 ## Super admins inside an org — including internal orgs
@@ -154,7 +166,10 @@ build alongside it.
 
 **Campaign-nested routers** — `requireCampaignManager` (super/admin/granted-lead): `assignments`,
 `campaignHouseholds`, `walklists`, `voted`, `efforts`, `passes`, `setup-status`, `turfs`,
-`turfs/:turfId/assignments`. A lead does everything an admin does inside a granted campaign.
+`turfs/:turfId/assignments`, `crew` (the lead crew surface, detailed below), and `packets`
+(printable walk packets — voter PII on paper, read-only; pinned by
+[packet.int.test.js](../server/test/packet.int.test.js)). A lead does everything an admin does inside
+a granted campaign.
 
 **Correcting a household pin** — the same `canManageCampaign` policy on **both** write paths, one of
 them not campaign-nested: web `PATCH /admin/campaigns/:id/households/:householdId/location` (via the
@@ -192,9 +207,18 @@ Without it a lead could cut turf and hand out every book except their own: the c
   authorizes on the report/share/campaign's `campaignId` via `manages()`; the list scopes to
   `managedCampaignIds`.
 
-**Org-wide, read-for-leads** — `surveys` + `tags`: role `('admin','lead')` so a lead can `GET` the
-library (to attach a survey / filter by tag), but every mutation carries a per-route
+**Org-wide, read-for-leads** — `tags`: role `('admin','lead')` so a lead can `GET` the library (to
+filter by tag), but every mutation (create, edit, merge, delete) carries a per-route
 `requireOrgRole('admin')`.
+
+**Surveys — leads author; admins own the lifecycle.** The `surveys` router is `('admin','lead')`,
+and a lead's write access is per-survey rather than blanket-denied: `POST /` (create) is **open to
+leads** — `createdBy` is stamped, and *attaching* a survey to a campaign is separately
+campaign-manager-scoped — while `PATCH /:id` and `POST /:id/duplicate` gate on `canManageSurvey`
+([campaignManagement.js](../server/src/services/authz/campaignManagement.js)): the lead authored it,
+or it is attached to a managed campaign as the campaign default or an Effort (walk-list) override.
+Archive, unarchive, and `DELETE` carry `requireOrgRole('admin')`. Pinned by
+[teamLead.int.test.js](../server/test/teamLead.int.test.js) ("lead survey edit/duplicate is scoped").
 
 **Org-wide, lead-SCOPED** — `memberships` (the Users surface) is `('admin','lead')` since
 2026-07-23, with per-route boundaries inside
@@ -213,8 +237,10 @@ library (to attach a survey / filter by tag), but every mutation carries a per-r
 - The whole matrix is pinned by
   [`test/leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js).
 
-**Org-only, leads blocked** — `voters` (org voter directory) and `queues` stay
-`requireOrgRole('admin')`.
+**Org-only, leads blocked** — `voters` (org voter directory) stays `requireOrgRole('admin')` with no
+per-route carve-outs; `dnc` is mounted org-level and admin-only on purpose (see below); and `queues`
+is stricter than the old "admin" framing here — its one route is `requireSuperAdmin`, a **platform**
+surface, so even org admins don't reach it (the web mounts it under `RoleGate require="super"`).
 
 > ⚠️ **One write on `leadCrew` is NOT campaign-shaped, and it is the only one.**
 > `PATCH .../crew/:userId/deactivate` and `.../reactivate` write `Membership.isActive`, and
@@ -228,10 +254,19 @@ library (to attach a survey / filter by tag), but every mutation carries a per-r
 > - `User.isSuperAdmin` is refused outright — a super-admin can hold an ordinary canvasser membership,
 >   and switching it off would force Doorline staff onto the support-grant path where every request
 >   logs as vendor intrusion, poisoning the audit trail `orgContext` exists to keep clean;
-> - the router carries a blanket **`VENDOR_READ_ONLY`** block, because the identical write is already
->   403 for a support-grant holder on `/admin/memberships` and must not be 200 through a campaign door;
-> - the response carries **`alsoAffects`** — the other campaigns this reaches — so the UI can disclose
->   the org-wide scope before committing rather than after.
+> - vendor staff (support-grant holders) are guarded per **target**, not per router: the 2026-07-29
+>   owner decision removed the blanket `VENDOR_READ_ONLY` rule (never re-add it), so a support grant
+>   now permits crew writes — every one recorded by `accessLog` — with one surviving refusal: any
+>   write **targeting** a Doorline staff account, via `refuseVendorStaffTarget`
+>   ([vendorGuards.js](../server/src/services/memberships/vendorGuards.js)), which guards all four
+>   leadCrew writes (create, coordinator, deactivate, reactivate);
+> - the response carries **`alsoAffects`** — the other campaigns this reaches. The clients disclose
+>   the reach **before** committing by reading `GET /admin/memberships/:userId/crews` into the
+>   confirm dialog (mobile MemberSheet + member detail, web UserProfileModal): `/crews` resolves
+>   campaign *names* and is deliberately **not grant-filtered**, so the list names campaigns the
+>   acting lead doesn't manage — which is the point. (Never resolve ids against `GET
+>   /admin/campaigns` for this — that list is lead-scoped and drops exactly the campaigns the
+>   warning exists to name.)
 >
 > They ship as a **pair**. A deactivate without its inverse would be a one-way door for a lead, and
 > their books stay assigned precisely because reactivation is one tap away — the same reason the org
@@ -243,6 +278,33 @@ its data endpoints allow `('admin','lead')` and gate leads on the campaign: `hou
 (no org-wide map), and `GET /:householdId/activity` authorizes on the household's `campaignId`; and
 `activities` (`GET /admin/activities/:id`, the ping detail) authorizes on the activity's `campaignId`. So
 a lead sees the map + ping/household detail only for campaigns they manage.
+
+**Export Center — campaign-scoped for leads.** `exports` is `('admin','lead')` with the
+imports/reports posture ([exports.js](../server/src/routes/admin/exports.js)): a lead may create and
+download exports of a **managed** campaign; the org-wide scope (`campaignId: null`) and the
+admin-only types are refused (`def.adminOnly || !campaign` → `isOrgAdmin`), the type list is
+filtered per role, and the history list scopes to `managedCampaignIds` — a lead's `$in` filter never
+matches `null`. Pinned by [exports.int.test.js](../server/test/exports.int.test.js).
+
+**DNC — deliberately NOT lead territory.** `/admin/dnc` is mounted **org-level**, not
+campaign-nested, and gated `requireOrgRole('admin')` ([dnc.js](../server/src/routes/admin/dnc.js)):
+DNC is an org-wide fact on the Voter, and the campaign-nested `voted.js` gate
+(`requireCampaignManager`) would admit leads — the mount comment in
+[routes/index.js](../server/src/routes/index.js) records exactly this. Pinned by
+[dnc.int.test.js](../server/test/dnc.int.test.js).
+
+**Import mapping profiles — deliberately lead-writable.** `GET`/`POST /admin/imports/profiles` are
+org-wide, name-keyed vendor column mappings behind only the router's `('admin','lead')` gate: a lead
+can read them and save/overwrite one by name. Owner-ruled 2026-08-07 — leads run imports, so they
+keep profile self-service; the profiles hold column mappings, never voter data.
+
+**Client-report shares — one write is org-shaped, and it is admin-only.** Every share route
+authorizes leads per campaign via `manages()`
+([clientReports.js](../server/src/routes/admin/clientReports.js)) — except
+`POST /shares/revoke-legacy`, the org-wide sweep that kills every legacy-open link at once. That is
+an org operator's switch, so since 2026-08-07 it carries a per-route `requireOrgRole('admin')`;
+before that a lead could enumerate and bulk-revoke links on campaigns they held no grant for. Pinned
+by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
 
 **The lead's crew surface** — `leadCrew` ([leadCrew.js](../server/src/routes/admin/leadCrew.js)) at
 `/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`: `GET /` (org members for the
@@ -345,14 +407,18 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   **two** `<Layout/>` shells: an **org-scoped** one (`requireConsoleAccess` — all campaign pages, incl.
   import and the campaign Survey select *and builder*, which leads may reach; the server's
   `canManageSurvey` enforces per-survey scope) with a nested `RoleGate require="orgAdmin"` around the
-  org-admin screens (Overview, Surveys, Tags, Voters, Users, queues) and a `RoleGate require="billing"`
-  nested inside that around `/billing`; and an **org-agnostic** one (`requireActiveOrg={false}` —
-  `/profile`, `/help`) with a nested `RoleGate require="super"` around the platform screens. Nav
+  org-admin screens (Overview, Surveys, Tags, Voters, Users, duplicate-surveys) and a `RoleGate
+  require="billing"` nested inside that around `/billing`; and an **org-agnostic** one
+  (`requireActiveOrg={false}` — `/profile`, `/help`) with a nested `RoleGate require="super"` around
+  the platform screens — including the Jobs/queues screen, which lives in the super shell (not the
+  orgAdmin group) because its server route is `requireSuperAdmin`. Nav
   ([navItems.js](../client/src/components/navItems.js) + [Layout.jsx](../client/src/components/Layout.jsx)
   + [BottomNav.jsx](../client/src/components/BottomNav.jsx)) filters the top-level list to `leadVisible`
   (just Campaigns) for a lead; the full campaign drill-in nav is unchanged.
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) hides create/edit/archive/delete for leads;
-  [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) hides the build/edit affordances;
+  [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) **shows** a lead the authoring
+  affordances (New/Edit/Duplicate) via `canManage = isOrgAdmin || managedCampaignIds.includes(campaignId)`,
+  with the server's `canManageSurvey` as the per-survey authority;
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) reads the picker from the `crew`
   endpoint, gives leads an inline create-canvasser modal, and is the **one** place a crew is set (the
   org Users page shows crews read-only). Login/select-org land a lead on `/campaigns` (they have no
@@ -386,16 +452,19 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   leads (server-scoped to their campaigns' rosters since 2026-07-23 — the old `isLead` branch that hid
   it was deleted as dead code); the **Duplicate surveys** row is likewise `isConsoleUser`, but the
   Delete inside that screen is `isOrgAdmin`, since `admin/voters.js` is `requireOrgRole('admin')`
-  router-wide — a lead reads every duplicate and can remove none. And the campaign screen's **Team** tile
-  ([campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) points at
-  `campaign-assignments/:campaignId` — the campaign's own crew + book assignments — not at the org Users
-  screen it used to open. That was the reported bug: a lead tapped it, `/admin/memberships` 403'd, and
-  [users.jsx](../mobile/app/(app)/admin/users.jsx) rendered the failure as **"No users yet"** — the app
-  stating as fact that the organization is empty to somebody simply not allowed to look. It now branches
-  on `error.code === 'FORBIDDEN_ROLE'` and says which of the two it is, pointing at the campaign Team
-  screen. Setting a *crew* remains web-only ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx));
-  mobile reads crews but has no coordinator picker. The **canvasser** flow is untouched — a lead who walks
-  is scoped as a canvasser via `CampaignAssignment` exactly like anyone else.
+  router-wide — a lead reads every duplicate and can remove none. The campaign screen's **Team** tile
+  ([campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) opens the
+  **Users hub pre-filtered to that campaign** ([users.jsx](../mobile/app/(app)/admin/users.jsx)) —
+  since the 2026-07-23 change made `/admin/memberships` lead-scoped server-side, the hub is one
+  surface for everyone. (The historical bug this area carried: before the scoping, a lead's
+  `/admin/memberships` call 403'd and the hub rendered the failure as **"No users yet"** — the app
+  stating as fact that the organization is empty to somebody simply not allowed to look.) The member
+  sheet ([MemberSheet.jsx](../mobile/components/MemberSheet.jsx)) carries a coordinator picker
+  (staged pick → `coordinator-preview` door count → confirm) wired to the campaign-scoped `crew`
+  endpoints, so crews are settable from mobile as well as from
+  [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) on web. The **canvasser** flow is
+  untouched — a lead who walks is scoped as a canvasser via `CampaignAssignment` exactly like anyone
+  else.
 
 ## Machine-readable 403s
 
@@ -433,10 +502,24 @@ test:int`):
 
 - [teamLead.int.test.js](../server/test/teamLead.int.test.js) — seed an org, an admin, and a lead granted
   campaign A only (with a campaign B they don't manage), then assert the lead gets 200 on A's field
-  routes / import / scoped reports / campaign survey PATCH, and 403 on the same for B, on campaign
-  create/archive/delete, on the org survey/tag mutations and the org Users admin — while 200 on
-  `.../crew` — and that `GET /admin/campaigns` returns only A. Also asserts role 403s carry
-  `code: 'FORBIDDEN_ROLE'` at both the org and campaign gate.
+  routes / import / scoped reports (overview, the notes feed, campaign-rollup self-scoping) /
+  campaign survey PATCH / the campaign map / household activity / the activity ping detail, and 403
+  on the same for B, on campaign create/archive/delete, on tag creation, on survey
+  archive/unarchive/delete, and on the org voter directory. Survey **create** is asserted **201** —
+  leads author — and edit/duplicate follow the `canManageSurvey` scope (own or managed-attached yes,
+  unmanaged-attached no). `GET /admin/memberships` is asserted **200 lead-scoped** (since
+  2026-07-23); the full Users boundary matrix is
+  [`leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js)'s job. `.../crew`
+  is 200/201, `GET /admin/campaigns` returns only A, and role 403s carry `code: 'FORBIDDEN_ROLE'` at
+  both the org and campaign gate. Lead scope on the newer surfaces is pinned elsewhere: packets in
+  [packet.int.test.js](../server/test/packet.int.test.js), exports in
+  [exports.int.test.js](../server/test/exports.int.test.js), the DNC refusal in
+  [dnc.int.test.js](../server/test/dnc.int.test.js), the flags list + bulk review in
+  [flagBulkReview.int.test.js](../server/test/flagBulkReview.int.test.js), the canvasser timeline and
+  overlap doors in
+  [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndOverlaps.int.test.js), and the
+  admin-only `revoke-legacy` share sweep in
+  [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
 - [perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) — the scope guarantee
   above, as a fixture no other suite could build: **two campaigns in ONE org** (Asa leads HD54, Frank
   leads HD64, Maria canvasses both). Asserts that two leads setting Maria's crew in their own campaigns

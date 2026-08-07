@@ -31,9 +31,9 @@ Switching organizations in the console always lands on the new org's home page �
 
 ## What a team lead can do
 
-Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, attach a survey, build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers) — including putting *themselves* on a book, so a lead who also walks doesn't have to ask you for one — build the crew (including creating new canvasser accounts), and see all the reporting.
+Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, build and attach a survey (leads author their own templates), build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers) — including putting *themselves* on a book, so a lead who also walks doesn't have to ask you for one — build the crew (including creating new canvasser accounts), print walk packets, export the campaign's data, and see all the reporting.
 
-What they *can't* do: create, archive, or delete a campaign; edit the org-wide survey or tag libraries (they can read them); or touch org users, org settings, or the voter directory. They also can't grant the lead role or see any campaign you didn't hand them. A lead with no grants sees an empty console.
+What they *can't* do: create, archive, or delete a campaign; archive or delete survey templates, or touch the **tag library** (leads build and edit surveys for the campaigns they manage, and can read tags); flag voters **do-not-contact** (that reaches every campaign at once, so it stays with you); or touch org settings or the voter directory. They also can't change anyone's role or identity, grant the lead role, or see any campaign you didn't hand them. A lead with no grants sees an empty console.
 
 They build their crew from their campaign's own **Team** tab instead — and that isn't a lesser version of the org Users page. A crew belongs to a campaign, so the Team tab is where *everyone* sets one, admins included.
 
@@ -50,7 +50,7 @@ You can change the checked campaigns anytime — unchecking one revokes it right
 ## Where a team lead works
 
 - **In the console**, they sign in the same way you do and land on **Campaigns**, showing only the campaigns they manage. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, Voters, Users — simply aren't in their nav.
-- **In the mobile app**, they get the same admin view, scoped to their campaigns. A campaign's **Team** tile is where they manage that campaign's crew and book assignments. The org-wide **Users** screen is an admin-only place and isn't offered to them.
+- **In the mobile app**, they get the same admin view, scoped to their campaigns — and **More → Users** is one shared surface: a lead sees it too, filtered to the people on *their* campaigns, never the whole organization. There they create canvassers, set temporary passwords, and switch canvasser accounts off and on; roles, identity edits, and account deletion stay with you. A campaign's **Team** tile opens that same Users view pre-filtered to the campaign.
 
 ## Coordinators and crews
 

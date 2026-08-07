@@ -29,6 +29,7 @@ const { signUserToken } = await import('../src/services/auth/tokens.js');
 const { Organization } = await import('../src/models/Organization.js');
 const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
+const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
@@ -67,7 +68,7 @@ async function call(method, path, { token, orgId, body } = {}) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, Effort, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse, FlagReview]) {
+  for (const M of [Organization, User, Membership, CampaignManager, Campaign, Effort, SurveyTemplate, ClientReport, ClientReportMapPoint, ReportShareLink, Subscription, Household, Voter, CanvassActivity, SurveyResponse, FlagReview]) {
     await M.deleteMany({});
   }
 
@@ -94,7 +95,20 @@ before(async () => {
     isActive: true, surveyTemplateId: template._id,
   });
 
-  Object.assign(ctx, { org, camp, admin: { token: signUserToken(admin), orgId: org._id } });
+  // A lead GRANTED this campaign: revoke-legacy must refuse them at the role wall, not for
+  // lacking a grant — the sweep is org-wide, so campaign scope can never make it safe.
+  const lead = await User.create({
+    firstName: 'Lea', lastName: 'Lead', email: 'lea@t.co',
+    passwordHash: await User.hashPassword('Str0ng!Passw0rd'), isActive: true,
+  });
+  await Membership.create({ userId: lead._id, organizationId: org._id, role: 'lead', isActive: true });
+  await CampaignManager.create({ campaignId: camp._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
+
+  Object.assign(ctx, {
+    org, camp,
+    admin: { token: signUserToken(admin), orgId: org._id },
+    lead: { token: signUserToken(lead), orgId: org._id },
+  });
 
   const app = createApp();
   server = http.createServer(app);
@@ -457,4 +471,53 @@ test('a walk-list-scoped report freezes only that effort\'s numbers; campaign-wi
   assert.strictEqual(preview.status, 200);
   assert.strictEqual(preview.json.report.effortName, 'North Side', 'the public shape carries the label');
   assert.strictEqual(preview.json.report.effortId, undefined, 'the public shape never carries the id');
+});
+
+// ── revoke-legacy is the org operator's switch, not a campaign tool. Every sibling share route
+// scopes a lead to their managed campaigns; this one sweeps links across ALL campaigns in one
+// write, so it is admin-only — a granted lead is refused at the role wall.
+//
+// The confirm test bulk-deactivates every legacy-open link in the org, so these three run LAST
+// and use their own dedicated link rather than leaning on ctx.legacy's state.
+
+test('revoke-legacy: a team lead is refused, even one granted the campaign', { skip }, async () => {
+  const target = await ReportShareLink.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    token: 'legacy-sweep-target', passwordHash: null, expiresAt: null, isActive: true,
+  });
+  ctx.sweepTarget = target;
+
+  for (const body of [undefined, { confirm: true }]) {
+    const res = await call('POST', '/admin/client-reports/shares/revoke-legacy', { ...ctx.lead, body });
+    assert.strictEqual(res.status, 403, 'the role wall refuses a lead in both dry-run and confirm form');
+    assert.strictEqual(res.json.code, 'FORBIDDEN_ROLE');
+  }
+  const row = await ReportShareLink.findById(target._id);
+  assert.strictEqual(row.isActive, true, 'the refused call deactivated nothing');
+});
+
+test('revoke-legacy: the admin dry-run lists what it would break without touching it', { skip }, async () => {
+  const res = await call('POST', '/admin/client-reports/shares/revoke-legacy', { ...ctx.admin });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.dryRun, true);
+  assert.ok(res.json.wouldRevoke >= 1);
+  assert.ok(
+    res.json.links.some((l) => l.id === String(ctx.sweepTarget._id)),
+    'the open link is named in the preview'
+  );
+  const row = await ReportShareLink.findById(ctx.sweepTarget._id);
+  assert.strictEqual(row.isActive, true, 'a dry run writes nothing');
+});
+
+test('revoke-legacy: admin confirm kills open links and leaves protected ones alone', { skip }, async () => {
+  const res = await call('POST', '/admin/client-reports/shares/revoke-legacy', {
+    ...ctx.admin, body: { confirm: true },
+  });
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.json.revoked >= 1);
+
+  const swept = await ReportShareLink.findById(ctx.sweepTarget._id);
+  assert.strictEqual(swept.isActive, false, 'the open link is dead');
+  const kept = await ReportShareLink.findById(ctx.share._id);
+  assert.strictEqual(kept.isActive, true, 'a passworded, expiring link is not legacy and survives');
 });

@@ -397,6 +397,16 @@ test('lead gating on /overlap-doors: granted lead + campaignId 200; lead without
   assert.strictEqual(bare.status, 403, 'lead without campaignId hits the reports router gate');
 });
 
+test('lead gating on /canvasser-timeline follows the same contract', { skip }, async () => {
+  const { leadTok, adminTok, org, camp } = ctx;
+  const ok = await call('GET', `/api/admin/reports/canvasser-timeline?campaignId=${camp._id}`, { token: leadTok, orgId: org._id });
+  assert.strictEqual(ok.status, 200, 'granted lead reads their campaign timeline');
+  const adminView = await call('GET', `/api/admin/reports/canvasser-timeline?campaignId=${camp._id}`, { token: adminTok, orgId: org._id });
+  assert.deepStrictEqual(ok.json, adminView.json, 'a granted lead sees exactly what an admin sees');
+  const bare = await call('GET', '/api/admin/reports/canvasser-timeline', { token: leadTok, orgId: org._id });
+  assert.strictEqual(bare.status, 403, 'no campaignId is org-wide — refused for a lead');
+});
+
 test('overlap round labels name their walk list ONLY once the campaign has 2+ efforts', { skip }, async () => {
   const { adminTok, org, camp, H } = ctx;
   // Single-effort campaign: short label, but effortName is still populated for clients

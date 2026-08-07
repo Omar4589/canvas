@@ -272,8 +272,10 @@ router.post('/shares', async (req, res, next) => {
 // Deliberately NOT automatic. Auto-expiring links created before the rules changed would take a
 // client's live report offline with no warning, under their feet, from a deploy they didn't know
 // about. So legacy links keep working and are flagged `isLegacyOpen`; this is the operator's switch
-// to kill them once they've told their customers. The decision of WHEN is a business one.
-router.post('/shares/revoke-legacy', async (req, res, next) => {
+// to kill them once they've told their customers. The decision of WHEN is a business one — an
+// ORG-level one, so unlike every campaign-scoped share route above, this is admin-only: it sweeps
+// links across all campaigns, which a campaign-scoped lead must not reach.
+router.post('/shares/revoke-legacy', requireOrgRole('admin'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);

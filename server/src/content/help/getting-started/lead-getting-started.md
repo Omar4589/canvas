@@ -20,10 +20,12 @@ Admins usually create and set up a campaign, then hand it off to you to run end-
 On any campaign you've been granted, you're as powerful as an admin:
 
 - Import the voter file and add later files ([voter imports](voter-imports))
-- Attach a survey and build your [walk lists](walk-lists)
+- Build and attach a survey — you can author your own templates, and edit any survey attached to a campaign you manage — then build your [walk lists](walk-lists)
 - Cut [turf and assign books](turf-and-books), and [assign canvassers](assigning-canvassers)
 - Create and activate [passes](passes)
 - Build your crew, including [creating new canvasser accounts](add-a-canvasser-account)
+- [Print walk packets](printing-walk-packets) for a paper canvass
+- [Export your campaign's data](exports) — org-wide exports and a few admin-only types stay with admins
 - See all the reporting: map, timeline, insights, early voting, and client reports
 
 ## What stays with admins
@@ -32,7 +34,8 @@ On any campaign you've been granted, you're as powerful as an admin:
 - Billing and org settings
 - The org voter directory
 - Changing anyone's **role**, name, or email — and managing admins or fellow leads
-- The survey template and tag libraries (you can *use* them, not edit them)
+- Archiving or deleting survey templates, and the **tag library** (you build and edit surveys for your campaigns; tags you can use, not edit)
+- **Do-not-contact flags** — flagging someone reaches every campaign in the organization at once, so it's admin-only
 - Granting the team-lead role
 
 ## Your Users page (mobile)

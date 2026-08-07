@@ -19,6 +19,7 @@ const { Membership } = await import('../src/models/Membership.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { Household } = await import('../src/models/Household.js');
+const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Effort } = await import('../src/models/Effort.js');
@@ -34,7 +35,7 @@ const ctx = {}; // { org, A, B, adminTok, leadTok }
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, ReportShareLink, SurveyTemplate, Effort]) await M.deleteMany({});
+  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, CanvassActivity, ReportShareLink, SurveyTemplate, Effort]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Test Org', slug: 'test-org-lead', isActive: true });
   const admin = await User.create({ firstName: 'Ada', lastName: 'Admin', email: 'admin@t.co', passwordHash: 'x', isActive: true });
@@ -76,8 +77,17 @@ before(async () => {
     isActive: true,
   });
 
+  // One activity per campaign, for the /admin/activities/:id (ping detail) scoping test.
+  // Same raw-insert idiom as the households above — the handler authorizes on campaignId.
+  const actA = new mongoose.Types.ObjectId();
+  const actB = new mongoose.Types.ObjectId();
+  await CanvassActivity.collection.insertMany([
+    { _id: actA, organizationId: org._id, campaignId: A._id, householdId: hhA, userId: admin._id, actionType: 'not_home', timestamp: new Date() },
+    { _id: actB, organizationId: org._id, campaignId: B._id, householdId: hhB, userId: admin._id, actionType: 'not_home', timestamp: new Date() },
+  ]);
+
   Object.assign(ctx, {
-    org, A, B, hhA, hhB, shareToken,
+    org, A, B, hhA, hhB, actA, actB, shareToken,
     survOverrideA, survDefaultB, survLeadDraft,
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
@@ -169,6 +179,19 @@ test('imports + reports scope to managed campaigns', { skip }, async () => {
   assert.strictEqual((await call('GET', `/api/admin/reports/overview?campaignId=${B._id}`, opt)).status, 403, 'reports B');
   assert.strictEqual((await call('GET', '/api/admin/reports/overview', opt)).status, 403, 'reports org-wide');
   assert.strictEqual((await call('GET', '/api/admin/reports/campaign-rollup', opt)).status, 200, 'rollup self-scopes');
+  // The notes-hub feed rides the same router gate: managed campaign or nothing.
+  assert.strictEqual((await call('GET', `/api/admin/reports/notes?campaignId=${A._id}`, opt)).status, 200, 'notes A');
+  assert.strictEqual((await call('GET', `/api/admin/reports/notes?campaignId=${B._id}`, opt)).status, 403, 'notes B');
+  assert.strictEqual((await call('GET', '/api/admin/reports/notes', opt)).status, 403, 'notes org-wide');
+});
+
+test('the activity ping detail is scoped to a managed campaign', { skip }, async () => {
+  const { leadTok, org, actA, actB } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  assert.strictEqual((await call('GET', `/api/admin/activities/${actA}`, opt)).status, 200, 'ping detail A');
+  // NB: this 403 is the handler's inline canManageCampaign check (activities.js), not the
+  // middleware — it carries no FORBIDDEN_ROLE code, so only the status is pinned here.
+  assert.strictEqual((await call('GET', `/api/admin/activities/${actB}`, opt)).status, 403, 'ping detail B');
 });
 
 test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reach org Users/voters', { skip }, async () => {

@@ -21,6 +21,7 @@ If **everyone** at an address is flagged, the whole door drops off your map and 
 automatically — you'll never be routed there. No action needed from you.
 
 The badge follows the person across every campaign, so you may see it on someone who asked to be
-left alone during a previous election. Admins set and remove the flag from the web console — if a
-resident asks you to never come back, record it in your door note and tell your admin so they can
-flag the voter.
+left alone during a previous election. **Only org admins** set and remove the flag, from the web
+console — team leads can't, precisely because the flag reaches every campaign at once, not just
+their own. If a resident asks you to never come back, record it in your door note and tell your
+admin so they can flag the voter.

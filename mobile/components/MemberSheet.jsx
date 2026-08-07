@@ -84,6 +84,16 @@ export default function MemberSheet({
     queryFn: () => api(`/admin/campaigns/${cId}/crew/${u.id}/coordinator-preview?coordinatorId=${pending || 'none'}`),
     enabled: !!cId && isPendingChange,
   });
+  // Which campaigns an org-wide account switch reaches. /crews names EVERY campaign the person
+  // is rostered on — including ones this viewer doesn't manage — which is exactly the point of
+  // the disclosure. (Never resolve ids against /admin/campaigns: that list is lead-scoped and
+  // would drop the campaigns the warning exists to name.) Loaded eagerly so the names are
+  // ready when the confirm opens; if it hasn't settled, the confirms fall back to their
+  // generic org-wide sentence rather than blocking the action.
+  const crewsQ = useQuery({
+    queryKey: ['admin', 'member-crews', u.id],
+    queryFn: () => api(`/admin/memberships/${u.id}/crews`),
+  });
 
   const settle = () => onChanged?.();
 
@@ -155,14 +165,44 @@ export default function MemberSheet({
   const activities = activityQ.data?.activities || [];
   const currentCoordName = member.coordinatorName || 'No coordinator';
 
+  // First ~5 campaign names the switch reaches (minus excludeId), or null when the list isn't
+  // usable — not loaded, errored, or empty after the exclusion.
+  const reachNames = (excludeId) => {
+    const names = (crewsQ.data?.crews || [])
+      .filter((c) => String(c.campaignId) !== String(excludeId || ''))
+      .map((c) => c.campaignName)
+      .filter(Boolean);
+    if (!names.length) return null;
+    const shown = names.slice(0, 5).join(', ');
+    return names.length > 5 ? `${shown} and ${names.length - 5} more` : shown;
+  };
+
   function confirmDeactivate() {
+    const also = reachNames(cId);
+    const scope = also
+      ? `They lose access to this organization everywhere — this also takes them out of: ${also}.`
+      : crewsQ.data
+        ? `They lose access to this organization everywhere. ${campaign?.name || 'This campaign'} is the only campaign they're on.`
+        : `They lose access to this organization everywhere — not just ${campaign?.name || 'this campaign'}.`;
     Alert.alert(
       `Deactivate ${name}?`,
-      `They lose access to this organization everywhere — not just ${campaign?.name || 'this campaign'}.` +
-        `\n\nTheir books stay theirs and every door they knocked still counts. You can switch them back on from here.`,
+      `${scope}\n\nTheir books stay theirs and every door they knocked still counts. You can switch them back on from here.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Deactivate', style: 'destructive', onPress: () => statusMut.mutate('deactivate') },
+      ]
+    );
+  }
+  function confirmReactivate() {
+    const all = reachNames(null);
+    Alert.alert(
+      `Reactivate ${name}?`,
+      all
+        ? `Access comes back for the whole organization — they rejoin: ${all}.`
+        : 'Access comes back for the whole organization.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reactivate', onPress: () => statusMut.mutate('reactivate') },
       ]
     );
   }
@@ -419,7 +459,7 @@ export default function MemberSheet({
             {/* Account switch — org-wide by design; disclosed in the confirm. */}
             {canManageAccount ? (
               member.status === 'deactivated' || !member.isActive ? (
-                <Pressable onPress={() => statusMut.mutate('reactivate')} style={styles.link}>
+                <Pressable onPress={confirmReactivate} style={styles.link}>
                   <Text style={styles.linkText}>Reactivate account</Text>
                 </Pressable>
               ) : (
