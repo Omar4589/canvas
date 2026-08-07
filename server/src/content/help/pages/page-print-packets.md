@@ -44,7 +44,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 
 ## What's on each sheet
 
-Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
+The cover opens with the Doorline mark and wordmark, then the race, then your organisation. Every page carries the campaign, your organisation, and the book name — so a packet found later says what it is without anyone opening the app — plus a coloured stripe matching the book's colour on the Turf Cutting map, and a **Walked by / Date** line.
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
 
@@ -63,7 +63,7 @@ The **cover** has a **Walked by** and **Date** line for whoever picks the packet
 - **Dates of birth.** An age prints instead.
 - **Anyone who asked not to be contacted.** They're removed when the PDF is built, checked at that moment — not from whatever the book held when it was cut. If one person at a three-person door is flagged, the door still prints and that person doesn't, with **no mark showing anyone was removed**.
 
-Doors also drop out if everyone there has already voted, the door was excluded from turf, or it's inactive. The cover tells you the total held back.
+Doors also drop out if everyone there has already voted, the door was excluded from turf, or it's inactive. The cover doesn't account for any of that — it states the door count once and leaves it there. What was left out, and why, is on screen for you, not on the paper for a volunteer.
 
 **Restricted doors do print** — "restricted" is what happened at a door, not an instruction to stay away.
 

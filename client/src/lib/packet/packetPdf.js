@@ -1,6 +1,6 @@
 import {
   PAGE, TYPE, BRAND, DARK, GRAY, SUBTLE, RULE, HAIRLINE, WHITE,
-  BOOK_COLORS, STATUS_INK, STATUS_LABEL, drawDoorlinePin,
+  BOOK_COLORS, STATUS_INK, STATUS_LABEL, drawDoorlinePin, drawDoorlineLockup,
 } from './packetTheme.js';
 import { buildSurveyPrintModel } from './surveyPrintModel.js';
 import { asciiSafe } from '../pdfText.js';
@@ -555,19 +555,19 @@ const drawCoverMap = (doc, book, ctx, x, y, map) => {
 
 const drawCover = (doc, payload, book, ctx, coverMap) => {
   const x = PAGE.MARGIN;
-  let y = PAGE.MARGIN + 34;
+  let y = PAGE.MARGIN;
 
-  // ── masthead: the RACE, biggest thing on the page ──
-  drawDoorlinePin(doc, x, y - 24, 26);
-  const mastheadX = x + 34;
+  // ── masthead: whose product, then whose race, then whose campaign ──
+  drawDoorlineLockup(doc, x, y, 22);
+  y += 46;
+
   setFont(doc, TYPE.coverCampaign, 'bold', DARK);
-  const nameLines = doc.splitTextToSize(asciiSafe(payload.campaign.name), ctx.contentW - 34);
-  for (const line of nameLines) {
-    text(doc, line, mastheadX, y);
+  for (const line of doc.splitTextToSize(asciiSafe(payload.campaign.name), ctx.contentW)) {
+    text(doc, line, x, y);
     y += 27;
   }
   setFont(doc, TYPE.coverOrg, 'normal', GRAY);
-  text(doc, payload.organization.name, mastheadX, y - 5);
+  text(doc, payload.organization.name, x, y - 6);
   y += 16;
 
   y += 14;
@@ -654,29 +654,6 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
       y += 14;
     }
     y += 18;
-  }
-
-  if (book.omitted.total > 0) {
-    setFont(doc, TYPE.coverBody, 'normal', GRAY);
-    // Plain English, and the two kinds kept apart. Apartments are a CHOICE the admin made in
-    // the studio, so folding them in under one system-sounding total both hid that setting and
-    // mislabelled it. Everything else stays an unexplained aggregate on purpose: a per-reason
-    // breakdown on paper edges toward outing a household to whoever is holding it, and the
-    // admin already sees the split on screen.
-    const apartments = book.omitted.reasons?.apartment || 0;
-    const heldBack = book.omitted.total - apartments;
-    const parts = [`${book.doorCount} of ${book.doorCount + book.omitted.total} doors printed.`];
-    if (apartments > 0) {
-      parts.push(`${apartments} apartment ${apartments === 1 ? 'door was' : 'doors were'} left out on purpose.`);
-    }
-    if (heldBack > 0) {
-      parts.push(`${heldBack} ${heldBack === 1 ? 'is' : 'are'} not being knocked this round and ${heldBack === 1 ? 'is' : 'are'} not listed here.`);
-    }
-    doc.splitTextToSize(parts.join(' '), ctx.contentW).forEach((ln) => {
-      text(doc, ln, x, y);
-      y += 13;
-    });
-    y += 8;
   }
 
   setFont(doc, TYPE.micro, 'bold', SUBTLE);

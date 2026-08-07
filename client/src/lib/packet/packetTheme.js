@@ -104,22 +104,59 @@ export const TYPE = Object.freeze({
   coverBody: 10,
 });
 
-// The Doorline pin, transcribed from client/src/components/Logo.jsx as vector path ops so
-// it prints crisp at any size and embeds no raster asset. doc.path() emits geometry only —
-// its `style` argument is ignored by the implementation, so the caller MUST follow with an
-// explicit fill write or the mark renders as nothing.
+// The Doorline mark, transcribed from client/src/components/Logo.jsx as vector path ops so it
+// prints crisp at any size and embeds no raster asset. Same 36x44 viewBox: the red pin, the
+// WHITE DOORWAY cut-out — an arched opening, not a circle, which is the whole point of the mark
+// — and the tiny knob. doc.path() emits geometry only; its `style` argument is ignored by the
+// implementation, so every subpath MUST be followed by an explicit fill write or it renders as
+// nothing.
+export const PIN_ASPECT = 36 / 44;
+
 export const drawDoorlinePin = (doc, x, y, h = 15) => {
-  const s = h / 30;
+  const s = h / 44;
+  const P = (px, py) => [x + px * s, y + py * s];
+
   doc.setFillColor(...BRAND);
   doc.path([
-    { op: 'm', c: [x + 12 * s, y] },
-    { op: 'c', c: [x + 5.4 * s, y, x, y + 5.4 * s, x, y + 12 * s] },
-    { op: 'c', c: [x, y + 20.4 * s, x + 12 * s, y + 30 * s, x + 12 * s, y + 30 * s] },
-    { op: 'c', c: [x + 12 * s, y + 30 * s, x + 24 * s, y + 20.4 * s, x + 24 * s, y + 12 * s] },
-    { op: 'c', c: [x + 24 * s, y + 5.4 * s, x + 18.6 * s, y, x + 12 * s, y] },
+    { op: 'm', c: P(18, 0) },
+    { op: 'c', c: [...P(8.06, 0), ...P(0, 8.06), ...P(0, 18)] },
+    { op: 'c', c: [...P(0, 29.5), ...P(12, 36.5), ...P(17, 43.2)] },
+    { op: 'c', c: [...P(17.5, 43.9), ...P(18.5, 43.9), ...P(19, 43.2)] },
+    { op: 'c', c: [...P(24, 36.5), ...P(36, 29.5), ...P(36, 18)] },
+    { op: 'c', c: [...P(36, 8.06), ...P(27.94, 0), ...P(18, 0)] },
     { op: 'h' },
   ]);
   doc.internal.write('f');
+
   doc.setFillColor(...WHITE);
-  doc.circle(x + 12 * s, y + 11.5 * s, 4.4 * s, 'F');
+  doc.path([
+    { op: 'm', c: P(12, 11) },
+    { op: 'l', c: P(12, 26) },
+    { op: 'l', c: P(24, 26) },
+    { op: 'l', c: P(24, 11) },
+    { op: 'c', c: [...P(24, 8.79), ...P(22.21, 7), ...P(20, 7)] },
+    { op: 'l', c: P(16, 7) },
+    { op: 'c', c: [...P(13.79, 7), ...P(12, 8.79), ...P(12, 11)] },
+    { op: 'h' },
+  ]);
+  doc.internal.write('f');
+
+  doc.setFillColor(...BRAND);
+  doc.circle(x + 21.3 * s, y + 18.1 * s, 0.9 * s, 'F');
+};
+
+// Mark + wordmark. Logo.jsx sets the word at 0.78x the mark's WIDTH with slightly tight
+// tracking, so the proportions here are the app's, not re-invented for print.
+export const drawDoorlineLockup = (doc, x, y, markH = 22) => {
+  drawDoorlinePin(doc, x, y, markH);
+  const markW = markH * PIN_ASPECT;
+  const size = markW * 0.78;
+  const gap = markH * 0.3;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(size);
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setCharSpace(-size * 0.02);
+  doc.text('Doorline', x + markW + gap, y + markH / 2 + size * 0.36);
+  doc.setCharSpace(0); // char spacing is sticky — every later string would inherit it
+  return markW + gap + doc.getTextWidth('Doorline');
 };

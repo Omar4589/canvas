@@ -93,12 +93,12 @@ Each door has:
   field list) · Restricted.
 - **Lines to write on.**
 
-Every packet also gets a **cover**, led by the **race name** — the biggest, boldest thing on
-the page, with your organisation under it. Below that sits the book's own identity: its name,
+Every packet also gets a **cover**, led by the **Doorline lockup** (mark plus wordmark), then
+the **race name** — the biggest, boldest thing on the page — then your organisation. Below that sits the book's own identity: its name,
 round, and door and resident counts, then the book's colour bar so the cover matches the stripe
 on every page behind it. One rule, not two — the book's colour bar is the only line. Then a **Walked by / Date** line, the
 streets it covers **in alphabetical order** (you scan this list for a name, so findability beats
-ranking by size), a tally box, and how many doors were held back.
+ranking by size), and a tally box.
 
 On a very large book the street list is **capped to what fits** and ends with "+ N more streets"
 — the cover doesn't run onto a second sheet, and every address is listed inside anyway.
@@ -159,7 +159,14 @@ all is still decided when the book is cut; this only removes them from the print
   that somebody at that address opted out. There's no marker, no gap, no count.
 
 Doors also drop out if everyone there has already voted, the door was excluded from turf, or
-it's inactive. The cover tells you the total held back; the reasons show on screen only.
+it's inactive.
+
+**The cover never accounts for what is missing.** It states the door count once, in the book
+line, and stops there. An earlier version printed a reconciliation sentence — "43 of 45 doors
+printed. 2 removed by current suppression rules" — which was jargon, and became wrong the moment
+apartments could be skipped, because it reported the admin's own choice back as a system rule.
+Omission counts and their reasons are the admin's, on screen; a volunteer only needs the doors
+they were handed.
 
 **Restricted doors DO print.** "Restricted" is what happened at a door — a gate, a guard, a
 locked lobby — not an instruction to stay away.
