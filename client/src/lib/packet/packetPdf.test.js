@@ -54,7 +54,7 @@ const makePayload = (doorCount, votersPerDoor, { survey = SURVEY } = {}) => ({
   books: [
     {
       id: 'b1', name: 'Ward 5 — Book C', code: 'R2-B07', colorIndex: 0,
-      passId: 'p1', passName: 'Round 2', roundNumber: 2, assignedTo: 'M. Ochoa',
+      passId: 'p1', passName: 'Round 2', roundNumber: 2,
       doorCount, voterCount: doorCount * votersPerDoor,
       streets: [{ name: 'N ORCHARD AVE', count: doorCount }],
       omitted: { total: 3, reasons: { doNotContact: 1, alreadyVoted: 2 } },
@@ -208,6 +208,16 @@ test('unprintable text is folded, and what cannot be folded is counted', () => {
     books: [{ doors: [{ voters: [{ name: 'Дмитрий' }, { name: "O'Brien" }] }] }],
   });
   assert.equal(scan.count, 1);
+});
+
+test('the cover carries a write-in name line, never a pre-printed assignee', async () => {
+  const doc = await renderPacketPdf(makePayload(4, 2), DEFAULT_SETTINGS);
+  const all = pageTexts(doc).join('\n');
+  // A packet goes to whoever picks it up, so the carrier writes their own name.
+  assert.ok(all.includes('WALKED BY'), 'the cover must offer a name line');
+  assert.ok(all.includes('DATE'));
+  // Nothing anywhere may claim who the app thinks holds this book.
+  assert.ok(!/Assigned:/.test(all), 'the in-app assignee must never be printed');
 });
 
 test('filename reflects the layout and the generation date', () => {

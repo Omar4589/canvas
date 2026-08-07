@@ -683,6 +683,14 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `docs/DPA.md` contains the words print, paper or hard copy — that is consistent with policies
   describing categories of data and recipients, never media, so **no paper sentence should be
   added.** Flagged for owner confirmation per the repo rule.
+  *[amendment 2026-08-06: the studio now also renders a **Mapbox** map of book boundaries, so
+  the page makes requests to `api.mapbox.com` it previously did not — viewer IP + viewport go to
+  Mapbox whenever it renders. **No change to the subprocessor position:** Mapbox is already the
+  disclosed mapping subprocessor for the admin console's Map and Turf Cutting pages, the map
+  imports `client/src/lib/mapboxInit.js` (which mutes usage beacons and carries that ruling), and
+  no VOTER data reaches it — the layers are book polygons and centroids, never door pins or
+  names. DPA §6 untouched, no customer notice event. Recorded because "a page that previously
+  rendered no map now does" is the kind of quiet change this log exists to catch.]*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 

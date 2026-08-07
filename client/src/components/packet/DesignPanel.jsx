@@ -24,7 +24,7 @@ const Toggle = ({ id, label, hint, checked, onChange, disabled }) => (
 );
 
 export default function DesignPanel({
-  settings, onChange, hasSurvey, unprintable, pages, doorCount, busy, onDownload,
+  settings, onChange, hasSurvey, unprintable, pages, doorCount, hasPick, busy, onDownload,
 }) {
   const set = (patch) => onChange({ ...settings, ...patch });
   const sheets = pages ? Math.ceil(pages / 2) : 0;
@@ -109,14 +109,17 @@ export default function DesignPanel({
       </div>
 
       <div className="pt-4 border-t border-border mt-4">
-        <div className="flex items-baseline justify-between text-sm mb-2">
-          <span className="text-muted-fg">{doorCount} doors</span>
-          <span className="font-medium text-fg tabular-nums">
-            {pages ? `${pages} pages · ${sheets} sheets` : '—'}
-          </span>
-        </div>
+        {/* Nothing picked yet means no numbers to show — a bare "0 doors" reads as an error. */}
+        {hasPick && (
+          <div className="flex items-baseline justify-between text-sm mb-2">
+            <span className="text-muted-fg tabular-nums">{doorCount.toLocaleString()} doors</span>
+            <span className="font-medium text-fg tabular-nums">
+              {pages ? `${pages} pages · ${sheets} sheets` : 'building…'}
+            </span>
+          </div>
+        )}
         <Button className="w-full" onClick={onDownload} disabled={busy || !pages}>
-          {busy ? 'Building…' : 'Download packets'}
+          {busy ? 'Building…' : hasPick ? 'Download packets' : 'Pick a book to print'}
         </Button>
       </div>
     </div>

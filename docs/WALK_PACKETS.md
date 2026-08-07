@@ -36,13 +36,22 @@ list to CSV.
 
 Three panes:
 
-- **Left — what to print.** Published books, grouped by round, plus your saved searches. Tick
-  as many books as you like; each one becomes its own stapled packet.
-- **Middle — the packet.** This is not a mock-up. It is the actual PDF, rebuilt about a
-  quarter-second after you change anything, shown exactly as it will print. What you download
-  is the same file you are looking at.
+- **Left — what to print.** Books grouped **walk list → round → book**, plus your saved
+  searches. A campaign runs several walk lists at once and each has its own rounds, so a bare
+  "Pass 3" wouldn't say which operation it belongs to. Tick as many books as you like; each one
+  becomes its own stapled packet. A running total at the bottom shows packets, doors, and
+  sheets, and warns before you cross the door limit rather than after.
+- **Middle — two tabs.**
+  - **Packet** is not a mock-up. It is the actual PDF, rebuilt about a quarter-second after you
+    change anything. What you download is the same file you are looking at.
+  - **Map** shows where the books actually are. Click a shape to add or drop it from the print
+    run. Only one round is drawn at a time — rounds re-cover the same streets, so stacking them
+    would be unreadable and ambiguous to click.
 - **Right — the design.** Layout, how many lines to write on, and what extras to include. The
   page count updates as you turn each knob, because paper is the cost that matters.
+
+A book is the **same colour** everywhere — on the Turf Cutting map, in this picker, on the
+studio map, and as the stripe on the printed page.
 
 ## Two layouts
 
@@ -67,7 +76,7 @@ of blanks.
 ## What's on a page
 
 Every sheet carries a **header band** — campaign, organisation, book name, round, door count,
-who it's assigned to, and a **packet code** like `R2-B07` in a red box. Under that is a coloured
+and a **packet code** like `R2-B07` in a red box. Under that is a coloured
 stripe matching the book's colour on the Turf Cutting map, so a dozen packets face-down on a
 folding table are sortable at a glance.
 
@@ -82,10 +91,15 @@ Each door has:
   field list) · Restricted.
 - **Lines to write on.**
 
-Every packet also gets a **cover** with the packet code in large type, the streets it covers,
-a tally box, and how many doors were held back. If you print more than one book at once you
-also get a **hand-out sheet** at the front: one line per packet, with ruled Out/In cells so a
-field director can sign packets out on the table where the packets actually are.
+Every packet also gets a **cover** with the packet code in large type, a **Walked by** and
+**Date** line to fill in, the streets it covers, a tally box, and how many doors were held back.
+If you print more than one book at once you also get a **hand-out sheet** at the front: one line
+per packet, with ruled **Walked by / Out / In** cells so a field director can sign packets out on
+the table where the packets actually are.
+
+**No canvasser name is ever printed.** A packet goes to whoever picks it up, which is rarely who
+the app thinks holds the book — so the carrier writes their own name on the cover. The in-app
+assignment still shows in the picker on screen, to help you choose what to print.
 
 ## What prints, and what never does
 
@@ -176,11 +190,19 @@ Mounted at `/admin/campaigns/:campaignId/packets` in `routes/index.js`, after
 
 ## Endpoints
 
-**`GET /sources`** → `{ cap, hasSurvey, rounds: [{ id, name, roundNumber, status, books: [{ id, name, doorCount, assignedTo }] }], walkLists: [{ id, name, doorCount, voterCount }] }`
+**`GET /sources`** → `{ cap, hasSurvey, rounds: [{ id, name, roundNumber, status, effortId, effortName, books: [{ id, name, doorCount, colorIndex, assignedTo, boundary, centroid }] }], walkLists: [{ id, name, doorCount, voterCount }] }`
 
 Published books on `active`/`draft` rounds only — a book on an archived round is not offered.
-`doorCount` is the cut-time count, so the picker labels it as approximate; the live knockable
-count is resolved at generation.
+Draft rounds are deliberate: a pass cannot be activated until its books are published, so
+"print the night before launch" IS the draft-pass / published-books state. `doorCount` is the
+cut-time count, so the picker labels it as approximate; the live knockable count is resolved at
+generation. `boundary`/`centroid` are display-only geometry for the studio map — `boundary` is
+Polygon **or** MultiPolygon (a book that owns a door surrounded by another book grows pocket
+islands), which any bounding-box maths must flatten.
+
+Rounds are sorted **walk list first** (`Effort`, by creation), then by `roundNumber` — sorting
+on `roundNumber` alone interleaves parallel walk lists into an unreadable list. `effortName`
+falls back to `'Walk list'` when a pass has no effort.
 
 **`GET /data?turfIds=a,b | walkListId=x [&includePhone=1]`** → the packet payload:
 
@@ -191,7 +213,7 @@ count is resolved at generation.
   generatedAt,                       // ISO; stamped on every page
   books: [{
     id, name, code,                  // code = `R{roundNumber}-B{nn}`
-    colorIndex, passId, passName, roundNumber, assignedTo,
+    colorIndex, passId, passName, roundNumber,
     doorCount, voterCount,
     streets: [{ name, count }],      // cover orientation list, derived from addressLine1
     omitted: { total, reasons: { doNotContact, alreadyVoted, excluded, inactive, missing } },
@@ -228,6 +250,25 @@ A **saved search has no persisted order** — it is a set, not a route. `buildFr
 `computeWalkOrder(..., { optimize: true })` for that printout only and does not write it back, so
 co-located units (stacked apartments sharing one geocode) can reorder between reprints.
 `orderProvenance: 'computed'` and a `warnings` entry say so rather than implying a stable route.
+
+## The colour rule
+
+`colorIndex` is assigned **by the server**, once, in `GET /sources` and again in
+`buildPacket.buildFromBooks`: a book's colour is its position **within its own pass, in
+creation order** — identical to `TurfsPage`'s `colorByTurf`. Every surface reads that number
+instead of using its own array position.
+
+This matters because three surfaces previously each had their own rule — the picker used its
+index within a name-sorted round, the map its index within a `createdAt`-sorted pass, and the
+paper its index within the *selection in click order*. They agreed only by luck, and diverged
+the moment a book was renamed or a partial selection was printed. `packet.int.test.js` pins it:
+printing the second book **alone** must still colour it `1`.
+
+The ranking query deliberately includes **draft** siblings (`status: { $ne: 'archived' }`), or
+every colour would shift the instant a draft book was accepted. And `packetTheme.BOOK_COLORS` is
+now the same twelve hues in the same order as `TurfsPage.jsx:34` — it previously was not, despite
+a comment claiming otherwise, so the on-screen swatch and the printed stripe were different
+colours even when the index agreed.
 
 ## Suppression
 
@@ -282,6 +323,13 @@ Two invariants:
    **not** reused: it adds a page and then draws the block anyway, silently running long blocks
    off the bottom.
 
+**The in-app assignee is deliberately not printed.** `TurfAssignment` is not read by
+`buildPacket.js` at all and `assignedTo` is absent from the packet payload — the cover carries a
+**Walked by** write-in instead, and the hand-out sheet a matching ruled column. Printing the app's
+assignee would be wrong more often than right on a paper day, and wrong in a way nobody can fix
+with a pen. `GET /sources` still returns `assignedTo` per book, because the on-screen picker uses
+it to show what a book is currently attached to.
+
 A page break inside a door reprints the address with `(cont.)` and a **hollow** sequence badge;
 a break inside one person's block reprints their name with `(cont.)` so answers below are never
 attributed to whoever lands at the top of the next page. Page numbers are **per book** ("Book C ·
@@ -297,6 +345,34 @@ Other renderer traps:
 - `PAGE` is frozen, so derived values are spelled out in the literal — a late `PAGE.X = …` throws.
 - Do **not** copy `reportPdf.js`'s `ACCENT_HEX.brand`; it is `#4f46e5` (indigo), predating the red
   brand. The neutrals in that block are correct and are mirrored in `packetTheme.js`.
+
+## The map
+
+`client/src/components/packet/PacketMap.jsx` — self-contained, modelled on `AnswerMiniMap.jsx`,
+because there is **no** reusable "draw these turfs" helper (TurfsPage inlines its own layer
+setup; `lib/mapRender.js` is household-pin machinery only). It reuses the boundaries already on
+`/sources` rather than calling `GET /admin/campaigns/:id/turfs`, which has no projection and
+would ship every book's full `householdIds` array.
+
+Traps it has to respect, all of them learned by TurfsPage first:
+
+- A basemap `setStyle()` **wipes every custom source and layer** — they are re-registered on
+  `style.load`, guarded by `if (map.getSource(…)) return`, and a pending handler is removed in
+  the effect cleanup or two styles both re-register.
+- The click handler is bound **once** and reads the toggle through a ref; a handler closing over
+  `selection` goes stale after the first toggle.
+- **A click on bare map does not clear the selection** — an accidental blank click wiping a
+  built-up print run is a failure this repo already had once.
+- Bounding boxes must flatten `MultiPolygon` one extra level or the fit lands on `NaN`.
+- The camera fits **once per round**, keyed on the book-id signature, so toggling a book never
+  yanks the view.
+- The map mounts only while its tab is open — a Mapbox canvas built inside a `display:none`
+  container comes up zero-sized. The preview stays mounted and merely hidden, so switching back
+  doesn't re-render the PDF.
+- Basemap dark ≠ app dark. Label ink flips on `useMapStyle().dark`, not `useTheme()` — the map
+  can be light while the console is dark, by design.
+- `mapboxgl` comes from `lib/mapboxInit.js`, never `'mapbox-gl'` directly: the wrapper carries
+  the usage-beacon mute and the subprocessor-disclosure ruling.
 
 ## Fonts
 

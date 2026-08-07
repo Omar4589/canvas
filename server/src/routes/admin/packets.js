@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Pass } from '../../models/Pass.js';
+import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
@@ -43,21 +44,52 @@ const idList = (v) =>
     .map((s) => String(s).trim())
     .filter((s) => mongoose.isValidObjectId(s));
 
-// What can be printed: published books on active rounds, plus saved searches.
+// What can be printed: published books on active AND draft rounds, plus saved searches.
+// Draft is deliberate — a pass cannot be activated until its books are published, so
+// "print the night before launch" is exactly the draft-pass / published-books state.
 router.get('/sources', async (req, res, next) => {
   try {
     const campaignId = req.campaign._id;
+
+    // Walk lists (the Effort model) are the top level a user picks from — a campaign runs
+    // several in parallel, each with its own rounds, and a bare "Pass 3" doesn't say which.
+    const efforts = await Effort.find({ campaignId }, { name: 1 }).sort({ createdAt: 1 }).lean();
+    const effortNameById = new Map(efforts.map((e) => [String(e._id), e.name]));
+    const effortRank = new Map(efforts.map((e, i) => [String(e._id), i]));
+
     const passes = await Pass.find(
       { campaignId, status: { $in: ['active', 'draft'] } },
       { name: 1, roundNumber: 1, status: 1, effortId: 1 }
+    ).lean();
+    // Group by walk list first, then by round — sorting on roundNumber alone interleaves
+    // walk lists (A's Pass 1, B's Pass 1, A's Pass 2 …), which is unreadable.
+    passes.sort(
+      (a, b) =>
+        (effortRank.get(String(a.effortId)) ?? 99) - (effortRank.get(String(b.effortId)) ?? 99) ||
+        a.roundNumber - b.roundNumber
+    );
+
+    // Every non-archived book, in creation order — the ranking below must see the DRAFT
+    // siblings too, or colours shift the moment a draft book is accepted.
+    const turfs = await Turf.find(
+      { campaignId, status: { $ne: 'archived' } },
+      { name: 1, passId: 1, doorCount: 1, householdIds: 1, status: 1, boundary: 1, centroid: 1 }
     )
-      .sort({ roundNumber: 1 })
+      .sort({ createdAt: 1 })
       .lean();
 
-    const turfs = await Turf.find(
-      { campaignId, status: 'published' },
-      { name: 1, passId: 1, doorCount: 1, householdIds: 1 }
-    ).lean();
+    // THE colour rule, assigned once, here. A book's colour is its position within its own
+    // pass in creation order — identical to TurfsPage's `colorByTurf`. Every surface (this
+    // picker, the studio map, the printed stripe) reads this number instead of using its own
+    // array position, which is what previously gave one book three different colours.
+    const perPass = new Map();
+    const colorIndexByTurf = new Map();
+    for (const t of turfs) {
+      const k = String(t.passId);
+      const n = perPass.get(k) || 0;
+      colorIndexByTurf.set(String(t._id), n % 12);
+      perPass.set(k, n + 1);
+    }
 
     const assignments = await TurfAssignment.find({ campaignId })
       .populate('userId', 'firstName lastName')
@@ -73,6 +105,7 @@ router.get('/sources', async (req, res, next) => {
 
     const byPass = new Map(passes.map((p) => [String(p._id), []]));
     for (const t of turfs) {
+      if (t.status !== 'published') continue; // ranked above, but a draft book can't be printed
       const arr = byPass.get(String(t.passId));
       if (!arr) continue; // a book on an archived round — not offered for printing
       arr.push({
@@ -81,7 +114,12 @@ router.get('/sources', async (req, res, next) => {
         // doorCount is the cut-time count; the live knockable number is resolved at
         // generation, so the picker labels this as approximate rather than promising it.
         doorCount: t.doorCount || (t.householdIds || []).length,
+        colorIndex: colorIndexByTurf.get(String(t._id)) ?? 0,
         assignedTo: (assignedByTurf.get(String(t._id)) || []).join(', ') || null,
+        // Display-only geometry for the studio map. Polygon OR MultiPolygon — a book that
+        // owns a door surrounded by another book grows pocket islands.
+        boundary: t.boundary || null,
+        centroid: t.centroid || null,
       });
     }
 
@@ -100,9 +138,12 @@ router.get('/sources', async (req, res, next) => {
         name: p.name,
         roundNumber: p.roundNumber,
         status: p.status,
-        books: (byPass.get(String(p._id)) || []).sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { numeric: true })
-        ),
+        effortId: p.effortId ? String(p.effortId) : null,
+        // The label the whole picker hangs off. Matches TurfsPage's pass picker wording.
+        effortName: effortNameById.get(String(p.effortId)) || 'Walk list',
+        // Ordered by colour, i.e. by creation — the same order the Turfs map sidebar lists
+        // them in, so the two screens read identically.
+        books: (byPass.get(String(p._id)) || []).sort((a, b) => a.colorIndex - b.colorIndex),
       })),
       walkLists: walkLists.map((w) => ({
         id: String(w._id),

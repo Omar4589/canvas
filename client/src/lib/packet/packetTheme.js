@@ -14,13 +14,25 @@ export const RULE = [229, 231, 235]; // #E5E7EB
 export const HAIRLINE = [209, 213, 219]; // #D1D5DB — what a volunteer writes ON
 export const WHITE = [255, 255, 255];
 
-// Book stripe colours, matched to the Turfs map so twelve packets face-down on a folding
-// table sort the same way the books do on screen.
+// Book stripe colours. These are the SAME twelve hues, in the SAME order, as
+// `BOOK_COLORS` in client/src/pages/TurfsPage.jsx:34 — so a book is one colour on the Turf
+// Cutting map, in the studio's picker and map, and on the printed stripe.
+//
+// That is only true if the INDEX agrees too. The index is assigned by the SERVER
+// (`colorIndex`, from the book's position within its pass in creation order) and every
+// surface reads it rather than using its own array position — a picker sorted by name and a
+// map sorted by createdAt otherwise hand the same book two different colours.
 export const BOOK_COLORS = [
-  [124, 58, 237], [8, 145, 178], [202, 138, 4], [22, 163, 74],
-  [219, 39, 119], [37, 99, 235], [234, 88, 12], [13, 148, 136],
-  [147, 51, 234], [190, 24, 93], [5, 150, 105], [161, 98, 7],
+  [37, 99, 235], [22, 163, 74], [219, 39, 119], [234, 88, 12],
+  [124, 58, 237], [8, 145, 178], [202, 138, 4], [220, 38, 38],
+  [5, 150, 105], [147, 51, 234], [13, 148, 136], [225, 29, 72],
 ];
+
+// The same list as CSS hex, for the on-screen picker and map (which need strings, not
+// triplets). Derived so the two can never drift.
+export const BOOK_COLOR_HEX = BOOK_COLORS.map(
+  ([r, g, b]) => `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`
+);
 
 // Prior-round status pill ink. Keyed to Household.status values.
 export const STATUS_INK = {

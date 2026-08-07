@@ -304,10 +304,13 @@ const drawBand = (doc, payload, book, ctx) => {
   setFont(doc, TYPE.headerBook, 'bold', DARK);
   text(doc, book.name, right, y + 8, { align: 'right' });
   setFont(doc, TYPE.headerMeta, 'normal', GRAY);
+  // Deliberately NOT the in-app assignee. A packet goes to whoever picks it up off the
+  // folding table, which is rarely who the app thinks holds the book — printing a name here
+  // would be wrong more often than right, and wrong in a way nobody can correct with a pen.
+  // The cover carries a write-in line instead.
   const bits = [
     book.roundNumber ? `Round ${book.roundNumber}` : null,
     `${book.doorCount} doors`,
-    book.assignedTo,
   ].filter(Boolean);
   text(doc, bits.join(' · '), right, y + 19, { align: 'right' });
 
@@ -356,13 +359,16 @@ const drawManifest = (doc, payload, ctx) => {
   text(doc, 'HAND OUT AGAINST THIS SHEET — ONE LINE PER PACKET', x, y);
   y += 16;
 
+  // The last three are ruled cells, not data — custody gets written in ink, at the table
+  // where the packets actually are. Widths sum to CONTENT_W (516).
   const cols = [
-    { label: 'Code', w: 62 },
-    { label: 'Book', w: 168 },
-    { label: 'Doors', w: 44 },
-    { label: 'Pages', w: 48 },
-    { label: 'Out', w: 97 },
-    { label: 'In', w: 97 },
+    { label: 'Code', w: 58 },
+    { label: 'Book', w: 146 },
+    { label: 'Doors', w: 38 },
+    { label: 'Pages', w: 42 },
+    { label: 'Walked by', w: 116, write: true },
+    { label: 'Out', w: 58, write: true },
+    { label: 'In', w: 58, write: true },
   ];
   setFont(doc, TYPE.micro, 'bold', SUBTLE);
   let cx = x;
@@ -383,10 +389,12 @@ const drawManifest = (doc, payload, ctx) => {
     text(doc, String(book.doorCount), cx, y + 11); cx += cols[2].w;
     setFont(doc, TYPE.option, 'normal', GRAY);
     text(doc, range ? `${range.from}-${range.to}` : '—', cx, y + 11); cx += cols[3].w;
-    // Ruled cells — custody is recorded in ink, on the table where the packets are.
     doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
-    doc.line(cx, y + 13, cx + cols[4].w - 10, y + 13); cx += cols[4].w;
-    doc.line(cx, y + 13, cx + cols[5].w - 10, y + 13);
+    doc.setLineWidth(0.5);
+    for (const c of cols.filter((k) => k.write)) {
+      doc.line(cx, y + 13, cx + c.w - 10, y + 13);
+      cx += c.w;
+    }
     y += 20;
     doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
     doc.line(x, y - 3, x + ctx.contentW, y - 3);
@@ -422,10 +430,22 @@ const drawCover = (doc, payload, book, ctx) => {
     book.roundNumber ? `Round ${book.roundNumber}` : null,
     `${book.doorCount} doors`,
     `${book.voterCount} residents`,
-    book.assignedTo ? `Assigned: ${book.assignedTo}` : null,
   ].filter(Boolean);
   text(doc, bits.join(' · '), x, y);
-  y += 30;
+  y += 34;
+
+  // Who is carrying this — filled in with a pen, by whoever actually takes it. The app's
+  // assignment is not printed anywhere: on a paper day the packet goes to whoever is
+  // standing there, and a pre-printed name that turns out to be wrong cannot be corrected.
+  const nameW = ctx.contentW * 0.62;
+  setFont(doc, TYPE.micro, 'bold', SUBTLE);
+  text(doc, 'WALKED BY', x, y);
+  text(doc, 'DATE', x + nameW + 16, y);
+  doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
+  doc.setLineWidth(0.75);
+  doc.line(x, y + 22, x + nameW, y + 22);
+  doc.line(x + nameW + 16, y + 22, x + ctx.contentW, y + 22);
+  y += 44;
 
   if (book.streets.length) {
     setFont(doc, TYPE.micro, 'bold', SUBTLE);

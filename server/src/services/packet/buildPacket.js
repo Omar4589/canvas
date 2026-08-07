@@ -4,7 +4,6 @@ import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
-import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
@@ -232,23 +231,30 @@ const buildFromBooks = async (campaign, turfIds, opts) => {
   const rank = new Map(turfIds.map((id, i) => [String(id), i]));
   turfs.sort((a, b) => (rank.get(String(a._id)) ?? 0) - (rank.get(String(b._id)) ?? 0));
 
+  const passIds = [...new Set(turfs.map((t) => String(t.passId)).filter(Boolean))];
   const passes = await Pass.find(
-    { _id: { $in: turfs.map((t) => t.passId).filter(Boolean) } },
+    { _id: { $in: passIds } },
     { name: 1, roundNumber: 1, effortId: 1 }
   ).lean();
   const passById = new Map(passes.map((p) => [String(p._id), p]));
 
-  const assignments = await TurfAssignment.find({ turfId: { $in: turfs.map((t) => t._id) } })
-    .populate('userId', 'firstName lastName')
+  // The book's colour is its position within its OWN PASS in creation order — the same rule
+  // GET /sources and TurfsPage use. It must be computed over every sibling in the pass, not
+  // over the selection, or printing two books out of twelve gives them colours 0 and 1 and
+  // the paper stripe contradicts both the picker and the Turf Cutting map.
+  const siblings = await Turf.find(
+    { passId: { $in: passIds }, status: { $ne: 'archived' } },
+    { passId: 1 }
+  )
+    .sort({ createdAt: 1 })
     .lean();
-  const assignedByTurf = new Map();
-  for (const a of assignments) {
-    if (!a.userId) continue;
-    const k = String(a.turfId);
-    const label = `${(a.userId.firstName || '').charAt(0)}. ${a.userId.lastName || ''}`.trim();
-    const arr = assignedByTurf.get(k) || [];
-    arr.push(label);
-    assignedByTurf.set(k, arr);
+  const perPass = new Map();
+  const colorIndexByTurf = new Map();
+  for (const s of siblings) {
+    const k = String(s.passId);
+    const n = perPass.get(k) || 0;
+    colorIndexByTurf.set(String(s._id), n % 12);
+    perPass.set(k, n + 1);
   }
 
   const resolveSurvey = surveyResolver(campaign);
@@ -275,11 +281,10 @@ const buildFromBooks = async (campaign, turfIds, opts) => {
       id: String(turf._id),
       name: turf.name,
       code: packetCode(pass?.roundNumber, i),
-      colorIndex: i % 12,
+      colorIndex: colorIndexByTurf.get(String(turf._id)) ?? i % 12,
       passId: pass ? String(pass._id) : null,
       passName: pass?.name || null,
       roundNumber: pass?.roundNumber || null,
-      assignedTo: (assignedByTurf.get(String(turf._id)) || []).join(', ') || null,
       doorCount: doors.length,
       voterCount: doors.reduce((n, d) => n + d.voters.length, 0),
       streets: streetSummary(doors),
@@ -328,7 +333,6 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
         passId: null,
         passName: null,
         roundNumber: null,
-        assignedTo: null,
         doorCount: doors.length,
         voterCount: doors.reduce((n, d) => n + d.voters.length, 0),
         streets: streetSummary(doors),

@@ -15,9 +15,11 @@ tags: print, packets, paper, pdf, volunteers, walk list, printable
 
 ## The three panes
 
-**Left — what to print.** Your published books, grouped by round, plus your saved searches. Tick as many books as you want; each one becomes its own packet. **All** and **Clear** select a whole round at once.
+**Left — what to print.** Your books, grouped **walk list → round → book**, plus your saved searches. Your campaign runs several walk lists at once and each has its own rounds, so the walk list's name sits above its rounds — "Pass 3" on its own wouldn't tell you which one. **All** and **Clear** select a whole walk list or a single round. At the bottom, a running total shows how many packets, doors and sheets you've picked, and warns you before you go over the limit.
 
-**Middle — the packet.** This isn't a preview drawing of the PDF, it *is* the PDF, rebuilt about a quarter-second after you change anything. What you download is the file you're looking at. **Open in a new tab** gives you a bigger view.
+**Middle — two tabs.** **Packet** isn't a preview drawing of the PDF, it *is* the PDF, rebuilt about a quarter-second after you change anything. What you download is the file you're looking at, and **Open in a new tab** gives you a bigger view. **Map** shows where the books actually are — click a shape to add or remove it. Only one round is drawn at a time, because rounds cover the same streets and stacking them would be unreadable.
+
+A book keeps the **same colour** everywhere: on the Turf Cutting map, in this list, on the map here, and as the stripe across the top of its printed pages.
 
 **Right — the design.** Every control shows what it costs: the page and sheet count under the button updates as you turn each knob.
 
@@ -43,6 +45,8 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 Every page carries the campaign, your organisation, the book name, and a **packet code** like `R2-B07` in a red box — so a packet found later says what it is without anyone opening the app. Under that is a coloured stripe matching the book's colour on the Turf Cutting map.
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
+
+The **cover** has a **Walked by** and **Date** line for whoever picks the packet up. No canvasser's name is ever printed — a packet goes to whoever takes it off the table, which is rarely who the app thinks holds the book, and a wrong pre-printed name can't be fixed with a pen. If you print several books at once, the hand-out sheet has a matching **Walked by** column so you can sign them out. Who currently holds a book *in the app* still shows in the picker on screen, so you can spot a book that someone is already walking on a phone.
 
 ## What never prints
 

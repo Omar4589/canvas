@@ -135,6 +135,15 @@ before(async () => {
     organizationId: org._id, campaignId: camp._id, passId: pass._id, turfId: turf._id, userId: walker._id,
   });
 
+  // A second book in the SAME pass, created later. Its colour must be 1 (its position in the
+  // pass) whether it is printed alone or alongside the first.
+  const secondDoor = await mkDoor('Second');
+  const turf2 = await Turf.create({
+    organizationId: org._id, campaignId: camp._id, passId: pass._id,
+    name: 'Ward 5 — Book D', mode: 'geometric', status: 'published',
+    householdIds: [secondDoor._id], doorCount: 1,
+  });
+
   // Two residents at door A: one ordinary, one flagged do-not-contact. The door must print;
   // the flagged person must not; nothing may hint that anyone was removed.
   await Voter.create({
@@ -174,7 +183,7 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, turf, pass, effort, a, b, c, restricted, dncDoor, votedDoor, excluded, inactive,
+    org, camp, turf, turf2, pass, effort, a, b, c, restricted, dncDoor, votedDoor, excluded, inactive,
     noCoords, list, bookOrder, admin, walker, adminTok: signUserToken(admin), walkerTok: signUserToken(walker),
   });
 });
@@ -304,9 +313,29 @@ test('the sources list offers published books and saved searches', { skip }, asy
   assert.equal(json.cap, PACKET_DOOR_CAP);
   const round = json.rounds.find((r) => r.roundNumber === 2);
   assert.ok(round);
-  assert.equal(round.books.length, 1);
+  // A campaign runs several walk lists in parallel, so a round must say which one it belongs
+  // to — "Pass 3" alone is ambiguous when three walk lists each have a Pass 3.
+  assert.equal(round.effortName, 'North');
+  assert.equal(round.effortId, String(ctx.effort._id));
+  assert.equal(round.books.length, 2);
   assert.equal(round.books[0].assignedTo, 'M. Ochoa');
+  // Colour is the book's position within its PASS, in creation order — the same rule
+  // TurfsPage uses, so the picker, the map and the printed stripe agree.
+  assert.deepEqual(round.books.map((b) => b.colorIndex), [0, 1]);
+  // The map needs geometry; a book cut without a boundary still lists, with null.
+  assert.ok('boundary' in round.books[0] && 'centroid' in round.books[0]);
   assert.ok(json.walkLists.some((w) => w.name === 'Saturday list'));
+});
+
+test('book colour is stable — printing the 2nd book ALONE still colours it 2nd', { skip }, async () => {
+  const { status, json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${ctx.turf2._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.equal(status, 200);
+  // Selection-relative colouring would make this 0 and the paper stripe would contradict
+  // both the picker and the Turf Cutting map.
+  assert.equal(json.books[0].colorIndex, 1);
 });
 
 test('an empty selection is a 400, never a silent whole-campaign print', { skip }, async () => {
