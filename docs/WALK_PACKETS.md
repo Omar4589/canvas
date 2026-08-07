@@ -76,7 +76,7 @@ of blanks.
 ## What's on a page
 
 Every sheet carries a **header band** — campaign, organisation, book name, round, door count,
-and a **packet code** like `R2-B07` in a red box. Under that is a coloured
+and a **packet code** like `R2-B07` in a red box — `R2` is the round, `B07` is the book. Under that is a coloured
 stripe matching the book's colour on the Turf Cutting map, so a dozen packets face-down on a
 folding table are sortable at a glance.
 
@@ -91,9 +91,15 @@ Each door has:
   field list) · Restricted.
 - **Lines to write on.**
 
-Every packet also gets a **cover** with the packet code in large type, a **Walked by** and
-**Date** line to fill in, the streets it covers **in alphabetical order** (you scan this list for a name, so
-findability beats ranking by size), a tally box, and how many doors were held back.
+Every packet also gets a **cover**, led by the **race name** — the biggest, boldest thing on
+the page, with your organisation under it. Below that sits the book's own identity: its name,
+round, door and resident counts, the **packet code** in a red box, and the book's colour bar so
+the cover matches the stripe on every page behind it. Then a **Walked by / Date** line, the
+streets it covers **in alphabetical order** (you scan this list for a name, so findability beats
+ranking by size), a tally box, and how many doors were held back.
+
+On a very large book the street list is **capped to what fits** and ends with "+ N more streets"
+— the cover doesn't run onto a second sheet, and every address is listed inside anyway.
 If you print more than one book at once you also get a **hand-out sheet** at the front: one line
 per packet, with ruled **Walked by / Out / In** cells so a field director can sign packets out on
 the table where the packets actually are.
@@ -168,7 +174,8 @@ doesn't count knocks.
 
 ## Practical notes for a paper day
 
-- **Print the morning of.** A packet freezes the moment it's built. Someone who asks to be left
+- **Print the morning of.** Every page is stamped with the date it was printed (the date only —
+  the hour told nobody anything). A packet freezes the moment it's built. Someone who asks to be left
   alone on Thursday is still in a Wednesday printout. Phones re-learn that within minutes;
   paper can't.
 - **Give the paper doors their own book, assigned to nobody.** A book with no one assigned to it
@@ -299,6 +306,20 @@ a zigzag book must regroup, a rural book must not.
 `printOrder` (`'street' | 'route'`) rides on each book in the payload so the reason is visible.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
+
+## The packet code
+
+`R{roundNumber}-B{bookIndex + 1}`, e.g. `R2-B07`. The B-number is the book's **stable position
+within its pass** — the same index that picks its colour — so a book carries the same code
+whether it is printed alone or with eleven others.
+
+It used to be the book's position in the current *selection*, which meant printing books 3/7/9
+produced `B01`/`B02`/`B03`, and printing book 7 alone produced `B01`. A code that changes every
+print run cannot do the one job it exists for: telling someone what a packet found on a desk
+three weeks later actually is.
+
+A saved-search packet has no round and no book position, so its plate reads **`LIST`** rather
+than a fabricated `R1-B01`.
 
 ## The colour rule
 

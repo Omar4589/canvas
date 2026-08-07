@@ -85,8 +85,14 @@ export const TYPE = Object.freeze({
   headerMeta: 8,
   plate: 12,
   footer: 7.5,
+  // The cover's hierarchy: the RACE is the masthead, the book is the identifier under it.
+  // A volunteer already knows which campaign they turned up for — but a packet found later,
+  // or a table holding two campaigns' packets, is answered by the race name first.
+  coverCampaign: 25,
+  coverOrg: 11,
+  coverBook: 15,
   coverTitle: 24,
-  coverPlate: 28,
+  coverPlate: 22,
   coverBody: 10,
 });
 

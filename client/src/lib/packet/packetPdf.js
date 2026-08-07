@@ -425,28 +425,51 @@ const drawManifest = (doc, payload, ctx) => {
 
 const drawCover = (doc, payload, book, ctx) => {
   const x = PAGE.MARGIN;
-  let y = PAGE.MARGIN + 60;
+  let y = PAGE.MARGIN + 34;
 
+  // ── masthead: the RACE, biggest thing on the page ──
+  drawDoorlinePin(doc, x, y - 24, 26);
+  const mastheadX = x + 34;
+  setFont(doc, TYPE.coverCampaign, 'bold', DARK);
+  const nameLines = doc.splitTextToSize(asciiSafe(payload.campaign.name), ctx.contentW - 34);
+  for (const line of nameLines) {
+    text(doc, line, mastheadX, y);
+    y += 27;
+  }
+  setFont(doc, TYPE.coverOrg, 'normal', GRAY);
+  text(doc, payload.organization.name, mastheadX, y - 5);
+  y += 16;
+
+  doc.setFillColor(BRAND[0], BRAND[1], BRAND[2]);
+  doc.rect(x, y, ctx.contentW, 2.5, 'F');
+  y += 26;
+
+  // ── the identifier: which book, and the code plate that sorts a stack ──
+  const plateW = 118;
+  const plateH = 38;
   doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
-  doc.setLineWidth(2);
-  doc.roundedRect(x, y - 34, 200, 46, 6, 6, 'S');
+  doc.setLineWidth(1.5);
+  doc.roundedRect(x + ctx.contentW - plateW, y - 26, plateW, plateH, 5, 5, 'S');
   setFont(doc, TYPE.coverPlate, 'bold', BRAND);
-  text(doc, book.code, x + 100, y, { align: 'center' });
-  y += 44;
+  text(doc, book.code, x + ctx.contentW - plateW / 2, y - 1, { align: 'center' });
 
-  setFont(doc, TYPE.coverTitle, 'bold', DARK);
-  text(doc, book.name, x, y);
-  y += 22;
+  setFont(doc, TYPE.coverBook, 'bold', DARK);
+  text(doc, book.name, x, y - 10);
   setFont(doc, TYPE.coverBody, 'normal', GRAY);
-  text(doc, `${payload.campaign.name} · ${payload.organization.name}`, x, y);
-  y += 15;
   const bits = [
     book.roundNumber ? `Round ${book.roundNumber}` : null,
     `${book.doorCount} doors`,
     `${book.voterCount} residents`,
   ].filter(Boolean);
-  text(doc, bits.join(' · '), x, y);
-  y += 34;
+  text(doc, bits.join(' · '), x, y + 5);
+  y += 26;
+
+  // The book's colour, so the cover matches the stripe on every page behind it and the
+  // swatch on the Turf Cutting map.
+  const stripe = BOOK_COLORS[book.colorIndex % BOOK_COLORS.length];
+  doc.setFillColor(stripe[0], stripe[1], stripe[2]);
+  doc.rect(x, y, ctx.contentW, 4, 'F');
+  y += 30;
 
   // Who is carrying this — filled in with a pen, by whoever actually takes it. The app's
   // assignment is not printed anywhere: on a paper day the packet goes to whoever is
@@ -466,14 +489,27 @@ const drawCover = (doc, payload, book, ctx) => {
     text(doc, 'STREETS IN THIS PACKET', x, y);
     y += 14;
     setFont(doc, TYPE.coverBody, 'normal', DARK);
-    const half = Math.ceil(book.streets.length / 2);
+
+    // The cover does NOT paginate, so the list is capped to the rows that actually fit above
+    // the tally box and the footer note. A book in a dense downtown grid can touch 80+ street
+    // names, and an uncapped two-column list ran clean off the bottom of the sheet.
+    const RESERVED = 150; // tally box + omission line + print-only note
+    const rowsThatFit = Math.max(1, Math.floor((PAGE.H - PAGE.MARGIN - RESERVED - y) / 13));
+    const shown = Math.min(book.streets.length, rowsThatFit * 2);
+    const half = Math.ceil(shown / 2);
     const colW = ctx.contentW / 2;
-    book.streets.forEach((s, i) => {
+    book.streets.slice(0, shown).forEach((s, i) => {
       const col = i < half ? 0 : 1;
       const row = i < half ? i : i - half;
       text(doc, `${s.name}  ${s.count}`, x + col * colW, y + row * 13);
     });
-    y += Math.max(half, 1) * 13 + 18;
+    y += Math.max(half, 1) * 13;
+    if (shown < book.streets.length) {
+      setFont(doc, TYPE.gate, 'italic', GRAY);
+      text(doc, `+ ${book.streets.length - shown} more streets — every address is listed inside.`, x, y + 10);
+      y += 14;
+    }
+    y += 18;
   }
 
   if (book.omitted.total > 0) {
@@ -547,8 +583,10 @@ export const renderPacketPdf = async (payload, settings) => {
     noteLines: settings.noteLines,
     showOutcome: settings.showOutcome,
     showPriorStatus: settings.showPriorStatus,
-    printedAt: new Date(payload.generatedAt).toLocaleString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    // Date only. A packet goes stale by DAYS — someone opting out on Thursday is still in a
+    // Wednesday printout — so the hour told a volunteer nothing and just added clutter.
+    printedAt: new Date(payload.generatedAt).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
     }),
     pageRanges: new Map(),
     survey: null,

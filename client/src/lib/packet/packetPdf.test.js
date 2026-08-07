@@ -234,6 +234,38 @@ test('the per-page name line costs no extra pages — it lives in the header ban
   assert.equal(doc.getNumberOfPages(), PAGE_PIN_60_DOORS);
 });
 
+test('the cover never overflows — long race names and huge street lists', async () => {
+  // The cover does NOT paginate, so everything on it has to be bounded. A dense downtown
+  // book can touch 80+ street names, and an uncapped two-column list ran off the sheet.
+  const longName = 'Committee to Elect Randall Marchetti to the Florida House of Representatives District 54';
+  for (const [name, streetCount] of [
+    ['Randy for HD54', 0], ['Randy for HD54', 6], [longName, 30], [longName, 120], [longName, 400],
+  ]) {
+    const payload = makePayload(4, 2);
+    payload.campaign.name = name;
+    payload.books[0].streets = Array.from({ length: streetCount }, (_, i) => ({
+      name: `STREET ${i} AVENUE`, count: i + 1,
+    }));
+    const doc = await renderPacketPdf(payload, DEFAULT_SETTINGS);
+    doc.setPage(1);
+    for (const y of textYs(doc.internal.pages[1].join('\n'))) {
+      assert.ok(y >= PAGE.MARGIN - 2, `cover ink at y=${y} with ${streetCount} streets is off the page`);
+    }
+  }
+});
+
+test('the race is the masthead and the code plate is stable', async () => {
+  const payload = makePayload(4, 2);
+  payload.campaign.name = 'Riverside City Council 2026';
+  const doc = await renderPacketPdf(payload, DEFAULT_SETTINGS);
+  doc.setPage(1);
+  const cover = doc.internal.pages[1].join('\n');
+  assert.ok(cover.includes('Riverside City Council 2026'), 'the race must appear on the cover');
+  assert.ok(cover.includes('R2-B07'), 'the code plate must appear on the cover');
+  // No clock on the paper — a packet goes stale by days, not minutes.
+  assert.ok(!/\d:\d\d\s*(AM|PM)/.test(pageTexts(doc).join('\n')), 'no time of day anywhere');
+});
+
 test('filename reflects the layout and the generation date', () => {
   const p = makePayload(1, 1);
   assert.match(packetFilename(p, { layout: 'field' }), /field-list-2026-08-06\.pdf$/);
