@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import mapboxgl from '../../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -109,6 +109,9 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
   const mapRef = useRef(null);
   const toggleRef = useRef(onToggleBook);
   const fittedRef = useRef('');
+  // The Mapbox token is fetched, so the map does not exist on first render. Everything that
+  // touches a layer waits on this rather than on mapRef alone.
+  const [ready, setReady] = useState(false);
   const { styleId, styleURL, setStyle, dark } = useMapStyle();
 
   const withBooks = useMemo(() => rounds.filter((r) => r.books.length), [rounds]);
@@ -136,6 +139,27 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
   // closed over `selection` would go stale after the very first toggle.
   useEffect(() => { toggleRef.current = onToggleBook; }, [onToggleBook]);
 
+  // Same trick for the DATA. The map is created asynchronously (after the token resolves) and
+  // a basemap swap wipes its sources, so there are three moments the layers need feeding:
+  // on 'load', on 'style.load', and whenever the selection changes. All three call this, and
+  // it reads the latest books through a ref so none of them can capture a stale closure.
+  const dataRef = useRef({ books: [], picked: [] });
+  dataRef.current = {
+    books,
+    picked: selection.kind === 'books' ? selection.turfIds : [],
+  };
+  const paint = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const fill = map.getSource('packet-books');
+    const label = map.getSource('packet-book-labels');
+    if (!fill || !label) return;
+    const { books: bs, picked } = dataRef.current;
+    const isPicked = (id) => picked.includes(id);
+    fill.setData(toFillGeoJSON(bs, isPicked));
+    label.setData(toLabelGeoJSON(bs, isPicked));
+  }, []);
+
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return undefined;
     mapboxgl.accessToken = tokenQ.data.token;
@@ -148,7 +172,11 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
     });
     mapRef.current = map;
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-    map.on('load', () => registerLayers(map, dark));
+    map.on('load', () => {
+      registerLayers(map, dark);
+      paint();
+      setReady(true);
+    });
     map.on('click', (e) => {
       const hit = map.queryRenderedFeatures(e.point, { layers: ['packet-book-fill'] });
       // Clicking bare map deliberately does NOT clear the selection — an accidental blank
@@ -161,6 +189,8 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
     return () => {
       map.remove();
       mapRef.current = null;
+      setReady(false);
+      fittedRef.current = '';
     };
     // styleURL/dark are handled by the swap effect below; re-running this would rebuild the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,39 +201,32 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
-    const handler = () => registerLayers(map, dark);
+    const handler = () => { registerLayers(map, dark); paint(); };
     map.on('style.load', handler);
     map.setStyle(styleURL);
     return () => map.off('style.load', handler);
   }, [styleURL, dark]);
 
-  // Feed the layers. Guarded on the source existing, because style swaps briefly remove it.
+  // `ready` is in the deps on purpose: without it, the very first paint never happened. The
+  // map is built only after the token query resolves, by which point books/selection have not
+  // changed — so this effect had already run once against a null map and was never re-run.
+  // The books simply did not appear until you touched the selection.
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const isPicked = (id) => selection.kind === 'books' && selection.turfIds.includes(id);
-    const paint = () => {
-      const fill = map.getSource('packet-books');
-      const label = map.getSource('packet-book-labels');
-      if (!fill || !label) return;
-      fill.setData(toFillGeoJSON(books, isPicked));
-      label.setData(toLabelGeoJSON(books, isPicked));
-    };
-    if (map.isStyleLoaded()) paint();
-    else map.once('idle', paint);
-  }, [books, selection]);
+    if (!ready) return;
+    paint();
+  }, [books, selection, ready, paint]);
 
   // Fit once per round, never on a selection change — otherwise every click yanks the camera.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !books.length) return;
+    if (!ready || !map || !books.length) return;
     const sig = books.map((b) => b.id).join(',');
     if (fittedRef.current === sig) return;
     const bb = bboxOf(books);
     if (!bb) return;
     fittedRef.current = sig;
     map.fitBounds(bb, { padding: 40, maxZoom: 15, duration: 0 });
-  }, [books]);
+  }, [books, ready]);
 
   // The pane resizes when the window does; a stale canvas size renders a letterboxed map.
   useEffect(() => {
