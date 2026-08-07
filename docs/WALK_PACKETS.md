@@ -330,6 +330,20 @@ a zigzag book must regroup, a rural book must not.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
 
+## "What to say"
+
+The script opens the **first door page** and the doors flow underneath it — it does not get a
+sheet of its own. Measured on a 207-door survey packet, that makes it free: 105 pages with the
+script and 105 without, because it fits in space that page already had.
+
+Two things it must not do, both of which it used to:
+
+- **Collide with the band.** A 24pt heading on `BODY_TOP` put its cap height straight through
+  the header band's WALKED BY rule. It is now 15pt, started 12pt lower, with 17pt of clearance.
+- **Break onto a bare page.** Overflow used to call `doc.addPage()` directly, so a long script
+  continued onto a page with no header band, no footer and no entry in `pageOwner` — unbranded
+  and unnumbered. It now takes the renderer's own `newPage` as a callback.
+
 ## The cover's type scale
 
 Top down: the **Doorline wordmark** at 14.04pt (derived — it is 0.78 × the lockup mark's width,
@@ -342,8 +356,10 @@ words without shouting.
 
 ## Filenames
 
-`{campaign}-{book}-packet-{YYYY-MM-DD}.pdf`, e.g.
-`florida-hd54-randy-maggard-book-33-packet-2026-08-07.pdf`. Punctuation collapses to single
+`{campaign}-{book}-{kind}-{YYYY-MM-DD}.pdf`, e.g.
+`florida-hd54-randy-maggard-book-33-survey-packet-2026-08-07.pdf` or `…-book-33-field-list-…`.
+The kind is the **resolved** layout, not the requested one: asking for a survey packet on a
+campaign with no survey prints the field list, and the filename has to say what is inside. Punctuation collapses to single
 hyphens, the campaign truncates at 40 characters and the book at 30, and nothing trails a hyphen
 into the extension. A multi-book run is one PDF with no single book name, so it says how many:
 `…-5-books-packet-…`. The date stays because a packet goes stale — the guidance is to print the

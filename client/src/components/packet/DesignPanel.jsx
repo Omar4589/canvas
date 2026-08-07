@@ -83,8 +83,8 @@ export default function DesignPanel({
             checked={settings.showPriorStatus} onChange={(v) => set({ showPriorStatus: v })}
           />
           <Toggle
-            id="showScriptPage" label="What to say page"
-            hint="One reference sheet per packet, not beside every door."
+            id="showScriptPage" label="What to say"
+            hint="Opens the first door page — your opening, closing and option scripts, once."
             checked={settings.showScriptPage} onChange={(v) => set({ showScriptPage: v })}
             disabled={settings.layout !== 'survey' || !hasSurvey}
           />

@@ -165,7 +165,7 @@ export default function PrintPacketsPage() {
     setDownloading(true);
     try {
       const doc = docRef.current || (await renderPacketPdf(payload, effective));
-      doc.save(packetFilename(payload));
+      doc.save(packetFilename(payload, effective));
     } finally {
       setDownloading(false);
     }

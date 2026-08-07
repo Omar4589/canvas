@@ -101,6 +101,7 @@ export const TYPE = Object.freeze({
   coverOrg: 11,
   coverBook: 13,
   coverTitle: 24,
+  scriptTitle: 15, // a section heading now, not a page title — it shares a page with doors
   coverPlate: 22,
   coverBody: 10,
 });

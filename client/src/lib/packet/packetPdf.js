@@ -676,20 +676,29 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
   text(doc, `Printed ${ctx.printedAt}. Print only — nothing written in this packet syncs to Doorline.`, x, y);
 };
 
-const drawScriptPage = (doc, survey, ctx) => {
+// What to say. NOT its own sheet: it opens the first door page and the doors flow underneath,
+// because ten lines of script were costing a whole side of paper per book.
+//
+// `nextPage` is the renderer's own newPage, not doc.addPage — a long script used to break onto
+// a raw page with no header band, no footer and no entry in pageOwner, so it printed unbranded
+// and unnumbered.
+const drawScriptPage = (doc, survey, ctx, startY, nextPage) => {
   const x = PAGE.MARGIN;
-  let y = PAGE.BODY_TOP;
-  setFont(doc, TYPE.coverTitle, 'bold', DARK);
+  // Clear of the band's WALKED BY rule: a 24pt heading on BODY_TOP put its cap height straight
+  // through that line.
+  let y = startY + 12;
+  setFont(doc, TYPE.scriptTitle, 'bold', DARK);
   text(doc, 'What to say', x, y);
-  y += 26;
+  y += 20;
   const para = (label, body) => {
     if (!body) return;
-    setFont(doc, TYPE.micro, 'bold', SUBTLE);
+    if (y > PAGE.BODY_BOTTOM - 40) y = nextPage();
+    setFont(doc, TYPE.micro, 'bold', GRAY);
     text(doc, label.toUpperCase(), x, y);
     y += 13;
     setFont(doc, TYPE.coverBody, 'normal', DARK);
     doc.splitTextToSize(asciiSafe(body), ctx.contentW).forEach((ln) => {
-      if (y > PAGE.BODY_BOTTOM - 12) { doc.addPage(); y = PAGE.BODY_TOP; }
+      if (y > PAGE.BODY_BOTTOM - 12) y = nextPage();
       text(doc, ln, x, y);
       y += 13;
     });
@@ -700,6 +709,12 @@ const drawScriptPage = (doc, survey, ctx) => {
     para(`${s.question} — if they say "${s.option}"`, s.script);
   }
   para('Closing', survey.closing);
+
+  // Rule off the reference block so the first door doesn't read as part of the script.
+  doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
+  doc.setLineWidth(0.5);
+  doc.line(x, y - 2, x + ctx.contentW, y - 2);
+  return y + 14;
 };
 
 // ── the run ──────────────────────────────────────────────────────────────────
@@ -765,11 +780,7 @@ export const renderPacketPdf = async (payload, settings) => {
     drawCover(doc, payload, book, ctx, coverMap);
     pageOwner[doc.getNumberOfPages()] = book;
 
-    if (layout === 'survey' && ctx.survey && settings.showScriptPage &&
-        (ctx.survey.intro || ctx.survey.closing || ctx.survey.scripts.length)) {
-      newPage(book);
-      drawScriptPage(doc, ctx.survey, ctx);
-    }
+
 
     // CONTIGUOUS runs, in walk order. A route that leaves a street and comes back later gets
     // a SECOND run, and each band describes the stretch in front of the volunteer.
@@ -793,6 +804,10 @@ export const renderPacketPdf = async (payload, settings) => {
     });
 
     let y = newPage(book);
+    if (layout === 'survey' && ctx.survey && settings.showScriptPage &&
+        (ctx.survey.intro || ctx.survey.closing || ctx.survey.scripts.length)) {
+      y = drawScriptPage(doc, ctx.survey, ctx, y, () => newPage(book));
+    }
     let lastStreet = null;
     for (const [doorIdx, door] of book.doors.entries()) {
       const segs = buildDoorSegments(door, ctx);
@@ -891,10 +906,10 @@ export const renderPacketPdf = async (payload, settings) => {
   return doc;
 };
 
-// campaign · book · "packet" · the day it was built. A multi-book run has no single book name,
-// so it says how many. The date stays because a packet goes stale — the guidance is to print the
-// morning of, and without it a Wednesday file and a Saturday file are indistinguishable.
-export const packetFilename = (payload) => {
+// campaign · book · which kind of packet · the day it was built. A multi-book run has no single
+// book name, so it says how many. The date stays because a packet goes stale — the guidance is
+// to print the morning of, and without it a Wednesday file and a Saturday file look alike.
+export const packetFilename = (payload, settings = {}) => {
   const slug = (v, max) =>
     String(v || '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, max)
       .replace(/-+$/, '');
@@ -903,6 +918,11 @@ export const packetFilename = (payload) => {
   const which = books.length === 1
     ? (slug(books[0].name, 30) || 'book')
     : `${books.length}-books`;
+  // Resolved, not requested: asking for a survey packet on a campaign without a survey prints
+  // the field list, and the filename must say what is actually inside.
+  const kind = resolveLayout(settings, books.some((b) => b.survey)) === 'survey'
+    ? 'survey-packet'
+    : 'field-list';
   const day = new Date(payload.generatedAt).toISOString().slice(0, 10);
-  return `${camp}-${which}-packet-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
+  return `${camp}-${which}-${kind}-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
 };

@@ -36,7 +36,7 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 - **Lines to write on** — 0 to 6. Four is the default and is nearly free: going from two to four adds about five pages across a whole 200-door book.
 - **What happened boxes** — Not home, Refused, Wrong address, Surveyed, Restricted. The same five on both layouts.
 - **Last round's result** — shows a small pill on doors that were already visited this round.
-- **What to say page** — one reference sheet per packet carrying your opening, closing, and any option scripts, instead of repeating them beside every door.
+- **What to say** — your opening, closing and any option scripts, printed once at the top of the first door page rather than repeated beside every door. It shares that page with the doors, so it costs no extra paper.
 - **Map on the cover** — a map of the book with the walk drawn over it: the route, a dot per door, and **A** and **B** on your first and last. The line shows the **order** of the walk, drawn door to door — it isn't directions along the streets. Needs a Mapbox key set up; without one the map is simply absent and everything else prints as normal.
 - **Hand-out sheet** — a front page listing every packet with ruled Out/In cells, so you can sign packets out to volunteers on the table. Appears when you're printing more than one book.
 - **Skip apartments** — leaves out doors in multi-unit buildings. A locked lobby or a call box is a door a volunteer can't work, so a lot of campaigns drop them on a paper day. Off by default, and the number left out is shown on screen. Whether apartments are in the book at all is decided when you cut it; this just keeps them off the printout.

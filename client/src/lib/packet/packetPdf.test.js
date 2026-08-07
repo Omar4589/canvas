@@ -393,19 +393,35 @@ test('the race is the masthead', async () => {
   assert.ok(!/\d:\d\d\s*(AM|PM)/.test(pageTexts(doc).join('\n')), 'no time of day anywhere');
 });
 
-test('the filename is campaign, book, packet, date', () => {
+test('the filename is campaign, book, kind, date', () => {
   const p = makePayload(1, 1);
   p.campaign.name = 'Florida - HD54 Randy Maggard';
   p.books[0].name = 'Book 33';
-  assert.equal(packetFilename(p), 'florida-hd54-randy-maggard-book-33-packet-2026-08-06.pdf');
+  assert.equal(
+    packetFilename(p, { layout: 'survey' }),
+    'florida-hd54-randy-maggard-book-33-survey-packet-2026-08-06.pdf'
+  );
+  assert.equal(
+    packetFilename(p, { layout: 'field' }),
+    'florida-hd54-randy-maggard-book-33-field-list-2026-08-06.pdf'
+  );
+
+  // Asking for a survey packet on a campaign with no survey prints the field list, so the
+  // filename has to say field list too.
+  const noSurvey = makePayload(1, 1);
+  noSurvey.books[0].survey = null;
+  assert.match(packetFilename(noSurvey, { layout: 'survey' }), /field-list-2026-08-06\.pdf$/);
 
   // A run of several books has no one book name to use, so it says how many.
   p.books.push({ ...p.books[0], id: 'b2', name: 'Book 34' });
-  assert.equal(packetFilename(p), 'florida-hd54-randy-maggard-2-books-packet-2026-08-06.pdf');
+  assert.match(packetFilename(p, { layout: 'survey' }), /-2-books-survey-packet-2026-08-06\.pdf$/);
 
   // Punctuation collapses; nothing trails a hyphen into ".pdf".
   const odd = makePayload(1, 1);
   odd.campaign.name = "Mayor's Race — 2026!!";
   odd.books[0].name = 'Ward 5 / Book C';
-  assert.equal(packetFilename(odd), 'mayor-s-race-2026-ward-5-book-c-packet-2026-08-06.pdf');
+  assert.equal(
+    packetFilename(odd, { layout: 'field' }),
+    'mayor-s-race-2026-ward-5-book-c-field-list-2026-08-06.pdf'
+  );
 });
