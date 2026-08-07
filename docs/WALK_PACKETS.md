@@ -58,8 +58,8 @@ studio map, and as the stripe on the printed page.
 | | **Survey packet** | **Field list** |
 |---|---|---|
 | Questions on the page | Every one, with options to circle | None |
-| Doors per page | About 2 | About 3 |
-| A 200-door book | ~122 pages / 61 sheets | ~68 pages / 34 sheets |
+| Doors per page | About 2 | About 4 |
+| A 200-door book | ~122 pages / 61 sheets | ~52 pages / 26 sheets |
 | Use it when | You want the answers back | You just want the doors walked |
 
 **Survey packet** prints the campaign's questions beside each door. Pick-one questions are
@@ -69,7 +69,9 @@ condition in plain English above it, and the question before the run gets a skip
 ("→ If not "Definitely" or "Probably", skip to Q5").
 
 **Field list** drops the questions entirely: address, who lives there, what happened, and lines
-to write on. It works even if the campaign has no survey set up at all — and if you pick the
+to write on — with the **notes beside** the residents and outcome boxes rather than under them.
+Stacked, the notes are the tallest thing on the door and the right half of the sheet sits empty
+while they run; measured, side by side is 25% fewer pages and makes a fourth note line free. It works even if the campaign has no survey set up at all — and if you pick the
 survey layout for a campaign without a survey, you get the field list rather than a packet full
 of blanks.
 

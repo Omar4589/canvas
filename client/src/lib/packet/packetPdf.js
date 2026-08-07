@@ -190,6 +190,77 @@ const buildDoorSegments = (door, ctx) => {
     });
   }
 
+  // FIELD LAYOUT: notes ride BESIDE the residents and the outcome boxes instead of under them.
+  // Stacked, the notes block is the tallest thing on the door and the whole right half of the
+  // sheet sits empty while it runs. Side by side the door is bound by the taller column, so the
+  // pages come down and extra note lines cost nothing until they outgrow the left column.
+  //
+  // The left column is sized off the outcome row, which needs ~310pt of chips and must not wrap.
+  if (!survey && ctx.layout === 'field') {
+    const LEFT_W = 320;
+    const GAP = 16;
+    const RIGHT_W = ctx.contentW - LEFT_W - GAP;
+    // A door with an implausible number of residents would make one indivisible block taller
+    // than a page. Those fall through to the stacked path, which can still split across pages.
+    if (door.voters.length * 13 + 40 < PAGE.USABLE - 140) {
+      // This block draws the residents itself, so drop the per-voter segments pushed above.
+      segs.length = 0;
+      segs.push({
+        kind: 'body',
+        measure: (doc, x, y, paint) => {
+          let lh = 0;
+          for (const v of door.voters) {
+            if (paint) {
+              setFont(doc, TYPE.voterNameCompact, 'bold', DARK);
+              text(doc, v.name, x + 6, y + lh + 9);
+              const nameW = doc.getTextWidth(asciiSafe(v.name));
+              const meta = voterMetaLine(v);
+              if (meta) {
+                setFont(doc, TYPE.voterMeta, 'normal', GRAY);
+                text(doc, meta, x + 6 + nameW + 10, y + lh + 9);
+              }
+              if (v.phone) {
+                setFont(doc, TYPE.voterMeta, 'normal', GRAY);
+                text(doc, v.phone, x + LEFT_W, y + lh + 9, { align: 'right' });
+              } else if (v.voted) {
+                setFont(doc, TYPE.voterMeta, 'bold', [21, 128, 61]);
+                text(doc, 'voted', x + LEFT_W, y + lh + 9, { align: 'right' });
+              }
+            }
+            lh += 13;
+          }
+          if (ctx.showOutcome) {
+            // Label above the chips, not beside them: beside costs 86pt of width the chips need
+            // to stay on one row, and one row is what keeps the left column short.
+            microLabel(doc, 'Door outcome', x + 6, y + lh, paint);
+            lh += 13;
+            lh += chipRow(
+              doc, x + 6, y + lh, LEFT_W - 6,
+              OUTCOMES_FIELD.map((t) => ({ text: t })), 'square', paint
+            );
+          }
+
+          let rh = 0;
+          if (ctx.noteLines > 0) {
+            const rx = x + LEFT_W + GAP;
+            microLabel(doc, 'Notes', rx, y, paint);
+            rh += 13;
+            rh += ruledLines(doc, rx, y + rh, RIGHT_W, ctx.noteLines, 0, paint);
+          }
+
+          const h = Math.max(lh, rh);
+          if (paint) {
+            doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
+            doc.setLineWidth(0.5);
+            doc.line(x, y + h + 7, x + ctx.contentW, y + h + 7);
+          }
+          return h + 14;
+        },
+      });
+      return segs;
+    }
+  }
+
   if (survey) {
     // Who answered — only meaningful when more than one person lives here. One grid per
     // door (not per voter) is what keeps a two-resident door on one page.
@@ -587,14 +658,25 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
 
   if (book.omitted.total > 0) {
     setFont(doc, TYPE.coverBody, 'normal', GRAY);
-    // The total only. A per-reason breakdown on paper edges toward outing a household to
-    // whoever holds it; the admin sees the split on screen instead.
-    text(
-      doc,
-      `${book.doorCount} of ${book.doorCount + book.omitted.total} doors printed. ${book.omitted.total} removed by current suppression rules.`,
-      x, y
-    );
-    y += 20;
+    // Plain English, and the two kinds kept apart. Apartments are a CHOICE the admin made in
+    // the studio, so folding them in under one system-sounding total both hid that setting and
+    // mislabelled it. Everything else stays an unexplained aggregate on purpose: a per-reason
+    // breakdown on paper edges toward outing a household to whoever is holding it, and the
+    // admin already sees the split on screen.
+    const apartments = book.omitted.reasons?.apartment || 0;
+    const heldBack = book.omitted.total - apartments;
+    const parts = [`${book.doorCount} of ${book.doorCount + book.omitted.total} doors printed.`];
+    if (apartments > 0) {
+      parts.push(`${apartments} apartment ${apartments === 1 ? 'door was' : 'doors were'} left out on purpose.`);
+    }
+    if (heldBack > 0) {
+      parts.push(`${heldBack} ${heldBack === 1 ? 'is' : 'are'} not being knocked this round and ${heldBack === 1 ? 'is' : 'are'} not listed here.`);
+    }
+    doc.splitTextToSize(parts.join(' '), ctx.contentW).forEach((ln) => {
+      text(doc, ln, x, y);
+      y += 13;
+    });
+    y += 8;
   }
 
   setFont(doc, TYPE.micro, 'bold', SUBTLE);

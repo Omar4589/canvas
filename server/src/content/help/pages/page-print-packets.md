@@ -27,7 +27,7 @@ A book keeps the **same colour** everywhere: on the Turf Cutting map, in this li
 
 **Survey packet** — the campaign's questions beside every door. Pick-one questions are pills you **circle**, pick-any questions are squares you **tick**, free-text questions are dashed lines you **write on**. Roughly 2 doors a page.
 
-**Field list** — no questions at all. Address, residents, what happened, and lines to write on. Roughly 4 doors a page, so a 200-door book is about 25 double-sided sheets instead of 67. Use this when you just want the doors walked. It works even if the campaign has no survey.
+**Field list** — no questions at all. Address, residents, what happened, and lines to write on, with the notes sitting **beside** the residents rather than under them so more doors fit. Roughly 4 doors a page, so a 200-door book is about 26 double-sided sheets instead of 61. Use this when you just want the doors walked. It works even if the campaign has no survey.
 
 If the campaign has no survey set up, the survey layout is unavailable and you'll get the field list.
 

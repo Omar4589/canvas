@@ -33,7 +33,7 @@ Print one packet, actually on paper, and look at it. Check the writing lines are
 
 **Print the morning of, not the night before.** A packet freezes the moment it's built. If someone asks not to be contacted on Thursday, a packet printed Wednesday still has them in it. Phones pick that change up within minutes; paper can't.
 
-**Budget the paper.** The page count is on screen before you print. A 200-door book is roughly 34 double-sided sheets as a field list, or 61 as a survey packet. A twelve-book Saturday is several reams — order it in advance.
+**Budget the paper.** The page count is on screen before you print. A 200-door book is roughly 26 double-sided sheets as a field list, or 61 as a survey packet. A twelve-book Saturday is several reams — order it in advance.
 
 **Print the hand-out sheet.** When you print more than one book you get a front page listing every packet with ruled Walked by / Out / In cells. Print that separately, put it on a clipboard, and sign packets out against it.
 

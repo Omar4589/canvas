@@ -284,6 +284,20 @@ test('the cover never overflows — long race names and huge street lists', asyn
   }
 });
 
+test('the field list packs notes BESIDE the door, not under it', async () => {
+  // The whole point of the field layout is density. Stacked, the notes block is the tallest
+  // thing on the door and the right half of the sheet sits empty while it runs; measured, that
+  // costs 25% more pages. This pins the packing so nobody quietly stacks them again.
+  const payload = makePayload(60, 2);
+  const doc = await renderPacketPdf(payload, { ...DEFAULT_SETTINGS, layout: 'field', noteLines: 3 });
+  const bodyPages = doc.getNumberOfPages() - 1; // minus the cover
+  assert.ok(bodyPages <= 16, `60 doors should fit in ~15 body pages, took ${bodyPages}`);
+
+  // And the extra room is free: a 4th note line must not cost a page.
+  const four = await renderPacketPdf(payload, { ...DEFAULT_SETTINGS, layout: 'field', noteLines: 4 });
+  assert.equal(four.getNumberOfPages(), doc.getNumberOfPages());
+});
+
 test('the cover says which order the doors are in', async () => {
   // Both orders look "wrong" to anyone expecting A-Z — a route revisits streets and the
   // postal city can flip mid-route — so the cover has to say what the order actually is.
