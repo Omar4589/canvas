@@ -46,6 +46,10 @@ Every page carries the campaign, your organisation, the book name, and a **packe
 
 Each door gets a numbered red circle (its place in the walk order), the address in large type, who lives there with party and age, the outcome boxes, and your writing lines. A **hollow** circle instead of a solid one means that door carried over from the previous page.
 
+**The doors are ordered street by street** — each street walked in one go, up one side and back down the other, with the streets in the order the book's route reaches them. The books themselves are cut as a shortest route, which suits the app because the phone draws that route on a map; on paper there's no map, so a route that cuts back and forth between two parallel streets is just confusing. The packet only regroups when it doesn't make the walk longer — on cul-de-sacs or a rural route it keeps the book's own order instead. The streets listed on the cover are alphabetical, so you can scan for a name.
+
+Every page has a **Walked by** and **Date** line, not just the cover — books get torn in half and shared between two volunteers all the time, and each half should say who walked it.
+
 The **cover** has a **Walked by** and **Date** line for whoever picks the packet up. No canvasser's name is ever printed — a packet goes to whoever takes it off the table, which is rarely who the app thinks holds the book, and a wrong pre-printed name can't be fixed with a pen. If you print several books at once, the hand-out sheet has a matching **Walked by** column so you can sign them out. Who currently holds a book *in the app* still shows in the picker on screen, so you can spot a book that someone is already walking on a phone.
 
 ## What never prints

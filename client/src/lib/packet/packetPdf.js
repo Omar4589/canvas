@@ -325,9 +325,23 @@ const drawBand = (doc, payload, book, ctx) => {
   const stripe = BOOK_COLORS[book.colorIndex % BOOK_COLORS.length];
   doc.setFillColor(stripe[0], stripe[1], stripe[2]);
   doc.rect(x, y + 30, ctx.contentW, 4, 'F');
+
+  // Who walked THIS sheet — on every page, not just the cover, because one book routinely
+  // gets torn in half and handed to two volunteers. It lives in the band's own spare space,
+  // so putting it on all pages costs no extra paper at all.
+  const dateW = 96;
+  const nameEnd = x + ctx.contentW - dateW - 34;
+  setFont(doc, TYPE.micro, 'bold', SUBTLE);
+  text(doc, 'WALKED BY', x, y + 47);
+  text(doc, 'DATE', x + ctx.contentW - dateW - 26, y + 47);
+  doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
+  doc.setLineWidth(0.5);
+  doc.line(x + 48, y + 48, nameEnd, y + 48);
+  doc.line(x + ctx.contentW - dateW, y + 48, x + ctx.contentW, y + 48);
+
   doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
   doc.setLineWidth(0.5);
-  doc.line(x, y + 39, x + ctx.contentW, y + 39);
+  doc.line(x, y + 52, x + ctx.contentW, y + 52);
 };
 
 const drawFooterRule = (doc, payload, ctx) => {

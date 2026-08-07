@@ -92,7 +92,8 @@ Each door has:
 - **Lines to write on.**
 
 Every packet also gets a **cover** with the packet code in large type, a **Walked by** and
-**Date** line to fill in, the streets it covers, a tally box, and how many doors were held back.
+**Date** line to fill in, the streets it covers **in alphabetical order** (you scan this list for a name, so
+findability beats ranking by size), a tally box, and how many doors were held back.
 If you print more than one book at once you also get a **hand-out sheet** at the front: one line
 per packet, with ruled **Walked by / Out / In** cells so a field director can sign packets out on
 the table where the packets actually are.
@@ -100,6 +101,25 @@ the table where the packets actually are.
 **No canvasser name is ever printed.** A packet goes to whoever picks it up, which is rarely who
 the app thinks holds the book — so the carrier writes their own name on the cover. The in-app
 assignment still shows in the picker on screen, to help you choose what to print.
+
+## What order the doors are in
+
+Not alphabetical — **street by street**, in the order the book's route reaches each street,
+and within a street up one side and back down the other.
+
+The books themselves are cut as a shortest-path route, which is right for the app because the
+phone draws that route on a map and walks you along it. On paper there's no map, and a route
+that saves a few metres by cutting between two parallel streets reads as nonsense — two houses
+on Birch, six on Cedar, back to Birch. So the packet regroups the doors so each street is
+walked in one go.
+
+It only does that when it **doesn't make the walk longer**. On a normal grid, grouping is about
+7% shorter *and* tidier, so it's used. On cul-de-sacs, a winding road, or a rural route where
+the same street name recurs miles apart, grouping would add anywhere from 11% to eighteen times
+the distance — so the book's own route is kept instead. That decision is made per book, from
+the actual door coordinates.
+
+None of this changes the app: the phone still walks the book's stored route.
 
 ## What prints, and what never does
 
@@ -251,6 +271,35 @@ A **saved search has no persisted order** — it is a set, not a route. `buildFr
 co-located units (stacked apartments sharing one geocode) can reorder between reprints.
 `orderProvenance: 'computed'` and a `warnings` entry say so rather than implying a stable route.
 
+## The print order
+
+`Turf.householdIds` is a **shortest-path route** (`services/turf/walkOrder.js` — Hilbert sort
+seeded into a bounded 2-opt). `buildPacket.orderForPrint` may regroup it for paper:
+
+1. `streetGroupedOrder` buckets doors by street, orders the **streets by where the route first
+   reaches them** (not alphabetically — that could send a volunteer across the book and back),
+   and within a street runs odds ascending then evens descending. A street with only one parity
+   falls back to plain ascending, so a one-sided street doesn't zigzag.
+2. Both orders are measured with `walkLength` over the door coordinates, and the grouped one is
+   used **only if it is not longer**.
+
+Measured on four synthetic shapes (`scratchpad/shapes.mjs`, throwaway):
+
+| shape | book route | street-grouped | chosen |
+|---|---:|---:|---|
+| 6-street grid | 3.02 km, 12 street changes | 2.82 km, 5 | **grouped** (7% shorter) |
+| curving road | 1.14 km | 1.27 km | route |
+| 5 cul-de-sacs | 2.21 km | 3.89 km | route |
+| rural, repeating names | 8.45 km | 159 km | route |
+
+That last row is why blanket grouping is wrong: `ROUTE 12` recurring every thirty doors makes
+"group by street name" teleport a volunteer across the county. Pinned by two integration tests —
+a zigzag book must regroup, a rural book must not.
+
+`printOrder` (`'street' | 'route'`) rides on each book in the payload so the reason is visible.
+Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
+is never rewritten** — this is a print-time view, so the app is unaffected.
+
 ## The colour rule
 
 `colorIndex` is assigned **by the server**, once, in `GET /sources` and again in
@@ -322,6 +371,13 @@ Two invariants:
    packer never meets a block it cannot place. `lib/reportPdf.js`'s `ensure()` is deliberately
    **not** reused: it adds a page and then draws the block anyway, silently running long blocks
    off the bottom.
+
+**The Walked by / Date line is on EVERY page, not just the cover.** One book routinely gets
+torn in half and handed to two volunteers, and a cover-only line leaves half the packet
+unattributable. It is drawn inside the 54pt header band (deepest ink at `y+52`), so `BODY_TOP`
+and the usable height are untouched and putting it on every page costs no extra paper —
+`packetPdf.test.js` pins the page count for a fixed payload to catch anyone moving it into the
+body.
 
 **The in-app assignee is deliberately not printed.** `TurfAssignment` is not read by
 `buildPacket.js` at all and `assignedTo` is absent from the packet payload — the cover carries a

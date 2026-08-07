@@ -67,7 +67,9 @@ const streetSummary = (doors) => {
   }
   return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    // Alphabetical, numeric-aware ("2ND ST" before "10TH ST"). A volunteer scans this list
+    // looking for a name, so findability beats ranking by size.
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 };
 
 // Retired questions and options stay in reports but must never reach the field — the same
@@ -126,8 +128,75 @@ const surveyResolver = (campaign) => {
   };
 };
 
+// ── print order ──────────────────────────────────────────────────────────────
+// The book's stored sequence is a SHORTEST-PATH route (services/turf/walkOrder.js: Hilbert
+// sort seeded into a bounded 2-opt). That is right for the app, which draws the route on a
+// map and guides you along it — but on paper there is no map, and a route that saves metres
+// by cutting between two parallel streets reads as nonsense: two houses on Birch, six on
+// Cedar, back to Birch. Measured on a 6-street grid, the stored route splits 5 of 6 streets
+// into multiple runs.
+//
+// So the packet re-groups the doors street by street — BUT ONLY WHEN THAT DOESN'T MAKE THE
+// WALK LONGER. Blanket grouping is a disaster on the shapes a grid doesn't represent:
+// measured, it adds 76% to a cul-de-sac neighbourhood and 1783% to a rural route where the
+// same street names recur miles apart. Comparing the two and keeping the shorter one gets
+// the grid's 7% saving with none of that risk.
+//
+// PRINT-ONLY: `Turf.householdIds` is untouched, so the phone still walks the stored route.
+
+const streetKey = (d) => streetOf(d.addressLine1).toUpperCase();
+const houseNumber = (d) => parseInt(String(d.addressLine1 || '').trim(), 10) || 0;
+
+// Rough metres between two [lng, lat] pairs — a local equirectangular approximation, which
+// is plenty at the scale of one book.
+const metresBetween = (a, b) => {
+  if (!a || !b) return 0;
+  const latMid = ((a[1] + b[1]) / 2) * (Math.PI / 180);
+  const dx = (a[0] - b[0]) * 111320 * Math.cos(latMid);
+  const dy = (a[1] - b[1]) * 111320;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+const walkLength = (doors) => {
+  let total = 0;
+  for (let i = 1; i < doors.length; i++) total += metresBetween(doors[i - 1]._loc, doors[i]._loc);
+  return total;
+};
+
+// Streets in the order the ROUTE first reaches them — not alphabetically, which could send a
+// volunteer across the book and back. Within a street: odds up one side, evens back down the
+// other, the way people actually walk a block. Mixed/!parity streets fall back to plain
+// ascending, so a one-sided street or a lettered address doesn't produce a silly zigzag.
+const streetGroupedOrder = (doors) => {
+  const firstSeen = new Map();
+  const groups = new Map();
+  for (const [i, d] of doors.entries()) {
+    const k = streetKey(d);
+    if (!firstSeen.has(k)) { firstSeen.set(k, i); groups.set(k, []); }
+    groups.get(k).push(d);
+  }
+  const out = [];
+  for (const k of [...firstSeen.keys()].sort((a, b) => firstSeen.get(a) - firstSeen.get(b))) {
+    const list = groups.get(k);
+    const odd = list.filter((d) => houseNumber(d) % 2 === 1).sort((a, b) => houseNumber(a) - houseNumber(b));
+    const even = list.filter((d) => houseNumber(d) % 2 === 0).sort((a, b) => houseNumber(b) - houseNumber(a));
+    out.push(...(odd.length && even.length ? [...odd, ...even] : [...list].sort((a, b) => houseNumber(a) - houseNumber(b))));
+  }
+  return out;
+};
+
+const orderForPrint = (doors) => {
+  if (doors.length < 3) return { doors, printOrder: 'route' };
+  // Without coordinates there is nothing to compare, so the book's own order stands.
+  if (!doors.some((d) => d._loc)) return { doors, printOrder: 'route' };
+  const grouped = streetGroupedOrder(doors);
+  return walkLength(grouped) <= walkLength(doors)
+    ? { doors: grouped, printOrder: 'street' }
+    : { doors, printOrder: 'route' };
+};
+
 // Doors + residents for one ordered id list, with every suppression rule applied.
-// `orderedIds` IS the walk sequence; the returned doors keep it.
+// `orderedIds` IS the book's stored sequence; orderForPrint may then regroup it for paper.
 const loadDoors = async (orderedIds, { includePhone }) => {
   if (!orderedIds.length) return { doors: [], omitted: { total: 0, reasons: {} } };
 
@@ -198,19 +267,26 @@ const loadDoors = async (orderedIds, { includePhone }) => {
     if (!h) continue; // suppressed or gone — counted in `omitted`, never marked on the page
     doors.push({
       id: String(h._id),
-      seq: doors.length + 1,
       addressLine1: h.addressLine1 || '',
       addressLine2: h.addressLine2 || null,
       city: h.city || '',
       state: h.state || '',
       zipCode: h.zipCode || '',
-      // Coordinates feed the walk-order sort and nothing else. They are never printed.
       voters: byHousehold.get(String(h._id)) || [],
       status: 'unknocked',
       lastActionAt: null,
+      // Coordinates order the page and are then DROPPED — they feed the sort below and the
+      // studio map's book outlines, and are never printed or returned per-door.
+      _loc: h.location?.coordinates?.length === 2 ? h.location.coordinates : null,
     });
   }
-  return { doors, omitted: { total: omittedIds.length, reasons } };
+
+  const { doors: ordered, printOrder } = orderForPrint(doors);
+  ordered.forEach((d, i) => {
+    d.seq = i + 1;
+    delete d._loc;
+  });
+  return { doors: ordered, printOrder, omitted: { total: omittedIds.length, reasons } };
 };
 
 // R2-B07 — the code plate stamped on every sheet, the cover, and the manifest. Derived
@@ -265,7 +341,7 @@ const buildFromBooks = async (campaign, turfIds, opts) => {
     // result back onto this list, so the paper walks the route the book was cut for.
     const orderedIds = (turf.householdIds || []).map(String);
     const pass = passById.get(String(turf.passId)) || null;
-    const { doors, omitted } = await loadDoors(orderedIds, opts);
+    const { doors, printOrder, omitted } = await loadDoors(orderedIds, opts);
 
     // Prior-round door status, per round — not the campaign-sticky Household.status, which
     // would report a door "surveyed" because a DIFFERENT round surveyed it.
@@ -290,6 +366,7 @@ const buildFromBooks = async (campaign, turfIds, opts) => {
       streets: streetSummary(doors),
       omitted,
       orderProvenance: 'book',
+      printOrder,
       survey: await resolveSurvey(pass),
       doors,
     });
@@ -321,7 +398,7 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
     (a, b) => (orderRank.get(a) ?? Number.MAX_SAFE_INTEGER) - (orderRank.get(b) ?? Number.MAX_SAFE_INTEGER)
   );
 
-  const { doors, omitted } = await loadDoors(fullOrdered, opts);
+  const { doors, printOrder, omitted } = await loadDoors(fullOrdered, opts);
   const resolveSurvey = surveyResolver(campaign);
   return {
     books: [
@@ -338,6 +415,7 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
         streets: streetSummary(doors),
         omitted,
         orderProvenance: 'computed',
+        printOrder,
         survey: await resolveSurvey(null),
         doors,
       },

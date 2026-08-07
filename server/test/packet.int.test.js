@@ -214,6 +214,9 @@ test('doors print in the BOOK\'s order, not $in order and not Household.walkOrde
   const { status, json } = await packet();
   assert.equal(status, 200);
   const printed = json.books[0].doors.map((d) => String(d.id));
+  // Every door here is on its own street and they lie along a line, so the street-grouping
+  // pass is a no-op — which is what makes this a clean test of the ORDER RECOVERY (the $in
+  // fix). Regrouping itself is covered by the two zigzag/rural tests below.
   // The book's own sequence, minus the four suppressed doors at its tail.
   const expected = ctx.bookOrder.map(String);
   assert.deepEqual(printed, expected, 'walk order must follow Turf.householdIds');
@@ -350,6 +353,85 @@ test('a canvasser cannot print — the gate is requireCampaignManager', { skip }
     token: ctx.walkerTok, orgId: ctx.org._id,
   });
   assert.ok(status === 403 || status === 404, `expected a refusal, got ${status}`);
+});
+
+// Two parallel streets, and a book whose stored route alternates between them — the shape
+// the shipped 2-opt actually produces on a grid, and the one that reads as nonsense on paper.
+const gridBook = async (ctx, Household, Turf, name, coords) => {
+  const ids = [];
+  for (const [i, [x, y, addr]] of coords.entries()) {
+    const h = await Household.create({
+      organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.effort._id,
+      addressLine1: addr, city: 'Town', state: 'FL', zipCode: '34741',
+      normalizedAddress: `${name}-${i}`,
+      // ~111320 m per degree; these are metres converted to a local offset.
+      location: { type: 'Point', coordinates: [-81.4 + x / 98000, 28.3 + y / 111320] },
+      isActive: true,
+    });
+    ids.push(h._id);
+  }
+  return Turf.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: ctx.pass._id,
+    name, mode: 'geometric', status: 'published', householdIds: ids, doorCount: ids.length,
+  });
+};
+
+test('a book that zigzags between two streets is REGROUPED street by street', { skip }, async () => {
+  // Stored order alternates Oak/Pine/Oak/Pine… — shorter in metres by cutting across, but on
+  // paper it sends a volunteer back and forth across the road for no reason.
+  const turf = await gridBook(ctx, Household, Turf, 'Zigzag', [
+    [0, 0, '101 OAK ST'], [0, 80, '102 PINE ST'],
+    [20, 0, '103 OAK ST'], [20, 80, '104 PINE ST'],
+    [40, 0, '105 OAK ST'], [40, 80, '106 PINE ST'],
+  ]);
+  const { status, json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.equal(status, 200);
+  const book = json.books[0];
+  assert.equal(book.printOrder, 'street');
+  const streets = book.doors.map((d) => d.addressLine1.replace(/^\d+\s+/, ''));
+  // Every street walked in ONE run, not interleaved.
+  assert.deepEqual(streets, ['OAK ST', 'OAK ST', 'OAK ST', 'PINE ST', 'PINE ST', 'PINE ST']);
+  // And renumbered 1..n over the order actually printed.
+  assert.deepEqual(book.doors.map((d) => d.seq), [1, 2, 3, 4, 5, 6]);
+});
+
+test('regrouping is SKIPPED when it would lengthen the walk', { skip }, async () => {
+  // The same street name recurring miles apart — a rural route. Grouping by name here would
+  // teleport a volunteer to the far end of the book and back.
+  const turf = await gridBook(ctx, Household, Turf, 'Rural', [
+    [0, 0, '100 MAIN ST'], [5000, 0, '200 COUNTY RD'], [10000, 0, '300 MAIN ST'],
+    [15000, 0, '400 COUNTY RD'], [20000, 0, '500 MAIN ST'],
+  ]);
+  const { status, json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.equal(status, 200);
+  const book = json.books[0];
+  assert.equal(book.printOrder, 'route', 'a longer street-grouped walk must be rejected');
+  // The book's own sequence survives untouched.
+  assert.deepEqual(
+    book.doors.map((d) => d.addressLine1),
+    ['100 MAIN ST', '200 COUNTY RD', '300 MAIN ST', '400 COUNTY RD', '500 MAIN ST']
+  );
+});
+
+test('the cover street list is alphabetical, numeric-aware', { skip }, async () => {
+  const turf = await gridBook(ctx, Household, Turf, 'Streets', [
+    [0, 0, '1 W ZEBRA LN'], [20, 0, '2 10TH ST'], [40, 0, '3 2ND ST'], [60, 0, '4 ADAMS AVE'],
+  ]);
+  const { json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  // Scannable order — and "2ND" before "10TH", which a plain string sort gets wrong.
+  assert.deepEqual(
+    json.books[0].streets.map((s) => s.name),
+    ['2ND ST', '10TH ST', 'ADAMS AVE', 'W ZEBRA LN']
+  );
 });
 
 test('over the cap the request is REFUSED, never truncated', { skip }, async () => {

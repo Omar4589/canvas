@@ -43,6 +43,10 @@ const SURVEY = {
   ],
 };
 
+// Pinned page count for makePayload(60, 2) at DEFAULT_SETTINGS — cover + script page + body.
+// Update this deliberately when the layout changes; an accidental jump means something grew.
+const PAGE_PIN_60_DOORS = 42;
+
 const voter = (i, name) => ({
   id: `v${i}`, name, party: 'DEM', age: 30 + i, gender: 'F', phone: null, voted: i === 0,
 });
@@ -210,14 +214,24 @@ test('unprintable text is folded, and what cannot be folded is counted', () => {
   assert.equal(scan.count, 1);
 });
 
-test('the cover carries a write-in name line, never a pre-printed assignee', async () => {
-  const doc = await renderPacketPdf(makePayload(4, 2), DEFAULT_SETTINGS);
-  const all = pageTexts(doc).join('\n');
-  // A packet goes to whoever picks it up, so the carrier writes their own name.
-  assert.ok(all.includes('WALKED BY'), 'the cover must offer a name line');
-  assert.ok(all.includes('DATE'));
+test('every page carries a write-in name line, never a pre-printed assignee', async () => {
+  const doc = await renderPacketPdf(makePayload(12, 2), DEFAULT_SETTINGS);
+  const pages = pageTexts(doc);
+  // A book routinely gets torn in half between two volunteers, so the name line has to be on
+  // EVERY sheet — a cover-only line leaves half the packet unattributable.
+  const withName = pages.filter((p) => p.includes('WALKED BY')).length;
+  assert.ok(withName >= pages.length - 1, `only ${withName}/${pages.length} pages offer a name line`);
+  assert.ok(pages.join('\n').includes('DATE'));
   // Nothing anywhere may claim who the app thinks holds this book.
-  assert.ok(!/Assigned:/.test(all), 'the in-app assignee must never be printed');
+  assert.ok(!/Assigned:/.test(pages.join('\n')), 'the in-app assignee must never be printed');
+});
+
+test('the per-page name line costs no extra pages — it lives in the header band', async () => {
+  // Drawn inside the 54pt band, below the colour stripe, so PAGE.BODY_TOP — and therefore
+  // pagination — is untouched. A regression pin: moving it into the body would push doors
+  // onto extra sheets and this count would climb.
+  const doc = await renderPacketPdf(makePayload(60, 2), DEFAULT_SETTINGS);
+  assert.equal(doc.getNumberOfPages(), PAGE_PIN_60_DOORS);
 });
 
 test('filename reflects the layout and the generation date', () => {
