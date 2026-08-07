@@ -320,6 +320,38 @@ a zigzag book must regroup, a rural book must not.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
 
+## The cover map
+
+`client/src/lib/packet/packetMapImage.js` fetches one basemap image per packet from Mapbox's
+Static Images API and `packetPdf.drawCoverMap` draws the walk over it — the route line, a dot
+per door, and **A**/**B** markers on the first and last.
+
+**The request carries a centre, a zoom and a size. Nothing else.** Mapbox's static API accepts
+an overlay polyline, and using it would have put every household coordinate in a third party's
+URL and access log. Instead the basemap comes back plain and the route is projected locally in
+PDF vector ops — which also prints sharper than a rasterised line and keeps the URL short
+enough that a 1,200-door book can't hit the API's length limit.
+
+Door coordinates reach the browser only when the map is on: `GET /packets/data?includeGeo=1`
+adds `lng`/`lat` per door and the default payload is unchanged. See the 2026-08-07 amendment in
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md).
+
+Details that matter:
+
+- **The projection must match the image.** Mapbox GL styles use 512px tiles, so the world is
+  `512 · 2^zoom` — `fitView`/`makeProjector` use that constant, and the tests pin it by asserting
+  the origin lands dead centre at zoom 0. Get it wrong and the route floats off the streets.
+- **The line is order, not directions.** It runs door to door in a straight line; we hold the
+  doors, not a routing engine. The caption says so, because a line over a street map looks like
+  turn-by-turn guidance and isn't.
+- **It fails open, always.** No token, no geometry, no network, no DOM → `fetchCoverMap` returns
+  `null` and the packet prints without it. A test asserts the page count is identical either way.
+- **Fetches are memoised** per book and image size, so turning a knob re-renders the PDF without
+  re-hitting Mapbox; a failure is cached too, so a dead token isn't retried on every keystroke.
+- **Attribution and the logo stay on** — Mapbox's terms require them on a static image.
+- The PNG Mapbox returns is re-encoded to JPEG (quality 0.82) before embedding; a print run
+  carries one of these per book.
+
 ## Street bands and the unit suffix
 
 Each contiguous run of one street gets a band naming it and the doors it covers. Two rules make

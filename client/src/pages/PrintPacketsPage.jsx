@@ -53,6 +53,13 @@ export default function PrintPacketsPage() {
 
   useEffect(() => { saveSettings(campaignId, settings); }, [campaignId, settings]);
 
+  // Same query key the studio map uses, so the two share one cached fetch.
+  const tokenQ = useQuery({
+    queryKey: ['config', 'mapbox-token'],
+    queryFn: ({ signal }) => api('/admin/config/mapbox-token', { signal }),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const sourcesQ = useQuery({
     queryKey: ['admin', 'packet-sources', campaignId],
     queryFn: ({ signal }) => api(`/admin/campaigns/${campaignId}/packets/sources`, { signal }),
@@ -95,7 +102,10 @@ export default function PrintPacketsPage() {
   );
 
   const dataQ = useQuery({
-    queryKey: ['admin', 'packet-data', campaignId, dataKey, debounced.includePhone, debounced.excludeApartments],
+    queryKey: [
+      'admin', 'packet-data', campaignId, dataKey,
+      debounced.includePhone, debounced.excludeApartments, debounced.showCoverMap,
+    ],
     enabled: hasPick,
     // The payload is the same for every layout, so switching layout or note lines re-renders
     // the PDF without going back to the server. Only the phone opt-in and the apartment cut
@@ -108,6 +118,8 @@ export default function PrintPacketsPage() {
       else qs.set('turfIds', selection.turfIds.join(','));
       if (debounced.includePhone) qs.set('includePhone', '1');
       if (debounced.excludeApartments) qs.set('excludeApartments', '1');
+      // Door coordinates come back only to draw the cover map, never to print.
+      if (debounced.showCoverMap) qs.set('includeGeo', '1');
       return api(`/admin/campaigns/${campaignId}/packets/data?${qs}`, { signal });
     },
   });
@@ -131,9 +143,15 @@ export default function PrintPacketsPage() {
   const overCap = pickedDoors > cap;
 
   const hasSurvey = !!payload?.books?.some((b) => b.survey) || !!sourcesQ.data?.hasSurvey;
+  const mapboxToken = tokenQ.data?.isReady ? tokenQ.data.token : null;
   const effective = useMemo(
-    () => ({ ...debounced, layout: resolveLayout(debounced, hasSurvey) }),
-    [debounced, hasSurvey]
+    () => ({
+      ...debounced,
+      layout: resolveLayout(debounced, hasSurvey),
+      // No token means no cover map — the renderer just skips it.
+      mapboxToken,
+    }),
+    [debounced, hasSurvey, mapboxToken]
   );
   const unprintable = useMemo(() => (payload ? scanUnprintableNames(payload) : null), [payload]);
   const onPages = useCallback((n) => setPages(n), []);

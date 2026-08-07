@@ -469,6 +469,22 @@ test('apartments can be left out, and the count says so', { skip }, async () => 
   assert.ok(excluded.json.warnings.some((w) => /apartment door/i.test(w)));
 });
 
+test('coordinates leave the server ONLY for the cover map', { skip }, async () => {
+  const base = `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${ctx.turf._id}`;
+  const auth = { token: ctx.adminTok, orgId: ctx.org._id };
+
+  // The default payload keeps its old shape — geo is opt-in, so the smaller disclosure is
+  // what a request gets unless it asks for the map.
+  const plain = await call(base, auth);
+  assert.ok(plain.json.books[0].doors.every((d) => d.lng === undefined && d.lat === undefined));
+
+  const geo = await call(`${base}&includeGeo=1`, auth);
+  const doors = geo.json.books[0].doors;
+  assert.ok(doors.some((d) => Number.isFinite(d.lng) && Number.isFinite(d.lat)));
+  // Even then it is coordinates only — the raw location document never rides along.
+  assert.ok(doors.every((d) => d.location === undefined && d._loc === undefined));
+});
+
 test('over the cap the request is REFUSED, never truncated', { skip }, async () => {
   // A book of cap+1 knockable doors. The refusal has to carry the real count so the UI can
   // say something a human can act on.

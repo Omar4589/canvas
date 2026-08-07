@@ -211,7 +211,7 @@ const orderForPrint = (doors) => {
 
 // Doors + residents for one ordered id list, with every suppression rule applied.
 // `orderedIds` IS the book's stored sequence; orderForPrint may then regroup it for paper.
-const loadDoors = async (orderedIds, { includePhone, excludeApartments }) => {
+const loadDoors = async (orderedIds, { includePhone, excludeApartments, includeGeo }) => {
   if (!orderedIds.length) return { doors: [], omitted: { total: 0, reasons: {} } };
 
   const all = await Household.find(
@@ -308,6 +308,15 @@ const loadDoors = async (orderedIds, { includePhone, excludeApartments }) => {
   const { doors: ordered, printOrder } = orderForPrint(doors);
   ordered.forEach((d, i) => {
     d.seq = i + 1;
+    // Coordinates leave ONLY when the cover map is switched on. The default payload keeps its
+    // old shape — geo is opt-in so the smaller disclosure stays the normal one. The recipient
+    // is the campaign manager who already has the address this was geocoded from, and the
+    // coordinates go to the browser to draw a route, never to a third party: Mapbox is sent a
+    // bounding box and nothing else. Still NEVER printed as text.
+    if (includeGeo && d._loc) {
+      d.lng = d._loc[0];
+      d.lat = d._loc[1];
+    }
     delete d._loc;
   });
   return {
@@ -445,8 +454,8 @@ const buildFromWalkList = async (campaign, walkListId, opts) => {
 };
 
 // source: { kind: 'books', turfIds: [] } | { kind: 'walklist', walkListId }
-export const buildPacket = async (campaign, orgName, source, { includePhone = false, excludeApartments = false } = {}) => {
-  const opts = { includePhone, excludeApartments };
+export const buildPacket = async (campaign, orgName, source, { includePhone = false, excludeApartments = false, includeGeo = false } = {}) => {
+  const opts = { includePhone, excludeApartments, includeGeo };
   const { books, notFound } =
     source.kind === 'walklist'
       ? await buildFromWalkList(campaign, source.walkListId, opts)

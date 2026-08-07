@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showPriorStatus: true,
   showScriptPage: true,
   showManifest: true,
+  // A basemap of the book with the walk drawn over it, on the cover. Needs MAPBOX_PUBLIC_TOKEN;
+  // silently absent without one.
+  showCoverMap: true,
   includePhone: false,
   excludeApartments: false,
   inkSaver: false,

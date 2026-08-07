@@ -89,6 +89,11 @@ export default function DesignPanel({
             disabled={settings.layout !== 'survey' || !hasSurvey}
           />
           <Toggle
+            id="showCoverMap" label="Map on the cover"
+            hint="The book on a map with the walk drawn over it."
+            checked={settings.showCoverMap} onChange={(v) => set({ showCoverMap: v })}
+          />
+          <Toggle
             id="showManifest" label="Hand-out sheet"
             hint="One line per packet, with room to sign them out."
             checked={settings.showManifest} onChange={(v) => set({ showManifest: v })}

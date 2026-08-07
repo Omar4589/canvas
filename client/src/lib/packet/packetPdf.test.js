@@ -299,6 +299,72 @@ test('the cover says which order the doors are in', async () => {
   assert.ok(streetCover.includes('street by street'), 'street order must be named');
 });
 
+// A real 1x1 JPEG, so addImage parses a genuine header rather than a placeholder string.
+const TINY_JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+
+const withFakeBrowser = async (fn) => {
+  const saved = { d: globalThis.document, f: globalThis.fetch, c: globalThis.createImageBitmap };
+  globalThis.document = {
+    createElement: () => ({
+      getContext: () => ({ drawImage() {} }),
+      toDataURL: () => TINY_JPEG,
+    }),
+  };
+  globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
+  globalThis.fetch = async () => ({ ok: true, blob: async () => ({}) });
+  try { return await fn(); } finally {
+    globalThis.document = saved.d; globalThis.fetch = saved.f; globalThis.createImageBitmap = saved.c;
+  }
+};
+
+const geoPayload = (n) => {
+  const p = makePayload(n, 1);
+  p.books[0].id = `geo-${n}-${Math.round(n * 7919)}`;
+  p.books[0].doors.forEach((d, i) => {
+    d.lng = -82.32 + (i % 5) * 0.004;
+    d.lat = 28.31 + Math.floor(i / 5) * 0.004;
+  });
+  return p;
+};
+
+test('the cover map draws the walk over a fetched basemap', async () => {
+  await withFakeBrowser(async () => {
+    const doc = await renderPacketPdf(geoPayload(12), { ...DEFAULT_SETTINGS, mapboxToken: 'pk.test' });
+    doc.setPage(1);
+    const cover = doc.internal.pages[1].join('\n');
+    assert.ok(/\/I\d|\/XObject/.test(cover), 'the basemap image must be placed on the cover');
+    const all = pageTexts(doc).join('\n');
+    assert.ok(all.includes('ORDER of the walk'), 'the caption must say it is order, not directions');
+  });
+});
+
+test('no token means no map, and the packet is otherwise identical', async () => {
+  // Failing open is the whole contract: a dead token, an offline laptop, or a blocked host
+  // must cost the packet the map and nothing else.
+  const withMap = await renderPacketPdf(geoPayload(12), { ...DEFAULT_SETTINGS, mapboxToken: null });
+  const without = await renderPacketPdf(geoPayload(12), { ...DEFAULT_SETTINGS, showCoverMap: false });
+  assert.equal(withMap.getNumberOfPages(), without.getNumberOfPages());
+});
+
+test('map geometry: fits the doors, north up, east right', async () => {
+  const { fitView, makeProjector } = await import('./packetMapImage.js');
+  const doors = [
+    { lng: -82.32, lat: 28.31 }, { lng: -82.28, lat: 28.36 },
+    { lng: -82.35, lat: 28.33 }, { lng: -82.30, lat: 28.30 },
+  ];
+  const W = 700, H = 320;
+  const view = fitView(doors, W, H);
+  const proj = makeProjector(view, W, H, 516, 236);
+  for (const d of doors) {
+    const q = proj(d.lng, d.lat);
+    assert.ok(q.x >= 0 && q.x <= 516 && q.y >= 0 && q.y <= 236, `door ${d.lng},${d.lat} fell outside the map`);
+  }
+  assert.ok(proj(-82.3, 28.36).y < proj(-82.3, 28.30).y, 'north must be up');
+  assert.ok(proj(-82.28, 28.33).x > proj(-82.35, 28.33).x, 'east must be right');
+  // Zoom 0 puts the origin at the centre of a 512px world — pins the Mercator constant.
+  assert.equal(Math.round(makeProjector({ lng: 0, lat: 0, zoom: 0 }, 512, 512, 512, 512)(0, 0).x), 256);
+});
+
 test('the race is the masthead', async () => {
   const payload = makePayload(4, 2);
   payload.campaign.name = 'Riverside City Council 2026';

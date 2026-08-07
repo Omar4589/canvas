@@ -692,6 +692,25 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   names. DPA §6 untouched, no customer notice event. Recorded because "a page that previously
   rendered no map now does" is the kind of quiet change this log exists to catch.]*
 
+  *[amendment 2026-08-07 — **cover map**: the packet PDF can now carry a basemap of the book with
+  the walk drawn over it. Two things changed and both are deliberate.*
+
+  ***(1) Door coordinates now leave the server** — `GET /packets/data` returns per-door `lng`/`lat`,
+  but ONLY when `includeGeo=1`, which the client sets only when the cover map is switched on. The
+  default payload keeps its previous shape, so the smaller disclosure stays the normal one. The
+  recipient is the campaign manager who already receives the street address these were geocoded
+  from, under the same `requireCampaignManager` gate — no new party, no new fact, a new
+  representation of one they hold. Coordinates are still NEVER rendered as text on the paper; they
+  place dots on an image.*
+
+  ***(2) Mapbox receives a rectangle, not the route.** Mapbox's Static Images API accepts an overlay
+  polyline, which is the obvious way to draw a route and would have put every household coordinate
+  in a third party's request URL and access log. It is not used. The request carries a centre, a
+  zoom and an image size — the same class of viewport request the console's existing map pages
+  already make — and the route is projected and drawn locally in PDF vector operations. **No
+  subprocessor change; DPA §6 untouched.** Recorded because "we added a map" is exactly the change
+  where coordinates leak to a vendor by default if nobody writes down that they must not.]*
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

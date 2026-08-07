@@ -160,7 +160,7 @@ router.get('/sources', async (req, res, next) => {
 // The packet payload. The browser renders the PDF from exactly this.
 router.get('/data', async (req, res, next) => {
   try {
-    const { walkListId, turfIds, includePhone, excludeApartments } = req.query;
+    const { walkListId, turfIds, includePhone, excludeApartments, includeGeo } = req.query;
     const source = walkListId
       ? { kind: 'walklist', walkListId: String(walkListId) }
       : { kind: 'books', turfIds: idList(turfIds) };
@@ -190,6 +190,7 @@ router.get('/data', async (req, res, next) => {
     const payload = await buildPacket(req.campaign, req.activeOrg?.name || '', source, {
       includePhone: includePhone === '1' || includePhone === 'true',
       excludeApartments: excludeApartments === '1' || excludeApartments === 'true',
+      includeGeo: includeGeo === '1' || includeGeo === 'true',
     });
 
     // Record-level audit: the subjects are the voters actually printed (post-suppression).

@@ -5,6 +5,7 @@ import {
 import { buildSurveyPrintModel } from './surveyPrintModel.js';
 import { asciiSafe } from '../pdfText.js';
 import { resolveLayout } from './packetSettings.js';
+import { fetchCoverMap } from './packetMapImage.js';
 
 // The packet renderer. jsPDF is loaded lazily so it never lands in the console's initial bundle.
 //
@@ -438,7 +439,50 @@ const drawManifest = (doc, payload, ctx) => {
   ).forEach((ln) => { text(doc, ln, x, y); y += 12; });
 };
 
-const drawCover = (doc, payload, book, ctx) => {
+// The walk, drawn over a basemap. The image is a plain rectangle fetched from Mapbox; every
+// line and dot here is projected locally, so no household coordinate is ever in that request.
+const COVER_MAP_H = 236;
+const drawCoverMap = (doc, book, ctx, x, y, map) => {
+  const W = ctx.contentW;
+  const pts = book.doors
+    .filter((d) => Number.isFinite(d.lng) && Number.isFinite(d.lat))
+    .map((d) => map.project(d.lng, d.lat));
+  if (pts.length < 2) return 0;
+
+  doc.addImage(map.dataUrl, 'JPEG', x, y, W, COVER_MAP_H);
+  doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
+  doc.setLineWidth(0.5);
+  doc.rect(x, y, W, COVER_MAP_H, 'S');
+
+  // Order of the walk. Deliberately straight door-to-door — we hold the doors, not a routing
+  // engine, and a line pretending to follow streets would be a turn-by-turn claim we can't back.
+  doc.setLineJoin('round');
+  doc.setLineCap('round');
+  doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
+  doc.setLineWidth(1.1);
+  for (let i = 1; i < pts.length; i++) {
+    doc.line(x + pts[i - 1].x, y + pts[i - 1].y, x + pts[i].x, y + pts[i].y);
+  }
+
+  doc.setFillColor(DARK[0], DARK[1], DARK[2]);
+  for (const p of pts) doc.circle(x + p.x, y + p.y, 1.1, 'F');
+
+  // Where you start and where you end — the two things worth finding at a glance.
+  const cap = (p, label) => {
+    doc.setFillColor(WHITE[0], WHITE[1], WHITE[2]);
+    doc.circle(x + p.x, y + p.y, 7.5, 'F');
+    doc.setDrawColor(BRAND[0], BRAND[1], BRAND[2]);
+    doc.setLineWidth(1.6);
+    doc.circle(x + p.x, y + p.y, 7.5, 'S');
+    setFont(doc, TYPE.micro, 'bold', BRAND);
+    text(doc, label, x + p.x, y + p.y + 2.8, { align: 'center' });
+  };
+  cap(pts[0], 'A');
+  cap(pts[pts.length - 1], 'B');
+  return COVER_MAP_H;
+};
+
+const drawCover = (doc, payload, book, ctx, coverMap) => {
   const x = PAGE.MARGIN;
   let y = PAGE.MARGIN + 34;
 
@@ -494,7 +538,7 @@ const drawCover = (doc, payload, book, ctx) => {
   // assignment is not printed anywhere: on a paper day the packet goes to whoever is
   // standing there, and a pre-printed name that turns out to be wrong cannot be corrected.
   const nameW = ctx.contentW * 0.62;
-  setFont(doc, TYPE.micro, 'bold', SUBTLE);
+  setFont(doc, TYPE.micro, 'bold', GRAY);
   text(doc, 'WALKED BY', x, y);
   text(doc, 'DATE', x + nameW + 16, y);
   doc.setDrawColor(HAIRLINE[0], HAIRLINE[1], HAIRLINE[2]);
@@ -502,6 +546,16 @@ const drawCover = (doc, payload, book, ctx) => {
   doc.line(x, y + 22, x + nameW, y + 22);
   doc.line(x + nameW + 16, y + 22, x + ctx.contentW, y + 22);
   y += 44;
+
+  if (coverMap) {
+    const drawn = drawCoverMap(doc, book, ctx, x, y, coverMap);
+    if (drawn) {
+      y += drawn + 12;
+      setFont(doc, TYPE.gate, 'italic', GRAY);
+      text(doc, 'A is your first door, B your last. The line is the ORDER of the walk, drawn door to door — not directions along the streets.', x, y);
+      y += 18;
+    }
+  }
 
   if (book.streets.length) {
     setFont(doc, TYPE.micro, 'bold', SUBTLE);
@@ -638,7 +692,18 @@ export const renderPacketPdf = async (payload, settings) => {
     const from = first ? doc.getNumberOfPages() : doc.getNumberOfPages() + 1;
 
     newPage(null);
-    drawCover(doc, payload, book, ctx);
+    // Fetched per book and memoised, so turning a knob re-renders the PDF without re-hitting
+    // Mapbox. Returns null on any failure — a packet must never fail to print over a map.
+    const coverMap = settings.showCoverMap
+      ? await fetchCoverMap({
+          doors: book.doors,
+          token: settings.mapboxToken,
+          boxW: PAGE.CONTENT_W,
+          boxH: COVER_MAP_H,
+          cacheKey: book.id,
+        })
+      : null;
+    drawCover(doc, payload, book, ctx, coverMap);
     pageOwner[doc.getNumberOfPages()] = book;
 
     if (layout === 'survey' && ctx.survey && settings.showScriptPage &&
