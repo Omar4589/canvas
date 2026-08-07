@@ -182,6 +182,24 @@ is the only mobile route with a role gate: everything else under `/mobile` is sc
 `assertHouseholdAccess` call, whose roster check would otherwise refuse a lead who manages the campaign
 but was never rostered onto it as a walker.
 
+**Mobile read surfaces never roster-wall a granted lead (2026-08-07).** The canvasser-facing
+readers — `/mobile/bootstrap`, `/mobile/changes`, `/mobile/me/*`, and the voter search/profile on
+`/mobile/voters` — used to require a `CampaignAssignment` for any non-admin, so a lead who managed a
+campaign but was never rostered as a walker hit a raw 403, and a rostered lead's voter search was
+book-scoped into an empty list. All of them now fall through to `canManageCampaign`: a granted lead
+gets what an unrostered **admin** gets (empty books on bootstrap, campaign-wide voter search —
+manager scope). **Writes are unchanged**: knocks still require a real roster row for non-admins, and
+walking still means being rostered. Pinned by
+[perRoundVoterView.int.test.js](../server/test/perRoundVoterView.int.test.js) ("granted lead needs
+NO roster row") and the walkthrough below.
+
+**The whole journey is pinned end-to-end** by
+[leadWalkthrough.int.test.js](../server/test/leadWalkthrough.int.test.js): one lead runs the entire
+lifecycle — config, survey authoring, effort/pass/books, **self-assignment**, the mobile walk (a
+real knock), every report surface the mobile admin app calls, packets, exports, a client report
+publish + share, and the Users surface — in dependency order, so a regression that walls any step of
+the real workflow fails even when each router gate is individually correct.
+
 That parity extends past the router gate into the **assignability** check those routers share:
 `partitionAssignable` ([services/campaignRoster.js](../server/src/services/campaignRoster.js)) allows
 anyone on the campaign roster, **any active org `admin`**, **a lead holding a `CampaignManager` grant on

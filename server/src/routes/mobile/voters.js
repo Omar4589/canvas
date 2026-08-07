@@ -37,7 +37,24 @@ function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Campaign comes from ?campaignId / body.campaignId; canvassers must be assigned to it.
+// Managers pass without a roster row: super/admin, or a lead granted THIS campaign.
+// The surfaces this router serves are the admin Voter search and Notes screens
+// (lead/admin), so a campaign's manager gets campaign scope, never their walker books —
+// a granted lead used to 403 here unless someone happened to roster them as a walker,
+// and a rostered lead was book-scoped into an empty "no voters" search. Cached on the
+// request because two of the three routes ask twice.
+async function managesCampaign(req, campaign) {
+  if (isAdminOrSuper(req)) return true;
+  const key = String(campaign._id);
+  if (req._managesCampaignId !== key) {
+    req._managesCampaignId = key;
+    req._managesCampaign = await canManageCampaign(req, campaign._id);
+  }
+  return req._managesCampaign;
+}
+
+// Campaign comes from ?campaignId / body.campaignId; canvassers must be assigned to it,
+// managers (see above) need no roster row.
 async function resolveCampaign(req, res) {
   const cid = req.query.campaignId || req.body?.campaignId;
   if (!activeOrgId(req)) {
@@ -56,7 +73,7 @@ async function resolveCampaign(req, res) {
   }
   if (!isAdminOrSuper(req)) {
     const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
-    if (!assigned) {
+    if (!assigned && !(await managesCampaign(req, campaign))) {
       res.status(403).json({ error: 'Not assigned to this campaign' });
       return null;
     }
@@ -65,9 +82,9 @@ async function resolveCampaign(req, res) {
 }
 
 // Household ids a canvasser may look up: their assigned books across all active
-// rounds. null = no restriction (admin/super). Empty array = sees nothing.
+// rounds. null = no restriction (admin/super/granted lead). Empty array = sees nothing.
 async function scopeHouseholdIds(req, campaign) {
-  if (isAdminOrSuper(req)) return null;
+  if (await managesCampaign(req, campaign)) return null;
   const passIds = await activePassIds(campaign._id);
   if (!passIds.length) return [];
   const myTurfs = await TurfAssignment.find(
@@ -159,7 +176,7 @@ router.get('/voters/:voterId', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.voterId)) {
       return res.status(400).json({ error: 'Invalid voterId' });
     }
-    if (!(await canManageCampaign(req, campaign._id))) {
+    if (!(await managesCampaign(req, campaign))) {
       return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN_ROLE' });
     }
     const voter = await Voter.findOne(

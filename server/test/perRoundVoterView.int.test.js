@@ -80,9 +80,14 @@ before(async () => {
   const lead = await User.create({
     firstName: 'Lea', lastName: 'Lead', email: 'rv-lead@t.co', passwordHash: 'x', isActive: true,
   });
+  // Granted the campaign but NEVER rostered as a walker — the common real-world lead.
+  const lead2 = await User.create({
+    firstName: 'Uma', lastName: 'Unrostered', email: 'rv-lead2@t.co', passwordHash: 'x', isActive: true,
+  });
   await Membership.create({ userId: admin._id, organizationId: org._id, role: 'admin', isActive: true });
   await Membership.create({ userId: canv._id, organizationId: org._id, role: 'canvasser', isActive: true });
   await Membership.create({ userId: lead._id, organizationId: org._id, role: 'lead', isActive: true });
+  await Membership.create({ userId: lead2._id, organizationId: org._id, role: 'lead', isActive: true });
 
   const template = await SurveyTemplate.create({
     organizationId: org._id,
@@ -174,8 +179,10 @@ before(async () => {
   for (const u of [canv, lead]) {
     await CampaignAssignment.create({ campaignId: campaign._id, userId: u._id, organizationId: org._id });
   }
-  // The lead's management grant covers THIS campaign.
+  // The lead's management grant covers THIS campaign. lead2 holds the same grant but
+  // NO CampaignAssignment — the roster gate must fall through to the grant for them.
   await CampaignManager.create({ campaignId: campaign._id, userId: lead._id, organizationId: org._id });
+  await CampaignManager.create({ campaignId: campaign._id, userId: lead2._id, organizationId: org._id });
 
   // A SECOND campaign the lead has NO grant for — its voter must stay unreachable
   // through the first campaign's grant (the no-widening rule).
@@ -199,9 +206,10 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, admin, canv, lead, campaign, campaign2, effort, p1, p2,
+    org, admin, canv, lead, lead2, campaign, campaign2, effort, p1, p2,
     h1, h2, h3, vA, vB, vC, v9,
     adminToken: signUserToken(admin), canvToken: signUserToken(canv), leadToken: signUserToken(lead),
+    lead2Token: signUserToken(lead2),
   });
 });
 
@@ -324,4 +332,25 @@ test('4. the canvasser search list still works (scoped, unchanged)', { skip }, a
   assert.equal(r.status, 200);
   assert.ok(r.json.voters.length >= 3, 'canvasser still finds their book\'s voters');
   assert.ok(r.json.voters.every((v) => v.fullName && !('answers' in v)), 'no answer content in the list');
+});
+
+test('5. a granted lead needs NO roster row, and searches campaign-wide (manager scope)', { skip }, async () => {
+  const { campaign, campaign2, vA, lead2Token, leadToken } = ctx;
+  // Unrostered-but-granted: both routes pass on the grant alone. This is the common
+  // real-world lead — they manage the campaign, nobody rostered them as a walker.
+  const search = await call(`/mobile/voters?campaignId=${campaign._id}&search=Test`, lead2Token);
+  assert.equal(search.status, 200, 'unrostered lead passes the campaign gate');
+  assert.ok(search.json.voters.length >= 3, 'and sees the whole campaign, not empty books');
+  const profile = await call(`/mobile/voters/${vA._id}?campaignId=${campaign._id}`, lead2Token);
+  assert.equal(profile.status, 200, 'unrostered lead reads the profile (management-only route)');
+
+  // Rostered lead: same campaign-wide search — manager scope, never book-scope. They
+  // hold no TurfAssignment, so book-scoping would have returned an empty list.
+  const rostered = await call(`/mobile/voters?campaignId=${campaign._id}&search=Test`, leadToken);
+  assert.equal(rostered.status, 200);
+  assert.ok(rostered.json.voters.length >= 3, 'rostered lead is not book-scoped into "no voters"');
+
+  // The grant does not widen: the ungranted campaign still refuses both routes.
+  const foreign = await call(`/mobile/voters?campaignId=${campaign2._id}&search=Test`, lead2Token);
+  assert.equal(foreign.status, 403, 'no grant, no roster → no search');
 });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
@@ -36,7 +37,11 @@ async function assertCampaignAccess(req, campaignId) {
   if (!campaign) return { error: 404, message: 'Campaign not found' };
   if (isOrgAdminOrSuper(req)) return { campaign };
   const assigned = await CampaignAssignment.exists({ campaignId: campaign._id, userId: req.user._id });
-  if (!assigned) return { error: 403, message: 'Not assigned to this campaign' };
+  // Same manager fallback as bootstrap.js: a lead granted this campaign reads their
+  // (empty) day stats instead of hitting a 403 wall on a campaign they manage.
+  if (!assigned && !(await canManageCampaign(req, campaign._id))) {
+    return { error: 403, message: 'Not assigned to this campaign' };
+  }
   return { campaign };
 }
 
