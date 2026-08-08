@@ -9,8 +9,9 @@ import mongoose from 'mongoose';
 // Locks the four failure modes the per-campaign model exists to prevent:
 //   1. Import theft — B's overlapping import must INSERT B's own rows, never re-house A's.
 //   2. Status bleed — surveying a shared person in A must not mark them surveyed in B.
-//   3. Delete hazard — deleting never-walked B leaves A intact; a flagged person losing
-//      their last row parks as a DncPendingId and re-flags on a later import.
+//   3. Delete hazard — deleting a never-walked campaign leaves the walked ones intact; a
+//      flagged person losing their last row parks as a DncPendingId and re-flags on a later
+//      import, while one with a surviving row is never parked and keeps the shared card.
 //   4. Wrong-row joins — directory/profile resolve per-campaign; DNC set in A reaches B's
 //      row and drops B's door; an import of an already-flagged person seeds the flag.
 // Plus the multi-campaign server guards: /admin/reports/* and /admin/households/map demand
@@ -63,13 +64,15 @@ function csvOf(rows) {
 }
 
 // Shared people V + W, plus X only-in-A, Y only-in-B, Z (flagged in A, later imported
-// into B), U (unique to the deletable campaign C). Svids never substrings of one another.
+// into B), U (unique to the deletable campaign C), T (unique to the deletable campaign D).
+// Svids never substrings of one another.
 const rowV = () => ({ svid: 'OVV1', first: 'Vera', last: 'Voter', phone: '111', party: 'D', address: '100 Main St', lat: '40.100000', lng: '-89.100000' });
 const rowW = () => ({ svid: 'OVW1', first: 'Wanda', last: 'Walker', phone: '222', party: 'R', address: '200 Oak St', lat: '40.200000', lng: '-89.200000' });
 const rowX = () => ({ svid: 'OVX1', first: 'Xen', last: 'Xylo', phone: '333', party: 'G', address: '300 Pine St', lat: '40.300000', lng: '-89.300000' });
 const rowY = () => ({ svid: 'OVY1', first: 'Yuri', last: 'Yates', phone: '444', party: 'D', address: '400 Cedar St', lat: '40.400000', lng: '-89.400000' });
 const rowZ = () => ({ svid: 'OVZ1', first: 'Zoe', last: 'Zane', phone: '555', party: 'R', address: '500 Birch St', lat: '40.500000', lng: '-89.500000' });
 const rowU = () => ({ svid: 'OVU1', first: 'Uma', last: 'Unique', phone: '666', party: 'D', address: '600 Elm St', lat: '40.600000', lng: '-89.600000' });
+const rowT = () => ({ svid: 'OVT1', first: 'Tess', last: 'Tenant', phone: '777', party: 'R', address: '700 Ash St', lat: '40.700000', lng: '-89.700000' });
 
 // Drive the REAL worker path into a given campaign (create job → stash CSV → process).
 async function runFile(campaign, rows, name = 'overlap.csv') {
@@ -281,6 +284,69 @@ test('deleting never-walked C leaves A intact and parks the last-row flag', { sk
   assert.equal(aU.doNotContact?.source, 'admin');
   assert.equal(aU.doNotContact?.reason, 'moved away, do not contact');
   assert.equal(await DncPendingId.countDocuments({ organizationId: ctx.org._id, stateVoterId: 'OVU1' }), 0, 'pending consumed');
+});
+
+// The sibling half of the same contract, which C could not reach: C's only flagged person
+// held their LAST row, so the skip guard in deleteCampaignCascade ("this person still has a
+// row elsewhere — leave the flag on it") never ran. D flags BOTH kinds at once, so the two
+// branches are told apart in one delete: T parks, Z must not. It also pins the case the
+// per-campaign model exists for — deleting a never-walked campaign that overlaps a WALKED
+// one (A carries a survey) must not cost A a row, a flag, or a survey.
+test('deleting never-walked D leaves the walked campaigns whole and parks only the last-row flag', { skip }, async () => {
+  const campD = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Campaign D', type: 'survey', state: 'IL', isActive: true,
+    surveyTemplateId: ctx.template._id,
+  });
+  // D overlaps A+B on V and the already-flagged Z, and holds T alone.
+  const jobD = await runFile(campD, [rowV(), rowZ(), rowT()], 'd1.csv');
+  assert.equal(jobD.status, 'completed');
+
+  const dZ = await voterIn(campD, 'OVZ1');
+  assert.equal(dZ.doNotContact?.flagged, true, 'Z seeds flagged into D from its siblings');
+  const dT = await voterIn(campD, 'OVT1');
+  const flagT = await call('POST', `/admin/voters/${dT._id}/dnc`, { ...asAdmin(), body: { reason: 'only ever in D' } });
+  assert.equal(flagT.status, 200);
+
+  // Snapshot the walked campaigns and the identity card all three rows share.
+  const aZBefore = await voterIn(ctx.campA, 'OVZ1');
+  const bZBefore = await voterIn(ctx.campB, 'OVZ1');
+  assert.ok(aZBefore.personId, 'A\'s Z row carries an identity card');
+  assert.equal(String(dZ.personId), String(aZBefore.personId), 'one person, one card, three campaign rows');
+  const aRowsBefore = await Voter.countDocuments({ campaignId: ctx.campA._id });
+  const bRowsBefore = await Voter.countDocuments({ campaignId: ctx.campB._id });
+  const aSurveysBefore = await SurveyResponse.countDocuments({ campaignId: ctx.campA._id });
+  assert.ok(aSurveysBefore > 0, 'A is the WALKED campaign here — that is the point of the case');
+
+  const counts = await deleteCampaignCascade(campD);
+  assert.equal(counts.voters, 3, 'exactly D\'s three rows die');
+
+  // The guard, both branches, from one delete.
+  assert.equal(counts.dncParked, 1, 'T (last row) parks; Z (siblings survive) must not');
+  assert.ok(await DncPendingId.findOne({ organizationId: ctx.org._id, stateVoterId: 'OVT1' }), 'T\'s request is held');
+  assert.equal(
+    await DncPendingId.countDocuments({ organizationId: ctx.org._id, stateVoterId: 'OVZ1' }), 0,
+    'a person with a surviving row is never parked — the flag rides that row'
+  );
+
+  // The walked campaigns are whole: every row, the flag with its attribution, the history.
+  assert.equal(await Voter.countDocuments({ campaignId: ctx.campA._id }), aRowsBefore, 'A keeps every row');
+  assert.equal(await Voter.countDocuments({ campaignId: ctx.campB._id }), bRowsBefore, 'B keeps every row');
+  const aZAfter = await voterIn(ctx.campA, 'OVZ1');
+  assert.equal(String(aZAfter._id), String(aZBefore._id), 'A\'s Z row is the same document');
+  assert.equal(aZAfter.doNotContact?.flagged, true, 'A\'s flag survives its sibling\'s delete');
+  assert.equal(aZAfter.doNotContact?.reason, aZBefore.doNotContact?.reason, 'with its original attribution');
+  assert.equal(String((await voterIn(ctx.campB, 'OVZ1'))._id), String(bZBefore._id), 'B\'s Z row too');
+  assert.equal(
+    await SurveyResponse.countDocuments({ campaignId: ctx.campA._id }), aSurveysBefore,
+    'A\'s canvassing history is untouched'
+  );
+  assert.equal((await voterIn(ctx.campA, 'OVV1')).surveyStatus, 'surveyed', 'and still reads surveyed');
+
+  // The card the survivors point at rides with them. (A card whose LAST row died — T's — is
+  // currently left behind instead; purging those orphans is separate, open work. This
+  // assertion is the guardrail for it: that purge must never reach a card like Z's.)
+  assert.ok(await Person.findById(aZBefore.personId).lean(), 'the shared card survives');
+  assert.equal(String(aZAfter.personId), String(aZBefore.personId), 'and the survivor still points at it');
 });
 
 // ── 4c. Directory + profile resolve per-campaign ────────────────────────────────
