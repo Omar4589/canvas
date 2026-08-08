@@ -18,6 +18,7 @@ import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { passBookIds, visibleCutDoors, countLooseDoors } from '../lib/cutMapDoors.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
+import { buildingKeyForCoords } from '../lib/buildings.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -122,14 +123,15 @@ function doorsToGeoJSON(doors, colorByTurf, targetedSet, statusMode, dark) {
 // Apartment units are each their own household but share one geocode, so on the
 // map their dots stack and only the top one is clickable. Group doors by rounded
 // coordinate (~1.1m): a key with >=2 doors becomes one building marker, lone
-// doors stay as normal dots.
-function doorKey(d) {
-  return `${Math.round(d.lat * 1e5)}|${Math.round(d.lng * 1e5)}`;
-}
+// doors stay as normal dots. The key itself comes from lib/buildings.js — the same
+// one the admin map, the canvasser map, and /exclude-apartments use, so "this is a
+// building" can't mean two different sets of doors on two screens.
+const doorKey = (d) => buildingKeyForCoords(d.lng, d.lat);
 function groupDoors(doors) {
   const groups = new Map();
   for (const d of doors || []) {
     const k = doorKey(d);
+    if (!k) continue; // no coordinate = nothing to stack; it can't be drawn either
     const arr = groups.get(k) || [];
     arr.push(d);
     groups.set(k, arr);

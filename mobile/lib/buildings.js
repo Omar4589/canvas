@@ -8,6 +8,10 @@ const DONE = new Set(['surveyed', 'lit_dropped']);
 export function buildingKey(h) {
   const c = h.location?.coordinates;
   if (!c || c.length !== 2) return null;
+  // A null/NaN inside a length-2 array would round to 0 and fold unrelated doors
+  // into a phantom building at the equator. Matches the server and web guards
+  // (server/src/utils/buildingKey.js, client/src/lib/buildings.js).
+  if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
   return `${Math.round(c[1] * 1e5)}|${Math.round(c[0] * 1e5)}`; // ~1.1m precision
 }
 

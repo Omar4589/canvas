@@ -87,7 +87,86 @@ export function drawHouseIcon(color, size = 64) {
   return ctx.getImageData(0, 0, size * dpr, size * dpr);
 }
 
-export function householdsToGeoJSON(households) {
+// Render an apartment-building icon — a rounded tower in the roll-up color with a
+// grid of lit windows. Visually distinct from drawHouseIcon at a glance, because
+// the whole point is that this pin is NOT one door. Same 64px canvas + pixelRatio 2
+// as the house icons so the two size together.
+export function drawBuildingIcon(color, size = 64) {
+  const dpr = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const darker = darkenHex(color);
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size - 4, 17, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Tower body
+  ctx.beginPath();
+  ctx.roundRect(17, 10, 30, 46, 3);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Parapet — a darker cap so the roofline reads at small sizes
+  ctx.beginPath();
+  ctx.roundRect(14, 6, 36, 7, 2);
+  ctx.fillStyle = darker;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // 3 x 3 windows
+  ctx.fillStyle = '#ffffff';
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      ctx.beginPath();
+      ctx.roundRect(21 + c * 8.5, 17 + r * 9, 5.5, 5.5, 1);
+      ctx.fill();
+    }
+  }
+
+  // Ground-floor entrance
+  ctx.beginPath();
+  ctx.roundRect(28, 45, 8, 11, 1);
+  ctx.fill();
+  ctx.fillStyle = darker;
+  ctx.beginPath();
+  ctx.arc(34, 51, 0.9, 0, Math.PI * 2);
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, size * dpr, size * dpr);
+}
+
+// Building roll-up colors. Deliberately THREE states rather than the 8-status
+// palette: a building holds a mix of door statuses, so painting it any single
+// status would be a claim about doors it doesn't hold. Mirrors the green/yellow/
+// grey roll-up mobile's building markers already use.
+export function buildingColorsForTheme(dark) {
+  return {
+    done: STATUS_COLORS.surveyed,
+    partial: '#f59e0b', // amber — some units worked, some not
+    none: dark ? '#d1d5db' : STATUS_COLORS.unknocked,
+  };
+}
+
+// stackedIds (optional): ids that belong to a building. Those doors get
+// `stacked: true` so the house layer can filter them out — otherwise the
+// building glyph would sit on top of N coincident house icons and a click
+// would land on whichever one Mapbox happened to hit first. Callers with no
+// building layer (client report map, answer mini-map) pass nothing and get
+// the old behavior exactly.
+export function householdsToGeoJSON(households, stackedIds = null) {
   return {
     type: 'FeatureCollection',
     features: households
@@ -104,8 +183,23 @@ export function householdsToGeoJSON(households) {
           // Pin provenance — drives the "approximate" ring + detail badge.
           coordConfidence: h.coordConfidence || '',
           coordSource: h.coordSource || '',
+          stacked: stackedIds ? stackedIds.has(h.id) : false,
         },
       })),
+  };
+}
+
+// buildings: the groupHouseholds() shape from lib/buildings.js.
+export function buildingsToGeoJSON(buildings) {
+  return {
+    type: 'FeatureCollection',
+    features: (buildings || []).map((b) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
+      // `key` is the click handle — the units themselves live in the memoized
+      // byKey map, since Mapbox feature properties can only carry scalars.
+      properties: { key: b.key, total: b.total, done: b.done, roll: b.roll },
+    })),
   };
 }
 
@@ -271,11 +365,22 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     map.addImage(id, drawHouseIcon(color), { pixelRatio: 2 });
   }
 
+  const bColors = buildingColorsForTheme(dark);
+  for (const roll of Object.keys(bColors)) {
+    const id = `building-${roll}`;
+    if (map.hasImage(id)) map.removeImage(id);
+    map.addImage(id, drawBuildingIcon(bColors[roll]), { pixelRatio: 2 });
+  }
+
   map.addSource('households', { type: 'geojson', data: EMPTY_FC });
   map.addLayer({
     id: 'households-symbols',
     type: 'symbol',
     source: 'households',
+    // Doors that share a pin are drawn ONCE, by the building layer below. Without
+    // this filter they'd stack invisibly under it (icon-allow-overlap draws every
+    // one of them) and a click could silently resolve to the wrong unit.
+    filter: ['!=', ['get', 'stacked'], true],
     layout: {
       'icon-image': [
         'match', ['get', 'status'],
@@ -295,6 +400,40 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     },
   });
 
+  // One glyph per set of doors sharing a coordinate — an apartment building, not a
+  // cluster: the pin is the doors' real location, it never merges with the building
+  // next door, and it does not dissolve as you zoom in. Fed only when the caller
+  // supplies buildings (see lib/buildings.js); empty everywhere else.
+  map.addSource('buildings', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'building-symbols',
+    type: 'symbol',
+    source: 'buildings',
+    layout: {
+      'icon-image': [
+        'match', ['get', 'roll'],
+        'done', 'building-done',
+        'partial', 'building-partial',
+        'building-none',
+      ],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.24, 14, 0.38, 17, 0.54],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      // Door count appears once you're close enough to read it. Labels MAY collide
+      // away (text-optional) — the icon never does, so no building is ever hidden.
+      'text-field': ['step', ['zoom'], '', 14, ['concat', ['to-string', ['get', 'total']], ' doors']],
+      'text-size': 11,
+      'text-offset': [0, 1.15],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: {
+      'text-color': dark ? '#f3f4f6' : '#111827',
+      'text-halo-color': dark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
+      'text-halo-width': 1.4,
+    },
+  });
+
   // Amber "approximate" ring under any interpolated (non-rooftop) geocode, so admins
   // can spot the pins most likely to be off and correct them. Below the house icon.
   map.addLayer(
@@ -302,7 +441,7 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       id: 'household-approx-ring',
       type: 'circle',
       source: 'households',
-      filter: ['==', ['get', 'coordConfidence'], 'interpolated'],
+      filter: ['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!=', ['get', 'stacked'], true]],
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
         'circle-color': 'rgba(0,0,0,0)',

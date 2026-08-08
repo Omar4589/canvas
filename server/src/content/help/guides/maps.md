@@ -15,6 +15,21 @@ There are two maps, and they draw the **same doors** from the **same data**. The
 
 Every house is a pin colored by its current status — gray (unknocked), blue (not home), green (surveyed), amber (refused), red (wrong address), purple (lit dropped), pink (no soliciting), and slate (restricted). If two colors trip you up, see [Restricted vs. refused](restricted-vs-refused). Doors where everyone has already voted drop off the field map on their own.
 
+## Apartment buildings: one marker, many doors
+
+Every apartment unit is its own door in Doorline. But address files put every unit of a building at the **same spot on the map**, so if each one got its own pin they'd land on top of each other — you'd see one house, click it, and get one of the units with no hint that dozens more were underneath.
+
+So wherever **two or more doors share a spot**, the map draws a **building icon** instead, with a **"N doors"** label once you zoom in close enough to read it. Its color is a summary of the doors inside: gray if none are worked, amber if some are, green when they all are.
+
+**Click the building to see every door in it** — each with its status and when it was last visited. Pick one to open it like any other door, then use **"← Back to all N doors at this pin"** to return to the list. If you reach one of those doors another way, like address search, the same Back bar is there, so a door inside a big building always tells you it has neighbors.
+
+Up top, next to the door count, you'll see how many buildings there are and how many doors are folded into them — for example **39 buildings · 485 stacked doors**. That's the honest answer to "why don't I see a pin for every door?"
+
+Two things this is *not*:
+
+- **It isn't clustering.** The building sits at the doors' real location, never merges with the building next door, and never breaks apart as you zoom in.
+- **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments (N+ units)** option that keeps big buildings out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. If you want to see only the doors in a cut, scope the map to that pass.
+
 ## Canvasser pings and trails
 
 Turn pings on and each dot marks **where a canvasser stood** when they logged a knock, with a faint line back to the house. Filter to a **single canvasser** and the map rings two of their doors — a **Start** ring on their first knock and a **Latest** ring on their most recent — so you can trace their day. To flag GPS that looks off, see [Audit](audit).

@@ -62,6 +62,9 @@ export default function MapFilters({
   onAnswerChange,
   statusColors,
   statusLabels,
+  // Doors sharing one geocode, drawn as building glyphs. 0 hides the note entirely.
+  buildingCount = 0,
+  stackedDoorCount = 0,
   showCanvasserPins = false,
   onShowCanvasserPinsChange,
   // Overlap overlay (admin map only): doors worked by 2+ canvassers in the same pass.
@@ -321,6 +324,17 @@ export default function MapFilters({
             />
           ))}
         </div>
+        {/* Not a filter — an explanation. Doors sharing one geocode can't each have
+            their own dot, so they're drawn as a building. Without this the map looks
+            like it lost them. */}
+        {buildingCount > 0 && (
+          <p className="mt-2 rounded border border-border bg-sunken px-2 py-1.5 text-[11px] leading-snug text-fg-muted">
+            🏢 <strong className="text-fg">{buildingCount.toLocaleString()}</strong> building
+            {buildingCount === 1 ? '' : 's'} hold{' '}
+            <strong className="text-fg">{stackedDoorCount.toLocaleString()}</strong> doors on shared pins. Click one to
+            see every door in it.
+          </p>
+        )}
       </div>
 
       {!hideCanvassers && (

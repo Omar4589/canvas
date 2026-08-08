@@ -6,6 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import HouseholdDetailPanel from '../components/HouseholdDetailPanel.jsx';
+import DoorStackPanel from '../components/DoorStackPanel.jsx';
 import MapFilters from '../components/MapFilters.jsx';
 import AddressSearch from '../components/AddressSearch.jsx';
 import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
@@ -19,8 +20,10 @@ import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
+import { groupHouseholds, buildingKeyForCoords } from '../lib/buildings.js';
 import {
   householdsToGeoJSON,
+  buildingsToGeoJSON,
   overlapDoorsToGeoJSON,
   activitiesToPingsGeoJSON,
   activitiesToLinesGeoJSON,
@@ -108,6 +111,11 @@ export default function MapPage() {
   const [selected, setSelected] = useState(() => searchParams.get('household') || null);
   const [selectedActivityId, setSelectedActivityId] = useState(null);
   const didFocusHouseholdRef = useRef(false);
+  // Doors sharing one map pin, opened as a list. Set by a building click or by a
+  // click that hit more than one house. The once-bound layer handlers can't read
+  // the memo, so the lookup rides a ref.
+  const [stackIds, setStackIds] = useState(null);
+  const buildingsByKeyRef = useRef(new Map());
 
   // "Move pin" mode: a draggable marker to correct a household's location.
   const moveMarkerRef = useRef(null);
@@ -519,19 +527,43 @@ export default function MapPage() {
 
     // Layer event handlers — bound ONCE; they reference layer IDs that get
     // recreated by registerLayers on each style swap, so they keep working.
+    // A click can land on more than one door: houses draw with icon-allow-overlap, so
+    // two pins a metre apart (or a whole apartment stack, before the building layer
+    // took those over) both hit. Taking features[0] silently opened one of them and
+    // hid the rest — the same failure that made 485 stacked doors invisible. More than
+    // one hit now opens the door list instead of guessing.
     map.on('click', 'households-symbols', (e) => {
-      const f = e.features?.[0];
-      if (!f) return;
-      setSelected(f.properties.id);
+      const hits = e.features || [];
+      if (!hits.length) return;
+      const ids = [...new Set(hits.map((f) => f.properties.id))];
       setSelectedActivityId(null);
+      if (ids.length > 1) {
+        setStackIds(ids);
+        setSelected(null);
+      } else {
+        setStackIds(null);
+        setSelected(ids[0]);
+      }
     });
     map.on('mouseenter', 'households-symbols', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'households-symbols', () => { map.getCanvas().style.cursor = ''; });
+    // A building glyph stands for every door on that pin — open the list, never one unit.
+    map.on('click', 'building-symbols', (e) => {
+      const key = e.features?.[0]?.properties?.key;
+      const building = key && buildingsByKeyRef.current.get(key);
+      if (!building) return;
+      setStackIds(building.units.map((u) => u.id));
+      setSelected(null);
+      setSelectedActivityId(null);
+    });
+    map.on('mouseenter', 'building-symbols', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'building-symbols', () => { map.getCanvas().style.cursor = ''; });
     map.on('click', 'canvasser-pings', (e) => {
       const f = e.features?.[0];
       if (!f) return;
       setSelectedActivityId(f.properties.activityId);
       setSelected(null);
+      setStackIds(null);
     });
     map.on('mouseenter', 'canvasser-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'canvasser-pings', () => { map.getCanvas().style.cursor = ''; });
@@ -540,6 +572,7 @@ export default function MapPage() {
       if (!f) return;
       setSelectedFlagId(f.properties.actionId);
       setSelected(null);
+      setStackIds(null);
       setSelectedActivityId(null);
     });
     map.on('mouseenter', 'flagged-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -607,13 +640,24 @@ export default function MapPage() {
     return () => map.off('style.load', handler);
   }, [styleURL, darkBase, mapReady]);
 
+  // Doors that share a coordinate — an apartment building, a duplex, or a geocoder
+  // that put a whole complex on one rooftop. Same rounded key the cut map, the
+  // canvasser map, and /exclude-apartments use, so all four agree on what a building is.
+  const { buildings, stackedIds, buildingsByKey } = useMemo(() => {
+    const g = groupHouseholds(households);
+    return { buildings: g.buildings, stackedIds: g.stackedIds, buildingsByKey: g.byKey };
+  }, [households]);
+  buildingsByKeyRef.current = buildingsByKey;
+
   // Push household features to the map source whenever data changes.
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const src = mapRef.current.getSource('households');
     if (!src) return;
-    const geojson = householdsToGeoJSON(households);
+    const geojson = householdsToGeoJSON(households, stackedIds);
     src.setData(geojson);
+    // Stacked doors are drawn once, as a building, by this source instead.
+    mapRef.current.getSource('buildings')?.setData(buildingsToGeoJSON(buildings));
 
     // Auto-fit on first load. Prefer the doors currently shown; if none are shown
     // (e.g. "today" before anyone has knocked), fall back to the campaign's full door
@@ -631,7 +675,7 @@ export default function MapPage() {
         mapRef.current._didFitBounds = true;
       }
     }
-  }, [households, mapBounds, mapReady, styleEpoch]);
+  }, [households, buildings, stackedIds, mapBounds, mapReady, styleEpoch]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -738,6 +782,32 @@ export default function MapPage() {
     if (!selected) return null;
     return h || (lastSelectedRef.current?.id === selected ? lastSelectedRef.current : null);
   }, [selected, households]);
+
+  // The building the open door belongs to, if any — so a door reached by search or a
+  // deep link (not by clicking the glyph) still says "you're inside an 84-door building".
+  const selectedBuilding = useMemo(() => {
+    const loc = selectedHousehold?.location;
+    if (!loc) return null;
+    return buildingsByKey.get(buildingKeyForCoords(loc.lng, loc.lat)) || null;
+  }, [selectedHousehold, buildingsByKey]);
+
+  // The door list to show: an explicitly opened stack, else the selected door's building.
+  // Same "don't snap the open panel shut" guard the single-door path uses above — a
+  // viewport-bounded refetch drops off-screen doors, and every door in a building shares
+  // one coordinate, so they all leave at once.
+  const lastStackRef = useRef(null);
+  const stackDoors = useMemo(() => {
+    const ids = stackIds || selectedBuilding?.units.map((u) => u.id);
+    if (!ids?.length) return null;
+    const key = ids.join(',');
+    const doors = ids.map((id) => householdsById.get(id)).filter(Boolean);
+    if (doors.length === ids.length) {
+      lastStackRef.current = { key, doors };
+      return doors;
+    }
+    if (lastStackRef.current?.key === key) return lastStackRef.current.doors;
+    return doors.length ? doors : null;
+  }, [stackIds, selectedBuilding, householdsById]);
 
   // Push the selected door to the highlight ring (see mapRender). Clears when nothing
   // is selected or the selected door has no coordinates.
@@ -850,6 +920,19 @@ export default function MapPage() {
                 ? 'Loading households…'
                 : `${households.length.toLocaleString()} households shown`}
             </span>
+            {/* Doors sharing a pin can't each get their own dot, so say how many are
+                folded into building glyphs — otherwise the map looks like it's missing them. */}
+            {buildings.length > 0 && (
+              <>
+                <span className="text-fg-subtle" aria-hidden="true">·</span>
+                <span
+                  title={`${stackedIds.size.toLocaleString()} doors share a pin with at least one other door. Each group is drawn as one building glyph — click it to see every door.`}
+                  className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted"
+                >
+                  {buildings.length.toLocaleString()} buildings · {stackedIds.size.toLocaleString()} stacked doors
+                </span>
+              </>
+            )}
             <span className="text-fg-subtle" aria-hidden="true">·</span>
             {/* Every polled count on the page feeds the pill (it reports the OLDEST). The flags
                 and overlaps layers are each a number here (their chips below), so the pill has to
@@ -942,6 +1025,8 @@ export default function MapPage() {
             onAnswerChange={setAnswerFilter}
             statusColors={STATUS_COLORS}
             statusLabels={STATUS_LABELS}
+            buildingCount={buildings.length}
+            stackedDoorCount={stackedIds.size}
             showCanvasserPins={showCanvasserPins}
             onShowCanvasserPinsChange={setShowCanvasserPins}
             showOverlaps={showOverlaps}
@@ -1005,14 +1090,55 @@ export default function MapPage() {
               }}
               className="rounded-lg border border-border bg-card shadow-lg"
             >
+              {/* This door isn't alone on its pin — offer the way back to the full list,
+                  so the other units can't be mistaken for doors that don't exist. */}
+              {stackDoors && stackDoors.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStackIds(stackDoors.map((d) => d.id));
+                    setSelected(null);
+                  }}
+                  className="flex w-full items-center gap-1.5 border-b border-border bg-sunken px-4 py-2 text-left text-xs font-medium text-fg-muted hover:text-fg"
+                >
+                  ← Back to all {stackDoors.length.toLocaleString()} doors at this pin
+                </button>
+              )}
               <HouseholdDetailPanel
                 household={selectedHousehold}
-                onClose={() => setSelected(null)}
+                onClose={() => { setSelected(null); setStackIds(null); }}
                 onMovePin={() => { setMoveErr(null); setMoveTarget(selectedHousehold); }}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
                 tz={tz}
                 passId={scopePassId}
+              />
+            </div>
+          )}
+          {/* Doors sharing one pin, listed. Only when no single door is open — picking one
+              from the list swaps this for the detail panel (with a Back bar). */}
+          {!selectedHousehold && !moveTarget && stackDoors && stackDoors.length > 1 && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                zIndex: 10,
+                width: 384,
+                maxWidth: 'calc(100% - 32px)',
+                maxHeight: 'calc(100% - 32px)',
+                overflowY: 'auto',
+              }}
+              className="rounded-lg border border-border bg-card shadow-lg"
+            >
+              <DoorStackPanel
+                doors={stackDoors}
+                selectedId={selected}
+                onSelect={(id) => setSelected(id)}
+                onClose={() => setStackIds(null)}
+                statusColors={STATUS_COLORS}
+                statusLabels={STATUS_LABELS}
+                tz={tz}
               />
             </div>
           )}
