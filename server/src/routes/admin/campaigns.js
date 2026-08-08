@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
-import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
+import { isOrgAdmin, managedCampaignIds, canManageCampaign, canManageSurvey } from '../../services/authz/campaignManagement.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
@@ -312,6 +312,15 @@ router.patch('/:campaignId', async (req, res, next) => {
           organizationId: orgId,
         });
         if (!tmpl) return res.status(400).json({ error: 'Survey template not found in this org.' });
+        // A lead attaches only what they could edit: authored, or already attached to
+        // a campaign they manage. Their list (surveys.js GET /) is scoped the same
+        // way, so this only fires on a hand-crafted id. Detach (null) stays free.
+        if (!(await canManageSurvey(req, tmpl))) {
+          return res.status(403).json({
+            error: 'You can only attach a survey you authored or one already attached to a campaign you manage.',
+            code: 'survey-out-of-scope',
+          });
+        }
       }
       campaign.surveyTemplateId = data.surveyTemplateId || null;
     }

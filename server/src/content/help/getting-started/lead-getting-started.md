@@ -20,7 +20,7 @@ Admins usually create and set up a campaign, then hand it off to you to run end-
 On any campaign you've been granted, you're as powerful as an admin:
 
 - Import the voter file and add later files ([voter imports](voter-imports))
-- Build and attach a survey — you can author your own templates, and edit any survey attached to a campaign you manage — then build your [walk lists](walk-lists)
+- Build and attach a survey from your library — surveys you created, or ones already on your campaigns; you can edit any of them — then build your [walk lists](walk-lists)
 - Cut [turf and assign books](turf-and-books), and [assign canvassers](assigning-canvassers)
 - Create and activate [passes](passes)
 - Build your crew, including [creating new canvasser accounts](add-a-canvasser-account)

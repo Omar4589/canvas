@@ -29,6 +29,14 @@ few) of them to run end-to-end — they report to the admins, who usually create
 then hand it off. A lead avoids the all-or-nothing choice of making a campaign runner a full org admin
 (which would give them every other campaign and all the org settings too).
 
+**The lead may not be your person at all.** The typical org here is a grassroots canvassing firm
+hired by campaigns: the org owner runs the company, admins work for the owner — and a team lead may
+be *the client's own campaign manager*, granted their one campaign. That trust model is why every
+wall below exists: a client's rep never sees billing or the fields that drive what the firm invoices,
+never touches another client's campaign, never sets an org-wide fact like Do-Not-Contact — and their
+**survey library shows only what they authored or what's already on their campaigns**, never another
+client's scripts, campaign names, or volumes.
+
 Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, build
 and attach a survey (authoring their own templates, not just picking from the library), build walk
 lists, cut turf, create and activate passes (rounds), assign books — **including to themselves**, since
@@ -45,10 +53,14 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
   admins. The server refuses with a 403 naming the field, so this can't be bypassed from the UI.
 - **Run the org survey library, or touch the tag library.** Surveys are nuanced: a lead **can author**
   survey templates — create new ones, and edit or duplicate their own or any survey attached to a
-  campaign they manage — but **archiving, un-archiving, and deleting** templates stay with org admins,
-  and the org-wide Surveys library page itself is admin-only (a lead works from their campaign's
-  Survey tab). The **tag library** is stricter: a lead can *read* tags (to filter by them) but never
-  create, edit, merge, or delete them.
+  campaign they manage — but their **library is scoped to exactly that set**: the list, the attach
+  picker, and the walk-list override picker show only authored-or-attached templates, and attaching
+  any other template by id is refused server-side the same way (`survey-out-of-scope`).
+  **Archiving, un-archiving, and deleting** templates stay with org admins, and the org-wide Surveys
+  library page itself is admin-only (a lead works from their campaign's Survey tab). One consequence
+  to know — the **detach cliff**: if a lead detaches an admin-authored template from their only
+  campaign using it, it leaves their library and an admin must re-attach it. The **tag library** is
+  stricter: a lead can *read* tags (to filter by them) but never create, edit, merge, or delete them.
 - **Flag a voter Do-Not-Contact, or clear the flag.** DNC is an org-wide fact about a person, not a
   campaign fact — setting it anywhere silences that voter in every campaign — so it stays with org
   admins.
@@ -229,14 +241,36 @@ Without it a lead could cut turf and hand out every book except their own: the c
 filter by tag), but every mutation (create, edit, merge, delete) carries a per-route
 `requireOrgRole('admin')`.
 
-**Surveys — leads author; admins own the lifecycle.** The `surveys` router is `('admin','lead')`,
-and a lead's write access is per-survey rather than blanket-denied: `POST /` (create) is **open to
-leads** — `createdBy` is stamped, and *attaching* a survey to a campaign is separately
-campaign-manager-scoped — while `PATCH /:id` and `POST /:id/duplicate` gate on `canManageSurvey`
+**Surveys — leads author; admins own the lifecycle; the lead's library is scoped (2026-08-08).**
+The `surveys` router is `('admin','lead')`, and a lead's access is per-survey rather than
+blanket-denied: `POST /` (create) is **open to leads** — `createdBy` is stamped — while `PATCH /:id`
+and `POST /:id/duplicate` gate on `canManageSurvey`
 ([campaignManagement.js](../server/src/services/authz/campaignManagement.js)): the lead authored it,
 or it is attached to a managed campaign as the campaign default or an Effort (walk-list) override.
-Archive, unarchive, and `DELETE` carry `requireOrgRole('admin')`. Pinned by
-[teamLead.int.test.js](../server/test/teamLead.int.test.js) ("lead survey edit/duplicate is scoped").
+Archive, unarchive, and `DELETE` carry `requireOrgRole('admin')`.
+
+The **LIST** (`GET /`) applies the same predicate as a set: for a lead the find filter is
+`$or [{createdBy}, {_id ∈ attachedSurveyTemplateIds(managed)}]` (the set-form helper lives beside
+`canManageSurvey` so the two can't drift), and the usage metadata is narrowed to their campaigns —
+`usedByCampaigns`, `usedByWalkLists`, and `responseCountByCampaign` are filtered, `responseCount` /
+`hasResponses` re-derive from the narrowed buckets, and a bare **`usedElsewhere` boolean** (no
+names, no volumes) tells the builder to keep its shared-edit warning honest when a template is also
+used beyond the lead's view. Without the scoping, the list handed a client-side lead every
+template's full question content plus other clients' campaign names and response volumes.
+
+**ATTACH is guarded the same way, server-side** — the list scoping alone would be cosmetic since
+attach went by id: the campaign default (`PATCH /admin/campaigns/:id`,
+[campaigns.js](../server/src/routes/admin/campaigns.js)) and the walk-list override (POST/PATCH on
+[efforts.js](../server/src/routes/admin/efforts.js), via `resolveOverrideTemplate`) both refuse a
+template failing `canManageSurvey` with `403 { code: 'survey-out-of-scope' }` — deliberately **not**
+`FORBIDDEN_ROLE`, which mobile treats as a role change. Detach (`null`) stays free; admins are
+untouched. The efforts path also gained plain validation (ObjectId shape + org ownership → 400) —
+previously any string was stored verbatim. One consequence, the **detach cliff**: detaching an
+admin-authored template from a lead's only campaign using it removes it from their scope, and only
+an admin can re-attach it. Pinned by [teamLead.int.test.js](../server/test/teamLead.int.test.js)
+(list + attach matrices), [surveys.int.test.js](../server/test/surveys.int.test.js) (override
+validation), and [leadWalkthrough.int.test.js](../server/test/leadWalkthrough.int.test.js) (the
+cliff, live).
 
 **Org-wide, lead-SCOPED** — `memberships` (the Users surface) is `('admin','lead')` since
 2026-07-23, with per-route boundaries inside

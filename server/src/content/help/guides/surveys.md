@@ -35,7 +35,11 @@ For the full workbench, open the campaign's **Survey Explorer** tab: filters (qu
 
 ## Who can edit what
 
-If you're a **team lead**, you can build new surveys and edit or duplicate the ones you authored or that are attached to a campaign you manage — that covers everything above. Two things stay with org admins: **archiving or deleting** a survey template, and the **tag library** — you pick from existing tags in the builder but can't create new ones. If an option is missing a tag you need, ask an admin to add it.
+If you're a **team lead**, you can build new surveys and edit or duplicate the ones you authored or that are attached to a campaign you manage — that covers everything above. **Your library is exactly that set**: the survey list and every picker show your own surveys and the ones already on your campaigns, nothing else in the organization.
+
+Two things follow from that. **Be careful swapping away an admin-built survey**: once it's detached from your last campaign using it, it leaves your library and only an admin can bring it back — if you just want different questions, **Duplicate** it first and edit your copy. And if a survey you share shows "**also used elsewhere in your organization**," edits apply there too — same answer: Duplicate before you change it.
+
+Two things stay with org admins: **archiving or deleting** a survey template, and the **tag library** — you pick from existing tags in the builder but can't create new ones. If an option is missing a tag you need, ask an admin to add it.
 
 ## Editing a live survey
 

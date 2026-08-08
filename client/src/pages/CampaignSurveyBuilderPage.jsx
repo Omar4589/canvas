@@ -120,6 +120,10 @@ export default function CampaignSurveyBuilderPage({ mode }) {
 
   const editing = mode === 'edit';
   const others = editing ? usedByOthers(attachedSurvey, campaignId) : 0;
+  // A lead's usedByCampaigns is narrowed to their campaigns, so `others` alone would go
+  // quiet exactly when the survey is shared with a campaign they can't see — the server
+  // ships the bare `usedElsewhere` boolean for that case (no names, no counts).
+  const sharedBeyondView = editing && !!attachedSurvey?.usedElsewhere;
   // On create, whether this campaign already has a main survey decides the copy + attach.
   const hasMain = !!attachedId;
 
@@ -140,11 +144,12 @@ export default function CampaignSurveyBuilderPage({ mode }) {
             : " It will become this campaign's default survey when you save.")}
       </p>
 
-      {editing && others > 0 && (
+      {editing && (others > 0 || sharedBeyondView) && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
           <span>
-            This survey is also used by {others} other campaign{others === 1 ? '' : 's'} — changes apply
-            to all of them.
+            {others > 0
+              ? `This survey is also used by ${others} other campaign${others === 1 ? '' : 's'} — changes apply to all of them.`
+              : 'This survey is also used elsewhere in your organization — changes apply there too.'}
           </span>
           <Button
             size="sm"

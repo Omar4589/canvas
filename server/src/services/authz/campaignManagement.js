@@ -75,3 +75,25 @@ export async function canManageSurvey(req, survey) {
   ]);
   return Boolean(asDefault || asOverride);
 }
+
+// The SET form of canManageSurvey's "attached" arm: every template id attached to a
+// campaign in `managed` — as the campaign default or any walk-list override. Kept
+// beside canManageSurvey so the per-doc and set predicates can't drift apart.
+// `managed` is the caller's already-computed managedCampaignIds (no second grant read).
+export async function attachedSurveyTemplateIds(req, managed) {
+  const orgId = req.activeOrg?._id;
+  if (!orgId || !managed?.length) return [];
+  const [defaults, overrides] = await Promise.all([
+    Campaign.distinct('surveyTemplateId', {
+      organizationId: orgId,
+      _id: { $in: managed },
+      surveyTemplateId: { $ne: null },
+    }),
+    Effort.distinct('surveyTemplateId', {
+      organizationId: orgId,
+      campaignId: { $in: managed },
+      surveyTemplateId: { $ne: null },
+    }),
+  ]);
+  return [...defaults, ...overrides];
+}

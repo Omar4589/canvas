@@ -173,7 +173,16 @@ test('3. survey authoring: create, edit, duplicate, attach; tags readable', { sk
   assert.ok(sid, `created survey id in response: ${created.text?.slice(0, 200)}`);
   expectOk(await asLead('PATCH', `/admin/surveys/${sid}`, { name: 'Lead Draft v2' }), 'edit own survey');
   expectOk(await asLead('POST', `/admin/surveys/${sid}/duplicate`), 'duplicate own survey');
-  expectOk(await asLead('PATCH', `/admin/campaigns/${ctx.A._id}`, { surveyTemplateId: String(ctx.template._id) }), 'attach survey to campaign');
+  expectOk(await asLead('PATCH', `/admin/campaigns/${ctx.A._id}`, { surveyTemplateId: String(sid) }), 'attach own authored survey');
+  // THE DETACH CLIFF, live: swapping the default detached the admin's template from the
+  // lead's only campaign, so it left their scope — re-attaching it now needs an admin.
+  const cliff = await asLead('PATCH', `/admin/campaigns/${ctx.A._id}`, { surveyTemplateId: String(ctx.template._id) });
+  assert.strictEqual(cliff.status, 403, 'detached admin template is out of the lead\'s reach');
+  assert.strictEqual(cliff.json.code, 'survey-out-of-scope');
+  expectOk(
+    await call('PATCH', `/admin/campaigns/${ctx.A._id}`, { token: ctx.adminTok, orgId: ctx.org._id, body: { surveyTemplateId: String(ctx.template._id) } }),
+    'admin restores the house template'
+  );
   expectOk(await asLead('GET', '/admin/tags'), 'read tags');
 });
 

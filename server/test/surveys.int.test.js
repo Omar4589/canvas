@@ -242,3 +242,22 @@ test('GET efforts reports per-walk-list responseCount and intakeResponseCount', 
   const coverage = json.intakeResponseCount + noOverride.reduce((n, e) => n + e.responseCount, 0);
   assert.strictEqual(coverage, 2);
 });
+
+test('a walk-list override is validated: bad ids and foreign-org templates are 400', { skip }, async () => {
+  // These used to be stored VERBATIM — no id-shape check, no org check. Admin-path
+  // validation is new alongside the lead attach scoping (surveys stay org-scoped).
+  const { adminTok, org, org2, C2, E2, surveyC } = ctx;
+  const opt = { token: adminTok, orgId: org._id };
+  const patch = (surveyTemplateId) =>
+    call('PATCH', `/api/admin/campaigns/${C2._id}/efforts/${E2._id}`, { ...opt, body: { surveyTemplateId } });
+
+  assert.strictEqual((await patch('not-an-oid')).status, 400, 'garbage id refused');
+  assert.strictEqual((await patch(String(new mongoose.Types.ObjectId()))).status, 400, 'nonexistent id refused');
+  const foreign = await SurveyTemplate.create({ organizationId: org2._id, name: 'Foreign', questions: [] });
+  assert.strictEqual((await patch(String(foreign._id))).status, 400, 'another org\'s template refused');
+
+  // The legitimate path still works, both directions. (surveyC — never deleted by the
+  // earlier lifecycle tests, unlike D/E.)
+  assert.strictEqual((await patch(String(surveyC._id))).status, 200, 'valid override set');
+  assert.strictEqual((await patch(null)).status, 200, 'override cleared');
+});

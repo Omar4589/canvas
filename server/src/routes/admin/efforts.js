@@ -12,6 +12,8 @@ import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyTemplate } from '../../models/SurveyTemplate.js';
+import { canManageSurvey } from '../../services/authz/campaignManagement.js';
 import { recomputeTurf, recomputePassTerritories } from '../../services/turf/generateTurf.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
@@ -171,10 +173,41 @@ router.get('/', async (req, res, next) => {
 
 // Create an effort. Optionally seed its door-set from a walk list (claims that
 // list's Intake households) — see /:id/claim for the full claim/re-carve flow.
+// Resolve + authorize a walk-list survey override. Returns { value } (null = no
+// override) or { error: true } with the response already sent. Lit-drop campaigns
+// never carry one (mirrors the Campaign type rule); the id is validated org-scoped
+// (it used to be stored verbatim, garbage included) and gated by canManageSurvey so
+// a lead can only point a walk list at a survey they authored or already run.
+async function resolveOverrideTemplate(req, res, surveyTemplateId) {
+  if (req.campaign.type !== 'survey' || !surveyTemplateId) return { value: null };
+  if (!mongoose.isValidObjectId(surveyTemplateId)) {
+    res.status(400).json({ error: 'Invalid surveyTemplateId.' });
+    return { error: true };
+  }
+  const tmpl = await SurveyTemplate.findOne({
+    _id: surveyTemplateId,
+    organizationId: req.campaign.organizationId,
+  });
+  if (!tmpl) {
+    res.status(400).json({ error: 'Survey template not found in this org.' });
+    return { error: true };
+  }
+  if (!(await canManageSurvey(req, tmpl))) {
+    res.status(403).json({
+      error: 'You can only attach a survey you authored or one already attached to a campaign you manage.',
+      code: 'survey-out-of-scope',
+    });
+    return { error: true };
+  }
+  return { value: tmpl._id };
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { name, surveyTemplateId, seedWalkListId, claimAllIntake } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
+    const tpl = await resolveOverrideTemplate(req, res, surveyTemplateId);
+    if (tpl.error) return;
     // The creator picks ONE door source. "All remaining (Intake)" wins over a saved-search
     // seed if both somehow arrive, so we never both claim-all and seed.
     const seedId = !claimAllIntake && seedWalkListId && mongoose.isValidObjectId(seedWalkListId) ? seedWalkListId : null;
@@ -182,9 +215,7 @@ router.post('/', async (req, res, next) => {
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
       name: String(name).trim(),
-      // Lit-drop campaigns never carry a survey (mirrors Campaign type rule).
-      surveyTemplateId:
-        req.campaign.type === 'survey' && surveyTemplateId ? surveyTemplateId : null,
+      surveyTemplateId: tpl.value,
       seededFromWalkListId: seedId,
       status: 'active',
       createdBy: req.user._id,
@@ -232,8 +263,9 @@ router.patch('/:id', loadEffort, async (req, res, next) => {
     const { name, surveyTemplateId } = req.body || {};
     if (name) req.effort.name = String(name).trim();
     if (surveyTemplateId !== undefined) {
-      req.effort.surveyTemplateId =
-        req.campaign.type === 'survey' && surveyTemplateId ? surveyTemplateId : null;
+      const tpl = await resolveOverrideTemplate(req, res, surveyTemplateId);
+      if (tpl.error) return;
+      req.effort.surveyTemplateId = tpl.value;
     }
     await req.effort.save();
     res.json({ effort: req.effort });

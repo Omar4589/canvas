@@ -86,9 +86,10 @@ A membership's **role** decides what a person can do in that org:
 - **Admin** — runs the whole organization: every campaign, plus the org-wide setup (the survey
   template library, tags, the voter directory, and Users administration).
 - **Team lead** — a **campaign-scoped admin**. Within the specific campaigns they're *granted*, a lead
-  does everything an admin does (import voters, build and attach a survey — leads author their own
-  templates — build walk lists, cut turf, run passes, assign books, manage the crew, print walk
-  packets, export the campaign, and see the reports / map / timeline). They **cannot** create, archive,
+  does everything an admin does (import voters, build and attach a survey from their own library —
+  templates they authored or already on their campaigns — build walk lists, cut turf, run passes,
+  assign books, manage the crew, print walk packets, export the campaign, and see the reports / map /
+  timeline). They **cannot** create, archive,
   or delete a campaign, archive/delete survey templates or touch the tag library, reach org Users
   administration, or see any campaign they weren't granted. Grant a lead their campaigns on the Users
   page (set role → Team lead, then check the campaigns).

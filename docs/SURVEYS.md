@@ -199,10 +199,18 @@ you assign it to a walk list — here or on the Walk Lists page.
 
 **Team leads can now author surveys** for a campaign they manage — **New survey** and **Edit survey**
 are available to them, not just admins. They stay scoped to their campaign: the server only lets a
-lead edit a survey they **authored** or one **attached to a campaign they manage**, and leads never
-see the org-wide Surveys library (which lists every campaign's surveys). Leads can pick from existing
-tags but can't create new ones (tag creation stays admin-only). Archiving/deleting templates stays
-admin-only too.
+lead edit a survey they **authored** or one **attached to a campaign they manage**, and since
+2026-08-08 their **entire library is that same set** — the list, the Change-survey picker, and the
+walk-list override dropdown show only authored-or-attached templates, and attaching anything else by
+id is refused server-side. (A lead may be the *client's* own manager — see
+[ROLES.md](ROLES.md) — so another client's scripts, campaign names, and response volumes must never
+appear.) Two consequences worth knowing: **detaching** an admin-authored survey from your only
+campaign using it drops it out of your library — an admin has to re-attach it; and the response
+counts a lead sees cover **their campaigns only**, so a survey shared beyond their view can read
+"0 responses" yet still refuse a question-type change (the org-wide `409 survey-has-responses` guard
+is unchanged — the builder shows "used elsewhere in your organization" in that case). Leads can pick
+from existing tags but can't create new ones (tag creation stays admin-only). Archiving/deleting
+templates stays admin-only too.
 
 From the main card you can:
 
@@ -430,7 +438,7 @@ campaign default **or** any `Effort` walk-list override). Archive/unarchive/dele
 
 | Method · path | Purpose |
 |---|---|
-| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` (campaign **defaults**), **`usedByWalkLists: [{campaignId, campaignName, effortId, effortName}]`** (every `Effort` whose `surveyTemplateId` points here — a survey used *only* as a walk-list override previously showed no usage at all), **`responseCount`** / **`hasResponses`** (org-wide `SurveyResponse.aggregate`), and **`responseCountByCampaign: [{campaignId, campaignName, count}]`** (a second aggregate grouped by `{surveyTemplateId, campaignId}`; a legacy null-`campaignId` bucket is labeled "No campaign"). `archivedAt` flows through — **archived templates are still returned**; Active/Archived filtering is client-side so one `['surveys']` cache serves the list and every picker. |
+| `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` (campaign **defaults**), **`usedByWalkLists: [{campaignId, campaignName, effortId, effortName}]`** (every `Effort` whose `surveyTemplateId` points here — a survey used *only* as a walk-list override previously showed no usage at all), **`responseCount`** / **`hasResponses`** (org-wide `SurveyResponse.aggregate`), and **`responseCountByCampaign: [{campaignId, campaignName, count}]`** (a second aggregate grouped by `{surveyTemplateId, campaignId}`; a legacy null-`campaignId` bucket is labeled "No campaign"). `archivedAt` flows through — **archived templates are still returned**; Active/Archived filtering is client-side so one `['surveys']` cache serves the list and every picker. **Lead rows are scoped (2026-08-08)**: the find filter is `$or [{createdBy: caller}, {_id ∈ attachedSurveyTemplateIds(managed)}]`, the three usage annotations are narrowed to managed campaigns (the null-campaign bucket drops), `responseCount`/`hasResponses` re-derive from the narrowed buckets, and **`usedElsewhere: true`** (bare boolean) marks a template also attached beyond the lead's campaigns so the builder's shared-edit warning still fires. Admin rows are byte-identical to before. |
 | `POST /admin/surveys` | Create (admin **or lead** — no per-survey scope needed; nothing is attached yet, `createdBy` is stamped as the caller, and the follow-on campaign/effort attach is separately campaign-manager-scoped). Zod `upsertSchema` (optional `tags: [String]` palette); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(withIds, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. **Then `ensureTags(orgId, tags, userId)`** auto-upserts org `Tag` docs (see §I). |
 | `PATCH /admin/surveys/:surveyId` | Update (admin, or a **lead** who passes `canManageSurvey` → else `403`). When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, then `canonicalizeTags(reconciled, data.tags ?? existing.tags)`, apply, and bump `version`. After save, **`ensureTags`** auto-upserts the library (see §I). |
 | `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim, `createdBy` = caller so a lead can then edit their copy). Admin, or a **lead** who passes `canManageSurvey` → else `403` (the answer-type-change escape hatch must work for leads on their campaign's surveys). |
@@ -445,6 +453,15 @@ campaign default **or** any `Effort` walk-list override). Archive/unarchive/dele
 > override — exact even when the default template is also some walk list's override (a per-survey
 > total would double-count there). Guard is `requireCampaignManager`, so leads who run the campaign
 > can read counts and set overrides (`PATCH …/efforts/:id { surveyTemplateId }`).
+>
+> **Attach is validated + scoped (2026-08-08).** Setting `surveyTemplateId` — campaign default
+> (`PATCH /admin/campaigns/:id`) or walk-list override (efforts POST/PATCH, via a shared
+> `resolveOverrideTemplate`) — now (a) validates the id: ObjectId shape + org ownership → `400`
+> (the efforts path previously stored **any** string verbatim, garbage included), and (b) for a
+> **lead**, requires `canManageSurvey` → `403 { code: 'survey-out-of-scope' }` (not `FORBIDDEN_ROLE`
+> — mobile treats that as a role change). Detach (`null`) is always free; admins attach anything
+> org-owned, unchanged. This closes the gap where the lead's scoped list was bypassable by attaching
+> an arbitrary template by id.
 
 > **Soft-retire reconcile (replaces the old "blocked destructive edits" model).** The PATCH route no
 > longer deletes anything structural. `reconcileQuestions(existingQuestions, incomingQuestions)`

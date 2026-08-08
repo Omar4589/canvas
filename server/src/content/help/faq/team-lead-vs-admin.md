@@ -9,7 +9,7 @@ summary: A lead runs the campaigns they're granted; org-wide actions stay with a
 tags: roles, team lead, admin, permissions
 ---
 
-A **team lead** is a campaign-scoped admin. On the campaigns they've been granted, a lead can do the day-to-day: manage passes, cut and assign books, import voters, run reports, print walk packets, export the campaign's data, and **build and attach surveys** — a lead authors their own survey templates, not just picks one.
+A **team lead** is a campaign-scoped admin. On the campaigns they've been granted, a lead can do the day-to-day: manage passes, cut and assign books, import voters, run reports, print walk packets, export the campaign's data, and **build and attach surveys** — a lead authors their own survey templates, and their survey library shows exactly what's theirs: surveys they wrote plus the ones already on their campaigns, never the rest of the organization's.
 
 What stays with an **org admin**:
 

@@ -195,9 +195,23 @@ test('the activity ping detail is scoped to a managed campaign', { skip }, async
 });
 
 test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reach org Users/voters', { skip }, async () => {
-  const { leadTok, org } = ctx;
+  const { leadTok, adminTok, org, survOverrideA, survDefaultB, survLeadDraft } = ctx;
   const opt = { token: leadTok, orgId: org._id };
-  assert.strictEqual((await call('GET', '/api/admin/surveys', opt)).status, 200, 'GET surveys');
+  // The lead's survey LIST is scoped: authored (Lead Draft) or attached to a managed
+  // campaign (Override A, via WL-A's override) — never Default B, which belongs to the
+  // unmanaged campaign. The stringify sweep is the belt-and-braces leak check: no
+  // usedBy map, walk-list label, or response bucket may name Campaign B either.
+  const leadList = await call('GET', '/api/admin/surveys', opt);
+  assert.strictEqual(leadList.status, 200, 'GET surveys');
+  const leadIds = leadList.json.surveys.map((s) => String(s._id));
+  assert.ok(leadIds.includes(String(survOverrideA._id)), 'managed-attached survey listed');
+  assert.ok(leadIds.includes(String(survLeadDraft._id)), 'authored survey listed');
+  assert.ok(!leadIds.includes(String(survDefaultB._id)), 'unmanaged-attached survey EXCLUDED');
+  assert.ok(!JSON.stringify(leadList.json).includes('Campaign B'), 'no leak of the unmanaged campaign anywhere in the payload');
+  const adminList = await call('GET', '/api/admin/surveys', { token: adminTok, orgId: org._id });
+  for (const s of [survOverrideA, survDefaultB, survLeadDraft]) {
+    assert.ok(adminList.json.surveys.some((x) => String(x._id) === String(s._id)), 'admin list is unscoped');
+  }
   assert.strictEqual((await call('GET', '/api/admin/tags', opt)).status, 200, 'GET tags');
   // Leads CAN author survey templates now (from their campaign) — createdBy is stamped
   // as the lead, and attaching is separately campaign-scoped.
@@ -266,6 +280,62 @@ test('lead survey edit/duplicate is scoped: own or managed-attached yes, unmanag
   // Duplicate follows the same scope.
   assert.strictEqual((await call('POST', `/api/admin/surveys/${survOverrideA._id}/duplicate`, opt)).status, 201, 'duplicate managed');
   assert.strictEqual((await call('POST', `/api/admin/surveys/${survDefaultB._id}/duplicate`, opt)).status, 403, 'duplicate unmanaged');
+});
+
+test('lead ATTACH is scoped like edit: campaign default and walk-list override', { skip }, async () => {
+  const { leadTok, adminTok, org, A, survOverrideA, survDefaultB, survLeadDraft } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  const adminOpt = { token: adminTok, orgId: org._id };
+
+  // Campaign default: the list is scoped, so this guard only fires on a hand-crafted id.
+  const foreign = await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...opt, body: { surveyTemplateId: String(survDefaultB._id) } });
+  assert.strictEqual(foreign.status, 403, 'attach unmanaged-attached template');
+  assert.strictEqual(foreign.json.code, 'survey-out-of-scope');
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...opt, body: { surveyTemplateId: String(survLeadDraft._id) } })).status,
+    200, 'attach authored template'
+  );
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...opt, body: { surveyTemplateId: String(survOverrideA._id) } })).status,
+    200, 'attach managed-attached template'
+  );
+
+  // Walk-list override: same guard on the efforts router. Ordering is deliberate —
+  // Override A is A's default RIGHT NOW, so it stays in the lead's scope while WL-A's
+  // override is swapped away and back (otherwise the swap itself would strand it:
+  // the detach cliff). It is RESTORED before A's default is cleared below.
+  const efforts = await call('GET', `/api/admin/campaigns/${A._id}/efforts`, opt);
+  const wlA = efforts.json.efforts.find((e) => e.name === 'WL-A');
+  assert.ok(wlA, 'fixture walk list present');
+  const overrideForeign = await call('PATCH', `/api/admin/campaigns/${A._id}/efforts/${wlA._id}`, { ...opt, body: { surveyTemplateId: String(survDefaultB._id) } });
+  assert.strictEqual(overrideForeign.status, 403, 'override with unmanaged template');
+  assert.strictEqual(overrideForeign.json.code, 'survey-out-of-scope');
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}/efforts/${wlA._id}`, { ...opt, body: { surveyTemplateId: String(survLeadDraft._id) } })).status,
+    200, 'override with authored template'
+  );
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}/efforts/${wlA._id}`, { ...opt, body: { surveyTemplateId: String(survOverrideA._id) } })).status,
+    200, 'override restored to the fixture template'
+  );
+  const createForeign = await call('POST', `/api/admin/campaigns/${A._id}/efforts`, { ...opt, body: { name: 'WL-X', surveyTemplateId: String(survDefaultB._id) } });
+  assert.strictEqual(createForeign.status, 403, 'create effort with unmanaged override');
+  assert.strictEqual(createForeign.json.code, 'survey-out-of-scope');
+
+  // Back to the campaign default: detach is free (Override A stays scoped via WL-A).
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...opt, body: { surveyTemplateId: null } })).status,
+    200, 'detach stays free'
+  );
+  // Admins are unchanged — attach anything, then restore A to its seeded no-default state.
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...adminOpt, body: { surveyTemplateId: String(survDefaultB._id) } })).status,
+    200, 'admin attaches unscoped'
+  );
+  assert.strictEqual(
+    (await call('PATCH', `/api/admin/campaigns/${A._id}`, { ...adminOpt, body: { surveyTemplateId: null } })).status,
+    200, 'admin restore'
+  );
 });
 
 test('lead can create a canvasser onto a managed campaign via /crew, not onto B', { skip }, async () => {

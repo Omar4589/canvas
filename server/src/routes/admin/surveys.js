@@ -9,12 +9,19 @@ import { Effort } from '../../models/Effort.js';
 import { classifyQuestionEdits } from '../../services/surveys/diffQuestions.js';
 import { canonicalizeTags } from '../../services/surveys/tags.js';
 import { ensureTags } from '../../services/surveys/tagOps.js';
-import { canManageSurvey } from '../../services/authz/campaignManagement.js';
+import {
+  canManageSurvey,
+  isOrgAdmin,
+  managedCampaignIds,
+  attachedSurveyTemplateIds,
+} from '../../services/authz/campaignManagement.js';
 
 const router = Router();
-// Team leads may READ the template library (to attach a survey to their campaign and
-// to use tags in walk lists / reports); managing the library itself (create/edit/
-// duplicate templates) stays with org admins via requireOrgRole('admin') per route.
+// Team leads author surveys for their campaigns: create is open (createdBy stamped),
+// edit/duplicate gate on canManageSurvey, and their LIST is scoped below to what they
+// authored or what's attached to a campaign they manage — a client-side lead must
+// never read other clients' scripts, campaign names, or volumes. Lifecycle
+// (archive/unarchive/delete) stays with org admins via requireOrgRole('admin').
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 const optionSchema = z.object({
@@ -204,10 +211,24 @@ router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
+    // A LEAD's library is scoped: templates they authored, or attached to a campaign
+    // they manage (the set form of canManageSurvey). managedSet doubles as the
+    // narrowing key for the usage maps below — null means admin, no narrowing.
+    let templateFilter = { organizationId: orgId };
+    let managedSet = null;
+    if (!isOrgAdmin(req)) {
+      const managed = await managedCampaignIds(req);
+      managedSet = new Set(managed.map(String));
+      const attached = await attachedSurveyTemplateIds(req, managed);
+      templateFilter = {
+        organizationId: orgId,
+        $or: [{ createdBy: req.user._id }, { _id: { $in: attached } }],
+      };
+    }
     // All org campaigns (not just default-attached) — the id→name map also labels
     // walk-list overrides and per-campaign response counts below.
     const [surveys, campaigns, efforts, responseCounts, responseByCampaign] = await Promise.all([
-      SurveyTemplate.find({ organizationId: orgId }).sort({ createdAt: -1 }).lean(),
+      SurveyTemplate.find(templateFilter).sort({ createdAt: -1 }).lean(),
       Campaign.find({ organizationId: orgId }).select('name surveyTemplateId isActive').lean(),
       Effort.find({ organizationId: orgId, surveyTemplateId: { $ne: null } })
         .select('name surveyTemplateId campaignId')
@@ -265,14 +286,40 @@ router.get('/', async (req, res, next) => {
     res.json({
       surveys: surveys.map((s) => {
         const id = String(s._id);
-        const responseCount = counts.get(id) || 0;
+        const allCampaignUses = usedBy.get(id) || [];
+        const allWalkUses = usedByWalk.get(id) || [];
+        const allByCampaign = byCampaign.get(id) || [];
+        if (!managedSet) {
+          const responseCount = counts.get(id) || 0;
+          return {
+            ...s,
+            usedByCampaigns: allCampaignUses,
+            usedByWalkLists: allWalkUses,
+            responseCount,
+            hasResponses: responseCount > 0,
+            responseCountByCampaign: allByCampaign,
+          };
+        }
+        // Lead view: usage and volumes narrowed to their campaigns (the null-campaign
+        // legacy bucket drops too — it's unattributable org-wide volume). One bare
+        // boolean says "also used beyond your campaigns" so the shared-edit warning
+        // can still fire without leaking whose campaigns or how much.
+        const usedByCampaigns = allCampaignUses.filter((c) => managedSet.has(c.id));
+        const usedByWalkLists = allWalkUses.filter((w) => managedSet.has(w.campaignId));
+        const responseCountByCampaign = allByCampaign.filter(
+          (b) => b.campaignId && managedSet.has(b.campaignId)
+        );
+        const responseCount = responseCountByCampaign.reduce((sum, b) => sum + b.count, 0);
         return {
           ...s,
-          usedByCampaigns: usedBy.get(id) || [],
-          usedByWalkLists: usedByWalk.get(id) || [],
+          usedByCampaigns,
+          usedByWalkLists,
           responseCount,
           hasResponses: responseCount > 0,
-          responseCountByCampaign: byCampaign.get(id) || [],
+          responseCountByCampaign,
+          usedElsewhere:
+            usedByCampaigns.length < allCampaignUses.length ||
+            usedByWalkLists.length < allWalkUses.length,
         };
       }),
     });

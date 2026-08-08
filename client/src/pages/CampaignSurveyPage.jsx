@@ -135,6 +135,9 @@ export default function CampaignSurveyPage() {
   const attachedId = campaign.surveyTemplateId?._id || campaign.surveyTemplateId || null;
   const attachedSurvey = attachedId ? surveyById.get(String(attachedId)) || null : null;
   const others = attachedSurvey ? usedByOthers(attachedSurvey, campaignId) : 0;
+  // Lead lists narrow usedByCampaigns to their campaigns; the server's bare
+  // `usedElsewhere` boolean keeps the shared badge honest beyond their view.
+  const sharedBeyondView = !!attachedSurvey?.usedElsewhere;
   const isLitDrop = campaign.type === 'lit_drop';
 
   // A survey just created here (?created=<id>) that ISN'T the main → prompt to assign it.
@@ -212,6 +215,7 @@ export default function CampaignSurveyPage() {
                       <> · {defaultCoverageCount.toLocaleString()} response{defaultCoverageCount === 1 ? '' : 's'} in this campaign</>
                     )}
                     {others > 0 && <> · used by {others} other campaign{others === 1 ? '' : 's'}</>}
+                    {others === 0 && sharedBeyondView && <> · also used elsewhere in your organization</>}
                   </div>
                   <div className="mt-1 text-xs text-fg-subtle">
                     Applies to every walk list without an override, and to unassigned (Intake) doors.
