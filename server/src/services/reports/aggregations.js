@@ -6,8 +6,12 @@ import mongoose from 'mongoose';
 // be composed into any pipeline with any match (org/campaign/effort/date-window).
 
 // Action types that count as a "knock" (a door interaction). note_added is excluded
-// because it can be left without an actual visit decision.
-export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
+// because it can be left without an actual visit decision. `no_soliciting` IS a knock — the
+// canvasser reached the door and a posted sign ended the visit, the same walk as any other
+// door — but it is NOT a contact, so it never enters the contactRate numerator below.
+// `restricted` is the only disposition that is a visit without being a knock (never reached
+// the door); it lives in BILLABLE_WITH_RESTRICTED instead.
+export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
 
 // The wider set used ONLY for billable-DOOR counting when an org opts in
 // (Campaign/Organization.billRestrictedDoors — resolve via billRestricted.js). A restricted mark
@@ -124,6 +128,7 @@ export function knocksPipeline(match, { byCampaign = false, byPass = false, incl
         hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
         hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
         hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
+        hasNoSoliciting: { $max: { $cond: [{ $eq: ['$actionType', 'no_soliciting'] }, 1, 0] } },
       },
     },
     {
@@ -140,6 +145,9 @@ export function knocksPipeline(match, { byCampaign = false, byPass = false, incl
         surveyedKnocks: { $sum: '$hasSurvey' },
         litKnocks: { $sum: '$hasLit' },
         refusedKnocks: { $sum: '$hasRefused' },
+        // A knock, never a contact — reported so the invoice-grade export and the by-round
+        // table can show it, but deliberately absent from contactRate below.
+        noSolicitingKnocks: { $sum: '$hasNoSoliciting' },
       },
     },
   ];

@@ -158,7 +158,7 @@ function distanceFromHouse(household, location) {
   return Math.round(haversineMeters(hLat, hLng, location.lat, location.lng));
 }
 
-const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted'];
+const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 // Snapshot of the entry a replace is about to delete, stamped onto the new row. "Latest
 // wins" is a delete-then-create, which would otherwise destroy the prior entry's GPS
@@ -554,6 +554,32 @@ router.post('/households/:householdId/restricted', async (req, res, next) => {
       householdId: req.params.householdId,
       actionType: 'restricted',
       status: 'restricted',
+      body: req.body,
+    });
+    if (result.error) return sendRouteError(res, result.error);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// No Soliciting: the canvasser reached the door and a posted sign forbade the knock. Unlike
+// `restricted` (never reached the door) this IS a knock — the same walk as any other door, so it
+// counts in KNOCK_ACTIONS, in billable doors, and in coverage-knocked. It is NOT a contact:
+// nobody answered, so it stays out of the contactRate numerator (aggregations.js).
+//
+// Available for ALL campaign types — a sign forbids leaving literature at least as much as it
+// forbids a survey. Non-completion, so a later tap supersedes it (statusPrecedence.js).
+router.post('/households/:householdId/no-soliciting', async (req, res, next) => {
+  try {
+    const result = await recordHouseholdAction({
+      req,
+      householdId: req.params.householdId,
+      actionType: 'no_soliciting',
+      status: 'no_soliciting',
       body: req.body,
     });
     if (result.error) return sendRouteError(res, result.error);

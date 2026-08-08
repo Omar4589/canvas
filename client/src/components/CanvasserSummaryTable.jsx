@@ -44,6 +44,7 @@ function columnsFor(litMode) {
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
     { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
+    { key: 'dayNoSoliciting', label: 'No solicit', numeric: true, help: metricHelp.noSoliciting },
     { key: 'dayRestricted', label: 'Restricted', numeric: true, help: metricHelp.restricted },
     { key: 'firstActivityAt', label: 'Start', numeric: true, help: metricHelp.start },
     { key: 'lastActivityAt', label: 'Last door', numeric: true, help: metricHelp.lastDoor },
@@ -163,6 +164,9 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
           <td className="px-3 py-2 text-right text-fg-muted">{ratePct(r.contactRate)}</td>
           <td className="px-3 py-2 text-right text-fg">
             {r.doorsPerHour > 0 ? r.doorsPerHour.toFixed(1) : '—'}
+          </td>
+          <td className="px-3 py-2 text-right text-fg-muted">
+            {(r.dayNoSoliciting || 0).toLocaleString()}
           </td>
           <td className="px-3 py-2 text-right text-fg-muted">
             {(r.dayRestricted || 0).toLocaleString()}

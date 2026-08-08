@@ -37,12 +37,15 @@ import { zonedDayRange } from '../../utils/timezone.js';
 export const BOOK_FRACTIONS = [0.9, 0.75, 0.6, 0.45, 0.3, 0.15];
 
 // Outcome mix per knock. survey → connection ~22-23%; refused is a contact but not
-// a completion; most doors are not-home (realistic).
+// a completion; no_soliciting is a knock but never a contact; most doors are not-home
+// (realistic). Weights sum to 100, and survey stays at 23 so the demo's connection rate
+// doesn't move when the mix is retuned.
 export const OUTCOME_WEIGHTS = [
-  ['not_home', 61],
+  ['not_home', 58],
   ['survey', 23],
   ['refused', 11],
   ['wrong_address', 5],
+  ['no_soliciting', 3],
 ];
 
 // Candidate-support mix among surveyed voters. Ids are stable (strong_support /

@@ -304,6 +304,7 @@ export default function DashboardPage() {
       // Restricted was silently 0 here forever: the endpoint returns `restricted`, the table reads
       // `dayRestricted`, and nothing mapped between them.
       dayRestricted: r.restricted ?? 0,
+      dayNoSoliciting: r.noSoliciting ?? 0,
       // doorsPerHour now comes from the SERVER (sum of per-day working spans). It used to be
       // re-derived here from lastActivityAt − firstActivityAt — a CALENDAR span — which divided a
       // week's doors by a week of wall-clock and under-reported pace roughly threefold.

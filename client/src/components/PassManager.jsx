@@ -19,6 +19,7 @@ const SEG_COLORS = {
   wrong_address: '#ef4444',
   refused: '#f59e0b',
   restricted: '#475569',
+  no_soliciting: '#db2777',
   unknocked: '#9ca3af',
 };
 
@@ -26,7 +27,7 @@ function ProgressBar({ counts = {}, total = 0 }) {
   if (!total) return <span className="text-xs text-fg-subtle">no doors</span>;
   return (
     <div className="flex h-2 w-40 overflow-hidden rounded bg-sunken">
-      {['surveyed', 'refused', 'restricted', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'].map((k) =>
+      {['surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'].map((k) =>
         counts[k] ? (
           <div key={k} style={{ width: `${(counts[k] / total) * 100}%`, background: SEG_COLORS[k] }} />
         ) : null

@@ -11,6 +11,7 @@ const DOT_CLS = {
   wrong_address: 'bg-red-500',
   refused: 'bg-amber-500',
   restricted: 'bg-slate-600',
+  no_soliciting: 'bg-pink-600',
   lit_dropped: 'bg-purple-500',
 };
 

@@ -8,7 +8,7 @@ import { actionLabel } from '../lib/statusColors.js';
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
 // way /overlap-doors (the map ring) does. `restricted` and `note_added` are deliberately out.
-const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped']);
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting']);
 
 function formatDateTime(d, tz) {
   if (!d) return '—';

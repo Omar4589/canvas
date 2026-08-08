@@ -1,7 +1,7 @@
 import { REASON_META } from '../lib/flags.js';
 import FlagLegend from './FlagLegend.jsx';
 
-const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
 const REVIEW_STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },

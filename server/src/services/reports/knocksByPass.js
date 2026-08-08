@@ -93,7 +93,7 @@ export async function buildKnocksByPassData({
   const shapeRow = (key) => {
     const p = passById.get(key) || null;
     const k = countsByPass.get(key) || {
-      knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+      knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, billableDoors: 0, restrictedDoors: 0,
     };
     const legacy = key === 'null' || key === 'undefined';
     return {
@@ -110,6 +110,7 @@ export async function buildKnocksByPassData({
       surveyedKnocks: k.surveyedKnocks,
       litKnocks: k.litKnocks,
       refusedKnocks: k.refusedKnocks,
+      noSolicitingKnocks: k.noSolicitingKnocks,
       // Equal to `knocks` unless this campaign invoices restricted doors. Rates below are
       // deliberately built from `knocks` in BOTH cases — a locked gate answered nobody.
       billableDoors: billableDoorsOf(k, billRestricted),
@@ -127,13 +128,14 @@ export async function buildKnocksByPassData({
   );
 
   const t = totalRows[0] || {
-    knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+    knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, billableDoors: 0, restrictedDoors: 0,
   };
   const totals = {
     knocks: t.knocks,
     surveyedKnocks: t.surveyedKnocks,
     litKnocks: t.litKnocks,
     refusedKnocks: t.refusedKnocks,
+    noSolicitingKnocks: t.noSolicitingKnocks,
     // Same pipeline, same (household, pass) dedup as the per-round rows above, and the same
     // policy helper — so Σ(rounds.billableDoors) === totals.billableDoors by construction,
     // exactly like knocks.
@@ -164,6 +166,7 @@ export async function buildKnocksByPassData({
             hasSurvey: flag('survey_submitted'),
             hasLit: flag('lit_dropped'),
             hasRefused: flag('refused'),
+            hasNoSoliciting: flag('no_soliciting'),
           },
         },
         {
@@ -175,6 +178,7 @@ export async function buildKnocksByPassData({
             surveyedKnocks: { $sum: '$hasSurvey' },
             litKnocks: { $sum: '$hasLit' },
             refusedKnocks: { $sum: '$hasRefused' },
+            noSolicitingKnocks: { $sum: '$hasNoSoliciting' },
           },
         },
       ]),
@@ -208,6 +212,7 @@ export async function buildKnocksByPassData({
           surveyedKnocks: r.surveyedKnocks,
           litKnocks: r.litKnocks,
           refusedKnocks: r.refusedKnocks,
+          noSolicitingKnocks: r.noSolicitingKnocks,
           billableDoors: billableDoorsOf(r, billRestricted),
           restrictedDoors: r.restrictedDoors,
           connectionRate: connectionRate(r),

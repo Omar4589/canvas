@@ -37,6 +37,7 @@ const STATUS_LABEL = {
   wrong_address: 'Wrong address',
   refused: 'Refused',
   restricted: 'Restricted',
+  no_soliciting: 'No soliciting',
   lit_dropped: 'Lit dropped',
 };
 
@@ -412,6 +413,7 @@ export default function AdminBookDetail() {
               'house-wrong_address': require('../../../../assets/icons/house-wrong_address.png'),
               'house-refused': require('../../../../assets/icons/house-refused.png'),
               'house-restricted': require('../../../../assets/icons/house-restricted.png'),
+              'house-no_soliciting': require('../../../../assets/icons/house-no_soliciting.png'),
               'house-lit_dropped': require('../../../../assets/icons/house-surveyed.png'),
             }}
           />
@@ -446,6 +448,7 @@ export default function AdminBookDetail() {
                   'wrong_address', 'house-wrong_address',
                   'refused', 'house-refused',
                   'restricted', 'house-restricted',
+                  'no_soliciting', 'house-no_soliciting',
                   'lit_dropped', 'house-lit_dropped',
                   'house-unknocked',
                 ],

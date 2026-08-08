@@ -47,6 +47,7 @@ export const STATUS_INK = {
   surveyed: [21, 128, 61],
   lit_dropped: [29, 78, 216],
   restricted: [109, 40, 217],
+  no_soliciting: [190, 24, 93], // pink-700 — deeper than the screen pink so it holds on paper
 };
 export const STATUS_LABEL = {
   not_home: 'NOT HOME',
@@ -55,6 +56,7 @@ export const STATUS_LABEL = {
   surveyed: 'SURVEYED',
   lit_dropped: 'LIT DROPPED',
   restricted: 'RESTRICTED',
+  no_soliciting: 'NO SOLICITING',
 };
 
 // Page geometry, in points (1/72"). US Letter portrait. The derived values are spelled out

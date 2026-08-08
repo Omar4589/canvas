@@ -95,7 +95,7 @@ async function leadMaySeeTarget(req, userId) {
   return visible.has(String(userId));
 }
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
 
 
 const addSchema = z.object({

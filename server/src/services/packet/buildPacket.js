@@ -28,8 +28,9 @@ export const PACKET_DOOR_CAP = 1200;
 
 // Why a door was held back. Aggregate only — a per-door marker would out the household
 // to whoever holds the paper, which services/export/exportScope.js:14 forbids for the
-// same reason. `restricted` is deliberately absent: it is a door OUTCOME, not a
-// suppression, so restricted doors print.
+// same reason. `restricted` and `no_soliciting` are deliberately absent: they are door
+// OUTCOMES, not suppressions, so those doors print. (A campaign that doesn't want to walk
+// them again drops them at CUT time — services/turf/generateTurf.js cutStatusExclusion.)
 const omissionReason = (h) => {
   if (h.isActive === false) return 'inactive';
   if (h.fullyDnc === true) return 'doNotContact';

@@ -1,4 +1,4 @@
-// Generates the 4 colored house map-icon PNGs used by the mobile map.
+// Generates the colored house map-icon PNGs used by the mobile map.
 // Run with: node scripts/gen-house-icons.mjs (from mobile/).
 //
 // Output: mobile/assets/icons/house-{status}.png at 128x128 (2x density of 64x64).
@@ -22,6 +22,8 @@ const STATUS_COLORS = {
   surveyed: '#22c55e',
   wrong_address: '#ef4444',
   refused: '#F59E0B',
+  restricted: '#475569',
+  no_soliciting: '#DB2777',
 };
 
 function darken(hex, amount = 0.2) {

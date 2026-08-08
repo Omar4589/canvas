@@ -9,6 +9,7 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'refused', label: 'Refused' },
+  { key: 'no_soliciting', label: 'No solicit' },
   { key: 'lit_dropped', label: 'Lit dropped' },
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },

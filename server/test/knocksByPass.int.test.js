@@ -372,17 +372,17 @@ test('CSV default view: exact headers, one row per round, TOTAL row, attachment'
   const lines = csv.text.split('\n');
   assert.deepStrictEqual(lines[0].split(','), [
     'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
-    'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
+    'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
     'Connection rate %', 'Contact rate %', 'New homes reached',
   ]);
   assert.strictEqual(lines.length, 5, 'header + R1 + R2 + legacy + TOTAL');
   assert.deepStrictEqual(
     lines[1].split(','),
-    ['North', '1', 'Round 1', 'archived', '2026-06-09T12:00:00.000Z', '2026-06-11T12:00:00.000Z', '1', '0', '0', '0', '0', '0', '1']
+    ['North', '1', 'Round 1', 'archived', '2026-06-09T12:00:00.000Z', '2026-06-11T12:00:00.000Z', '1', '0', '0', '0', '0', '0', '0', '1']
   );
   assert.deepStrictEqual(
     lines[4].split(','),
-    ['TOTAL', '', '', '', '', '', '8', '2', '0', '2', '25', '50', '7'],
+    ['TOTAL', '', '', '', '', '', '8', '2', '0', '2', '0', '25', '50', '7'],
     'the TOTAL row is the invoice headline'
   );
 });
@@ -397,7 +397,7 @@ test('CSV groupBy=canvasser: per-user headers, no TOTAL row (no honest per-user 
   const lines = csv.text.split('\n');
   assert.deepStrictEqual(lines[0].split(','), [
     'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
-    'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused',
+    'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
     'Connection rate %', 'Contact rate %',
   ]);
   assert.strictEqual(lines.length, 5, 'header + 4 canvasser×round rows, no TOTAL');

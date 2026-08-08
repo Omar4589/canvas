@@ -55,6 +55,7 @@ export default function AdminUserDetail() {
     wrong_address: colors.status.wrong_address,
     refused: colors.status.refused,
     restricted: colors.status.restricted,
+    no_soliciting: colors.status.no_soliciting,
     lit_dropped: colors.status.lit_dropped,
   };
   const router = useRouter();

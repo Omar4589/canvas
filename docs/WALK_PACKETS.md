@@ -102,8 +102,8 @@ Each door has:
 - The **address**, largest thing on the block, then city/state/ZIP and unit.
 - **Last round's result** as a small outlined pill, on doors that were already visited.
 - **Who lives there** — name, party, age.
-- **What happened** — Not home · Refused · Wrong address · Surveyed · Restricted. One set for
-  both layouts: a volunteer ticks the same box either way, and two vocabularies for one act made
+- **What happened** — Not home · Refused · Wrong address · Surveyed · No soliciting · Restricted.
+  One set for both layouts: a volunteer ticks the same box either way, and two vocabularies for one act made
   the cover's tally disagree with the app.
 - **Lines to write on.**
 

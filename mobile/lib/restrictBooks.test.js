@@ -22,13 +22,13 @@ import {
 // fingerprint. (--experimental-default-type=module because mobile is CommonJS-default for
 // Metro; the flag scopes ESM to the test run only.)
 
-test('restrictCounts: reached = not_home + wrong_address + refused; completed/restricted excluded', () => {
+test('restrictCounts: reached = not_home + wrong_address + refused + no_soliciting; completed/restricted excluded', () => {
   const counts = restrictCounts([
     'unknocked', 'unknocked', // 2 untouched
-    'not_home', 'wrong_address', 'refused', // 3 reached
+    'not_home', 'wrong_address', 'refused', 'no_soliciting', // 4 reached
     'surveyed', 'lit_dropped', 'restricted', // completed / already marked — in neither bucket
   ]);
-  assert.deepEqual(counts, { unknocked: 2, reached: 3, incomplete: 5 });
+  assert.deepEqual(counts, { unknocked: 2, reached: 4, incomplete: 6 });
 });
 
 test('restrictCountsFromStatusCounts sums per-book progress shapes (missing entries safe)', () => {

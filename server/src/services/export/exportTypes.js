@@ -32,8 +32,8 @@ import { EXPORT_ESTIMATES } from './exportEstimates.js';
 // from here, never the other way around. `filters` names UI filter groups, not param keys.
 // `estimate` (absent only on full-backup) is the pre-queue count from exportEstimates.js.
 
-const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted'];
-const ACTION_TYPES = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted'];
+const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
+const ACTION_TYPES = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s));
 const isId = (s) => mongoose.isValidObjectId(s);
@@ -83,7 +83,7 @@ const BACKUP_NOTES = [
   'voterfile-current.csv is a RECONSTRUCTION from the data currently in Doorline, not the originally uploaded file: unmapped vendor columns were never stored, rows that failed import are absent, and edits made since the upload are reflected.',
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
-  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file.',
+  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file.',
 ];
 
 const buildFullBackup = async (ctx, sink) => {
@@ -176,7 +176,7 @@ const buildFullBackup = async (ctx, sink) => {
 export const EXPORT_TYPES = {
   'canvass-activity': {
     label: 'Canvassing activity',
-    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit drop) are door-level records and leave them blank.',
+    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
     filters: ['date', 'effort', 'pass', 'canvasser'],
     adminOnly: false,

@@ -11,9 +11,9 @@ export const formatCount = (n) => (n || 0).toLocaleString();
 // Which contact outcomes to show, by campaign type. Survey campaigns hide the lit-drop row; lit-drop
 // campaigns hide the surveyed row. A null/unknown type (older reports) shows all four.
 export function contactOrderFor(type) {
-  if (type === 'survey') return ['surveyed', 'refused', 'not_home', 'wrong_address'];
-  if (type === 'lit_drop') return ['lit_dropped', 'refused', 'not_home', 'wrong_address'];
-  return ['surveyed', 'refused', 'not_home', 'wrong_address', 'lit_dropped'];
+  if (type === 'survey') return ['surveyed', 'refused', 'not_home', 'no_soliciting', 'wrong_address'];
+  if (type === 'lit_drop') return ['lit_dropped', 'refused', 'not_home', 'no_soliciting', 'wrong_address'];
+  return ['surveyed', 'refused', 'not_home', 'no_soliciting', 'wrong_address', 'lit_dropped'];
 }
 
 // Client-facing, plain-language labels for the voter-contact breakdown. Deliberately local to the
@@ -24,6 +24,7 @@ const CONTACT_LABELS = {
   refused: 'Declined to participate',
   not_home: "Didn't answer",
   wrong_address: 'Wrong address',
+  no_soliciting: 'No-soliciting sign',
   lit_dropped: 'Lit dropped',
 };
 
@@ -36,6 +37,7 @@ const CONTACT_HELP = {
   refused: 'Doors where someone answered but declined to participate.',
   not_home: 'Doors where no one answered.',
   wrong_address: 'Doors that turned out to be a wrong or bad address.',
+  no_soliciting: 'Doors we reached where a posted no-soliciting sign ended the visit. Nobody answered, so these are not counted as reaching a person.',
   lit_dropped: 'Doors where we dropped literature.',
 };
 const KPI_HELP = {

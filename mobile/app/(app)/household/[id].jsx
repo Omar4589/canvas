@@ -438,6 +438,19 @@ export default function HouseholdDetail() {
             </>
           )}
 
+          {/* No Soliciting — a posted sign ended the visit. All campaign types; IS a knock. */}
+          <Pressable
+            onPress={() => submitAction('no_soliciting')}
+            disabled={isSubmitting || !canCanvass}
+            style={({ pressed }) => [
+              styles.actionButton,
+              styles.actionNoSoliciting,
+              { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+            ]}
+          >
+            <Text style={styles.actionButtonText}>No soliciting</Text>
+          </Pressable>
+
           {/* Restricted Access — inaccessible home. All campaign types; not a knock. */}
           <Pressable
             onPress={() => submitAction('restricted')}
@@ -667,6 +680,7 @@ function makeStyles(t) {
   actionWrongAddress: { backgroundColor: colors.danger },
   actionRefused: { backgroundColor: colors.status.refused },
   actionRestricted: { backgroundColor: colors.status.restricted },
+  actionNoSoliciting: { backgroundColor: colors.status.no_soliciting },
   actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
   });
 }

@@ -50,7 +50,7 @@ Files are named book first — `book-33-yourcampaign-field-list-2026-08-07.pdf` 
 
 - **Lines to write on** — 0 to 6. On a **survey packet** this is the knob that decides your page count: a door is never split across two sheets, so if the writing lines push a door past half a page you get one door per page instead of two. On a 207-door book that is 208 pages at three lines versus 105 at one. The page count under the button updates as you change it. Three is the default. On a **field list** the lines are nearly free — going from two to four adds about five pages across a whole 200-door book.
 - **Doors per packet** — splits big books into several small packets at print time. Set it to 35 and a 150-door book prints as **"Book 33 · 1 of 4"** through **"4 of 4"**: each part a contiguous stretch of the book's walk order with its own cover, map, street list and page numbering, sized for one volunteer. Parts prefer to break where streets change when a change sits near the cut, and a book only slightly over your number stays whole — so part sizes vary a little by design, never past about a third over it. Saved searches split the same way. **Paper only:** the book in the app — its doors, colour, assignment and route — is untouched, and clearing the field puts you back to whole books. Blank is off, and it's remembered per campaign.
-- **What happened boxes** — Not home, Refused, Wrong address, Surveyed, Restricted. The same five on both layouts.
+- **What happened boxes** — Not home, Refused, Wrong address, Surveyed, No soliciting, Restricted. The same six on both layouts.
 - **Last round's result** — shows a small pill on doors that were already visited this round.
 - **What to say** — your opening, closing and any option scripts, printed once at the top of the first door page rather than repeated beside every door. It shares that page with the doors, so it costs no extra paper.
 - **Map on the cover** — a map of the book with the walk drawn over it: the route, a dot per door, and **A** and **B** on your first and last. The line shows the **order** of the walk, drawn door to door — it isn't directions along the streets. Needs a Mapbox key set up; without one the map is simply absent and everything else prints as normal.
@@ -81,7 +81,7 @@ The **cover** has a **Walked by** and **Date** line for whoever picks the packet
 
 Doors also drop out if everyone there has already voted, the door was excluded from turf, or it's inactive. The cover doesn't account for any of that — it states the door count once and leaves it there. What was left out, and why, is on screen for you, not on the paper for a volunteer.
 
-**Restricted doors do print** — "restricted" is what happened at a door, not an instruction to stay away.
+**Restricted and no-soliciting doors do print** — those record what happened at a door, not an instruction to stay away. If you don't want volunteers sent back to them, drop them when you cut the round rather than at print time.
 
 ## If it won't print
 

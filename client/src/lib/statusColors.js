@@ -11,6 +11,7 @@ export const STATUS_COLORS = {
   refused: '#f59e0b', // amber-500
   lit_dropped: '#a855f7', // purple-500
   restricted: '#475569', // slate-600 — inaccessible/blocked home
+  no_soliciting: '#db2777', // pink-600 — a posted sign ended the visit
   voted: '#14b8a6', // teal-500
   dnc: '#9f1239', // rose-800 — do not contact
 };
@@ -23,6 +24,7 @@ export const STATUS_LABELS = {
   refused: 'Refused',
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
+  no_soliciting: 'No soliciting',
   voted: 'Voted',
   dnc: 'Do not contact',
 };
@@ -53,6 +55,7 @@ export const ACTION_LABELS = {
   survey_submitted: 'Surveyed',
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
+  no_soliciting: 'No soliciting',
   note_added: 'Note added',
 };
 

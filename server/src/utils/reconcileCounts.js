@@ -78,7 +78,7 @@ async function dedupCanvassActivities() {
   const dupes = await CanvassActivity.aggregate([
     {
       $match: {
-        actionType: { $in: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'] },
+        actionType: { $in: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'] },
       },
     },
     {

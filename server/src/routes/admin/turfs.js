@@ -16,7 +16,7 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories, addSupplementalBooks } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, addSupplementalBooks, cutStatusExclusion } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -280,7 +280,7 @@ router.post('/accept', async (req, res, next) => {
 // works on an active pass with published books (unlike /generate, which 409s).
 router.post('/add-supplemental', async (req, res, next) => {
   try {
-    const { passId, name, maxDoors, excludeRestricted } = req.body || {};
+    const { passId, name, maxDoors, excludeRestricted, excludeNoSoliciting } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
@@ -299,6 +299,7 @@ router.post('/add-supplemental', async (req, res, next) => {
         name: (name && String(name).trim()) || 'New voters',
         maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
         excludeRestricted: !!excludeRestricted,
+        excludeNoSoliciting: !!excludeNoSoliciting,
       });
       return res.status(result.added ? 201 : 200).json(result);
     } finally {
@@ -538,6 +539,7 @@ router.get('/', async (req, res, next) => {
     let knockCount = 0;
     let supplementalDoorCount = 0;
     let supplementalRestrictedCount = 0;
+    let supplementalNoSolicitingCount = 0;
     if (filter.passId) {
       const pass = await Pass.findOne(
         { _id: filter.passId, campaignId: req.campaign._id },
@@ -574,11 +576,14 @@ router.get('/', async (req, res, next) => {
           });
           supplementalBase._id = { $in: householdIds };
         }
-        [supplementalDoorCount, supplementalRestrictedCount] = await Promise.all([
+        [supplementalDoorCount, supplementalRestrictedCount, supplementalNoSolicitingCount] = await Promise.all([
           Household.countDocuments(supplementalBase),
           // The restricted slice, so the client can mirror its "exclude restricted"
           // checkbox: shown count = supplementalDoorCount − (checkbox ? this : 0).
           Household.countDocuments({ ...supplementalBase, status: 'restricted' }),
+          // Same, for the "exclude no-soliciting" checkbox. Disjoint from the line above
+          // (a door has ONE status), so subtracting both when both are ticked is correct.
+          Household.countDocuments({ ...supplementalBase, status: 'no_soliciting' }),
         ]);
       }
     }
@@ -590,6 +595,7 @@ router.get('/', async (req, res, next) => {
       knockCount,
       supplementalDoorCount,
       supplementalRestrictedCount,
+      supplementalNoSolicitingCount,
     });
   } catch (err) {
     next(err);
@@ -694,7 +700,7 @@ router.post('/manual-preview', async (req, res, next) => {
 // previewed count equals what Generate will actually cut).
 router.post('/target-preview', async (req, res, next) => {
   try {
-    const { passId, filter, excludeRestricted } = req.body || {};
+    const { passId, filter, excludeRestricted, excludeNoSoliciting } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
@@ -706,7 +712,7 @@ router.post('/target-preview', async (req, res, next) => {
     // The same cuttability the cut itself applies (generateTurf's baseFilter).
     const cutBase = {
       ...KNOCKABLE_DOOR_FILTER,
-      ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
+      ...cutStatusExclusion({ excludeRestricted, excludeNoSoliciting }),
     };
     const cuttable = householdIds.length
       ? (

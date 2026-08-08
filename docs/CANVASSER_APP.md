@@ -156,10 +156,11 @@ Tapping a house opens its detail. The header shows the address, when it was last
 **status pill** (the amber **Refused** pill is new — see below). What you do here depends on the
 campaign type:
 
-- On a **Lit drop** campaign, there's a **Lit dropped** button, plus **Restricted access** (below).
+- On a **Lit drop** campaign, there's a **Lit dropped** button, plus **No soliciting** and
+  **Restricted access** (below).
 - On a **Survey** campaign, you get the **voters at this address** (each a tappable card → their
   survey) plus three door buttons stacked at the bottom: **Not home**, **Wrong address**, and
-  **Refused** — then **Restricted access** below them.
+  **Refused** — then **No soliciting** and **Restricted access** below them.
 
 Each voter reads the same everywhere — on the map's pull-up sheet and here on the door — as
 **Party · Age · Gender** (say, "Democratic · 34 yrs · Female"), plus a **✓ Voted** tag and whether
@@ -193,6 +194,18 @@ home** (nobody answered) and **Wrong address** (the door doesn't belong to your 
 on **survey** campaigns. It counts as a real knock and as having reached a person, just not a completed
 survey, so it gets its own **amber** color everywhere (the pin, the status pill). Like the other door
 buttons, it recolors the pin to amber immediately and syncs in the background.
+
+### No soliciting (there's a sign)
+
+**No soliciting** is for a door with a posted sign you decided to honor. It's on **every** campaign
+type, and it recolors the pin **pink**. Unlike Restricted access below, this one **is** a knock — you
+walked to the door like any other house, and the only difference is why you left — so it counts toward
+your knocks, your doors/hour, and "houses knocked". What it is *not* is a contact: nobody came to the
+door, so it doesn't lift your connection or "reached a person" rate the way a survey or a Refused does.
+
+Your campaign decides whether to honor these signs at all — most political canvassing is legally
+exempt from them — so if you're unsure, ask your organizer. Either way, recording it means your
+admins can choose to leave those homes out of the next round.
 
 ### Restricted access (you can't get to the door)
 
@@ -514,8 +527,11 @@ branch the action area:
 - `survey` → the **voters at this address** list (each `VoterCard` `guardedPush`es to
   `/(app)/voter/:id/survey`) plus three door buttons: **Not home** (`info`), **Wrong address**
   (`danger`), and **Refused** (`colors.status.refused`, amber).
-- **Both branches** then render **Restricted access** (`submitAction('restricted')`,
-  `colors.status.restricted`, slate) *outside* the type branch — it's offered on every campaign type.
+- **Both branches** then render **No soliciting** (`submitAction('no_soliciting')`,
+  `colors.status.no_soliciting`, pink) and **Restricted access** (`submitAction('restricted')`,
+  `colors.status.restricted`, slate) *outside* the type branch — both are offered on every campaign
+  type. The two look alike and count oppositely: `no_soliciting` is in `KNOCK_ACTIONS`, `restricted`
+  is not (see [METRICS.md](METRICS.md)).
 
 All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` —
 `firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is
@@ -558,14 +574,15 @@ statuses stay green `successBg`, everything else — including `restricted` — 
 color always comes from `colors.status[status]`, so a `restricted` pill reads as a **slate dot** on
 neutral chrome; the label from `colors.statusLabels[status]` (`'Restricted'`).
 
-The **Refused** and **Restricted** dispositions are plumbed through `recordAction.js`:
-`ACTION_PATHS.refused = 'refused'` and `ACTION_PATHS.restricted = 'restricted'` map them to
-`POST /mobile/households/:id/refused` / `.../restricted`, and both flow through the same
+The **Refused**, **No soliciting** and **Restricted** dispositions are plumbed through
+`recordAction.js`: `ACTION_PATHS.refused = 'refused'`, `ACTION_PATHS.no_soliciting = 'no-soliciting'`
+and `ACTION_PATHS.restricted = 'restricted'` map them to `POST /mobile/households/:id/refused` /
+`.../no-soliciting` / `.../restricted`, and all flow through the same
 `optimisticSubmit` pipeline (optimistic patch → pending overlay → GPS-stamped background write →
 reconcile) as the other door actions, so the recolor is un-clobberable by a racing server fetch. The
 tokens are defined in [lib/theme.js](../mobile/lib/theme.js): `status.refused` / `statusLabels.refused`
-= `'#F59E0B'` / `'Refused'` and `status.restricted` / `statusLabels.restricted` = `'#475569'` /
-`'Restricted'` (the survey screen's callouts reuse `warn`/`warnBg`/`warnFg`). Note the server
+= `'#F59E0B'` / `'Refused'`, `status.no_soliciting` / `statusLabels.no_soliciting` = `'#DB2777'` /
+`'No soliciting'`, and `status.restricted` / `statusLabels.restricted` = `'#475569'` / `'Restricted'` (the survey screen's callouts reuse `warn`/`warnBg`/`warnFg`). Note the server
 `/restricted` route writes a `restricted` `CanvassActivity` + `Household.status='restricted'` but the
 action is **excluded from `KNOCK_ACTIONS`**, so it never bills as a knock (see [METRICS.md](METRICS.md)).
 
@@ -706,8 +723,9 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `app/(app)/books.jsx`, `app/(app)/map.jsx`, `app/(app)/admin/more.jsx`,
   `app/(app)/stats.jsx` (comprehensive redesign), `app/(app)/stats/[date].jsx` (drop Distance tile),
   `components/EffortPicker.jsx`, `lib/rates.js` (shared `formatPace`),
-  `app/(app)/household/[id].jsx` (Refused + Restricted-access door buttons; amber pill + slate `restricted` dot),
+  `app/(app)/household/[id].jsx` (Refused + No-soliciting + Restricted-access door buttons; amber pill,
+  pink `no_soliciting` dot + slate `restricted` dot),
   `app/(app)/voter/[id]/survey.jsx` (conditional questions, per-option scripts, Other specify),
-  `lib/recordAction.js` (`refused` + `restricted` action paths), `lib/surveyVisibility.js` (shared visibility evaluator),
+  `lib/recordAction.js` (`refused` + `no_soliciting` + `restricted` action paths), `lib/surveyVisibility.js` (shared visibility evaluator),
   `lib/theme.js` (`status.refused`/`statusLabels.refused` amber + `status.restricted`/`statusLabels.restricted` slate tokens),
   `server/src/routes/mobile/bootstrap.js`, `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

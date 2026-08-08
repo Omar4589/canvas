@@ -37,6 +37,7 @@ const status = {
   refused: '#F59E0B',
   lit_dropped: '#A855F7',
   restricted: '#475569', // slate — inaccessible/blocked home; distinct from grey unknocked
+  no_soliciting: '#DB2777', // pink — a posted sign ended the visit; clear of amber refused / purple lit
   voted: '#14B8A6',
   dnc: '#9F1239', // deep rose — do-not-contact; distinct from wrong_address red
 };
@@ -48,6 +49,7 @@ const statusLabels = {
   refused: 'Refused',
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
+  no_soliciting: 'No soliciting',
   voted: 'Voted',
   dnc: 'Do not contact',
 };
@@ -72,6 +74,7 @@ export const ACTION_LABELS = {
   survey_submitted: 'Surveyed',
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
+  no_soliciting: 'No soliciting',
   note_added: 'Note added',
 };
 

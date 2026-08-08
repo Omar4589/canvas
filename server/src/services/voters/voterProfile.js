@@ -12,7 +12,7 @@ import { User } from '../../models/User.js';
 import { Person } from '../../models/Person.js';
 import { Organization } from '../../models/Organization.js';
 
-const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
+const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
 const hasText = (s) => typeof s === 'string' && s.trim() !== '';
 
 // Build the full profile payload for one voter. Shared by the admin and mobile voter routes.

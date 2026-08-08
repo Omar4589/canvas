@@ -15,6 +15,7 @@ export function dotColors(colors) {
     wrong_address: colors.danger,
     refused: colors.status.refused,
     restricted: colors.status.restricted,
+    no_soliciting: colors.status.no_soliciting,
     lit_dropped: colors.accentPurple,
   };
 }

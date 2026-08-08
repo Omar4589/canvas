@@ -23,6 +23,7 @@ const ACTION_COLORS = {
   wrong_address: '#ef4444',
   refused: '#f59e0b',
   restricted: '#475569',
+  no_soliciting: '#db2777',
   note_added: '#9ca3af',
 };
 

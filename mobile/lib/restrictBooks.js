@@ -5,7 +5,7 @@
 // restrictBooksConfirm.js.
 //
 // The rule this file exists to hold (mirrors web's RestrictModal): when the crew has REACHED
-// doors (not-home / wrong-address / refused), the SAFE scope — 'unknocked', leave reached
+// doors (not-home / wrong-address / refused / no-soliciting), the SAFE scope — 'unknocked', leave reached
 // doors alone — is the default path, and the reached-inclusive 'incomplete' scope always
 // costs a second, explicit confirm. The server defaults an omitted scope to 'incomplete',
 // so every mark call built here carries an explicit scope.
@@ -13,7 +13,10 @@
 // Statuses that count as "reached": touched by the crew but not completed. Matches the
 // server's skip clause (restrict-bulk, scope 'unknocked') — surveyed/lit_dropped are
 // "completed" and restricted is already marked; all three are skipped server-side either way.
-const REACHED = new Set(['not_home', 'wrong_address', 'refused']);
+// The server writes that clause as an EXCLUSION, so it picks up each new non-completion status
+// automatically. This set does NOT — a status missing here doesn't change what the server marks,
+// it just makes the confirm prompt under-report it. Add every new one.
+const REACHED = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting']);
 
 // Per-door statuses (this round) → the three counts the prompts speak in.
 export const restrictCounts = (statuses) => {

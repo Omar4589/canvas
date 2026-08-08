@@ -43,4 +43,6 @@ export const metricHelp = {
     'People who recorded at least one door in the selected range — not everyone assigned to a campaign. Someone assigned but not out yet does not appear here.',
   restricted:
     'Inaccessible homes — a locked building, a gate, no legal access. Recorded and shown, but never counted as a knock and never billed.',
+  noSoliciting:
+    'Homes where a posted no-soliciting sign ended the visit. The canvasser reached the door, so these ARE knocks and count toward doors/hour — but nobody answered, so they never count toward the contact rate.',
 };

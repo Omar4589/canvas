@@ -218,9 +218,46 @@ hundred same-second marks by one admin audit nothing a canvasser did. Doors alre
 the round** keep their result (skipped), already-restricted doors are skipped (idempotent), and
 **Unmark restricted** removes only the bulk marks — field marks survive.
 
+
+### No soliciting  *(all campaign types)*
+A door with a **posted no-soliciting sign** the canvasser honored. Colored **pink (`#DB2777`)**,
+offered on **every** campaign — a sign forbids leaving literature at least as much as it forbids a
+survey.
+
+It sits between Refused and Restricted, and the one rule to hold onto is that it takes **one half from
+each**: like Refused it **is a knock**; like Restricted it **is not a contact**.
+
+- It **is a knock.** `no_soliciting` is in `KNOCK_ACTIONS`, so it counts toward **Knocks**, **Houses
+  knocked**, **billable doors**, and the doors/hour numerator. The canvasser walked the same path they
+  walk for a Not home — the only difference is why they left. No opt-in, no flag: unlike Restricted
+  doors these bill by default, because the walk is indistinguishable from any other knock.
+- It is **not a contact.** Nobody answered, so it never enters the **Reached-a-person** (contact rate)
+  numerator, and it isn't a completion so it never enters the **Connection rate** numerator either. It
+  therefore *lowers* both rates by widening their shared denominator — correctly: a knock happened and
+  no one was reached.
+- It gets its **own coverage segment**, on the "knocked" side of the funnel (unlike Restricted, which
+  sits outside it).
+
+Like every non-completion it is **overridable** — it's in `REPLACEABLE_ACTIONS`, so any later
+disposition on the same door/pass supersedes it, and vice-versa.
+
+> **Why record it at all rather than suppressing the door?** Political canvassing is generally *exempt*
+> from no-soliciting ordinances — it's protected speech, not commercial solicitation — so honoring a
+> sign is a campaign **policy** choice, not a legal obligation. Doorline therefore records the outcome
+> and leaves the decision with the campaign: an admin who doesn't want anyone sent back can drop those
+> homes at **cut time** (the "Exclude N no-soliciting homes" toggle, see
+> [PASSES_AND_TURF.md](PASSES_AND_TURF.md)). That is non-destructive and reversible, unlike the
+> permanent suppression a do-not-contact flag applies (see [VOTERS.md](VOTERS.md)).
+
+**Two units, and they differ on purpose.** The per-outcome report buckets (`noSolicitingKnocks`, the
+CSV column) count doors where **any** canvasser recorded it — exactly like `refusedKnocks`, so a door
+two canvassers dispositioned differently appears in both buckets. The coverage segment and the cut
+exclusion instead read the door's **resolved status**, which is one bucket per door. Don't reconcile
+one against the other; only the coverage segments are guaranteed to partition.
+
 ### Coverage funnel (the colored bar)
 Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `refused`, `restricted`,
-`not_home`, `wrong_address`, `voted`, `dnc`, or `unknocked` — so the bar sums to the total number
+`no_soliciting`, `not_home`, `wrong_address`, `voted`, `dnc`, or `unknocked` — so the bar sums to the total number
 of households. `unknocked` = houses not yet knocked at all; `restricted` = homes a canvasser
 couldn't physically reach (its own segment — counted in the household total but not among the
 "knocked"); `voted` = early-voting doors that dropped off the canvasser's list (pulled out of
@@ -358,8 +395,8 @@ status. The reporting reads these fields:
 
 | Model | File | Fields that matter for metrics |
 |---|---|---|
-| `CanvassActivity` | [models/CanvassActivity.js](../server/src/models/CanvassActivity.js) | `householdId`, `userId`, `actionType` (`not_home`/`wrong_address`/`refused`/`restricted`/`survey_submitted`/`lit_dropped`/`note_added`), `passId` (nullable), `campaignId`, `organizationId`, `timestamp` |
-| `Household` | [models/Household.js](../server/src/models/Household.js) | `status` (`unknocked`/`not_home`/`surveyed`/`wrong_address`/`refused`/`restricted`/`lit_dropped`), `isActive`, `campaignId`, `lastActionAt`, `lastActionBy` |
+| `CanvassActivity` | [models/CanvassActivity.js](../server/src/models/CanvassActivity.js) | `householdId`, `userId`, `actionType` (`not_home`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`survey_submitted`/`lit_dropped`/`note_added`), `passId` (nullable), `campaignId`, `organizationId`, `timestamp` |
+| `Household` | [models/Household.js](../server/src/models/Household.js) | `status` (`unknocked`/`not_home`/`surveyed`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`lit_dropped`), `isActive`, `campaignId`, `lastActionAt`, `lastActionBy` |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `voterId`, `householdId`, `userId`, `passId`, `campaignId`, `submittedAt` (one per voter **per pass**) |
 | `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list the round belongs to), `roundNumber` (ordered **per walk list** — unique on `{effortId, roundNumber}`, so numbering restarts in every walk list and "Pass 1" alone is ambiguous once a campaign has 2+ lists), `name`, `status`, `activatedAt` |
 | `Voter` | [models/Voter.js](../server/src/models/Voter.js) | `surveyStatus` (`not_surveyed`/`surveyed`), `householdId` (required → voters are campaign-disjoint) |
@@ -367,7 +404,7 @@ status. The reporting reads these fields:
 **The core invariant (write path).** In [`routes/mobile/canvass.js`](../server/src/routes/mobile/canvass.js),
 every knock submission first runs
 `CanvassActivity.deleteMany({ userId, householdId, passId, actionType ∈ REPLACEABLE_ACTIONS })`
-before inserting the new one (`REPLACEABLE_ACTIONS` = the five knock types **plus `restricted`** — so a
+before inserting the new one (`REPLACEABLE_ACTIONS` = the six knock types **plus `restricted`** — so a
 mistaken restricted mark is superseded by any later disposition on the same door/pass, and vice-versa). Therefore:
 
 > **At most ONE `CanvassActivity` (knock) exists per `(userId, householdId, passId)`.**
@@ -377,15 +414,22 @@ a same-canvasser same-pass correction never inflates anything. The survey route 
 household-scoped dedup, so a multi-voter house still yields exactly one `survey_submitted`
 activity per (user, house, pass) — even though it produces multiple `SurveyResponse` rows.
 
-`KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped']`
-([services/reports/aggregations.js](../server/src/services/reports/aggregations.js)). `refused` is a
-knock like the others (a billable door interaction). Two actions are deliberately **excluded**:
-`note_added` (a note can be left without a visit decision) and **`restricted`** (an inaccessible-home
-*marker* — no door interaction happened, so it is never a knock and never enters any rate). The
-non-completion status precedence (`ACTION_TO_STATUS` / `statusPrecedence` in
-[utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)) maps **both** `refused` and
-`restricted` to same-named statuses, resolved last-write-wins — so a later refusal or restricted mark
-can overwrite an earlier not-home on the same house-pass, but a survey still wins over either.
+`KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped',
+'no_soliciting']` ([services/reports/aggregations.js](../server/src/services/reports/aggregations.js)).
+`refused` and `no_soliciting` are knocks like the others (billable door interactions — in both cases
+the canvasser reached the door). Two actions are deliberately **excluded**: `note_added` (a note can be
+left without a visit decision) and **`restricted`** (an inaccessible-home *marker* — no door
+interaction happened, so it is never a knock and never enters any rate).
+
+**The three-way distinction, since two of these look alike:** `refused` reached the door AND a person
+(a contact); `no_soliciting` reached the door but no person (a knock, never a contact);
+`restricted` reached neither (not even a knock). `contactRate`'s numerator is therefore
+`surveyed + refused` and nothing else.
+
+The non-completion status precedence (`ACTION_TO_STATUS` / `statusPrecedence` in
+[utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)) maps `refused`, `no_soliciting`
+and `restricted` to same-named statuses, resolved last-write-wins — so a later mark can overwrite an
+earlier not-home on the same house-pass, but a survey still wins over any of them.
 
 ## B. Field dictionary
 
@@ -1070,6 +1114,18 @@ computed the same way the timeline and the CSV do; **clients must not re-derive 
   `refusedKnocks = 0`. A survey still beats a refusal in status precedence
   ([utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)), so a house-pass that was
   refused then surveyed resolves to `surveyed`, not `refused`.
+- **No soliciting is a knock, never a contact (all campaign types).** `no_soliciting` IS in
+  `KNOCK_ACTIONS`, so it counts in `knocks`, `homesKnocked`, `billableDoors` (with no opt-in — the walk
+  happened) and the doors/hour numerator, and it appears in the door-outcome breakdown's
+  `no_soliciting` bucket, which is what keeps that breakdown summing to `doorsKnocked`. It is **not**
+  in either rate numerator: `contactRate` stays `(surveyed + refused) ÷ knocks` and `connectionRate`
+  stays `(surveyed + lit) ÷ knocks`, so a no-soliciting door lowers **both** as an unreached knock.
+  Surfaced as `noSoliciting` on `/canvassers`, `dayNoSoliciting` on `/canvasser-timeline`,
+  `noSolicitingKnocks` on `/knocks-by-pass` (+ the **No soliciting** CSV column), and as its own
+  coverage segment on the **knocked** side of the funnel. Two units on purpose: the `*Knocks` buckets
+  are `$max`-per-door-pass (a door two canvassers dispositioned differently lands in two buckets, same
+  as `refusedKnocks`), while coverage reads the door's single resolved status — only coverage
+  partitions.
 - **Restricted is a marker, never a knock (all campaign types) — the inverse of Refused.** `restricted`
   is deliberately **out of** `KNOCK_ACTIONS`, so an inaccessible-home mark never counts in `knocks`,
   `homesKnocked` (`status ∉ {unknocked, restricted}`), `connectionRate`, `contactRate`, or the

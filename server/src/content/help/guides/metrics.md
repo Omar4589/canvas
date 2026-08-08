@@ -80,9 +80,13 @@ Coverage is always for the whole campaign — it can't be narrowed to one team, 
 
 Time actually spent on doors — each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
 
+## No soliciting
+
+A door with a posted no-soliciting sign the canvasser honored. The canvasser reached the door, so this **is** counted as a knock — it counts toward doors, doors/hour, and billing like any other. But nobody answered, so it never counts toward your **contact rate** or **survey rate**; it lowers both, the same way a not-home does. See [Refused, No soliciting, and Restricted](restricted-vs-refused).
+
 ## Restricted
 
-An **inaccessible** home — a locked building, a gate, no legal access. It's recorded and shown so you know it was attempted, but it is **never counted as a knock**, so it never affects your contact rate, survey rate, or coverage. See [Restricted vs. refused](restricted-vs-refused).
+An **inaccessible** home — a locked building, a gate, no legal access. It's recorded and shown so you know it was attempted, but it is **never counted as a knock**, so it never affects your contact rate, survey rate, or coverage. See [Refused, No soliciting, and Restricted](restricted-vs-refused).
 
 ## Billable doors
 

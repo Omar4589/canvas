@@ -24,7 +24,12 @@ import { fetchCoverMap } from './packetMapImage.js';
 // One set for both layouts. The field list used to say "Spoke with" on the theory that a packet
 // without questions can't produce a survey — but a volunteer ticks the same box either way, and
 // two vocabularies for one act made the tally on the cover disagree with the app.
-const OUTCOMES = ['Not home', 'Refused', 'Wrong address', 'Surveyed', 'Restricted'];
+//
+// Keep this in lockstep with the app's door buttons — a volunteer holding paper and a canvasser
+// holding a phone must be able to record the same thing. chipRow wraps and reports its own
+// height, and measure/paint call it with identical args, so growing this list reflows safely;
+// the cover tally below divides its width by the length, so that follows too.
+const OUTCOMES = ['Not home', 'Refused', 'Wrong address', 'Surveyed', 'No soliciting', 'Restricted'];
 
 const setFont = (doc, size, style = 'normal', color = DARK) => {
   doc.setFont('helvetica', style);

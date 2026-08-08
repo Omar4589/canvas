@@ -81,7 +81,7 @@ const TYPES = [
   },
 ];
 
-const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted'];
+const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 const STATUS_LABEL = {
   pending: 'Queued',

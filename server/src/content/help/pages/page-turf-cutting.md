@@ -15,7 +15,7 @@ tags: turf, books, cutting, assign, progress, status, page
 
 Once a round has been knocked, the map starts showing you how it's going:
 
-- **Every house is colored by what happened at it in the round you've picked** — surveyed, not home, refused, restricted, or still unknocked.
+- **Every house is colored by what happened at it in the round you've picked** — surveyed, not home, refused, no soliciting, restricted, or still unknocked.
 - **The ring around each house is its book's color**, so you can see a house's status *and* which book it belongs to at the same time.
 - **Book labels count the work** — `Book 4 · 23/65` means 23 of that book's 65 houses are done.
 - **Books shade in as they fill up** — pale means untouched, solid means finished. Easy way to spot a book nobody has started.
@@ -29,6 +29,17 @@ Status colors appear on their own once the round has knocks. While you're still 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
 
 **Making the map bigger.** Use the chevron on the **Generate books** header to collapse that panel so the map fills the space — a small button at the top-left of the map brings it back, and it stays collapsed next time. For an even bigger view, the **fullscreen** button (also top-left of the map) expands the map to the whole screen; press **Esc** or the button again to come back.
+
+## Leaving homes out of the next round
+
+When you cut a round, two checkboxes appear above **Generate** whenever there's anything to skip:
+
+- **Exclude N restricted-access homes** — doors nobody could reach.
+- **Exclude N no-soliciting homes** — doors with a posted sign your canvassers honored.
+
+Both are **on by default** and both are independent — tick either, both, or neither. Either way it's
+non-destructive: the homes stay in the campaign and in every count, they're just left out of *this
+round's* books, and they come back automatically if someone re-records the door later.
 
 ## Marking a book restricted
 

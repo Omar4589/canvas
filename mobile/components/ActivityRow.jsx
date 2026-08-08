@@ -15,6 +15,7 @@ const ACTION_TO_PIN = {
   refused: 'refused',
   lit_dropped: 'lit_dropped',
   restricted: 'restricted',
+  no_soliciting: 'no_soliciting',
   note_added: 'unknocked',
 };
 

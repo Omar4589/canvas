@@ -61,6 +61,7 @@ const STATUS_OPTIONS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'refused', label: 'Refused' },
+  { key: 'no_soliciting', label: 'No solicit' },
   { key: 'restricted', label: 'Restricted' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'lit_dropped', label: 'Lit dropped' },
@@ -72,7 +73,7 @@ const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
 const LAST_KNOCK_COLOR = '#db2777'; // pink
 // Mirror the server's KNOCK_ACTIONS so the inline overlap badge matches the /overlap-doors
 // ring (restricted / note_added are not knocks — excluded).
-const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped']);
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting']);
 
 const one = (v) => (Array.isArray(v) ? v[0] : v) || '';
 
@@ -1160,6 +1161,7 @@ export default function AdminMap() {
             'house-wrong_address': require('../../../assets/icons/house-wrong_address.png'),
             'house-refused': require('../../../assets/icons/house-refused.png'),
             'house-restricted': require('../../../assets/icons/house-restricted.png'),
+            'house-no_soliciting': require('../../../assets/icons/house-no_soliciting.png'),
             'house-lit_dropped': require('../../../assets/icons/house-surveyed.png'),
           }}
         />
@@ -1230,6 +1232,7 @@ export default function AdminMap() {
                 'wrong_address', 'house-wrong_address',
                 'refused', 'house-refused',
                 'restricted', 'house-restricted',
+                'no_soliciting', 'house-no_soliciting',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -1253,6 +1256,7 @@ export default function AdminMap() {
                   'not_home', colors.status.not_home,
                   'wrong_address', colors.status.wrong_address,
                   'refused', colors.status.refused,
+                  'no_soliciting', colors.status.no_soliciting,
                   'restricted', colors.status.restricted,
                   'lit_dropped', colors.status.lit_dropped,
                   colors.textSecondary,

@@ -25,6 +25,20 @@ const CUT_COLUMNS = {
 // Orchestrates a turf generation run: load the pass's walk-list households,
 // dispatch to the cut mode, compute boundary/centroid/walk-order per book, and
 // persist Turf docs as drafts atomically (clearing prior drafts for the pass so
+// Admin-reviewed second-pass removal. Two independent cut-time toggles both exclude by
+// Household.status, so they MUST share one `$nin` — two `{ status: { $ne } }` spreads into the
+// same object would silently keep only the last one, quietly re-cutting the doors the admin
+// asked to drop. Non-destructive either way: the homes stay in the campaign and its counts, and
+// re-enter scope automatically the moment they're re-dispositioned.
+//   excludeRestricted   — inaccessible homes (gate/locked building; never reached the door)
+//   excludeNoSoliciting — a posted sign ended the visit (the door WAS reached; still a knock)
+export function cutStatusExclusion({ excludeRestricted, excludeNoSoliciting } = {}) {
+  const drop = [];
+  if (excludeRestricted) drop.push('restricted');
+  if (excludeNoSoliciting) drop.push('no_soliciting');
+  return drop.length ? { status: { $nin: drop } } : {};
+}
+
 // a re-run / worker restart is clean). Mirrors turfId/walkOrder onto households.
 export async function generateTurf({ campaignId, passId, mode, params = {}, generationJobId, generatedBy, onProgress }) {
   const campaign = await Campaign.findById(campaignId).lean();
@@ -45,10 +59,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     effortId: pass.effortId,
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
-    // Admin-reviewed second-pass removal: when set, this cut skips inaccessible homes
-    // (Household.status === 'restricted'). Non-destructive — the homes stay in the
-    // campaign/counts and re-enter scope automatically if re-dispositioned.
-    ...(params.excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
+    ...cutStatusExclusion(params),
   };
 
   // Targeted follow-up round: restrict the universe to the effort's doors matching
@@ -190,7 +201,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // through the normal Accept → Assign steps) and the whole pass is re-tessellated
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
-export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false }) {
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
   // Same mid-delete guard as generateTurf above.
@@ -215,7 +226,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     ...(alreadyBooked.length ? { _id: { $nin: alreadyBooked } } : {}),
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
-    ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
+    ...cutStatusExclusion({ excludeRestricted, excludeNoSoliciting }),
   };
 
   // A targeted round only ever wants its matching doors: resolve the pass's own

@@ -121,7 +121,9 @@ export async function computeWindowStats({
   // One outcome per (household, pass): every group has >=1 knock action so resolveStatus never
   // returns 'unknocked'. Σ(events) === knockGroups.length === k.knocks === doorsKnocked. `refused`
   // is a knock outcome too, so it MUST be a key here or the breakdown stops summing to doorsKnocked.
-  const events = { not_home: 0, wrong_address: 0, refused: 0, surveyed: 0, lit_dropped: 0 };
+  // Same for `no_soliciting` — the `status in events` guard below silently DROPS any knock outcome
+  // missing from this literal, which is exactly how a breakdown starts under-counting in silence.
+  const events = { not_home: 0, wrong_address: 0, refused: 0, surveyed: 0, lit_dropped: 0, no_soliciting: 0 };
   for (const g of knockGroups) {
     const status = resolveStatus(campaignType, g.acts);
     if (status in events) events[status] += 1;
@@ -239,7 +241,7 @@ export async function buildFrozenMapPoints({ report, campaign, template = null, 
     }
   }
 
-  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0, restricted: 0 };
+  const coverage = { unknocked: 0, not_home: 0, surveyed: 0, wrong_address: 0, refused: 0, lit_dropped: 0, restricted: 0, no_soliciting: 0 };
   const points = [];
   for (const h of households) {
     const coords = h.location?.coordinates || [];

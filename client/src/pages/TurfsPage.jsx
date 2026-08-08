@@ -434,10 +434,15 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
   const bulkMarks = books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
 
   // Live per-scope counts from the progress the page already loaded. "Reached" = doors the crew
-  // touched but didn't complete (not-home / refused / wrong-address). When there are any, offer a
-  // choice and default to leaving them alone.
+  // touched but didn't complete (not-home / refused / wrong-address / no-soliciting). When there
+  // are any, offer a choice and default to leaving them alone.
+  //
+  // This list MUST mirror the server's scope rule (routes/admin/turfs.js — "not surveyed, not
+  // lit_dropped, not already restricted"), which is written as an EXCLUSION and so picks up every
+  // new non-completion status automatically. A status missing here doesn't change what gets
+  // marked; it makes this preview under-report it, which is worse than a visible error.
   const unknockedCount = sumStatus(books, progressByTurf, ['unknocked']);
-  const incompleteCount = sumStatus(books, progressByTurf, ['unknocked', 'not_home', 'wrong_address', 'refused']);
+  const incompleteCount = sumStatus(books, progressByTurf, ['unknocked', 'not_home', 'wrong_address', 'refused', 'no_soliciting']);
   const reachedCount = Math.max(0, incompleteCount - unknockedCount);
   const hasProgress = progressByTurf && progressByTurf.size > 0;
   const showScope = marking && hasProgress && reachedCount > 0;
@@ -846,6 +851,7 @@ export default function TurfsPage() {
   // Admin-reviewed second-pass removal: default ON, so a re-cut skips inaccessible homes
   // (only surfaced when the effort actually has restricted-status doors).
   const [excludeRestricted, setExcludeRestricted] = useState(true);
+  const [excludeNoSoliciting, setExcludeNoSoliciting] = useState(true);
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
 
@@ -944,11 +950,15 @@ export default function TurfsPage() {
   const unassignedCount = Math.max(
     0,
     (turfsQ.data?.supplementalDoorCount || 0) -
-      (excludeRestricted ? turfsQ.data?.supplementalRestrictedCount || 0 : 0)
+      (excludeRestricted ? turfsQ.data?.supplementalRestrictedCount || 0 : 0) -
+      (excludeNoSoliciting ? turfsQ.data?.supplementalNoSolicitingCount || 0 : 0)
   );
   // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
   // can drop them from this cut so nobody is routed back to an unreachable door.
   const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
+  // Homes where a posted sign ended the visit. Unlike restricted these WERE knocked (they count
+  // as billable doors); the toggle is about not sending anyone back, not about billing.
+  const noSolicitingDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'no_soliciting').length;
   // Dead-end guard: the effort owns no mappable doors. /doors returns the effort's
   // knockable doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
@@ -1037,13 +1047,13 @@ export default function TurfsPage() {
   const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
   const excludeActive = sideActive(targetFilter.exclude);
   const targetPreviewQ = useQuery({
-    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0],
+    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting && noSolicitingDoorCount > 0],
     queryFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/target-preview`, {
         method: 'POST',
         // excludeRestricted rides along under the same condition Generate uses, so the
         // previewed count equals what the cut will actually produce.
-        body: { passId, filter: targetFilter, excludeRestricted: excludeRestricted && restrictedDoorCount > 0 },
+        body: { passId, filter: targetFilter, excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
       }),
     enabled: !!campaignId && !!passId && targetActive,
   });
@@ -1233,6 +1243,7 @@ export default function TurfsPage() {
       else params = { maxDoors: Number(maxDoors) || 65, tolerance: (FLEX_OPTIONS.find((o) => o.key === flex) || {}).tolerance };
       if (targetActive) params.targetFilter = targetFilter;
       if (excludeRestricted && restrictedDoorCount > 0) params.excludeRestricted = true;
+      if (excludeNoSoliciting && noSolicitingDoorCount > 0) params.excludeNoSoliciting = true;
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
     },
     onSuccess: (res) => {
@@ -1332,7 +1343,7 @@ export default function TurfsPage() {
     mutationFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, {
         method: 'POST',
-        body: { passId, excludeRestricted: excludeRestricted && restrictedDoorCount > 0 },
+        body: { passId, excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
       }),
     onSuccess: invalidateTurfs,
   });
@@ -1896,7 +1907,7 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'lit_dropped', 'wrong_address'].map((s) => (
+                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address'].map((s) => (
                       <label key={s} className="flex items-center gap-1 capitalize">
                         <input type="checkbox" checked={targetFilter.priorPassStatuses.includes(s)} onChange={() => toggleTargetStatus(s)} />
                         {s.replace('_', ' ')}
@@ -1968,7 +1979,7 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'lit_dropped', 'wrong_address'].map((s) => (
+                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address'].map((s) => (
                       <label key={s} className="flex items-center gap-1 capitalize">
                         <input
                           type="checkbox"
@@ -2056,6 +2067,21 @@ export default function TurfsPage() {
               <span>
                 Exclude <strong>{restrictedDoorCount.toLocaleString()}</strong> restricted-access{' '}
                 {restrictedDoorCount === 1 ? 'home' : 'homes'} from this cut
+              </span>
+            </label>
+          )}
+
+          {noSolicitingDoorCount > 0 && publishedCount === 0 && (
+            <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={excludeNoSoliciting}
+                onChange={(e) => setExcludeNoSoliciting(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                Exclude <strong>{noSolicitingDoorCount.toLocaleString()}</strong> no-soliciting{' '}
+                {noSolicitingDoorCount === 1 ? 'home' : 'homes'} from this cut
               </span>
             </label>
           )}

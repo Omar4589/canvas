@@ -105,6 +105,17 @@ never automatic: turn it off to include them (e.g. if access has since opened up
 counterpart to the field marker — the field records "can't get in," the admin decides per round whether
 to keep trying.
 
+**Excluding no-soliciting homes from a later round.** The exact same mechanism, for the pink
+**No soliciting** disposition: a separate **"Exclude N no-soliciting homes"** toggle (also on by
+default) appears whenever any exist. It is independent of the restricted toggle — tick either, both,
+or neither — and the two are folded into one `status: { $nin: [...] }` on the cut, so ticking both
+really does drop both sets.
+
+The difference worth knowing: a restricted home was never *reached*, while a no-soliciting home was
+knocked and billed like any other door. Excluding it is purely about not sending a volunteer back to a
+door the campaign has decided to honor — it changes nothing about how the door was counted. See
+[METRICS.md](METRICS.md).
+
 Excluding them from the cut doesn't remove them from the **cut map**, though — like every door a cut leaves
 out of a book (already-worked doors a targeted cut skipped, restricted homes, voters added since the cut),
 they stay visible as gray *loose* dots, which pad the density so a round looks bigger than the walk. A single

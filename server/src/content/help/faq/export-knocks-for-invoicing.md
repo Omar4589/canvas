@@ -19,6 +19,7 @@ Three things to know:
 
 - **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading.
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
+- **No-soliciting doors are already in there.** They're knocks like any other, counted in the **Knocks** column, plus their own **No soliciting** column so you can see how many there were.
 - **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).
 
 **Want a file that sticks around, or the per-door detail behind these totals?** The campaign's

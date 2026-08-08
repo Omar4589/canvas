@@ -28,6 +28,7 @@ const ACTION_PIN = {
   wrong_address: 'wrong_address',
   refused: 'refused',
   restricted: 'restricted',
+  no_soliciting: 'no_soliciting',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };

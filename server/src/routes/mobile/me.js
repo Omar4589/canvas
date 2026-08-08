@@ -17,7 +17,7 @@ import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilte
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped'];
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
 
 function activeOrgId(req) {
   return req.activeOrg?._id;

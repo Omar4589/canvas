@@ -55,7 +55,7 @@ export const EXPORT_TYPE_META = [
   },
 ];
 
-export const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted'];
+export const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 // Lay the server registry's copy over the local fallback, keyed by id. Server label /
 // desc / oneRowIs / filters win; mobile-only fields (emoji, sub, contents) stay local.
