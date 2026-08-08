@@ -60,6 +60,13 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   await captureCampaignBeforeDelete(campaign);
   heartbeat();
 
+  // Address-level DO-NOT-KNOCK needs NO parking block here, and its absence is deliberate —
+  // do not "fix" it by adding one. DoNotKnockAddress is keyed {organizationId, normalizedAddress}
+  // with no campaignId, so deleting a campaign cannot touch it: the request simply survives, and
+  // a later import of that address into any campaign re-suppresses the door (csvImporter's
+  // $setOnInsert + reapplyDoNotKnock). That is the whole reason it isn't a Household boolean —
+  // compare the block immediately below, which is the cost of a per-campaign-row design.
+  //
   // DNC stickiness: for each flagged person whose ONLY row(s) live in this campaign, park
   // the request as a DncPendingId carrying the flag's original attribution (uploadId, or
   // null + reason for admin-set) — a future import graduates it back onto the real row

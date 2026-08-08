@@ -964,6 +964,7 @@ export default function TurfsPage() {
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
   // Already-voted owned doors the cut skips (so a smaller book total makes sense).
   const votedDoorCount = turfsQ.data?.votedDoorCount || 0;
+  const doNotKnockDoorCount = turfsQ.data?.doNotKnockDoorCount || 0;
   const excludedApartmentCount = turfsQ.data?.excludedApartmentCount || 0;
   const knockCount = turfsQ.data?.knockCount || 0;
   // "Remove apartments": preview how many doors sit in buildings of N+ units (same
@@ -2112,6 +2113,13 @@ export default function TurfsPage() {
           {!hasNoDoors && votedDoorCount > 0 && (
             <p className="mt-2 text-xs text-fg-muted">
               {votedDoorCount.toLocaleString()} door{votedDoorCount === 1 ? '' : 's'} here already voted — skipped (not cut into books).
+            </p>
+          )}
+          {/* Disjoint from the voted line above (the server keeps the three skip counts mutually
+              exclusive in coverage-bucket precedence), so both can show without double-counting. */}
+          {!hasNoDoors && doNotKnockDoorCount > 0 && (
+            <p className="mt-1 text-xs text-fg-muted">
+              {doNotKnockDoorCount.toLocaleString()} door{doNotKnockDoorCount === 1 ? '' : 's'} here are marked do not knock — skipped (not cut into books).
             </p>
           )}
 

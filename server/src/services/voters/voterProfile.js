@@ -226,6 +226,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           status: household.status,
           fullyVoted: !!household.fullyVoted,
           fullyDnc: !!household.fullyDnc,
+          doNotKnock: !!household.doNotKnock,
           turfId: household.turfId ? String(household.turfId) : null,
           location: household.location || null,
           campaign: campaign

@@ -18,6 +18,7 @@ import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
 import { recomputeFullyDnc } from '../dnc/recomputeFullyDnc.js';
 import { reapplyDncLists } from '../dnc/reapplyDncLists.js';
+import { reapplyDoNotKnock } from '../dnc/doNotKnock.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 import { collectRevisitHomes } from './collectRevisitHomes.js';
 
@@ -342,6 +343,14 @@ export async function processImportJob(job) {
     const dncDropped = await Household.find({ campaignId: campaign._id, fullyDnc: true }).distinct('_id');
     const dncRecompute = [...new Set([...dncDropped.map(String), ...reappliedDncHh, ...(counts.seededDncHouseholdIds || [])])];
     if (dncRecompute.length) await recomputeFullyDnc(dncRecompute);
+
+    // Do-not-knock (address-level): catches what csvImporter's $setOnInsert cannot — an address
+    // under a standing request that ALREADY existed as a Household row in this campaign, or one
+    // this import re-housed. Note the deliberate ASYMMETRY with the two blocks above: there is no
+    // "reopen" half. A new resident re-opens a fully-voted or all-DNC door because that person
+    // asked for nothing; a do-not-knock request was about the ADDRESS, so new names in a refreshed
+    // file are not consent. Only an explicit admin clear lifts it (services/dnc/doNotKnock.js).
+    await reapplyDoNotKnock(orgId, campaign._id);
 
     // Re-house cleanup: count voters that changed doors, then deactivate doors this
     // import emptied (and reactivate any refilled) — bounded to the touched households.

@@ -120,6 +120,13 @@ statuses above it isn't about what happened; it's a standing request:
   one flagged voter, one not — stays fully knockable for the housemates.
 - A new resident moving into a fully-flagged door **reopens** it automatically on the next import.
 
+> **When the ADDRESS is the one asking, this is the wrong flag.** "Never come to my door again"
+> covers the housemates too, and Do not contact deliberately doesn't — a mixed door stays knockable.
+> Its sibling feature, **[Do not knock](DO_NOT_KNOCK.md)**, suppresses the address itself in every
+> campaign, permanently, without touching anyone's personal Do-not-contact status. The two are
+> independent in both directions; note that Do not knock **never** auto-reopens for a new resident,
+> the exact inverse of the bullet above.
+
 ## What you can change (web admin)
 
 - **Edit voter info** — fix/maintain contact, party, gender, registration, districts, and name.
@@ -169,6 +176,7 @@ by different endpoints; it is no longer in the map/door bootstrap payload at all
 | Model | File | Notes |
 |---|---|---|
 | `Voter` | [models/Voter.js](../server/src/models/Voter.js) | **PER-CAMPAIGN rows** (unique `{campaignId, stateVoterId}`; org isolation holds transitively — a campaign belongs to one org). The same person in 2 campaigns of one org = 2 **sibling rows** (same `{organizationId, stateVoterId}`, non-unique index for sibling lookups). **Sibling invariant:** `doNotContact` must agree across siblings (writers write by the org+svid pair); `surveyStatus`, `householdId`, `locallyEditedFields` are per-row by design. Also: `lastEditedBy`/`lastEditedAt` (admin edit stamp), `{organizationId, lastName, firstName}` directory index. **`doNotContact`** typed subdoc `{flagged, at, byUserId, reason, source: 'admin'\|'upload', uploadId}` + partial index `{organizationId, 'doNotContact.flagged'}` (flagged rows only). Index changes ship via `migrate:voter-campaigns --apply` then `migrate:build-indexes --apply`. Import-safe **by omission**: never in csvImporter's `row.voter` `$set`; a flagged person imported into a NEW campaign gets the subdoc **seeded on insert** (`$setOnInsert`, original attribution kept, so upload-undo still reverts seeded copies). |
+| `Household.doNotKnock` | [models/Household.js](../server/src/models/Household.js) | The ADDRESS-level sibling — see **[DO_NOT_KNOCK.md](DO_NOT_KNOCK.md)**. NOT derived from voters: mirrored from the org-level `DoNotKnockAddress` record (keyed `{organizationId, normalizedAddress}`, no campaignId, survives a campaign delete). Written ONLY by [recomputeDoNotKnock.js](../server/src/services/dnc/recomputeDoNotKnock.js), same unconditional-`$set`/`updatedAt` contract as `fullyDnc`. In `KNOCKABLE_DOOR_FILTER` as the 5th flag. Never auto-reopens. |
 | `Household.fullyDnc` | [models/Household.js](../server/src/models/Household.js) | Derived: true when **every** voter at the door is flagged (≥1-voter guard — a voter-less door is never fullyDnc). Written ONLY by [services/dnc/recomputeFullyDnc.js](../server/src/services/dnc/recomputeFullyDnc.js), whose unconditional bulkWrite `$set` bumps `updatedAt` — the mobile `/changes` delta depends on that bump. Filtered via the shared [`KNOCKABLE_DOOR_FILTER`](../server/src/services/canvass/knockableDoorFilter.js) at every cut/serve/count site. |
 | `DncUpload` / `DncPendingId` | [models/DncUpload.js](../server/src/models/DncUpload.js), [models/DncPendingId.js](../server/src/models/DncPendingId.js) | Org-level (no campaignId) audit + sticky-pending stores for DNC list uploads; pendings graduate on later imports via [services/dnc/reapplyDncLists.js](../server/src/services/dnc/reapplyDncLists.js), hooked in importProcessor beside the voted reapply. `DncPendingId.uploadId` is now **nullable**: deleting a campaign that held a flagged person's LAST row parks their request as a pending id (null uploadId = admin-set, `reason` carried) so a later import re-flags them — "never contact me" survives a campaign delete. Both models are in the org-delete `ORG_SCOPED` sweep. |
 | `VoterNote` | [models/VoterNote.js](../server/src/models/VoterNote.js) | **New, org-level** admin/canvasser note that follows the person: `{ organizationId, voterId, authorId, body, editedBy, editedAt, timestamps }`. Index `{voterId, createdAt:-1}`. |

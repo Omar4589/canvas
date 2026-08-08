@@ -704,6 +704,9 @@ async function resetActivityLayer(campaign, log) {
   // just above. fullyDnc is NOT: it derives from org-wide Voter.doNotContact.flagged, which this
   // reset never touches, and nothing here recomputes it. Clearing it let a do-not-contact door
   // back through KNOCKABLE_DOOR_FILTER and put staged knocks on a door we promise never to knock.
+  // doNotKnock is NOT either, for the same reason and more so: it mirrors the org-level
+  // DoNotKnockAddress record, which is deliberately outside every campaign-scoped wipe. Do not add
+  // either suppression flag to the $set below.
   await Household.updateMany(
     { campaignId },
     { $set: { status: 'unknocked', fullyVoted: false, lastActionAt: null, lastActionBy: null } }

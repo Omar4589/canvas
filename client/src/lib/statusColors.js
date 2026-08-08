@@ -14,6 +14,7 @@ export const STATUS_COLORS = {
   no_soliciting: '#db2777', // pink-600 — a posted sign ended the visit
   voted: '#14b8a6', // teal-500
   dnc: '#9f1239', // rose-800 — do not contact
+  doNotKnock: '#4c0519', // rose-950 — address-level "never come back"; darker than dnc on purpose
 };
 
 export const STATUS_LABELS = {
@@ -27,6 +28,7 @@ export const STATUS_LABELS = {
   no_soliciting: 'No soliciting',
   voted: 'Voted',
   dnc: 'Do not contact',
+  doNotKnock: 'Do not knock',
 };
 
 // On a dark basemap the unknocked gray (#9ca3af) is too low-contrast; lighten it.

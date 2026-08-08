@@ -44,7 +44,7 @@ They can disagree (Knocks can exceed Houses once you do a second pass) — that'
 ### Houses knocked
 Distinct households that have been knocked at least once — **status outside
 `NON_KNOCKED_STATUSES` (`unknocked`, `restricted`)**, and at bucket level also outside the
-synthetic `dnc`/`voted` segments, which are carved exclusively out of raw-`unknocked` doors.
+synthetic `doNotKnock`/`dnc`/`voted` segments, which are carved exclusively out of raw-`unknocked` doors.
 This is **current-state and all-time** — it doesn't move with the date filter. It answers "how
 much of the turf is done." Field: `homesKnocked`.
 
@@ -257,15 +257,17 @@ one against the other; only the coverage segments are guaranteed to partition.
 
 ### Coverage funnel (the colored bar)
 Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `refused`, `restricted`,
-`no_soliciting`, `not_home`, `wrong_address`, `voted`, `dnc`, or `unknocked` — so the bar sums to the total number
+`no_soliciting`, `not_home`, `wrong_address`, `voted`, `dnc`, `doNotKnock`, or `unknocked` — so the bar sums to the total number
 of households. `unknocked` = houses not yet knocked at all; `restricted` = homes a canvasser
 couldn't physically reach (its own segment — counted in the household total but not among the
 "knocked"); `voted` = early-voting doors that dropped off the canvasser's list (pulled out of
 `unknocked`, see early-voting doc); `dnc` = doors where **every** resident is marked do-not-contact
-(also pulled out of `unknocked` — they will never be knocked; see [VOTERS.md](VOTERS.md)).
-**Precedence:** a door that is both fully-voted and fully-DNC buckets as `dnc` — the permanent
-request outranks this election's early voting, so the segments always sum. This is a coverage
-lens, separate from Knocks (activity). Field: `canvass` / `coverage`.
+(also pulled out of `unknocked` — they will never be knocked; see [VOTERS.md](VOTERS.md));
+`doNotKnock` = addresses that asked nobody ever return (see [DO_NOT_KNOCK.md](DO_NOT_KNOCK.md)).
+**Precedence, strongest first — `doNotKnock` > `dnc` > `voted`:** a door in more than one buckets
+ONCE, in the strongest, so the segments always sum. The order is the permanence order — the address
+request never reopens, the person-level one reopens for a new resident, and early voting resets
+each election. This is a coverage lens, separate from Knocks (activity). Field: `canvass` / `coverage`.
 
 ## Coverage vs. Knocks — worked example
 

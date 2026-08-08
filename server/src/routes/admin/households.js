@@ -17,6 +17,7 @@ import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
 import { getPassStatusMap, getUserStatusMap } from '../../services/passes/passStatus.js';
+import { setDoNotKnock, clearDoNotKnock } from '../../services/dnc/doNotKnock.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
@@ -318,7 +319,7 @@ router.get('/map', async (req, res, next) => {
     const MAP_HOUSEHOLD_CAP = 50000;
     let households = await Household.find(
       householdFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
@@ -451,6 +452,10 @@ router.get('/map', async (req, res, next) => {
         // Filtered to a canvasser or a round → that scope's resolved status (a door
         // untouched in scope reads 'unknocked'); else the global "ever surveyed" status.
         status: statusMap ? statusMap.get(String(h._id))?.status || 'unknocked' : h.status,
+        // Suppressed doors stay ON the admin map by design (this map is the record of work
+        // performed and billed) — the flag rides along so the panel can badge them and offer
+        // the lift. Never a filter here.
+        doNotKnock: h.doNotKnock === true,
         lastActionAt: ((passId || userId) ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
         lastAction: last
           ? {
@@ -625,6 +630,99 @@ router.get('/:householdId/activity', async (req, res, next) => {
       .sort((a, b) => (b.roundNumber ?? -1) - (a.roundNumber ?? -1));
 
     res.json({ rounds });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Do not knock ────────────────────────────────────────────────────────────────────────
+// Address-level suppression: "nobody comes to this door again". Distinct from the person-level
+// DNC flag in routes/admin/voters.js, which needs EVERY voter at a door flagged before the door
+// itself drops.
+//
+// ROLE GATE — a deliberate divergence from DNC. The DNC routes are org-ADMIN-only (routes/index.js
+// mounts /admin/dnc outside the lead-admitting gate, on purpose). These admit LEADS too, scoped to
+// a campaign they manage, because a lead runs the walk and is who a canvasser reports the request
+// to. What no role can do is set it from the canvasser app: the request reaches us at the door,
+// but darkening an address org-wide and permanently is a management decision (ruling, Aug 2026).
+//
+// Writes go through services/dnc/doNotKnock.js so the org-level record and the per-campaign
+// Household mirrors can never drift.
+
+// Load the door + enforce the lead's campaign scope. Returns null (after responding) on failure.
+async function loadDoorForDnk(req, res) {
+  const orgId = activeOrgId(req);
+  const { householdId } = req.params;
+  if (!mongoose.isValidObjectId(householdId)) {
+    res.status(400).json({ error: 'Invalid id' });
+    return null;
+  }
+  const hh = await Household.findOne(
+    { _id: householdId, organizationId: orgId },
+    {
+      campaignId: 1, normalizedAddress: 1, addressLine1: 1, addressLine2: 1,
+      city: 1, state: 1, zipCode: 1, doNotKnock: 1,
+    }
+  ).lean();
+  // 404 rather than 403 for a wrong-org id — same concealment the rest of this router uses.
+  if (!hh) {
+    res.status(404).json({ error: 'Household not found' });
+    return null;
+  }
+  if (!isOrgAdmin(req) && !(await canManageCampaign(req, hh.campaignId))) {
+    res.status(403).json({ error: 'Forbidden' });
+    return null;
+  }
+  return hh;
+}
+
+// Which management role is acting — recorded on the request so a review can tell a lead's
+// suppression from an admin's.
+function dnkSource(req) {
+  if (req.user?.isSuperAdmin) return 'super';
+  return req.activeMembership?.role === 'lead' ? 'lead' : 'admin';
+}
+
+router.post('/:householdId/do-not-knock', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const hh = await loadDoorForDnk(req, res);
+    if (!hh) return;
+
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 3) {
+      return res.status(400).json({ error: 'A reason is required (at least 3 characters).' });
+    }
+
+    const result = await setDoNotKnock({
+      organizationId: activeOrgId(req),
+      household: hh,
+      reason,
+      source: dnkSource(req),
+      byUserId: req.user._id,
+      campaignIdAtSet: hh.campaignId,
+    });
+    // doorsAffected counts EVERY campaign's row for this address, not just this one — the caller
+    // shows it because suppressing from one campaign silently darkening a door in another would
+    // otherwise be a surprise.
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:householdId/do-not-knock', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const hh = await loadDoorForDnk(req, res);
+    if (!hh) return;
+
+    const result = await clearDoNotKnock({
+      organizationId: activeOrgId(req),
+      normalizedAddress: hh.normalizedAddress,
+    });
+    if (!result.cleared) return res.status(404).json({ error: 'This address is not marked do-not-knock.' });
+    res.json({ cleared: true, doorsAffected: result.doorsAffected });
   } catch (err) {
     next(err);
   }

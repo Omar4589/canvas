@@ -1,18 +1,22 @@
 ---
 slug: do-not-contact
-title: Honoring "never knock here again"
+title: Honoring "don't contact me again"
 audience: admin
 kind: guide
 order: 21
 sourceDoc: VOTERS.md
 summary: Mark a voter Do not contact — they drop out of walk lists, exports, and surveys everywhere, and a fully-flagged door leaves the map.
-tags: do not contact, dnc, opt out, privacy, remove, skip, never knock, complaint
+tags: do not contact, dnc, opt out, privacy, remove, skip, complaint
 ---
 
 ## When someone asks to be left alone
 
-Sometimes a resident tells a canvasser — or calls the campaign — that they never want anyone at
-their door again. **Do not contact** is how you honor that, permanently.
+Sometimes a person tells a canvasser — or calls the campaign — that they never want to be contacted
+again. **Do not contact** is how you honor that, permanently.
+
+> **Asking about the *house*, not the person?** If a resident says "never come to this door again",
+> that's **[Do not knock](do-not-knock)** — it suppresses the whole address, including the
+> housemates, which Do not contact deliberately does not.
 
 The flag lives on the **person**, not the campaign: set it once and it follows them into every
 future campaign your organization runs, on every campaign type — literature drops included.
@@ -41,11 +45,14 @@ Have a suppression list from a client or a prior cycle? On the **Voters** page, 
   is never included in new walk lists.
 - Canvassers see a **Do not contact** badge on the voter at the door, and the survey button is
   disabled for them. The server refuses a survey for a flagged voter no matter what.
-- The rest of the household is unaffected — one flagged voter doesn't hide the door. But once
+- The rest of the household is unaffected — one flagged voter doesn't hide the door, and canvassers
+  are still routed there for the housemates. **If that's not what you want, use
+  [Do not knock](do-not-knock) instead**, which suppresses the address itself. But once
   **everyone** at an address is flagged, the whole door drops off books, maps, and future turf
   cuts, and shows in reports as its own **Do not contact** coverage segment.
 - Nothing historical changes: past knocks and surveys stay in your reports (marked, so an export
   can't be mistaken for a call list), and your counts and billing never move.
 
 If a new resident is imported into a fully-flagged address later, the door comes back
-automatically — only the flagged individuals stay suppressed.
+automatically — only the flagged individuals stay suppressed. (Do not knock is the opposite: it
+never reopens on its own.)

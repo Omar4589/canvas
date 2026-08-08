@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
@@ -28,10 +28,133 @@ function formatAnswer(answer) {
   return String(answer);
 }
 
+// Address-level "never come back". Set/lift live here rather than on a menu because the door
+// panel is where an admin or lead is standing when a canvasser reports the request.
+//
+// Two things this control deliberately says out loud:
+//   - it suppresses the address in EVERY campaign, not just this one (Household rows are
+//     per-campaign; the request is not), and
+//   - it does not auto-reopen, so lifting it is a human act.
+// Both are surprises if discovered later rather than read here.
+function DoNotKnockSection({ household, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState(null);
+  const qc = useQueryClient();
+  const on = household.doNotKnock === true;
+
+  const invalidate = () => {
+    // Prefix match — the map key carries every filter after these two segments.
+    qc.invalidateQueries({ queryKey: ['admin', 'households-map'] });
+    qc.invalidateQueries({ queryKey: ['do-not-knock'] });
+    onChanged?.();
+  };
+
+  const set = useMutation({
+    mutationFn: () =>
+      api(`/admin/households/${household.id}/do-not-knock`, { method: 'POST', body: { reason: reason.trim() } }),
+    onSuccess: (r) => {
+      setOpen(false);
+      setReason('');
+      setErr(null);
+      invalidate();
+      if ((r?.doorsAffected || 0) > 1) {
+        window.alert(
+          `Marked do not knock. This address appears in ${r.doorsAffected} campaigns — all of them are now suppressed.`
+        );
+      }
+    },
+    onError: (e) => setErr(e?.message || 'Could not mark this address.'),
+  });
+
+  const lift = useMutation({
+    mutationFn: () => api(`/admin/households/${household.id}/do-not-knock`, { method: 'DELETE' }),
+    onSuccess: () => { setErr(null); invalidate(); },
+    onError: (e) => setErr(e?.message || 'Could not lift the request.'),
+  });
+
+  const busy = set.isPending || lift.isPending;
+
+  if (on) {
+    return (
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">Do not knock</div>
+        <div className="mt-1 text-sm font-medium text-danger">⛔ Nobody visits this address</div>
+        <p className="mt-1 text-xs text-fg-muted">
+          Suppressed in every campaign, and it will not reopen on its own — not even when new
+          residents are imported here.
+        </p>
+        {err && <p className="mt-2 text-xs text-danger">{err}</p>}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm('Lift the do-not-knock request? This address becomes knockable again in every campaign.')) {
+              lift.mutate();
+            }
+          }}
+          className="mt-2 rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+        >
+          {lift.isPending ? 'Lifting…' : 'Lift request'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-border px-4 py-3">
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
+        >
+          Mark do not knock…
+        </button>
+      ) : (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-fg-muted">Mark do not knock</div>
+          <p className="mt-1 text-xs text-fg-muted">
+            Nobody visits this address again, in this and every other campaign. Individual voters
+            keep their own do-not-contact status.
+          </p>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            placeholder="Why? (required — e.g. resident asked us never to return)"
+            className="mt-2 w-full rounded-md border border-border bg-card px-2 py-1 text-sm text-fg"
+          />
+          {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={busy || reason.trim().length < 3}
+              onClick={() => set.mutate()}
+              className="rounded-md bg-danger px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {set.isPending ? 'Marking…' : 'Mark do not knock'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setOpen(false); setErr(null); }}
+              className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HouseholdDetailPanel({
   household,
   onClose,
   onMovePin,
+  onDoNotKnockChanged,
   statusColors,
   statusLabels,
   tz,
@@ -114,6 +237,14 @@ export default function HouseholdDetailPanel({
                 ⚠ Overlap
               </span>
             )}
+            {h.doNotKnock && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+                title="This address asked that nobody come back — suppressed in every campaign"
+              >
+                ⛔ Do not knock
+              </span>
+            )}
           </div>
           <div className="mt-1 truncate font-medium text-fg">{h.addressLine1}</div>
           {h.addressLine2 && (
@@ -160,6 +291,8 @@ export default function HouseholdDetailPanel({
           </svg>
         </button>
       </div>
+
+      <DoNotKnockSection household={h} onChanged={onDoNotKnockChanged} />
 
       {h.lastAction && (
         <div className="border-b border-border px-4 py-3 text-sm">

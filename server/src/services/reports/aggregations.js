@@ -175,9 +175,11 @@ export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 
 // Coverage-funnel bucket. Doors that are suppressed AND otherwise unknocked are pulled out of
 // `unknocked` into their own synthetic segment, so suppression doesn't inflate "unknocked"
 // (those doors dropped off the canvasser's list and will never be knocked). Knocked doors keep
-// their real status. Two synthetic segments, in precedence order: `dnc` (every resident asked
-// not to be contacted — permanent) outranks `voted` (this election's early voting — cyclical),
-// so a door that is both buckets once, as dnc, and segment totals always sum to the universe.
+// their real status. THREE synthetic segments, in precedence order: `doNotKnock` (the address
+// itself asked that nobody come back — permanent, and never auto-reopens) outranks `dnc` (every
+// resident individually asked not to be contacted — permanent, but reopens for a new resident),
+// which outranks `voted` (this election's early voting — cyclical). A door in two or three
+// buckets counts ONCE, in the strongest, so segment totals always sum to the universe.
 // Used by the status group-by in /overview and /campaign-rollup.
 // "Houses knocked" — the ONE definition (owner ruling 2026-07-29: a door we could not knock is
 // not a knocked door). Two forms because two kinds of surface consume it:
@@ -185,18 +187,22 @@ export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 
 //   NON_KNOCKED_STATUSES — for queries over RAW Household.status. `restricted` is excluded:
 //     a gated community nobody could enter was never knocked, and counting it inflated the
 //     Campaigns page 20 points over the dashboard (11,390 vs 8,164 on a real campaign).
-//   NON_KNOCKED_BUCKETS — for queries over coverageBucketExpr output (below). Adds `dnc` and
-//     `voted`, which are SYNTHETIC buckets carved exclusively out of raw-`unknocked` doors —
-//     so at bucket level they must be excluded too, or a suppressed door nobody visited counts
-//     as knocked. (The rollup excluded voted but not dnc — that was a bug, not a choice.)
+//   NON_KNOCKED_BUCKETS — for queries over coverageBucketExpr output (below). Adds `doNotKnock`,
+//     `dnc` and `voted`, which are SYNTHETIC buckets carved exclusively out of raw-`unknocked`
+//     doors — so at bucket level they must be excluded too, or a suppressed door nobody visited
+//     counts as knocked. (The rollup excluded voted but not dnc — that was a bug, not a choice.)
 //
 // Every "houses knocked" / knockedPct on any surface must derive from one of these two.
 export const NON_KNOCKED_STATUSES = ['unknocked', 'restricted'];
-export const NON_KNOCKED_BUCKETS = [...NON_KNOCKED_STATUSES, 'dnc', 'voted'];
+export const NON_KNOCKED_BUCKETS = [...NON_KNOCKED_STATUSES, 'doNotKnock', 'dnc', 'voted'];
 
 export const coverageBucketExpr = {
   $switch: {
     branches: [
+      {
+        case: { $and: [{ $eq: ['$doNotKnock', true] }, { $eq: ['$status', 'unknocked'] }] },
+        then: 'doNotKnock',
+      },
       {
         case: { $and: [{ $eq: ['$fullyDnc', true] }, { $eq: ['$status', 'unknocked'] }] },
         then: 'dnc',

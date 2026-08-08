@@ -39,6 +39,7 @@ const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
 const VotersPage = lazy(() => import('./pages/VotersPage.jsx'));
 const VoterDetailPage = lazy(() => import('./pages/VoterDetailPage.jsx'));
 const DoNotContactPage = lazy(() => import('./pages/DoNotContactPage.jsx'));
+const DoNotKnockPage = lazy(() => import('./pages/DoNotKnockPage.jsx'));
 const SurveysPage = lazy(() => import('./pages/SurveysPage.jsx'));
 const SurveyEditorPage = lazy(() => import('./pages/SurveyEditorPage.jsx'));
 const TagsPage = lazy(() => import('./pages/TagsPage.jsx'));
@@ -189,6 +190,10 @@ export default function App() {
             <Route path="/users" element={<UsersPage />} />
             <Route path="/voters" element={<VotersPage />} />
             <Route path="/voters/dnc" element={<DoNotContactPage />} />
+            {/* Sits under /voters for discoverability beside its person-level sibling, but the
+                register is about ADDRESSES — see the page header. Must precede /voters/:voterId
+                or the literal segment is swallowed by the param route. */}
+            <Route path="/voters/do-not-knock" element={<DoNotKnockPage />} />
             <Route path="/voters/:voterId" element={<VoterDetailPage />} />
             <Route path="/surveys" element={<SurveysPage />} />
             <Route path="/surveys/new" element={<SurveyEditorPage mode="new" />} />

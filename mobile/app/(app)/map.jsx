@@ -505,7 +505,15 @@ export default function MapScreen() {
                 .map((h) => {
                   const c = hMap.get(String(h._id));
                   if (!c) return h;
-                  if (c.isActive === false || c.fullyVoted === true || c.fullyDnc === true) return null; // archived, everyone voted, or all DNC — drop
+                  // archived, everyone voted, all-DNC, or the address asked that nobody come
+                  // back — drop. This is how a door suppressed mid-shift leaves a running app;
+                  // the server bumps updatedAt on every recompute so the delta always carries it.
+                  if (
+                    c.isActive === false ||
+                    c.fullyVoted === true ||
+                    c.fullyDnc === true ||
+                    c.doNotKnock === true
+                  ) return null;
                   return {
                     ...h,
                     status: c.status,

@@ -16,6 +16,7 @@ const SEGMENTS = [
   { key: 'restricted', label: 'Restricted' },
   { key: 'voted', label: 'Voted' },
   { key: 'dnc', label: 'No contact' },
+  { key: 'doNotKnock', label: 'No knock' },
   { key: 'unknocked', label: 'Unknocked' },
 ];
 

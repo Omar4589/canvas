@@ -95,9 +95,16 @@ export default function VotersPage() {
             (For canvassers — the people you assign books to — see <strong>Users</strong>.)
           </p>
         </div>
-        <Link to="/voters/dnc" className="shrink-0 text-sm font-medium text-brand-accent hover:underline">
-          Do-not-contact list →
-        </Link>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Link to="/voters/dnc" className="text-sm font-medium text-brand-accent hover:underline">
+            Do-not-contact list →
+          </Link>
+          {/* The address-level sibling. Named "addresses" here so the two are not read as the
+              same list: one suppresses a person, the other a door. */}
+          <Link to="/voters/do-not-knock" className="text-sm font-medium text-brand-accent hover:underline">
+            Do-not-knock addresses →
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">

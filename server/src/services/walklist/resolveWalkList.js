@@ -170,7 +170,25 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
 
   // options.effortId scopes the whole resolution to one effort's doors (used by
   // targeted follow-up cuts) — every predicate runs within this base set.
-  const baseMatch = { campaignId, isActive: true, 'location.coordinates': { $exists: true, $ne: null } };
+  //
+  // The two SUPPRESSION flags are excluded here, not just at cut time. generateTurf applies the
+  // full KNOCKABLE_DOOR_FILTER on top of this resolution, so a suppressed door never cut anyway —
+  // but it still counted in the preview's `householdCount`, so "N doors" over-reported what the
+  // cut would actually produce. Both flags are handled together on purpose (owner ruling, Aug
+  // 2026): fixing one and leaving the other is how the numbers start disagreeing for a reason
+  // nobody can reconstruct later.
+  //
+  // fullyVoted and excludedFromTurf are deliberately NOT here. They are cycle/administrative
+  // exclusions rather than standing requests, and a walk list is a targeting universe that
+  // outlives one round's voted file — narrowing it on those would change what a saved list means,
+  // which is a separate decision from this one.
+  const baseMatch = {
+    campaignId,
+    isActive: true,
+    fullyDnc: { $ne: true },
+    doNotKnock: { $ne: true },
+    'location.coordinates': { $exists: true, $ne: null },
+  };
   if (options.effortId) baseMatch.effortId = oid(options.effortId);
   const baseHouseholds = await Household.find(baseMatch, { _id: 1 }).lean();
   const baseIds = baseHouseholds.map((h) => String(h._id));

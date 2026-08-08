@@ -33,6 +33,9 @@ export const PACKET_DOOR_CAP = 1200;
 // them again drops them at CUT time — services/turf/generateTurf.js cutStatusExclusion.)
 const omissionReason = (h) => {
   if (h.isActive === false) return 'inactive';
+  // Precedence mirrors the coverage buckets (services/reports/aggregations.js): the
+  // address-level request outranks the person-level one.
+  if (h.doNotKnock === true) return 'doNotKnock';
   if (h.fullyDnc === true) return 'doNotContact';
   if (h.fullyVoted === true) return 'alreadyVoted';
   if (h.excludedFromTurf === true) return 'excluded';
@@ -234,7 +237,7 @@ const loadDoors = async (orderedIds, { includePhone, excludeApartments, includeG
   if (omittedIds.length) {
     const rows = await Household.find(
       { _id: { $in: omittedIds } },
-      { isActive: 1, fullyVoted: 1, fullyDnc: 1, excludedFromTurf: 1 }
+      { isActive: 1, fullyVoted: 1, fullyDnc: 1, doNotKnock: 1, excludedFromTurf: 1 }
     ).lean();
     for (const h of rows) {
       const r = omissionReason(h);

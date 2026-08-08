@@ -138,6 +138,102 @@ function Detail({ label, value, mono }) {
   );
 }
 
+// Address-level suppression, shown inside "Household & campaign" rather than beside the
+// person-level DNC section — because it is a fact about the DOOR, and putting it next to the
+// voter flag is how the two get conflated. Flagging this voter never sets this, and setting this
+// never flags anyone: one is "don't talk to this person", the other is "don't come to this house".
+function HouseholdDoNotKnockControl({ household, voterId }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState(null);
+  const qc = useQueryClient();
+
+  const done = () => {
+    setOpen(false);
+    setReason('');
+    setErr(null);
+    qc.invalidateQueries({ queryKey: ['admin', 'voter', voterId] });
+  };
+  const mark = useMutation({
+    mutationFn: () =>
+      api(`/admin/households/${household.id}/do-not-knock`, { method: 'POST', body: { reason: reason.trim() } }),
+    onSuccess: done,
+    onError: (e) => setErr(e?.message || 'Could not mark this address.'),
+  });
+  const lift = useMutation({
+    mutationFn: () => api(`/admin/households/${household.id}/do-not-knock`, { method: 'DELETE' }),
+    onSuccess: done,
+    onError: (e) => setErr(e?.message || 'Could not lift the request.'),
+  });
+  const busy = mark.isPending || lift.isPending;
+
+  if (household.doNotKnock) {
+    return (
+      <div className="mt-3 rounded border border-danger/30 bg-danger-tint p-3 text-sm">
+        <p className="font-medium text-danger">⛔ Do not knock — nobody visits this address</p>
+        <p className="mt-1 text-xs text-fg-muted">
+          Applies in every campaign and does not reopen on its own, even when new residents are
+          imported here. Residents keep their own do-not-contact status.
+        </p>
+        {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+        <button
+          onClick={() => {
+            if (window.confirm('Lift the do-not-knock request? This address becomes knockable again in every campaign.')) lift.mutate();
+          }}
+          disabled={busy}
+          className="mt-2 text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+        >
+          {lift.isPending ? 'Lifting…' : 'Lift request'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-xs font-semibold text-fg-muted hover:underline"
+        >
+          Mark this address do not knock…
+        </button>
+      ) : (
+        <div className="rounded border border-border-strong p-3">
+          <p className="text-xs text-fg-muted">
+            Nobody visits this address again, in this and every other campaign. This is separate
+            from flagging a voter do-not-contact.
+          </p>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            placeholder="Reason (required) — e.g. resident asked us never to return"
+            className="mt-2 w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none"
+          />
+          {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => mark.mutate()}
+              disabled={reason.trim().length < 3 || busy}
+              className="rounded-md bg-danger px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+            >
+              {mark.isPending ? 'Marking…' : 'Mark do not knock'}
+            </button>
+            <button
+              onClick={() => { setOpen(false); setErr(null); }}
+              disabled={busy}
+              className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DncSection({ dnc, onFlag, onUnflag, busy, tz }) {
   const [reason, setReason] = useState('');
 
@@ -525,7 +621,9 @@ export default function VoterDetailPage() {
               Campaign: {h.campaign ? <Link to={`/campaigns/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
               {h.fullyDnc && <span className="ml-2 text-danger">· fully do-not-contact</span>}
+              {h.doNotKnock && <span className="ml-2 font-semibold text-danger">· ⛔ do not knock</span>}
             </p>
+            <HouseholdDoNotKnockControl household={h} voterId={voterId} />
             {/* The same person's record in each other campaign of this org (sibling rows). */}
             {p.otherCampaigns?.length > 0 && (
               <p className="mt-1 text-fg-muted">

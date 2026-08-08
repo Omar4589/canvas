@@ -13,6 +13,7 @@ const SEGMENTS = [
   { key: 'no_soliciting', label: 'No soliciting', color: 'bg-pink-600' },
   { key: 'voted', label: 'Voted', color: 'bg-teal-500' },
   { key: 'dnc', label: 'Do not contact', color: 'bg-rose-800' },
+  { key: 'doNotKnock', label: 'Do not knock', color: 'bg-rose-950' },
   { key: 'unknocked', label: 'Unknocked', color: 'bg-gray-400' },
 ];
 

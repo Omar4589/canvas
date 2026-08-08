@@ -533,6 +533,7 @@ router.get('/', async (req, res, next) => {
     // sense. A door that is BOTH fully-voted and fully-DNC counts once, as DNC (matching the
     // coverage bucket precedence: permanent suppression outranks cycle suppression), so the
     // skip-lines always sum.
+    let doNotKnockDoorCount = 0;
     let votedDoorCount = 0;
     let dncDoorCount = 0;
     let excludedApartmentCount = 0;
@@ -552,12 +553,23 @@ router.get('/', async (req, res, next) => {
           isActive: true,
           'location.coordinates': { $exists: true, $ne: null },
         };
-        [votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount] = await Promise.all([
-          Household.countDocuments({ ...base, fullyVoted: true, fullyDnc: { $ne: true } }),
-          Household.countDocuments({ ...base, fullyDnc: true }),
-          Household.countDocuments({ ...base, excludedFromTurf: true }),
-          CanvassActivity.countDocuments({ passId: filter.passId }),
-        ]);
+        // Kept mutually DISJOINT, in the same precedence order the coverage buckets use
+        // (services/reports/aggregations.js): doNotKnock > fullyDnc > fullyVoted. A door that is
+        // several of these is reported once, in the strongest, so the three lines can be shown
+        // side by side without double-counting.
+        [doNotKnockDoorCount, votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount] =
+          await Promise.all([
+            Household.countDocuments({ ...base, doNotKnock: true }),
+            Household.countDocuments({
+              ...base,
+              fullyVoted: true,
+              fullyDnc: { $ne: true },
+              doNotKnock: { $ne: true },
+            }),
+            Household.countDocuments({ ...base, fullyDnc: true, doNotKnock: { $ne: true } }),
+            Household.countDocuments({ ...base, excludedFromTurf: true }),
+            CanvassActivity.countDocuments({ passId: filter.passId }),
+          ]);
         // Doors a supplemental book would actually pick up: bookless + knockable,
         // and — when the round is targeted — matching the pass's own recorded
         // targetFilter (exclude branch included). Computed server-side so the
@@ -589,6 +601,7 @@ router.get('/', async (req, res, next) => {
     }
     res.json({
       turfs: withCounts,
+      doNotKnockDoorCount,
       votedDoorCount,
       dncDoorCount,
       excludedApartmentCount,

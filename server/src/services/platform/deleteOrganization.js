@@ -8,6 +8,7 @@ import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
 import { DncUpload } from '../../models/DncUpload.js';
+import { DoNotKnockAddress } from '../../models/DoNotKnockAddress.js';
 import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { ExportJob } from '../../models/ExportJob.js';
@@ -54,7 +55,8 @@ const CHUNK = Number(process.env.ORG_DELETE_CHUNK) || 5000;
 // test can seed a stub row in every one and prove the sweep is exhaustive.
 export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
-  ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, Effort, EffortMember,
+  ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
+  Effort, EffortMember,
   ExportJob, FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
   SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,

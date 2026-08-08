@@ -11,6 +11,7 @@ import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { streamParse } from './parseUpload.js';
 import { bumpLive } from '../platform/platformStats.js';
 import { IDENTITY_FIELDS, identityEq } from '../person/propagateIdentity.js';
+import { suppressedAddressSet } from '../dnc/doNotKnock.js';
 
 const trimOrNull = (v) => {
   if (v == null) return null;
@@ -489,6 +490,15 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     }
   }
 
+  // Standing do-not-knock requests covering any address in this batch. A door imported into a
+  // BRAND-NEW campaign must arrive already suppressed, not be knockable until something
+  // recomputes it — the address request is org-wide and predates this campaign existing. Mirrors
+  // how a flagged sibling's doNotContact subdoc is seeded onto newly inserted voter rows below.
+  const suppressedAddresses = await suppressedAddressSet(
+    orgId,
+    householdValues.map((h) => h.normalizedAddress)
+  );
+
   let keptPins = 0;
   const householdOps = householdValues.map((h) => {
     const set = {
@@ -511,6 +521,11 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
       status: 'unknocked',
       isActive: true,
     };
+    // $setOnInsert ONLY, and never in `set` above: survival for an EXISTING door is by omission,
+    // the same mechanism that protects surveyStatus and doNotContact from a re-import. If
+    // doNotKnock ever appears in the $set spread, every re-import silently un-suppresses every
+    // door we promised never to visit again.
+    if (suppressedAddresses.has(h.normalizedAddress)) setOnInsert.doNotKnock = true;
     // Corrected pin: move the location trio to $setOnInsert. The existing row keeps its
     // human-placed pin; a row deleted between the prefetch and this write still inserts complete
     // coords. A field must never appear in both operators — Mongo rejects the conflict.

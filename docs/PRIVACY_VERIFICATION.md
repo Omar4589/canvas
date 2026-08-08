@@ -96,6 +96,35 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 - Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
 - Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
 - The 180-day name retention on deletion records — still cron-kept on the worker dyno.
+- *(v4 2026-08-08)* **Do-not-knock: a NEW category of personal data, with a NEW retention shape.**
+  Address-level suppression shipped ([DO_NOT_KNOCK.md](DO_NOT_KNOCK.md)). Three things a policy
+  sentence anchors on, all of them new:
+  1. **What we collect.** `DoNotKnockAddress.reason` is **required free text attached to a specific
+     residential address**, and in practice will describe the people living there ("man at this
+     house threatened a canvasser"). That is a free-text note about identifiable individuals, held
+     against their home address, and it is written by staff, not the data subject. The nearest
+     existing analogue is `Voter.doNotContact.reason`, which the policy already covers under
+     "Canvassing activity — contact preferences"; **this one is broader, because the subject is a
+     household rather than a named registrant, and can therefore describe people who are not in the
+     voter file at all.**
+  2. **Retention.** The record is **permanent by design and deliberately survives campaign
+     deletion** — that survival is the feature's core requirement, not an oversight (a request must
+     outlive the campaign it was made in, or "never come back" quietly expires). It is swept by
+     **org** deletion only (`ORG_SCOPED`, verified by `doNotKnock.int.test.js` case 12). No TTL,
+     like everything else here. **Any published sentence implying campaign deletion removes the
+     personal data collected during that campaign is now narrower than the truth** and must be
+     checked against this.
+  3. **What we expose.** A new admin surface (`GET /admin/do-not-knock`, web page *Voters →
+     Do-not-knock addresses*) lists addresses + reasons + author. It is **org-admin-only** — team
+     leads can set and lift per-door but cannot read the org-wide register (they would see campaigns
+     they don't manage). It is **not** in the Export Center; if it is ever added there, that is a
+     separate export-exposure review.
+
+  **Not a subprocessor event** — no new third party receives anything, so **DPA §6 is not
+  triggered** and nothing is gated on customer notice. **Owner decision still required:** whether
+  privacy.html's "Canvassing activity" paragraph and the retention section need to name
+  address-level suppression records as data that outlives a campaign. Until that is decided, do not
+  claim campaign deletion is complete erasure of campaign-era personal data.
 - *(2026-07-17)* Do-not-contact enforcement: *"a flagged voter is excluded from walk-list exports
   and new surveys, and a fully-flagged door drops from every campaign type."* True only while the
   `KNOCKABLE_DOOR_FILTER` spread covers every knockable-door site, the export's live-state join

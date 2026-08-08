@@ -92,6 +92,23 @@ const householdSchema = new mongoose.Schema(
     // the coverage bucket, and only for doors that were never knocked).
     fullyDnc: { type: Boolean, default: false, index: true },
 
+    // Do-not-knock: the residents asked that NOBODY come to this door again. Same suppression
+    // reach as fullyDnc (cutting, books, canvasser map/list, walk packets, all campaign types),
+    // and the same "where may we go NEXT, never what did we DO" rule — the admin map still shows
+    // it, and no report or billing query reads it (sole exception: the coverage bucket, and only
+    // for doors never knocked).
+    //
+    // NOT derived from the voters — mirrored from the org-level DoNotKnockAddress record, which
+    // is the source of truth (see that model for why a bare boolean here cannot work). Written
+    // ONLY by services/dnc/recomputeDoNotKnock.js.
+    //
+    // Two deliberate divergences from fullyDnc:
+    //   1. One resident's request suppresses the whole address — fullyDnc needs EVERY voter flagged.
+    //   2. It NEVER auto-reopens. fullyDnc reopens when a new resident is imported (they asked for
+    //      nothing); this request was about the ADDRESS, so a file refresh showing new names is not
+    //      consent. Only an explicit admin clear reopens it.
+    doNotKnock: { type: Boolean, default: false, index: true },
+
     // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these
     // doors are skipped from cutting, the map, door counts, and the canvasser list.
     excludedFromTurf: { type: Boolean, default: false, index: true },

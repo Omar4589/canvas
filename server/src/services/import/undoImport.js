@@ -78,7 +78,7 @@ export async function undoImport(importJob) {
 
   // Decide which inserted households to keep vs delete.
   const hhDocs = await findInChunks(
-    Household, '_id', Hins.map(oid), { _id: 1, effortId: 1, turfId: 1, status: 1, fullyVoted: 1, fullyDnc: 1 }, { campaignId }
+    Household, '_id', Hins.map(oid), { _id: 1, effortId: 1, turfId: 1, status: 1, fullyVoted: 1, fullyDnc: 1, doNotKnock: 1 }, { campaignId }
   );
   const hhById = new Map(hhDocs.map((h) => [String(h._id), h]));
   const keptHh = new Set();
@@ -91,6 +91,10 @@ export async function undoImport(importJob) {
     else if (h.status && h.status !== 'unknocked') reason = 'already canvassed';
     else if (h.fullyVoted) reason = 'fully voted';
     else if (h.fullyDnc) reason = 'fully do-not-contact';
+    // A door suppressed after the import is a standing request, exactly like the DNC case below:
+    // undoing an import must never destroy it. Deleting the Household would also strand the
+    // org-level DoNotKnockAddress record with nothing to mirror onto until a re-import.
+    else if (h.doNotKnock) reason = 'do-not-knock address';
     else if (actHh.has(hid)) reason = 'already canvassed';
     else if (survHh.has(hid)) reason = 'surveyed';
     else if (votedHh.has(hid)) reason = 'has voted residents';
@@ -129,11 +133,11 @@ export async function undoImport(importJob) {
   const curDncV = new Set(curV.filter((v) => v.doNotContact?.flagged === true).map((v) => String(v._id)));
   const curHhIds = [...new Set(curV.map((v) => v.householdId).filter(Boolean).map(String))];
   const curHh = await findInChunks(
-    Household, '_id', curHhIds.map(oid), { _id: 1, effortId: 1, turfId: 1, status: 1, fullyVoted: 1, fullyDnc: 1 }, { campaignId }
+    Household, '_id', curHhIds.map(oid), { _id: 1, effortId: 1, turfId: 1, status: 1, fullyVoted: 1, fullyDnc: 1, doNotKnock: 1 }, { campaignId }
   );
   const nowKept = new Set();
   for (const h of curHh) {
-    if (h.effortId || h.turfId || (h.status && h.status !== 'unknocked') || h.fullyVoted || h.fullyDnc) nowKept.add(String(h._id));
+    if (h.effortId || h.turfId || (h.status && h.status !== 'unknocked') || h.fullyVoted || h.fullyDnc || h.doNotKnock) nowKept.add(String(h._id));
   }
   const finalV = deletableV.filter((vid) => {
     const hh = curHhByVoter.get(vid);
@@ -185,6 +189,7 @@ export async function undoImport(importJob) {
       status: 'unknocked',
       fullyVoted: { $ne: true },
       fullyDnc: { $ne: true },
+      doNotKnock: { $ne: true },
     });
     doorsDeleted += r.deletedCount || 0;
   }

@@ -40,6 +40,7 @@ const status = {
   no_soliciting: '#DB2777', // pink — a posted sign ended the visit; clear of amber refused / purple lit
   voted: '#14B8A6',
   dnc: '#9F1239', // deep rose — do-not-contact; distinct from wrong_address red
+  doNotKnock: '#4C0519', // darkest rose — address-level "never come back"; reads as stronger than dnc
 };
 const statusLabels = {
   unknocked: 'Unknocked',
@@ -52,6 +53,7 @@ const statusLabels = {
   no_soliciting: 'No soliciting',
   voted: 'Voted',
   dnc: 'Do not contact',
+  doNotKnock: 'Do not knock',
 };
 
 // ACTION type → label. Distinct from statusLabels above: an action is what a canvasser

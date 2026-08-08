@@ -420,6 +420,8 @@ router.get('/changes', async (req, res, next) => {
       isActive: 1,
       fullyVoted: 1, // client drops doors where everyone has now voted
       fullyDnc: 1, // client drops doors where everyone is do-not-contact
+      doNotKnock: 1, // client drops doors whose address asked that nobody come back
+
       location: 1, // so an admin pin-move (or another canvasser's fix) reflects live
       coordSource: 1,
       coordConfidence: 1,
