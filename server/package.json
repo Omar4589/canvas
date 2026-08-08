@@ -41,6 +41,7 @@
     "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
+    "remirror:pass": "node src/migrations/remirrorPass.js",
     "sweep:raw-imports": "node src/migrations/sweepRawImports.js",
     "recompute:territories": "node src/migrations/recomputeTerritories.js",
     "audit:orphaned-reviews": "node src/migrations/auditOrphanedReviews.js",

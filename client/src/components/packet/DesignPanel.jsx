@@ -1,5 +1,6 @@
 import { LAYOUTS } from '../../lib/packet/packetSettings.js';
-import { Button, Select } from '../ui/index.js';
+import { MIN_DOORS_PER_PACKET } from '../../lib/packet/splitBooks.js';
+import { Button, Input, Select } from '../ui/index.js';
 
 const Toggle = ({ id, label, hint, checked, onChange, disabled }) => (
   <label
@@ -24,10 +25,10 @@ const Toggle = ({ id, label, hint, checked, onChange, disabled }) => (
 );
 
 export default function DesignPanel({
-  settings, onChange, hasSurvey, unprintable, pages, doorCount, hasPick, busy, onDownload,
+  settings, onChange, hasSurvey, unprintable, pages, doorCount, packetCount = 1, hasPick, busy, onDownload,
 }) {
   const set = (patch) => onChange({ ...settings, ...patch });
-  const sheets = pages ? Math.ceil(pages / 2) : 0;
+  const sheets = pages && settings.duplex ? Math.ceil(pages / 2) : 0;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -72,6 +73,34 @@ export default function DesignPanel({
               ))}
             </Select>
           </label>
+          {/* Values 1-9 read as off too (splitBooks ignores them) — clamping while someone
+              is mid-typing "35" would yank the field out from under them. */}
+          <label htmlFor="doorsPerPacket" className="flex items-start justify-between gap-3 py-2.5 border-b border-border">
+            <span className="min-w-0">
+              <span className="block text-sm text-fg">Doors per packet</span>
+              <span className="block text-xs text-fg-muted mt-0.5">
+                Splits big books into packets of about this many doors — one per volunteer.
+                Blank prints whole books.
+              </span>
+            </span>
+            {/* Width lives on a wrapper: ui/Input hard-codes w-full, which beats a caller's
+                w-20 in the compiled stylesheet order, so the input fills a fixed box instead. */}
+            <span className="block w-20 shrink-0">
+              <Input
+                id="doorsPerPacket"
+                type="number"
+                min={MIN_DOORS_PER_PACKET}
+                max={500}
+                step={5}
+                placeholder="—"
+                value={settings.doorsPerPacket || ''}
+                onChange={(e) => {
+                  const n = Math.floor(Number(e.target.value));
+                  set({ doorsPerPacket: Number.isFinite(n) && n > 0 ? n : 0 });
+                }}
+              />
+            </span>
+          </label>
           <Toggle
             id="showOutcome" label="What happened boxes"
             hint="Not home, refused, wrong address…"
@@ -92,6 +121,11 @@ export default function DesignPanel({
             id="showCoverMap" label="Map on the cover"
             hint="The book on a map with the walk drawn over it."
             checked={settings.showCoverMap} onChange={(v) => set({ showCoverMap: v })}
+          />
+          <Toggle
+            id="duplex" label="Printing double-sided"
+            hint="Starts every packet on a fresh sheet so two books never share one."
+            checked={settings.duplex} onChange={(v) => set({ duplex: v })}
           />
           <Toggle
             id="showManifest" label="Hand-out sheet"
@@ -124,13 +158,18 @@ export default function DesignPanel({
           <div className="flex items-baseline justify-between text-sm mb-2">
             <span className="text-fg-muted tabular-nums">{doorCount.toLocaleString()} doors</span>
             <span className="font-medium text-fg tabular-nums">
-              {pages ? `${pages} pages · ${sheets} sheets` : 'building…'}
+              {pages ? `${pages} pages${sheets ? ` · ${sheets} sheets` : ''}` : 'building…'}
             </span>
           </div>
         )}
         <Button className="w-full" onClick={onDownload} disabled={busy || !pages}>
           {busy ? 'Building…' : hasPick ? 'Download packets' : 'Pick a book to print'}
         </Button>
+        {hasPick && packetCount > 1 && (
+          <p className="mt-1.5 text-[11px] text-fg-muted text-center">
+            Downloads a folder (ZIP) — one PDF per packet, plus the hand-out sheet.
+          </p>
+        )}
       </div>
     </div>
   );

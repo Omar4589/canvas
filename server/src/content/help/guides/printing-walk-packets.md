@@ -23,6 +23,8 @@ This is the single most important step and it takes a minute. On [Turf Cutting](
 
 A book with nobody assigned to it is invisible to every canvasser in the app. That's what stops two people knocking the same street, one on a phone and one on paper. Don't try to separate them with a [walk list](page-walk-lists) instead — moving doors between walk lists re-cuts books and is not something to do the night before.
 
+And don't re-cut a big book just to get volunteer-sized packets — the **Doors per packet** control on the print screen splits it on paper only, and the book in the app stays exactly as cut.
+
 **2. Decide which layout you need.**
 
 If you want answers back on paper you can read later, print the **survey packet**. If you just need the doors walked and notes taken, print the **field list** — it's about a third of the paper and there's nothing to explain to a volunteer at 8 a.m.
@@ -37,9 +39,11 @@ Print one packet, actually on paper, and look at it. Check the writing lines are
 
 **Budget the paper.** The page count is on screen before you print. A 200-door book is roughly 26 double-sided sheets as a field list, or 61 as a survey packet. A twelve-book Saturday is several reams — order it in advance.
 
-**Print the hand-out sheet.** When you print more than one book you get a front page listing every packet with ruled Walked by / Out / In cells. Print that separately, put it on a clipboard, and sign packets out against it.
+**Split big books into small packets.** A 150-door book is a phone-sized unit, not a volunteer-sized one. Set **Doors per packet** to about 35 and it prints as "Book 33 · 1 of 4" through "4 of 4" — each part a walkable stretch with its own cover, map and street list, sized for one person's afternoon. Parts prefer to break where streets change, so short streets stay whole — only a longer street ends up shared when no break sits near the cut.
 
-**Staple by book.** Every sheet carries its book name and a coloured stripe, so a dropped pile can be sorted back at a glance.
+**Print the hand-out sheet.** Whenever a print run comes out as more than one packet — several books, or one big book split into parts — you get a front page listing every packet with ruled Walked by / Out / In cells. Print that separately, put it on a clipboard, and sign packets out against it.
+
+**Staple by packet.** Every sheet carries its packet name and a coloured stripe, so a dropped pile can be sorted back at a glance.
 
 ## During the day
 

@@ -25,6 +25,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Ruled lines under each door, now at a 20pt (college-ruled) pitch. THREE real lines beat
   // the four unwritable ones this used to default to — at 12pt they were 4.23mm apart.
   noteLines: 3,
+  // Pad each packet to an even page count so every cover lands on a FRESH SHEET. Without it a
+  // duplexed run fuses the end of one book to the start of the next on a single piece of paper.
+  duplex: true,
   showOutcome: true,
   showPriorStatus: true,
   showScriptPage: true,
@@ -35,6 +38,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   includePhone: false,
   excludeApartments: false,
   inkSaver: false,
+  // Split big books into ~N-door printed packets ("Book 33 · 2 of 4"). 0 = off: whole books,
+  // exactly as before the knob existed. Print-time only — the split never touches the book.
+  doorsPerPacket: 0,
 });
 
 const KEY = (campaignId) => `packetSettings:${campaignId}`;

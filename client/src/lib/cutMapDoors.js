@@ -6,6 +6,11 @@
 // its Pass-1 book id. Judged by turfId presence it would read "booked" (and gray-fallback
 // against this pass's palette); judged by pass membership it reads loose — which is what
 // the page means. cutMapDoors.test.js pins both this and the pre-cut rule below.
+//
+// Since Aug 2026 the SERVER already answers pass-scoped: /doors resolves each door's turfId
+// from the pass's own Turf.householdIds, never the mirror (cutting a future draft round used
+// to make this page hide the live round's 12k doors as "not in any book"). The set-membership
+// check here stays as defense — a foreign id can then only ever read as loose, never booked.
 
 // The pass's own book ids, as the string Set every door check runs against.
 export const passBookIds = (turfs) => new Set((turfs || []).map((t) => String(t._id)));

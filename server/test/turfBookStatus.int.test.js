@@ -31,6 +31,7 @@ const { Turf } = await import('../src/models/Turf.js');
 const { Household } = await import('../src/models/Household.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { addSupplementalBooks } = await import('../src/services/turf/generateTurf.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -122,7 +123,7 @@ before(async () => {
     });
   const bookA = await mk(pass2._id, 'Book A', [d1, d2, d3, d4]);
   const bookB = await mk(pass2._id, 'Book B', [d5, d6]);
-  await mk(pass1._id, 'R1 Book', [d1, d2, d3, d4, d5, d6]);
+  const r1Book = await mk(pass1._id, 'R1 Book', [d1, d2, d3, d4, d5, d6]);
   // Doors currently live in the round-2 books (Household.turfId mirrors the newest cut).
   await Household.updateMany({ _id: { $in: [d1._id, d2._id, d3._id, d4._id] } }, { $set: { turfId: bookA._id } });
   await Household.updateMany({ _id: { $in: [d5._id, d6._id] } }, { $set: { turfId: bookB._id } });
@@ -132,7 +133,7 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, effort, pass1, pass2, bookA, bookB, admin, lead,
+    org, camp, effort, pass1, pass2, bookA, bookB, r1Book, admin, lead,
     d1, d2, d3, d4, d5, d6,
     adminTok: signUserToken(admin), leadTok: signUserToken(lead),
   });
@@ -281,4 +282,42 @@ test('the cut page door drill still returns the household unchanged', { skip }, 
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.json.household.id, String(d1._id));
   assert.ok(Array.isArray(r.json.voters));
+});
+
+test('doors resolves door->book from the PASS\'S OWN books, never the Household.turfId mirror', { skip }, async () => {
+  // The mirror points at the LATEST cut anywhere in the campaign — here, pass 2's books —
+  // while every door still belongs to pass 1's R1 Book. Judged by the mirror, pass 1's cut
+  // map read all of its doors as "not in any book" the moment a future round was cut: the
+  // 12k-doors-vanished incident. The feed must answer from Turf.householdIds instead.
+  const r = await call('GET', `${turfBase()}/doors?passId=${ctx.pass1._id}`, {
+    token: ctx.adminTok, orgId: ctx.org._id,
+  });
+  assert.strictEqual(r.status, 200);
+  for (const d of [ctx.d1, ctx.d2, ctx.d3, ctx.d4, ctx.d5, ctx.d6]) {
+    assert.strictEqual(byId(r.json.doors, d).turfId, String(ctx.r1Book._id),
+      'a door must read as a member of THIS pass\'s book even when the mirror points elsewhere');
+  }
+  // And on pass 2 the same doors belong to pass 2's books — each page sees its own round.
+  const r2 = await call('GET', `${turfBase()}/doors?passId=${ctx.pass2._id}`, {
+    token: ctx.adminTok, orgId: ctx.org._id,
+  });
+  assert.strictEqual(byId(r2.json.doors, ctx.d1).turfId, String(ctx.bookA._id));
+  assert.strictEqual(byId(r2.json.doors, ctx.d6).turfId, String(ctx.bookB._id));
+});
+
+test('a door another round\'s cut claimed still flows into a supplemental book here', { skip }, async () => {
+  // d7 is new to pass 1 (not in any of ITS books) but pass 2's cut has already stamped the
+  // mirror on it. The old `turfId: null` filter made it invisible to Add-as-new-book on
+  // pass 1 — silently, forever. Membership in THIS pass's books is the real test.
+  const [d7] = await Household.insertMany([hh(ctx.org._id, ctx.camp._id, ctx.effort._id, 7)]);
+  await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
+  const result = await addSupplementalBooks({
+    campaignId: ctx.camp._id, passId: ctx.pass1._id, name: 'Late arrivals', maxDoors: 65,
+  });
+  assert.strictEqual(result.added, 1, 'the mirrored-away door must be swept in');
+  const created = await Turf.findOne({ _id: { $in: result.bookIds } }).lean();
+  assert.deepStrictEqual(created.householdIds.map(String), [String(d7._id)]);
+  // And doors already in one of THIS pass's books stay out — added exactly the one door.
+  await Turf.deleteMany({ _id: { $in: result.bookIds } });
+  await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
 });

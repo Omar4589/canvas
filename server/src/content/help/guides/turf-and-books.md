@@ -57,6 +57,6 @@ The Books tab follows the **campaign chip** at the top. Pick an **archived** cam
 
 ## Handing a book out on paper
 
-A book doesn't have to go to a phone. **Campaign → Print Packets** turns any book into a printed packet — addresses in walk order, who lives there, and room to write — for volunteers who aren't using the app. There's a **Print this book on paper** shortcut in the assignment panel too.
+A book doesn't have to go to a phone. **Campaign → Print Packets** turns any book into a printed packet — addresses in walk order, who lives there, and room to write — for volunteers who aren't using the app; a big book can be split into several volunteer-sized packets right on that screen, without re-cutting anything. There's a **Print this book on paper** shortcut in the assignment panel too.
 
 One thing to plan around: printed packets are **print-only**, so a book walked on paper keeps reading as **0 knocked** here and everywhere else. If a paper crew is working alongside app canvassers, cut the paper doors into their own book and leave it **unassigned** — an unassigned book is invisible to every canvasser in the app, so nobody walks the same street twice. See [Printing packets for a paper canvass](printing-walk-packets).

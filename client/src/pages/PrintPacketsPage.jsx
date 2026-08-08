@@ -3,11 +3,17 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import SourcePicker from '../components/packet/SourcePicker.jsx';
+import {
+  defaultSourceKey, roundForKey, listForKey, LIST_KEY,
+} from '../lib/packet/packetSource.js';
 import DesignPanel from '../components/packet/DesignPanel.jsx';
 import PaperPreview from '../components/packet/PaperPreview.jsx';
 import PacketMap from '../components/packet/PacketMap.jsx';
 import { loadSettings, saveSettings, resolveLayout } from '../lib/packet/packetSettings.js';
-import { renderPacketPdf, packetFilename } from '../lib/packet/packetPdf.js';
+import { splitBooks } from '../lib/packet/splitBooks.js';
+import { renderPacketPdf, renderManifestPdf, packetFilename } from '../lib/packet/packetPdf.js';
+import { packetZipPlan } from '../lib/packet/packetZip.js';
+import { zipStore } from '../lib/packet/zipStore.js';
 import { scanUnprintableNames } from '../lib/pdfText.js';
 
 // The Print Studio. Pick books on the left, watch the real PDF (or where the books are) in
@@ -35,13 +41,22 @@ export default function PrintPacketsPage() {
   const [pages, setPages] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [tab, setTab] = useState('preview');
+  // null = "nobody has touched the dropdown", so the landing choice can keep following the
+  // data (a deep link, or the live round appearing). Once set, the user's pick wins.
+  const [pickedSource, setPickedSource] = useState(null);
 
   // Deep links from the Books panel and the Saved Searches page land here pre-selected.
   useEffect(() => {
     const turfIds = params.get('turfIds');
     const walkListId = params.get('walkListId');
-    if (walkListId) setSelection({ kind: 'walklist', walkListId });
-    else if (turfIds) setSelection({ kind: 'books', turfIds: turfIds.split(',').filter(Boolean) });
+    if (walkListId) {
+      setSelection({ kind: 'walklist', walkListId });
+      setPickedSource(LIST_KEY(walkListId));
+    } else if (turfIds) {
+      // Leave pickedSource null — defaultSourceKey finds the round holding these books once
+      // /sources lands, which a hard-coded key here could not do (the fetch is still in flight).
+      setSelection({ kind: 'books', turfIds: turfIds.split(',').filter(Boolean) });
+    }
   }, [params]);
 
   // Settings drive a full re-render of the document, so they are debounced; the panel itself
@@ -93,6 +108,25 @@ export default function PrintPacketsPage() {
   const hasPick =
     selection.kind === 'walklist' ? !!selection.walkListId : selection.turfIds.length > 0;
 
+  // ONE round notion for the whole screen — the list and the map both read this. Changing it
+  // CLEARS the picks on purpose: a selection that outlived the round it was made in is how a
+  // print run ends up spanning the live round and a draft one.
+  // A pick that no longer resolves (its round got archived under a refetch) falls back to the
+  // default rather than leaving the <select> showing one round while state names another.
+  const sourceKey = useMemo(() => {
+    const src = sourcesQ.data;
+    if (pickedSource && (roundForKey(src, pickedSource) || listForKey(src, pickedSource))) {
+      return pickedSource;
+    }
+    return defaultSourceKey(src, selection);
+  }, [sourcesQ.data, pickedSource, selection]);
+  const scopedRound = useMemo(() => roundForKey(sourcesQ.data, sourceKey), [sourcesQ.data, sourceKey]);
+
+  const changeSource = useCallback((key) => {
+    setPickedSource(key);
+    setSelection(key.startsWith('w:') ? { kind: 'walklist', walkListId: key.slice(2) } : EMPTY);
+  }, []);
+
   const dataKey = useMemo(
     () =>
       selection.kind === 'walklist'
@@ -125,6 +159,13 @@ export default function PrintPacketsPage() {
   });
 
   const payload = dataQ.data || null;
+  // The split is print-time and client-side, so the knob is a RE-RENDER, not a refetch —
+  // deliberately absent from the query key above, like noteLines. splitBooks returns the
+  // payload object itself when there is nothing to split, so "off" changes nothing.
+  const splitPayload = useMemo(
+    () => splitBooks(payload, debounced.doorsPerPacket),
+    [payload, debounced.doorsPerPacket]
+  );
   const rounds = sourcesQ.data?.rounds || [];
   const cap = sourcesQ.data?.cap || 1200;
 
@@ -159,20 +200,59 @@ export default function PrintPacketsPage() {
   // than spending another ~1s re-rendering an identical PDF.
   const docRef = useRef(null);
   const onReady = useCallback((doc) => { docRef.current = doc; }, []);
+  // A newer payload or setting invalidates the previewed bytes IMMEDIATELY. Without this,
+  // Download during the ~1s re-render saves the OLD document under a filename computed from
+  // the NEW state — and the split filename actively asserts a packet count, so that
+  // mismatch stopped being cosmetic. Costs one fresh render in that window, nothing more.
+  useEffect(() => { docRef.current = null; }, [splitPayload, effective]);
 
   const download = async () => {
     if (!payload) return;
     setDownloading(true);
     try {
-      const doc = docRef.current || (await renderPacketPdf(payload, effective));
-      doc.save(packetFilename(payload, effective));
+      // One packet -> one PDF, unchanged. Several packets -> a ZIP with ONE FILE PER PACKET
+      // (plus the hand-out sheet), because the unit of download should match the unit of
+      // custody: each volunteer gets a file, and reprinting one packet is opening one file
+      // rather than hunting page ranges in a 300-page blob. Each per-packet render is a
+      // single-book payload, so it naturally skips the duplex padding and inline manifest.
+      if (splitPayload.books.length > 1) {
+        const { entries, zipName } = packetZipPlan(splitPayload, effective);
+        const files = [];
+        const pageCounts = new Map();
+        for (const e of entries) {
+          const d = await renderPacketPdf(e.payload, effective);
+          pageCounts.set(e.payload.books[0].id, d.getNumberOfPages());
+          files.push({ name: e.name, data: new Uint8Array(d.output('arraybuffer')) });
+        }
+        if (effective.showManifest) {
+          const m = await renderManifestPdf(splitPayload, effective, pageCounts);
+          files.unshift({
+            name: zipName.replace(/\.zip$/, '-hand-out-sheet.pdf'),
+            data: new Uint8Array(m.output('arraybuffer')),
+          });
+        }
+        const blob = new Blob([zipStore(files)], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = zipName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const doc = docRef.current || (await renderPacketPdf(splitPayload, effective));
+        doc.save(packetFilename(splitPayload, effective));
+      }
     } finally {
       setDownloading(false);
     }
   };
 
   const capError = dataQ.error?.data?.error === 'packet-too-large' ? dataQ.error.data : null;
-  const packetCount = selection.kind === 'walklist' ? 1 : selection.turfIds.length;
+  // Once a payload exists, packets are what the SPLIT payload says — one book can be several
+  // packets. Before it lands, the selection is the best estimate available.
+  const packetCount = splitPayload
+    ? splitPayload.books.length
+    : selection.kind === 'walklist' ? 1 : selection.turfIds.length;
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -201,9 +281,10 @@ export default function PrintPacketsPage() {
               sources={sourcesQ.data}
               loading={sourcesQ.isLoading}
               selection={selection}
+              sourceKey={sourceKey}
+              onSourceChange={changeSource}
               onToggleBook={toggleBook}
-              onSelectRound={setMany}
-              onSelectWalkList={setMany}
+              onSelectAll={setMany}
             />
           </div>
 
@@ -219,7 +300,9 @@ export default function PrintPacketsPage() {
               </div>
               <p className="text-xs text-fg-muted mt-0.5">
                 {pages
-                  ? `${pages} pages · ${Math.ceil(pages / 2)} sheets double-sided`
+                  ? `${pages} pages${
+                      effective.duplex ? ` · ${Math.ceil(pages / 2)} sheets double-sided` : ''
+                    }`
                   : `about ${Math.ceil(doors / DOORS_PER_PAGE_HINT / 2).toLocaleString()} sheets`}
               </p>
               {overCap && (
@@ -260,7 +343,7 @@ export default function PrintPacketsPage() {
               display:none container comes up zero-sized. The preview stays mounted and merely
               hidden, so switching back doesn't re-render the whole PDF. */}
           {tab === 'map' ? (
-            <PacketMap rounds={rounds} selection={selection} onToggleBook={toggleBook} />
+            <PacketMap round={scopedRound} selection={selection} onToggleBook={toggleBook} />
           ) : null}
 
           <div
@@ -298,7 +381,7 @@ export default function PrintPacketsPage() {
                 <p className="text-sm text-fg-muted">Loading doors…</p>
               </div>
             ) : payload ? (
-              <PaperPreview payload={payload} settings={effective} onPages={onPages} onReady={onReady} />
+              <PaperPreview payload={splitPayload} settings={effective} onPages={onPages} onReady={onReady} />
             ) : null}
 
             {payload?.warnings?.length > 0 && (
@@ -320,6 +403,7 @@ export default function PrintPacketsPage() {
             unprintable={unprintable}
             pages={pages}
             doorCount={doors}
+            packetCount={packetCount}
             hasPick={hasPick}
             busy={downloading || dataQ.isFetching}
             onDownload={download}

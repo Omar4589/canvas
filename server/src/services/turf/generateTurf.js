@@ -198,12 +198,21 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
 
-  // Supplemental books come from the effort's OWNED doors not yet in a book.
+  // Supplemental books come from the effort's OWNED doors not yet in one of THIS
+  // PASS's books — judged against the pass's own Turf.householdIds, never the
+  // Household.turfId mirror. The mirror points at the LATEST cut anywhere in the
+  // campaign, so a door claimed by another round's draft cut would read "booked"
+  // here and silently never make it into a supplemental book on this one.
   // Skip fully-voted doors (not knockable), same as the main cut.
+  const ownBooks = await Turf.find(
+    { passId, status: { $ne: 'archived' } },
+    { householdIds: 1 }
+  ).lean();
+  const alreadyBooked = ownBooks.flatMap((t) => t.householdIds || []);
   const baseFilter = {
     campaignId,
     effortId: pass.effortId,
-    turfId: null,
+    ...(alreadyBooked.length ? { _id: { $nin: alreadyBooked } } : {}),
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
     ...(excludeRestricted ? { status: { $ne: 'restricted' } } : {}),
@@ -218,7 +227,12 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   if (isActiveTargetFilter(pass.targetFilter)) {
     const { householdIds } = await resolveWalkList(campaign, pass.targetFilter, { effortId: pass.effortId });
     if (!householdIds.length) return { added: 0, bookCount: 0, bookIds: [] };
-    baseFilter._id = { $in: householdIds };
+    // Compose with the already-booked exclusion above — assigning `_id` twice would
+    // silently drop whichever condition wrote first.
+    const booked = new Set(alreadyBooked.map(String));
+    const fresh = householdIds.filter((id) => !booked.has(String(id)));
+    if (!fresh.length) return { added: 0, bookCount: 0, bookIds: [] };
+    baseFilter._id = { $in: fresh };
   }
 
   const households = await Household.find(baseFilter, CUT_COLUMNS).lean();

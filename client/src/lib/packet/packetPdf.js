@@ -94,6 +94,21 @@ const ruledLines = (doc, x, y, w, n, firstIndent, paint) => {
   return 6 + n * NOTE_PITCH;
 };
 
+// The page that makes duplex packets separable. A book ending on an odd page would otherwise
+// put the NEXT book's cover on the back of its last sheet — two packets fused into one piece
+// of paper, and no way to hand them to two volunteers. The sheet is spent either way, so it
+// carries ruled lines instead of nothing: a blank back page reads as a printer fault and
+// generates a phone call, and volunteers running out of room to write is a real paper problem.
+const drawSpareNotes = (doc, y) => {
+  setFont(doc, TYPE.plate, 'bold', DARK);
+  text(doc, 'Notes', PAGE.MARGIN, y + 4);
+  setFont(doc, TYPE.micro, 'normal', GRAY);
+  text(doc, 'Spare room to write — this page is part of your packet.', PAGE.MARGIN, y + 18);
+  const top = y + 30;
+  const n = Math.floor((PAGE.BODY_BOTTOM - top) / NOTE_PITCH);
+  ruledLines(doc, PAGE.MARGIN, top, PAGE.CONTENT_W, n, 0, true);
+};
+
 const microLabel = (doc, s, x, y, paint) => {
   if (paint) {
     setFont(doc, TYPE.micro, 'bold', GRAY);
@@ -447,8 +462,37 @@ const drawFooterRule = (doc, payload, ctx) => {
 };
 
 // ── covers and reference pages ───────────────────────────────────────────────
+// Trim a string to a width IN THE CURRENT FONT — call after setFont, or the measure lies.
+// Measured through asciiSafe because that is what text() actually prints: '—' folds to a
+// hyphen a third its width, and '…' would fold to '...', so measuring the raw string
+// would trim against widths that never reach the page.
+const fitText = (doc, str, maxW) => {
+  if (doc.getTextWidth(asciiSafe(str)) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && doc.getTextWidth(`${asciiSafe(s)}...`) > maxW) s = s.slice(0, -1);
+  return `${s.replace(/\s+$/, '')}...`;
+};
+
+// How many pages the hand-out sheet needs for `rows` packet lines. MUST mirror
+// drawManifest's own y increments exactly — it exists so renderPacketPdf can reserve the
+// right number of pages UP FRONT. drawManifest runs LAST (page ranges aren't known until
+// the books are paged), and a raw addPage() at that point appends to the END of the
+// document — before this, a long custody list printed its tail after the last book, on
+// unbranded, unnumbered pages. Splitting made that mainline: 1,200 doors at a 10-door
+// knob is 120 rows.
+const manifestPageCount = (rows) => {
+  let pages = 1;
+  let y = PAGE.MARGIN + 10 + 22 + 14 + 26 + 16 + 6 + 4; // the header block below
+  for (let i = 0; i < rows; i++) {
+    y += 20;
+    if (y > PAGE.BODY_BOTTOM - 20) { pages += 1; y = PAGE.MARGIN + 10; }
+  }
+  return pages;
+};
+
 const drawManifest = (doc, payload, ctx) => {
   const x = PAGE.MARGIN;
+  let pageIdx = 0;
   let y = PAGE.MARGIN + 10;
   setFont(doc, TYPE.coverTitle, 'bold', DARK);
   text(doc, 'Packet run', x, y);
@@ -486,7 +530,9 @@ const drawManifest = (doc, payload, ctx) => {
     const range = ctx.pageRanges.get(book.id);
     cx = x;
     setFont(doc, TYPE.option, 'bold', DARK);
-    text(doc, book.name, cx, y + 11); cx += cols[0].w;
+    // Clipped to its column: a long book name — or one carrying a "· 2 of 4" part suffix —
+    // must not run into the Doors figure beside it.
+    text(doc, fitText(doc, book.name, cols[0].w - 10), cx, y + 11); cx += cols[0].w;
     setFont(doc, TYPE.option, 'normal', DARK);
     text(doc, String(book.doorCount), cx, y + 11); cx += cols[1].w;
     setFont(doc, TYPE.option, 'normal', GRAY);
@@ -500,7 +546,15 @@ const drawManifest = (doc, payload, ctx) => {
     y += 20;
     doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
     doc.line(x, y - 3, x + ctx.contentW, y - 3);
-    if (y > PAGE.BODY_BOTTOM - 20) { doc.addPage(); y = PAGE.MARGIN + 10; }
+    if (y > PAGE.BODY_BOTTOM - 20) {
+      // Continue on the NEXT RESERVED page (manifestPageCount), never a raw addPage — that
+      // would append to the end of the document, after every book. The fallback only exists
+      // so a drift bug between the two would degrade instead of throwing.
+      pageIdx += 1;
+      if (ctx.manifestPages && pageIdx < ctx.manifestPages.length) doc.setPage(ctx.manifestPages[pageIdx]);
+      else doc.addPage();
+      y = PAGE.MARGIN + 10;
+    }
   }
 
   y += 14;
@@ -724,6 +778,8 @@ export const renderPacketPdf = async (payload, settings) => {
   const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
 
   const layout = resolveLayout(settings, payload.books.some((b) => b.survey));
+  // Only meaningful across a multi-packet run — one packet cannot collide with anything.
+  const duplex = settings.duplex !== false && payload.books.length > 1;
   const ctx = {
     contentW: PAGE.CONTENT_W,
     layout,
@@ -752,14 +808,22 @@ export const renderPacketPdf = async (payload, settings) => {
     return PAGE.BODY_TOP;
   };
 
-  // Manifest first so it travels with the stacks and cannot be lost.
+  // Manifest first so it travels with the stacks and cannot be lost. Reserve EVERY page it
+  // will need (manifestPageCount mirrors its row arithmetic) — it is drawn last, when the
+  // ranges exist, and at that point addPage() could only append after the final book.
   if (settings.showManifest && payload.books.length > 1) {
-    newPage(null);
-    // Ranges are filled after paging; draw the manifest last onto this reserved page.
-    ctx.manifestPage = doc.getNumberOfPages();
+    ctx.manifestPages = [];
+    for (let i = 0; i < manifestPageCount(payload.books.length); i++) {
+      newPage(null);
+      ctx.manifestPages.push(doc.getNumberOfPages());
+    }
+    ctx.manifestPage = ctx.manifestPages[0];
+    // An odd manifest would push the first book's cover onto its back side. This spacer stays
+    // genuinely blank — it belongs to no book, so it gets no band, no footer and no number.
+    if (duplex && doc.getNumberOfPages() % 2 === 1) newPage(null);
   }
 
-  for (const book of payload.books) {
+  for (const [bookIdx, book] of payload.books.entries()) {
     ctx.survey = book.survey ? buildSurveyPrintModel(book.survey) : null;
     // jsPDF opens with one blank page, so the very first newPage() reuses it rather than
     // adding one — the cover lands on the page that already exists.
@@ -774,7 +838,12 @@ export const renderPacketPdf = async (payload, settings) => {
           token: settings.mapboxToken,
           boxW: PAGE.CONTENT_W,
           boxH: COVER_MAP_H,
-          cacheKey: book.id,
+          // Keyed on the SLICE, not just the id: two knob values can produce the same part
+          // ids over different cut positions (and Skip apartments shifts a part's doors
+          // under an identical id) — an id-only key then reuses a basemap fitted to the
+          // OLD slice and the walk draws outside the frame. First + last + count pins the
+          // contiguous slice exactly.
+          cacheKey: `${book.id}:${book.doors.length}:${book.doors[0]?.id ?? ''}:${book.doors[book.doors.length - 1]?.id ?? ''}`,
         })
       : null;
     drawCover(doc, payload, book, ctx, coverMap);
@@ -880,6 +949,14 @@ export const renderPacketPdf = async (payload, settings) => {
       }
     }
 
+    // EVERY PACKET STARTS ON A FRESH SHEET. Duplexed, an odd-length book hands its last
+    // sheet's back to the next book's cover, and the two packets cannot be separated. The
+    // final book needs no pad — nothing follows it, so its back side is simply blank.
+    if (duplex && bookIdx < payload.books.length - 1 && doc.getNumberOfPages() % 2 === 1) {
+      drawSpareNotes(doc, newPage(book));
+    }
+    // Set AFTER any pad: the spare page is part of the packet, so the manifest's range
+    // must cover it or a director reprinting by range would drop it.
     ctx.pageRanges.set(book.id, { from, to: doc.getNumberOfPages() });
   }
 
@@ -917,18 +994,48 @@ export const renderPacketPdf = async (payload, settings) => {
   return doc;
 };
 
+// The hand-out sheet as its own document, for the per-packet ZIP download — where each packet
+// is a separate file and the run needs one sheet naming them all. pageCountByBook feeds the
+// Pages column: a packet's range in its OWN file is 1..N, which is what a director flipping
+// that file sees. Reuses drawManifest verbatim; with no reserved pages an overflow falls to
+// doc.addPage(), which in a manifest-only document IS the next page.
+export const renderManifestPdf = async (payload, settings, pageCountByBook = new Map()) => {
+  const { jsPDF } = await import('jspdf');
+  const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
+  const ctx = {
+    contentW: PAGE.CONTENT_W,
+    printedAt: new Date(payload.generatedAt).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+    }),
+    pageRanges: new Map(
+      (payload.books || []).map((b) => [b.id, { from: 1, to: pageCountByBook.get(b.id) || 1 }])
+    ),
+  };
+  drawManifest(doc, payload, ctx);
+  return doc;
+};
+
 // campaign · book · which kind of packet · the day it was built. A multi-book run has no single
 // book name, so it says how many. The date stays because a packet goes stale — the guidance is
 // to print the morning of, and without it a Wednesday file and a Saturday file look alike.
+//
+// A SPLIT run counts packets, not books: one book split four ways is "book-c-4-packets", and a
+// mixed run just says how many packets came out. Unsplit filenames are byte-identical to before.
 export const packetFilename = (payload, settings = {}) => {
   const slug = (v, max) =>
     String(v || '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, max)
       .replace(/-+$/, '');
   const camp = slug(payload.campaign?.name, 40) || 'campaign';
   const books = payload.books || [];
-  const which = books.length === 1
-    ? (slug(books[0].name, 30) || 'book')
-    : `${books.length}-books`;
+  const split = books.some((b) => (b.partCount || 1) > 1);
+  const sources = new Set(books.map((b) => b.sourceBookId || b.id)).size;
+  const which = split
+    ? sources === 1
+      ? `${slug(books[0].sourceName || books[0].name, 30) || 'book'}-${books.length}-packets`
+      : `${books.length}-packets`
+    : books.length === 1
+      ? (slug(books[0].name, 30) || 'book')
+      : `${books.length}-books`;
   // Resolved, not requested: asking for a survey packet on a campaign without a survey prints
   // the field list, and the filename must say what is actually inside.
   const kind = resolveLayout(settings, books.some((b) => b.survey)) === 'survey'

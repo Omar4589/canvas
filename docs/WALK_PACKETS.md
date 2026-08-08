@@ -39,17 +39,27 @@ a management action.
 
 Three panes:
 
-- **Left — what to print.** Books grouped **walk list → round → book**, plus your saved
-  searches. A campaign runs several walk lists at once and each has its own rounds, so a bare
-  "Pass 3" wouldn't say which operation it belongs to. Tick as many books as you like; each one
-  becomes its own stapled packet. A running total at the bottom shows packets, doors, and
-  sheets, and warns before you cross the door limit rather than after.
+- **Left — what to print.** One **dropdown** picks the source: a **round**, listed under the
+  walk list it belongs to, or a **saved search**. A campaign runs several walk lists at once and
+  each has its own rounds, so a bare "Pass 3" wouldn't say which operation it belongs to.
+  Rounds that aren't live are offered too and carry their status — printing a `draft` round is
+  the normal "print the night before launch" case. Below the dropdown sit **that round's books**;
+  tick as many as you like and each becomes its own stapled packet — unless you set **Doors per
+  packet**, which splits big books into several smaller ones (see below). A running total at the
+  bottom shows packets, doors, and sheets, and warns before you cross the door limit rather than
+  after.
+
+  **Changing rounds clears your ticks, on purpose.** One round at a time isn't only about the
+  list staying short: a print run that spanned the live round and a draft one would send
+  volunteers to doors the app crew is already working. If the round you're on **is** live and
+  someone already holds one of its books in the app, the picker says so above the list.
 - **Middle — two tabs.**
   - **Packet** is not a mock-up. It is the actual PDF, rebuilt about a quarter-second after you
     change anything. What you download is the same file you are looking at.
   - **Map** shows where the books actually are. Click a shape to add or drop it from the print
-    run. Only one round is drawn at a time — rounds re-cover the same streets, so stacking them
-    would be unreadable and ambiguous to click.
+    run. It draws **the round chosen in the dropdown** — rounds re-cover the same streets, so
+    stacking them would be unreadable and ambiguous to click, and one shared choice means the
+    list and the map can never sit on different rounds.
 - **Right — the design.** Layout, how many lines to write on, and what extras to include. The
   page count updates as you turn each knob, because paper is the cost that matters.
 
@@ -106,13 +116,48 @@ ranking by size), and a tally box.
 
 On a very large book the street list is **capped to what fits** and ends with "+ N more streets"
 — the cover doesn't run onto a second sheet, and every address is listed inside anyway.
-If you print more than one book at once you also get a **hand-out sheet** at the front: one line
-per packet — book name, doors, page range — with ruled **Walked by / Out / In** cells so a field
-director can sign packets out on the table where the packets actually are.
+**A run of several packets downloads as a folder (ZIP): one PDF per packet, plus the hand-out
+sheet as its own file.** The unit of download matches the unit of custody — each volunteer gets
+a file, and reprinting one packet is opening one file rather than hunting page ranges in a
+300-page blob. A one-packet run stays a single plain PDF. (Technical: the ZIP is store-only —
+the PDFs are already compressed — written by
+[`lib/packet/zipStore.js`](../client/src/lib/packet/zipStore.js) with no new dependency, and
+each per-packet file is a single-book render, so it naturally carries no duplex padding or
+inline manifest.)
+
+Whenever a print run comes out as **more than one packet** — several books, or one big book
+split into parts — you also get a **hand-out sheet** at the front: one line per packet — name,
+doors, page range — with ruled **Walked by / Out / In** cells so a field director can sign
+packets out on the table where the packets actually are.
 
 **No canvasser name is ever printed.** A packet goes to whoever picks it up, which is rarely who
 the app thinks holds the book — so the carrier writes their own name on the cover. The in-app
 assignment still shows in the picker on screen, to help you choose what to print.
+
+## Splitting a big book across volunteers
+
+A 150-door book is a fine unit for a phone and a terrible one for a paper afternoon. **Doors
+per packet** (right pane) splits every oversized book **at print time**: set it to 35 and that
+book prints as **"Book 33 · 1 of 4" … "· 4 of 4"** — four separate packets of roughly 30–45
+doors, each a contiguous stretch of the book's own walk order, each with its own cover, map,
+street list, tally box and page numbering. Hand each part to a different volunteer instead of
+tearing one packet in half at a page boundary.
+
+What the split does — and refuses to do:
+
+- **Parts prefer to break where streets change** when a change sits near the cut, so short
+  streets stay whole — but a longer street (roughly half your number and up) can still be
+  shared between two packets when no break lands close enough. Part sizes vary a little
+  around the number you set — that is the feature, not drift — and no part ever comes out
+  bigger than the size that keeps a small book whole.
+- **A book only slightly over your number stays whole.** Nobody wants a 35-door packet plus a
+  3-door orphan, so books up to about a third over the target print as one packet, and the
+  parts of a split book are **balanced** — an 82-door book at 35 prints as 41 + 41, never
+  35 + 35 + 12.
+- **Saved searches split the same way.** A 400-door search stops printing as one monolith.
+- **The app never notices.** This is paper-only: the book itself, its assignment, its colour,
+  and the phone's walk order are untouched. Clear the field and you're back to whole books.
+- **It's remembered per campaign**, like every other knob on this screen. Blank = off.
 
 ## What order the doors are in
 
@@ -180,7 +225,9 @@ locked lobby — not an instruction to stay away.
 The studio refuses, and tells you the real number and roughly how many sheets it would be.
 It does **not** print as much as it can and stop. A packet that quietly ran short would send
 nobody to the doors it dropped, and because paper reports nothing, no report would ever catch it.
-Deselect a few books and print the rest separately.
+Deselect a few books and print the rest separately. **Doors per packet doesn't move this wall**
+— it changes how a selection divides into stapled units, not how many doors one print run may
+contain.
 
 ## Why nothing comes back
 
@@ -205,7 +252,9 @@ doesn't count knocks.
   paper can't.
 - **Give the paper doors their own book, assigned to nobody.** A book with no one assigned to it
   is invisible to every app canvasser, so nobody walks the same street twice.
-- **Staple by book** and hand them out against the sheet at the front — each packet's name and
+- **A big book doesn't need re-cutting for a paper day.** Set **Doors per packet** and it prints
+  as several small packets; the book in the app stays exactly as cut.
+- **Staple by packet** and hand them out against the sheet at the front — each packet's name and
 colour stripe are on every page.
 - **Collect the packets at the end of the day and shred them when the race is over.** Paper has
   no sign-out and no remote wipe.
@@ -229,12 +278,14 @@ client/src/pages/PrintPacketsPage.jsx        the studio (three panes, full-bleed
   lib/packet/packetTheme.js                  ink, type scale, page geometry, the pin
   lib/packet/surveyPrintModel.js             survey -> printable questions + skip logic
   lib/packet/packetSettings.js               defaults, layouts, per-campaign persistence
+  lib/packet/splitBooks.js                   print-time split into ~N-door packets
   lib/pdfText.js                             asciiSafe / countUnprintable / scanUnprintableNames
 
 server/src/routes/admin/packets.js           GET /sources, GET /data
 server/src/services/packet/buildPacket.js    assembly: order, suppression, survey, age
-server/test/packet.int.test.js               the only coverage this feature has
-client/src/lib/packet/packetPdf.test.js      pagination + survey-model invariants
+server/test/packet.int.test.js               the only server coverage this feature has
+client/src/lib/packet/packetPdf.test.js      pagination + survey-model + split-render invariants
+client/src/lib/packet/splitBooks.test.js     the chunking rules
 ```
 
 Mounted at `/admin/campaigns/:campaignId/packets` in `routes/index.js`, after
@@ -333,6 +384,60 @@ a zigzag book must regroup, a rural book must not.
 Doors without coordinates, and books under 3 doors, keep the stored order. **`Turf.householdIds`
 is never rewritten** — this is a print-time view, so the app is unaffected.
 
+## The split rule
+
+`lib/packet/splitBooks.js` — **client-side, pure, print-time**. `splitBooks(payload,
+doorsPerPacket)` runs memoized between the `/data` fetch and everything downstream
+(preview, renderer, filename, packet count); the server knows nothing about it, and the knob is
+deliberately **absent from the query key** — changing it is a re-render, never a refetch, the
+same contract as `noteLines`. It returns the payload **object itself** when there is nothing to
+do (off, `< MIN_DOORS_PER_PACKET` = 10, or no book big enough), and never mutates the cached
+payload — every door it touches is copied.
+
+For target N: a book with `doors.length ≤ ceil(1.3 × N)` stays whole (no 35 + 3 orphans).
+Otherwise the **part count comes first** — `round(len / N)`, bumped until every part fits under
+that hard max — and each cut then slides within `max(3, 0.2 × N)` doors of its balanced ideal
+to the nearest **street boundary** (consecutive doors whose `street` differs). Balancing before
+cutting is what prevents runt tails: 82 doors at 35 is 41 + 41, never 35 + 35 + 12. Every cut
+is additionally **clamped for feasibility**: its part — and everything still owed after it —
+must stay within `[min(10, balanced size), hardMax]`, so a street boundary that would drag a
+part past hardMax (or shrink one to a sticky note) is rejected and the cut falls back to the
+clamped ideal. Slides therefore never compound — unclamped, an ordinary two-street 87-door
+book at 35 produced parts of 37 and 50, a packet bigger than the 46-door book the same knob
+leaves whole; the fuzz test pins the bounds. A window with no usable street change (one long
+street) likewise hard-cuts at the clamped ideal — two walkers on one street beats a 60-door
+packet. Parts **exactly partition** the book's final print order: same doors, same sequence,
+none duplicated, none dropped — the audit flatMap and the totals both lean on that.
+
+Each part is an ordinary book-object to the renderer, with three fields that are load-bearing:
+
+- **`id`** — distinct per part (`` `${bookId}#2of4` ``). The manifest's `pageRanges` and the
+  per-packet page-numbering maps key on `book.id`; parts sharing the parent id would share one
+  reprint range and one page count. The cover-map cache goes further — its key is the id
+  **plus the slice** (first door, last door, count), because two knob values can mint the same
+  part ids over different cut positions, and an id-only key would reuse a basemap fitted to
+  the old slice and draw the walk outside the frame.
+- **`seq`** — re-stamped 1..n per part. The street bands number doors by position within the
+  book-object they're in, so a part keeping the parent's global numbers would print a door
+  badge saying 39 under a band saying "doors 1-15".
+- **`colorIndex`** — inherited from the parent, per the colour rule. Parts inventing their own
+  would put a stripe on paper that contradicts the picker and the Turf Cutting map.
+
+`name` gets `· i of m`; `doorCount`/`voterCount`/`streets` are recomputed per slice
+(`streets` with the same numeric-aware sort as the server's `streetSummary`); `partIndex`,
+`partCount`, `sourceBookId` and `sourceName` carry provenance for the filename and the packet
+count; `survey`/`printOrder`/round fields are inherited. `omitted` rides on **part 1 only**
+(the others get an empty shell) so `totals.omitted` counts each held-back door exactly once;
+the renderer never reads it. `totals.books` counts **parts** — it feeds the hand-out header's
+"N packets" line. One consequence the tests pin: a single book split into parts crosses the
+manifest's `books.length > 1` gate and **gains** the hand-out sheet, which is right — the parts
+are separate physical packets to sign out. The 1,200-door cap is untouched: it runs server-side
+on the whole selection before the split exists, and splitting is division, never truncation.
+
+One accepted asymmetry: the "back later" street marker is computed within one book-object, so a
+street the route revisits in a *different part* isn't flagged — correct for the volunteer
+holding only their part.
+
 ## A door is atomic
 
 A door is never split across two pages unless it is genuinely taller than one. Splitting put the
@@ -357,6 +462,53 @@ knob that decides this, and the studio shows the page count as you turn it.
 
 The field list is unaffected: its doors are ~120pt, five fit a page, and nothing split before
 or after.
+
+## Printing from a draft round does not disturb the live one
+
+The supported prep flow — new pass, draw or cut books, **Accept, never Activate** — leaves the
+live round untouched where it matters: book membership (`Turf.householdIds`), assignments,
+knock history, and everything a phone resolves. Only **Activate** archives a round.
+
+One thing does move: `Household.turfId` / `walkOrder` are a single global **mirror** that every
+cut re-points at itself, so cutting the draft moves the mirror off the live round's books. Two
+admin surfaces used to read that mirror and misread the live round the moment a draft was cut —
+the Turf Cutting door map ("12,087 doors not in any book") and Add-as-new-book's door sweep.
+Both now resolve door → book from **the viewed pass's own books** instead
+([routes/admin/turfs.js](../server/src/routes/admin/turfs.js) `/doors`,
+[services/turf/generateTurf.js](../server/src/services/turf/generateTurf.js)
+`addSupplementalBooks`), pinned by `turfBookStatus.int.test.js`. The mobile **list-view sort**
+also reads `walkOrder`, so on an installation where a draft cut has already stolen the mirror,
+repair it:
+
+```
+npm run remirror:pass -- --pass <livePassId>            # dry run — counts, writes nothing
+npm run remirror:pass -- --pass <livePassId> --apply
+```
+
+(Heroku dashboard → More → Run console. Idempotent; restores each member door's mirror from
+its book's stored order; touches nothing on any other round.)
+
+## Where the round choice lives
+
+`GET /sources` returns **published books on active AND draft rounds** — a pass cannot be
+activated until its books are published, so "print before launch" is exactly the
+draft-pass / published-books state. A round with no *published* books is filtered out of the
+dropdown entirely: it can't be printed, so an option leading to an empty list would only look
+broken. That is the usual reason a freshly cut round seems missing — **Accept** its books.
+
+The choice itself is one string on `PrintPacketsPage`, `p:<passId>` or `w:<savedSearchId>`,
+resolved by [`lib/packet/packetSource.js`](../client/src/lib/packet/packetSource.js) and handed
+to both the picker and the map. It is a *derived* default with a user override
+(`pickedSource ?? defaultSourceKey(...)`), so the landing choice keeps following the data — a
+`?turfIds=` deep link opens the round holding those books, which a key hard-coded at
+link-handling time could not do, because `/sources` is still in flight then. A pick that stops
+resolving (its round archived under a refetch) falls back to the default rather than leaving the
+`<select>` displaying one round while state names another.
+
+`PacketMap` previously kept its **own** `activeRoundId` plus a row of switcher chips. Two round
+notions on one screen meant the panes could disagree while a single selection spanned both —
+the exact cross-round print run the dropdown exists to prevent. It now renders the round it is
+given and owns no round state.
 
 ## "What to say"
 
@@ -390,8 +542,11 @@ The kind is the **resolved** layout, not the requested one: asking for a survey 
 campaign with no survey prints the field list, and the filename has to say what is inside. Punctuation collapses to single
 hyphens, the campaign truncates at 40 characters and the book at 30, and nothing trails a hyphen
 into the extension. A multi-book run is one PDF with no single book name, so it says how many:
-`…-5-books-packet-…`. The date stays because a packet goes stale — the guidance is to print the
-morning of, and without it a Wednesday file and a Saturday file are indistinguishable.
+`…-5-books-survey-packet-…`. A **split** run counts packets instead: one book split four ways keeps its
+identity — `…-book-33-4-packets-survey-packet-…` — and a mixed run of several source books says
+`…-7-packets-…`. Unsplit filenames are byte-identical to before the knob existed. The date stays
+because a packet goes stale — the guidance is to print the morning of, and without it a
+Wednesday file and a Saturday file are indistinguishable.
 
 ## The cover map
 
@@ -527,9 +682,15 @@ it to show what a book is currently attached to.
 
 A page break inside a door reprints the address with `(cont.)` and a **hollow** sequence badge;
 a break inside one person's block reprints their name with `(cont.)` so answers below are never
-attributed to whoever lands at the top of the next page. Page numbers are **per book** ("Book C ·
-Page 7 of 12") and written in a second pass over `doc.setPage()`; the hand-out sheet carries
-absolute ranges so a director can reprint by range.
+attributed to whoever lands at the top of the next page. Page numbers are **per packet** ("Book
+C · 2 of 4 · Page 7 of 12" — a split part numbers its own pages from 1) and written in a second
+pass over `doc.setPage()`; the hand-out sheet carries absolute ranges so a director can reprint
+by range. The manifest's name cell clips to its column (`fitText`) so a long name — or one
+carrying a part suffix — can't run into the Doors figure beside it. The hand-out sheet's pages
+are **all reserved up front** (`manifestPageCount` mirrors its row arithmetic): it is drawn
+last, when the ranges exist, and an `addPage()` at that point appends to the END of the
+document — a long custody list used to print its tail after the last book, unbranded and
+unnumbered, and splitting made long lists mainline.
 
 Other renderer traps:
 

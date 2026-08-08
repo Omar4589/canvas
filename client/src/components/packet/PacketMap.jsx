@@ -12,7 +12,12 @@ import { BOOK_COLOR_HEX } from '../../lib/packet/packetTheme.js';
 //
 // ONE ROUND AT A TIME, deliberately. Rounds re-cover the same streets (each pass cuts its
 // own books over the same doors), so stacking two rounds' fills is both unreadable and
-// ambiguous to click. A round switcher sits above the canvas when there is more than one.
+// ambiguous to click.
+//
+// The round is chosen ONCE, on the left, and handed down here. This pane used to keep its own
+// `activeRoundId` and its own switcher chips, which meant the list and the map could sit on
+// different rounds while one selection spanned both — the exact cross-round print run the
+// single dropdown exists to prevent.
 
 // Books with pocket islands are stored as MultiPolygon, which nests one level deeper than
 // Polygon — flattening is what stops the fit landing on NaN.
@@ -104,7 +109,7 @@ const registerLayers = (map, dark) => {
   });
 };
 
-export default function PacketMap({ rounds, selection, onToggleBook }) {
+export default function PacketMap({ round, selection, onToggleBook }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const toggleRef = useRef(onToggleBook);
@@ -114,26 +119,13 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
   const [ready, setReady] = useState(false);
   const { styleId, styleURL, setStyle, dark } = useMapStyle();
 
-  const withBooks = useMemo(() => rounds.filter((r) => r.books.length), [rounds]);
-  const [activeRoundId, setActiveRoundId] = useState(null);
+  const books = useMemo(() => round?.books || [], [round]);
 
   const tokenQ = useQuery({
     queryKey: ['config', 'mapbox-token'],
     queryFn: () => api('/admin/config/mapbox-token'),
     staleTime: 5 * 60 * 1000,
   });
-
-  // Default to the round holding the first picked book, else the first round with books.
-  useEffect(() => {
-    if (!withBooks.length) return;
-    if (activeRoundId && withBooks.some((r) => r.id === activeRoundId)) return;
-    const picked = selection.kind === 'books' ? selection.turfIds : [];
-    const holding = withBooks.find((r) => r.books.some((b) => picked.includes(b.id)));
-    setActiveRoundId((holding || withBooks[0]).id);
-  }, [withBooks, activeRoundId, selection]);
-
-  const activeRound = withBooks.find((r) => r.id === activeRoundId) || withBooks[0] || null;
-  const books = activeRound?.books || [];
 
   // The click handler is bound once and reads the callback through a ref — a handler that
   // closed over `selection` would go stale after the very first toggle.
@@ -247,26 +239,6 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {withBooks.length > 1 && (
-        <div className="flex flex-wrap gap-1.5 pb-3">
-          {withBooks.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => setActiveRoundId(r.id)}
-              aria-pressed={r.id === activeRound?.id}
-              className={`px-2.5 py-1 rounded-md border text-xs transition-colors ${
-                r.id === activeRound?.id
-                  ? 'border-brand-accent bg-brand-tint text-fg'
-                  : 'border-border bg-card text-fg-muted hover:bg-sunken'
-              }`}
-            >
-              {r.effortName} · Pass {r.roundNumber}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="relative flex-1 rounded-lg overflow-hidden border border-border" style={{ minHeight: 0 }}>
         <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
         <MapStyleControl
@@ -278,15 +250,17 @@ export default function PacketMap({ rounds, selection, onToggleBook }) {
         {!books.length && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-sm text-fg-muted bg-card/90 px-3 py-1.5 rounded-md">
-              This round&apos;s books have no map outline.
+              {round
+                ? 'This round\u2019s books have no map outline.'
+                : 'A saved search has no book outlines to draw.'}
             </p>
           </div>
         )}
       </div>
 
       <p className="pt-2 text-xs text-fg-muted">
-        Click a book to add or remove it. Only books on this round are shown — rounds cover the
-        same streets, so they can&apos;t be drawn together.
+        Click a book to add or remove it. Only the round picked on the left is shown — rounds
+        cover the same streets, so they can&apos;t be drawn together.
       </p>
     </div>
   );

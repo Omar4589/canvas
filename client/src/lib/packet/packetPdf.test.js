@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderPacketPdf, packetFilename } from './packetPdf.js';
+import { renderPacketPdf, renderManifestPdf, packetFilename } from './packetPdf.js';
 import { buildSurveyPrintModel } from './surveyPrintModel.js';
+import { splitBooks } from './splitBooks.js';
 import { DEFAULT_SETTINGS } from './packetSettings.js';
 import { PAGE } from './packetTheme.js';
 import { asciiSafe, countUnprintable, scanUnprintableNames } from '../pdfText.js';
@@ -124,6 +125,79 @@ test('no ink escapes the page, at every household size', async () => {
       }
     }
   }
+});
+
+// A multi-book run, the only shape where one packet can collide with the next.
+const makeRun = (sizes) => {
+  const base = makePayload(1, 1, { survey: null });
+  return {
+    ...base,
+    books: sizes.map((n, i) => ({
+      ...makePayload(n, 1, { survey: null }).books[0],
+      id: `b${i}`, name: `Book ${String.fromCharCode(65 + i)}`, colorIndex: i,
+    })),
+    totals: { books: sizes.length, doors: sizes.reduce((a, b) => a + b, 0), voters: 0, omitted: 0 },
+  };
+};
+
+// A book's own page 1 is its cover; the footer names it. PDF pages are 1-indexed, so a cover
+// on an ODD page is the FRONT of a sheet.
+const coverPages = (doc) =>
+  pageTexts(doc).flatMap((t, i) => (t.includes('Page 1 of') ? [i + 1] : []));
+
+test('every packet starts on the front of a sheet when printing double-sided', async () => {
+  // Otherwise a book ending on an odd page hands its last sheet's BACK to the next book's
+  // cover: two packets fused onto one piece of paper, unseparable without a guillotine.
+  const run = makeRun([3, 8, 2, 14]);
+  const settings = { ...DEFAULT_SETTINGS, layout: 'field', duplex: true };
+  const doc = await renderPacketPdf(run, settings);
+  const covers = coverPages(doc);
+  assert.equal(covers.length, 4);
+  const backs = covers.filter((p) => p % 2 === 0);
+  assert.deepEqual(backs, [], `covers landed on the back of a sheet: pages ${backs.join(', ')}`);
+});
+
+test('the padding is what does it — without it, a cover lands on a back side', async () => {
+  const run = makeRun([3, 8, 2, 14]);
+  const off = await renderPacketPdf(run, { ...DEFAULT_SETTINGS, layout: 'field', duplex: false });
+  const on = await renderPacketPdf(run, { ...DEFAULT_SETTINGS, layout: 'field', duplex: true });
+  assert.ok(
+    coverPages(off).some((p) => p % 2 === 0),
+    'fixture no longer reproduces the collision — pick book sizes that do'
+  );
+  assert.ok(on.getNumberOfPages() > off.getNumberOfPages(), 'padding should cost pages');
+});
+
+test('a spare page belongs to its own packet, not the next one', async () => {
+  // It carries the book's band and counts in "Page N of M" — a page numbered into the NEXT
+  // book would tell a volunteer their packet started with someone else's notes.
+  const doc = await renderPacketPdf(makeRun([8, 3]), {
+    ...DEFAULT_SETTINGS, layout: 'field', duplex: true,
+  });
+  const pages = pageTexts(doc);
+  const spare = pages.findIndex((t) => t.includes('Spare room to write'));
+  assert.ok(spare >= 0, 'expected a spare notes page');
+  assert.match(pages[spare], /Book A/, 'the spare page must stay with Book A');
+});
+
+test('a single-book run is never padded', async () => {
+  // Nothing follows it, so there is no collision to prevent and no sheet to spend.
+  const one = makePayload(9, 1, { survey: null });
+  const on = await renderPacketPdf(one, { ...DEFAULT_SETTINGS, layout: 'field', duplex: true });
+  const off = await renderPacketPdf(one, { ...DEFAULT_SETTINGS, layout: 'field', duplex: false });
+  assert.equal(on.getNumberOfPages(), off.getNumberOfPages());
+});
+
+test('the standalone hand-out sheet renders every packet row', async () => {
+  // The ZIP download ships the manifest as its own file; each row's Pages column reads the
+  // packet's range in its OWN file (1..N), which is what someone flipping that file sees.
+  const run = makeRun([3, 8, 2]);
+  const counts = new Map([['b0', 2], ['b1', 3], ['b2', 2]]);
+  const doc = await renderManifestPdf(run, DEFAULT_SETTINGS, counts);
+  const t = pageTexts(doc).join('\n');
+  for (const b of run.books) assert.match(t, new RegExp(b.name));
+  assert.match(t, /1-3/, 'the 3-page packet must show its own file range');
+  assert.match(t, /HAND OUT AGAINST THIS SHEET/);
 });
 
 test('a door that fits on a page is never split across two', async () => {
@@ -436,4 +510,135 @@ test('the filename is campaign, book, kind, date', () => {
     packetFilename(odd, { layout: 'field' }),
     'mayor-s-race-2026-ward-5-book-c-field-list-2026-08-06.pdf'
   );
+});
+
+// ── splitting big books into small packets ───────────────────────────────────
+// splitBooks slices a payload BEFORE the renderer sees it; these tests pin what the renderer
+// does with the parts — separate physical packets, each self-contained. The chunking rules
+// themselves are pinned in splitBooks.test.js.
+
+test('a split book renders as separate packets: manifest, own covers, restarting page numbers', async () => {
+  // 80 doors at target 35 → two parts of 40 (one street, so the cuts land on the ideals).
+  const payload = splitBooks(makePayload(80, 1), 35);
+  assert.equal(payload.books.length, 2);
+  const doc = await renderPacketPdf(payload, DEFAULT_SETTINGS);
+  const pages = pageTexts(doc);
+  const all = pages.join('\n');
+
+  // One book split into parts is now MULTIPLE physical packets to sign out, so the very
+  // split that created them brings the hand-out sheet with it.
+  assert.ok(pages[0].includes('Packet run'), 'the hand-out sheet must lead a split run');
+  assert.ok(pages[0].includes('2 packets'), 'totals.books must count parts, not books');
+  assert.ok(pages[0].includes('1 of 2'), 'each part gets its own manifest row');
+  assert.ok(pages[0].includes('2 of 2'));
+
+  // Two covers — each part is its own stapled unit with its own tally box.
+  assert.equal(pages.filter((p) => p.includes('TALLY AS YOU GO')).length, 2);
+
+  // Per-packet page numbering restarts: exactly one "Page 1 of" per part.
+  assert.equal((all.match(/Page 1 of \d+/g) || []).length, 2, 'each part must restart at Page 1');
+  assert.ok(all.includes('1 of 2'), 'the part name reaches the page furniture');
+
+  // The manifest's reprint ranges must differ — same-id parts used to overwrite each other.
+  const ranges = [...pages[0].matchAll(/\b(\d+)-(\d+)\b/g)].map((m) => m[0]);
+  assert.ok(new Set(ranges).size >= 2, `manifest ranges must be distinct, got ${ranges.join(', ')}`);
+});
+
+test('street bands inside a part agree with its restarted door numbers', async () => {
+  // Part 2 of a 12-door book split 6/6: its band must say "doors 1-6" — the part's own
+  // numbering — never "doors 7-12" carried over from the parent book.
+  const payload = makePayload(12, 1);
+  payload.books[0].doors.forEach((d, i) => {
+    d.street = i < 6 ? 'N ORCHARD AVE' : 'S CEDAR ST';
+    d.addressLine1 = `${100 + i} ${d.street}`;
+  });
+  const out = splitBooks(payload, 10); // hardMax 13 < ... no: 12 <= 13 stays whole — force it
+  assert.equal(out.books.length, 1, 'sanity: 12 doors at target 10 stays whole (under hardMax)');
+
+  const big = makePayload(24, 1);
+  big.books[0].doors.forEach((d, i) => {
+    d.street = i < 12 ? 'N ORCHARD AVE' : 'S CEDAR ST';
+    d.addressLine1 = `${100 + i} ${d.street}`;
+  });
+  const split = splitBooks(big, 12); // two parts, cut exactly at the street change
+  assert.equal(split.books.length, 2);
+  assert.deepEqual(split.books.map((b) => b.doorCount), [12, 12]);
+  const doc = await renderPacketPdf(split, DEFAULT_SETTINGS);
+  const all = pageTexts(doc).join('\n');
+  assert.ok(/S CEDAR ST/.test(all));
+  assert.ok(/doors 1-12/.test(all), 'each part bands its own doors 1..n');
+  assert.ok(!/doors 13-24/.test(all), 'no band may carry the parent book’s numbering');
+});
+
+test('split parts each draw their own cover map', async () => {
+  await withFakeBrowser(async () => {
+    const payload = splitBooks(geoPayload(80), 35);
+    assert.equal(payload.books.length, 2);
+    // Distinct part ids are what keep the cover-map cache from serving part 1's basemap to
+    // every part — the same trap geoPayload's per-fixture ids dodge.
+    assert.notEqual(payload.books[0].id, payload.books[1].id);
+    const doc = await renderPacketPdf(payload, { ...DEFAULT_SETTINGS, mapboxToken: 'pk.test' });
+    const covers = pageTexts(doc).filter((p) => p.includes('TALLY AS YOU GO'));
+    assert.equal(covers.length, 2);
+    for (const cover of covers) {
+      assert.ok(/\/I\d|\/XObject/.test(cover), 'every part cover must place its own basemap');
+    }
+  });
+});
+
+test('the filename counts packets when a split happened', () => {
+  // One source book split in two: keep the book's identity, say how many packets.
+  const one = splitBooks(makePayload(80, 1), 35);
+  assert.equal(
+    packetFilename(one, { layout: 'survey' }),
+    'riverside-city-council-2026-ward-5-book-c-2-packets-survey-packet-2026-08-06.pdf'
+  );
+
+  // Several source books with at least one split: no single name, count the packets.
+  const two = makePayload(80, 1);
+  two.books.push({ ...two.books[0], id: 'b2', name: 'Book D' });
+  const out = splitBooks(two, 35);
+  assert.equal(out.books.length, 4);
+  assert.match(packetFilename(out, { layout: 'survey' }), /-4-packets-survey-packet-2026-08-06\.pdf$/);
+
+  // Knob off → identity payload → the unsplit filename, byte-identical.
+  const off = splitBooks(makePayload(1, 1), 0);
+  assert.match(packetFilename(off, { layout: 'survey' }), /-ward-5-book-c-survey-packet-2026-08-06\.pdf$/);
+});
+
+test('a long hand-out sheet continues on reserved pages up front, never after the books', async () => {
+  // drawManifest runs LAST (it needs the page ranges), so a raw addPage() there appends to
+  // the END of the document — the custody sheet's tail printed after every book, unbranded
+  // and unnumbered. Splitting made long manifests mainline (120 packets at a 10-door knob),
+  // so the pages are now reserved up front; this pins that the overflow rows land there.
+  const p = makePayload(2, 1);
+  const base = { ...p.books[0], survey: null };
+  p.books = Array.from({ length: 40 }, (_, i) => ({ ...base, id: `mb${i}`, name: `Bk-${i + 1}-x` }));
+  p.totals = { books: 40, doors: 80, voters: 80, omitted: 0 };
+  const doc = await renderPacketPdf(p, { ...DEFAULT_SETTINGS, layout: 'field' });
+  const pages = pageTexts(doc);
+
+  const firstCover = pages.findIndex((t) => t.includes('TALLY AS YOU GO'));
+  assert.ok(pages[0].includes('Packet run'), 'the hand-out sheet leads the document');
+  assert.ok(firstCover >= 2, `40 rows must overflow one manifest page (first cover on page ${firstCover + 1})`);
+  const manifest = pages.slice(0, firstCover).join('\n');
+  for (let i = 1; i <= 40; i++) {
+    assert.ok(manifest.includes(`Bk-${i}-x`), `packet ${i}'s row must be on the up-front manifest pages`);
+  }
+  // The last page is a book body page with the print-only footer — not an orphan manifest tail.
+  assert.ok(pages[pages.length - 1].includes('print only'), 'no unbranded manifest page at the end');
+});
+
+// Pinned like PAGE_PIN_60_DOORS: the split fixture's page count moves only on deliberate
+// layout changes. 80 doors → 2 parts of 40; each part carries a cover and (survey layout)
+// a script page, which is the paper cost of splitting — visible here, and live in the studio.
+// 83 = manifest + 2 × (cover + 40 atomic survey doors at one per page) — the script page
+// shares the first door page, exactly as in the unsplit pin's accounting. 83 -> 85 when
+// packets began starting on a fresh sheet: the manifest and the first part are both odd, so
+// each takes one spare page rather than handing its last sheet's back to the next cover.
+const PAGE_PIN_80_DOORS_SPLIT_35 = 85;
+
+test('page count for a split fixture is pinned', async () => {
+  const doc = await renderPacketPdf(splitBooks(makePayload(80, 2), 35), DEFAULT_SETTINGS);
+  assert.equal(doc.getNumberOfPages(), PAGE_PIN_80_DOORS_SPLIT_35);
 });

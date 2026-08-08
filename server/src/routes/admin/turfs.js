@@ -974,6 +974,21 @@ router.get('/doors', async (req, res, next) => {
     // unit list without a per-unit fetch.
     const placed = households.filter((h) => h.location?.coordinates?.length === 2);
 
+    // door → book resolved from THIS PASS's own books, never from Household.turfId.
+    // The mirror is single-valued and always points at the LATEST cut, so prepping a
+    // future draft round moves it off this pass's books — which made this page hide
+    // 12k live doors as "not in any book" mid-campaign. Turf.householdIds is the
+    // authoritative membership (it is what the phones resolve against), so this map
+    // reads it too and the two can no longer disagree.
+    const passTurfs = await Turf.find(
+      { passId: pass._id, status: { $ne: 'archived' } },
+      { householdIds: 1 }
+    ).lean();
+    const bookOf = new Map();
+    for (const t of passTurfs) {
+      for (const hid of t.householdIds || []) bookOf.set(String(hid), String(t._id));
+    }
+
     // withStatus=1 (the web cut map): each door's status FOR THIS ROUND, so the map can
     // color houses by what happened this pass instead of only by which book owns them.
     // Opt-in rather than unconditional — the mobile assign map (slim=1) colors by book and
@@ -993,7 +1008,7 @@ router.get('/doors', async (req, res, next) => {
         id: String(h._id),
         lng: h.location.coordinates[0],
         lat: h.location.coordinates[1],
-        turfId: h.turfId ? String(h.turfId) : null,
+        turfId: bookOf.get(String(h._id)) || null,
         status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
       };
       if (passStatusMap) d.passStatus = passStatusMap.get(String(h._id))?.status || 'unknocked';

@@ -23,6 +23,7 @@
     "audit:mobile-api": "node scripts/mobile-api-surface.mjs",
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
+    "remirror:pass": "npm --prefix server run remirror:pass --",
     "sweep:raw-imports": "npm --prefix server run sweep:raw-imports --",
     "recompute:territories": "npm --prefix server run recompute:territories --",
     "audit:orphaned-reviews": "npm --prefix server run audit:orphaned-reviews --",

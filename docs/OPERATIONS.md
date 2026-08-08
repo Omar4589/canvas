@@ -197,6 +197,22 @@ deleted for 180 days. Set it up now anyway, so you don't forget.
 
 ## One-off commands
 
+### Repair a round's door mirror after cutting a future round
+
+`Household.turfId`/`walkOrder` mirror the **latest cut anywhere in the campaign**, so cutting a
+draft round (the walk-packet prep flow) moves them off the live round's books. Book membership,
+assignments and knock history are untouched — but the phone's list-view sort reads `walkOrder`,
+so restore the mirror after any cut of a non-live round:
+
+```
+npm run remirror:pass -- --pass <livePassId>            # dry run: counts, writes nothing
+npm run remirror:pass -- --pass <livePassId> --apply
+```
+
+Idempotent — it rewrites each member door's mirror from its own book's stored order, only for
+the named pass's published books. (The admin cut map and Add-as-new-book no longer read the
+mirror at all, so they need no repair.)
+
 ### Lock the store reviewers' demo account (do this before you submit)
 
 An App Store or Play reviewer **will press "Delete my account"** — testing that button is literally what
