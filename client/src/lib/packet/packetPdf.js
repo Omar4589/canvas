@@ -818,9 +818,15 @@ export const renderPacketPdf = async (payload, settings) => {
       ctx.manifestPages.push(doc.getNumberOfPages());
     }
     ctx.manifestPage = ctx.manifestPages[0];
-    // An odd manifest would push the first book's cover onto its back side. This spacer stays
-    // genuinely blank — it belongs to no book, so it gets no band, no footer and no number.
-    if (duplex && doc.getNumberOfPages() % 2 === 1) newPage(null);
+    // An odd manifest would push the first book's cover onto its back side. The spacer
+    // belongs to no book — no band, no footer, no number — but it says WHY it exists,
+    // because a wordless blank page reads as a printer fault in the preview and on paper.
+    if (duplex && doc.getNumberOfPages() % 2 === 1) {
+      newPage(null);
+      setFont(doc, TYPE.micro, 'normal', SUBTLE);
+      text(doc, 'This side is left blank so the first packet starts on its own sheet.',
+        PAGE.W / 2, PAGE.H / 2, { align: 'center' });
+    }
   }
 
   for (const [bookIdx, book] of payload.books.entries()) {
@@ -1015,9 +1021,12 @@ export const renderManifestPdf = async (payload, settings, pageCountByBook = new
   return doc;
 };
 
-// campaign · book · which kind of packet · the day it was built. A multi-book run has no single
-// book name, so it says how many. The date stays because a packet goes stale — the guidance is
-// to print the morning of, and without it a Wednesday file and a Saturday file look alike.
+// book · campaign · which kind of packet · the day it was built. The book leads because that
+// is how a table of printouts (or a folder of per-packet files) gets scanned — every file
+// starting with the campaign name made the one difference the LAST thing the eye reached. A
+// multi-book run has no single book name, so it says how many. The date stays because a packet
+// goes stale — the guidance is to print the morning of, and without it a Wednesday file and a
+// Saturday file look alike.
 //
 // A SPLIT run counts packets, not books: one book split four ways is "book-c-4-packets", and a
 // mixed run just says how many packets came out. Unsplit filenames are byte-identical to before.
@@ -1042,5 +1051,5 @@ export const packetFilename = (payload, settings = {}) => {
     ? 'survey-packet'
     : 'field-list';
   const day = new Date(payload.generatedAt).toISOString().slice(0, 10);
-  return `${camp}-${which}-${kind}-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
+  return `${which}-${camp}-${kind}-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
 };

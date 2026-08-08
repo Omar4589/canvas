@@ -479,17 +479,19 @@ test('the race is the masthead', async () => {
   assert.ok(!/\d:\d\d\s*(AM|PM)/.test(pageTexts(doc).join('\n')), 'no time of day anywhere');
 });
 
-test('the filename is campaign, book, kind, date', () => {
+test('the filename is book, campaign, kind, date', () => {
+  // The book leads: a folder of per-packet files sorts and scans by the one thing that
+  // differs between them, instead of burying it behind an identical campaign prefix.
   const p = makePayload(1, 1);
   p.campaign.name = 'Florida - HD54 Randy Maggard';
   p.books[0].name = 'Book 33';
   assert.equal(
     packetFilename(p, { layout: 'survey' }),
-    'florida-hd54-randy-maggard-book-33-survey-packet-2026-08-06.pdf'
+    'book-33-florida-hd54-randy-maggard-survey-packet-2026-08-06.pdf'
   );
   assert.equal(
     packetFilename(p, { layout: 'field' }),
-    'florida-hd54-randy-maggard-book-33-field-list-2026-08-06.pdf'
+    'book-33-florida-hd54-randy-maggard-field-list-2026-08-06.pdf'
   );
 
   // Asking for a survey packet on a campaign with no survey prints the field list, so the
@@ -500,7 +502,7 @@ test('the filename is campaign, book, kind, date', () => {
 
   // A run of several books has no one book name to use, so it says how many.
   p.books.push({ ...p.books[0], id: 'b2', name: 'Book 34' });
-  assert.match(packetFilename(p, { layout: 'survey' }), /-2-books-survey-packet-2026-08-06\.pdf$/);
+  assert.match(packetFilename(p, { layout: 'survey' }), /^2-books-.*-survey-packet-2026-08-06\.pdf$/);
 
   // Punctuation collapses; nothing trails a hyphen into ".pdf".
   const odd = makePayload(1, 1);
@@ -508,7 +510,7 @@ test('the filename is campaign, book, kind, date', () => {
   odd.books[0].name = 'Ward 5 / Book C';
   assert.equal(
     packetFilename(odd, { layout: 'field' }),
-    'mayor-s-race-2026-ward-5-book-c-field-list-2026-08-06.pdf'
+    'ward-5-book-c-mayor-s-race-2026-field-list-2026-08-06.pdf'
   );
 });
 
@@ -591,7 +593,7 @@ test('the filename counts packets when a split happened', () => {
   const one = splitBooks(makePayload(80, 1), 35);
   assert.equal(
     packetFilename(one, { layout: 'survey' }),
-    'riverside-city-council-2026-ward-5-book-c-2-packets-survey-packet-2026-08-06.pdf'
+    'ward-5-book-c-2-packets-riverside-city-council-2026-survey-packet-2026-08-06.pdf'
   );
 
   // Several source books with at least one split: no single name, count the packets.
@@ -599,11 +601,11 @@ test('the filename counts packets when a split happened', () => {
   two.books.push({ ...two.books[0], id: 'b2', name: 'Book D' });
   const out = splitBooks(two, 35);
   assert.equal(out.books.length, 4);
-  assert.match(packetFilename(out, { layout: 'survey' }), /-4-packets-survey-packet-2026-08-06\.pdf$/);
+  assert.match(packetFilename(out, { layout: 'survey' }), /^4-packets-.*-survey-packet-2026-08-06\.pdf$/);
 
   // Knob off → identity payload → the unsplit filename, byte-identical.
   const off = splitBooks(makePayload(1, 1), 0);
-  assert.match(packetFilename(off, { layout: 'survey' }), /-ward-5-book-c-survey-packet-2026-08-06\.pdf$/);
+  assert.match(packetFilename(off, { layout: 'survey' }), /^ward-5-book-c-.*-survey-packet-2026-08-06\.pdf$/);
 });
 
 test('a long hand-out sheet continues on reserved pages up front, never after the books', async () => {

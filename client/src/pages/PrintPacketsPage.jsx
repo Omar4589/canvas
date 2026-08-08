@@ -215,7 +215,7 @@ export default function PrintPacketsPage() {
       // custody: each volunteer gets a file, and reprinting one packet is opening one file
       // rather than hunting page ranges in a 300-page blob. Each per-packet render is a
       // single-book payload, so it naturally skips the duplex padding and inline manifest.
-      if (splitPayload.books.length > 1) {
+      if (effective.downloadAs === 'zip' && splitPayload.books.length > 1) {
         const { entries, zipName } = packetZipPlan(splitPayload, effective);
         const files = [];
         const pageCounts = new Map();

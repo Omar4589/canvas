@@ -252,7 +252,7 @@ router.get('/bootstrap', async (req, res, next) => {
       ...KNOCKABLE_DOOR_FILTER,
       'location.coordinates': { $exists: true, $ne: null },
     };
-    const { scope, doorPass } = await canvasserScopeWithPasses(req, campaign);
+    const { scope, doorPass, doorTurf } = await canvasserScopeWithPasses(req, campaign);
     householdFilter._id = { $in: scope };
 
     const households = await Household.find(householdFilter, {
@@ -285,6 +285,17 @@ router.get('/bootstrap', async (req, res, next) => {
       if (s) {
         h.status = s.status;
         h.lastActionAt = s.lastActionAt;
+      }
+      // turfId/walkOrder rewritten the same way as status above: FROM THE CANVASSER'S OWN
+      // ASSIGNED BOOK, never the raw Household mirror. The shipped app filters doors into
+      // books by h.turfId, and the mirror follows the latest cut anywhere in the campaign —
+      // cutting a draft round used to blank every phone's book until the mirror was
+      // repaired. The door is in scope precisely because it is in one of the canvasser's
+      // books, so the map always has it.
+      const t = doorTurf.get(String(h._id));
+      if (t) {
+        h.turfId = t.turfId;
+        h.walkOrder = t.walkOrder;
       }
     }
 

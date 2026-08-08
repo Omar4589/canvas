@@ -46,12 +46,20 @@ export async function canvasserScopeWithPasses(req, campaign) {
   ).lean();
   const scope = [];
   const doorPass = new Map();
+  // door → the canvasser's own book, with the door's position in that book's stored walk
+  // order. The bootstrap stamps these OVER Household.turfId/walkOrder on the wire: the
+  // shipped app groups doors into books by h.turfId (mobile books.jsx / map.jsx), and the
+  // raw mirror points at the LATEST cut anywhere in the campaign — so cutting a future
+  // draft round made every canvasser's doors vanish from their phone. Stamping from the
+  // assigned book heals every installed bundle with no app update.
+  const doorTurf = new Map();
   for (const b of books) {
     const pid = b.passId ? String(b.passId) : null;
-    for (const hid of b.householdIds || []) {
+    (b.householdIds || []).forEach((hid, idx) => {
       scope.push(hid);
       if (pid) doorPass.set(String(hid), pid);
-    }
+      doorTurf.set(String(hid), { turfId: String(b._id), walkOrder: idx });
+    });
   }
-  return { scope, doorPass };
+  return { scope, doorPass, doorTurf };
 }

@@ -116,10 +116,13 @@ ranking by size), and a tally box.
 
 On a very large book the street list is **capped to what fits** and ends with "+ N more streets"
 — the cover doesn't run onto a second sheet, and every address is listed inside anyway.
-**A run of several packets downloads as a folder (ZIP): one PDF per packet, plus the hand-out
-sheet as its own file.** The unit of download matches the unit of custody — each volunteer gets
-a file, and reprinting one packet is opening one file rather than hunting page ranges in a
-300-page blob. A one-packet run stays a single plain PDF. (Technical: the ZIP is store-only —
+**A run of several packets downloads either way — your choice, next to the Download button.**
+**One PDF** (the default) is one print job: click Print once and the whole run comes out, and
+because every packet is padded to start on the front of a fresh sheet, double-sided printing
+never fuses two packets onto one piece of paper. **File per packet** downloads a folder (ZIP):
+one PDF per packet plus the hand-out sheet as its own file, so each volunteer gets a file and
+reprinting one packet is opening one file rather than hunting page ranges in a 300-page blob.
+A one-packet run is always a single plain PDF. (Technical: the ZIP is store-only —
 the PDFs are already compressed — written by
 [`lib/packet/zipStore.js`](../client/src/lib/packet/zipStore.js) with no new dependency, and
 each per-packet file is a single-book render, so it naturally carries no duplex padding or
@@ -536,15 +539,18 @@ words without shouting.
 
 ## Filenames
 
-`{campaign}-{book}-{kind}-{YYYY-MM-DD}.pdf`, e.g.
-`florida-hd54-randy-maggard-book-33-survey-packet-2026-08-07.pdf` or `…-book-33-field-list-…`.
-The kind is the **resolved** layout, not the requested one: asking for a survey packet on a
-campaign with no survey prints the field list, and the filename has to say what is inside. Punctuation collapses to single
-hyphens, the campaign truncates at 40 characters and the book at 30, and nothing trails a hyphen
-into the extension. A multi-book run is one PDF with no single book name, so it says how many:
-`…-5-books-survey-packet-…`. A **split** run counts packets instead: one book split four ways keeps its
-identity — `…-book-33-4-packets-survey-packet-…` — and a mixed run of several source books says
-`…-7-packets-…`. Unsplit filenames are byte-identical to before the knob existed. The date stays
+`{book}-{campaign}-{kind}-{YYYY-MM-DD}.pdf`, e.g.
+`book-33-florida-hd54-randy-maggard-survey-packet-2026-08-07.pdf` or `book-33-…-field-list-…`.
+The **book leads** — a table of printouts or a folder of per-packet files gets scanned by the
+one thing that differs between them, so the campaign prefix no longer buries it. The kind is
+the **resolved** layout, not the requested one: asking for a survey packet on a campaign with
+no survey prints the field list, and the filename has to say what is inside. Punctuation
+collapses to single hyphens, the campaign truncates at 40 characters and the book at 30, and
+nothing trails a hyphen into the extension. A multi-book run has no single book name, so it
+says how many, still first: `5-books-{campaign}-survey-packet-…`. A **split** run counts
+packets instead: one book split four ways keeps its identity —
+`{book}-4-packets-{campaign}-…` — and a mixed run of several source books says
+`7-packets-…`. The date stays
 because a packet goes stale — the guidance is to print the morning of, and without it a
 Wednesday file and a Saturday file are indistinguishable.
 

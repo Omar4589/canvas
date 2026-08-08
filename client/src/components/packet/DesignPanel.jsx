@@ -153,6 +153,30 @@ export default function DesignPanel({
       </div>
 
       <div className="pt-4 border-t border-border mt-4">
+        {/* Only a real choice when the run is several packets — one packet is one PDF. */}
+        {hasPick && packetCount > 1 && (
+          <div className="flex items-center gap-1 mb-3" role="group" aria-label="Download as">
+            {[
+              { id: 'single', label: 'One PDF' },
+              { id: 'zip', label: 'File per packet' },
+            ].map((o) => {
+              const on = (settings.downloadAs || 'single') === o.id;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => set({ downloadAs: o.id })}
+                  aria-pressed={on}
+                  className={`flex-1 px-2 py-1.5 rounded-md border text-xs transition-colors ${
+                    on ? 'border-brand-accent bg-brand-tint text-fg font-medium' : 'border-border bg-card text-fg-muted hover:bg-sunken'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* Nothing picked yet means no numbers to show — a bare "0 doors" reads as an error. */}
         {hasPick && (
           <div className="flex items-baseline justify-between text-sm mb-2">
@@ -167,7 +191,11 @@ export default function DesignPanel({
         </Button>
         {hasPick && packetCount > 1 && (
           <p className="mt-1.5 text-[11px] text-fg-muted text-center">
-            Downloads a folder (ZIP) — one PDF per packet, plus the hand-out sheet.
+            {(settings.downloadAs || 'single') === 'zip'
+              ? 'A folder (ZIP): one PDF per packet, plus the hand-out sheet.'
+              : settings.duplex
+                ? 'One PDF, one print job — packets never share a sheet.'
+                : 'One PDF, one print job.'}
           </p>
         )}
       </div>

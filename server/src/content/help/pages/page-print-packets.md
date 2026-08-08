@@ -39,7 +39,12 @@ If the campaign has no survey set up, the survey layout is unavailable and you'l
 
 ## What the download looks like
 
-One packet downloads as a single PDF. **Several packets download as a folder (ZIP) with one PDF per packet**, named for its book, plus the hand-out sheet as its own file — so you can print or reprint any one packet without touching the rest, and hand each volunteer their own file.
+One packet downloads as a single PDF. Several packets download **your way — pick next to the Download button**:
+
+- **One PDF** (the default) — one file, one print job. Every packet starts on the front of a fresh sheet, so double-sided printing never runs two packets onto one piece of paper.
+- **File per packet** — a folder (ZIP) with one PDF per packet, each named for its book, plus the hand-out sheet as its own file. Print or reprint any one packet without touching the rest, or hand each volunteer their own file.
+
+Files are named book first — `book-33-yourcampaign-field-list-2026-08-07.pdf` — so a folder of packets sorts by the thing that differs.
 
 ## The other controls
 

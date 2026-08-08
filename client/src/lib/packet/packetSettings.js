@@ -28,6 +28,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Pad each packet to an even page count so every cover lands on a FRESH SHEET. Without it a
   // duplexed run fuses the end of one book to the start of the next on a single piece of paper.
   duplex: true,
+  // How a multi-packet run downloads. 'single' — one PDF, one click prints the whole run
+  // (safe front-and-back because of the duplex padding above). 'zip' — one PDF per packet
+  // plus the hand-out sheet, for handing each volunteer their own file. A one-packet run is
+  // always a single PDF either way.
+  downloadAs: 'single',
   showOutcome: true,
   showPriorStatus: true,
   showScriptPage: true,

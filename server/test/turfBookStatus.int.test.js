@@ -32,6 +32,8 @@ const { Household } = await import('../src/models/Household.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { addSupplementalBooks } = await import('../src/services/turf/generateTurf.js');
+const { TurfAssignment } = await import('../src/models/TurfAssignment.js');
+const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -133,9 +135,9 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, effort, pass1, pass2, bookA, bookB, r1Book, admin, lead,
+    org, camp, effort, pass1, pass2, bookA, bookB, r1Book, admin, lead, canv,
     d1, d2, d3, d4, d5, d6,
-    adminTok: signUserToken(admin), leadTok: signUserToken(lead),
+    adminTok: signUserToken(admin), leadTok: signUserToken(lead), canvTok: signUserToken(canv),
   });
 });
 
@@ -320,4 +322,39 @@ test('a door another round\'s cut claimed still flows into a supplemental book h
   // And doors already in one of THIS pass's books stay out — added exactly the one door.
   await Turf.deleteMany({ _id: { $in: result.bookIds } });
   await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
+});
+
+test('bootstrap doors carry the CANVASSER\'S OWN book id, whatever the mirror says', { skip }, async () => {
+  // The shipped app groups doors into books by h.turfId (mobile books.jsx / map.jsx). The raw
+  // Household mirror follows the latest cut anywhere in the campaign, so cutting a draft round
+  // blanked every phone: doors arrived, matched no book, and vanished from the screen. The
+  // wire value must come from the canvasser's ASSIGNED book — like status/lastActionAt already
+  // do — so an installed bundle survives any future cut with no app update and no data repair.
+  await CampaignAssignment.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, userId: ctx.canv._id, assignedBy: ctx.admin._id,
+  });
+  await TurfAssignment.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: ctx.pass2._id,
+    turfId: ctx.bookA._id, userId: ctx.canv._id, assignedBy: ctx.admin._id,
+  });
+  // Simulate the incident: a "draft cut" steals the mirror for bookA's doors.
+  await Household.updateMany(
+    { _id: { $in: ctx.bookA.householdIds } },
+    { $set: { turfId: ctx.r1Book._id, walkOrder: 99 } }
+  );
+  const r = await call('GET', `/api/mobile/bootstrap?campaignId=${ctx.camp._id}`, {
+    token: ctx.canvTok, orgId: ctx.org._id,
+  });
+  assert.strictEqual(r.status, 200);
+  const hhs = r.json.households || [];
+  assert.ok(hhs.length >= 4, `expected bookA's doors on the wire, got ${hhs.length}`);
+  const ids = ctx.bookA.householdIds.map(String);
+  for (const h of hhs) {
+    assert.strictEqual(h.turfId, String(ctx.bookA._id),
+      'the wire turfId must be the assigned book, not the stolen mirror');
+    assert.strictEqual(h.walkOrder, ids.indexOf(String(h.id ?? h._id)),
+      'walkOrder must be the door\'s position in ITS book, not the draft\'s');
+  }
+  // Restore the setup's mirror state for any later test.
+  await Household.updateMany({ _id: { $in: ctx.bookA.householdIds } }, { $set: { turfId: ctx.bookA._id } });
 });
