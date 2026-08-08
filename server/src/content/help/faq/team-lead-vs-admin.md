@@ -25,4 +25,4 @@ So a lead runs the operation; an admin owns the organization.
 
 **Users, scoped.** In the mobile app a team lead **does** get the Users page — showing only the people on campaigns they manage, never the whole organization. There a lead can create canvassers onto their campaign (with an optional coordinator), set **temporary passwords**, and **switch canvasser accounts off and back on**. That's the whole list: a lead can't change anyone's role, edit their name or email, or touch admins or fellow leads — the server refuses, not just the app.
 
-See [User roles and your team](roles-and-team) and [Why doesn't my other organization show up when I sign in?](why-cant-i-see-my-other-org).
+See also [Why doesn't my other organization show up when I sign in?](why-cant-i-see-my-other-org). If you're a lead, start with [Get started as a team lead](lead-getting-started); admins, [User roles and your team](roles-and-team) covers granting and scoping a lead.

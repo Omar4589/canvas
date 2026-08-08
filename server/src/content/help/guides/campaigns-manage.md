@@ -13,7 +13,9 @@ A campaign is the container for one canvassing project — its voters, walk list
 
 ## Create one
 
-Open **Campaigns → New campaign**. A drawer asks for a name, a type (survey or lit drop), a state, and a timezone (which auto-fills from the state), plus optional **key dates**. You don't need a survey yet.
+Creating a campaign is an **admin** action — as a team lead you won't see the button; an admin creates the campaign and [grants it to you](team-lead-vs-admin), and from there it's yours to run.
+
+Admins: open **Campaigns → New campaign**. A drawer asks for a name, a type (survey or lit drop), a state, and a timezone (which auto-fills from the state), plus optional **key dates**. You don't need a survey yet.
 
 Once it's created, drill into the campaign and follow the **Setup progress** card on its dashboard — a live checklist that walks you from importing voters through building [walk lists](walk-lists), cutting [books](turf-and-books), assigning canvassers, and activating a [pass](passes). New here? See [Getting started as a lead](lead-getting-started).
 
@@ -22,6 +24,8 @@ Once it's created, drill into the campaign and follow the **Setup progress** car
 The Campaigns page opens on a summary strip — how many campaigns, how many active, total households and houses knocked — above the list. Toggle between **Cards** and **Table**, search by name or state, and sort by recent, name, households, knocked %, or setup progress. Finished campaigns tuck into an archived section at the bottom, and each card or row has a **⋮ menu** for View dashboard, Assignments, and (for admins) Edit, Archive, and Delete.
 
 ## Editing — what you can change, and when
+
+The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archive and Delete. As a team lead the campaign setting you change yourself is its **survey** — attach or swap it from the campaign's Survey tab (see [surveys](surveys)); for the fields below, ask an admin.
 
 - **Name and state** — always editable.
 - **Timezone** — editable, but once there's field activity you'll see a warning: changing it re-buckets every past daily stat. Nothing is lost and all-time totals stay the same, but day-by-day numbers shift.

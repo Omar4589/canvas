@@ -33,9 +33,20 @@ function SharePanel({ campaignId }) {
   const shares = q.data?.shares || [];
   const inval = () => qc.invalidateQueries({ queryKey: ['admin', 'client-report-shares', campaignId] });
 
+  // The minted password from the last create — the server generates one when we don't send a
+  // password and returns it exactly ONCE (it's hashed at rest and can never be fetched again),
+  // so it must be caught here and shown, or the new link is locked with a password nobody knows.
+  const [minted, setMinted] = useState(null);
+  const [mintedCopied, setMintedCopied] = useState(false);
   const createM = useMutation({
     mutationFn: (body) => api('/admin/client-reports/shares', { method: 'POST', body }),
-    onSuccess: inval,
+    onSuccess: (data) => {
+      if (data?.generatedPassword) {
+        setMinted(data.generatedPassword);
+        setMintedCopied(false);
+      }
+      inval();
+    },
   });
   const patchM = useMutation({
     mutationFn: ({ id, body }) => api(`/admin/client-reports/shares/${id}`, { method: 'PATCH', body }),
@@ -52,7 +63,24 @@ function SharePanel({ campaignId }) {
 
   const urlFor = (token) => `${window.location.origin}/r/${token}`;
   const copyTimerRef = useRef(null);
-  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
+  const mintedTimerRef = useRef(null);
+  useEffect(
+    () => () => {
+      clearTimeout(copyTimerRef.current);
+      clearTimeout(mintedTimerRef.current);
+    },
+    []
+  );
+  function copyMinted() {
+    navigator.clipboard
+      ?.writeText(minted)
+      .then(() => {
+        setMintedCopied(true);
+        clearTimeout(mintedTimerRef.current);
+        mintedTimerRef.current = setTimeout(() => setMintedCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
   function copy(token) {
     navigator.clipboard
       ?.writeText(urlFor(token))
@@ -69,8 +97,9 @@ function SharePanel({ campaignId }) {
         <div>
           <div className="text-sm font-semibold text-fg">Share link</div>
           <div className="text-xs text-fg-muted">
-            A public link to this campaign's published reports (latest + history). Anyone with it can
-            view — add a password and revoke/rotate any time.
+            A public link to this campaign's published reports (latest + history). Every link is
+            password-protected and expires on its own — set your own password, or one is generated
+            and shown to you once when the link is created.
           </div>
         </div>
         <Button
@@ -83,6 +112,30 @@ function SharePanel({ campaignId }) {
           + New link
         </Button>
       </div>
+      {minted && (
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning-tint p-3">
+          <div className="text-sm font-medium text-fg">Link created — this is its password:</div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <code className="rounded border border-border bg-card px-2 py-1 text-sm font-medium text-fg">
+              {minted}
+            </code>
+            <Button size="sm" variant="secondary" onClick={copyMinted}>
+              {mintedCopied ? 'Copied!' : 'Copy password'}
+            </Button>
+            <button
+              type="button"
+              className="text-xs text-fg-muted hover:underline"
+              onClick={() => setMinted(null)}
+            >
+              Done — I saved it
+            </button>
+          </div>
+          <div className="mt-1.5 text-xs text-fg-muted">
+            Shown once and never again — send it to your client along with the link. Lost it? Use{' '}
+            <span className="font-medium">Set password</span> on the link to replace it.
+          </div>
+        </div>
+      )}
       {q.isLoading && <div className="text-sm text-fg-muted">Loading…</div>}
       {!q.isLoading && shares.length === 0 && (
         <div className="text-sm text-fg-muted">No share link yet — create one to send to your client.</div>
@@ -111,6 +164,7 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
   const [label, setLabel] = useState(s.label || '');
   const [pwOpen, setPwOpen] = useState(false);
   const [pw, setPw] = useState('');
+  const expired = s.expiresAt && new Date(s.expiresAt) <= new Date();
 
   // Re-sync when the server value changes (after a save invalidates the list).
   useEffect(() => setLabel(s.label || ''), [s.label]);
@@ -156,9 +210,15 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
           {copied ? 'Copied!' : 'Copy'}
         </Button>
         {!s.isActive && <Badge variant="neutral">disabled</Badge>}
+        {expired && <Badge variant="danger">expired</Badge>}
         {s.hasPassword && (
           <Badge variant="info" dot>
             password
+          </Badge>
+        )}
+        {s.isLegacyOpen && s.isActive && (
+          <Badge variant="warning" dot>
+            open link — add a password
           </Badge>
         )}
       </div>
@@ -218,9 +278,10 @@ function ShareRow({ s, url, copied, onCopy, patchM, rotateM, deleteM }) {
         >
           Delete
         </button>
-        {s.lastAccessedAt && (
-          <span className="ml-auto text-fg-subtle">Last opened {formatDateInTz(s.lastAccessedAt)}</span>
-        )}
+        <span className="ml-auto flex flex-wrap items-center gap-3 text-fg-subtle">
+          {s.expiresAt && !expired && <span>Expires {formatDateInTz(s.expiresAt)}</span>}
+          {s.lastAccessedAt && <span>Last opened {formatDateInTz(s.lastAccessedAt)}</span>}
+        </span>
       </div>
     </div>
   );

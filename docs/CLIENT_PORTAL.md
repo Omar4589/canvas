@@ -3,8 +3,8 @@
 How you deliver the weekly report you used to assemble by hand and email — an "Activity at a glance"
 KPI strip, a support breakdown, survey and voter-contact breakdowns, your written observations, and an
 interactive map of where the team has been. You build a report, review it, and publish it; recipients
-open a **public link** (optionally password-protected) and see the campaign's published reports —
-**latest plus the full weekly history** — with no login. Reports are **frozen snapshots**: once
+open a **public link** (always password-protected — set your own or the app mints one) and see the
+campaign's published reports — **latest plus the full weekly history** — with no login. Reports are **frozen snapshots**: once
 published, a report never changes, and next week's report just appears at the same link.
 
 - **Part 1 — For everyone** is plain language: what a recipient sees, how you build and publish a
@@ -27,7 +27,8 @@ map rendering), [USERS.md](USERS.md) (admin/lead/canvasser roles), [TIMEZONES.md
 You share a link like `https://doorline.app/r/<token>`. Anyone with it (the candidate, a consultant,
 the campaign manager, your boss, the state director — one person or many) opens a clean **report hub**:
 the **weekly reports for that campaign, newest first**, with no admin tools and no account to create.
-If you put a password on the link, they're asked for it once (it's remembered for that browser tab).
+The link has a password (every link does — you hand it over with the URL); they're asked for it once
+(it's remembered for that browser tab).
 
 A report reads top to bottom as a document, in this order:
 
@@ -97,17 +98,27 @@ published report.
 
 On the campaign's **Client Reports** tab, use the **Share link** panel:
 
-- **+ New link** creates a public link to this campaign's published reports. **Copy** it and send it to
-  anyone — they don't need an account. Give each link a **label** (e.g. *Candidate*, *Internal*) inline.
+- **+ New link** creates a public link to this campaign's published reports — **and a password with it**:
+  every new link is password-protected, and when the operator doesn't supply a password the server mints
+  a strong one and returns it **once**, in the create response. The panel shows it in a one-time callout
+  ("shown once and never again") with a copy button — it's bcrypt-hashed at rest and can never be
+  displayed again. **Copy** the URL and send both to the client — they don't need an account. Give each
+  link a **label** (e.g. *Candidate*, *Internal*) inline.
 - **Set / Change password** is an **inline field** (no browser prompt). A password can be **replaced
   but never removed** — the server refuses removal (`SHARE_PASSWORD_REQUIRED`) so a protected link
-  can't quietly become an open one; rotate the link if a password is lost. (A legacy open link can
-  still have a password *added* — that's the one permitted direction.)
-- **Rotate** issues a fresh URL and **instantly kills the old one** (use it if a link leaked).
+  can't quietly become an open one; if a password is lost, **Set password** replaces it. (A legacy open
+  link can still have a password *added* — that's the one permitted direction.)
+- **Rotate** issues a fresh URL and **instantly kills the old one** (use it if a link leaked). The
+  password carries over — rotate changes the URL, not the password.
 - **Disable / Enable** turns a link off without deleting it; **Delete** removes it for good. Each row
-  shows when the link was **last opened**.
-- You can keep **more than one link per campaign** (e.g. a password-protected one for the candidate and
-  an open one for internal staff), each revocable on its own.
+  shows when the link was **last opened** and when it **expires** — every new link expires
+  (`SHARE_LINK_DEFAULT_DAYS`, default 90; an expired row is badged **expired**). Past expiry, the
+  operator creates a fresh link.
+- You can keep **more than one link per campaign** (e.g. one for the candidate and one for internal
+  staff), each with its own password and each revocable on its own.
+- A link from before passwords+expiry became required keeps working (`isLegacyOpen`) and is badged
+  **open link — add a password** in the panel; the admin-only **revoke-legacy** sweep kills all of
+  them at once, deliberately never automatically.
 
 A link always shows the **latest report plus every prior week** for that campaign, and new reports you
 publish appear automatically — so you share it once. Recipients only ever see **published** reports for
@@ -221,7 +232,9 @@ draft.
 ## Endpoints
 
 **Admin builder** — server routes are mounted at `/admin/client-reports` (unchanged), gated
-`requireOrgRole('admin')` and filtered by `campaignId` in query/body. The admin **UI** for these lives
+`requireOrgRole('admin', 'lead')` with every handler authorizing the specific campaign via
+`manages()` (`canManageCampaign` — an admin passes everywhere, a lead only on granted campaigns) and
+filtered by `campaignId` in query/body. The admin **UI** for these lives
 inside the campaign drill-in — list at `/campaigns/:campaignId/reports`
 ([ClientReportsPage](../client/src/pages/ClientReportsPage.jsx)), builder at
 `/campaigns/:campaignId/reports/:id` ([ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx)),
@@ -235,12 +248,17 @@ otherwise, and is frozen onto the report with its `name`) ·
 `PATCH /:id` (drafts only) · `POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` ·
 `POST /:id/publish` · `POST /:id/unpublish` · `DELETE /:id`.
 
-**Admin share management** — same router, also `requireOrgRole('admin')`. Declared **before** the
-`/:id` report routes so Express doesn't match `:id = "shares"`:
-`GET /shares?campaignId=` · `POST /shares` `{campaignId,label?,password?}` ·
-`PATCH /shares/:id` `{label?, password?(string sets / null clears), isActive?}` ·
-`POST /shares/:id/rotate` (new token) · `DELETE /shares/:id`. Returns the token; the SPA builds
-`${origin}/r/${token}`.
+**Admin share management** — same router, same campaign-scoped gate (only
+`POST /shares/revoke-legacy` layers `requireOrgRole('admin')` on top — it sweeps links across all
+campaigns). Declared **before** the `/:id` report routes so Express doesn't match `:id = "shares"`:
+`GET /shares?campaignId=` · `POST /shares` `{campaignId,label?,password?,expiresInDays?}` — always
+creates a **password + expiry**; when `password` is absent the server mints one
+(`generateSharePassword`, ~62^12) and returns it once as `generatedPassword`, and `expiresAt`
+defaults to `SHARE_LINK_DEFAULT_DAYS` (90, max 365) ·
+`PATCH /shares/:id` `{label?, password?(string replaces; null → 400 SHARE_PASSWORD_REQUIRED), isActive?}` ·
+`POST /shares/:id/rotate` (new token, password unchanged) · `DELETE /shares/:id`. Returns the token;
+the SPA builds `${origin}/r/${token}`. Rows carry `hasPassword`/`expiresAt`/`isLegacyOpen` for the
+panel's badges.
 
 **Public read** — `/share`, mounted **before** the `requireAuth` gate in
 [routes/index.js](../server/src/routes/index.js) (no login), implemented in

@@ -5,7 +5,7 @@ audience: all
 kind: faq
 order: 21
 sourceDoc: USERS.md
-summary: Use the "Forgot password?" link to email yourself a reset link, or ask an admin for a temporary password.
+summary: Use the "Forgot password?" link to email yourself a reset link, or ask an admin or your team lead for a temporary password.
 tags: password, login, account, reset, email
 ---
 
@@ -19,9 +19,10 @@ You can reset it yourself by email:
    so use it soon. If it expires, just request a new one.
 4. Sign in with your new password.
 
-**No email arriving, or no access to that inbox?** The old way still works: ask an **org admin**
-to issue you a **temporary password**. It's valid for **72 hours**, and you'll be prompted to set
-your own new password right away when you sign in with it.
+**No email arriving, or no access to that inbox?** The old way still works: ask an **org admin** —
+or, if you're a canvasser, the **team lead** who runs your campaign — to issue you a **temporary
+password**. It's valid for **72 hours**, and you'll be prompted to set your own new password right
+away when you sign in with it.
 
 > Requesting a reset never locks your account — you can keep signing in with your current
 > password even if you asked for a link and didn't use it. **Completing** a reset, though, signs
