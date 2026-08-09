@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import RowMenu from '../RowMenu.jsx';
+import { useRowNavigation, stopRowClick } from '../../lib/rowNavigation.js';
 import { Card, Badge, Button } from '../ui/index.js';
 import { formatDateInTz } from '../../lib/datetime.js';
 import { daysUntil, formatDateLabel, earlyVotingState, countdownLabel } from '../../lib/electionDates.js';
@@ -71,15 +72,30 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
   // Assignments; the page's menuItems() shrinks to Retry (failed) or nothing.
   const gone = !!c.deletionStatus;
   const items = menuItems(c);
+  const href = `/campaigns/${c._id}`;
+  // Whole-card click → the dashboard. Rules and rationale live in lib/rowNavigation.js; the
+  // card's own controls sit inside a stopRowClick wrapper in the footer below.
+  const openDashboard = useRowNavigation(href);
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card
+      onClick={gone ? undefined : openDashboard}
+      className={`flex flex-col gap-3 p-4 ${
+        // Matches the clickable-row affordance already used in TeamBreakdown /
+        // CanvasserSummaryTable, plus a border lift a bordered card can afford.
+        gone ? '' : 'cursor-pointer transition-colors hover:border-border-strong hover:bg-sunken/60'
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         {gone ? (
           <span className="font-semibold text-fg">{c.name}</span>
         ) : (
+          // stopRowClick so the Link navigates once, not twice (it and the card handler both
+          // target this URL — harmless, but a double navigate is sloppy). The Link stays because
+          // it, not the card, is what keyboard and screen-reader users use.
           <Link
-            to={`/campaigns/${c._id}`}
+            to={href}
+            onClick={stopRowClick}
             className="font-semibold text-fg hover:text-brand-accent hover:underline"
           >
             {c.name}
@@ -139,7 +155,16 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
         <StatRow label="Created" value={formatDateInTz(c.createdAt, c.timeZone) || '—'} />
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
+      {/* Every control lives inside this one stopPropagation boundary, so the whole-card click
+          above can never fire alongside them. It wraps rather than annotating each control
+          because that is the invariant worth enforcing in one place: anything interactive added
+          to this footer later is covered automatically. Note the kebab is included — RowMenu's
+          popover is position:fixed but still a React child, and React events bubble through the
+          component tree, so a menu-item click is caught here too. */}
+      <div
+        onClick={stopRowClick}
+        className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3"
+      >
         {gone ? (
           <>
             <p className={`text-xs ${c.deletionStatus === 'failed' ? 'text-danger' : 'text-fg-muted'}`}>
@@ -156,7 +181,7 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
             </Button>
             <div className="flex items-center gap-1">
               <Link
-                to={`/campaigns/${c._id}`}
+                to={href}
                 className="text-xs font-medium text-fg-muted hover:text-brand-accent"
               >
                 Open dashboard →

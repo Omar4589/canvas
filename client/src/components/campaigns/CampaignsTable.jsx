@@ -2,10 +2,89 @@ import { Link } from 'react-router-dom';
 import RowMenu from '../RowMenu.jsx';
 import { DataTable } from '../ui/index.js';
 import { daysUntil, formatDateLabel } from '../../lib/electionDates.js';
+import { useRowNavigation, stopRowClick } from '../../lib/rowNavigation.js';
 import { TypePill, StatusBadge, CountdownChip } from './CampaignCard.jsx';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
+}
+
+// One row. Extracted from the map() below ONLY because useRowNavigation is a hook and hooks
+// cannot be called inside a loop — not for reuse.
+function CampaignRow({ campaign: c, menuItems }) {
+  const households = c.counts?.households || 0;
+  const pct = households ? Math.round((100 * (c.counts?.knocked || 0)) / households) : 0;
+  // Mid-delete rows are inert: plain name (drill-in 404s), menu shrinks to Retry/nothing.
+  const gone = !!c.deletionStatus;
+  const items = menuItems(c);
+  const href = `/campaigns/${c._id}`;
+  // Click-anywhere navigation, identical to the card rendering of this same list — shared so the
+  // two views cannot drift. See lib/rowNavigation.js.
+  const openDashboard = useRowNavigation(href);
+
+  return (
+    <tr
+      onClick={gone ? undefined : openDashboard}
+      className={`hover:bg-sunken ${gone ? '' : 'cursor-pointer'}`}
+    >
+      <td className="px-4 py-3 font-medium text-fg">
+        {gone ? (
+          <span className="text-fg">{c.name}</span>
+        ) : (
+          <Link
+            to={href}
+            onClick={stopRowClick}
+            className="text-fg hover:text-brand-accent hover:underline"
+          >
+            {c.name}
+          </Link>
+        )}
+        {!gone && c.stepsTotal != null && !c.setupComplete && (
+          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
+            <span className="h-1 w-1 rounded-full bg-brand-accent" />
+            Setup {c.stepsDone}/{c.stepsTotal}
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <TypePill type={c.type} />
+      </td>
+      <td className="px-4 py-3">{c.state}</td>
+      <td className="px-4 py-3">
+        {c.electionDay ? (
+          <span className="flex items-center gap-1.5">
+            {formatDateLabel(c.electionDay)}
+            <CountdownChip days={daysUntil(c.electionDay, c.timeZone)} />
+          </span>
+        ) : (
+          <span className="text-fg-muted">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">{fmt(c.counts?.households)}</td>
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-2">
+          <span className="tabular-nums">{fmt(c.counts?.knocked)}</span>
+          <span className="h-1.5 w-16 overflow-hidden rounded-full bg-sunken">
+            <span
+              className="block h-full rounded-full bg-brand-600"
+              style={{ width: `${Math.min(100, pct)}%` }}
+            />
+          </span>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        {c.type === 'survey' ? fmt(c.counts?.surveysSubmitted) : fmt(c.counts?.litDropped)}
+      </td>
+      <td className="px-4 py-3">
+        <StatusBadge isActive={c.isActive} deletionStatus={c.deletionStatus} />
+      </td>
+      {/* The actions cell is the row's stopRowClick boundary — a kebab press, and every menu item
+          under it, must never also open the dashboard. */}
+      <td onClick={stopRowClick} className="px-4 py-3 text-right">
+        {items.length > 0 && <RowMenu items={items} />}
+      </td>
+    </tr>
+  );
 }
 
 // Table rendering of the same campaign list as CampaignCard — used by both the
@@ -29,70 +108,9 @@ export default function CampaignsTable({ campaigns, menuItems }) {
         </>
       }
     >
-      {campaigns.map((c) => {
-        const households = c.counts?.households || 0;
-        const pct = households ? Math.round((100 * (c.counts?.knocked || 0)) / households) : 0;
-        // Mid-delete rows are inert: plain name (drill-in 404s), menu shrinks to Retry/nothing.
-        const gone = !!c.deletionStatus;
-        const items = menuItems(c);
-        return (
-          <tr key={c._id} className="hover:bg-sunken">
-            <td className="px-4 py-3 font-medium text-fg">
-              {gone ? (
-                <span className="text-fg">{c.name}</span>
-              ) : (
-                <Link
-                  to={`/campaigns/${c._id}`}
-                  className="text-fg hover:text-brand-accent hover:underline"
-                >
-                  {c.name}
-                </Link>
-              )}
-              {!gone && c.stepsTotal != null && !c.setupComplete && (
-                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-medium text-brand-tint-fg">
-                  <span className="h-1 w-1 rounded-full bg-brand-accent" />
-                  Setup {c.stepsDone}/{c.stepsTotal}
-                </span>
-              )}
-            </td>
-            <td className="px-4 py-3">
-              <TypePill type={c.type} />
-            </td>
-            <td className="px-4 py-3">{c.state}</td>
-            <td className="px-4 py-3">
-              {c.electionDay ? (
-                <span className="flex items-center gap-1.5">
-                  {formatDateLabel(c.electionDay)}
-                  <CountdownChip days={daysUntil(c.electionDay, c.timeZone)} />
-                </span>
-              ) : (
-                <span className="text-fg-muted">—</span>
-              )}
-            </td>
-            <td className="px-4 py-3 text-right tabular-nums">{fmt(c.counts?.households)}</td>
-            <td className="px-4 py-3">
-              <div className="flex items-center justify-end gap-2">
-                <span className="tabular-nums">{fmt(c.counts?.knocked)}</span>
-                <span className="h-1.5 w-16 overflow-hidden rounded-full bg-sunken">
-                  <span
-                    className="block h-full rounded-full bg-brand-600"
-                    style={{ width: `${Math.min(100, pct)}%` }}
-                  />
-                </span>
-              </div>
-            </td>
-            <td className="px-4 py-3 text-right tabular-nums">
-              {c.type === 'survey' ? fmt(c.counts?.surveysSubmitted) : fmt(c.counts?.litDropped)}
-            </td>
-            <td className="px-4 py-3">
-              <StatusBadge isActive={c.isActive} deletionStatus={c.deletionStatus} />
-            </td>
-            <td className="px-4 py-3 text-right">
-              {items.length > 0 && <RowMenu items={items} />}
-            </td>
-          </tr>
-        );
-      })}
+      {campaigns.map((c) => (
+        <CampaignRow key={c._id} campaign={c} menuItems={menuItems} />
+      ))}
     </DataTable>
   );
 }
