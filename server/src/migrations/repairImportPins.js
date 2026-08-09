@@ -571,7 +571,9 @@ async function main() {
       );
     }
     if (reverts.length) {
-      console.log(`  Reverting ${reverts.length} earlier repair(s) whose evidence the trust gates now reject:`);
+      console.log(
+        `  ${APPLY ? 'Reverting' : 'Would revert'} ${reverts.length} earlier repair(s) whose evidence the trust gates now reject:`
+      );
       for (const { h, from, why } of reverts) {
         const [lng, lat] = from.coordinates;
         console.log(
