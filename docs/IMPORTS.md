@@ -596,8 +596,14 @@ the building stays and only the off-street strays are suspect — this is the si
 structurally misses, because a street that collapsed WHOLE leaves no cohort to compare against);
 and knock evidence (`CanvassActivity.distanceFromHouseMeters`
 ≥ threshold with the *closest* knock still far, from 2+ distinct canvassers). Suspects are then
-adjudicated against the address via `geocodeResolve`, and only an `exact`-confidence answer can
-overrule a stored pin. **The confirm floor is per-signal**: distance-based suspects (out-of-state,
+adjudicated against the address via `geocodeResolve`, and an answer must clear **four trust gates**
+before it may overrule a stored pin — because the geocoder has placeholder behavior of its *own*
+(observed on a real district file: twelve different "De Soto Ave, Clewiston" house numbers "matched"
+onto one identical LaBelle rooftop 49km away): `exact` confidence; a **true rooftop type**
+(`rooftop`/`point` — never `nearest_rooftop_match`, which means "the nearest roof I *do* know",
+i.e. somebody else's); **no collapse** — an identical answer point claimed by two or more
+*different base addresses* is the provider guessing (89 lots of one park sharing a point is one
+base address, and passes); and the **matched ZIP** agreeing with the address's own ZIP. **The confirm floor is per-signal**: distance-based suspects (out-of-state,
 street outlier, knock evidence) need the answer more than `--min-meters` (250) away — an exact answer
 agreeing within that refutes a distance suspicion. Stacked-pin suspects need only
 `STACKED_MIN_METERS` (25): their suspicion is *identity*, not distance — the door provably shares one
@@ -619,6 +625,15 @@ would probe the whole database), and a cache-only dry run reports exactly how ma
 cached answer — the upper bound of what `--geocode` would spend — before any money moves. Run it
 **before** cutting a pass: books are cut around pin geography, so repairing after Accept leaves books
 drawn around fiction.
+
+**The script also second-guesses itself.** Every run re-examines its own past repairs — doors whose
+`coordSource` is `'corrected'` *and* whose latest `HouseholdLocationChange` row is
+`source: 'import_repair'` — against the same trust gates, always cache-only (free). A past move whose
+evidence fails the gates is **reverted** to the pin the file gave it: location restored from the
+audit row's `from`, provenance reset to `'file'`, corrected-by stamps cleared, and a new audit row
+written for the revert itself. A door whose latest move is human (`drag`/`admin_drag`/`gps`) is
+never touched — people outrank providers. This is what healed the doors that earlier runs had parked
+on collapsed geocoder answers before the gates existed.
 
 **Sequencing trap: use `--geocode` on the FIRST apply.** The placeholder signal is stack-based, so
 once a pin's cached-answer neighbours move away, an uncached tail door at that pin is a lone door with

@@ -564,10 +564,16 @@ fraud audit).
 | `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
 
-Four notes on `repair:import-pins` specifically, because they surprise people:
+Five notes on `repair:import-pins` specifically, because they surprise people:
 
-- **It only touches pins that came from the file** (`coordSource: 'file'`). A hand-dragged pin is
-  field-verified truth; the geocoder's pins already came from the address. Neither is ever overwritten.
+- **It only touches pins that came from the file** (`coordSource: 'file'`), plus its own past
+  repairs (below). A hand-dragged pin is field-verified truth; the geocoder's pins already came
+  from the address. Neither is ever overwritten.
+- **It distrusts the geocoder too, and reverts itself.** An answer may only overrule a pin if it is
+  a *true* rooftop (`rooftop`/`point`, never `nearest_rooftop_match`), no *other* base address gets
+  the identical point, and its matched ZIP equals the address's ZIP. Every run also re-checks the
+  script's own past repairs against those gates (cache-only, free) and reverts any that fail — back
+  to the file's pin, provenance reset to `'file'`. A pin whose latest move was human is never touched.
 - **It does not move books.** A repaired door stays in whatever book was cut around its old location
   until that pass is re-cut. Run `npm run recompute:territories -- --apply` if a book *outline* now
   looks wrong — that redraws outlines only, never membership.

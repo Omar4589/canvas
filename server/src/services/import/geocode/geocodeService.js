@@ -166,6 +166,11 @@ export async function resolve(householdMap, opts = {}) {
     h.longitude = lng; h.latitude = lat;
     h.coordSource = 'geocodio';
     h.coordConfidence = entry.confidence === 'none' ? null : entry.confidence;
+    // Evidence for callers that must decide whether this answer may OVERRULE an existing pin
+    // (repair:import-pins): the raw accuracy type and the address the provider thinks it
+    // matched. The importer never persists these — household docs pick fields explicitly.
+    h.geocodeAccuracyType = entry.accuracyType ?? null;
+    h.geocodeMatchedAddress = entry.matchedAddress ?? null;
   };
 
   // 3. Split into cache-hits vs the unique cacheKeys to geocode.
@@ -239,6 +244,8 @@ export async function resolve(householdMap, opts = {}) {
         for (const t of g.members) {
           t.h.longitude = d.location[0]; t.h.latitude = d.location[1];
           t.h.coordSource = 'geocodio'; t.h.coordConfidence = d.confidence === 'none' ? null : d.confidence;
+          t.h.geocodeAccuracyType = d.accuracyType ?? null;
+          t.h.geocodeMatchedAddress = d.matchedAddress ?? null;
         }
         stats.geocodedNew += g.members.length;
       } else {

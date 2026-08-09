@@ -5,6 +5,7 @@ import { Campaign } from '../models/Campaign.js';
 import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
 import { Household } from '../models/Household.js';
+import { HouseholdLocationChange } from '../models/HouseholdLocationChange.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { haversineMeters } from '../utils/normalizeAddress.js';
 import { inStateBounds } from '../utils/stateBounds.js';
@@ -63,12 +64,20 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 //                           costs one cache-first lookup and moves nothing.
 // Nothing is repaired on suspicion. A shortlisted door is then ADJUDICATED against the address
 // itself via the geocoder (cache-first, so it is usually free), and repaired only when the
-// geocoder is confident AND disagrees with the stored pin by more than --min-meters.
+// answer clears the TRUST GATES: rooftop confidence, a TRUE rooftop type (never
+// 'nearest_rooftop_match' — "the nearest roof I DO know" is a guess, not this address), no
+// collapse (an identical point claimed by several different base addresses is the geocoder's
+// own placeholder), the matched ZIP agreeing with the address's ZIP, and a disagreement with
+// the stored pin larger than the per-signal floor. Every run also RE-EXAMINES the script's
+// own past repairs against those same gates and reverts any whose evidence no longer passes —
+// back to the pin the file gave them, provenance cleared to 'file'.
 //
 // What it will NEVER touch:
-//   · Doors whose coordSource is 'corrected' or 'geocodio'. Only 'file' pins have this bug, and
-//     a human-placed pin is field-verified truth — overwriting one is the exact regression the
-//     re-import pin shield exists to prevent.
+//   · Doors whose coordSource is 'geocodio' (already from the address), or 'corrected' doors
+//     whose latest move was HUMAN ('drag'/'admin_drag'/'gps') — field-verified truth, and
+//     overwriting it is the exact regression the re-import pin shield exists to prevent. The
+//     only 'corrected' doors it may touch are its OWN import_repair moves, and only to revert
+//     them when their evidence fails the trust gates.
 //   · Book / turf membership, walkOrder, status, or any knock. updateHouseholdLocation moves the
 //     coordinate and its provenance, nothing else. A repaired door therefore stays in the book
 //     that was cut around its WRONG location until you re-cut that pass.
@@ -292,13 +301,23 @@ async function auditCampaign(campaign) {
   return { households, suspects, stackedIds };
 }
 
-async function adjudicate(households, suspects, stackedIds) {
-  const byId = new Map(households.map((h) => [String(h._id), h]));
-  // geocodeService takes (and mutates) a Map<normalizedAddress, householdLike>. Feed it copies
-  // with null coords so it treats them as needing a lookup, leaving the real docs untouched.
+// Only a TRUE rooftop answer may overrule a stored pin. 'nearest_rooftop_match' is Geocodio
+// saying "I could not find this address — here is the nearest roof I DO know": fine for
+// seeding a door that has no pin at all, but as an overrule it moved 12 different De Soto
+// Ave (Clewiston) house numbers onto one LaBelle rooftop 49km away. Observed, not
+// hypothetical — which is also why every answer faces the placeholder + ZIP gates below.
+const OVERRULE_TYPES = new Set(['rooftop', 'point']);
+
+const zipOfMatched = (s) => (/(\d{5})(?:-\d{4})?$/.exec(String(s || '').trim()) || [])[1] || null;
+
+// Probe a set of households (cache-first) and return what the provider actually said, per
+// household id — coordinates AND the evidence needed to decide whether the answer deserves
+// to overrule anything. geocodeService takes (and mutates) a Map<normalizedAddress,
+// householdLike>; feed it copies with null coords so the real docs stay untouched.
+async function probeAnswers(byId, ids, cacheOnly) {
   const probe = new Map();
   const probeToId = new Map();
-  for (const id of suspects.keys()) {
+  for (const id of ids) {
     const h = byId.get(id);
     if (!h?.normalizedAddress) continue;
     probe.set(h.normalizedAddress, {
@@ -312,25 +331,82 @@ async function adjudicate(households, suspects, stackedIds) {
     });
     probeToId.set(h.normalizedAddress, id);
   }
-  if (!probe.size) return { confirmed: [], stats: null, skippedClose: 0, unresolved: 0 };
+  if (!probe.size) return { answers: new Map(), stats: null, unresolved: 0 };
 
-  const { stats } = await geocodeResolve(probe, { cacheOnly: !ALLOW_GEOCODE });
+  const { stats } = await geocodeResolve(probe, {
+    cacheOnly,
+    // A paid run works in 1,000-address batches and can sit for minutes between console
+    // lines; tick per batch so the Run console never reads as hung. Cache-only runs make
+    // no provider calls, so this never fires there.
+    onProgress: (done, total) => console.log(`  … geocoded ${done}/${total} unique addresses`),
+  });
 
   // Addresses the resolver returned NO coordinates for. On a cache-only run this is the exact
   // upper bound of what --geocode would spend — reported so the price is known before paying.
   let unresolved = 0;
-  for (const p of probe.values()) if (p.latitude == null || p.longitude == null) unresolved += 1;
+  const answers = new Map();
+  for (const [normAddr, p] of probe) {
+    if (p.latitude == null || p.longitude == null) { unresolved += 1; continue; }
+    answers.set(probeToId.get(normAddr), {
+      lat: p.latitude,
+      lng: p.longitude,
+      confidence: p.coordConfidence ?? null,
+      accuracyType: p.geocodeAccuracyType ?? null,
+      matchedZip: zipOfMatched(p.geocodeMatchedAddress),
+    });
+  }
+  return { answers, stats, unresolved };
+}
 
+// Identical answer points across DIFFERENT base addresses are the collapse tell — the same
+// rule the vendor-placeholder classifier uses. Two real rooftops never share coordinates to
+// the sixth decimal; 89 lots of one park legitimately can (one base address), and do pass.
+function collectBasesByPoint(byId, ...answerMaps) {
+  const basesByPoint = new Map();
+  for (const answers of answerMaps) {
+    for (const [id, ans] of answers) {
+      const h = byId.get(id);
+      if (!h) continue;
+      const key = `${ans.lat}|${ans.lng}`;
+      const set = basesByPoint.get(key) || new Set();
+      set.add(baseAddressOf(h.addressLine1));
+      basesByPoint.set(key, set);
+    }
+  }
+  return basesByPoint;
+}
+
+// The geocoder has placeholder behavior of its OWN — the exact disease this script repairs,
+// from the other direction. An answer that fails any gate is reported, never applied.
+function distrustReason(h, ans, basesByPoint) {
+  if (ans.accuracyType && !OVERRULE_TYPES.has(ans.accuracyType)) {
+    return `a ${ans.accuracyType} answer, not this address's own rooftop`;
+  }
+  const bases = basesByPoint.get(`${ans.lat}|${ans.lng}`);
+  if (bases && bases.size > 1) {
+    return `geocoder placeholder — ${bases.size} different addresses get this identical spot`;
+  }
+  const hZip = String(h.zipCode || '').trim().slice(0, 5);
+  if (ans.matchedZip && /^\d{5}$/.test(hZip) && ans.matchedZip !== hZip) {
+    return `matched in ZIP ${ans.matchedZip}, but the address says ${hZip}`;
+  }
+  return null;
+}
+
+function adjudicate(byId, suspects, stackedIds, answers, basesByPoint) {
   const confirmed = [];
+  const distrusted = [];
   let skippedClose = 0;
-  for (const [normAddr, probed] of probe) {
-    if (probed.latitude == null || probed.longitude == null) continue;
+  for (const id of suspects.keys()) {
+    const ans = answers.get(id);
     // Only a rooftop-grade answer is allowed to overrule a stored pin.
-    if (probed.coordConfidence !== 'exact') continue;
-    const h = byId.get(probeToId.get(normAddr));
+    if (!ans || ans.confidence !== 'exact') continue;
+    const h = byId.get(id);
     const c = coordsOf(h);
     if (!c) continue;
-    const gap = haversineMeters(c.lat, c.lng, probed.latitude, probed.longitude);
+    const why = distrustReason(h, ans, basesByPoint);
+    if (why) { distrusted.push({ h, why }); continue; }
+    const gap = haversineMeters(c.lat, c.lng, ans.lat, ans.lng);
     // The gap gate is per-SIGNAL. For the distance-based signals (out-of-state, street
     // outlier, knock evidence) a rooftop answer agreeing within MIN_METERS genuinely
     // refutes the suspicion — the pin was fine. For a stacked-pin suspect the suspicion is
@@ -339,16 +415,45 @@ async function adjudicate(households, suspects, stackedIds) {
     // (a block, a subdivision) puts true rooftops well inside 250m. There, any rooftop
     // answer that actually leaves the shared dot (> STACKED_MIN_METERS, generously past
     // building-key rounding) dissolves the stack and is taken.
-    const floor = stackedIds?.has(String(h._id)) ? STACKED_MIN_METERS : MIN_METERS;
+    const floor = stackedIds?.has(id) ? STACKED_MIN_METERS : MIN_METERS;
     if (gap < floor) {
       // An exact answer that AGREES with the pin — the suspicion is refuted, not pending.
       // Counted so "none confirmed" can't be misread as "no cache hit, try --geocode".
       skippedClose += 1;
       continue;
     }
-    confirmed.push({ h, to: { lat: probed.latitude, lng: probed.longitude }, gap: Math.round(gap) });
+    confirmed.push({ h, to: { lat: ans.lat, lng: ans.lng }, gap: Math.round(gap) });
   }
-  return { confirmed, stats, skippedClose, unresolved };
+  return { confirmed, skippedClose, distrusted };
+}
+
+// Second-guess this script's OWN past work. Doors it moved are coordSource 'corrected' with a
+// latest audit row of source 'import_repair'; if the cached answer that justified such a move
+// fails today's trust gates, the move was made on the geocoder's placeholder and gets
+// reverted to the pin the file gave it. A door whose LATEST move is human
+// ('drag'/'admin_drag'/'gps') is never touched: people outrank providers.
+async function findOwnRepairs(campaign) {
+  const households = await Household.find(
+    {
+      campaignId: campaign._id,
+      isActive: true,
+      coordSource: 'corrected',
+      'location.coordinates': { $exists: true, $ne: null },
+    },
+    { addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1, location: 1, normalizedAddress: 1 }
+  ).lean();
+  if (!households.length) return { households: [], fromById: new Map() };
+
+  const latest = await HouseholdLocationChange.aggregate([
+    { $match: { householdId: { $in: households.map((h) => h._id) } } },
+    { $sort: { householdId: 1, createdAt: -1 } },
+    { $group: { _id: '$householdId', source: { $first: '$source' }, from: { $first: '$from' } } },
+  ]);
+  const fromById = new Map();
+  for (const r of latest) {
+    if (r.source === 'import_repair' && r.from?.coordinates?.length === 2) fromById.set(String(r._id), r.from);
+  }
+  return { households: households.filter((h) => fromById.has(String(h._id))), fromById };
 }
 
 async function main() {
@@ -396,27 +501,54 @@ async function main() {
   let totalRepaired = 0;
   let totalNewLookups = 0;
   let totalUnresolved = 0;
+  let totalDistrusted = 0;
+  let totalRevertsPlanned = 0;
+  let totalReverted = 0;
 
   for (const campaign of campaigns) {
     const audit = await auditCampaign(campaign);
-    if (!audit || !audit.suspects.size) continue;
-    totalSuspects += audit.suspects.size;
+    const own = await findOwnRepairs(campaign);
+    if ((!audit || !audit.suspects.size) && !own.households.length) continue;
 
-    const { confirmed, stats, skippedClose, unresolved } = await adjudicate(audit.households, audit.suspects, audit.stackedIds);
-    totalNewLookups += stats?.geocodedNew || 0;
-    totalUnresolved += unresolved;
+    const byId = new Map((audit?.households || []).map((h) => [String(h._id), h]));
+    for (const h of own.households) byId.set(String(h._id), h);
+    const suspects = audit?.suspects || new Map();
+    totalSuspects += suspects.size;
+
+    const sus = await probeAnswers(byId, [...suspects.keys()], !ALLOW_GEOCODE);
+    // Re-examining our own repairs is ALWAYS cache-only: the answer that justified each move
+    // is cached by definition, so this phase costs nothing no matter how many were repaired.
+    const past = await probeAnswers(byId, own.households.map((h) => String(h._id)), true);
+    totalNewLookups += sus.stats?.geocodedNew || 0;
+    totalUnresolved += sus.unresolved;
+
+    // Collapse detection spans BOTH pools — a placeholder point is one point regardless of
+    // whether the doors parked on it were repaired last week or flagged today.
+    const basesByPoint = collectBasesByPoint(byId, sus.answers, past.answers);
+    const { confirmed, skippedClose, distrusted } = adjudicate(byId, suspects, audit?.stackedIds, sus.answers, basesByPoint);
+
+    const reverts = [];
+    for (const h of own.households) {
+      const ans = past.answers.get(String(h._id));
+      if (!ans || ans.confidence !== 'exact') continue;
+      const why = distrustReason(h, ans, basesByPoint);
+      if (why) reverts.push({ h, from: own.fromById.get(String(h._id)), why });
+    }
+    totalDistrusted += distrusted.length;
+    totalRevertsPlanned += reverts.length;
+
     // "Refuted" ≠ "no answer": name the suspects whose exact geocode AGREED with the pin,
     // or a clean run reads like a cache miss and invites a pointless --geocode spend.
     const refutedNote = skippedClose ? ` (${skippedClose} refuted — the address geocodes to where the pin already is)` : '';
-    if (!confirmed.length) {
-      console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), none confirmed by the address${refutedNote}.`);
+    if (!confirmed.length && !distrusted.length && !reverts.length) {
+      if (suspects.size) console.log(`${campaign.name}: ${suspects.size} suspect(s), none confirmed by the address${refutedNote}.`);
       continue;
     }
     totalConfirmed += confirmed.length;
 
-    console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), ${confirmed.length} confirmed${refutedNote}:`);
+    console.log(`${campaign.name}: ${suspects.size} suspect(s), ${confirmed.length} confirmed${refutedNote}:`);
     for (const { h, to, gap } of confirmed) {
-      const why = audit.suspects.get(String(h._id)).join('; ');
+      const why = suspects.get(String(h._id)).join('; ');
       console.log(
         `  · ${h.addressLine1}${h.addressLine2 ? ` ${h.addressLine2}` : ''}, ${h.city} — ${gap}m off ` +
           `→ ${to.lat.toFixed(6)}, ${to.lng.toFixed(6)}  [${why}]`
@@ -433,16 +565,71 @@ async function main() {
         console.log(`    ! skipped: ${err.message}`);
       }
     }
+    for (const { h, why } of distrusted) {
+      console.log(
+        `  ✗ ${h.addressLine1}${h.addressLine2 ? ` ${h.addressLine2}` : ''}, ${h.city} — answer NOT trusted (${why}) — pin left alone`
+      );
+    }
+    if (reverts.length) {
+      console.log(`  Reverting ${reverts.length} earlier repair(s) whose evidence the trust gates now reject:`);
+      for (const { h, from, why } of reverts) {
+        const [lng, lat] = from.coordinates;
+        console.log(
+          `  ↩ ${h.addressLine1}${h.addressLine2 ? ` ${h.addressLine2}` : ''}, ${h.city} — ${why} → back to ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+        );
+        if (!APPLY) continue;
+        const doc = await Household.findById(h._id);
+        if (!doc) continue;
+        // Hand-rolled rather than updateHouseholdLocation: the door goes back to BEING a file
+        // pin — provenance and the corrected-by stamps must CLEAR, not re-stamp, or the revert
+        // would shield the bad-then-restored pin from every future look.
+        const badFrom = doc.location;
+        doc.location = { type: 'Point', coordinates: from.coordinates };
+        doc.coordSource = 'file';
+        doc.coordConfidence = null;
+        doc.correctedBy = null;
+        doc.correctedAt = null;
+        doc.previousLocation = null;
+        try {
+          await doc.save();
+          await HouseholdLocationChange.create({
+            organizationId: doc.organizationId,
+            campaignId: doc.campaignId,
+            householdId: doc._id,
+            userId: USER_ID,
+            source: 'import_repair',
+            scope: 'unit',
+            from: badFrom,
+            to: { type: 'Point', coordinates: from.coordinates },
+          });
+          totalReverted += 1;
+        } catch (err) {
+          console.log(`    ! revert skipped: ${err.message}`);
+        }
+      }
+    }
   }
 
   console.log('');
-  if (!totalSuspects) {
+  if (!totalSuspects && !totalRevertsPlanned) {
     console.log('Nothing to repair — no imported pin looks out of place.');
   } else {
     console.log(
       `${totalSuspects} suspect door(s); ${totalConfirmed} confirmed by the address; ` +
         `${APPLY ? `${totalRepaired} repaired.` : '0 repaired (dry run).'}`
     );
+    if (totalDistrusted) {
+      console.log(
+        `${totalDistrusted} suspect answer(s) DISTRUSTED (geocoder placeholder / nearest-rooftop / wrong ZIP) — those pins were left alone.`
+      );
+    }
+    if (totalRevertsPlanned) {
+      console.log(
+        APPLY
+          ? `${totalReverted} earlier repair(s) reverted to the pin the file gave them.`
+          : `${totalRevertsPlanned} earlier repair(s) would be REVERTED — their evidence fails the trust gates. Run with --apply to commit.`
+      );
+    }
     if (totalNewLookups) {
       console.log(`Paid geocoder lookups: ${totalNewLookups} (~${(geocodeCostCents(totalNewLookups) / 100).toFixed(2)} USD).`);
     } else if (!ALLOW_GEOCODE && totalUnresolved) {
