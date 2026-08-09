@@ -51,8 +51,23 @@ router.get('/', async (req, res, next) => {
       { householdIds: 0, voterIds: 0 }
     )
       .sort({ createdAt: -1 })
+      // Who built the list. Flattened to { id, name } rather than shipping the raw User doc —
+      // this list is read by leads as well as admins, and a populated User would carry email and
+      // phone to a surface that only needs a name. `createdBy` is null for lists auto-generated
+      // by an import (source: 'import'), which the UI renders as "Automatic".
+      .populate('createdBy', 'firstName lastName')
       .lean();
-    res.json({ walkLists });
+    res.json({
+      walkLists: walkLists.map((w) => ({
+        ...w,
+        createdBy: w.createdBy
+          ? {
+              id: String(w.createdBy._id),
+              name: `${w.createdBy.firstName || ''} ${w.createdBy.lastName || ''}`.trim() || null,
+            }
+          : null,
+      })),
+    });
   } catch (err) {
     next(err);
   }

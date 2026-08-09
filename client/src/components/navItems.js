@@ -40,7 +40,6 @@ export const CAMPAIGN_NAV = [
   { slug: 'efforts', label: 'Walk Lists', icon: '/efforts' },
   { slug: 'walklists', label: 'Saved Searches', icon: '/walklists' },
   { slug: 'turfs', label: 'Turf Cutting', icon: '/turfs' },
-  { slug: 'packets', label: 'Print Packets', icon: '/packets' },
   { slug: 'team', label: 'Team', icon: '/users' },
   { slug: 'timeline', label: 'Timeline', icon: '/timeline' },
   { slug: 'map', label: 'Map', icon: '/map' },
@@ -51,4 +50,7 @@ export const CAMPAIGN_NAV = [
   { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting' },
   { slug: 'reports', label: 'Client Reports', icon: '/admin/client-reports' },
   { slug: 'exports', label: 'Exports', icon: '/exports' },
+  // Down here with the other occasional outputs rather than next to Turf Cutting: printing paper
+  // packets is a rare fallback, not a step in the normal cut-and-walk flow (owner call).
+  { slug: 'packets', label: 'Print Packets', icon: '/packets' },
 ];

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -26,18 +26,72 @@ function navClass(collapsed) {
     ].join(' ');
 }
 
+// Names the icons on the collapsed rail. The native `title` this replaces took about a second to
+// appear, looked like an OS artifact, and was easy to miss entirely — so a rail of eighteen
+// unlabeled glyphs was effectively unreadable.
+//
+// position:FIXED, and that is load-bearing: the nav is `overflow-y-auto`, and CSS resolves the
+// other axis to `auto` too whenever one axis is not `visible` — so an absolutely-positioned tip
+// would be clipped at the 64px rail edge, which is the whole bug it exists to avoid. Same reason
+// RowMenu is fixed-positioned.
+//
+// pointer-events-none so the tip can never sit under the cursor and start a hide/show flicker.
+function RailTip({ label, enabled, children }) {
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);
+
+  const show = () => {
+    if (!enabled || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    setPos({
+      // Centered on the icon, but clamped so an item scrolled to the very top or bottom of the
+      // rail still gets a fully visible tip.
+      top: Math.min(Math.max(r.top + r.height / 2, 18), window.innerHeight - 18),
+      left: r.right + 10,
+    });
+  };
+  const hide = () => setPos(null);
+
+  return (
+    <span
+      ref={ref}
+      className="block"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
+      {children}
+      {enabled && pos && (
+        <span
+          // aria-hidden: the control itself carries an aria-label when collapsed, so announcing
+          // this too would read the name twice.
+          aria-hidden="true"
+          style={{ position: 'fixed', top: pos.top, left: pos.left, transform: 'translateY(-50%)' }}
+          className="pointer-events-none z-50 whitespace-nowrap rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-fg shadow-lg"
+        >
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function NavItem({ n, collapsed }) {
   const Icon = navIcon(n.to);
   return (
-    <NavLink
-      to={n.to}
-      end={n.end}
-      title={collapsed ? n.label : undefined}
-      className={navClass(collapsed)}
-    >
-      <Icon size={20} />
-      {!collapsed && <span>{n.label}</span>}
-    </NavLink>
+    <RailTip label={n.label} enabled={collapsed}>
+      <NavLink
+        to={n.to}
+        end={n.end}
+        // The label is the only accessible name once the text is hidden.
+        aria-label={collapsed ? n.label : undefined}
+        className={navClass(collapsed)}
+      >
+        <Icon size={20} />
+        {!collapsed && <span>{n.label}</span>}
+      </NavLink>
+    </RailTip>
   );
 }
 
@@ -58,12 +112,11 @@ function ContentFallback() {
   );
 }
 
-function ThemeToggle({ collapsed, dark, toggle }) {
+function ThemeToggleButton({ collapsed, dark, toggle }) {
   return (
     <button
       type="button"
       onClick={toggle}
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       className={[
         'flex items-center gap-3 rounded-md text-sm font-medium text-fg-muted transition-colors hover:bg-sunken hover:text-fg',
@@ -73,6 +126,15 @@ function ThemeToggle({ collapsed, dark, toggle }) {
       {dark ? <IconSun /> : <IconMoon />}
       {!collapsed && <span>{dark ? 'Light mode' : 'Dark mode'}</span>}
     </button>
+  );
+}
+
+// Wrapper so the collapsed rail's theme button gets the same tip as everything else on it.
+function ThemeToggle({ collapsed, dark, toggle }) {
+  return (
+    <RailTip label={dark ? 'Light mode' : 'Dark mode'} enabled={collapsed}>
+      <ThemeToggleButton collapsed={collapsed} dark={dark} toggle={toggle} />
+    </RailTip>
   );
 }
 
@@ -215,12 +277,22 @@ export default function Layout() {
                 const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
                 // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
                 const mockBadge = n.slug === 'audit' && openMockFlags > 0;
+                const flagNote = mockBadge
+                  ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
+                  : '';
                 return (
-                  <NavLink
+                  <RailTip
                     key={n.slug || 'home'}
+                    // Collapsed, the red dot on Audit is the only sign of the flag count — so the
+                    // tip carries it, or the badge is unreadable on the rail.
+                    label={mockBadge ? `${n.label} · ${flagNote}` : n.label}
+                    enabled={collapsed}
+                  >
+                  <NavLink
                     to={to}
                     end={!n.slug}
-                    title={collapsed ? n.label : mockBadge ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}` : undefined}
+                    aria-label={collapsed ? n.label : undefined}
+                    title={!collapsed && mockBadge ? flagNote : undefined}
                     className={(s) => navClass(collapsed)(s) + (mockBadge ? ' relative' : '')}
                   >
                     <Icon size={20} />
@@ -237,6 +309,7 @@ export default function Layout() {
                       <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
                     )}
                   </NavLink>
+                  </RailTip>
                 );
               })}
             </>
@@ -267,19 +340,23 @@ export default function Layout() {
             collapsed ? 'flex flex-col items-center gap-1' : '',
           ].join(' ')}
         >
-          <NavLink
-            to="/help"
-            title={collapsed ? 'Help' : undefined}
-            className={navClass(collapsed)}
-          >
-            <IconHelp size={20} />
-            {!collapsed && <span>Help</span>}
-          </NavLink>
+          <RailTip label="Help" enabled={collapsed}>
+            <NavLink
+              to="/help"
+              aria-label={collapsed ? 'Help' : undefined}
+              className={navClass(collapsed)}
+            >
+              <IconHelp size={20} />
+              {!collapsed && <span>Help</span>}
+            </NavLink>
+          </RailTip>
           <ThemeToggle collapsed={collapsed} dark={dark} toggle={toggleTheme} />
           {collapsed ? (
-            <IconButton label="Sign out" onClick={logout} className="text-brand-accent hover:bg-brand-tint hover:text-brand-hover">
-              <IconSignOut size={20} />
-            </IconButton>
+            <RailTip label="Sign out" enabled>
+              <IconButton label="Sign out" onClick={logout} className="text-brand-accent hover:bg-brand-tint hover:text-brand-hover">
+                <IconSignOut size={20} />
+              </IconButton>
+            </RailTip>
           ) : (
             <div className="mt-2 px-1">
               <NavLink to="/profile" className="block rounded-md py-0.5 hover:text-brand-accent">

@@ -588,33 +588,45 @@ export default function WalkListsPage() {
           ) : (
             <ul className="space-y-2">
               {lists.map((w) => (
-                <li key={w._id} className="rounded border border-border p-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate font-medium">{w.name}</span>
-                      {w.source === 'csv' && (
-                        <span className="shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
-                      )}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        onClick={() => exportCsv(w)}
-                        disabled={exportingId === w._id}
-                        className="text-xs text-brand-accent hover:underline disabled:opacity-60"
-                      >
-                        {exportingId === w._id ? 'Exporting…' : 'Export CSV'}
-                      </button>
-                      <Link
-                        to={`/campaigns/${campaignId}/packets?walkListId=${w._id}`}
-                        className="text-xs text-brand-accent hover:underline"
-                      >
-                        Print packet
-                      </Link>
-                      <button onClick={() => del.mutate(w._id)} className="text-xs text-danger hover:underline">Delete</button>
-                    </div>
+                // Name, meta and actions each get their OWN row. They used to share one line with
+                // three action links, which left the name a few characters wide ("Palm Bea…") —
+                // and the name is the only thing that tells two saved searches apart.
+                <li key={w._id} className="rounded border border-border p-2.5 text-sm">
+                  <div className="flex items-start gap-1.5">
+                    <span className="min-w-0 flex-1 break-words font-medium" title={w.name}>{w.name}</span>
+                    {w.source === 'csv' && (
+                      <span className="mt-0.5 shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-fg-muted">
+                    {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}
                   </div>
                   <div className="text-xs text-fg-muted">
-                    {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}
+                    {/* An import-generated revisit list has no author — say so rather than
+                        printing "by Unknown", which reads like data we lost. */}
+                    {w.createdBy?.name ? `by ${w.createdBy.name}` : 'built automatically by an import'}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <Link
+                      to={`/campaigns/${campaignId}/map?savedSearchId=${w._id}`}
+                      className="text-xs text-brand-accent hover:underline"
+                    >
+                      View on map
+                    </Link>
+                    <button
+                      onClick={() => exportCsv(w)}
+                      disabled={exportingId === w._id}
+                      className="text-xs text-brand-accent hover:underline disabled:opacity-60"
+                    >
+                      {exportingId === w._id ? 'Exporting…' : 'Export CSV'}
+                    </button>
+                    <Link
+                      to={`/campaigns/${campaignId}/packets?walkListId=${w._id}`}
+                      className="text-xs text-brand-accent hover:underline"
+                    >
+                      Print packet
+                    </Link>
+                    <button onClick={() => del.mutate(w._id)} className="ml-auto text-xs text-danger hover:underline">Delete</button>
                   </div>
                 </li>
               ))}

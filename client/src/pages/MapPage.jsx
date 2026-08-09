@@ -183,6 +183,8 @@ export default function MapPage() {
   const [scopeEffortId, setScopeEffortId] = useState(searchParams.get('effortId') || '');
   const [scopePassId, setScopePassId] = useState(searchParams.get('passId') || '');
   const [scopeImportId, setScopeImportId] = useState(searchParams.get('importId') || '');
+  // A saved search's FROZEN door set (deep-linked from the Saved Searches page).
+  const [scopeSavedSearchId, setScopeSavedSearchId] = useState(searchParams.get('savedSearchId') || '');
 
   // Viewport bound ("west,south,east,north"): null until the first auto-fit, then updated on
   // every settled move (debounced) so the households query — including the 20s live poll — only
@@ -238,6 +240,13 @@ export default function MapPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
     enabled: !!campaignId,
   });
+  // Only to name the saved-search scope chip — fetched solely when that scope is active, since
+  // nothing else on this page needs the list.
+  const scopeSavedSearchesQ = useQuery({
+    queryKey: ['admin', 'walklists', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/walklists`),
+    enabled: !!campaignId && !!scopeSavedSearchId,
+  });
   const efforts = scopeEffortsQ.data?.efforts || [];
   const showEffortSelect = efforts.length > 1;
   // Safety net (same as the canvasser filter below): a stale deep-linked effortId that
@@ -265,6 +274,11 @@ export default function MapPage() {
     scopeLabel = p ? `Pass ${p.roundNumber} · ${p.name}` : 'Pass';
   } else if (scopeImportId) {
     scopeLabel = "this import's homes";
+  } else if (scopeSavedSearchId) {
+    // Named if the list is still in this campaign's set; a deleted saved search falls back to
+    // the generic label rather than blanking the chip and hiding that a scope is active.
+    const s = (scopeSavedSearchesQ.data?.walkLists || []).find((x) => String(x._id) === scopeSavedSearchId);
+    scopeLabel = s ? `Saved search · ${s.name}` : 'a saved search';
   }
   function clearScope() {
     // The ✕ clears only what the chip is showing — once the select owns the effort
@@ -272,6 +286,7 @@ export default function MapPage() {
     if (!showEffortSelect) setScopeEffortId('');
     setScopePassId('');
     setScopeImportId('');
+    setScopeSavedSearchId('');
   }
 
   const tokenQ = useQuery({
@@ -312,6 +327,7 @@ export default function MapPage() {
     effortId: scopeEffortId,
     passId: scopePassId,
     importId: scopeImportId,
+    savedSearchId: scopeSavedSearchId,
     bbox,
   });
 
@@ -332,6 +348,7 @@ export default function MapPage() {
       scopeEffortId,
       scopePassId,
       scopeImportId,
+      scopeSavedSearchId,
       bbox,
     ],
     queryFn: () => api(`/admin/households/map${queryString}`),

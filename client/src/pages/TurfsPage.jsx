@@ -23,6 +23,7 @@ import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
+import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
 // to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
@@ -383,19 +384,24 @@ function PassPicker({ campaignId, passId, onChange }) {
     enabled: !!campaignId,
   });
   const passes = passesQ.data?.passes || [];
-  const activeIds = passesQ.data?.activePassIds || [];
-  const effortName = new Map((effortsQ.data?.efforts || []).map((e) => [String(e._id), e.name]));
-  // Default to a round that still NEEDS cutting (no books yet), else the active one,
-  // else the most recent — so you usually land where there's work to do.
+  const efforts = effortsQ.data?.efforts || [];
+  const effortName = new Map(efforts.map((e) => [String(e._id), e.name]));
+  // Landing pass: the WALK LIST's status ranks first, the old pass ranking second. Rules and
+  // their tests live in lib/passPicker.js — the ranking is easy to regress silently, and a wrong
+  // landing sends you to cut a list nobody is walking.
+  //
+  // Waits for BOTH queries: ranking with `efforts` still empty would tier every pass as
+  // "unknown" and land on whatever the old rule picked, then not re-run (passId is set by then).
+  const ready = !passesQ.isLoading && !effortsQ.isLoading;
   useEffect(() => {
-    if (passId || !passes.length) return;
-    const live = passes.filter((p) => p.status !== 'archived');
-    const recent = (arr) => [...arr].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    const needsCut = recent(live.filter((p) => (p.turfCount || 0) === 0));
-    const active = recent(live.filter((p) => p.status === 'active'));
-    const pick = needsCut[0] || active[0] || recent(live)[0] || passes[0];
-    onChange(String(pick._id));
-  }, [passId, passes, activeIds]);
+    if (passId || !ready || !passes.length) return;
+    const pick = pickDefaultPass({ passes, efforts });
+    if (pick) onChange(String(pick._id));
+  }, [passId, ready, passes, efforts]);
+
+  // Every pass stays reachable — you may need an archived round's books — but grouped so active
+  // work sits at the top.
+  const groups = groupPassesByEffortStatus({ passes, efforts });
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Pass</span>
@@ -405,10 +411,14 @@ function PassPicker({ campaignId, passId, onChange }) {
         className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       >
         {!passes.length && <option value="">No passes</option>}
-        {passes.map((p) => (
-          <option key={p._id} value={p._id}>
-            {effortName.get(String(p.effortId)) || 'Walk list'} · Pass {p.roundNumber} · {p.name} ({p.status})
-          </option>
+        {groups.map((g) => (
+          <optgroup key={g.key} label={g.label}>
+            {g.passes.map((p) => (
+              <option key={p._id} value={p._id}>
+                {effortName.get(String(p.effortId)) || 'Walk list'} · Pass {p.roundNumber} · {p.name} ({p.status})
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </div>

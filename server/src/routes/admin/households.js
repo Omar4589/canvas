@@ -12,6 +12,7 @@ import { voterAnswerClause } from '../../services/surveys/answerAgg.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
@@ -201,6 +202,14 @@ router.get('/map', async (req, res, next) => {
       req.query.importId && mongoose.isValidObjectId(req.query.importId)
         ? new mongoose.Types.ObjectId(req.query.importId)
         : null;
+    // Same idea for a saved search — its frozen householdIds are already exactly the door set,
+    // so this reads the snapshot rather than re-resolving the filter. That is the point of a
+    // saved search being frozen (SavedSearch.js decision 8): the map must show the doors the
+    // list actually holds, not what the same filter would select today.
+    const savedSearchId =
+      req.query.savedSearchId && mongoose.isValidObjectId(req.query.savedSearchId)
+        ? new mongoose.Types.ObjectId(req.query.savedSearchId)
+        : null;
 
     // Date window in the campaign's (or org's) timezone — date-only days in, half-open
     // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as
@@ -249,6 +258,21 @@ router.get('/map', async (req, res, next) => {
         return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
       }
       householdFilter._id = { $in: ids };
+    }
+    if (savedSearchId) {
+      const ss = await SavedSearch.findOne(
+        { _id: savedSearchId, campaignId, organizationId: orgId },
+        'householdIds'
+      ).lean();
+      const ids = ss?.householdIds || [];
+      if (!ids.length) {
+        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
+      }
+      // Intersect rather than overwrite: importId above may already have narrowed _id, and a
+      // deep link carrying both must show the overlap, not whichever clause ran last.
+      householdFilter._id = householdFilter._id
+        ? { $in: ids.filter((id) => householdFilter._id.$in.some((x) => String(x) === String(id))) }
+        : { $in: ids };
     }
 
     const surveyMatch = { organizationId: orgId };
