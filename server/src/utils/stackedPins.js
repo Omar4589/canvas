@@ -1,10 +1,15 @@
 // Doors stacked on one exact pin, classified: a real building, or a vendor placeholder?
 //
-// A genuine apartment/park is ONE street address with many units — every door shares its
-// street line ("1000 Lely Palms Dr Apt 151" and "Apt 152" both read "Lely Palms Dr" once
-// streetName.js strips the unit). A vendor PLACEHOLDER pin is the opposite: when a voter
-// file can't place an address it stamps a ZIP/area centroid instead of leaving the
-// coordinates blank, so doors from many DIFFERENT streets pile onto one identical dot.
+// A genuine apartment/park is ONE BASE ADDRESS with many units — every door shares its
+// house number + street ("900 Aqua Isles Blvd Lot 1" and "Lot 2" both read
+// "900 Aqua Isles Blvd" once streetName.js's baseAddressOf strips the unit). A vendor
+// PLACEHOLDER pin is the opposite: when a voter file can't place an address it stamps a
+// centroid instead of leaving the coordinates blank, so doors from many DIFFERENT
+// addresses pile onto one identical dot. The key must be the BASE ADDRESS, never the bare
+// street name: a vendor that collapses its unplaceable County Rd 78 addresses onto one
+// point ON County Rd 78 produces 18 house numbers that all share a street — keyed by
+// street they impersonate an 18-door building; keyed by base address they are 18
+// different homes on one dot, which is the tell.
 // Measured on a real i360 district file: 176 such pins holding 2,081 doors — ~8% of the
 // walk universe rendered unwalkable and, worse, excluded from books by "Remove apartments"
 // (which keys on geocode stacking and cannot tell a tower from 18 collapsed houses).
@@ -26,7 +31,7 @@
 // looping the strip would change walk-packet street bands, which share the parser. Left as-is.
 //
 // Consumed by the import validator (to warn in the preview) and repair:import-pins (to
-// shortlist doors for geocode adjudication). Pure — callers supply { id, street, pinKey }.
+// shortlist doors for geocode adjudication). Pure — callers supply { id, street, pinKey } — `street` is the BASE ADDRESS (baseAddressOf).
 
 export const DOMINANT_SHARE = 0.5;
 

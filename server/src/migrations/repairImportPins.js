@@ -8,7 +8,7 @@ import { Household } from '../models/Household.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { haversineMeters } from '../utils/normalizeAddress.js';
 import { inStateBounds } from '../utils/stateBounds.js';
-import { streetOf } from '../utils/streetName.js';
+import { streetOf, baseAddressOf } from '../utils/streetName.js';
 import { buildingKeyForCoords } from '../utils/buildingKey.js';
 import { classifyStackedPins } from '../utils/stackedPins.js';
 import { resolve as geocodeResolve, geocodeCostCents } from '../services/import/geocode/geocodeService.js';
@@ -37,12 +37,16 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 // HOW A DOOR IS SHORTLISTED (any one signal is enough — all four are only suspicion):
 //   1. Out of state       — the pin isn't inside its own state's bounding box.
 //   2. Street outlier     — far from the medoid of the other doors on its street + ZIP.
-//   3. Placeholder pin    — doors from several DIFFERENT streets share one exact coordinate
-//                           (a vendor stamped a centroid on addresses it couldn't place). A
-//                           real building shares one street line, so it can never trip this;
-//                           a building with a couple of odd-street strays keeps its majority
-//                           and only the strays are checked. Catches what #2 structurally
-//                           can't: a street that collapsed WHOLE leaves no cohort to compare.
+//   3. Placeholder pin    — doors from several DIFFERENT base addresses (house number +
+//                           street, unit stripped) share one exact coordinate — a vendor
+//                           stamped a centroid on addresses it couldn't place. A real
+//                           building is ONE house number with many units, so it can never
+//                           trip this; a building with a couple of odd strays keeps its
+//                           majority and only the strays are checked. Keyed on base address,
+//                           not street name, so 18 different County Rd 78 house numbers on
+//                           one dot can't impersonate a building. Catches what #2
+//                           structurally can't: a whole street collapsed onto its own road
+//                           leaves no cohort to compare AND sits on the right street.
 //   4. Knock evidence     — two or more canvassers logged a knock far from the pin. They were
 //                           standing at the real house; the pin is what's wrong.
 // Nothing is repaired on suspicion. A shortlisted door is then ADJUDICATED against the address
@@ -63,6 +67,33 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 // future re-imports, and (b) downgrades past "far from house" GPS flags at that door — the
 // canvasser really was at the house, so the flag was ours, not theirs. The Audit page's
 // historical counts will drop accordingly.
+// Refuse anything that isn't a recognized flag BEFORE touching the database. The failure this
+// guards against is real and observed: `--campaign= <id>` (a space after the =) parses as an
+// EMPTY campaign filter plus a stray argument — the empty filter silently widens the run to
+// EVERY campaign in the org, which on --apply is not what anyone typed.
+for (const a of process.argv.slice(2)) {
+  if (a === '--apply' || a === '--geocode') continue;
+  // An id that isn't a 24-char hex ObjectId throws a raw Mongoose CastError deep in the run —
+  // a stack trace where a one-line "you have a typo" belongs. Observed: a 25-char id with a
+  // trailing character pasted in from the console.
+  const id = /^--(campaign|user)=(.+)$/.exec(a);
+  if (id && !/^[0-9a-f]{24}$/i.test(id[2])) {
+    const hint = id[2].length !== 24 ? `it is ${id[2].length} characters, not 24` : 'it contains a non-hex character';
+    console.error(`ERROR: --${id[1]}=${id[2]} is not a valid id — ${hint}. Check for a stray character when you pasted it.`);
+    process.exit(1);
+  }
+  if (/^--(campaign|org|user|min-meters)=.+$/.test(a)) continue;
+  if (/^--(campaign|org|user|min-meters)=$/.test(a)) {
+    console.error(`ERROR: "${a}" is missing its value — write it with no space after the = (e.g. --campaign=abc123).`);
+    process.exit(1);
+  }
+  console.error(
+    `ERROR: unrecognized argument "${a}".` +
+      (/^[0-9a-f]{24}$/i.test(a) ? ` Did you mean --campaign=${a} (no space after the =)?` : '')
+  );
+  process.exit(1);
+}
+
 const APPLY = process.argv.includes('--apply');
 const ALLOW_GEOCODE = process.argv.includes('--geocode');
 const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split('=')[1] || null;
@@ -209,7 +240,10 @@ async function auditCampaign(campaign) {
     const stacked = classifyStackedPins(
       households.map((h) => {
         const c = coordsOf(h);
-        return { id: String(h._id), street: streetOf(h.addressLine1), pinKey: c ? buildingKeyForCoords([c.lng, c.lat]) : null };
+        // BASE ADDRESS, not street: a genuine building is one house number with many units.
+        // Keying on street let a same-street collapse (18 different County Rd 78 house
+        // numbers on one dot) impersonate an 18-door building and dodge the signal.
+        return { id: String(h._id), street: baseAddressOf(h.addressLine1), pinKey: c ? buildingKeyForCoords([c.lng, c.lat]) : null };
       })
     );
     for (const [id, info] of stacked.suspects) {
@@ -217,7 +251,7 @@ async function auditCampaign(campaign) {
       addReason(
         id,
         info.kind === 'placeholder'
-          ? `placeholder pin — ${info.pinDoors} doors from ${info.pinStreets} streets on one spot`
+          ? `placeholder pin — ${info.pinDoors} doors from ${info.pinStreets} addresses on one spot`
           : `stray — parked on another street's ${info.pinDoors}-door building`
       );
     }

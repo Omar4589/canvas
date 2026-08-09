@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { formatInTz } from '../lib/datetime.js';
-import { streetOf } from '../lib/streetName.js';
+import { baseAddressOf } from '../lib/streetName.js';
 
 // Every door hiding under one map pin. The household symbol layer draws with
 // icon-allow-overlap, so an 84-unit building used to render as 84 coincident
@@ -29,7 +29,9 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, s
     const lines = new Set(doors.map((d) => (d.addressLine1 || '').trim()).filter(Boolean));
     const freq = new Map();
     for (const d of doors) {
-      const s = streetOf(d.addressLine1);
+      // Base address, not street: two towers or 18 same-street houses on one dot both
+      // deserve the warning; 89 lots of "900 Aqua Isles Blvd" do not.
+      const s = baseAddressOf(d.addressLine1);
       freq.set(s, (freq.get(s) || 0) + 1);
     }
     const modal = Math.max(0, ...freq.values());
@@ -71,7 +73,7 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, s
       </div>
       {multiStreet ? (
         <p className="border-b border-warning/30 bg-warning-tint px-4 py-2 text-[11px] leading-snug text-warning-fg">
-          These doors have <strong>different street addresses</strong> but identical map coordinates — usually a
+          These doors have <strong>different addresses</strong> but identical map coordinates — usually a
           placeholder pin the voter file stamped on addresses it couldn&apos;t place, not a real building. The doors
           are real and walkable; the dot is what&apos;s wrong. Ask your Doorline contact to run the pin repair.
         </p>

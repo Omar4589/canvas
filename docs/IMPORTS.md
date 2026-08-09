@@ -94,9 +94,10 @@ An audit run finds them and can correct them:
 - It looks only at pins that came **from your file**. A pin someone dragged to the right spot by hand
   is field-verified truth and is never overwritten, and neither is one the geocoder placed.
 - A door is suspected when it's outside its state, when it's far from the other doors on its own
-  street, when it **shares an exact map spot with doors from other streets** (a placeholder
-  coordinate the vendor stamped on addresses it couldn't place — a real apartment building is one
-  street address with many units, so it never trips this), or when **two or more canvassers logged a
+  street, when it **shares an exact map spot with doors from other addresses** (a placeholder
+  coordinate the vendor stamped on addresses it couldn't place — a real building is one **house
+  number** with many units, so it never trips this; 18 different house numbers on one dot are 18
+  collapsed homes even when they share a street name), or when **two or more canvassers logged a
   knock far away from it** — they were standing at the real house, so the pin is what's wrong.
 - A real building carrying a couple of oddly-typed rows keeps its majority: the building stays put
   and only the odd doors get a second look. An 89-door mobile-home park with two typo'd lots is a
@@ -109,7 +110,7 @@ An audit run finds them and can correct them:
   the exact steps).
 
 Ask your Doorline contact to run it — it's an operator tool, not a page in the app. The import
-preview also warns up front now: *"N doors sit on an exact map spot shared with doors from other streets"*
+preview also warns up front now: *"N doors sit on an exact map spot shared with doors from other addresses"*
 means the file shipped placeholder coordinates and a repair run is worth scheduling before turf is cut.
 
 ## Shared voter database

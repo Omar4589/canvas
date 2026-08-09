@@ -8,7 +8,7 @@ import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress, haversineMeters } from '../../utils/normalizeAddress.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
-import { streetOf } from '../../utils/streetName.js';
+import { baseAddressOf } from '../../utils/streetName.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
 import { classifyStackedPins } from '../../utils/stackedPins.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
@@ -361,7 +361,9 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
     const pinDoors = [];
     for (const [normAddr, h] of householdMap) {
       if (h.latitude == null || h.longitude == null) continue;
-      pinDoors.push({ id: normAddr, street: streetOf(h.addressLine1), pinKey: buildingKeyForCoords([h.longitude, h.latitude]) });
+      // Base address (number kept, unit stripped): one house number with many units is a
+      // building; many house numbers on one dot is a placeholder — even on ONE street.
+      pinDoors.push({ id: normAddr, street: baseAddressOf(h.addressLine1), pinKey: buildingKeyForCoords([h.longitude, h.latitude]) });
     }
     const stacked = classifyStackedPins(pinDoors);
     return {

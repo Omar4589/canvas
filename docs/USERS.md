@@ -214,7 +214,17 @@ a mostly empty column). On `md+` the roster rows carry **activity columns** — 
 campaigns), last door knocked, last sign-in — joined client-side from the all-time campaign
 leaderboard (`GET /admin/reports/canvassers?campaignId=`, the same ledger-sourced rows the reports
 pages read) plus the roster's own `lastLoginAt`. `lastSeenAt` stays super-admin-only by design and
-must never be added here. **Click a team member** to open their campaign-scoped **profile panel**: their activity
+must never be added here.
+
+Search, sort and paging are all **client-side** over the roster the page already holds — deliberately,
+unlike the super-admin tables which sort and page on the server: this list is one campaign's people,
+and the page needs all of them anyway for the crew grouping and the activity join. **Crew grouping is
+a sort mode, not a separate layout** (`sort.key === 'crew'` orders by coordinator with the unassigned
+last, and the render emits a heading whenever the coordinator changes, including at the top of a page
+so a crew split across a page boundary is labelled on both). Every comparator is written ASCENDING and
+`dir` alone flips it, so a column can never disagree with its own arrow. The page offset is **clamped
+derived state**, never an effect — removing the last member of a page would otherwise leave an empty
+page with a live Prev button. **Click a team member** to open their campaign-scoped **profile panel**: their activity
 in this campaign; their crew/coordinator — this is the only place a crew is set; and, when the viewer
 may manage the account (admin: anyone; lead: canvassers — the `leadMayManageTarget` wall), a
 **Profile** section (name/email/phone, saved through `PATCH /admin/memberships/:userId/user` with the

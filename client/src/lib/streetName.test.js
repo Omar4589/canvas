@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { streetOf, UNIT_SUFFIX } from './streetName.js';
-import { streetOf as serverStreetOf, UNIT_SUFFIX as serverUnitSuffix } from '../../../server/src/utils/streetName.js';
+import { streetOf, baseAddressOf, UNIT_SUFFIX } from './streetName.js';
+import { streetOf as serverStreetOf, baseAddressOf as serverBaseAddressOf, UNIT_SUFFIX as serverUnitSuffix } from '../../../server/src/utils/streetName.js';
 
 // DRIFT GUARD: this file mirrors server/src/utils/streetName.js. The server copy decides which
 // stacked pins the pin-repair flags; this copy decides which stacks the door panel warns about.
@@ -31,4 +31,17 @@ test('units baked into line1 collapse to one street — the case that misfired t
 
 test('different streets stay different', () => {
   assert.notEqual(streetOf('370 Mahogony Ct'), streetOf('800 Gen Chesty Puller Ct'));
+});
+
+test('client baseAddressOf is byte-identical to the server implementation', () => {
+  const probes = ['900 Aqua Isles Blvd Lot G1', '1644 County Rd 78', '845 Collier Ct Apt 104', '123 Main St # 4', null];
+  for (const p of probes) assert.equal(baseAddressOf(p), serverBaseAddressOf(p), String(p));
+});
+
+test('base address keeps the number, strips the unit — the building-vs-collapse tell', () => {
+  // One building: many lots, one base.
+  assert.equal(baseAddressOf('900 Aqua Isles Blvd Lot 1'), baseAddressOf('900 Aqua Isles Blvd Lot 88'));
+  // A same-street collapse: same street, different bases.
+  assert.notEqual(baseAddressOf('1644 County Rd 78'), baseAddressOf('2282 County Rd 78'));
+  assert.equal(streetOf('1644 County Rd 78'), streetOf('2282 County Rd 78'));
 });

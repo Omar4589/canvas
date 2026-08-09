@@ -249,3 +249,29 @@ test('placeholder detection runs on RESOLVED coordinates — after the per-house
   assert.equal(r.coordConflicts, 1);
   assert.equal(r.placeholderPins, 0, 'after the vote, only one door remains at the shared spot');
 });
+
+test('a SAME-STREET collapse — different house numbers on one dot — is a placeholder too', () => {
+  // The County Rd 78 shape: the vendor stamped its unplaceable addresses onto one point ON
+  // the same road. Keyed by street name these impersonate a building; keyed by base address
+  // (number kept, unit stripped) they are different homes on one dot.
+  const rows = [
+    at('A', '1644 County Rd 78', 26.75, -81.44),
+    at('B', '2282 County Rd 78', 26.75, -81.44),
+    at('C', '3530 County Rd 78', 26.75, -81.44),
+    at('D', '4847 County Rd 78', 26.75, -81.44),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 1);
+  assert.equal(r.placeholderPinDoors, 4);
+});
+
+test('a lot community — ONE house number, many lots — is still a real building', () => {
+  const rows = [
+    at('A', '813 E El Paso Ave Lot 40', 26.75, -81.44),
+    at('B', '813 E El Paso Ave Lot 43', 26.75, -81.44),
+    at('C', '813 E El Paso Ave Lot 51', 26.75, -81.44),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 0);
+  assert.equal(r.placeholderPinDoors, 0);
+});

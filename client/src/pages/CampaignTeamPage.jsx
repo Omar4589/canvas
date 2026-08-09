@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useParams, Navigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { Card, Button, Badge, Modal, PhoneInput } from '../components/ui';
 import PasswordInput from '../components/PasswordInput.jsx';
 import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
+import Pager from '../components/Pager.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
 import { formatRelative, formatDate } from '../lib/dates.js';
 
@@ -43,16 +44,56 @@ const ROW_GRID_LIT =
   'grid w-full grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-3 md:grid-cols-[minmax(0,1fr)_5rem_7.5rem_7.5rem_1.25rem]';
 const rowGridClass = (isSurvey) => (isSurvey ? ROW_GRID_SURVEY : ROW_GRID_LIT);
 
+// Each column's natural first direction. Names read A→Z; anything countable or dated reads
+// biggest/most-recent first, because "who has done the most" and "who has gone quiet" are the
+// questions this page exists to answer.
+const SORT_DEFAULT_DIR = {
+  crew: 'asc',
+  name: 'asc',
+  email: 'asc',
+  doors: 'desc',
+  surveys: 'desc',
+  lastDoor: 'desc',
+  lastLogin: 'desc',
+};
+
 // The column header above a roster list. Named columns instead of empty width: doors + last door
 // answer "who has been out lately" at a glance, which is the whole reason the page went wide.
-function TeamHeaderRow({ isSurvey }) {
+// Sorting is CLIENT-side here (unlike the super-admin tables, which sort on the server): the roster
+// is one campaign's people and the page already holds all of them for the crew grouping, so paging
+// the server would cost a round trip and break the grouping for nothing.
+function SortCol({ label, sortKey, right, sort, onSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`uppercase tracking-wide hover:text-fg ${right ? 'text-right' : 'text-left'} ${
+        active ? 'text-fg' : ''
+      }`}
+    >
+      {label}
+      {active && (sort.dir === 'asc' ? ' ▴' : ' ▾')}
+    </button>
+  );
+}
+
+function TeamHeaderRow({ isSurvey, sort, onSort }) {
+  // Call sites written out rather than wrapped in a local <Col> helper: a component defined during
+  // render is a new TYPE every render, so React would remount the header instead of updating it.
+  const s = { sort, onSort };
   return (
     <li className={`${rowGridClass(isSurvey)} hidden border-b border-border bg-sunken px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-muted md:grid`}>
-      <span>Member</span>
-      <span className="text-right">Doors</span>
-      {isSurvey && <span className="text-right">Surveys</span>}
-      <span className="text-right">Last door</span>
-      <span className="text-right">Last login</span>
+      <span className="flex items-center gap-3">
+        <SortCol label="Member" sortKey="name" {...s} />
+        <SortCol label="Email" sortKey="email" {...s} />
+        <SortCol label="Crew" sortKey="crew" {...s} />
+      </span>
+      <SortCol label="Doors" sortKey="doors" right {...s} />
+      {isSurvey && <SortCol label="Surveys" sortKey="surveys" right {...s} />}
+      <SortCol label="Last door" sortKey="lastDoor" right {...s} />
+      <SortCol label="Last login" sortKey="lastLogin" right {...s} />
       <span aria-hidden />
     </li>
   );
@@ -357,6 +398,8 @@ function AddPersonModal({ campaignId, isOrgAdmin, onClose, onDone }) {
     </Modal>
   );
 }
+
+const ROSTER_PAGE = 25;
 
 const panelInputClass =
   'w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -840,6 +883,9 @@ export default function CampaignTeamPage() {
   const [creatingMember, setCreatingMember] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [dirOpen, setDirOpen] = useState(false);
+  const [rosterQ, setRosterQ] = useState('');
+  const [rosterSort, setRosterSort] = useState({ key: 'crew', dir: 'asc' });
+  const [skip, setSkip] = useState(0);
 
   // ONE campaign-scoped list, same for both roles. This used to fork — admins read the org Users
   // list, leads read the crew endpoint — and the lead branch was the leakier of the two: it returned
@@ -918,18 +964,56 @@ export default function CampaignTeamPage() {
   );
   const assignedSet = useMemo(() => new Set(team.map((a) => a.userId)), [team]);
   // Group the team by coordinator ("crew") — named crews first, "No coordinator" last.
-  const hasCrews = useMemo(() => team.some((a) => a.coordinatorId), [team]);
-  const teamGroups = useMemo(() => {
-    const byCoord = new Map();
-    for (const a of team) {
-      const key = a.coordinatorId || 'none';
-      if (!byCoord.has(key)) byCoord.set(key, { key, name: a.coordinatorName || null, members: [] });
-      byCoord.get(key).members.push(a);
-    }
-    return [...byCoord.values()].sort((a, b) =>
-      a.key === 'none' ? 1 : b.key === 'none' ? -1 : (a.name || '').localeCompare(b.name || '')
+  // Search → sort → page, in that order, all client-side over the roster we already hold.
+  //
+  // Crew grouping survives as a SORT MODE rather than a separate layout: sorting by crew orders the
+  // list by coordinator (unassigned last, as the old "No coordinator" group was) and the render
+  // drops a group header in whenever the coordinator changes. That way one code path serves both
+  // "browse the crews" and "find this person", and a page boundary can't strand half a crew under
+  // a heading that scrolled off.
+  const rosterRows = useMemo(() => {
+    const needle = rosterQ.trim().toLowerCase();
+    const rows = needle
+      ? team.filter((a) => `${a.firstName} ${a.lastName} ${a.email}`.toLowerCase().includes(needle))
+      : team;
+    const nameOf = (a) => `${a.firstName} ${a.lastName}`.trim().toLowerCase();
+    const act = (a) => activityByUser.get(String(a.userId));
+    const time = (v) => (v ? new Date(v).getTime() : 0);
+    // Every comparator is ASCENDING; `dir` alone decides the direction, so a column can't disagree
+    // with its own arrow.
+    const asc = {
+      crew: (a, b) =>
+        Number(!a.coordinatorId) - Number(!b.coordinatorId) ||
+        (a.coordinatorName || '').localeCompare(b.coordinatorName || '') ||
+        nameOf(a).localeCompare(nameOf(b)),
+      name: (a, b) => nameOf(a).localeCompare(nameOf(b)),
+      email: (a, b) => (a.email || '').localeCompare(b.email || ''),
+      doors: (a, b) => (act(a)?.knocks || 0) - (act(b)?.knocks || 0),
+      surveys: (a, b) => (act(a)?.surveysSubmitted || 0) - (act(b)?.surveysSubmitted || 0),
+      lastDoor: (a, b) => time(act(a)?.lastActivityAt) - time(act(b)?.lastActivityAt),
+      lastLogin: (a, b) => time(a.lastLoginAt) - time(b.lastLoginAt),
+    };
+    const sorted = [...rows].sort(asc[rosterSort.key] || asc.name);
+    if (rosterSort.dir === 'desc') sorted.reverse();
+    return sorted;
+  }, [team, rosterQ, rosterSort, activityByUser]);
+
+  // Clamped rather than reset in an effect: removing the last member of a page (or a search that
+  // narrows the list under the current offset) would otherwise render an empty page with a live
+  // Prev button. Derived state needs no cleanup and can't fall out of sync.
+  const rosterSkip = Math.min(
+    skip,
+    Math.max(0, (Math.ceil(rosterRows.length / ROSTER_PAGE) - 1) * ROSTER_PAGE)
+  );
+  const pageRows = rosterRows.slice(rosterSkip, rosterSkip + ROSTER_PAGE);
+  const onSort = (key) => {
+    setRosterSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: SORT_DEFAULT_DIR[key] || 'asc' }
     );
-  }, [team]);
+    setSkip(0);
+  };
   // Who may RUN a crew is an org-level fact — any active admin or lead, whether or not they walk
   // this campaign — so the server sends the eligible list alongside the roster. Deriving it from the
   // roster instead would empty the picker on a campaign whose lead doesn't knock doors.
@@ -977,9 +1061,24 @@ export default function CampaignTeamPage() {
       </p>
 
       <Card className="flex flex-col p-4">
-        <h2 className="mb-3 text-sm font-semibold text-fg">
-          On this campaign <span className="text-fg-muted">({team.length})</span>
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-fg">
+            On this campaign <span className="text-fg-muted">({team.length})</span>
+            {rosterQ.trim() && (
+              <span className="text-fg-muted"> · {rosterRows.length} matching</span>
+            )}
+          </h2>
+          <input
+            type="search"
+            value={rosterQ}
+            onChange={(e) => {
+              setRosterQ(e.target.value);
+              setSkip(0);
+            }}
+            placeholder="Search this team by name or email…"
+            className="w-full max-w-xs rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
+        </div>
         {loading ? (
           <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
         ) : !team.length ? (
@@ -990,43 +1089,52 @@ export default function CampaignTeamPage() {
             </button>{' '}
             by their email address.
           </div>
-        ) : !hasCrews ? (
-          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            <TeamHeaderRow isSurvey={isSurveyCampaign} />
-            {team.map((a) => (
-              <TeamMemberRow
-                key={a.userId}
-                a={a}
-                isSelf={String(a.userId) === String(user?.id)}
-                isSurvey={isSurveyCampaign}
-                activity={activityByUser.get(String(a.userId))}
-                onOpen={setSelectedMember}
-              />
-            ))}
-          </ul>
+        ) : !rosterRows.length ? (
+          <div className="rounded border border-dashed border-border bg-sunken px-4 py-8 text-center text-sm text-fg-muted">
+            No one on this team matches “{rosterQ.trim()}”.{' '}
+            <button onClick={() => setRosterQ('')} className="font-medium text-brand-accent hover:underline">
+              Clear search
+            </button>
+          </div>
         ) : (
-          <div className="space-y-3">
-            {teamGroups.map((g) => (
-              <div key={g.key}>
-                <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  {g.name || 'No coordinator'} <span className="text-fg-subtle">({g.members.length})</span>
-                </div>
-                <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  <TeamHeaderRow isSurvey={isSurveyCampaign} />
-                  {g.members.map((a) => (
+          <>
+            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+              <TeamHeaderRow isSurvey={isSurveyCampaign} sort={rosterSort} onSort={onSort} />
+              {pageRows.map((a, i) => {
+                // Crew heading whenever the coordinator changes — including at the top of a page,
+                // so a crew split across two pages is labelled on both.
+                const prev = i > 0 ? pageRows[i - 1] : null;
+                const showCrew =
+                  rosterSort.key === 'crew' &&
+                  (!prev || String(prev.coordinatorId || '') !== String(a.coordinatorId || ''));
+                return (
+                  <Fragment key={a.userId}>
+                    {showCrew && (
+                      <li className="bg-sunken/60 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                        {a.coordinatorName || 'No coordinator'}
+                      </li>
+                    )}
                     <TeamMemberRow
-                      key={a.userId}
                       a={a}
                       isSelf={String(a.userId) === String(user?.id)}
                       isSurvey={isSurveyCampaign}
                       activity={activityByUser.get(String(a.userId))}
                       onOpen={setSelectedMember}
                     />
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+                  </Fragment>
+                );
+              })}
+            </ul>
+            {rosterRows.length > ROSTER_PAGE && (
+              <Pager
+                skip={rosterSkip}
+                limit={ROSTER_PAGE}
+                total={rosterRows.length}
+                onChange={setSkip}
+                className="mt-3"
+              />
+            )}
+          </>
         )}
       </Card>
 
