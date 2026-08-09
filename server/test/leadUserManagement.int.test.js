@@ -146,7 +146,7 @@ test('lead deactivate/reactivate: same boundary', { skip }, async () => {
   assert.strictEqual(theAdmin.status, 403);
 });
 
-test('role change / create / delete / identity edits stay admin-only for leads', { skip }, async () => {
+test('role change / create / delete stay admin-only for leads', { skip }, async () => {
   const roleChange = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}`, { ...asLead(), body: { role: 'admin' } });
   assert.strictEqual(roleChange.status, 403);
   assert.strictEqual(roleChange.json.code, 'ADMIN_ONLY');
@@ -159,9 +159,50 @@ test('role change / create / delete / identity edits stay admin-only for leads',
 
   const del = await call('DELETE', `/api/admin/memberships/${ctx.canvA._id}`, asLead());
   assert.strictEqual(del.status, 403);
+});
 
-  const identity = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/user`, { ...asLead(), body: { firstName: 'Hax' } });
-  assert.strictEqual(identity.status, 403);
+test('lead identity edits: their canvassers only, and the multi-org email lock holds (2026-08-09 ruling)', { skip }, async () => {
+  // The same leadMayManageTarget wall as passwords — which is the MORE dangerous power, so
+  // identity following it is a coherent widening, not a new kind of hole.
+  const ok = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/user`, {
+    ...asLead(),
+    body: { firstName: 'Canvy', phone: '(555) 200-0001' },
+  });
+  assert.strictEqual(ok.status, 200, 'canvasser on their campaign: editable');
+  assert.strictEqual(ok.json.user.firstName, 'Canvy');
+
+  // Email too — for a SINGLE-org canvasser it is just a typo fix.
+  const mail = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/user`, {
+    ...asLead(),
+    body: { email: 'canva.fixed@t.co' },
+  });
+  assert.strictEqual(mail.status, 200, 'single-org email edit allowed');
+
+  const offCampaign = await call('PATCH', `/api/admin/memberships/${ctx.canvB._id}/user`, { ...asLead(), body: { firstName: 'Hax' } });
+  assert.strictEqual(offCampaign.status, 403, 'a canvasser on an unmanaged campaign is out of reach');
+  const fellowLead = await call('PATCH', `/api/admin/memberships/${ctx.lead2._id}/user`, { ...asLead(), body: { firstName: 'Hax' } });
+  assert.strictEqual(fellowLead.status, 403, 'a fellow lead is never editable');
+  const theAdmin = await call('PATCH', `/api/admin/memberships/${ctx.admin._id}/user`, { ...asLead(), body: { firstName: 'Hax' } });
+  assert.strictEqual(theAdmin.status, 403, 'an admin is never editable by a lead');
+
+  // The multi-org email lock is what makes this widening safe to a shared account: give canvA a
+  // second active org and their LOGIN EMAIL goes out of everyone's reach — lead and admin alike —
+  // while name/phone stay editable.
+  const otherOrg = await Organization.create({ name: 'Second Org', slug: 'lu-second-org', isActive: true });
+  await Membership.create({ userId: ctx.canvA._id, organizationId: otherOrg._id, role: 'canvasser', isActive: true });
+  const locked = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/user`, {
+    ...asLead(),
+    body: { email: 'steal@t.co' },
+  });
+  assert.strictEqual(locked.status, 403, 'multi-org email edit refused');
+  assert.strictEqual(locked.json.code, 'MULTI_ORG_EMAIL_LOCKED');
+  const nameStill = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/user`, {
+    ...asLead(),
+    body: { lastName: 'Renamed' },
+  });
+  assert.strictEqual(nameStill.status, 200, 'name/phone stay editable under the lock');
+  // Restore the single-org world for any test after us.
+  await Membership.deleteOne({ userId: ctx.canvA._id, organizationId: otherOrg._id });
 });
 
 test('per-user read drills follow visibility: in-scope 200, out-of-scope 403', { skip }, async () => {

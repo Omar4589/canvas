@@ -76,10 +76,13 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
   that campaign's people, not the organization's, and a lead adds someone by typing their **email
   address** rather than browsing a directory. Until then its add-picker returned every active member of
   the whole org, making it the one place a lead saw *more* of the organization than their own Users list
-  would show them. On that scoped list a lead can **set temporary passwords** and **switch accounts off
-  and back on**, for **canvasser accounts only** — never an admin, another lead, or Doorline staff
-  (the server refuses, not just the UI). Changing roles, creating org-level accounts, deleting, and
-  editing someone's identity (name/email/phone) remain admin-only.
+  would show them. On that scoped list a lead can **set temporary passwords**, **switch accounts off
+  and back on**, and — since 2026-08-09 — **edit the person's name, email, and phone**, for
+  **canvasser accounts only** — never an admin, another lead, or Doorline staff (the server refuses,
+  not just the UI). Identity edits ride the same guards an admin's do: a deleted account is
+  untouchable, and the **login email of anyone who also belongs to another organization is locked**
+  (only that person or Doorline can change it). Changing roles, creating org-level accounts, and
+  deleting remain admin-only.
 
   **The off-switch caveat is a real one:** deactivation is *not* campaign-scoped — an account is
   either on or off for the whole organization, so switching off someone a lead shares with another
@@ -283,13 +286,18 @@ cliff, live).
 - `GET /` — a lead's list is filtered to `leadVisibleUserIds` (everyone holding a
   `CampaignAssignment` on a campaign in their `managedCampaignIds` grant set; empty grants → empty
   list, default-deny).
-- `PATCH /:userId/password`, `/deactivate`, `/reactivate` — allowed for a lead only when
+- `PATCH /:userId/password`, `/deactivate`, `/reactivate`, `POST /:userId/resend-invite`, and — since
+  2026-08-09 — `PATCH /:userId/user` (identity: name/email/phone) — allowed for a lead only when
   `leadMayManageTarget` passes: the target's membership role is **`canvasser`** AND they share a
   managed campaign. Fellow leads and admins are never manageable (privilege-escalation guard).
+  Identity edits keep every guard the admin path has — vendor-staff refusal, the tombstone 409, the
+  **multi-org email lock** (`MULTI_ORG_EMAIL_LOCKED`), and the duplicate-email 409 — and refuse with
+  a plain-message 403, deliberately not `ADMIN_ONLY` (leads sometimes may) and never
+  `FORBIDDEN_ROLE` (the mobile shell treats that as a role-recovery signal).
 - `GET /:userId/{crews,campaigns,stats,recent-activity}` — read drills allowed for any *visible*
   target (`leadMaySeeTarget`), 403 outside the scope.
-- `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId`, `PATCH /:userId/user`
-  (identity) — walled by `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`.
+- `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId` — walled by
+  `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`.
 - The whole matrix is pinned by
   [`test/leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js).
 

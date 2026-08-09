@@ -443,6 +443,21 @@ export default function MemberSheet({
               <Text style={styles.linkText}>Full canvasser view ›</Text>
             </Pressable>
 
+            {/* The full profile page (identity, password, status). A lead can edit their
+                canvassers' name/email/phone there (2026-08-09 ruling) — until this link existed
+                the page was reachable only from the flat org view, which leads never see. */}
+            {canManageAccount ? (
+              <Pressable
+                onPress={() => {
+                  onClose();
+                  router.push(`/(app)/admin/users/${u.id}`);
+                }}
+                style={styles.link}
+              >
+                <Text style={styles.linkText}>Manage profile ›</Text>
+              </Pressable>
+            ) : null}
+
             {/* Campaign roster — admin only (a lead's people are auto-assigned on create). */}
             {isAdminViewer && cId ? (
               member.assigned ? (

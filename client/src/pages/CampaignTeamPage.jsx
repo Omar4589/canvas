@@ -317,6 +317,9 @@ function AddPersonModal({ campaignId, isOrgAdmin, onClose, onDone }) {
   );
 }
 
+const panelInputClass =
+  'w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
+
 function StatBox({ label, value }) {
   return (
     <div className="rounded-md border border-border bg-sunken px-3 py-2">
@@ -326,15 +329,91 @@ function StatBox({ label, value }) {
   );
 }
 
-// A lighter, campaign-scoped member panel (not the org Users modal): their activity in THIS
-// campaign, set their crew (coordinator), and remove them from the campaign. Admins get a
-// link to the full account on the Users page.
+// The campaign-scoped member PROFILE: everything a lead (or admin) manages about a person, in one
+// sectioned panel — identity, their activity in THIS campaign, their crew, and account access
+// (temporary password, invite, on/off switch). It used to be activity + crew + remove only, which
+// left a web lead with no way to reset a forgotten password or switch off a departed canvasser —
+// powers the server has allowed them since the lead role shipped, and the mobile sheet already
+// offers. The management sections follow the server's wall exactly: an admin manages anyone here;
+// a lead manages CANVASSERS (this roster is by definition a campaign they manage) — admins, other
+// leads, and Doorline staff render read-only for them.
 function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrgAdmin, onClose, onRemove, removing }) {
   const qc = useQueryClient();
   const summaryQ = useQuery({
     queryKey: ['admin', 'campaign-member-summary', campaignId, member.userId],
     queryFn: () => api(`/admin/reports/canvassers/${member.userId}/summary?campaignId=${campaignId}`),
   });
+
+  // The server's leadMayManageTarget, mirrored: isOrgAdmin covers admin + super; a lead's reach is
+  // canvasser targets. Staff accounts are refused server-side whoever asks, and a deleted account
+  // is terminal — hide the controls rather than render guaranteed 403s/409s.
+  const canManageAccount =
+    (isOrgAdmin || member.role === 'canvasser') && !member.isSuperAdmin && member.status !== 'deleted';
+  const deactivated = member.status === 'deactivated';
+
+  // ── Identity ─────────────────────────────────────────────────────────────────────────────
+  const [profile, setProfile] = useState({
+    firstName: member.firstName || '',
+    lastName: member.lastName || '',
+    email: member.email || '',
+    phone: member.phone || '',
+  });
+  const profileDirty =
+    profile.firstName !== (member.firstName || '') ||
+    profile.lastName !== (member.lastName || '') ||
+    profile.email !== (member.email || '') ||
+    profile.phone !== (member.phone || '');
+  const invalidatePeople = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
+    qc.invalidateQueries({ queryKey: ['memberships'] });
+  };
+  const saveProfileMut = useMutation({
+    mutationFn: () => {
+      const body = {};
+      if (profile.firstName !== member.firstName) body.firstName = profile.firstName.trim();
+      if (profile.lastName !== member.lastName) body.lastName = profile.lastName.trim();
+      if (profile.email !== member.email) body.email = profile.email.trim().toLowerCase();
+      if (profile.phone !== (member.phone || '')) body.phone = profile.phone.trim();
+      return api(`/admin/memberships/${member.userId}/user`, { method: 'PATCH', body });
+    },
+    onSuccess: invalidatePeople,
+  });
+
+  // ── Access: temp password, invite, on/off ────────────────────────────────────────────────
+  const [pw, setPw] = useState('');
+  const [pwOpen, setPwOpen] = useState(false);
+  const pwProblem = pw.length > 0 ? tempPasswordProblem(pw) : null;
+  const setPwMut = useMutation({
+    mutationFn: () => api(`/admin/memberships/${member.userId}/password`, { method: 'PATCH', body: { password: pw } }),
+    onSuccess: () => {
+      setPw('');
+      setPwOpen(false);
+    },
+  });
+  const resendMut = useMutation({
+    mutationFn: () => api(`/admin/memberships/${member.userId}/resend-invite`, { method: 'POST' }),
+  });
+  // The on/off switch is ORG-wide (a membership has no campaign), so the confirm names the other
+  // campaigns it reaches — same disclosure the mobile sheet shows, from the same crews read.
+  const [statusConfirm, setStatusConfirm] = useState(false);
+  const crewsQ = useQuery({
+    queryKey: ['admin', 'member-crews', member.userId],
+    queryFn: () => api(`/admin/memberships/${member.userId}/crews`),
+    enabled: statusConfirm && !deactivated,
+  });
+  const statusMut = useMutation({
+    mutationFn: (verb) =>
+      api(`/admin/campaigns/${campaignId}/crew/${member.userId}/${verb}`, { method: 'PATCH' }),
+    onSuccess: () => {
+      setStatusConfirm(false);
+      invalidatePeople();
+    },
+  });
+  const otherCampaigns = (crewsQ.data?.crews || [])
+    .filter((c) => String(c.campaignId) !== String(campaignId))
+    .map((c) => c.campaignName)
+    .filter(Boolean);
   const [coordinatorId, setCoordinatorId] = useState(member.coordinatorId || '');
   // A crew change re-stamps this person’s knock history onto the new team — for THIS campaign, since
   // the crew lives on the campaign roster. So it stages, previews, then commits.
@@ -394,9 +473,10 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
 
   return (
     <Modal
-      size="md"
+      size="2xl"
       onClose={onClose}
       title={`${member.firstName} ${member.lastName}`}
+      subtitle={member.email}
       footer={
         <>
           <Button
@@ -417,10 +497,12 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 text-sm text-fg-muted">
-          <span className="truncate">{member.email}</span>
+      <div className="space-y-5">
+        <div className="flex items-center gap-2">
           <RoleBadge role={member.role} />
+          {member.status === 'deactivated' && <Badge variant="warning">Deactivated</Badge>}
+          {member.status === 'removed' && <Badge variant="neutral">No longer in the org</Badge>}
+          {member.status === 'deleted' && <Badge variant="danger">Account deleted</Badge>}
         </div>
 
         {confirming && (
@@ -438,6 +520,79 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
               knocked still counts toward this campaign's totals.
             </p>
           </div>
+        )}
+
+        {canManageAccount ? (
+          <div>
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">Profile</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
+                <input
+                  value={profile.firstName}
+                  onChange={(e) => setProfile((p) => ({ ...p, firstName: e.target.value }))}
+                  className={panelInputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
+                <input
+                  value={profile.lastName}
+                  onChange={(e) => setProfile((p) => ({ ...p, lastName: e.target.value }))}
+                  className={panelInputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">Email</label>
+                <input
+                  type="email"
+                  value={profile.email}
+                  onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+                  className={panelInputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-fg-muted">Phone</label>
+                <PhoneInput value={profile.phone} onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))} />
+              </div>
+            </div>
+            {saveProfileMut.error && (
+              <p className="mt-2 text-sm text-danger">
+                {saveProfileMut.error.data?.code === 'MULTI_ORG_EMAIL_LOCKED'
+                  ? 'They also work with another organization, so only they (or Doorline) can change their login email. Name and phone still save.'
+                  : saveProfileMut.error.message}
+              </p>
+            )}
+            {profileDirty && (
+              <div className="mt-2 flex items-center gap-2">
+                <Button size="sm" loading={saveProfileMut.isPending} onClick={() => saveProfileMut.mutate()}>
+                  Save profile
+                </Button>
+                <button
+                  type="button"
+                  className="text-xs text-fg-muted hover:underline"
+                  onClick={() =>
+                    setProfile({
+                      firstName: member.firstName || '',
+                      lastName: member.lastName || '',
+                      email: member.email || '',
+                      phone: member.phone || '',
+                    })
+                  }
+                >
+                  Discard
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          member.status !== 'deleted' && (
+            <p className="text-xs text-fg-muted">
+              {member.role !== 'canvasser'
+                ? 'Admins and team leads are managed by an org admin.'
+                : 'This account is managed by an org admin.'}
+            </p>
+          )
         )}
 
         <div>
@@ -504,6 +659,122 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
           )}
         </div>
 
+        {canManageAccount && (
+          <div>
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-fg-muted">Access</div>
+            {deactivated ? (
+              <div className="rounded-lg border border-warning/30 bg-warning-tint px-3 py-2 text-sm">
+                <p className="text-warning-fg">
+                  Their account is switched off — they can’t sign in anywhere in your organization.
+                </p>
+                {statusConfirm ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button size="sm" loading={statusMut.isPending} onClick={() => statusMut.mutate('reactivate')}>
+                      Yes, switch it on
+                    </Button>
+                    <button type="button" className="text-xs text-fg-muted hover:underline" onClick={() => setStatusConfirm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="mt-1 text-xs font-medium text-brand-accent hover:underline"
+                    onClick={() => setStatusConfirm(true)}
+                  >
+                    Reactivate account (restores every campaign they were on)
+                  </button>
+                )}
+                {statusMut.error && <p className="mt-1 text-xs text-danger">{statusMut.error.message}</p>}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {pwOpen ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <PasswordInput
+                        value={pw}
+                        onChange={(e) => setPw(e.target.value)}
+                        autoComplete="new-password"
+                        placeholder="New temporary password"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      loading={setPwMut.isPending}
+                      disabled={!pw || !!pwProblem}
+                      onClick={() => setPwMut.mutate()}
+                    >
+                      Set password
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-xs text-fg-muted hover:underline"
+                      onClick={() => {
+                        setPwOpen(false);
+                        setPw('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    {pwProblem && <p className="w-full text-xs text-danger">{pwProblem}</p>}
+                    <p className="w-full text-xs text-fg-subtle">
+                      Valid for 72 hours — they’ll set their own password when they sign in with it.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <button type="button" className="font-medium text-brand-accent hover:underline" onClick={() => setPwOpen(true)}>
+                      Set temporary password
+                    </button>
+                    {!member.lastLoginAt && (
+                      <button
+                        type="button"
+                        className="font-medium text-brand-accent hover:underline disabled:opacity-50"
+                        disabled={resendMut.isPending}
+                        onClick={() => resendMut.mutate()}
+                      >
+                        {resendMut.isPending ? 'Sending…' : 'Resend invite'}
+                      </button>
+                    )}
+                    <button type="button" className="font-medium text-danger hover:underline" onClick={() => setStatusConfirm(true)}>
+                      Deactivate account
+                    </button>
+                  </div>
+                )}
+                {setPwMut.isSuccess && !pwOpen && (
+                  <p className="text-xs text-fg-muted">Temporary password set — hand it over in person, it’s never emailed.</p>
+                )}
+                {setPwMut.error && <p className="text-xs text-danger">{setPwMut.error.message}</p>}
+                {resendMut.isSuccess && <p className="text-xs text-fg-muted">Invite sent — a fresh set-password link, good for 72 hours.</p>}
+                {resendMut.error && <p className="text-xs text-danger">{resendMut.error.message}</p>}
+                {statusConfirm && (
+                  <div className="rounded-lg border border-warning/30 bg-warning-tint px-3 py-2 text-sm">
+                    <p className="font-medium text-warning-fg">Switch off {member.firstName}’s account?</p>
+                    <p className="mt-1 text-fg-muted">
+                      {crewsQ.isLoading
+                        ? 'Checking which campaigns this reaches…'
+                        : otherCampaigns.length
+                          ? `This is org-wide — it also takes them out of: ${otherCampaigns.join(', ')}.`
+                          : 'They’re only on this campaign, so nothing else is affected.'}{' '}
+                      Their work stays counted, and you can switch them back on anytime.
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button variant="danger" size="sm" loading={statusMut.isPending} onClick={() => statusMut.mutate('deactivate')}>
+                        Deactivate
+                      </Button>
+                      <button type="button" className="text-xs text-fg-muted hover:underline" onClick={() => setStatusConfirm(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                    {statusMut.error && <p className="mt-1 text-xs text-danger">{statusMut.error.message}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {isOrgAdmin && (
           <Link to={usersReturn} onClick={onClose} className="inline-block text-xs font-medium text-brand-accent hover:underline">
             Manage this person&apos;s account →
@@ -522,6 +793,7 @@ export default function CampaignTeamPage() {
   const [search, setSearch] = useState('');
   const [creatingMember, setCreatingMember] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [dirOpen, setDirOpen] = useState(false);
 
   // ONE campaign-scoped list, same for both roles. This used to fork — admins read the org Users
   // list, leads read the crew endpoint — and the lead branch was the leakier of the two: it returned
@@ -580,6 +852,12 @@ export default function CampaignTeamPage() {
     ),
     [assignmentsQ.data]
   );
+  // The open panel re-derives its member from the FRESH roster, so a profile save or status flip
+  // shows in the panel immediately instead of the stale object captured at click time.
+  const liveMember = useMemo(
+    () => (selectedMember ? team.find((a) => a.userId === selectedMember.userId) || selectedMember : null),
+    [selectedMember, team]
+  );
   const assignedSet = useMemo(() => new Set(team.map((a) => a.userId)), [team]);
   // Group the team by coordinator ("crew") — named crews first, "No coordinator" last.
   const hasCrews = useMemo(() => team.some((a) => a.coordinatorId), [team]);
@@ -619,46 +897,104 @@ export default function CampaignTeamPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight text-fg">Team</h1>
+      {/* Stacked, roster-first. This page was two side-by-side cards, which made sense when the
+          left one was an org directory — for a lead it had shrunk to a button and a sentence,
+          leaving half the page empty. The roster IS the page now; adding is a header action, and
+          the admin-only directory tucks into a collapsible card underneath. */}
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Team</h1>
+        <div className="flex items-center gap-3">
+          {isOrgAdmin && (
+            <Link to={usersReturn} className="text-xs font-medium text-fg-muted hover:underline">Manage users →</Link>
+          )}
+          <Button size="sm" onClick={() => setCreatingMember(true)}>+ Add someone</Button>
+        </div>
+      </div>
       <p className="mb-5 max-w-2xl text-sm text-fg-muted">
         The people on <span className="font-medium text-fg">{selected?.name || 'this campaign'}</span>. Only people on
-        this team can be assigned books and see the campaign in the mobile app.
+        this team can be assigned books and see the campaign in the mobile app. Click anyone to
+        manage them — their details, crew, password, and access.
       </p>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* LEFT — add somebody. By email for everyone; admins also get the org directory. */}
-        <Card className="flex flex-col p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-fg">Add to the campaign</h2>
-            {isOrgAdmin && (
-              <Link to={usersReturn} className="text-xs font-medium text-fg-muted hover:underline">Manage users →</Link>
-            )}
+      <Card className="flex flex-col p-4">
+        <h2 className="mb-3 text-sm font-semibold text-fg">
+          On this campaign <span className="text-fg-muted">({team.length})</span>
+        </h2>
+        {loading ? (
+          <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
+        ) : !team.length ? (
+          <div className="rounded border border-dashed border-border bg-sunken px-4 py-8 text-center text-sm text-fg-muted">
+            No one yet —{' '}
+            <button onClick={() => setCreatingMember(true)} className="font-medium text-brand-accent hover:underline">
+              add someone
+            </button>{' '}
+            by their email address.
           </div>
-          <Button size="sm" onClick={() => setCreatingMember(true)}>+ Add someone</Button>
-          <p className="mt-2 text-xs text-fg-muted">
-            Start with their email address — we’ll add the person it belongs to, or help you create
-            their account.
-          </p>
+        ) : !hasCrews ? (
+          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            {team.map((a) => (
+              <TeamMemberRow
+                key={a.userId}
+                a={a}
+                isSelf={String(a.userId) === String(user?.id)}
+                onOpen={setSelectedMember}
+              />
+            ))}
+          </ul>
+        ) : (
+          <div className="space-y-3">
+            {teamGroups.map((g) => (
+              <div key={g.key}>
+                <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                  {g.name || 'No coordinator'} <span className="text-fg-subtle">({g.members.length})</span>
+                </div>
+                <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                  {g.members.map((a) => (
+                    <TeamMemberRow
+                      key={a.userId}
+                      a={a}
+                      isSelf={String(a.userId) === String(user?.id)}
+                      onOpen={setSelectedMember}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
-          {isOrgAdmin && (
-            <>
-              <div className="mt-4 mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  Or pick from your organization
-                </h3>
+      {isOrgAdmin && (
+        <Card className="mt-4 p-4">
+          <button
+            type="button"
+            onClick={() => setDirOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span className="text-sm font-semibold text-fg">
+              Add from your organization{' '}
+              <span className="font-normal text-fg-muted">
+                ({candidates.length} not on this campaign)
+              </span>
+            </span>
+            <span className="text-fg-subtle" aria-hidden>{dirOpen ? '▴' : '▾'}</span>
+          </button>
+          {dirOpen && (
+            <div className="mt-3">
+              <div className="mb-3 flex items-center gap-2">
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search org members…"
+                  className="min-w-0 flex-1 rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                />
                 {candidates.length > 0 && (
                   <Button variant="secondary" size="sm" onClick={addAllVisible} disabled={busy}>
                     Add all{search.trim() ? ' shown' : ''}
                   </Button>
                 )}
               </div>
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search org members…"
-                className="mb-3 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-              />
               {directoryQ.isLoading ? (
                 <div className="py-6 text-center text-sm text-fg-muted">Loading…</div>
               ) : !candidates.length ? (
@@ -691,55 +1027,10 @@ export default function CampaignTeamPage() {
                   })}
                 </ul>
               )}
-            </>
-          )}
-        </Card>
-
-        {/* RIGHT — the current team */}
-        <Card className="flex flex-col p-4">
-          <h2 className="mb-3 text-sm font-semibold text-fg">
-            On this campaign <span className="text-fg-muted">({team.length})</span>
-          </h2>
-          {loading ? (
-            <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
-          ) : !team.length ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-4 py-8 text-center text-sm text-fg-muted">
-              No one yet — use <span className="font-medium text-fg">Add someone</span> on the left.
-            </div>
-          ) : !hasCrews ? (
-            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-              {team.map((a) => (
-                <TeamMemberRow
-                  key={a.userId}
-                  a={a}
-                  isSelf={String(a.userId) === String(user?.id)}
-                  onOpen={setSelectedMember}
-                />
-              ))}
-            </ul>
-          ) : (
-            <div className="space-y-3">
-              {teamGroups.map((g) => (
-                <div key={g.key}>
-                  <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                    {g.name || 'No coordinator'} <span className="text-fg-subtle">({g.members.length})</span>
-                  </div>
-                  <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                    {g.members.map((a) => (
-                      <TeamMemberRow
-                        key={a.userId}
-                        a={a}
-                        isSelf={String(a.userId) === String(user?.id)}
-                        onOpen={setSelectedMember}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              ))}
             </div>
           )}
         </Card>
-      </div>
+      )}
 
       {creatingMember && (
         <AddPersonModal
@@ -752,7 +1043,7 @@ export default function CampaignTeamPage() {
 
       {selectedMember && (
         <TeamMemberPanel
-          member={selectedMember}
+          member={liveMember}
           campaignId={campaignId}
           campaignType={selected?.type}
           coordinators={coordinators}

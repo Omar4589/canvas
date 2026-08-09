@@ -207,10 +207,18 @@ subset of org members who work it. The team is what:
 - **gates the mobile app** — a canvasser only sees campaigns they're on (admins & super-admins see all); and
 - **gates book assignment** — you can only assign books to people on the team.
 
-Manage it on the campaign's **Team** page (two panes: **add someone** on the left, the current team on
-the right — **click a team member** to open a quick, campaign-scoped panel: their activity in this
-campaign, set their crew/coordinator — this is the only place a crew is set — or remove them from the
-campaign). A person joins a campaign's team these ways, all equivalent:
+Manage it on the campaign's **Team** page (stacked since 2026-08-09: the roster is the page, **+ Add
+someone** is the header action, and an admin-only **Add from your organization** card collapses
+underneath — the old side-by-side directory pane had shrunk, for a lead, to a button beside a mostly
+empty column). **Click a team member** to open their campaign-scoped **profile panel**: their activity
+in this campaign; their crew/coordinator — this is the only place a crew is set; and, when the viewer
+may manage the account (admin: anyone; lead: canvassers — the `leadMayManageTarget` wall), a
+**Profile** section (name/email/phone, saved through `PATCH /admin/memberships/:userId/user` with the
+multi-org email lock surfaced inline), an **Access** section (temporary password, **Resend invite**
+shown only for someone who has never signed in, and the org-wide on/off switch, whose confirm names
+the other campaigns it reaches via the `/crews` read), and remove-from-campaign. Admins, other leads,
+and Doorline staff render read-only for a lead. A person joins a campaign's team these ways, all
+equivalent:
 
 1. **Team page → Add someone**, keyed on their **email address**. One door for every case: an address
    already belonging to a colleague puts that person on the campaign; an unused one opens a short form and
@@ -376,13 +384,13 @@ Because the account is shared, some things are global and some are per-org:
 
 | Thing | Scope | Who can change it |
 | --- | --- | --- |
-| Name, phone | Shared (one profile) | Any admin of an org they belong to, or a super-admin |
-| **Login email** | Shared (it's how they sign in everywhere) | The user or a super-admin only, **if** they're in 2+ orgs |
-| Password | Shared | Any of their org's admins (as a *temporary* password) or the user |
+| Name, phone | Shared (one profile) | Any admin of an org they belong to, or a super-admin — and, for a **canvasser**, a team lead who manages one of their campaigns (2026-08-09) |
+| **Login email** | Shared (it's how they sign in everywhere) | The user or a super-admin only, **if** they're in 2+ orgs; otherwise like name/phone |
+| Password | Shared | Any of their org's admins (as a *temporary* password), a lead managing one of a **canvasser's** campaigns, or the user |
 | Role | Per-org | Each org's admin (admin / team lead / canvasser) — see [ROLES.md](ROLES.md) |
 | Team-lead campaign grants | Per-org (`CampaignManager`) | Each org's admin — which campaigns a lead manages |
 | Crew / coordinator | **Per-campaign** (the campaign roster) | An admin, or a team lead on that campaign — points to an admin or team lead in the same org |
-| Active / inactive | Per-org (membership) | Each org's admin, for their own org |
+| Active / inactive | Per-org (membership) | Each org's admin — or a lead, for a canvasser on their campaigns (the switch itself is org-wide, disclosed before confirm) |
 | Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership |
 
 The important one: for a person who belongs to **more than one org**, a regular admin **cannot change

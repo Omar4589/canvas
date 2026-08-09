@@ -968,6 +968,21 @@ These survive the remediation and are the list to take to counsel:
    guard stays out by owner decision (a locked-out user can now rescue themselves, so the
    trade-off changed but the owner kept admin resets unrestricted). Item 14 remains
    open-by-decision.]*
+   > **(v4 stamp 2026-08-09) A WIDENING in the same family, ruled by the owner: team leads can now
+   > EDIT IDENTITY — name, email, phone — via `PATCH /admin/memberships/:userId/user`, for
+   > canvasser accounts on campaigns they manage** (`leadMayManageTarget`, the identical wall as the
+   > lead password power above; route was `requireAdminRole` before). Why it is bounded: name and
+   > phone are per-USER fields, so a lead's edit is visible in any other org the person works for —
+   > but the **multi-org email lock** (`MULTI_ORG_EMAIL_LOCKED`) already refuses the field that
+   > matters most, the login email of anyone with 2+ active memberships, to leads and admins alike;
+   > the tombstone 409 and the vendor-staff refusal also apply unchanged, and a lead still cannot
+   > touch admins, other leads, staff, or anyone off their campaigns. Pinned by
+   > `test/leadUserManagement.int.test.js` ("lead identity edits" — target matrix + the lock).
+   > Surfaces: the web campaign Team page's member panel and the mobile profile page (role picker
+   > remains admin-only there). **No published-policy sentence changes** — the Privacy Policy does
+   > not enumerate which org roles may correct member records; this stays within "your
+   > organization's administrators," which a campaign-scoped lead now partially is by design. New
+   > fields collected: none.
 6. **The audit write is best-effort.** See the carve-out above.
 7. **Legacy `/r/` report links** created before the password/expiry change remain open and non-expiring
    until an operator revokes them (now at least `noindex` + robots-disallowed).

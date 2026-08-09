@@ -43,7 +43,10 @@ router.get('/', async (req, res, next) => {
     const campaign = await loadOwnedCampaign(req);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     const assignments = await CampaignAssignment.find({ campaignId: campaign._id })
-      .populate({ path: 'userId', select: 'firstName lastName email isActive deletedAt isSuperAdmin' })
+      // lastLoginAt rides along for the Team panel's "Resend invite" affordance (shown only for
+      // someone who has never signed in). Not a new disclosure: /admin/memberships already returns
+      // it, to admins and leads alike, for exactly the people this roster can contain.
+      .populate({ path: 'userId', select: 'firstName lastName email phone isActive deletedAt isSuperAdmin lastLoginAt' })
       .lean();
     // Join org roles + coordinator (the "team" grouping) so the pickers/Team page can
     // show the admin badge, search, and group/assign by crew.
@@ -86,9 +89,11 @@ router.get('/', async (req, res, next) => {
             firstName: a.userId.firstName,
             lastName: a.userId.lastName,
             email: a.userId.email,
+            phone: a.userId.phone || null,
             status,
             isActive: status === 'active',
             isSuperAdmin: !!a.userId.isSuperAdmin,
+            lastLoginAt: a.userId.lastLoginAt || null,
             role: roleByUser.get(String(a.userId._id)) || 'canvasser',
             coordinatorId,
             coordinatorName: coordinatorId ? coordNameById.get(coordinatorId) || null : null,

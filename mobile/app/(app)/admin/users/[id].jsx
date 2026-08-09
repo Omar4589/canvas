@@ -443,8 +443,10 @@ export default function AdminUserDetail() {
             </Text>
           </View>
 
-          {/* Profile form — identity + role editing is admin-only. */}
-          {isAdminViewer && (
+          {/* Profile form — identity edits follow the server's wall: an admin edits anyone; a LEAD
+              edits their CANVASSERS (2026-08-09 ruling — same boundary as the temp-password power
+              they already hold). Role + grants stay admin-only and are gated separately below. */}
+          {(isAdminViewer || user.role === 'canvasser') && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Profile</Text>
 
@@ -503,6 +505,8 @@ export default function AdminUserDetail() {
               style={styles.textInput}
             />
 
+            {isAdminViewer && (
+            <>
             <Text style={styles.formLabel}>Role</Text>
             {isSelf ? (
               <View style={styles.selfNote}>
@@ -590,6 +594,8 @@ export default function AdminUserDetail() {
                   </Text>
                 )}
               </View>
+            )}
+            </>
             )}
 
             <Pressable

@@ -509,11 +509,21 @@ router.delete('/:userId', requireAdminRole, async (req, res, next) => {
   }
 });
 
-router.patch('/:userId/user', requireAdminRole, async (req, res, next) => {
+// Identity edits (name/email/phone). Admin: anyone in the org. LEAD (since 2026-08-09, owner
+// ruling): their canvassers only — the same leadMayManageTarget wall as the temp-password power
+// they already hold, which is the more dangerous of the two. A lead owns onboarding, so fixing
+// their own hire's typo'd name or email shouldn't need an admin. Every guard below the gate
+// (vendor staff, tombstone, the multi-org email lock, dup-email 409) applies to both roles —
+// the lock matters most here: a User is platform-wide, and it is what keeps a lead (or admin)
+// from rewriting the login email of somebody who also works for another organization.
+router.patch('/:userId/user', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
+    }
+    if (!isOrgAdmin(req) && !(await leadMayManageTarget(req, req.params.userId))) {
+      return res.status(403).json({ error: 'You can only edit canvassers on your campaigns.' });
     }
     if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const membership = await Membership.findOne({
