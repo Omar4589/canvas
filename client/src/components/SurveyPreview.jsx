@@ -1,3 +1,5 @@
+import { choicesFor } from '../lib/surveyChoices.js';
+
 // Read-only render of a survey template (intro · questions · closing). Used by the
 // in-campaign Survey screen to preview the attached template without pulling in the
 // editable builder (QuestionCard is module-local to SurveysPage). Question shape:
@@ -35,24 +37,23 @@ export default function SurveyPreview({ survey }) {
               </div>
               <div className="mt-0.5 text-xs text-fg-subtle">{TYPE_HINT[q.type] || q.type}</div>
 
-              {isChoice && (q.options || []).length > 0 && (
+              {/* choicesFor appends the synthetic "Other (specify)" write-in, which is a question
+                  FLAG rather than a row in options[] — without it this preview showed a shorter
+                  survey than the one the phone actually asks. */}
+              {isChoice && choicesFor(q).length > 0 && (
                 <ul className="mt-2 space-y-1">
-                  {(q.options || [])
-                    .filter((opt) => typeof opt === 'string' || !opt.retired)
-                    .map((opt, oi) => {
-                      const text = typeof opt === 'string' ? opt : opt?.text;
-                      return (
-                        <li key={oi} className="flex items-center gap-2 text-sm text-fg-muted">
-                          <span
-                            className={
-                              'inline-block h-3 w-3 shrink-0 border border-border-strong ' +
-                              (q.type === 'single_choice' ? 'rounded-full' : 'rounded-sm')
-                            }
-                          />
-                          {text || <span className="text-fg-subtle">(empty option)</span>}
-                        </li>
-                      );
-                    })}
+                  {choicesFor(q).map((opt, oi) => (
+                    <li key={opt.id || oi} className="flex items-center gap-2 text-sm text-fg-muted">
+                      <span
+                        className={
+                          'inline-block h-3 w-3 shrink-0 border border-border-strong ' +
+                          (q.type === 'single_choice' ? 'rounded-full' : 'rounded-sm')
+                        }
+                      />
+                      {opt.text || <span className="text-fg-subtle">(empty option)</span>}
+                      {opt.isOther && <span className="text-fg-subtle">— write-in</span>}
+                    </li>
+                  ))}
                 </ul>
               )}
               {q.type === 'text' && (

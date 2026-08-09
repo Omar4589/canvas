@@ -72,7 +72,11 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
   their list is exactly the people rostered on campaigns they manage, deduped, never the whole
   organization. (That scoped surface lives in the **mobile** admin app's Users hub and the underlying
   API; the **web** console's org Users page stays admin-only — on web a lead's people work happens on
-  the campaign Team page.) On that scoped list a lead can **set temporary passwords** and **switch accounts off
+  the campaign Team page.) **The campaign Team page is scoped the same way as of 2026-08-08** — it shows
+  that campaign's people, not the organization's, and a lead adds someone by typing their **email
+  address** rather than browsing a directory. Until then its add-picker returned every active member of
+  the whole org, making it the one place a lead saw *more* of the organization than their own Users list
+  would show them. On that scoped list a lead can **set temporary passwords** and **switch accounts off
   and back on**, for **canvasser accounts only** — never an admin, another lead, or Doorline staff
   (the server refuses, not just the UI). Changing roles, creating org-level accounts, deleting, and
   editing someone's identity (name/email/phone) remain admin-only.
@@ -359,13 +363,48 @@ before that a lead could enumerate and bulk-revoke links on campaigns they held 
 by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
 
 **The lead's crew surface** — `leadCrew` ([leadCrew.js](../server/src/routes/admin/leadCrew.js)) at
-`/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`: `GET /` (org members for the
-add-picker), `POST /` (create a **canvasser** — or **link an existing account by email** (`linkExisting`)
-— role hard-coded, and put them on this campaign; a lead owns onboarding, so linking a returning
-cross-org canvasser is allowed here too, with the same privacy guards as the admin path), `PATCH
-/:userId/coordinator` + `GET /:userId/coordinator-preview` (both scoped to this campaign's roster).
-This is how a lead builds a crew without the org Users admin. Adding/removing *existing* members and
-reading the roster still go through `.../assignments`.
+`/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`:
+
+- **`GET /`** — **this campaign's roster**, plus a separate `coordinators` array. Until 2026-08-08 this
+  ran `Membership.find({ organizationId, isActive: true })`: every active member of the **whole
+  organization**, with name, email, org role and `isSuperAdmin`. It was the campaign Team page's
+  add-picker, and the web page routed **leads** here *specifically because* they cannot reach
+  `/admin/memberships` — so a lead's picker was **wider** than the org Users list, which has always been
+  narrowed to `leadVisibleUserIds`. A lead may be the client's own campaign manager, so that was another
+  client's staff list. Rows are now scoped to the campaign; **fields are unchanged**, because the shipped
+  mobile book-assign pickers read this list and already intersect it with the roster
+  (`mobile/app/(app)/admin/books.jsx`), making the narrowing a no-op for them.
+  `coordinators` is name-and-role only (no email) and is deliberately **org-level**: `resolveCoordinatorId`
+  accepts any active admin or lead, and managing a campaign does not put you on its roster, so deriving
+  the crew dropdown from the roster would empty it on a campaign whose lead does not walk.
+- **`POST /resolve`** `{email}` → `{ outcome, person }`. The lookup behind the add box. `on-campaign` /
+  `in-org` / `in-org-inactive` name the person; **`outside` is one indistinguishable answer** covering *no
+  account anywhere*, *an account in another organization*, and *an address released by a deleted account* —
+  no name, no role, no account status, nothing to compare. POST rather than GET so an address never enters
+  a URL or a proxy log; rate-limited per actor ([crewResolveLimit.js](../server/src/middleware/crewResolveLimit.js),
+  30/hour) and every answer that names somebody writes an `AccessLog` subject line — a lookup is a
+  single-record read, so it is recorded like one.
+- **`POST /`** — resolve-then-branch. `linkExisting` is still **accepted and ignored** (released mobile
+  binaries send it); what the address resolves to decides. Free address → create + set-password invite
+  (`outcome:'created'`). Colleague in this org → **claim**: roster row only, **no membership write**, so a
+  lead can never silently promote or demote anyone (`'in-org'`, `addedToCampaign`). Already on the campaign
+  → idempotent no-op (`'on-campaign'`, no email). Address that turns out to hold an account **elsewhere** →
+  attach that real person, **discard the typed name and password** (`'attached'`, `attached:true`,
+  `addedToOrg`) — overwriting a stranger's name would be a lie, and setting their password is the takeover
+  path in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 14. Switched-off colleague →
+  `409 MEMBER_DEACTIVATED` for a lead (reactivating is org-wide), reactivate-and-roster for an admin.
+  The old `EMAIL_EXISTS_USE_LINK` / `ALREADY_MEMBER` round trip is gone **from this route** — both were the
+  server asking the client to retry with different intent. `POST /admin/memberships` (org Users page,
+  admin-only) is unchanged and still uses them.
+- **`PATCH /:userId/coordinator`** + **`GET /:userId/coordinator-preview`** — both scoped to this
+  campaign's roster.
+
+`POST /` and the coordinator write refuse on an **archived** campaign (409 `campaign-archived`); the crew
+door used to bypass that read-only promise while `.../assignments` honoured it. `/resolve` is exempt (writes
+nothing), and so are deactivate/reactivate — org-wide acts that merely arrive through a campaign URL.
+
+This is how a lead builds a crew without the org Users admin. Removing *existing* members and reading the
+roster still go through `.../assignments`.
 
 **A lead's coordinator change is confined to the campaign in the URL — structurally, not by
 convention.** A crew lives on `CampaignAssignment.coordinatorId` (unique `{campaignId, userId}`), so
@@ -471,20 +510,30 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) **shows** a lead the authoring
   affordances (New/Edit/Duplicate) via `canManage = isOrgAdmin || managedCampaignIds.includes(campaignId)`,
   with the server's `canManageSurvey` as the per-survey authority;
-  [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) reads the picker from the `crew`
-  endpoint, gives leads an inline create-canvasser modal, and is the **one** place a crew is set (the
-  org Users page shows crews read-only). Login/select-org land a lead on `/campaigns` (they have no
-  `/admin` Overview).
+  [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) adds people **by email address** for
+  both roles, and is the **one** place a crew is set (the org Users page shows crews read-only).
+  Login/select-org land a lead on `/campaigns` (they have no `/admin` Overview).
 - **The `/admin/memberships` fork** — that route is admin-only, so any *campaign* page that reads it for
-  a name list breaks for a lead. Three pages now branch on `isOrgAdmin`, calling
-  `/admin/campaigns/:id/crew` instead (same shape, open to the lead who manages the campaign) and keying
-  the query `['admin','campaign-crew',campaignId]` so the two never share a cache entry:
-  `CampaignTeamPage`, [CampaignAssignmentsModal.jsx](../client/src/components/CampaignAssignmentsModal.jsx)
-  (opened from the Campaigns page's **ungated** action list, so a lead reaches it) and
-  [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) (the "assigned by" labels). **The failure mode is
-  what makes this worth a bullet:** the 403 arrived as an empty array, so the picker rendered *empty* and
-  the labels rendered *blank* — the UI asserting there is nobody, rather than that you may not look. Both
-  web cases were found only by grepping for the pattern after the mobile one was reported.
+  a name list breaks for a lead. Three pages branched on `isOrgAdmin` and called
+  `/admin/campaigns/:id/crew` instead, keying the query `['admin','campaign-crew',campaignId]` so the two
+  never share a cache entry. **The failure mode that made it worth a bullet:** the 403 arrived as an empty
+  array, so the picker rendered *empty* and the labels rendered *blank* — the UI asserting there is nobody,
+  rather than that you may not look. Both web cases were found only by grepping for the pattern after the
+  mobile one was reported.
+  **Since 2026-08-08 the fork is mostly gone, because the endpoint it forked to was the leakier of the
+  two** (see the crew surface above). Where each page landed:
+  - `CampaignTeamPage` — **no fork**. Both roles read the campaign-scoped `crew` list; adding is the
+    email-keyed modal. An **org admin** additionally gets the org directory from `/admin/memberships` for
+    bulk staffing (typing twenty addresses would be worse than the picker it replaced); a lead never
+    fetches it.
+  - [CampaignAssignmentsModal.jsx](../client/src/components/CampaignAssignmentsModal.jsx) — opened from the
+    Campaigns page's **ungated** action list, so a lead reaches it; it was therefore the *second* copy of
+    the org directory. It still forks, but the branches now differ in meaning: an admin assigns from the org
+    directory, a lead sees only this campaign's roster (so they can take people **off**) and is pointed at
+    the Team tab to add.
+  - [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) (the "assigned by" labels) — **no fork**: names
+    now resolve from `.../assignments`, which keeps a row for someone since removed from the campaign.
+    Resolving them against the crew list would have reintroduced the exact blank-name failure above.
 - **The two org lists** — [SelectOrgPage.jsx](../client/src/pages/SelectOrgPage.jsx) makes only
   `consoleMemberships` selectable, renders `nonConsoleMemberships` as a muted, non-interactive **"No
   console access"** section pointing at the mobile app, and auto-enters when there is exactly one console

@@ -283,7 +283,10 @@ the event document — that guard is what blanks a do-not-contact person's row.
 - **`survey-results*.csv`** — Submitted (ISO)/Date/Time; Walk list, Pass, Pass name; **State
   voter ID, UID**, Voter first/last name, Party; Address block minus County; Canvasser + Team; Template,
   Template version, Offline submission, Edited, Note; one column per question (current text,
-  `Label (key)` on duplicates); Household/Voter/Response DB ids.
+  `Label (key)` on duplicates); Household/Voter/Response DB ids. An **"Other (specify)" write-in**
+  renders as **`Other — <typed text>`** (the sentinel is seeded into the export's option lookup), so
+  it can't be read as a canonical option that happens to share the typed wording; a multi-select
+  keeps its other picks (`Yes; Other — potholes`).
 - **`survey-answers.csv`** — Submitted (ISO)/Date/Time; **State voter ID, UID**, Voter
   first/last name, Party; Address block minus County; Canvasser; Walk list, Pass, Pass name, Template,
   Template version; Question, Question key, Answer (snapshot), Option ids, Other text; Note,

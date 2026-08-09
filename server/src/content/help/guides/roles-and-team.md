@@ -47,6 +47,8 @@ They build their crew from their campaign's own **Team** tab instead — and tha
 
 You can change the checked campaigns anytime — unchecking one revokes it right away. A brand-new campaign has no lead until you grant one.
 
+**Their Team page is the campaign's, not the organization's.** A lead sees the people on the campaign you granted them — not your whole roster — and adds someone by typing an **email address**, which either finds the colleague it belongs to or creates a new account. You keep the searchable directory of everyone in the organization on that same page; they don't. So if you want a lead to be able to pull from a pool of your existing canvassers, either add those people to the campaign yourself or make sure the lead has their addresses.
+
 **Surveys at handoff — two habits that save headaches later.** A lead's library is only what they authored or what's already on their campaigns, and *attaching is what grants access*. So: **attach the house survey before you hand the campaign off** — if the lead later swaps it out, it leaves their library and you'll need to re-attach it for them. And if one template serves several campaigns, **duplicate a per-campaign copy first** — otherwise a lead editing "their" survey is editing every campaign's, and while the builder warns them, a separate copy removes the risk entirely.
 
 > Tip: A lead who also walks doors is added to a campaign's roster like any [canvasser](add-a-canvasser-account) — managing and walking are separate.

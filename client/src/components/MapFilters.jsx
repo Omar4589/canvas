@@ -106,10 +106,13 @@ export default function MapFilters({
     [];
 
   function setAnswer(questionKey, option, optionId) {
-    if (
-      answerFilter?.questionKey === questionKey &&
-      answerFilter?.option === option
-    ) {
+    // Same-chip test by id where there is one (see the chip's `active` above): keyed on the
+    // label, clicking "Other" while a real option also named "Other" was selected read as a
+    // toggle-off instead of a switch.
+    const sameChip = optionId
+      ? answerFilter?.optionId === optionId
+      : answerFilter?.option === option && !answerFilter?.optionId;
+    if (answerFilter?.questionKey === questionKey && sameChip) {
       onAnswerChange({ questionKey: '', option: '', optionId: '', templateId: '' });
     } else {
       // Pin the filter to the template these chips came from — question keys / option ids
@@ -400,11 +403,17 @@ export default function MapFilters({
                 <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
                 <div className="flex flex-wrap gap-1">
                   {q.options.filter((opt) => !opt.retired).map((opt) => {
+                    // Match on the stable id when there is one: the write-in chip reads "Other",
+                    // and a real option can be named "Other" too — keyed on the label, both chips
+                    // would highlight together and collide as React keys.
                     const active =
-                      answerFilter?.questionKey === q.key && answerFilter?.option === opt.option;
+                      answerFilter?.questionKey === q.key &&
+                      (opt.id != null
+                        ? answerFilter?.optionId === opt.id
+                        : answerFilter?.option === opt.option);
                     return (
                       <button
-                        key={opt.option}
+                        key={opt.id ?? `legacy:${opt.option}`}
                         type="button"
                         onClick={() => setAnswer(q.key, opt.option, opt.id)}
                         className={

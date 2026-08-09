@@ -9,7 +9,7 @@ import PassManager from '../components/PassManager.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
-import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 
 const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
@@ -276,13 +276,16 @@ export default function EffortsPage() {
 
   // Names for the "assigned by" labels below. This page is inside the campaign console, which team
   // leads reach — and /admin/memberships is admin-only, so a lead 403'd and every name rendered
-  // blank. The campaign crew endpoint carries the same names and is open to the lead who manages
-  // this campaign.
-  const { isOrgAdmin } = useAuth();
+  // blank.
+  //
+  // They come off the campaign ROSTER, not the crew picker. The roster
+  // keeps a row for someone who has since been taken off the campaign (with a `status` saying so),
+  // whereas the crew list is only current people — resolving names against that one renders a blank
+  // where a departed walker's name should be. Same endpoint for both roles.
   const orgQ = useQuery({
-    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaignId],
-    queryFn: () => api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaignId}/crew`),
-    enabled: isOrgAdmin || !!campaignId,
+    queryKey: ['admin', 'campaign-assignments', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/assignments`),
+    enabled: !!campaignId,
   });
   const orgTz = useOrgTimeZone();
   const tz = selected?.timeZone || orgTz;
@@ -304,7 +307,7 @@ export default function EffortsPage() {
 
   // userId → "First Last", to render an effort's crewUserIds as a hover list.
   const nameByUserId = useMemo(
-    () => new Map((orgQ.data?.members || []).map((m) => [m.user.id, `${m.user.firstName} ${m.user.lastName}`])),
+    () => new Map((orgQ.data?.assignments || []).map((a) => [String(a.userId), `${a.firstName} ${a.lastName}`])),
     [orgQ.data]
   );
   const totalDoors = useMemo(() => efforts.reduce((sum, e) => sum + (e.doorCount || 0), 0), [efforts]);

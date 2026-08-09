@@ -404,3 +404,124 @@ test('voters-by-answer rows carry wasOfflineSubmission; the response detail expo
   );
   assert.strictEqual(offline.json.response.editedAt, null, 'never-edited row stays null');
 });
+
+// ── The "Other: ___" write-in ────────────────────────────────────────────────
+//
+// The write-in is a question FLAG, not a row in options[], so reporting has to materialize the
+// `__other__` sentinel by hand. Before it did, the whole bucket was broken END TO END: the chart
+// showed a bar labelled with the raw sentinel and badged "retired", and every drill behind it
+// returned ZERO — the bucket carried a null id, so the drill fell back to matching the LABEL
+// against `answers.answer`, which holds the canvasser's typed text and can never equal '__other__'.
+//
+// Self-contained fixture (its own org/campaign/template) so it can't perturb the counting-contract
+// assertions above. Deliberately includes a real option ALSO named "Other" — the collision that
+// makes a text-keyed implementation steal rows.
+test('write-in answers: counted, labelled, drillable, and never confused with a real "Other" option', { skip }, async () => {
+  const org2 = await Organization.create({ name: 'Other Org', slug: 'other-org-test', isActive: true });
+  const admin2 = await User.create({ firstName: 'Otto', lastName: 'Admin', email: 'otto@o.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: admin2._id, organizationId: org2._id, role: 'admin', isActive: true });
+  const canv = await User.create({ firstName: 'Wren', lastName: 'Wright', email: 'wren@o.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: canv._id, organizationId: org2._id, role: 'canvasser', isActive: true });
+
+  const tpl = await SurveyTemplate.create({
+    organizationId: org2._id,
+    name: 'Write-in Survey',
+    version: 1,
+    questions: [{
+      key: 'issue',
+      label: 'Top issue?',
+      type: 'single_choice',
+      order: 0,
+      otherOption: true,
+      options: [
+        { id: 'opt_roads', text: 'Roads', order: 0 },
+        // A hand-authored option literally named "Other". Nothing forbids this, and it is what
+        // breaks any implementation that matches the write-in by its label.
+        { id: 'opt_other', text: 'Other', order: 1 },
+      ],
+    }],
+  });
+  const camp = await Campaign.create({
+    organizationId: org2._id, name: 'Write-in Campaign', type: 'survey', state: 'TX',
+    isActive: true, timeZone: 'America/Chicago', surveyTemplateId: tpl._id,
+  });
+
+  const vIds = Array.from({ length: 5 }, () => new mongoose.Types.ObjectId());
+  await Voter.collection.insertMany(vIds.map((id, i) => ({
+    _id: id, organizationId: org2._id, campaignId: camp._id, fullName: `Write-in Voter ${i + 1}`, isActive: true,
+  })));
+  const hh = new mongoose.Types.ObjectId();
+  await Household.collection.insertMany([{
+    _id: hh, organizationId: org2._id, campaignId: camp._id,
+    addressLine1: '9 Elm St', city: 'Tyler', state: 'TX', zipCode: '75701', isActive: true,
+  }]);
+
+  let vi = 0;
+  const mk = (answers) => SurveyResponse.create({
+    organizationId: org2._id, campaignId: camp._id, voterId: vIds[vi++], householdId: hh,
+    userId: canv._id, surveyTemplateId: tpl._id, surveyTemplateVersion: 1,
+    submittedAt: new Date('2026-06-10T18:00:00Z'),
+    location: { lat: 32.35, lng: -95.3 }, // required — every survey carries its GPS stamp
+    answers,
+  });
+  const row = (answer, optionIds, otherText = null) => ([{
+    questionKey: 'issue', questionLabel: 'Top issue?', answer, optionIds, otherText,
+  }]);
+
+  // Two write-ins (the capture flow snapshots the TYPED TEXT as `answer`), one real "Other"
+  // option pick, one canonical, and one legacy pre-option-id row whose snapshot reads 'Other'.
+  await mk(row('potholes', ['__other__'], 'potholes'));
+  await mk(row('speeding', ['__other__'], 'speeding'));
+  await mk(row('Other', ['opt_other']));
+  await mk(row('Roads', ['opt_roads']));
+  await mk(row('Other', []));
+
+  const opt = { token: signUserToken(admin2), orgId: org2._id };
+  const results = await call('GET', `/api/admin/reports/survey-results?campaignId=${camp._id}`, opt);
+  assert.strictEqual(results.status, 200);
+  const q = results.json.questions.find((x) => x.key === 'issue');
+
+  const writeIn = q.options.find((o) => o.id === '__other__');
+  assert.ok(writeIn, 'the write-in gets its own bucket keyed on the sentinel');
+  assert.strictEqual(writeIn.count, 2, 'both typed answers land in it — and nothing else does');
+  assert.strictEqual(writeIn.retired, false, 'it is a live choice, not a deleted option');
+  assert.notStrictEqual(writeIn.option, '__other__', 'the raw sentinel is never shown to a human');
+
+  // The real option named "Other" keeps its own rows: its id-native pick AND the legacy row whose
+  // snapshot text matches its label. Seeding the sentinel by TEXT would have stolen these.
+  const realOther = q.options.find((o) => o.id === 'opt_other');
+  assert.strictEqual(realOther.count, 2, 'the hand-authored "Other" option keeps its own answers');
+
+  // Two buckets, two distinct labels — a shared label collides as a React key and expand-state.
+  const labels = q.options.map((o) => o.option);
+  assert.strictEqual(new Set(labels).size, labels.length, 'no two buckets share a label');
+  assert.strictEqual(q.options.reduce((s, o) => s + o.count, 0), 5, 'every response is counted once');
+
+  // THE DRILL. This returned zero rows before the fix.
+  const drill = await call(
+    'GET',
+    `/api/admin/reports/voters-by-answer?campaignId=${camp._id}&questionKey=issue` +
+      `&optionId=__other__&option=${encodeURIComponent(writeIn.option)}&surveyTemplateId=${tpl._id}`,
+    opt
+  );
+  assert.strictEqual(drill.status, 200);
+  assert.strictEqual(drill.json.total, 2, 'the drill returns exactly the write-ins');
+  const typed = drill.json.voters.map((r) => r.answer).sort();
+  // Self-describing: a write-in of "potholes" must not read identically to a canonical option
+  // someone happened to name "potholes".
+  assert.deepStrictEqual(typed, ['Other — potholes', 'Other — speeding']);
+
+  // The per-canvasser breakdown must sum to the same number — this file's counting contract.
+  const byCanv = await call(
+    'GET',
+    `/api/admin/reports/answer-canvassers?campaignId=${camp._id}&questionKey=issue` +
+      `&optionId=__other__&option=${encodeURIComponent(writeIn.option)}&surveyTemplateId=${tpl._id}`,
+    opt
+  );
+  assert.strictEqual(byCanv.status, 200);
+  assert.strictEqual(
+    byCanv.json.rows.reduce((s, r) => s + r.count, 0),
+    writeIn.count,
+    'answer-canvassers sums EXACTLY to the survey-results count for the write-in'
+  );
+});

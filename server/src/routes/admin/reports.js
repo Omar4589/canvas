@@ -15,6 +15,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
+import { OTHER_OPTION_ID } from '../../services/surveys/otherOption.js';
 import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
@@ -1416,6 +1417,26 @@ async function buildVotersByAnswerFilter(req) {
   return { filter, template, wantsTag };
 }
 
+// One stored answer rendered for a human — the drill-in list, its CSV, and any other
+// per-response readout. Shared so the screen and the export can never disagree.
+//
+// The capture flow embeds an "Other: ___" write-in INTO the answer snapshot as one of its
+// entries, so a raw cell reads "potholes" — indistinguishable from a canonical option someone
+// happened to name "potholes". Label just that entry, leaving a multi-select's other picks alone.
+export function formatAnswerCell(a) {
+  const parts = Array.isArray(a.answer) ? a.answer : a.answer != null ? [a.answer] : [];
+  if ((a.optionIds || []).includes(OTHER_OPTION_ID)) {
+    const typed = a.otherText || '';
+    if (!typed) return parts.join('; ') || 'Other';
+    const labeled = parts.map((p) => (p === typed ? `Other — ${typed}` : p));
+    if (!parts.includes(typed)) labeled.push(`Other — ${typed}`);
+    return labeled.join('; ');
+  }
+  // Legacy belt-and-braces: only append otherText when it isn't already in the snapshot.
+  const base = parts.join('; ');
+  return a.otherText && !parts.includes(a.otherText) ? `${base} — ${a.otherText}` : base;
+}
+
 router.get('/voters-by-answer', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -1468,6 +1489,14 @@ router.get('/voters-by-answer', async (req, res, next) => {
             }
           : null,
         note: r.note || null,
+        // What this voter actually answered on the drilled question. Without it, drilling the
+        // write-in bucket listed 12 voters and none of what any of them typed — the one bucket
+        // where the answer IS the free text, so the list was unreadable without opening each row.
+        answer: (r.answers || [])
+          .filter((a) => a.questionKey === req.query.questionKey)
+          .map(formatAnswerCell)
+          .filter(Boolean)
+          .join(' | ') || null,
         wasOfflineSubmission: !!r.wasOfflineSubmission,
       })),
     });
@@ -1539,13 +1568,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
       if (optionId && (a.optionIds || []).includes(optionId)) return true;
       return option != null && (Array.isArray(a.answer) ? a.answer.includes(option) : a.answer === option);
     };
-    const answerText = (a) => {
-      const base = Array.isArray(a.answer) ? a.answer.join('; ') : a.answer ?? '';
-      // The capture flow embeds the Other free text INTO the answer snapshot itself;
-      // only append otherText when it isn't already there (legacy belt-and-braces).
-      const embedded = Array.isArray(a.answer) ? a.answer.includes(a.otherText) : a.answer === a.otherText;
-      return a.otherText && !embedded ? `${base} — ${a.otherText}` : base;
-    };
+    const answerText = formatAnswerCell;
 
     const dateFmt = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -1629,7 +1652,12 @@ router.get('/answer-canvassers', async (req, res, next) => {
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       match.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
     }
-    const keys = [optionId, option].filter((v) => v != null && v !== '');
+    // Id + legacy display text, so a pre-option-id row still counts. NOT for the write-in
+    // bucket: its `answer` is the typed text, so the label lane would never find a real write-in
+    // while it DOES pull in rows filed under a different bucket by mergeOptionRows — breaking the
+    // contract above that these per-canvasser counts sum to the option's /survey-results count.
+    const keys =
+      optionId === OTHER_OPTION_ID ? [OTHER_OPTION_ID] : [optionId, option].filter((v) => v != null && v !== '');
 
     // Numerator: this option's selections per canvasser. Denominator: each canvasser's
     // TOTAL selections on this question (any option) — the context for "12% of everything

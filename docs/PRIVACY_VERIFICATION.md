@@ -60,6 +60,14 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
    (`computeReport.js:151-176`) rebuilds public answers from option ids against canonical labels —
    `'__other__'` emits the literal word `'Other'`, unmatched legacy text collapses to `'Other'`, text
    questions never reach the map — and `migrate:scrub-map-points` back-scrubs already-published points.
+   *[v4 2026-08-08: the BREAKDOWN-table twin changed mechanism, not exposure. `'__other__'` became a
+   first-class ADMIN reporting bucket (`mergeOptionRows` seeds it), so `computeSurveyBreakdowns` can
+   no longer identify a write-in by "id is null" — it now folds `id == null || id === '__other__'`
+   into the single public `Other` row explicitly. Net promise unchanged and re-verified: exactly one
+   row reads 'Other', counts are preserved, no typed string reaches a client. `publicPointAnswer`
+   itself is untouched. Pinned by a new exactly-one-`Other` assertion in `reportSecurity.int.test.js`
+   — the prior assertion read a `Map` keyed on the label, which silently last-wins and could not have
+   caught a duplicate. **No published legal text changes.**]*
 10. **Share links**: `robots.txt` now has `Disallow: /r/` and the `/r/` pages inject
     `<meta name="robots" content="noindex, nofollow">` (client-JS only — no `X-Robots-Tag` header, so
     robots.txt is the load-bearing control). A password **can no longer be removed** from a link
@@ -362,6 +370,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   strictly wider than `leadVisibleUserIds`. Sourcing a roster from it would both show every org
   member as if rostered and, for a lead, skip the visibility filter that exists on the list route.
   **Assessment: NO published-policy change, and no claim in this document moves.**
+  > **(v4 stamp 2026-08-08) TRAP 2 is now history — the leak it described was the picker itself, and
+  > it is closed.** The trap said sourcing a *roster* from `GET /admin/campaigns/:id/crew` would skip the
+  > lead visibility filter. What the review missed is that the web campaign Team page **was already
+  > doing exactly that**, deliberately: `CampaignTeamPage.jsx` routed leads to `/crew` *because* they
+  > cannot reach `/admin/memberships`, so a lead's add-picker returned every active member of the
+  > organization — name, email, org role, `isSuperAdmin` — while their own Users list was correctly
+  > narrowed to `leadVisibleUserIds`. A team lead may be the client's own campaign manager, so that was
+  > one customer's staff list shown to another. `GET /` now returns **this campaign's roster** (rows
+  > narrowed, fields unchanged) plus a name-and-role-only `coordinators` array. **TRAP 1 is HONORED, not
+  > amended:** no `?campaignId=` was added to `/admin/memberships` and its lead filter is untouched —
+  > `/crew` narrowed on its own query, so the two routes stay independent.
+  > **This narrows.** No new field, no new retention rule, no new subprocessor, no published-policy
+  > sentence affected. See the EXCEPTION 3 stamp below for the add-flow half of the same change.
 
 - *(v4 2026-08-01)* **New surface: the Export Center** (`ExportJob` + the `exportArtifacts`
   GridFS bucket + `/api/admin/exports` + a worker queue). Customers can now queue background
@@ -1306,6 +1327,25 @@ stamp above.]*
 
 **The fifth (knocks-by-pass.csv) is aggregate counts, not records — no policy text change.** Its default layout carries no personal data at all (walk-list/round names and tallies); the `groupBy=canvasser` layout re-exposes canvasser name/email/status to **exactly the audience** that already downloads them from `canvassers.csv` (same admin-or-lead gate, plus the stricter always-required `campaignId`). No voter fields appear in any layout, no new party receives data, and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access is covered by the fail-closed central access log (E13 — no exemption for this route).
 
+> **[v4 2026-08-08 — the drill now RETURNS rows for the "Other" bucket, and each row carries the
+> rendered answer. Re-verified: same audience, same categories, no policy change.]** Two facts
+> changed. (1) Drilling the write-in bucket previously returned **zero** rows — the bucket carried a
+> null id, so the filter matched its label against `answers.answer`, which holds the canvasser's typed
+> text. It now matches by the `'__other__'` id, so this export can return up to `EXPORT_CAP` rows
+> where it used to return none. That is a **bug fix, not a new exposure**: the same caller could
+> already reach every one of those responses through the un-drilled list, the response detail view,
+> and `survey-answers.csv` (which has carried dedicated **Option ids** and **Other text** columns all
+> along). (2) The JSON drill row gained an `answer` field, rendered by the same `formatAnswerCell` as
+> the CSV — the answer snapshot was already in the CSV column named above, so the screen merely stops
+> being less informative than the download. The role gate, the lead-campaign gate, the 50k cap and
+> the fail-closed access log are all unchanged. **No Privacy Policy / ToS / DPA text change.**
+>
+> Worth stating plainly because it is the one genuinely new *practical* capability: an operator can
+> now list, read and export what canvassers typed about residents in free text. That data was always
+> collected and always exportable — this makes it *findable*. It carries no retention or redaction
+> treatment distinct from any other survey answer, and is removed by the same account/org deletion
+> cascade.
+
 **The fourth (voters-by-answer.csv) is a same-audience exposure, not a new recipient class.** It downloads exactly what the same caller could already page through on `GET /admin/reports/voters-by-answer` (same filter builder, same role + lead-campaign gate) — voter identity/address, canvasser identity, the chosen answer, and the door note were all already readable by that audience in-app, and the walk-list CSV above already put voter name/party/address in a file for the same roles. No new party receives data and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access to it is covered by the fail-closed central access log (E13 — the finish-listener middleware logs unless explicitly exempted; this route has no exemption).
 
 **The first one is effectively a bulk export of the entire campaign voter file, and this is a two-click product feature, not an edge case.** A walk list can be saved with an **empty filter** — `filter` is optional on `POST /admin/campaigns/:id/walklists` (`walklists.js:74-92`), and an empty filter resolves to `baseSet` = **every active geocoded household in the campaign and every voter in them** (`server/src/services/walklist/resolveWalkList.js:48-53`, `:131-132`). The web UI enables Save on a name alone (`client/src/pages/WalkListsPage.jsx:416`, `:27-47`) and puts an "Export CSV" button on every saved list (`:534-537`). **No row cap. No pagination. No size guard.**
@@ -1708,6 +1748,29 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
 **But two things cross the boundary:**
 
 - **The global email namespace is an account-existence oracle, and lets one org attach another org's user.** When org A's admin adds a member whose email already exists **anywhere** on the platform, the API returns **409 `EMAIL_EXISTS_USE_LINK`** (`services/memberships/createMember.js:50-51`, `:61-66`). With `linkExisting: true`, org A creates a Membership on that existing global account — **with no consent gate of any kind** (`:53-60`, `:83-94`). Org A's Users page then displays that person's firstName, lastName, email, phone, `isActive`, `createdAt`, **`lastLoginAt`** (a *global* last-login, reflecting activity in any org) and **`isMultiOrg`** (`routes/admin/memberships.js:137-148`). Notification is **after the fact only** (`Membership.acknowledgedAt`). The same flow is reachable by a **team lead** (`routes/admin/leadCrew.js:23`, `:91-97`).
+  > **(v4 stamp 2026-08-08) Narrowed on the CAMPAIGN door; unchanged on the org door. The line
+  > citations above are pre-2026-08-08 and no longer resolve** — `createMember.js` now carries
+  > `resolveEmailInOrg` ahead of `createOrgMember`, and the lead path is `leadCrew.js` `POST /` +
+  > `POST /resolve`.
+  > **What changed.** The campaign add flow resolves the address **before** it writes, and the answer is
+  > org-bounded: a colleague is named, and *everything else* — no account anywhere, an account in another
+  > customer's org, an address released by a deleted account — returns one byte-identical
+  > `{outcome:'outside', person:null}`, pinned by a `deepStrictEqual` between the foreign-account and
+  > no-account bodies (`test/teamLead.int.test.js`). The pre-commit oracle described above therefore **no
+  > longer answers on this door**: `EMAIL_EXISTS_USE_LINK` is unreachable from `POST /crew`. Attaching
+  > still works — owner decision, the returning-canvasser path is real — but the operator commits
+  > *first* and learns the identity only in the 201, by which point an `addedToOrg` email has gone to
+  > that person and an audit row exists. The typed name and typed password are **discarded** on that
+  > branch, so an attach can no longer overwrite a stranger's name or set their password. The lookup is
+  > rate-limited per actor (`middleware/crewResolveLimit.js`, 30/hour) and every answer that names
+  > somebody writes an `AccessLog` subject line — the same record-level trail as opening a profile.
+  > **What is NOT closed, said plainly.** `POST /admin/memberships` (org Users page, `requireAdminRole`)
+  > keeps `linkExisting` and all three codes, so the oracle survives for **org admins on the org door**.
+  > And the takeover path below survives one step later: once the attached person holds a Membership,
+  > `PATCH /admin/memberships/:userId/password` is gated only on "a Membership exists in my active org",
+  > and passwords are per-USER. Item 14 stands.
+  > **Direction: narrows.** No new field, no new retention rule, no new subprocessor, no published-policy
+  > sentence affected. The new audit line records a `userId` we already hold.
   **And it is a takeover path.** *[v3: reviewed and left unprevented by decision — admin reset is the
   product's only password-recovery mechanism, so blocking it would strand multi-org users entirely;
   the reset now issues a visible forced-change temp password (misuse locks the victim out loudly, not

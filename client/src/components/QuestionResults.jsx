@@ -149,6 +149,13 @@ function VoterList({
                   {v.household.addressLine1}, {v.household.city}
                 </div>
               )}
+              {/* What they actually answered. Load-bearing for the write-in bucket, where the
+                  answer IS the typed text — a list of names alone said nothing about it. */}
+              {v.answer && (
+                <div className="truncate text-xs text-fg-muted" title={v.answer}>
+                  {v.answer}
+                </div>
+              )}
               {v.note && (
                 <div className="truncate text-xs italic text-fg-subtle" title={v.note}>
                   “{v.note}”
@@ -605,15 +612,20 @@ export default function QuestionResults({
       ) : (
         <div>
           {options.map((o, idx) => {
-            const isOpen = expandedOption === o.option;
+            // Key on the stable id, not the label. Two buckets can legitimately share a label —
+            // the write-in reads "Other", and nothing stops an operator naming a real option
+            // "Other" too — and a label key would collide, so clicking one row expanded both,
+            // mounting two drills under one heading.
+            const rowKey = o.id ?? `legacy:${o.option}`;
+            const isOpen = expandedOption === rowKey;
             return (
-              <div key={o.option}>
+              <div key={rowKey}>
                 <OptionRow
                   {...o}
                   percent={percents[idx]}
                   expandable={expandable}
                   expanded={isOpen}
-                  onToggle={() => setExpandedOption(isOpen ? null : o.option)}
+                  onToggle={() => setExpandedOption(isOpen ? null : rowKey)}
                 />
                 {isOpen && (
                   <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">

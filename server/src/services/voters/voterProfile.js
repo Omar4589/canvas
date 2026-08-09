@@ -274,12 +274,27 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           questionKey: a.questionKey,
           questionLabel: a.questionLabel,
           answer: a.answer,
+          // The editor round-trips what it receives. Without these two the "Other" pick and its
+          // typed text could not be rendered OR sent back, so re-normalizing on save de-classified
+          // the answer: optionIds went empty, otherText null, and the write-in silently dropped
+          // out of its reporting bucket into a junk bucket named after the typed text.
+          optionIds: a.optionIds || [],
+          otherText: a.otherText ?? null,
         })),
         // Question defs (type/options) so the edit UI can render the right inputs.
         questions: (tpl?.questions || [])
           .slice()
           .sort((a, b) => (a.order || 0) - (b.order || 0))
-          .map((q) => ({ key: q.key, label: q.label, type: q.type, options: q.options || [], required: !!q.required })),
+          // otherOption rides along so the editor can materialize the synthetic "Other (specify)"
+          // choice — it is a question FLAG, never a row in options[].
+          .map((q) => ({
+            key: q.key,
+            label: q.label,
+            type: q.type,
+            options: q.options || [],
+            required: !!q.required,
+            otherOption: !!q.otherOption,
+          })),
       };
     }),
     // Preserved (overwritten) responses — read-only; restore/erase act on `id` (the archive id).
@@ -303,6 +318,12 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
           questionKey: a.questionKey,
           questionLabel: a.questionLabel,
           answer: a.answer,
+          // The editor round-trips what it receives. Without these two the "Other" pick and its
+          // typed text could not be rendered OR sent back, so re-normalizing on save de-classified
+          // the answer: optionIds went empty, otherText null, and the write-in silently dropped
+          // out of its reporting bucket into a junk bucket named after the typed text.
+          optionIds: a.optionIds || [],
+          otherText: a.otherText ?? null,
         })),
       };
     }),

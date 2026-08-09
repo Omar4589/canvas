@@ -19,6 +19,7 @@ import { buildKnocksByPassData } from '../reports/knocksByPass.js';
 import { zonedDayRange, tzAbbrev } from '../../utils/timezone.js';
 import { DNC_FILTER } from './exportScope.js';
 import { ExportUserError } from './exportErrors.js';
+import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
 
 // Row builders for every Export Center type. Each builder receives:
 //   ctx  — { organizationId, campaignId, campaign, org, params, anchorTz, dnc (Set of flagged
@@ -422,6 +423,10 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
     const optionTextById = new Map();
     for (const question of questions) {
       for (const opt of question.options || []) optionTextById.set(`${question.key}:${opt.id}`, opt.text);
+      // The write-in has no option row, so without this its ids resolve to nothing and the cell
+      // falls back to the bare snapshot — a write-in of "potholes" printing byte-identically to a
+      // canonical option named "potholes". Seeded, it reads "Other — potholes".
+      if (question.otherOption) optionTextById.set(`${question.key}:${OTHER_OPTION_ID}`, 'Other');
     }
     const cols = [...questions, ...orphans];
 

@@ -302,6 +302,22 @@ test('publish path: canvasser-typed Other text NEVER reaches the public map poin
   const byLabel = new Map(support.options.map((o) => [o.option, o.count]));
   assert.strictEqual(byLabel.get('Yes'), 1, 'canonical label kept with its exact count');
   assert.strictEqual(byLabel.get('Other'), 2, 'the __other__ pick and the typed legacy row merge into one Other bucket');
+  // Single-ness has to be asserted on the ARRAY: a Map silently last-wins on a duplicate key, so
+  // the assertion above cannot see two rows both labelled 'Other'. That is exactly what shipping
+  // a label-keyed collapse would produce once the write-in became a first-class bucket — split
+  // counts, split percentages, and colliding React keys on a public share page.
+  assert.strictEqual(
+    support.options.filter((o) => o.option === 'Other').length,
+    1,
+    'exactly ONE Other row may reach a client report'
+  );
+  // The collapse is a FOLD, not a filter: dropping the non-canonical buckets instead of merging
+  // them would quietly remove answers from the client's percentages.
+  assert.strictEqual(
+    support.options.reduce((s, o) => s + o.count, 0),
+    3,
+    'every recorded answer is still counted (1 canonical + 1 write-in + 1 legacy typed)'
+  );
   const reportDump = JSON.stringify(published.stats);
   assert.ok(!reportDump.includes(TYPED_OTHER) && !reportDump.includes(TYPED_LEGACY), 'no typed string in any breakdown');
   ctx.publishedReport = draft;

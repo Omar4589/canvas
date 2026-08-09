@@ -17,6 +17,24 @@ Open a campaign and pick **Survey** in the sidebar, then click **New survey**. G
 
 If the campaign has no survey yet, the one you build becomes its default. If it already has one, your new survey is added to your library so you can assign it to specific doors — a new survey never silently replaces the default.
 
+## Letting people answer in their own words: "Other (specify)"
+
+On any choice question, tick **Other (specify)**. At the door the canvasser gets an extra **Other** choice, and picking it opens a small box to type what the person actually said. You keep the clean option counts *and* the verbatim wording.
+
+Those write-ins are tracked like any other answer:
+
+- Survey results show an **Other** bar next to your real options.
+- Click it and you get the list of people who wrote something in, **each row showing what they typed**.
+- You can filter the map to Other, and exports spell it out as `Other — potholes`, so a write-in is never confused with a real option that happens to use the same word.
+- On a voter's page you can read the typed text, and change or clear it like any other answer.
+
+**Clients never see the words.** On a client report, every write-in is merged into a single **Other** row with its count intact — a client learns how many people said something else, never what any of them said.
+
+Two things worth knowing:
+
+- It's a **question setting, not an option** — you won't find "Other" in the list of options you typed, and you don't need to add it there.
+- If you also create your own option called "Other", both work and stay separate; the write-in then reads **Other (specify)** so you can tell them apart. Usually that means you want one or the other, not both.
+
 ## Branching and tags
 
 Any question after the first can be set to **Show only if...** an earlier answer matches — the app builds branch, skip, and skip-to-end flows from that one rule. Hidden questions never show at the door and their answers aren't saved.

@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -208,11 +209,20 @@ export default function AdminUsers() {
   // requireCampaignManager too, so BOTH roles create through here when a campaign is picked.
   const createOnCampaign = useMutation({
     mutationFn: (body) => api(`/admin/campaigns/${cId}/crew`, { method: 'POST', body }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
       qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
       setShowCreate(false);
+      // The address already had an account, so the server attached that REAL person and dropped the
+      // typed name. Say so, or the operator goes looking for someone who was never created.
+      if (data?.attached) {
+        const who = `${data.user.firstName} ${data.user.lastName}`;
+        Alert.alert(
+          'Added an existing account',
+          `That email already had a Door Line account, so ${who} was added rather than a new person. They keep their own password. If that isn't who you meant, remove them and check the address.`
+        );
+      }
     },
   });
   const assignAll = useMutation({

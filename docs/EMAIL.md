@@ -23,9 +23,9 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 | --- | --- | --- | --- |
 | 1 | **Password reset** | Someone taps **Forgot password?** on the sign-in page (real, active account only) | That person |
 | 2 | **Invite + set-password link** | An admin creates a **new** user on the Users page | The new user |
-| 3 | **Invite + set-password link** (also names the campaign) | A lead/admin creates a new canvasser inline from a campaign's **Team** page | The new canvasser |
-| 4 | **"You've been added"** (no link, no credentials) | An **existing** account is linked into another org (Users page or Team page) | That person |
-| 5 | **Added to campaign** | A Team-page add of an existing member — genuinely-new roster rows only | That member |
+| 3 | **Invite + set-password link** (also names the campaign) | A lead/admin adds an address that has **no** account yet, from a campaign's **Team** page | The new canvasser |
+| 4 | **"You've been added"** (no link, no credentials) | An **existing** account joins another org — the Users page link toggle, or a Team-page add whose address turned out to hold an account elsewhere | That person |
+| 5 | **Added to campaign** | A Team-page add of someone already in the org, or an `.../assignments` add — genuinely-new roster rows only | That member |
 | 6 | **Welcome + set-password link** | A super admin provisions a new client org with its first admin | That admin |
 | 7 | **Support-access notice** | Doorline staff opens a **new** support-access grant into an org | **Billing admins only** (see below) |
 | 8 | **Wind-down warning** | The nightly sweep finds a canceled org within ~30 days of data deletion — sent once, and the deletion **cannot proceed without it** | **Billing admins only** |
@@ -81,7 +81,14 @@ already sent cannot be recalled, so the fix has to reach *future* mail immediate
 - **Never fire from a silent side-effect.** Handing someone a book (which quietly adds them to
   the campaign roster) sends nothing; only deliberate adds notify.
 - **Never spam repeats.** Re-adding an existing roster member, re-entering a live support grant,
-  and re-running the nightly sweep against an already-warned org all send nothing.
+  and re-running the nightly sweep against an already-warned org all send nothing. On the Team page's
+  add-by-email door that is structural rather than incidental: an address that resolves to somebody
+  **already on this campaign** is an idempotent no-op and sends nothing, and a colleague still holding
+  an unused temporary password is skipped on the added-to-campaign note, because the invite they have
+  not opened yet already named this campaign.
+- **Exactly one email per add, chosen by what the address turned out to be** — an invite for a genuinely
+  new account, "you've been added" for an account attached from elsewhere, "added to campaign" for a
+  colleague. Never two: the branch is exclusive by construction (`routes/admin/leadCrew.js`).
 - Suspending or canceling an org sends no email by itself — only the later wind-down warning
   does, and no wind-down or dormancy deletion ever happens without its warning first.
 

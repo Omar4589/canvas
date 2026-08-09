@@ -4,6 +4,7 @@ import { Household } from '../../models/Household.js';
 import { resolveStatus } from '../../utils/statusPrecedence.js';
 import { KNOCK_ACTIONS, knocksPipeline, connectionRate, contactRate } from './aggregations.js';
 import { choiceKeyStages, mergeOptionRows } from '../surveys/answerAgg.js';
+import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
 
 // Compute service for the client report builder. Everything here is WINDOWED by an explicit
 // UTC date range so a snapshot can be frozen for a given week (period) AND cumulatively
@@ -49,14 +50,23 @@ export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supp
     ]);
     const merged = mergeOptionRows(q, agg);
     // PUBLIC-SURFACE RULE (the breakdown-table twin of publicPointAnswer): only the template's
-    // canonical option labels may appear on a client report. mergeOptionRows keys leftover rows
-    // by their RAW answer text, and for a legacy pre-option-id "Other: ___" response that text
-    // is whatever the canvasser typed — so every unmatched bucket (id:null, which also covers
-    // the synthetic '__other__' id) collapses into one 'Other' row here. Counts are preserved
-    // exactly — only the label is withheld. Admin analytics keep the raw buckets; this function
-    // is client-report-only (sole caller: computeWindowStats).
-    const canonical = merged.filter((o) => o.id != null);
-    const otherCount = merged.filter((o) => o.id == null).reduce((s, o) => s + o.count, 0);
+    // canonical option labels may appear on a client report. Two kinds of bucket are not
+    // canonical and must never reach a client under their own label:
+    //   · the '__other__' write-in bucket — its answers are canvasser-typed free text;
+    //   · every id:null orphan — mergeOptionRows keys those by RAW answer text, which for a
+    //     pre-option-id "Other: ___" response is, again, whatever the canvasser typed.
+    // Both FOLD into a single 'Other' row. This is a fold, not a filter: dropping them would
+    // silently remove answers from the client's percentages. Counts are preserved exactly —
+    // only the label is withheld.
+    //
+    // Test it on `id`, never on the label: since the write-in bucket became a first-class
+    // reporting bucket it arrives here already labelled 'Other', so a label-based test would
+    // emit TWO rows both reading "Other" — splitting the count and the percentage, and
+    // colliding React keys on the public share page. Admin analytics keep the raw buckets;
+    // this function is client-report-only (sole caller: computeWindowStats).
+    const isCanonical = (o) => o.id != null && o.id !== OTHER_OPTION_ID;
+    const canonical = merged.filter(isCanonical);
+    const otherCount = merged.filter((o) => !isCanonical(o)).reduce((s, o) => s + o.count, 0);
     if (otherCount > 0) canonical.push({ id: null, text: 'Other', retired: false, count: otherCount });
     const questionTotal = canonical.reduce((s, o) => s + o.count, 0);
     const options = canonical.map((o) => ({

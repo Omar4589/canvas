@@ -6,6 +6,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
 import { Badge } from '../components/ui/index.js';
+import { choicesFor, OTHER_OPTION_ID } from '../lib/surveyChoices.js';
 
 function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
@@ -287,12 +288,14 @@ function DncSection({ dnc, onFlag, onUnflag, busy, tz }) {
 function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
   const [edit, setEdit] = useState(false);
   const [vals, setVals] = useState({});
+  const [otherTexts, setOtherTexts] = useState({});
   const [note, setNote] = useState('');
 
   function startEdit() {
     // Seed editor state with option IDS (choice) / text (free-text). Prefer stored
     // optionIds; fall back to mapping the snapshot text back to ids for legacy rows.
     const map = {};
+    const others = {};
     for (const q of survey.questions) {
       const a = survey.answers.find((x) => x.questionKey === q.key);
       if (q.type === 'text') {
@@ -307,8 +310,10 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
       }
       ids = ids || [];
       map[q.key] = q.type === 'multiple_choice' ? ids : ids[0] ?? '';
+      others[q.key] = a?.otherText ?? '';
     }
     setVals(map);
+    setOtherTexts(others);
     setNote(survey.note || '');
     setEdit(true);
   }
@@ -321,9 +326,14 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
       }
       const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v ? [v] : [];
       const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
-      const texts = ids.map((id) => byId.get(id)).filter((t) => t != null);
+      // Snapshot the write-in exactly as the capture flow does — the sentinel has no option label,
+      // so its snapshot IS the typed text (falling back to 'Other' when nothing was typed).
+      const otherText = ids.includes(OTHER_OPTION_ID) ? (otherTexts[q.key] || '').trim() || null : null;
+      const texts = ids
+        .map((id) => (id === OTHER_OPTION_ID ? otherText || 'Other' : byId.get(id)))
+        .filter((t) => t != null);
       const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
-      return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids };
+      return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids, otherText };
     });
     // Carry through answers to retired/removed questions (not shown in the editor).
     const editedKeys = new Set(editable.map((q) => q.key));
@@ -357,7 +367,15 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
             {survey.answers.map((a) => (
               <div key={a.questionKey} className="flex gap-2">
                 <dt className="text-fg-muted">{a.questionLabel}:</dt>
-                <dd className="font-medium text-fg">{answerText(a.answer)}</dd>
+                <dd className="font-medium text-fg">
+                  {answerText(a.answer)}
+                  {/* The capture flow usually embeds the write-in INTO the snapshot; only append
+                      it when it isn't already there. Same guard as ResponseDetailDrawer. */}
+                  {a.otherText &&
+                    !(Array.isArray(a.answer) ? a.answer.includes(a.otherText) : a.answer === a.otherText) && (
+                      <span className="text-fg-muted"> — {a.otherText}</span>
+                    )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -375,7 +393,14 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
         </>
       ) : (
         <div className="space-y-3">
-          {survey.questions.filter((q) => !q.retired).map((q) => (
+          {survey.questions.filter((q) => !q.retired).map((q) => {
+            // The synthetic "Other (specify)" choice lives here too, or an Other answer can be
+            // neither shown nor kept. keepIds holds whatever this response actually selected, so
+            // a since-retired option stays visible instead of being silently de-selected on save.
+            const selected = Array.isArray(vals[q.key]) ? vals[q.key] : vals[q.key] ? [vals[q.key]] : [];
+            const choices = choicesFor(q, { keepIds: selected });
+            const otherPicked = selected.includes(OTHER_OPTION_ID);
+            return (
             <div key={q.key}>
               <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
               {q.type === 'single_choice' ? (
@@ -385,11 +410,11 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                   className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
                 >
                   <option value="">—</option>
-                  {q.options.filter((o) => !o.retired).map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
+                  {choices.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
                 </select>
               ) : q.type === 'multiple_choice' ? (
                 <div className="flex flex-wrap gap-3">
-                  {q.options.filter((o) => !o.retired).map((o) => (
+                  {choices.map((o) => (
                     <label key={o.id} className="flex items-center gap-1 text-sm">
                       <input type="checkbox" checked={Array.isArray(vals[q.key]) && vals[q.key].includes(o.id)} onChange={() => toggleMulti(q.key, o.id)} />
                       {o.text}
@@ -403,8 +428,17 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
                   className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
                 />
               )}
+              {otherPicked && (
+                <input
+                  value={otherTexts[q.key] ?? ''}
+                  onChange={(e) => setOtherTexts((t) => ({ ...t, [q.key]: e.target.value }))}
+                  placeholder="Please specify"
+                  className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
+                />
+              )}
             </div>
-          ))}
+            );
+          })}
           <label className="block text-xs font-medium text-fg-muted">
             Note
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg" />

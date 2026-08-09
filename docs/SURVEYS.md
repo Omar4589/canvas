@@ -113,6 +113,26 @@ Turn on **Other (specify)** on a choice question and the door form gains an **Ot
 small free-text box. Whatever the voter says is captured alongside the structured answer, so you keep
 the clean option counts *and* the verbatim text.
 
+**Where those answers show up:**
+
+- **Survey results** give Other its own bar, labelled **Other**, alongside your real options. (It
+  used to appear as a strange greyed-out entry called `__other__` badged "no longer asked" — that was
+  a bug, not a deleted option.)
+- **Click the bar** to list the people who wrote something in, each row showing what they typed.
+  Before, that list came back empty no matter how many write-ins you had.
+- **Filter the map** to Other, like any other answer.
+- **Exports** name it: a write-in reads `Other — potholes`, so it can't be mistaken for a real option
+  someone happened to name "potholes".
+- **The voter's page** shows the typed text, and you can now add, change, or remove an Other answer
+  there — including the text. Editing a response used to quietly de-classify it: the words survived,
+  but the answer dropped out of the Other count and reappeared as a junk row named after the typing.
+- **Client reports** never show the words. Every write-in is folded into a single **Other** row with
+  its count intact — a client sees how many people said something else, never what any of them said.
+
+If you also create a normal option literally named "Other" on the same question, both work and stay
+separate — the write-in then reads **Other (specify)** so the two are told apart. It's usually a sign
+you want one or the other, not both.
+
 > **Note — "Refused to answer" is not built yet.** A per-question "Refused" choice is a planned,
 > separate **door-outcome** feature; it does not exist today. Don't expect a Refused toggle in the
 > builder.
@@ -502,8 +522,8 @@ of that logic:
 | Helper | Role |
 |---|---|
 | `choiceKeyStages(questionKey)` | Aggregation fragment: after the caller's `$match`, `$unwind` answers, match the `questionKey`, then emit one `_answerKeys` row per chosen key — the **`optionIds`** for id-native rows, or the literal **`answer`** text (wrapped to an array) for legacy rows. Works for single + multiple. |
-| `mergeOptionRows(question, rows, opts)` | Merge raw `$group` rows (`{ _id, count, responseIds? }`) onto the question's **current options** — matched **by id, then by text**. Leftover values with no current option collapse into a **retired orphan bucket** (`id: null`, `retired: true`, `text` = the raw value). Returns `[{ id, text, retired, count, responseIds }]` sorted by count desc. |
-| `voterAnswerClause(questionKey, optionId, optionText)` | "Voters who chose this option" filter: id-native `$elemMatch` on `optionIds` **OR** legacy `$elemMatch` on `answer` text (the latter also matches multi-select arrays containing the text). |
+| `mergeOptionRows(question, rows, opts)` | Merge raw `$group` rows (`{ _id, count, responseIds? }`) onto the question's **current options** — matched **by id, then by text**. When `question.otherOption` is set it also **seeds the `'__other__'` sentinel into the id lookup ONLY** (never the text lookup — see the trap below), so a write-in is a first-class bucket `{ id: '__other__', text: 'Other', retired: false }` rather than an orphan labelled with the raw sentinel. Leftover values with no current option still collapse into a **retired orphan bucket** (`id: null`, `retired: true`, `text` = the raw value) — that bucket is now only DELETED options and pre-option-id text. Returns `[{ id, text, retired, count, responseIds }]` sorted by count desc. |
+| `voterAnswerClause(questionKey, optionId, optionText)` | "Voters who chose this option" filter: id-native `$elemMatch` on `optionIds` **OR** legacy `$elemMatch` on `answer` text (the latter also matches multi-select arrays containing the text). **The text lane is suppressed for `'__other__'`** — a write-in's `answer` is whatever was typed, so the lane can never find one, while it *does* steal an option named "Other", a legacy row reading "Other", and any multi-select array containing it (measured 6 hits against a 3-row truth). Match the sentinel by id alone. |
 | `answerFilterClause(questionKey, values, texts)` | Saved-Search / targeted-round filter: match any chosen option **id** (`optionIds.$in`) **OR** their texts (`answer.$in`), tolerating legacy saved filters that stored literal text. |
 | `answerTagClause(template, tag)` | "Voters who chose ANY option carrying this tag" — a single cross-question `$or` over the tag's `(questionKey, optionId \| legacy text)` members. Resolves the tag's members via `tagOptionMap(template).get(normalizeTag(tag))` (see §I) and **reuses `voterAnswerClause` per member**, flattening their `$or`s. Empty / unknown tag → `{ _id: null }` (matches nothing). |
 
@@ -541,6 +561,33 @@ rows keep reporting via the text fallback.
 > (`computeSurveyBreakdowns`), and the report bars
 > ([ReportBreakdown.jsx](../client/src/components/ReportBreakdown.jsx)) re-derive percent from the
 > counts they display — so a published snapshot is always self-consistent.
+
+### The client-report fold (why `computeReport` is different)
+
+`computeSurveyBreakdowns` ([computeReport.js](../server/src/services/reports/computeReport.js)) is the
+breakdown-table twin of `publicPointAnswer`: **only the template's canonical option labels may reach a
+client.** Two kinds of bucket are not canonical and must never appear under their own label —
+
+- the **`'__other__'` write-in bucket**, whose answers are canvasser-typed free text; and
+- every **`id: null` orphan**, which `mergeOptionRows` keys by the RAW answer text — for a
+  pre-option-id write-in, again whatever was typed.
+
+Both **fold into a single `Other` row**. Three properties are load-bearing:
+
+1. **It is a fold, not a filter.** Dropping those buckets would silently remove answers from the
+   client's percentages. Counts are preserved exactly — only the label is withheld, so Σ options
+   still equals the question total.
+2. **Test on `id`, never on the label.** Since the write-in became a first-class bucket (§C) it
+   arrives here already labelled `Other`, so a label-based test emits **two rows both reading
+   "Other"** — split count, split percentage, and duplicate React keys on a public share page.
+   `reportSecurity.int.test.js` pins exactly-one-`Other` on the array (a `Map` keyed on the label
+   silently last-wins and cannot see the duplicate).
+3. **An option still present but `retired: true` keeps its real label** — it has a non-null id, so it
+   is canonical. Only *deleted* options fall to the orphan branch. `mergeOptionRows` cannot tell a
+   deleted option's authored label from canvasser free text; both arrive as the same untrusted value.
+
+Published reports are **frozen snapshots** — `ClientReport` stores only `{ option, count, percent }`,
+recomputed on publish — so a report published before a change does not self-heal.
 
 ## D. The visibility evaluator (shared, three copies, drift-guarded)
 
@@ -593,12 +640,49 @@ Both write paths funnel through `normalizeAndFilterAnswers(template, rawAnswers,
 
 ### The `'__other__'` sentinel
 
-"Other (specify)" is a per-question `otherOption` toggle, not a real option. On mobile it renders as
-a synthetic choice `{ id: '__other__', text: 'Other (specify)' }`; when picked it shows a free-text
-box whose value is submitted as `answer.otherText`, with `'__other__'` carried in `optionIds`. The
-sentinel is accepted everywhere a real option id is: `normalizeAndFilterAnswers` (valid id set),
-`validateVisibleIfIntegrity` / the builder's condition editor (a pickable rule target), and the
-visibility evaluator (just another id).
+"Other (specify)" is a per-question `otherOption` toggle, **not a real option** — it is never a row in
+`question.options[]`. It is materialized as a synthetic choice `{ id: '__other__', text: 'Other
+(specify)' }` at render time; when picked it shows a free-text box whose value is submitted as
+`answer.otherText`, with `'__other__'` carried in `optionIds` and the typed text ALSO snapshotted
+into `answer` (there is no option label to snapshot).
+
+**That "flag, not a row" design is the whole trap.** Anything reconciling answers against
+`question.options` finds nothing to match, so every such site must seed the sentinel by hand. The
+constant and its label rule live in
+[`services/surveys/otherOption.js`](../server/src/services/surveys/otherOption.js) (`OTHER_OPTION_ID`,
+`otherBucketLabel`) and, on the web, [`lib/surveyChoices.js`](../client/src/lib/surveyChoices.js)
+(`choicesFor`) — import them rather than retyping the literal.
+
+The sentinel is accepted everywhere a real option id is:
+
+| Site | Role |
+|---|---|
+| `normalizeAndFilterAnswers` | Valid-id set, and the gate that keeps `otherText` (`optionIds.includes('__other__')`). |
+| `validateVisibleIfIntegrity` / builder condition editor | A pickable rule target; the visibility evaluator treats it as just another id. |
+| `mergeOptionRows` (§C) | Seeded into the **id** lookup so a write-in is a first-class reporting bucket. |
+| `voterAnswerClause` (§C) | Matched by id only — never by text. |
+| `/answer-canvassers` | Keys on the sentinel alone, so its per-canvasser counts still sum to the `/survey-results` count. |
+| `buildSurveyResultsWide` (exports) | Seeded into `optionTextById` so a cell reads `Other — potholes`. |
+| `voterProfile` + the voter-page editor | `optionIds`/`otherText` ride the wire, so an edit round-trips instead of de-classifying. |
+| `SurveyPreview`, mobile field form, print model | Materialize the choice, or the preview shows a shorter survey than the phone asks. |
+
+**`computeReport` deliberately does NOT treat it as canonical** — see *The client-report fold* in §C.
+
+**Two labelling rules, both load-bearing:**
+
+1. **Seed the id lookup, never the text lookup.** Seeding by text lets the sentinel clobber a real
+   option an operator named "Other", silently re-attributing that option's legacy rows to the
+   write-in (measured: the real option's count fell while the sentinel's rose).
+2. **When a real option already owns the label "Other"**, the write-in bucket becomes **"Other
+   (specify)"** (`otherBucketLabel`). Nothing forbids that pairing — there is no text-uniqueness
+   check on save, deliberately, since rejecting it would 400 an existing template on its next edit —
+   and two buckets sharing a label collide as React keys and expand-state on every surface that keys
+   on text. Surfaces that can key on `id` now do.
+
+**What cannot be recovered:** a response recorded *before* stable option ids has `optionIds: []` and
+only a free-text snapshot. For a write-in that snapshot is arbitrary text, so such a row can never be
+re-identified as Other — it surfaces as its own orphan bucket named after the typing. No heuristic
+can fix that without guessing, and none is attempted.
 
 ## F. Submission & dedup invariants
 
@@ -839,6 +923,11 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 | `GET /admin/reports/voters-by-answer.csv` | The same drill as a **CSV attachment** — same params (incl. `userId` + tag mode) through the **same** `buildVotersByAnswerFilter`, so the file can never disagree with the JSON list. No pagination; hard `EXPORT_CAP = 50000`. Columns: `Submitted (ISO)`, `Date`, `Time (<tz-abbrev>)` (campaign tz), `Voter`, `Party`, `Address`, `City`, `State`, `Zip`, `Canvasser first/last name`, `Question`, `Answer` (the drilled question's **snapshots** — `questionLabel` + `answer` text + `otherText`, honest even after an option rename; tag mode collects every answer entry carrying the tag), `Note`, `Offline submission` (yes/no), `Response id`. **This is the 4th server-side CSV export** — same audience as the JSON (org admin + granted lead, campaign-scoped); recorded in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) §B8. |
 | `GET /admin/reports/responses/:responseId?campaignId=` | One response in full (the detail drawer/screen): answers, note, GPS + `distanceFromHouseMeters`, voter, household (with coordinates for the dot map), canvasser, round — **now also `syncedAt`** (server receipt time; trails `submittedAt` by however long the phone stayed offline), **`editedAt`**, and **`editedBy{id,firstName,lastName}`**. Re-checks the response's own `campaignId` against the lead's grants (defense-in-depth beyond the router gate). |
 
+> **Each drill row carries its `answer`** — the response's answer to the drilled question, rendered
+> by the shared `formatAnswerCell` that also builds the CSV cell, so screen and export cannot
+> disagree. This is load-bearing for the write-in bucket, where the answer IS the free text: without
+> it the drill listed names and nothing about what any of them wrote.
+>
 > **The counting contract.** `answer-canvassers` must sum **exactly** to the option's count on
 > `survey-results` for identical filters. That count comes from the `choiceKeyStages` explode folded
 > by `mergeOptionRows` (id-native rows count by option id, legacy rows by text) — so the breakdown
@@ -856,6 +945,9 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   team-attribution model in [METRICS.md](METRICS.md).
 > - **Tag mode is a `400` by design**: a tag rollup is a **distinct-voter** count across questions
 >   (§I), which has no honest per-canvasser sum — three questions can feed one voter's tag.
+> - **The `'__other__'` write-in keys on the sentinel ALONE** here (`keys = ['__other__']`, not
+>   `[optionId, option]`). Including its display text would count a legacy row that `mergeOptionRows`
+>   files under a *different* bucket, breaking this very contract.
 > - Option counts are **per RESPONSE**, and `SurveyResponse` is unique on `{voterId, passId}` — one
 >   response per voter **per round**. So the same voter asked in Round 1 and again in Round 2 counts
 >   **twice**: two forms, and (for a yard sign) two signs handed out. That is intended — contrast

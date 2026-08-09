@@ -5,6 +5,7 @@
 // removing one surfaces its old answers as a "retired/legacy" bucket. See docs/SURVEYS.md.
 
 import { tagOptionMap, normalizeTag } from './tags.js';
+import { OTHER_OPTION_ID, otherBucketLabel } from './otherOption.js';
 
 // Pipeline fragment for one choice question: after the caller's $match on the response
 // set, explode one row per chosen answer-key — the option id(s) for id-native rows, or
@@ -36,6 +37,17 @@ export function choiceKeyStages(questionKey) {
 export function mergeOptionRows(question, rows, { previewLimit = 0 } = {}) {
   const byId = new Map((question.options || []).map((o) => [o.id, o]));
   const byText = new Map((question.options || []).map((o) => [o.text, o]));
+  // The "Other: ___" write-in is a question FLAG, not a row in options[] — so without this seed
+  // every write-in falls to the legacy-orphan branch below and surfaces as a bucket literally
+  // labelled `__other__` and badged retired, with a null id that makes its drill-in match nothing.
+  //
+  // byId ONLY, never byText: seeding the text would let the sentinel clobber a real option an
+  // operator named "Other", silently re-attributing that option's legacy text rows to the write-in
+  // (measured: the real option's count fell while the sentinel's rose). The sentinel only ever
+  // arrives here as an option id, so the id lane alone is sufficient.
+  if (question?.otherOption) {
+    byId.set(OTHER_OPTION_ID, { id: OTHER_OPTION_ID, text: otherBucketLabel(question), retired: false });
+  }
   const merged = new Map();
   const bump = (mapKey, base, row) => {
     const cur = merged.get(mapKey) || { ...base, count: 0, responseIds: [] };
@@ -60,7 +72,14 @@ export function mergeOptionRows(question, rows, { previewLimit = 0 } = {}) {
 export function voterAnswerClause(questionKey, optionId, optionText) {
   const ors = [];
   if (optionId) ors.push({ answers: { $elemMatch: { questionKey, optionIds: optionId } } });
-  if (optionText != null) ors.push({ answers: { $elemMatch: { questionKey, answer: optionText } } });
+  // The write-in bucket has NO stable text — `answer` holds whatever the canvasser typed — so the
+  // legacy-text lane is pure noise for it AND an active hazard: it can never find a real write-in
+  // ("potholes" is not "Other"), while it does steal an option an operator named "Other", a legacy
+  // row whose snapshot happens to read "Other", and any multi-select array containing "Other".
+  // Measured against a 3-write-in population, the unguarded clause returned 6. Match by id alone.
+  if (optionText != null && optionId !== OTHER_OPTION_ID) {
+    ors.push({ answers: { $elemMatch: { questionKey, answer: optionText } } });
+  }
   return ors.length ? { $or: ors } : { _id: null }; // nothing selectable → matches nothing
 }
 

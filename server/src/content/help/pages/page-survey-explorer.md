@@ -9,7 +9,9 @@ summary: Drill into any survey answer — see the voters behind it, who recorded
 tags: survey explorer, answers, drill, audit, canvasser, export, page
 ---
 
-The **Survey Explorer** turns any survey count into the people behind it. Pick a question and an answer, and you get every matching entry — the voter, the address, **which canvasser recorded it and exactly when**, any note they typed, and a map of exactly those doors.
+The **Survey Explorer** turns any survey count into the people behind it. Pick a question and an answer, and you get every matching entry — the voter, the address, **which canvasser recorded it and exactly when**, the answer itself, any note they typed, and a map of exactly those doors.
+
+If a question uses **[Other (specify)](surveys)**, the write-ins get their own **Other** answer to pick, and each row shows what that person typed — so "what did people actually say?" is a drill, not an export you have to open in a spreadsheet.
 
 ## Pick a drill
 

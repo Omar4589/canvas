@@ -207,13 +207,24 @@ subset of org members who work it. The team is what:
 - **gates the mobile app** — a canvasser only sees campaigns they're on (admins & super-admins see all); and
 - **gates book assignment** — you can only assign books to people on the team.
 
-Manage it on the campaign's **Team** page (two panes: add org members on the left, the current team on
+Manage it on the campaign's **Team** page (two panes: **add someone** on the left, the current team on
 the right — **click a team member** to open a quick, campaign-scoped panel: their activity in this
 campaign, set their crew/coordinator — this is the only place a crew is set — or remove them from the
 campaign). A person joins a campaign's team these ways, all equivalent:
 
-1. **Team page → Add** an existing org member — or **+ New canvasser** to create a brand-new person
-   straight onto the team (works on the web console **and** the mobile admin app's Assignments screen).
+1. **Team page → Add someone**, keyed on their **email address**. One door for every case: an address
+   already belonging to a colleague puts that person on the campaign; an unused one opens a short form and
+   creates the account. An **org admin** additionally gets a searchable directory of the organization
+   alongside it, for bulk-staffing a new campaign; a **team lead** does not, because the Team page shows
+   that campaign's people rather than the organization's (see [ROLES.md](ROLES.md)). Works on the web
+   console **and** the mobile admin app's Users hub.
+
+   **The surprise worth knowing:** if the address turns out to already have a Door Line account —
+   including one belonging to another organization — that **existing person is added and anything you
+   typed is discarded**. The name you guessed does not overwrite theirs, and a temporary password you
+   typed is not applied to an account that is not yours to reset. The confirmation names who actually
+   landed; if it is not who you meant, remove them and check the address. A colleague whose account is
+   **switched off** cannot be added until an admin switches it back on, because that flag is org-wide.
 2. **Walk Lists → Manage → Pre-add** — pre-stage someone onto a walk list (also puts them on the team).
 3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
 
@@ -630,17 +641,31 @@ grant — the reset endpoint itself is identical.) The authz side of this is in 
   orgs) so the UI can disable the email field with an explanation. Enforced in both
   [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) and the mobile
   [users/[id].jsx](../mobile/app/(app)/admin/users/[id].jsx).
-- **Link vs create intent** — `POST /admin/memberships` **and** the team-lead crew endpoint
-  `POST /admin/campaigns/:id/crew` both take `linkExisting` (shared `memberIdentityShape`). `false` +
-  existing email → `409 EMAIL_EXISTS_USE_LINK`; `true` + no account → `404 EMAIL_NOT_FOUND`; `true` +
-  already in this org → `409 ALREADY_MEMBER`. All four surfaces send it and offer the link toggle — web
-  ([UsersPage.jsx](../client/src/pages/UsersPage.jsx), [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx))
-  and mobile ([admin/users.jsx](../mobile/app/(app)/admin/users.jsx),
-  [campaign-assignments/[campaignId].jsx](../mobile/app/(app)/admin/campaign-assignments/[campaignId].jsx))
-  — and each **auto-switches the toggle on** when the server returns `EMAIL_EXISTS_USE_LINK`. Letting a
-  **team lead** link (not just create) is deliberate: a lead owns onboarding and a returning canvasser may
-  already have an account from another org; the same privacy guards apply (name revealed only on linking,
-  `isMultiOrg` boolean only, added-to-org banner on next login).
+- **Link vs create intent — the ORG door still asks; the CAMPAIGN door resolves.** They diverged on
+  2026-08-08.
+
+  **`POST /admin/memberships`** (org Users page, `requireAdminRole`) is unchanged: it takes
+  `linkExisting` (shared `memberIdentityShape`), and `false` + existing email → `409 EMAIL_EXISTS_USE_LINK`;
+  `true` + no account → `404 EMAIL_NOT_FOUND`; `true` + already in this org → `409 ALREADY_MEMBER`. Its two
+  surfaces send it and offer the link toggle ([UsersPage.jsx](../client/src/pages/UsersPage.jsx) and the org
+  form in [admin/users.jsx](../mobile/app/(app)/admin/users.jsx)), auto-switching the toggle on when the
+  server returns `EMAIL_EXISTS_USE_LINK`.
+
+  **`POST /admin/campaigns/:id/crew`** no longer asks for intent. It **still accepts `linkExisting` and
+  ignores it** — already-released mobile binaries send it — and resolves the address itself
+  (`resolveEmailInOrg`), branching to create / claim / no-op / attach with no second round trip. Both
+  409s are therefore unreachable on this route, and the two clients that fed it a toggle
+  ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx),
+  [CreateCanvasserSheet.jsx](../mobile/components/CreateCanvasserSheet.jsx)) have dropped it. Full outcome
+  table in [ROLES.md](ROLES.md) → *The lead's crew surface*.
+
+  Letting a **team lead** attach an existing cross-org account (not just create) remains deliberate: a lead
+  owns onboarding and a returning canvasser may already have an account from another org. What changed is
+  *when* they learn that: the pre-commit lookup answers `outside` for every address that is not already a
+  colleague — identical for "no account anywhere", "an account in another organization", and a tombstoned
+  address — so identity is revealed only in the success response, after the add has happened, an email has
+  gone to the person, and an audit line exists. The older guards still apply (`isMultiOrg` boolean only,
+  added-to-org banner on next login).
 
 ## Crews (coordinators) — a PER-CAMPAIGN link
 

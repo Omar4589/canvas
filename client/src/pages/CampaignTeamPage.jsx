@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Navigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -10,9 +10,15 @@ import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
-// per-campaign roster that GATES mobile visibility AND who can be assigned books — so
-// admins manage the campaign's team in context. Two panes: add org members on the left,
-// the current team on the right. Reuses the /admin/campaigns/:id/assignments endpoints.
+// per-campaign roster that GATES mobile visibility AND who can be assigned books — so the
+// campaign's team is managed in context. Two panes: add somebody on the left, the current team
+// on the right. Reuses the /admin/campaigns/:id/assignments endpoints.
+//
+// The left pane used to be a directory of the ORGANIZATION for everyone who could open the page,
+// which for a team lead meant every other client's staff (a lead may be the client's own campaign
+// manager). Adding is now keyed on an email address for both roles — see AddPersonModal — and the
+// directory list survives for ORG ADMINS only, because bulk-staffing a campaign one typed address
+// at a time would be worse than what it replaced.
 function RoleBadge({ role }) {
   if (role !== 'admin' && role !== 'lead') return null;
   return (
@@ -51,33 +57,54 @@ function TeamMemberRow({ a, isSelf, onOpen }) {
   );
 }
 
-// Inline "add a canvasser to this campaign" form — the crew equivalent of the org Users
-// admin's add-member flow, scoped to one campaign. Used by admins AND team leads (both may
-// POST to the campaign's crew endpoint). It can CREATE a brand-new canvasser or LINK an
-// existing Door Line account by email — a returning canvasser may already have a login from
-// another org, and a lead owns onboarding, so we mirror the admin link flow here.
-function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, error }) {
-  const [emailLookup, setEmailLookup] = useState(false);
+// Add somebody to this campaign, keyed on their EMAIL ADDRESS. One door for a brand-new canvasser,
+// a colleague already in the org, and someone already on this very campaign.
+//
+// It replaces a two-pane "browse the organization and pick" flow whose picker was, for a team lead,
+// the entire org directory (see the note on the crew endpoint in server/src/routes/admin/leadCrew.js).
+// You type the address, the server says who it belongs to HERE, and you confirm — no checkbox to
+// guess, no "already a member" dead end, and nothing to browse.
+//
+// The one thing the confirm step deliberately does NOT do is tell you about accounts outside your
+// organization: those come back indistinguishable from an unused address, and the "create" you then
+// submit quietly attaches the real person instead of minting a duplicate. You find out who in the
+// SUCCESS message — after an email has gone to them and an audit line has been written.
+function AddPersonModal({ campaignId, isOrgAdmin, onClose, onDone }) {
+  const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
-  // The email already has a Door Line account — flip to the link path so the person can
-  // still be added (they keep their existing password; no new temp password is issued).
-  useEffect(() => {
-    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setEmailLookup(true);
-  }, [error]);
+  const resolveMut = useMutation({
+    mutationFn: (em) => api(`/admin/campaigns/${campaignId}/crew/resolve`, { method: 'POST', body: { email: em } }),
+  });
+  const addMut = useMutation({
+    mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
+    onSuccess: onDone,
+  });
 
-  function submit(e) {
+  const found = resolveMut.data;
+  const done = addMut.data;
+  const person = found?.person;
+  const fullName = person ? `${person.firstName} ${person.lastName}` : '';
+  const cleanEmail = email.trim().toLowerCase();
+
+  function lookUp(e) {
     e?.preventDefault();
-    const em = email.trim().toLowerCase();
-    if (emailLookup) {
-      onCreate({ email: em, linkExisting: true });
-      return;
-    }
+    if (!cleanEmail) return;
+    setLocalError('');
+    addMut.reset();
+    resolveMut.mutate(cleanEmail);
+  }
+  function startOver() {
+    resolveMut.reset();
+    addMut.reset();
+    setLocalError('');
+  }
+  function submitNew(e) {
+    e?.preventDefault();
     // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and the
     // new canvasser sets their own via the emailed set-password link. Only validate a typed one.
     if (password !== '') {
@@ -88,111 +115,203 @@ function CreateCrewMemberModal({ onClose, onCreate, onFoundExisting, saving, err
       }
     }
     setLocalError('');
-    onCreate({
+    addMut.mutate({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: em,
+      email: cleanEmail,
       phone: phone.trim() || undefined,
       password,
-      linkExisting: false,
     });
   }
+
   const inputClass =
     'w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
+  const saving = addMut.isPending;
+
+  // ── Done ──────────────────────────────────────────────────────────────────────────────────
+  if (done) {
+    const landed = `${done.user.firstName} ${done.user.lastName}`;
+    return (
+      <Modal size="md" onClose={onClose} title="Added" footer={<Button size="sm" onClick={onClose}>Done</Button>}>
+        <p className="text-sm text-fg">
+          <span className="font-medium">{landed}</span> is on this campaign.
+        </p>
+        {done.attached && (
+          // The typed name was discarded in favour of a real person the operator had not met. Say so
+          // plainly — otherwise they believe they created "Wrong Guess" and go looking for them.
+          <div className="mt-3 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+            That address already had a Door Line account, so we added <strong>{landed}</strong> rather
+            than creating a new person. They keep their own password — anything you typed here was not
+            applied. If that isn’t who you meant, remove them from the campaign and check the address.
+          </div>
+        )}
+        {done.outcome === 'created' && (
+          <p className="mt-3 text-xs text-fg-muted">
+            They’ve been emailed a link to set their own password.
+          </p>
+        )}
+      </Modal>
+    );
+  }
+
+  // ── Step 1: who is this? ──────────────────────────────────────────────────────────────────
+  if (!found) {
+    return (
+      <Modal
+        size="md"
+        onClose={onClose}
+        title="Add someone to this campaign"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" loading={resolveMut.isPending} onClick={lookUp} disabled={!cleanEmail}>Continue</Button>
+          </>
+        }
+      >
+        <form onSubmit={lookUp} className="space-y-3">
+          <p className="text-sm text-fg-muted">
+            Start with their email address. If they already have an account we’ll add that person; if
+            not, you’ll create one.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Email</label>
+            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus className={inputClass} />
+          </div>
+          {resolveMut.error && <p className="text-sm text-danger">{resolveMut.error.message}</p>}
+        </form>
+      </Modal>
+    );
+  }
+
+  // ── Step 2: confirm what the address turned out to be ─────────────────────────────────────
+  const backButton = (
+    <Button variant="secondary" size="sm" onClick={startOver}>Back</Button>
+  );
+
+  if (found.outcome === 'on-campaign') {
+    return (
+      <Modal size="md" onClose={onClose} title="Already here" footer={<>{backButton}<Button size="sm" onClick={onClose}>Close</Button></>}>
+        <p className="text-sm text-fg">
+          <span className="font-medium">{fullName}</span> is already on this campaign.
+        </p>
+      </Modal>
+    );
+  }
+
+  if (found.outcome === 'in-org-inactive') {
+    return (
+      <Modal
+        size="md"
+        onClose={onClose}
+        title="Account switched off"
+        footer={
+          <>
+            {backButton}
+            {isOrgAdmin ? (
+              <Button size="sm" loading={saving} onClick={() => addMut.mutate({ email: cleanEmail })}>
+                Switch on &amp; add
+              </Button>
+            ) : (
+              <Button size="sm" onClick={onClose}>Close</Button>
+            )}
+          </>
+        }
+      >
+        <p className="text-sm text-fg">
+          <span className="font-medium">{fullName}</span> is in your organization, but their account is
+          switched off.
+        </p>
+        <p className="mt-2 text-sm text-fg-muted">
+          {isOrgAdmin
+            ? 'Switching it back on restores their access to every campaign they were on, not just this one.'
+            : 'Switching an account back on affects every campaign in the organization, so an org admin has to do it.'}
+        </p>
+        {addMut.error && <p className="mt-3 text-sm text-danger">{addMut.error.message}</p>}
+      </Modal>
+    );
+  }
+
+  if (found.outcome === 'in-org') {
+    return (
+      <Modal
+        size="md"
+        onClose={onClose}
+        title="Add them to this campaign?"
+        footer={
+          <>
+            {backButton}
+            <Button size="sm" loading={saving} onClick={() => addMut.mutate({ email: cleanEmail })}>
+              Add to campaign
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-fg">
+          <span className="font-medium">{fullName}</span> is already in your organization
+          {person.role !== 'canvasser' ? ` (${person.role === 'lead' ? 'a team lead' : 'an admin'})` : ''}.
+        </p>
+        <p className="mt-2 text-sm text-fg-muted">
+          Adding them here puts them on this campaign’s roster so they can be given books. It doesn’t
+          change their role or their other campaigns.
+        </p>
+        {addMut.error && <p className="mt-3 text-sm text-danger">{addMut.error.message}</p>}
+      </Modal>
+    );
+  }
+
+  // 'outside' — nobody in this organization uses that address. Deliberately the same answer whether
+  // the address is unused or belongs to another customer's account; see the server-side note.
   return (
     <Modal
       size="md"
       onClose={onClose}
-      title="Add a canvasser"
+      title="New canvasser"
       footer={
         <>
-          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" loading={saving} onClick={submit}>
-            {emailLookup ? 'Link existing user' : 'Create & add'}
-          </Button>
+          {backButton}
+          <Button size="sm" loading={saving} onClick={submitNew}>Create &amp; add</Button>
         </>
       }
     >
-      <form onSubmit={submit} className="space-y-3">
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs">
-          <input
-            type="checkbox"
-            checked={emailLookup}
-            onChange={(e) => { setEmailLookup(e.target.checked); setLocalError(''); }}
-          />
-          <span className="text-fg-muted">Existing user (by email — link them to this org)</span>
-        </label>
+      <form onSubmit={submitNew} className="space-y-3">
         <p className="text-sm text-fg-muted">
-          {emailLookup
-            ? 'Links an existing Door Line account to your organization and puts them on this campaign. They keep their current password.'
-            : 'Adds a brand-new canvasser to your organization and puts them on this campaign. They set their own password from the emailed invite — a temporary one is optional.'}
+          No one in your organization uses <span className="font-medium text-fg">{cleanEmail}</span>.
+          Create their account and put them on this campaign.
         </p>
-        {!emailLookup && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
-              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} required className={inputClass} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
-              <input value={lastName} onChange={(e) => setLastName(e.target.value)} required className={inputClass} />
-            </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">First name</label>
+            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} required className={inputClass} />
           </div>
-        )}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-muted">Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Last name</label>
+            <input value={lastName} onChange={(e) => setLastName(e.target.value)} required className={inputClass} />
+          </div>
         </div>
-        {!emailLookup && (
-          <>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">
-                Phone <span className="text-fg-subtle">(optional)</span>
-              </label>
-              <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-muted">Temporary password <span className="text-fg-subtle">(optional)</span></label>
-              <PasswordInput
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                placeholder="Leave blank to email an invite"
-              />
-              <p className="mt-1 text-xs text-fg-subtle">
-                Leave blank to let them set their own password via the emailed invite (recommended).
-                Type one only if they can’t receive email.
-              </p>
-            </div>
-          </>
-        )}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
+            Phone <span className="text-fg-subtle">(optional)</span>
+          </label>
+          <PhoneInput value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-fg-muted">
+            Temporary password <span className="text-fg-subtle">(optional)</span>
+          </label>
+          <PasswordInput
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            placeholder="Leave blank to email an invite"
+          />
+          <p className="mt-1 text-xs text-fg-subtle">
+            Leave blank to let them set their own password via the emailed invite (recommended).
+            Type one only if they can’t receive email.
+          </p>
+        </div>
         {localError && <p className="text-sm text-danger">{localError}</p>}
-        {error && (
-          error.data?.code === 'ALREADY_MEMBER' ? (
-            // They already belong to this org — linking is a dead end; they just need to be
-            // added to the campaign roster. Point at the "Add to the campaign" search.
-            <div className="rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
-              That person is already in your organization. Add them to this campaign from{' '}
-              <strong>Add to the campaign</strong> on the left.
-              <div className="mt-2">
-                <button
-                  type="button"
-                  onClick={() => onFoundExisting?.(email.trim().toLowerCase())}
-                  className="font-semibold text-brand-accent hover:underline"
-                >
-                  Search my members for “{email.trim().toLowerCase()}” →
-                </button>
-              </div>
-            </div>
-          ) : error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
-            <div className="rounded-md border border-border bg-sunken px-3 py-2 text-xs text-fg-muted">
-              This email already has a Door Line account — we switched on <strong>Existing user</strong> above.
-              Click <strong>Link existing user</strong> to add them (they keep their current password).
-            </div>
-          ) : (
-            <p className="text-sm text-danger">{error.message}</p>
-          )
-        )}
+        {addMut.error && <p className="text-sm text-danger">{addMut.error.message}</p>}
       </form>
     </Modal>
   );
@@ -404,12 +523,22 @@ export default function CampaignTeamPage() {
   const [creatingMember, setCreatingMember] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
 
-  // Admins list the whole org from the Users admin; team leads can't reach that, so they
-  // read the same picker list from the campaign-scoped crew endpoint instead.
+  // ONE campaign-scoped list, same for both roles. This used to fork — admins read the org Users
+  // list, leads read the crew endpoint — and the lead branch was the leakier of the two: it returned
+  // every active member of the ORGANIZATION. A lead may be the client's own campaign manager, so
+  // that was another client's staff list. Both now read the campaign, and adding is by email.
   const membersQ = useQuery({
-    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaignId],
-    queryFn: () => api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaignId}/crew`),
-    enabled: isOrgAdmin || !!campaignId,
+    queryKey: ['admin', 'campaign-crew', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/crew`),
+    enabled: !!campaignId,
+  });
+  // The org directory, for ADMINS only — bulk-staffing a new campaign by typing twenty addresses
+  // would be worse than the picker it replaced. A lead never fetches this; /admin/memberships is
+  // admin-gated on the client and lead-scoped on the server either way.
+  const directoryQ = useQuery({
+    queryKey: ['memberships'],
+    queryFn: () => api('/admin/memberships'),
+    enabled: isOrgAdmin,
   });
   const assignmentsQ = useQuery({
     queryKey: ['admin', 'campaign-assignments', campaignId],
@@ -435,18 +564,14 @@ export default function CampaignTeamPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
     },
   });
-  // Create a net-new canvasser (or link a returning one by email) straight onto this
-  // campaign, in one step. Available to admins AND leads (the crew endpoint accepts both);
-  // the canvasser is auto-assigned.
-  const createMemberMut = useMutation({
-    mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
-    onSuccess: () => {
-      invalidate();
-      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
-      qc.invalidateQueries({ queryKey: ['memberships'] });
-      setCreatingMember(false);
-    },
-  });
+  // Every door onto the roster invalidates the same three caches — the roster itself, the crew list
+  // (shared with the book-assign pickers), and the org directory. AddPersonModal calls this on
+  // success; it stays open afterwards to report WHO actually landed.
+  const afterAdd = () => {
+    invalidate();
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaignId] });
+    qc.invalidateQueries({ queryKey: ['memberships'] });
+  };
   const busy = assignMut.isPending || unassignMut.isPending;
 
   const team = useMemo(
@@ -469,17 +594,15 @@ export default function CampaignTeamPage() {
       a.key === 'none' ? 1 : b.key === 'none' ? -1 : (a.name || '').localeCompare(b.name || '')
     );
   }, [team]);
-  const orgMembers = (membersQ.data?.members || []).filter((m) => m.user.isActive && m.isActive);
-  // Eligible coordinators for the member panel's crew picker — active admins + team leads.
+  // Who may RUN a crew is an org-level fact — any active admin or lead, whether or not they walk
+  // this campaign — so the server sends the eligible list alongside the roster. Deriving it from the
+  // roster instead would empty the picker on a campaign whose lead doesn't knock doors.
   const coordinators = useMemo(
-    () =>
-      (membersQ.data?.members || [])
-        .filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive)
-        .map((m) => ({ id: m.user.id, name: `${m.user.firstName} ${m.user.lastName}` })),
+    () => (membersQ.data?.coordinators || []).map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}` })),
     [membersQ.data]
   );
-  const candidates = orgMembers
-    .filter((m) => !assignedSet.has(m.user.id))
+  const candidates = (directoryQ.data?.members || [])
+    .filter((m) => m.user.isActive && m.isActive && !assignedSet.has(m.user.id))
     .filter((m) => {
       if (!search.trim()) return true;
       return `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase().includes(search.trim().toLowerCase());
@@ -503,67 +626,72 @@ export default function CampaignTeamPage() {
       </p>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {/* LEFT — add org members not yet on the team */}
+        {/* LEFT — add somebody. By email for everyone; admins also get the org directory. */}
         <Card className="flex flex-col p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-fg">Add to the campaign</h2>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setCreatingMember(true)} className="text-xs font-medium text-brand-accent hover:underline">+ New canvasser</button>
-              {isOrgAdmin && (
-                <Link to={usersReturn} className="text-xs font-medium text-fg-muted hover:underline">Manage users →</Link>
-              )}
-            </div>
-          </div>
-          <div className="mb-3 flex items-center gap-2">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search org members…"
-              className="min-w-0 flex-1 rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            />
-            {candidates.length > 0 && (
-              <Button variant="secondary" size="sm" onClick={addAllVisible} disabled={busy}>
-                Add all{search.trim() ? ' shown' : ''}
-              </Button>
+            {isOrgAdmin && (
+              <Link to={usersReturn} className="text-xs font-medium text-fg-muted hover:underline">Manage users →</Link>
             )}
           </div>
-          {loading ? (
-            <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
-          ) : !orgMembers.length ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
-              No members in this org yet.{' '}
-              <button onClick={() => setCreatingMember(true)} className="font-medium text-brand-accent hover:underline">Create one →</button>
-            </div>
-          ) : !candidates.length ? (
-            <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
-              {search.trim() ? 'No matches.' : 'Everyone in the org is already on this campaign.'}
-            </div>
-          ) : (
-            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-              {candidates.map((m) => {
-                const u = m.user;
-                return (
-                  <li key={u.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
-                        <RoleBadge role={m.role} />
-                        {String(u.id) === String(user?.id) && <YouBadge />}
-                      </div>
-                      <div className="truncate text-xs text-fg-muted">{u.email}</div>
-                    </div>
-                    <button
-                      onClick={() => assignMut.mutate([u.id])}
-                      disabled={busy}
-                      className="shrink-0 rounded-md border border-brand-accent/30 bg-brand-tint px-3 py-1 text-xs font-semibold text-brand-accent disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+          <Button size="sm" onClick={() => setCreatingMember(true)}>+ Add someone</Button>
+          <p className="mt-2 text-xs text-fg-muted">
+            Start with their email address — we’ll add the person it belongs to, or help you create
+            their account.
+          </p>
+
+          {isOrgAdmin && (
+            <>
+              <div className="mt-4 mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                  Or pick from your organization
+                </h3>
+                {candidates.length > 0 && (
+                  <Button variant="secondary" size="sm" onClick={addAllVisible} disabled={busy}>
+                    Add all{search.trim() ? ' shown' : ''}
+                  </Button>
+                )}
+              </div>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search org members…"
+                className="mb-3 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+              {directoryQ.isLoading ? (
+                <div className="py-6 text-center text-sm text-fg-muted">Loading…</div>
+              ) : !candidates.length ? (
+                <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
+                  {search.trim() ? 'No matches.' : 'Everyone in the org is already on this campaign.'}
+                </div>
+              ) : (
+                <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                  {candidates.map((m) => {
+                    const u = m.user;
+                    return (
+                      <li key={u.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-medium text-fg">{u.firstName} {u.lastName}</span>
+                            <RoleBadge role={m.role} />
+                            {String(u.id) === String(user?.id) && <YouBadge />}
+                          </div>
+                          <div className="truncate text-xs text-fg-muted">{u.email}</div>
+                        </div>
+                        <button
+                          onClick={() => assignMut.mutate([u.id])}
+                          disabled={busy}
+                          className="shrink-0 rounded-md border border-brand-accent/30 bg-brand-tint px-3 py-1 text-xs font-semibold text-brand-accent disabled:opacity-50"
+                        >
+                          Add
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
           )}
         </Card>
 
@@ -576,7 +704,7 @@ export default function CampaignTeamPage() {
             <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
           ) : !team.length ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-8 text-center text-sm text-fg-muted">
-              No one yet — add people from the left.
+              No one yet — use <span className="font-medium text-fg">Add someone</span> on the left.
             </div>
           ) : !hasCrews ? (
             <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
@@ -614,12 +742,11 @@ export default function CampaignTeamPage() {
       </div>
 
       {creatingMember && (
-        <CreateCrewMemberModal
+        <AddPersonModal
+          campaignId={campaignId}
+          isOrgAdmin={isOrgAdmin}
           onClose={() => setCreatingMember(false)}
-          onCreate={(body) => createMemberMut.mutate(body)}
-          onFoundExisting={(email) => { setSearch(email); setCreatingMember(false); }}
-          saving={createMemberMut.isPending}
-          error={createMemberMut.error}
+          onDone={afterAdd}
         />
       )}
 

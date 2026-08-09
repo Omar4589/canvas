@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -8,10 +9,12 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
   const { isOrgAdmin } = useAuth();
   const [search, setSearch] = useState('');
 
-  // Admins list the whole org from the Users admin; team leads can't reach that route at all, so
-  // they read the same picker list from the campaign-scoped crew endpoint instead. This modal opens
-  // from the Campaigns page's UNGATED action list, so a lead gets here — and without the fork the
-  // 403 rendered as an empty picker. Same shape from both. (CampaignTeamPage does this too.)
+  // This modal opens from the Campaigns page's UNGATED ⋮ action list, so a team lead reaches it —
+  // which made it the SECOND copy of the org-wide directory a lead could see, after the Team page's
+  // picker. It still forks, but the two branches now mean different things: an admin gets the org
+  // directory to assign from, while a lead gets the campaign's own roster (the crew endpoint is
+  // campaign-scoped now — server/src/routes/admin/leadCrew.js), so here they can only take people
+  // OFF. Adding is by email on the Team tab, for both roles.
   const membersQ = useQuery({
     queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaign._id],
     queryFn: () =>
@@ -99,6 +102,15 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
             <p className="mt-1 text-xs text-fg-muted">
               Only assigned canvassers will see this campaign in the mobile app.
             </p>
+            {!isOrgAdmin && (
+              <p className="mt-1 text-xs text-fg-muted">
+                This is the campaign’s own team. To add someone,{' '}
+                <Link to={`/campaigns/${campaign._id}/team`} onClick={onClose} className="font-medium text-brand-accent hover:underline">
+                  open the Team tab
+                </Link>{' '}
+                and add them by email.
+              </p>
+            )}
           </div>
           <button
             type="button"

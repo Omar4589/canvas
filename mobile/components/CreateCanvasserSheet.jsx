@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -32,7 +32,6 @@ export default function CreateCanvasserSheet({
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
-  const [linkExisting, setLinkExisting] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -41,35 +40,28 @@ export default function CreateCanvasserSheet({
   const [coordinatorId, setCoordinatorId] = useState('');
   const [coordOpen, setCoordOpen] = useState(false);
 
-  // The email already has a Door Line account — flip to the link path so a returning
-  // canvasser can still be added. They keep their own password.
-  useEffect(() => {
-    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
-  }, [error]);
+  // There used to be an "Existing user (by email)" checkbox here, plus an effect that ticked it for
+  // you when the server answered EMAIL_EXISTS_USE_LINK so you could submit a second time. The server
+  // now resolves the address itself and does the right thing on the first try: a colleague is put on
+  // the campaign, an unused address becomes a new account, and an address that turns out to have an
+  // account elsewhere attaches that real person (the caller is told WHO in the response — see the
+  // `attached` handling in the Users hub). Nothing left for the operator to guess at.
 
   // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and
   // the new canvasser sets their own via the emailed set-password link.
-  const valid = linkExisting
-    ? !!email.trim()
-    : firstName.trim() && lastName.trim() && email.trim() && (password === '' || isValidTempPassword(password));
-  const pwProblem = !linkExisting && password.length > 0 ? tempPasswordProblem(password) : null;
+  const valid = firstName.trim() && lastName.trim() && email.trim() && (password === '' || isValidTempPassword(password));
+  const pwProblem = password.length > 0 ? tempPasswordProblem(password) : null;
 
   function submit() {
     if (!valid || submitting) return;
-    const em = email.trim().toLowerCase();
-    onCreate(
-      linkExisting
-        ? { email: em, linkExisting: true, ...(coordinatorId ? { coordinatorId } : {}) }
-        : {
-            firstName: firstName.trim(),
-            lastName: lastName.trim(),
-            email: em,
-            phone: phone.trim() || undefined,
-            password,
-            linkExisting: false,
-            ...(coordinatorId ? { coordinatorId } : {}),
-          }
-    );
+    onCreate({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone.trim() || undefined,
+      password,
+      ...(coordinatorId ? { coordinatorId } : {}),
+    });
   }
 
   const coordName = coordinatorId ? coordinators.find((c) => c.id === coordinatorId)?.name : null;
@@ -81,34 +73,19 @@ export default function CreateCanvasserSheet({
         <View style={[styles.card, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
           <Text style={styles.title}>Add a canvasser</Text>
           <Text style={styles.sub}>
-            {linkExisting
-              ? `Links an existing Door Line account to ${campaignName || 'this campaign'}. They keep their current password.`
-              : `Creates a canvasser on ${campaignName || 'this campaign'}. They set their own password from the emailed invite — a temporary one is optional.`}
+            {`Adds someone to ${campaignName || 'this campaign'}. If the email already has a Door Line account we'll add that person; otherwise we'll create one and email them a link to set their own password.`}
           </Text>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 400 }}>
-            <Pressable
-              onPress={() => setLinkExisting((v) => !v)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}
-            >
-              <View style={[styles.check, linkExisting && styles.checkOn]}>
-                {linkExisting && <Text style={styles.checkMark}>✓</Text>}
+            <View style={styles.row2}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>First name</Text>
+                <TextInput value={firstName} onChangeText={setFirstName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.input} />
               </View>
-              <Text style={{ color: colors.textPrimary, fontSize: 13, flex: 1 }}>
-                Existing user (by email — link them to this org)
-              </Text>
-            </Pressable>
-            {!linkExisting && (
-              <View style={styles.row2}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>First name</Text>
-                  <TextInput value={firstName} onChangeText={setFirstName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.input} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Last name</Text>
-                  <TextInput value={lastName} onChangeText={setLastName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.input} />
-                </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Last name</Text>
+                <TextInput value={lastName} onChangeText={setLastName} autoCapitalize="words" placeholderTextColor={colors.textMuted} style={styles.input} />
               </View>
-            )}
+            </View>
             <Text style={styles.label}>Email</Text>
             <TextInput
               value={email}
@@ -120,22 +97,22 @@ export default function CreateCanvasserSheet({
               placeholderTextColor={colors.textMuted}
               style={styles.input}
             />
-            {!linkExisting && (
-              <>
-                <Text style={styles.label}>Phone (optional)</Text>
-                <TextInput
-                  value={phone}
-                  onChangeText={(t) => setPhone(formatUsPhoneInput(t))}
-                  keyboardType="phone-pad"
-                  placeholder="(555) 123-4567"
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
-                />
-                <Text style={styles.label}>Temporary password (optional)</Text>
-                <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="Leave blank to email an invite" />
-                {pwProblem ? <Text style={styles.error}>{pwProblem}</Text> : null}
-              </>
-            )}
+            <Text style={styles.label}>Phone (optional)</Text>
+            <TextInput
+              value={phone}
+              onChangeText={(t) => setPhone(formatUsPhoneInput(t))}
+              keyboardType="phone-pad"
+              placeholder="(555) 123-4567"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <Text style={styles.label}>Temporary password (optional)</Text>
+            <PasswordInput value={password} onChangeText={setPassword} autoComplete="new-password" placeholder="Leave blank to email an invite" />
+            {pwProblem ? <Text style={styles.error}>{pwProblem}</Text> : null}
+            <Text style={[styles.sub, { marginTop: spacing.xs }]}>
+              The name and password apply only if we create a new account — if the address already
+              has one, that person is added as they are.
+            </Text>
 
             {/* Coordinator — optional; the server assigns the crew at create time. */}
             {coordinators.length > 0 && (
@@ -167,26 +144,17 @@ export default function CreateCanvasserSheet({
               </>
             )}
 
-            {error && error.data?.code === 'ALREADY_MEMBER' ? (
-              <Text style={[styles.sub, { marginTop: spacing.sm }]}>
-                That person is already in your organization — close this and find them in the list.
-              </Text>
-            ) : error && error.data?.code === 'EMAIL_EXISTS_USE_LINK' ? (
-              <Text style={[styles.sub, { marginTop: spacing.sm }]}>
-                This email already has a Door Line account — we switched on "Existing user" above. Tap Link user to add them.
-              </Text>
-            ) : error ? (
-              <Text style={styles.error}>{error.message}</Text>
-            ) : null}
+            {/* MEMBER_DEACTIVATED is the one refusal left on this door: the address belongs to a
+                colleague whose account is switched off, which is an ORG-wide flip a lead may not
+                make. The server names them so the message is actionable. */}
+            {error ? <Text style={styles.error}>{error.message}</Text> : null}
           </ScrollView>
           <View style={styles.actions}>
             <Pressable onPress={onClose} style={styles.btnGhost} disabled={submitting}>
               <Text style={styles.btnGhostText}>Cancel</Text>
             </Pressable>
             <Pressable onPress={submit} style={[styles.btnPrimary, (!valid || submitting) && { opacity: 0.5 }]} disabled={!valid || submitting}>
-              <Text style={styles.btnPrimaryText}>
-                {submitting ? 'Saving…' : linkExisting ? 'Link user' : 'Create canvasser'}
-              </Text>
+              <Text style={styles.btnPrimaryText}>{submitting ? 'Saving…' : 'Add to campaign'}</Text>
             </Pressable>
           </View>
         </View>
@@ -220,17 +188,6 @@ function makeStyles(t) {
       backgroundColor: colors.bg,
     },
     row2: { flexDirection: 'row', gap: spacing.md },
-    check: {
-      width: 20,
-      height: 20,
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    checkOn: { borderColor: colors.brand, backgroundColor: colors.brand },
-    checkMark: { color: colors.textInverse, fontWeight: '700', fontSize: 12 },
     dropdown: {
       flexDirection: 'row',
       alignItems: 'center',
