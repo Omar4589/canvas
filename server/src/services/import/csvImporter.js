@@ -8,6 +8,9 @@ import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress, haversineMeters } from '../../utils/normalizeAddress.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
+import { streetOf } from '../../utils/streetName.js';
+import { buildingKeyForCoords } from '../../utils/buildingKey.js';
+import { classifyStackedPins } from '../../utils/stackedPins.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { streamParse } from './parseUpload.js';
 import { bumpLive } from '../platform/platformStats.js';
@@ -347,6 +350,20 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
 
   const finish = () => {
     const coordConflictStats = resolveCoordConflicts(householdMap, coordConflicts);
+    // Placeholder-pin detection, CROSS-household: a vendor that can't place an address stamps
+    // a ZIP/area centroid, so doors from many different streets pile onto one identical dot.
+    // Runs after coordinate resolution so it judges the coords that will actually be written.
+    // Detection only — the coords are never nulled here: nulling would hand these doors to the
+    // geocoder, which DROPS what it can't place, and placeholder-stamped addresses (rural
+    // routes, brand-new streets) are exactly the ones geocoders fail on. A suspect pin walks;
+    // a dropped door doesn't. repair:import-pins adjudicates them after import, cache-first,
+    // with no drop semantics.
+    const pinDoors = [];
+    for (const [normAddr, h] of householdMap) {
+      if (h.latitude == null || h.longitude == null) continue;
+      pinDoors.push({ id: normAddr, street: streetOf(h.addressLine1), pinKey: buildingKeyForCoords([h.longitude, h.latitude]) });
+    }
+    const stacked = classifyStackedPins(pinDoors);
     return {
       totalRows,
       errors,
@@ -360,6 +377,11 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       // silent first-row-wins can never happen again.
       coordConflicts: coordConflictStats.resolved,
       coordConflictTies: coordConflictStats.ties,
+      // Placeholder coordinates: pins where no street holds a majority, plus stray doors
+      // parked on some other street's building. suspects.size = every door worth a second
+      // look. Same preview/ImportJob plumbing as coordConflicts.
+      placeholderPins: stacked.placeholderPins,
+      placeholderPinDoors: stacked.suspects.size,
     };
   };
   return { push, finish, resolved };

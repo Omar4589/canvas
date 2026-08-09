@@ -8,6 +8,7 @@ import { Card, Button, Badge, Modal, PhoneInput } from '../components/ui';
 import PasswordInput from '../components/PasswordInput.jsx';
 import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
+import { formatRelative, formatDate } from '../lib/dates.js';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so the
@@ -32,13 +33,39 @@ function YouBadge() {
     <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">you</span>
   );
 }
-// A pressable roster row — opens the campaign-scoped member panel (activity, crew, remove).
-function TeamMemberRow({ a, isSelf, onOpen }) {
+// One shared grid template keeps the header row and the member rows in lockstep — change one,
+// change both. Columns beyond the name collapse away below md, where the two-line row is enough.
+// Two STATIC strings, not an interpolated one: Tailwind's scanner only emits classes it can see
+// whole in the source, so a template-built grid-cols-[…] would silently produce no CSS.
+const ROW_GRID_SURVEY =
+  'grid w-full grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-3 md:grid-cols-[minmax(0,1fr)_5rem_5rem_7.5rem_7.5rem_1.25rem]';
+const ROW_GRID_LIT =
+  'grid w-full grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-3 md:grid-cols-[minmax(0,1fr)_5rem_7.5rem_7.5rem_1.25rem]';
+const rowGridClass = (isSurvey) => (isSurvey ? ROW_GRID_SURVEY : ROW_GRID_LIT);
+
+// The column header above a roster list. Named columns instead of empty width: doors + last door
+// answer "who has been out lately" at a glance, which is the whole reason the page went wide.
+function TeamHeaderRow({ isSurvey }) {
+  return (
+    <li className={`${rowGridClass(isSurvey)} hidden border-b border-border bg-sunken px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-muted md:grid`}>
+      <span>Member</span>
+      <span className="text-right">Doors</span>
+      {isSurvey && <span className="text-right">Surveys</span>}
+      <span className="text-right">Last door</span>
+      <span className="text-right">Last login</span>
+      <span aria-hidden />
+    </li>
+  );
+}
+
+// A pressable roster row — opens the campaign-scoped member profile panel. `activity` is this
+// person's row from the campaign leaderboard (reports/canvassers), when they have one.
+function TeamMemberRow({ a, isSelf, isSurvey, activity, onOpen }) {
   return (
     <li>
       <button
         onClick={() => onOpen(a)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-sunken"
+        className={`${rowGridClass(isSurvey)} px-3 py-2 text-left text-sm transition-colors hover:bg-sunken`}
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -51,7 +78,21 @@ function TeamMemberRow({ a, isSelf, onOpen }) {
           </div>
           <div className="truncate text-xs text-fg-muted">{a.email}</div>
         </div>
-        <span className="shrink-0 text-fg-subtle" aria-hidden>›</span>
+        <span className="hidden text-right text-sm tabular-nums text-fg md:block">
+          {(activity?.knocks ?? 0).toLocaleString()}
+        </span>
+        {isSurvey && (
+          <span className="hidden text-right text-sm tabular-nums text-fg md:block">
+            {(activity?.surveysSubmitted ?? 0).toLocaleString()}
+          </span>
+        )}
+        <span className="hidden text-right text-xs text-fg-muted md:block">
+          {formatRelative(activity?.lastActivityAt, { never: '—' })}
+        </span>
+        <span className="hidden text-right text-xs text-fg-muted md:block">
+          {formatRelative(a.lastLoginAt, { never: 'Never' })}
+        </span>
+        <span className="shrink-0 text-right text-fg-subtle" aria-hidden>›</span>
       </button>
     </li>
   );
@@ -337,7 +378,7 @@ function StatBox({ label, value }) {
 // offers. The management sections follow the server's wall exactly: an admin manages anyone here;
 // a lead manages CANVASSERS (this roster is by definition a campaign they manage) — admins, other
 // leads, and Doorline staff render read-only for them.
-function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrgAdmin, onClose, onRemove, removing }) {
+function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrgAdmin, activity, onClose, onRemove, removing }) {
   const qc = useQueryClient();
   const summaryQ = useQuery({
     queryKey: ['admin', 'campaign-member-summary', campaignId, member.userId],
@@ -498,11 +539,16 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
       }
     >
       <div className="space-y-5">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <RoleBadge role={member.role} />
           {member.status === 'deactivated' && <Badge variant="warning">Deactivated</Badge>}
           {member.status === 'removed' && <Badge variant="neutral">No longer in the org</Badge>}
           {member.status === 'deleted' && <Badge variant="danger">Account deleted</Badge>}
+          <span className="text-xs text-fg-muted">
+            On this campaign since {formatDate(member.assignedAt)} · Last login{' '}
+            {formatRelative(member.lastLoginAt, { never: 'never' })} · Last door knocked{' '}
+            {formatRelative(activity?.lastActivityAt, { never: 'none yet' })}
+          </span>
         </div>
 
         {confirming && (
@@ -817,6 +863,18 @@ export default function CampaignTeamPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/assignments`),
     enabled: !!campaignId,
   });
+  // The campaign leaderboard (all-time), for the activity columns: doors, surveys, last door
+  // knocked. Same rows the reports pages read; keyed per campaign. Ledger-sourced, so someone
+  // who has knocked nothing simply has no row — the columns render 0 / —.
+  const activityQ = useQuery({
+    queryKey: ['admin', 'report-canvassers', campaignId],
+    queryFn: () => api(`/admin/reports/canvassers?campaignId=${campaignId}`),
+    enabled: !!campaignId,
+  });
+  const activityByUser = useMemo(
+    () => new Map((Array.isArray(activityQ.data) ? activityQ.data : []).map((r) => [String(r.userId), r])),
+    [activityQ.data]
+  );
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
   const assignMut = useMutation({
@@ -894,10 +952,12 @@ export default function CampaignTeamPage() {
     if (ids.length) assignMut.mutate(ids);
   }
   const loading = membersQ.isLoading || assignmentsQ.isLoading;
+  const isSurveyCampaign = selected?.type !== 'lit_drop';
 
   return (
-    <div className="max-w-4xl">
-      {/* Stacked, roster-first. This page was two side-by-side cards, which made sense when the
+    <div>
+      {/* Stacked, roster-first, full-width — the roster carries activity columns now, so the old
+          max-w-4xl cap was wasted screen on exactly the page that gained data to show. This page was two side-by-side cards, which made sense when the
           left one was an org directory — for a lead it had shrunk to a button and a sentence,
           leaving half the page empty. The roster IS the page now; adding is a header action, and
           the admin-only directory tucks into a collapsible card underneath. */}
@@ -932,11 +992,14 @@ export default function CampaignTeamPage() {
           </div>
         ) : !hasCrews ? (
           <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            <TeamHeaderRow isSurvey={isSurveyCampaign} />
             {team.map((a) => (
               <TeamMemberRow
                 key={a.userId}
                 a={a}
                 isSelf={String(a.userId) === String(user?.id)}
+                isSurvey={isSurveyCampaign}
+                activity={activityByUser.get(String(a.userId))}
                 onOpen={setSelectedMember}
               />
             ))}
@@ -949,11 +1012,14 @@ export default function CampaignTeamPage() {
                   {g.name || 'No coordinator'} <span className="text-fg-subtle">({g.members.length})</span>
                 </div>
                 <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                  <TeamHeaderRow isSurvey={isSurveyCampaign} />
                   {g.members.map((a) => (
                     <TeamMemberRow
                       key={a.userId}
                       a={a}
                       isSelf={String(a.userId) === String(user?.id)}
+                      isSurvey={isSurveyCampaign}
+                      activity={activityByUser.get(String(a.userId))}
                       onOpen={setSelectedMember}
                     />
                   ))}
@@ -1044,6 +1110,7 @@ export default function CampaignTeamPage() {
       {selectedMember && (
         <TeamMemberPanel
           member={liveMember}
+          activity={activityByUser.get(String(liveMember.userId))}
           campaignId={campaignId}
           campaignType={selected?.type}
           coordinators={coordinators}

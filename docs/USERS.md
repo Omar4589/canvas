@@ -207,10 +207,14 @@ subset of org members who work it. The team is what:
 - **gates the mobile app** — a canvasser only sees campaigns they're on (admins & super-admins see all); and
 - **gates book assignment** — you can only assign books to people on the team.
 
-Manage it on the campaign's **Team** page (stacked since 2026-08-09: the roster is the page, **+ Add
-someone** is the header action, and an admin-only **Add from your organization** card collapses
-underneath — the old side-by-side directory pane had shrunk, for a lead, to a button beside a mostly
-empty column). **Click a team member** to open their campaign-scoped **profile panel**: their activity
+Manage it on the campaign's **Team** page (stacked and full-width since 2026-08-09: the roster is the
+page, **+ Add someone** is the header action, and an admin-only **Add from your organization** card
+collapses underneath — the old side-by-side directory pane had shrunk, for a lead, to a button beside
+a mostly empty column). On `md+` the roster rows carry **activity columns** — doors, surveys (survey
+campaigns), last door knocked, last sign-in — joined client-side from the all-time campaign
+leaderboard (`GET /admin/reports/canvassers?campaignId=`, the same ledger-sourced rows the reports
+pages read) plus the roster's own `lastLoginAt`. `lastSeenAt` stays super-admin-only by design and
+must never be added here. **Click a team member** to open their campaign-scoped **profile panel**: their activity
 in this campaign; their crew/coordinator — this is the only place a crew is set; and, when the viewer
 may manage the account (admin: anyone; lead: canvassers — the `leadMayManageTarget` wall), a
 **Profile** section (name/email/phone, saved through `PATCH /admin/memberships/:userId/user` with the

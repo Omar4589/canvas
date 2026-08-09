@@ -183,6 +183,29 @@ async function auditCampaign(campaign) {
   for (const [id, info] of streetOutliers(households)) {
     addReason(id, `${info.distance}m from its street (cohort ${info.cohortSize})`);
   }
+  // Placeholder pins — the signal the street cohort structurally misses. When a vendor can't
+  // place an address it stamps a centroid, so doors from many DIFFERENT streets pile onto one
+  // identical dot; if a whole street collapsed there, the cohort above has nothing left to
+  // compare it against (measured on a real district file: cohorts caught 4 of 18 doors at one
+  // such pin, this catches all 18). A genuine building shares ONE street line, so it can never
+  // trip this; a building carrying a couple of odd-street strays keeps its majority and only
+  // the strays are checked (classifyStackedPins' dominant-street rule).
+  {
+    const stacked = classifyStackedPins(
+      households.map((h) => {
+        const c = coordsOf(h);
+        return { id: String(h._id), street: streetOf(h.addressLine1), pinKey: c ? buildingKeyForCoords([c.lng, c.lat]) : null };
+      })
+    );
+    for (const [id, info] of stacked.suspects) {
+      addReason(
+        id,
+        info.kind === 'placeholder'
+          ? `placeholder pin — ${info.pinDoors} doors from ${info.pinStreets} streets on one spot`
+          : `stray — parked on another street's ${info.pinDoors}-door building`
+      );
+    }
+  }
   for (const [id, info] of await knockOutliers(households.map((h) => h._id))) {
     addReason(id, `knocked from ${info.minDistance}m away, 2+ canvassers`);
   }

@@ -56,6 +56,13 @@ const importJobSchema = new mongoose.Schema(
     // took whichever row sorted first — a door could land miles away with no trace.
     coordConflicts: { type: Number, default: 0 },
     coordConflictTies: { type: Number, default: 0 },
+    // Placeholder coordinates: pins where doors from several DIFFERENT streets share one
+    // exact spot (a vendor stamped a centroid on addresses it couldn't place), plus stray
+    // doors parked on some other street's building. Warned in the preview; adjudicated
+    // after import by `repair:import-pins` — never nulled at import (a suspect pin walks,
+    // a geocoder-dropped door doesn't).
+    placeholderPins: { type: Number, default: 0 },
+    placeholderPinDoors: { type: Number, default: 0 },
     // Households the incoming voters lived at BEFORE this import (captured pre-apply).
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.
