@@ -557,6 +557,22 @@ fraud audit).
 | `npm run audit:team-counts` | **Read-only.** Prints each team's row and checks Σ teams + no-team − cross-team == the campaign billable, column by column, for **every campaign**. Exits **1** if any column of any campaign fails. Narrow with `--org=<slug>` or `--campaign=<id>`. ⚠️ The `doors` column **cannot** fail — [see below](#the-tick-that-cannot-fail-auditteam-counts) |
 | `npm run repair:team-stamps -- --apply --ready-only` | Only sets the `teamAttributionReadyAt` gate flag; examines no ledger rows. **The only mode of this script that still runs** — see [Re-attribution](#re-attribution-repairteamstampsjs) |
 | `npm run repair:orphaned-assignments` | Dry run — finds anyone still holding books on a campaign they're off the roster of |
+| `npm run repair:import-pins` | **Read-only and free** (dry run, cache-only). Finds doors an import pinned in the wrong place — out of state, far from their own street, or knocked from far away by 2+ canvassers — and re-checks each against the address. Narrow with `--campaign=<id>` / `--org=<slug>` |
+| `npm run repair:import-pins -- --geocode` | Same, but lets unconfirmed suspects hit **Geocodio** (costs money; prints the estimate) |
+| `npm run repair:import-pins -- --apply --user=<userId>` | Commits the confirmed corrections. **`--user` is mandatory** — the audit row's `userId` is required, and without it a door would save and then fail its audit write |
+| `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
+| `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
+
+Three notes on `repair:import-pins` specifically, because they surprise people:
+
+- **It only touches pins that came from the file** (`coordSource: 'file'`). A hand-dragged pin is
+  field-verified truth; the geocoder's pins already came from the address. Neither is ever overwritten.
+- **It does not move books.** A repaired door stays in whatever book was cut around its old location
+  until that pass is re-cut. Run `npm run recompute:territories -- --apply` if a book *outline* now
+  looks wrong — that redraws outlines only, never membership.
+- **It changes historical Audit numbers.** A repaired door becomes `coordSource: 'corrected'`, which
+  downgrades past "far from house" GPS flags there. That's the right outcome — the canvasser really was
+  at the house — but the flag counts on the Audit page will drop after a run.
 
 ### Team attribution (`migrateActivityCoordinator.js`)
 

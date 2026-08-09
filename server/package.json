@@ -45,6 +45,7 @@
     "sweep:raw-imports": "node src/migrations/sweepRawImports.js",
     "recompute:territories": "node src/migrations/recomputeTerritories.js",
     "audit:orphaned-reviews": "node src/migrations/auditOrphanedReviews.js",
+    "repair:import-pins": "node src/migrations/repairImportPins.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
     "migrate:campaign-coordinators": "node src/migrations/migrateCampaignCoordinators.js",

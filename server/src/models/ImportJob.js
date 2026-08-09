@@ -50,6 +50,12 @@ const importJobSchema = new mongoose.Schema(
     // Homes that arrived WITH lat/long in the file (no paid lookup needed). Only geocodedNew is
     // billable; this + geocodedCached are free. Powers the super-admin Imports cost review.
     householdsWithFileCoords: { type: Number, default: 0 },
+    // Addresses whose rows asserted DIFFERENT pins. Resolved by majority / state bounds;
+    // `Ties` is the subset the file could not settle, which kept the first row's pin and
+    // is what `repair:import-pins` adjudicates. Recorded because the old rule silently
+    // took whichever row sorted first — a door could land miles away with no trace.
+    coordConflicts: { type: Number, default: 0 },
+    coordConflictTies: { type: Number, default: 0 },
     // Households the incoming voters lived at BEFORE this import (captured pre-apply).
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.

@@ -319,7 +319,7 @@ router.get('/map', async (req, res, next) => {
     const MAP_HOUSEHOLD_CAP = 50000;
     let households = await Household.find(
       householdFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock excludedFromTurf'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
@@ -456,6 +456,13 @@ router.get('/map', async (req, res, next) => {
         // performed and billed) — the flag rides along so the panel can badge them and offer
         // the lift. Never a filter here.
         doNotKnock: h.doNotKnock === true,
+        // Same rule, second flag: a door the cut held back ("remove apartments"). It rides along
+        // so the map can count it, dim it on request, and badge it in the panel — the SERVER
+        // never filters on it. Read it as CAMPAIGN-WIDE and provenance-free: the stamp records no
+        // effort/pass/actor (Household.js), so a client may say "not in books" and must never say
+        // "excluded from THIS walk list" — a door can be re-carved into another effort and keep
+        // the flag. See docs/MAPS.md §I.
+        excludedFromTurf: h.excludedFromTurf === true,
         lastActionAt: ((passId || userId) ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
         lastAction: last
           ? {

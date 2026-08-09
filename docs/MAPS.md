@@ -135,6 +135,10 @@ An organizer sees the whole campaign at once:
   "N doors" label; the header and sidebar count them, and clicking one lists every door inside. See
   [Apartment buildings](#apartment-buildings) above — this is why the "households shown" number can
   be larger than the number of pins you can pick out.
+- **Doors excluded from books, called out rather than hidden.** If turf was cut with **Remove
+  apartments**, those doors are still here — this map is the record of what exists, not of what was
+  cut. The Layers sidebar counts them and offers **Show / Dim / Hide**, and each one's panel carries a
+  **Not in books** badge. Exclusion is campaign-wide, so the badge never claims a particular walk list.
 - **Filters**: by status, by canvasser, by date range, and by a specific survey answer — and, once
   the campaign has **two or more walk lists**, an in-page **"All walk lists"** select that narrows
   the doors and pins to one walk list (the mobile admin map offers the same as a **walk-list chip**
@@ -331,7 +335,7 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 
 | Endpoint | File | Returns | Notes |
 |---|---|---|---|
-| `GET /admin/households/map` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ households, canvassers[], activities[], total, truncated }` | Params: `campaignId, from, to, status, userId, questionKey, option, optionId, surveyTemplateId, includeActivities, effortId, passId, bbox`. **`surveyTemplateId`** (optional, validated ObjectId) scopes the answer filter (`questionKey` + `option`/`optionId`) to **one survey template** — question keys and option ids are label slugs unique only *within* a template, so on a multi-survey campaign an unscoped filter can union answers from two templates whose slugs collide. Both clients now send it (web `MapFilters`/`MapPage`/`AnswerMiniMap`, mobile `admin/map.jsx` — stamped from the survey-results payload's `surveyTemplate.id` when an answer chip is set, or seeded from the drill-in params); **without it the legacy cross-template union applies** (old mobile builds, legacy deep links — a deep link without the param briefly queries cross-template until the survey query resolves the current template's id). **`bbox=west,south,east,north`** (both clients send it after the first auto-fit, debounced per settled pan/zoom) narrows the pull to the viewport via `$geoWithin` on the household `2dsphere` index; an absent/degenerate/near-world bbox falls back to the unbounded pull (50k cap + `truncated`). For smooth panning the clients send a **padded buffer** box and skip the refetch while the viewport stays inside the last padded box — web pads ~4× the viewport (`inflateBbox` in `MapPage.jsx`, containment-gated), mobile pads ~10%/side + epsilon-gates (`admin/map.jsx`) — so small pans cost no request. Each household's `surveys[]` carries META only (`id, submittedAt, voter, canvasser, note`) — **`answers[]` moved to the lazy per-door `GET /admin/households/:householdId/surveys`** (same lead-scope guard, optional `passId`), fetched on open by both the web detail panel and (now, at web parity) the mobile door sheet. Otherwise: matching households + 5 parallel queries (voters, survey meta, last-activity aggregate, canvasser directory, optional activities). `activities` (pings) only when `includeActivities=1`. **With `passId`** the door set is scoped to that round's books AND each door's `status`/`lastAction`/surveys are resolved **per-round** (`getPassStatusMap` + `passId`-scoped activity/survey queries; a door untouched that round reads `unknocked`) — the audit reflects the selected round, not the global latest. The `status=` **filter** is also applied against the per-round status when `passId` is set, so the door set matches the colors shown. **With `userId`** (the canvasser filter) each door's `status`/`lastAction` are resolved to **that canvasser's OWN** disposition (`getUserStatusMap` — `surveyed` if they surveyed it, else their latest action; a door they never touched reads `unknocked`), the last-activity aggregate is narrowed to their own knocks, and the `status=` filter tests that per-user status too — so the colors AND the door set are one canvasser's work, not the global "ever-surveyed" status. **Without `userId`/`passId`** the row ships the global `Household.status` (unchanged legacy behavior); the client renders `status` → pin color either way, so the recolor is automatic and needs no client change. (`userId` **takes** the `statusMap` branch but still honors `passId` — `getUserStatusMap(userId, …, passId)` scopes to that round — so `userId`+`passId` yields *that canvasser's disposition within that round*.) The admin map screen also accepts a **client-side** `?household=<id>` URL param (web `MapPage`, and now mobile `admin/map.jsx` with a `&focusAt=` nonce) that focuses a single door — used by the [Notes hub](NOTES.md) "view on map" link; it opens the map on **all-time** so an old door still loads, then flies to the pin. Not a server param. |
+| `GET /admin/households/map` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ households, canvassers[], activities[], total, truncated }` | Params: `campaignId, from, to, status, userId, questionKey, option, optionId, surveyTemplateId, includeActivities, effortId, passId, bbox`. **`surveyTemplateId`** (optional, validated ObjectId) scopes the answer filter (`questionKey` + `option`/`optionId`) to **one survey template** — question keys and option ids are label slugs unique only *within* a template, so on a multi-survey campaign an unscoped filter can union answers from two templates whose slugs collide. Both clients now send it (web `MapFilters`/`MapPage`/`AnswerMiniMap`, mobile `admin/map.jsx` — stamped from the survey-results payload's `surveyTemplate.id` when an answer chip is set, or seeded from the drill-in params); **without it the legacy cross-template union applies** (old mobile builds, legacy deep links — a deep link without the param briefly queries cross-template until the survey query resolves the current template's id). **`bbox=west,south,east,north`** (both clients send it after the first auto-fit, debounced per settled pan/zoom) narrows the pull to the viewport via `$geoWithin` on the household `2dsphere` index; an absent/degenerate/near-world bbox falls back to the unbounded pull (50k cap + `truncated`). For smooth panning the clients send a **padded buffer** box and skip the refetch while the viewport stays inside the last padded box — web pads ~4× the viewport (`inflateBbox` in `MapPage.jsx`, containment-gated), mobile pads ~10%/side + epsilon-gates (`admin/map.jsx`) — so small pans cost no request. Each household row carries `doNotKnock` **and `excludedFromTurf`** — projected purely so the client can count/badge/dim them; **neither is ever a server filter** (§I). Each household's `surveys[]` carries META only (`id, submittedAt, voter, canvasser, note`) — **`answers[]` moved to the lazy per-door `GET /admin/households/:householdId/surveys`** (same lead-scope guard, optional `passId`), fetched on open by both the web detail panel and (now, at web parity) the mobile door sheet. Otherwise: matching households + 5 parallel queries (voters, survey meta, last-activity aggregate, canvasser directory, optional activities). `activities` (pings) only when `includeActivities=1`. **With `passId`** the door set is scoped to that round's books AND each door's `status`/`lastAction`/surveys are resolved **per-round** (`getPassStatusMap` + `passId`-scoped activity/survey queries; a door untouched that round reads `unknocked`) — the audit reflects the selected round, not the global latest. The `status=` **filter** is also applied against the per-round status when `passId` is set, so the door set matches the colors shown. **With `userId`** (the canvasser filter) each door's `status`/`lastAction` are resolved to **that canvasser's OWN** disposition (`getUserStatusMap` — `surveyed` if they surveyed it, else their latest action; a door they never touched reads `unknocked`), the last-activity aggregate is narrowed to their own knocks, and the `status=` filter tests that per-user status too — so the colors AND the door set are one canvasser's work, not the global "ever-surveyed" status. **Without `userId`/`passId`** the row ships the global `Household.status` (unchanged legacy behavior); the client renders `status` → pin color either way, so the recolor is automatic and needs no client change. (`userId` **takes** the `statusMap` branch but still honors `passId` — `getUserStatusMap(userId, …, passId)` scopes to that round — so `userId`+`passId` yields *that canvasser's disposition within that round*.) The admin map screen also accepts a **client-side** `?household=<id>` URL param (web `MapPage`, and now mobile `admin/map.jsx` with a `&focusAt=` nonce) that focuses a single door — used by the [Notes hub](NOTES.md) "view on map" link; it opens the map on **all-time** so an old door still loads, then flies to the pin. Not a server param. |
 | `GET /mobile/bootstrap` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ user, campaign, surveys, households[], voters[], books[], generatedAt }` | Canvasser-scoped to assigned books on active rounds; fully-voted doors dropped. The map's initial load. Voters project `party / gender / dateOfBirth / surveyStatus` (+ a derived `voted`) — everything the shared `VoterMeta` line needs and nothing it doesn't. **`precinct` was removed**: once the door screen stopped showing it, no mobile surface read it from this payload, and it was being shipped for every voter on every device. (The voter *profile* still shows precinct — it's fed by `GET /mobile/voters/:id`, a different, unprojected query.) |
 | `GET /mobile/changes?since=` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ serverTime, households[], voters[] }` | Delta: households with `updatedAt > since`, plus voters on **two tracks, unioned**: ALL voters of each changed household, **and voters whose own `updatedAt` moved** — so a pure identity edit (admin correction, Person propagation, re-import reconcile) reaches phones in ~30s without a re-bootstrap. Client patches the bootstrap cache so multiple canvassers stay in sync. Full contract + consequences in [PASSES_AND_TURF.md](PASSES_AND_TURF.md) §G. |
 | `GET /mobile/me/today?since=` | [routes/mobile/me.js](../server/src/routes/mobile/me.js) | Shift stats | Powers the bottom-sheet **Today's Progress** (doors, responses, remaining, pace, distance). Refetched on the 120s poll **and immediately when a knock/survey is confirmed** — the record flow invalidates `['mobile','me']` (see the intervals note below). |
@@ -414,13 +418,29 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
   `stacked: true` on every door in a building, and `households-symbols` carries
   `filter: ['!=', ['get','stacked'], true]` (as does `household-approx-ring`). Without that filter the
   building glyph would sit on top of N still-rendered coincident house icons and a click could resolve
-  to any of them. Callers with no building layer (`ClientReportMap`, `AnswerMiniMap`, `PacketMap`) pass
-  no `stackedIds`, get `stacked: false` on every feature, and render exactly as before.
+  to any of them. A caller that passes no `stackedIds` gets `stacked: false` on every feature and renders
+  exactly as before — that default is what lets one shared helper serve maps that do and don't group.
+- **Which web maps group.** The **admin map**, **[ClientReportMap](../client/src/components/ClientReportMap.jsx)**
+  and **[AnswerMiniMap](../client/src/components/AnswerMiniMap.jsx)** all group, from the one shared
+  `groupHouseholds`. **[PacketMap](../client/src/components/packet/PacketMap.jsx) does not and must not** —
+  despite the grep hit, it defines its own *local* `registerLayers`, imports nothing from `mapRender.js`,
+  and draws only book polygons. Recorded so an audit by grep doesn't relitigate it.
+  - `AnswerMiniMap` gets the **glyph only**: no click handler, because the card's hand-off is its
+    "Open in Map →" link. Its payload is already answer-filtered, so a glyph's count there means
+    "doors WITH THIS ANSWER at this pin", not the building's size.
+  - `ClientReportMap` gets the glyph, the click fix, and a **status-tally summary — never a door list.**
+    The frozen `ClientReportMapPoint` carries no `addressLine2`, so a per-door list would print the same
+    street address N times; adding the unit line to fix that would put apartment numbers on an
+    **unauthenticated share link**, contradicting [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) §D11.
+    Its count says "doors **reached** at this spot" because the snapshot drops unknocked doors — the
+    building's real size is genuinely unknowable there, and the roll-up is only ever `done`/`partial`.
 - **Click disambiguation:** the `households-symbols` handler reads **all** of `e.features`, not
-  `features[0]`. One hit → open that door. More than one (two pins a metre apart that overlap on
-  screen) → open [DoorStackPanel](../client/src/components/DoorStackPanel.jsx) listing them. The
-  `building-symbols` handler resolves `properties.key` through a `buildingsByKeyRef` (feature properties
-  can only carry scalars, and the layer handlers are bound once at init so they can't read the memo).
+  `features[0]` — on both the admin map and the client report map. One hit → open that door. More than
+  one (two pins a metre apart that overlap on screen) → open the stack UI rather than guess:
+  [DoorStackPanel](../client/src/components/DoorStackPanel.jsx) on the admin map, the tally card on the
+  client report. The `building-symbols` handler resolves `properties.key` through a `buildingsByKeyRef`
+  (feature properties can only carry scalars, and the layer handlers are bound once at init so a closure
+  over the memo would go stale on the first data change).
 - **First/last-knock endpoints:** when the map is scoped to a **single canvasser** (with pings on) the
   two ends of their run are ringed — a **"Start"** ring on the earliest knock and a **"Latest"** ring on
   the most recent. There is **no server field for this**: it's derived **client-side** from the same
@@ -592,26 +612,50 @@ constants). A small legend labels the two rings when they're shown.
   — the throw is uncatchable from JS, and a *native* catch would swallow the failure and silently
   leave telemetry **on**, quietly falsifying the privacy policy.
 - **Native symbol layers, not MarkerView; no clustering** — one GeoJSON feature collection per layer.
-- **The building key has ONE definition, shared by four surfaces.** `` `${round(lat*1e5)}|${round(lng*1e5)}` ``
-  (~1.1 m) lives in [client/src/lib/buildings.js](../client/src/lib/buildings.js) (web admin map **and**
-  [TurfsPage](../client/src/pages/TurfsPage.jsx)'s `doorKey`, which delegates to it),
-  [mobile/lib/buildings.js](../mobile/lib/buildings.js) (canvasser map), and
-  [server/src/utils/buildingKey.js](../server/src/utils/buildingKey.js) (the `scope:'building'` move).
-  The **`POST /admin/turfs/exclude-apartments`** endpoint builds the same key inline. Change the rounding
-  in one and "this is one building" silently means a different set of doors on different screens — and
-  the cut would exclude doors the map never showed as stacked. All four guard non-finite coordinates and
-  return `null`; a `NaN`/`null` that rounds to `0` folds unrelated doors into a phantom building at the
-  equator.
+- **The building key has ONE rule and exactly THREE implementations of it.** `` `${round(lat*1e5)}|${round(lng*1e5)}` ``
+  (~1.1 m) is implemented in [client/src/lib/buildings.js](../client/src/lib/buildings.js) (web),
+  [mobile/lib/buildings.js](../mobile/lib/buildings.js) (mobile), and
+  [server/src/utils/buildingKey.js](../server/src/utils/buildingKey.js) (server). Count *implementations*,
+  not screens — the web one is shared by four surfaces already (admin map, [TurfsPage](../client/src/pages/TurfsPage.jsx)'s
+  `doorKey`, [ClientReportMap](../client/src/components/ClientReportMap.jsx),
+  [AnswerMiniMap](../client/src/components/AnswerMiniMap.jsx)), and new consumers should import it rather
+  than add a fourth copy. **`POST /admin/turfs/exclude-apartments` still builds the key inline** — it is
+  the one site that has not been folded in, and it is the one where drift would be worst: the cut would
+  exclude doors the map never showed as stacked. Change the rounding in one implementation and "this is
+  one building" silently means a different set of doors on different screens. All three guard non-finite
+  coordinates and return `null`; a `NaN`/`null` that rounds to `0` folds unrelated doors into a phantom
+  building at the equator.
 - **A door's *display* threshold is 2+, the *exclusion* threshold is the admin's.** The map groups at
   `BUILDING_MIN_UNITS = 2` because the job is "don't hide a door under another door." Turf Cutting's
   **Remove apartments (N+ units)** takes its own N (default 4) — the two are the same key at different
   cutoffs and should never be collapsed into one number.
-- **`excludedFromTurf` is not a map filter.** Doors excluded from books stay on the admin map by design
-  (same rule as `doNotKnock`): the map is the record of what exists and what was worked, and an excluded
-  apartment door can still be flagged, overlapped, or marked do-not-contact. `/admin/households/map`
-  filters on neither `excludedFromTurf` nor `turfId` — scoping to a `passId` is the way to see only the
-  cut. So "3,513 households shown" counts every active geocoded door in scope, apartments included; it is
-  **not** the size of the cut.
+- **`excludedFromTurf` is never a SERVER filter — it is a client view toggle.** Doors excluded from books
+  stay on the admin map by design (same rule as `doNotKnock`): the map is the record of what exists and
+  what was worked and billed, and an excluded apartment door can still be flagged, overlapped, or marked
+  do-not-contact. `/admin/households/map` filters on neither `excludedFromTurf` nor `turfId` — it now
+  *projects* the flag ([households.js](../server/src/routes/admin/households.js), beside `doNotKnock`) so
+  the client can count it, badge it, and offer **Show / Dim / Hide** in the Layers sidebar. Never add a
+  server query param that drops them, or coverage and billing stop reconciling with what an admin sees.
+  So "3,513 households shown" counts every active geocoded door in scope, apartments and excluded doors
+  included; it is **not** the size of the cut — scope to a `passId` for that.
+  - **Hide must filter BEFORE `groupHouseholds`** ([excludedDoors.js](../client/src/lib/excludedDoors.js)).
+    Filter after and the hidden doors are still in `stackedIds`, so `households-symbols`'s
+    `['!=', ['get','stacked'], true]` keeps them invisible while the building glyph keeps counting them —
+    the sidebar would report stacked doors that aren't on the map.
+  - **Dim is a data property + a `case` expression, not `visibility` and not `setFilter`.** `visibility`
+    can't express "dim"; `setFilter` would leave the doors inside `stackedIds` and the building totals.
+    These are **symbol** layers, so it is `icon-opacity` / `text-opacity` — the cut map's `circle-opacity`
+    idiom silently no-ops here. `household-approx-ring` shares the source and fades too, or a dimmed door
+    keeps a bright amber halo around a ghost house. A building dims only when EVERY unit in it is excluded.
+  - **The chip counts the PAYLOAD, not the campaign** — viewport-bounded and capped at
+    `MAP_HOUSEHOLD_CAP`. It will not reconcile with Turf Cutting's `excludedApartmentCount`, which is
+    effort-scoped, coords-required, and (unlike the voted/DNC/do-not-knock trio beside it) carries no
+    disjointness carve-outs. Don't present the two as the same quantity.
+  - **The flag is campaign-wide and provenance-free.** `KNOCKABLE_DOOR_FILTER` reads it unscoped and the
+    stamp records no effort/pass/actor/threshold, so copy may say "not in books" and must **never** say
+    "excluded from this walk list" — a door can be force-re-carved into another effort and keep the flag.
+    Two open consequences: `include-apartments` is an effort-wide reset, not a per-door lift, and a door
+    returned to Intake (`effortId: null`) can never be un-excluded, because `Pass.effortId` is required.
 - **Fully-voted doors drop off** the canvasser's bootstrap/map (see EARLY_VOTING.md).
 - **Pings are per-action GPS stamps**, not live tracking — there is no continuous location feed.
 - **Recording is optimistic-first.** The pin recolors before the network call; GPS + submit run in the
@@ -659,7 +703,8 @@ constants). A small legend labels the two rings when they're shown.
 | [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters (incl. the in-page walk-list `<select>` on 2+-effort campaigns — see §D's deep-link row), Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)), and the opt-in **Overlaps** ring overlay (`/overlap-doors` query + `overlap-doors-ring` layer + the header "N overlaps" chip). |
 | [client/src/components/HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) | Web admin map's tapped-door panel: header status/address, last action, **History by pass** (from the lazy `/activity` rounds), voters, surveys (answers lazy-loaded from `/surveys`), and the inline **⚠ Overlap** badge — computed no-new-fetch from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in one pass), with an "Also worked by …" line and a per-pass overlap pill in the history. |
 | [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`), the overlap-ring layer (`overlapDoorsToGeoJSON` → `overlap-doors-ring`), and the building layer (`drawBuildingIcon` / `buildingColorsForTheme` / `buildingsToGeoJSON` → `building-symbols`). |
-| [client/src/lib/buildings.js](../client/src/lib/buildings.js) | Web building grouping: `buildingKeyForCoords` (the shared ~1.1 m key — see §I), `groupHouseholds` → `{ buildings, stackedIds, byKey }`, `buildingLabel`. Consumed by MapPage **and** TurfsPage's `doorKey`. Tested in [buildings.test.js](../client/src/lib/buildings.test.js). |
+| [client/src/lib/buildings.js](../client/src/lib/buildings.js) | Web building grouping: `buildingKeyForCoords` (the shared ~1.1 m key — see §I), `groupHouseholds` → `{ buildings, stackedIds, byKey }`, `buildingLabel`. Consumed by MapPage, TurfsPage's `doorKey`, ClientReportMap and AnswerMiniMap. Tested in [buildings.test.js](../client/src/lib/buildings.test.js). |
+| [client/src/lib/excludedDoors.js](../client/src/lib/excludedDoors.js) | The Show/Dim/Hide predicate for doors held back from books: `isExcludedDoor`, `visibleMapDoors(households, mode)` (Hide must run BEFORE grouping — §I), `countExcludedDoors` (counts the payload, not the campaign). Tested in [excludedDoors.test.js](../client/src/lib/excludedDoors.test.js). |
 | [client/src/components/DoorStackPanel.jsx](../client/src/components/DoorStackPanel.jsx) | Web admin map's "every door on this pin" list — opened by a building click or by a click that hit more than one house. Presentational; MapPage owns selection and hands the picked door to `HouseholdDetailPanel` (with a "← Back to all N doors" bar). |
 | [client/src/components/ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) | Read-only client-report coverage map: frozen snapshot points, client-side status/answer filtering, no canvassers; ResizeObserver-resized (see gotcha §I). |
 | [client/src/components/LiveStatus.jsx](../client/src/components/LiveStatus.jsx) | The "Live · updated Xs ago" toggle/indicator + Refresh. |

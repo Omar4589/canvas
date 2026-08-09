@@ -20,7 +20,10 @@ const householdLocationChangeSchema = new mongoose.Schema(
     campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true, index: true },
     householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true, index: true },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // who moved it
-    source: { type: String, enum: ['gps', 'drag', 'admin_drag'], required: true },
+    // 'import_repair' = repair:import-pins, the offline script that adjudicates doors whose
+    // import rows disagreed on a pin. Its own value rather than 'admin_drag' — nobody dragged
+    // anything, and mislabeling it would put a lie in a permanent audit log.
+    source: { type: String, enum: ['gps', 'drag', 'admin_drag', 'import_repair'], required: true },
     scope: { type: String, enum: ['unit', 'building'], default: 'unit' },
     accuracy: { type: Number, default: null }, // GPS accuracy (m) when source === 'gps'
     from: { type: pointSchema, default: null }, // pre-move point (null if the door had none)

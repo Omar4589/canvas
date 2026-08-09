@@ -21,6 +21,7 @@ import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { groupHouseholds, buildingKeyForCoords } from '../lib/buildings.js';
+import { visibleMapDoors, countExcludedDoors } from '../lib/excludedDoors.js';
 import {
   householdsToGeoJSON,
   buildingsToGeoJSON,
@@ -191,6 +192,11 @@ export default function MapPage() {
   // The padded box currently fetched (numbers), for the moveend containment check. A ref (not state)
   // so the once-bound moveend handler always reads the latest without rebinding. null = unbounded.
   const paddedBboxRef = useRef(null);
+
+  // Doors the cut held back (Household.excludedFromTurf). Default 'show' — the default map is
+  // unchanged, and this map is the record of work performed and billed. 'hide' is a CLIENT view
+  // only; the server never filters on the flag (see lib/excludedDoors.js).
+  const [excludedVis, setExcludedVis] = useState('show'); // 'show' | 'dim' | 'hide'
 
   // GPS-audit flag overlay. When deep-linked to a specific entry (?focusActivityId), start on
   // "all" statuses so that entry is present even if it's already been reviewed.
@@ -640,13 +646,19 @@ export default function MapPage() {
     return () => map.off('style.load', handler);
   }, [styleURL, darkBase, mapReady]);
 
+  // Hide has to happen BEFORE grouping. Filter after and the hidden doors are still in
+  // stackedIds — the house layer keeps them invisible while the building glyph keeps
+  // counting them, so the sidebar would report stacked doors that aren't on the map.
+  const shownHouseholds = useMemo(() => visibleMapDoors(households, excludedVis), [households, excludedVis]);
+  const excludedCount = useMemo(() => countExcludedDoors(households), [households]);
+
   // Doors that share a coordinate — an apartment building, a duplex, or a geocoder
   // that put a whole complex on one rooftop. Same rounded key the cut map, the
   // canvasser map, and /exclude-apartments use, so all four agree on what a building is.
   const { buildings, stackedIds, buildingsByKey } = useMemo(() => {
-    const g = groupHouseholds(households);
+    const g = groupHouseholds(shownHouseholds);
     return { buildings: g.buildings, stackedIds: g.stackedIds, buildingsByKey: g.byKey };
-  }, [households]);
+  }, [shownHouseholds]);
   buildingsByKeyRef.current = buildingsByKey;
 
   // Push household features to the map source whenever data changes.
@@ -654,10 +666,11 @@ export default function MapPage() {
     if (!mapReady || !mapRef.current) return;
     const src = mapRef.current.getSource('households');
     if (!src) return;
-    const geojson = householdsToGeoJSON(households, stackedIds);
+    const dim = excludedVis === 'dim';
+    const geojson = householdsToGeoJSON(shownHouseholds, stackedIds, dim);
     src.setData(geojson);
     // Stacked doors are drawn once, as a building, by this source instead.
-    mapRef.current.getSource('buildings')?.setData(buildingsToGeoJSON(buildings));
+    mapRef.current.getSource('buildings')?.setData(buildingsToGeoJSON(buildings, dim));
 
     // Auto-fit on first load. Prefer the doors currently shown; if none are shown
     // (e.g. "today" before anyone has knocked), fall back to the campaign's full door
@@ -675,7 +688,7 @@ export default function MapPage() {
         mapRef.current._didFitBounds = true;
       }
     }
-  }, [households, buildings, stackedIds, mapBounds, mapReady, styleEpoch]);
+  }, [shownHouseholds, buildings, stackedIds, excludedVis, mapBounds, mapReady, styleEpoch]);
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -1032,6 +1045,9 @@ export default function MapPage() {
             showOverlaps={showOverlaps}
             onShowOverlapsChange={setShowOverlaps}
             overlapCount={overlapDoorsQ.data?.total || 0}
+            excludedVis={excludedVis}
+            onExcludedVisChange={setExcludedVis}
+            excludedCount={excludedCount}
             showFlags={showFlags}
             onShowFlagsChange={setShowFlags}
             flagReasonFilter={flagReasonFilter}

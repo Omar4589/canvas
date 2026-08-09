@@ -109,8 +109,16 @@ const householdSchema = new mongoose.Schema(
     //      consent. Only an explicit admin clear reopens it.
     doNotKnock: { type: Boolean, default: false, index: true },
 
-    // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these
-    // doors are skipped from cutting, the map, door counts, and the canvasser list.
+    // Admin-excluded from turf (e.g. "remove apartments"): like fullyVoted, these doors are
+    // skipped from cutting, book door counts, the canvasser list, and printed packets — via
+    // KNOCKABLE_DOOR_FILTER, which reads this flag UNSCOPED. So exclusion is campaign-wide:
+    // the stamp records no effort/pass/actor, and the door is uncuttable in every effort until
+    // POST /admin/turfs/include-apartments clears it on whichever effort owns it now.
+    //
+    // NOT skipped from the ADMIN MAP — that map is the record of what exists and what was
+    // worked, so an excluded door stays visible and merely rides a flag (same rule as
+    // doNotKnock; see docs/MAPS.md §I). This comment used to claim "the map" and was the
+    // sentence that seeded the same error in PASSES_AND_TURF.md.
     excludedFromTurf: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }

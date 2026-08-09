@@ -7,6 +7,7 @@ import { SavedSearch } from '../../models/SavedSearch.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
+import { streetOf, UNIT_SUFFIX } from '../../utils/streetName.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
 import { computeWalkOrder } from '../turf/walkOrder.js';
 
@@ -60,15 +61,8 @@ const ageOf = (dob) => {
 // The UNIT has to come off or every apartment becomes its own street: a 40-door building
 // listed "Bay Harbor Blvd Apt 101 … Apt 308" as nineteen separate streets on the cover and
 // banded a fresh street every single door.
-const UNIT_SUFFIX = /\s+(?:apt|apartment|unit|ste|suite|bldg|building|lot|trlr|trailer|rm|room|fl|floor|#)\b\.?\s*\S*$/i;
-
-const streetOf = (line1) =>
-  String(line1 || '')
-    .trim()
-    .replace(/^\d+[A-Za-z]?\s+/, '')
-    .replace(/\s+#.*$/, '')
-    .replace(UNIT_SUFFIX, '')
-    .trim() || '(no street)';
+// streetOf/UNIT_SUFFIX now live in utils/streetName.js — the pin-repair audit groups
+// addresses by street too, and the two must split buildings the same way.
 
 // A door inside a multi-unit building. Either the unit is baked into the street line, or the
 // import put it in addressLine2. Campaigns often skip these on a paper day — locked lobbies,

@@ -160,13 +160,22 @@ export function buildingColorsForTheme(dark) {
   };
 }
 
+// The dim ramp for doors the cut held back. A data property + a `case` expression, not
+// layer `visibility` (which can't express "dim") and not `setFilter` (which would leave
+// the doors inside stackedIds and the building totals). Off unless the caller opts in.
+const DIM_OPACITY = ['case', ['boolean', ['get', 'excluded'], false], 0.25, 1];
+
 // stackedIds (optional): ids that belong to a building. Those doors get
 // `stacked: true` so the house layer can filter them out — otherwise the
 // building glyph would sit on top of N coincident house icons and a click
 // would land on whichever one Mapbox happened to hit first. Callers with no
 // building layer (client report map, answer mini-map) pass nothing and get
 // the old behavior exactly.
-export function householdsToGeoJSON(households, stackedIds = null) {
+//
+// dimExcluded (optional): stamp `excluded: true` on doors held back from books, so the
+// layers above can fade them. Defaults FALSE so the read-only client report map and the
+// answer mini-map can never inherit dimming they didn't ask for.
+export function householdsToGeoJSON(households, stackedIds = null, dimExcluded = false) {
   return {
     type: 'FeatureCollection',
     features: households
@@ -184,13 +193,14 @@ export function householdsToGeoJSON(households, stackedIds = null) {
           coordConfidence: h.coordConfidence || '',
           coordSource: h.coordSource || '',
           stacked: stackedIds ? stackedIds.has(h.id) : false,
+          excluded: dimExcluded ? h.excludedFromTurf === true : false,
         },
       })),
   };
 }
 
 // buildings: the groupHouseholds() shape from lib/buildings.js.
-export function buildingsToGeoJSON(buildings) {
+export function buildingsToGeoJSON(buildings, dimExcluded = false) {
   return {
     type: 'FeatureCollection',
     features: (buildings || []).map((b) => ({
@@ -198,7 +208,15 @@ export function buildingsToGeoJSON(buildings) {
       geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
       // `key` is the click handle — the units themselves live in the memoized
       // byKey map, since Mapbox feature properties can only carry scalars.
-      properties: { key: b.key, total: b.total, done: b.done, roll: b.roll },
+      properties: {
+        key: b.key,
+        total: b.total,
+        done: b.done,
+        roll: b.roll,
+        // A building dims only when EVERY door in it is excluded. A mixed stack still
+        // holds cuttable doors, so fading it would hide live work behind an admin action.
+        excluded: dimExcluded ? (b.units || []).every((u) => u.excludedFromTurf === true) : false,
+      },
     })),
   };
 }
@@ -398,6 +416,9 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
     },
+    // These are SYMBOL layers — `circle-opacity` (the cut map's dim idiom) silently
+    // no-ops here, and Dim mode would look identical to Show.
+    paint: { 'icon-opacity': DIM_OPACITY },
   });
 
   // One glyph per set of doors sharing a coordinate — an apartment building, not a
@@ -431,6 +452,10 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       'text-color': dark ? '#f3f4f6' : '#111827',
       'text-halo-color': dark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
       'text-halo-width': 1.4,
+      // The label fades with its glyph — a crisp "12 doors" over a ghost building reads
+      // as a rendering bug rather than as "held back from books".
+      'icon-opacity': DIM_OPACITY,
+      'text-opacity': DIM_OPACITY,
     },
   });
 
@@ -447,7 +472,9 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
         'circle-color': 'rgba(0,0,0,0)',
         'circle-stroke-color': '#f59e0b',
         'circle-stroke-width': 2,
-        'circle-stroke-opacity': 0.9,
+        // Shares the `households` source, so it has to fade with the icon it rings —
+        // otherwise a dimmed door keeps a bright amber halo around a ghost house.
+        'circle-stroke-opacity': ['case', ['boolean', ['get', 'excluded'], false], 0.12, 0.9],
       },
     },
     'households-symbols'

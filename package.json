@@ -56,6 +56,7 @@
     "migrate:turf-indexes": "npm --prefix server run migrate:turf-indexes --",
     "migrate:activity-coordinator": "npm --prefix server run migrate:activity-coordinator --",
     "migrate:campaign-coordinators": "npm --prefix server run migrate:campaign-coordinators --",
+    "repair:import-pins": "npm --prefix server run repair:import-pins --",
     "repair:orphaned-assignments": "npm --prefix server run repair:orphaned-assignments --",
     "audit:team-counts": "npm --prefix server run audit:team-counts --",
     "repair:team-stamps": "npm --prefix server run repair:team-stamps --",

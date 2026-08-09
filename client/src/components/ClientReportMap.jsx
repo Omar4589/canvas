@@ -7,7 +7,8 @@ import MapFilters from './MapFilters.jsx';
 import MapStyleControl from './MapStyleControl.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
-import { householdsToGeoJSON, registerLayers } from '../lib/mapRender.js';
+import { householdsToGeoJSON, buildingsToGeoJSON, registerLayers } from '../lib/mapRender.js';
+import { groupHouseholds } from '../lib/buildings.js';
 
 // Read-only interactive coverage map for a client report. Reuses the admin map's rendering
 // (drawHouseIcon / householdsToGeoJSON / registerLayers via lib/mapRender), but: data is
@@ -49,6 +50,11 @@ export default function ClientReportMap({
   const [statusFilter, setStatusFilter] = useState([]);
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', option: '' });
   const [selected, setSelected] = useState(null);
+  // An opened building (by key) or an ambiguous multi-door click (by ids). The click
+  // handlers are bound once, so the building lookup rides a ref.
+  const [stackKey, setStackKey] = useState(null);
+  const [stackIds, setStackIds] = useState(null);
+  const buildingsByKeyRef = useRef(new Map());
 
   const { styleId, styleURL, setStyle, dark: darkBase } = useMapStyle();
   const [styleEpoch, setStyleEpoch] = useState(0);
@@ -101,9 +107,37 @@ export default function ClientReportMap({
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(containerRef.current);
 
+    // Read every hit, not features[0]. Coincident icons all fire, and picking the first
+    // silently opened one door while hiding the rest — the same defect the admin map had.
+    // True stacks are now drawn by the building layer, so this branch catches the
+    // near-coincident-but-distinct pins that remain.
     map.on('click', 'households-symbols', (e) => {
-      const f = e.features?.[0];
-      if (f) setSelected(f.properties.id);
+      const ids = [...new Set((e.features || []).map((f) => f.properties.id))];
+      if (!ids.length) return;
+      if (ids.length > 1) {
+        setStackKey(null);
+        setStackIds(ids);
+        setSelected(null);
+      } else {
+        setStackIds(null);
+        setStackKey(null);
+        setSelected(ids[0]);
+      }
+    });
+    // A building stands for every reached door on that pin. The handler is bound once, so
+    // the lookup rides a ref rather than a closure over the memo.
+    map.on('click', 'building-symbols', (e) => {
+      const key = e.features?.[0]?.properties?.key;
+      if (!key || !buildingsByKeyRef.current.has(key)) return;
+      setStackKey(key);
+      setStackIds(null);
+      setSelected(null);
+    });
+    map.on('mouseenter', 'building-symbols', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', 'building-symbols', () => {
+      map.getCanvas().style.cursor = '';
     });
     map.on('mouseenter', 'households-symbols', () => {
       map.getCanvas().style.cursor = 'pointer';
@@ -144,12 +178,24 @@ export default function ClientReportMap({
     return () => map.off('style.load', handler);
   }, [styleURL, darkBase, mapReady]);
 
+  // Doors sharing a pin, grouped into one glyph. Derived entirely from coordinates the
+  // snapshot already carries — no new field reaches the share link. The count means
+  // "doors REACHED and matching the current filters at this pin": the frozen snapshot
+  // drops unknocked doors, so the building's true size is unknowable here and must
+  // never be claimed. (Roll-up is therefore only ever 'done' or 'partial'.)
+  const { buildings, stackedIds, buildingsByKey } = useMemo(() => {
+    const g = groupHouseholds(filtered);
+    return { buildings: g.buildings, stackedIds: g.stackedIds, buildingsByKey: g.byKey };
+  }, [filtered]);
+  buildingsByKeyRef.current = buildingsByKey;
+
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const src = mapRef.current.getSource('households');
     if (!src) return;
-    const geojson = householdsToGeoJSON(filtered);
+    const geojson = householdsToGeoJSON(filtered, stackedIds);
     src.setData(geojson);
+    mapRef.current.getSource('buildings')?.setData(buildingsToGeoJSON(buildings));
     if (geojson.features.length && !mapRef.current._didFitBounds) {
       const bounds = new mapboxgl.LngLatBounds();
       for (const f of geojson.features) bounds.extend(f.geometry.coordinates);
@@ -158,12 +204,31 @@ export default function ClientReportMap({
         mapRef.current._didFitBounds = true;
       }
     }
-  }, [filtered, mapReady, styleEpoch]);
+  }, [filtered, buildings, stackedIds, mapReady, styleEpoch]);
 
   const selectedHousehold = useMemo(
     () => households.find((h) => h.id === selected) || null,
     [selected, households]
   );
+
+  // The doors behind an opened glyph (a building) or an ambiguous click (near-coincident
+  // pins). Deliberately summarised, never listed: the frozen point carries no unit line
+  // (ClientReportMapPoint), so a per-door list would print the same street address N times —
+  // and adding addressLine2 to fix that would put apartment numbers on an unauthenticated
+  // share link (docs/PRIVACY_VERIFICATION.md §D11). A status tally says more and exposes nothing new.
+  const stackSummary = useMemo(() => {
+    const doors = stackKey ? buildingsByKey.get(stackKey)?.units : stackIds?.map((id) => households.find((h) => h.id === id)).filter(Boolean);
+    if (!doors?.length) return null;
+    const lines = new Set(doors.map((d) => (d.addressLine1 || '').trim()).filter(Boolean));
+    const byStatus = new Map();
+    for (const d of doors) byStatus.set(d.status, (byStatus.get(d.status) || 0) + 1);
+    return {
+      title: lines.size === 1 ? [...lines][0] : `${doors.length} doors at one spot`,
+      place: doors[0]?.city ? `${doors[0].city}, ${doors[0].state || ''}`.trim() : '',
+      total: doors.length,
+      tally: [...byStatus.entries()].sort((a, b) => b[1] - a[1]),
+    };
+  }, [stackKey, stackIds, buildingsByKey, households]);
 
   // Gate ONLY on the token — the map container must mount as soon as the token is ready so the
   // init effect (which keys off tokenQ.data) finds it. Waiting on the data query here is the bug
@@ -220,6 +285,37 @@ export default function ClientReportMap({
           menuDirection="down"
           className="absolute left-4 top-4 z-10 items-start"
         />
+        {/* Several doors at one spot. A tally, not a list — see the stackSummary comment. */}
+        {!selectedHousehold && stackSummary && (
+          <div className="absolute right-4 top-4 z-10 w-72 rounded-lg border border-border bg-card p-4 shadow-lg">
+            <button
+              type="button"
+              onClick={() => { setStackKey(null); setStackIds(null); }}
+              className="float-right text-fg-muted hover:text-fg"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+            <div className="text-sm font-semibold text-fg">{stackSummary.title}</div>
+            {stackSummary.place && <div className="text-xs text-fg-muted">{stackSummary.place}</div>}
+            <div className="mt-2 text-xs text-fg-muted">
+              <strong className="tabular-nums text-fg">{stackSummary.total.toLocaleString()}</strong> doors
+              reached at this spot — an apartment building or several homes sharing one address point.
+            </div>
+            <ul className="mt-2 space-y-1">
+              {stackSummary.tally.map(([status, n]) => (
+                <li key={status} className="flex items-center gap-2 text-sm">
+                  <span
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: STATUS_COLORS[status] }}
+                  />
+                  <span className="flex-1 text-fg-muted">{STATUS_LABELS[status] || status}</span>
+                  <span className="tabular-nums text-fg">{n.toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {selectedHousehold && (
           <div className="absolute right-4 top-4 z-10 w-72 rounded-lg border border-border bg-card p-4 shadow-lg">
             <button

@@ -111,7 +111,9 @@ async function flushCacheOps(ops) {
 
 /**
  * @param householdMap Map<normalizedAddress, householdObj> (mutated in place for matches)
- * @param opts { geocodeBatch?, onProgress? } — geocodeBatch injectable for tests
+ * @param opts { geocodeBatch?, onProgress?, cacheOnly? } — geocodeBatch injectable for tests;
+ *             cacheOnly serves whatever the GeocodeCache already knows and never calls the
+ *             provider (so an audit script can run for free).
  * @returns { unmatched: Map<normalizedAddress,{code,detail}>, stats }
  */
 export async function resolve(householdMap, opts = {}) {
@@ -190,9 +192,15 @@ export async function resolve(householdMap, opts = {}) {
   cacheByKey = null; // cache lookup done — release it before the geocode batches
   if (!toGeocode.size) return { unmatched, stats };
 
-  if (!apiKey) {
+  // No key, or the caller explicitly refused to spend money (opts.cacheOnly — used by the
+  // repair:import-pins audit, which must be free to run and re-run). Cache hits above have
+  // already filled; everything still missing is reported, never looked up.
+  if (!apiKey || opts.cacheOnly) {
+    const detail = apiKey
+      ? 'Cache-only run — no provider lookup was attempted.'
+      : 'Geocoding is not configured (missing GEOCODIO_API_KEY).';
     for (const [, g] of toGeocode) for (const t of g.members) {
-      unmatched.set(t.normAddr, { code: 'geocode_failed', detail: 'Geocoding is not configured (missing GEOCODIO_API_KEY).' });
+      unmatched.set(t.normAddr, { code: 'geocode_failed', detail });
       stats.geocodeFailed += 1;
     }
     return { unmatched, stats };

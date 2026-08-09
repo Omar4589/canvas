@@ -37,7 +37,9 @@ const APPLY = process.argv.includes('--apply');
 const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split('=')[1] || null;
 
 async function main() {
-  await connectDb();
+  // connectDb takes the URI as an ARGUMENT (it throws on a falsy one) — the bare call this
+  // used to make meant the script died with "MONGODB_URI is required" every time it was run.
+  await connectDb(process.env.MONGODB_URI);
 
   const orgFilter = {};
   if (ORG_SLUG) {

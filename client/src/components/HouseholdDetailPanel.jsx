@@ -245,6 +245,17 @@ export default function HouseholdDetailPanel({
                 ⛔ Do not knock
               </span>
             )}
+            {/* Administrative, not a resident request — warning tokens, not danger. The wording
+                stays campaign-wide on purpose: the flag records no effort/pass/actor, so it can
+                never honestly name the walk list that excluded the door. */}
+            {h.excludedFromTurf && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg"
+                title="Held back by Remove apartments when turf was cut — not cut into books, not sent to phones, and not printed, anywhere in this campaign. Clear it from Turf Cutting on the walk list that owns this door."
+              >
+                🚫 Not in books
+              </span>
+            )}
           </div>
           <div className="mt-1 truncate font-medium text-fg">{h.addressLine1}</div>
           {h.addressLine2 && (

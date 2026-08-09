@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import { useMapStyle } from '../lib/mapStyles.js';
-import { householdsToGeoJSON, registerLayers } from '../lib/mapRender.js';
+import { householdsToGeoJSON, buildingsToGeoJSON, registerLayers } from '../lib/mapRender.js';
+import { groupHouseholds } from '../lib/buildings.js';
 
 const DEFAULT_CENTER = [-95.7129, 37.0902];
 const DEFAULT_ZOOM = 3.5;
@@ -73,13 +74,22 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenQ.data]);
 
+  // Apartment units share a geocode, so without grouping a 40-unit building reads as one
+  // door here too. Glyph only — this card's hand-off is the "Open in Map →" link below, and
+  // the admin map owns the door list. Note the count on a glyph here means "doors WITH THIS
+  // ANSWER at this pin", not the building's size: the payload is already answer-filtered.
+  const { buildings, stackedIds } = useMemo(() => groupHouseholds(households), [households]);
+
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const src = mapRef.current.getSource('households');
     if (!src) return;
-    const geojson = householdsToGeoJSON(households);
+    const geojson = householdsToGeoJSON(households, stackedIds);
     src.setData(geojson);
+    mapRef.current.getSource('buildings')?.setData(buildingsToGeoJSON(buildings));
     // Re-fit whenever the drill changes — the point of this map IS the filtered subset.
+    // Stacked doors are still features here (only the layer filters them), so the camera
+    // still frames every door.
     if (geojson.features.length) {
       const bounds = new mapboxgl.LngLatBounds();
       for (const f of geojson.features) bounds.extend(f.geometry.coordinates);
@@ -87,7 +97,7 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
         mapRef.current.fitBounds(bounds, { padding: 48, maxZoom: 15, duration: 0 });
       }
     }
-  }, [households, mapReady]);
+  }, [households, buildings, stackedIds, mapReady]);
 
   // The Map page's answer chips key on option TEXT, so the deep link always carries it.
   // surveyTemplateId rides along so the Map's filter stays scoped to THIS survey.

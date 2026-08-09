@@ -89,7 +89,7 @@ async function forecastPersons(validRows, uidSource, orgId) {
  * a person who exists only in a SIBLING campaign forecasts as a NEW voter here (their
  * row here will be an insert), and never as a move/orphan.
  */
-export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null }) {
+export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null, coordConflicts = 0, coordConflictTies = 0 }) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
@@ -278,7 +278,10 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       orphanedDoors,
       nearDuplicates,
     },
-    rowIssues: { missingRequired, noCoordinates, duplicateInFile, spreadsheetErrors },
+    // coordConflicts: addresses whose rows asserted DIFFERENT pins (beyond rooftop-vs-parcel
+    // noise). `ties` is the subset the file couldn't settle by majority or state bounds —
+    // those keep the first row's pin and are what `repair:import-pins` adjudicates.
+    rowIssues: { missingRequired, noCoordinates, duplicateInFile, spreadsheetErrors, coordConflicts, coordConflictTies },
     samples: {
       moved,
       orphans,

@@ -28,7 +28,24 @@ Up top, next to the door count, you'll see how many buildings there are and how 
 Two things this is *not*:
 
 - **It isn't clustering.** The building sits at the doors' real location, never merges with the building next door, and never breaks apart as you zoom in.
-- **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments (N+ units)** option that keeps big buildings out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. If you want to see only the doors in a cut, scope the map to that pass.
+- **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments (N+ units)** option that keeps big buildings out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. See the next section.
+
+## Doors you left out of your books
+
+If you cut turf with **Remove apartments**, those doors don't disappear. They're still on the map, because this map is the record of every door you have and every knock that happened at one — an excluded door can still be flagged, double-knocked, or asked to be left alone, and you'd want to see all of that.
+
+So the map names them instead of hiding them. In the **Layers** panel you'll see a count — "Doors excluded from books · 485" — and three choices:
+
+- **Show** (the default) — they look like any other door.
+- **Dim** — they fade back, so the doors your canvassers actually have stand out without the rest vanishing.
+- **Hide** — they come off the map entirely. This only changes *your* view; nothing is deleted and no one else is affected.
+
+Open one and its panel carries a **Not in books** badge. Excluding is campaign-wide — an excluded door isn't cut into any book, sent to any phone, or printed on any packet, in this campaign, whichever walk list happens to own it. To put them back, use **Include apartments** on Turf Cutting for the walk list that owns the door.
+
+Two things worth knowing before you go looking for a number to match:
+
+- **The count is of the doors currently on your screen**, not of the whole campaign. Zoom or filter and it moves. It won't line up with the number on the Turf Cutting page, which counts a different thing.
+- **A door excluded after a cut is still listed in that book.** Excluding it stops it being *served* — it won't reach a phone or a packet — but the book that was already cut still has its name in it. Re-cut the pass if you want the book itself to change.
 
 ## Canvasser pings and trails
 

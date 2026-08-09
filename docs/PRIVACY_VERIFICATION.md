@@ -1412,6 +1412,20 @@ For **each individual household that was reached**, `ClientReportMapPoint` store
 
 The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReportMapPoint.js:33`). **That is not an accurate description of its precision.** What it excludes is the unit/apartment line (`addressLine2`) and the ZIP.
 
+> **[v4 2026-08-08 — building grouping on the client report map: RE-VERIFIED, nothing new is exposed.]**
+> `ClientReportMap` now groups points that share a coordinate into one building glyph
+> (`client/src/lib/buildings.js` `groupHouseholds`), and clicking one opens a **status tally** — the
+> street line, a count, and how many doors are in each status. Every input is derived from data the
+> snapshot **already** sends (coordinates + `status`); no field was added to `ClientReportMapPoint`,
+> `computeReport.js`'s projection, or `clientReportView.js`'s shape, and `share.js` is untouched.
+> The unit-line exclusion recorded above **still holds and was the deciding constraint**: a per-door
+> list was deliberately NOT built, because it would have needed `addressLine2` on the snapshot, which
+> would put apartment numbers on an unauthenticated page and falsify this section. If that list is
+> ever wanted, it is a schema change, a re-publish of every report, and an edit here — not a polish item.
+> One inference does change shape: a glyph now makes the *number* of canvassed doors at one coordinate
+> legible at a glance, where before it was N coincident icons. That is the same disclosure ("this
+> household was canvassed") already recorded below, rendered honestly rather than hidden under itself.
+
 **Unknocked households are omitted** (`computeReport.js:200`), so a point's mere presence discloses that the household was canvassed.
 
 **The codebase says this plainly.** `models/ReportShareLink.js:29-34`: *"every map point is a household's exact street address and coordinates plus that household's survey answers ('412 Elm St → Opposed'). A name is a public voter-file lookup away."*
@@ -1749,6 +1763,21 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 - **Only the address is sent.** No voter name, no voter ID, no party/age/gender. **The unit/apartment number is deliberately omitted** (`geocodeService.js:64-69`).
 - **Only households MISSING coordinates are sent** (`:45-47`, `:127-135`). Addresses that arrive from the customer's file with coordinates, or that hit the local cache, are never transmitted.
 - The whole path is gated behind `GEOCODE_ENABLED === 'true'` **plus** a `GEOCODIO_API_KEY` (`services/import/importProcessor.js:129`).
+
+> **[v4 2026-08-08 — a second caller of this path: `repair:import-pins`. NOT a new subprocessor, NOT a
+> DPA §6 event.]** `server/src/migrations/repairImportPins.js` re-checks the addresses of doors whose
+> import pin looks wrong (out of state, far from their own street, or knocked from far away by 2+
+> canvassers) by calling the **same** `geocodeService.resolve()` with the **same** address string and the
+> same unit-line omission. Same recipient, same data category, same purpose (turning an address into a
+> coordinate) — so the subprocessor list in `docs/DPA.md` §6 and the Privacy Policy's service-providers
+> paragraph are **unchanged and still true**; no customer notice is triggered.
+> Two things narrow it further, both deliberate: the script is **cache-only by default**
+> (`resolve(map, { cacheOnly: true })`, added for exactly this reason — it serves what `GeocodeCache`
+> already holds and never calls the provider), so a routine audit transmits **nothing**; and a provider
+> lookup happens only when an operator passes `--geocode` explicitly, for the shortlisted doors only,
+> never the campaign. The bullet above — *"only households MISSING coordinates are sent"* — now has one
+> narrow, operator-initiated exception: a door that HAS coordinates believed to be wrong. That is the
+> only claim on this page the change touches, and this stamp is the correction.
 
 **COULD NOT DETERMINE:** whether `GEOCODE_ENABLED` is `true` in production — it is an environment variable, not in the repo. A persistent `GeocodeCache` collection, a geocoding-cost model, and an owner-facing cost page all indicate it is in real use. **Treat as live and disclose.**
 

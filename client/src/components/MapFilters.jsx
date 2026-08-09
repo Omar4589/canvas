@@ -1,5 +1,6 @@
 import { REASON_META } from '../lib/flags.js';
 import FlagLegend from './FlagLegend.jsx';
+import Segmented from './ui/Segmented.jsx';
 
 const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
@@ -71,6 +72,11 @@ export default function MapFilters({
   showOverlaps = false,
   onShowOverlapsChange,
   overlapCount = 0,
+  // Doors held back from books (Household.excludedFromTurf). 'show' | 'dim' | 'hide'.
+  // 0 count hides the control entirely.
+  excludedVis = 'show',
+  onExcludedVisChange,
+  excludedCount = 0,
   // GPS-audit flags overlay (admin map only).
   showFlags = false,
   onShowFlagsChange,
@@ -170,6 +176,36 @@ export default function MapFilters({
             Doors worked by two or more canvassers in the same pass — a turf collision or
             possible double-count.
           </div>
+
+          {/* Only offered when there is something to see. Tri-state, so it uses Segmented
+              rather than a checkbox — "dim" is the useful middle setting and a boolean
+              can't express it. Never a server filter: see lib/excludedDoors.js. */}
+          {excludedCount > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center gap-2 text-sm">
+                <span className="text-fg">Doors excluded from books</span>
+                <span className="ml-auto rounded-full bg-warning-tint px-1.5 text-xs font-medium text-warning-fg">
+                  {excludedCount.toLocaleString()}
+                </span>
+              </div>
+              <Segmented
+                size="sm"
+                value={excludedVis}
+                onChange={onExcludedVisChange}
+                options={[
+                  { value: 'show', label: 'Show' },
+                  { value: 'dim', label: 'Dim' },
+                  { value: 'hide', label: 'Hide' },
+                ]}
+              />
+              <div className="mt-1 text-xs text-fg-muted">
+                Held back by <strong className="font-medium text-fg-muted">Remove apartments</strong> when
+                turf was cut — not cut into books, not sent to phones, not printed, anywhere in this
+                campaign. They stay on this map because it is the record of what exists and what was
+                worked. Clear it from Turf Cutting on the walk list that owns the door.
+              </div>
+            </div>
+          )}
         </div>
       )}
 

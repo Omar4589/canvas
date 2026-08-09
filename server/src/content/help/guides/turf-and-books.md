@@ -19,7 +19,7 @@ On the Turf Cutting page, pick how to slice the doors:
 - **By attribute** makes one book per precinct, county, city, ZIP, or district. You'll see each group's door count first, so you can set a smart cap.
 - **Manual** lets you draw areas on the map — each area becomes a book, with live house and voter counts as you draw.
 
-Cuts only include knockable doors. Already-voted homes are skipped, and you can leave out apartments and [restricted-access homes](restricted-vs-refused) too.
+Cuts only include knockable doors. Already-voted homes are skipped, and you can leave out apartments and [restricted-access homes](restricted-vs-refused) too. Doors you leave out aren't deleted — they stay visible and counted on the [Map](page-map), where you can dim or hide them; they're simply never cut into a book, sent to a phone, or printed.
 
 Cutting a follow-up round? The **Target doors** panel narrows the cut to just the doors you're chasing — the not-homes, the undecided — so canvassers only get those. See [Passes](passes) for how it works.
 

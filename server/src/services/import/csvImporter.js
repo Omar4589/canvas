@@ -6,7 +6,8 @@ import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
-import { normalizeAddress } from '../../utils/normalizeAddress.js';
+import { normalizeAddress, haversineMeters } from '../../utils/normalizeAddress.js';
+import { inStateBounds } from '../../utils/stateBounds.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { streamParse } from './parseUpload.js';
 import { bumpLive } from '../platform/platformStats.js';
@@ -162,6 +163,103 @@ export function validateRows(rows, mapping, headers) {
  * validateRows loop; `sink` (optional) receives each valid row instead of the
  * validRows array — when provided, finish() reports validRows: null.
  */
+// ── Disagreeing coordinates across rows for ONE household ─────────────────────
+//
+// Several voters normally share an address, so several rows collapse into one Household.
+// They are supposed to carry the same pin — but files do disagree, and the old rule was
+// "first row with valid coords wins", silently. One bad row that happened to sort first
+// pinned the door miles away with no error, no counter, and no second look: the geocoder
+// never re-checks a door that already HAS coordinates.
+//
+// What replaces row order, in order: rows that round to the same ~1.1m pin aren't a
+// disagreement at all; an out-of-state candidate loses to an in-state one; otherwise the
+// most-voted pin wins. A genuine TIE (the classic two-rows-two-places case) keeps the first
+// pin and records a conflict — it is never nulled, because a household the geocoder can't
+// place is DROPPED along with its voters, and losing a door is worse than a suspect pin.
+// Ties are what `npm run repair:import-pins` adjudicates offline, where it can consult the
+// geocoder without drop semantics.
+const COORD_CANDIDATE_CAP = 6; // bounded — this runs on the 300k-row streaming path
+const COORD_AGREE_M = 150; // rooftop vs. parcel centroid is not a disagreement
+
+const coordKeyOf = (lat, lng) => `${Math.round(lat * 1e5)}|${Math.round(lng * 1e5)}`;
+
+// Nothing is allocated until a household actually disagrees with itself — the overwhelmingly
+// common "every row agrees" path only bumps an integer.
+function noteCoordCandidate(conflicts, normAddr, existing, incoming) {
+  const kExisting = coordKeyOf(existing.latitude, existing.longitude);
+  const kIncoming = coordKeyOf(incoming.latitude, incoming.longitude);
+  const list = conflicts.get(normAddr);
+  if (kExisting === kIncoming) {
+    existing.coordVotes += 1;
+    if (list) {
+      const c = list.find((x) => x.key === kIncoming);
+      if (c) c.n += 1;
+    }
+    return;
+  }
+  if (!list) {
+    conflicts.set(normAddr, [
+      { key: kExisting, lat: existing.latitude, lng: existing.longitude, n: existing.coordVotes },
+      { key: kIncoming, lat: incoming.latitude, lng: incoming.longitude, n: 1 },
+    ]);
+    return;
+  }
+  const c = list.find((x) => x.key === kIncoming);
+  if (c) c.n += 1;
+  else if (list.length < COORD_CANDIDATE_CAP) {
+    list.push({ key: kIncoming, lat: incoming.latitude, lng: incoming.longitude, n: 1 });
+  }
+}
+
+// Returns { resolved, ties } — how many households had disagreeing rows, and how many of
+// those could not be decided. Mutates the winning coordinates onto the household objects.
+export function resolveCoordConflicts(householdMap, conflicts) {
+  let resolved = 0;
+  let ties = 0;
+  for (const [normAddr, candidates] of conflicts) {
+    const h = householdMap.get(normAddr);
+    if (!h || candidates.length < 2) continue;
+
+    // Within noise of each other → not a disagreement; leave the door alone.
+    let maxGap = 0;
+    for (let i = 0; i < candidates.length; i += 1) {
+      for (let j = i + 1; j < candidates.length; j += 1) {
+        const d = haversineMeters(candidates[i].lat, candidates[i].lng, candidates[j].lat, candidates[j].lng);
+        if (d > maxGap) maxGap = d;
+      }
+    }
+    if (maxGap <= COORD_AGREE_M) continue;
+
+    resolved += 1;
+    // A coordinate outside its own state is disqualified outright — but only when that
+    // leaves something. inStateBounds fails open on unknown state codes, so this is
+    // insurance against the gross case, never a gate.
+    const inState = candidates.filter((c) => inStateBounds(h.state, c.lat, c.lng));
+    const pool = inState.length > 0 && inState.length < candidates.length ? inState : candidates;
+
+    let best = pool[0];
+    let tied = false;
+    for (const c of pool.slice(1)) {
+      if (c.n > best.n) {
+        best = c;
+        tied = false;
+      } else if (c.n === best.n) {
+        tied = true;
+      }
+    }
+    if (tied) {
+      // No majority and no state test to break it. Keep the first pin (never null it) and
+      // record the conflict so the preview says so and the repair script can adjudicate.
+      ties += 1;
+      h.coordConflict = true;
+      continue;
+    }
+    h.latitude = best.lat;
+    h.longitude = best.lng;
+  }
+  return { resolved, ties };
+}
+
 export function makeRowValidator(mapping, headers, { sink } = {}) {
   const resolved = resolveMapping(mapping, headers || []);
   const errors = [];
@@ -169,6 +267,8 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
   const seenSvids = new Set();
   const dupSvids = new Map(); // duplicated ID value → dropped-row count (first occurrence kept)
   const householdMap = new Map();
+  // normalizedAddress → candidate pins, allocated ONLY when rows disagree.
+  const coordConflicts = new Map();
   let totalRows = 0;
   let validCount = 0;
   let dupRows = 0; // total rows dropped as in-file duplicates — NOT dupSvids.size
@@ -221,20 +321,47 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
     }
     seenSvids.add(svid);
     validCount += 1;
-    // Group into unique households as rows arrive. First row with valid coords wins.
+    // Group into unique households as rows arrive. A later row can only FILL a missing
+    // pin here; when two rows assert different pins the decision is deferred to finish()
+    // (see resolveCoordConflicts) rather than settled by row order.
     const normAddr = normalizeAddress(mapped.household);
     const existing = householdMap.get(normAddr);
     if (!existing) {
-      householdMap.set(normAddr, { ...mapped.household, normalizedAddress: normAddr });
+      householdMap.set(normAddr, {
+        ...mapped.household,
+        normalizedAddress: normAddr,
+        // Rows backing the current pin. One integer per household; the candidate list is
+        // only allocated if a row ever disagrees.
+        coordVotes: mapped.household.latitude != null ? 1 : 0,
+      });
     } else if (existing.latitude == null && mapped.household.latitude != null) {
       existing.latitude = mapped.household.latitude;
       existing.longitude = mapped.household.longitude;
+      existing.coordVotes = 1;
+    } else if (existing.latitude != null && mapped.household.latitude != null) {
+      noteCoordCandidate(coordConflicts, normAddr, existing, mapped.household);
     }
     if (sink) sink(mapped);
     else validRows.push(mapped);
   };
 
-  const finish = () => ({ totalRows, errors, validRows, householdMap, dupSvids, dupRows, validCount });
+  const finish = () => {
+    const coordConflictStats = resolveCoordConflicts(householdMap, coordConflicts);
+    return {
+      totalRows,
+      errors,
+      validRows,
+      householdMap,
+      dupSvids,
+      dupRows,
+      validCount,
+      // Households whose rows disagreed on a pin, and how many of those were a tie the
+      // file itself could not settle. Surfaced in the preview/diff and on ImportJob so a
+      // silent first-row-wins can never happen again.
+      coordConflicts: coordConflictStats.resolved,
+      coordConflictTies: coordConflictStats.ties,
+    };
+  };
   return { push, finish, resolved };
 }
 

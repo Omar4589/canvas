@@ -96,7 +96,7 @@ export async function processImportJob(job) {
     const buffer = await loadRawImport(importJobId);
     const useSpill = importJob.kind !== 'preview' && importJob.kind !== 'geocode_check';
     if (useSpill) fs.writeFileSync(spillRaw, '');
-    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection } = await buildImportRows(
+    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies } = await buildImportRows(
       buffer,
       importJob.filename,
       importJob.fieldMapping || {},
@@ -141,7 +141,7 @@ export async function processImportJob(job) {
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
       await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'diffing', heartbeatAt: new Date() } });
-      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource });
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource, coordConflicts, coordConflictTies });
       diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },
@@ -398,6 +398,8 @@ export async function processImportJob(job) {
           progress: 100,
           completedAt: new Date(),
           householdsWithFileCoords,
+          coordConflicts: coordConflicts || 0,
+          coordConflictTies: coordConflictTies || 0,
           ...(geoStats || {}),
           ...(revisit ? { revisitSavedSearchId: revisit.savedSearchId, revisitHouseholdCount: revisit.householdCount } : {}),
         },

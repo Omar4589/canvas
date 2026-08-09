@@ -65,6 +65,44 @@ be placed. On import, unplaceable addresses are dropped (and listed) so every im
 walkable pin. *(Geocoding has an internal per-lookup cost, but that's Doorline's cost — it's never
 shown to admins or clients. Only the platform owner sees it, on the super-admin Imports page.)*
 
+## When two rows disagree about where a house is
+
+Several voters usually share an address, so several rows in your file become **one door**. They're
+supposed to carry the same coordinates — but files do disagree, and one bad row used to be enough to
+pin a house miles away: whichever row happened to come first simply won, silently.
+
+Now the file has to make its case:
+
+- Rows within about **150 metres** of each other aren't a disagreement at all — that's just a rooftop
+  versus a driveway, and the first pin stands.
+- A coordinate that isn't even **inside the state** loses to one that is.
+- Otherwise the **most rows win.** A single bad row can no longer outvote the good ones.
+- If it's a genuine tie — two rows, two places, nothing to separate them — the door keeps the first
+  pin and the import **records the conflict** instead of hiding it. The preview counts these, so
+  "3 addresses had disagreeing coordinates" is something you see rather than something you find out
+  months later from a canvasser standing in the wrong neighborhood.
+
+A tie is never resolved by throwing the coordinates away: a door with no pin gets dropped from the
+import along with its voters, and losing a house is worse than a suspect pin. Ties are cleaned up
+afterwards — see **Fixing pins that came in wrong** below.
+
+## Fixing pins that came in wrong
+
+Doors imported before the rule above may still sit in the wrong place, and ties still need settling.
+An audit run finds them and can correct them:
+
+- It looks only at pins that came **from your file**. A pin someone dragged to the right spot by hand
+  is field-verified truth and is never overwritten, and neither is one the geocoder placed.
+- A door is suspected when it's outside its state, when it's far from the other doors on its own
+  street, or when **two or more canvassers logged a knock far away from it** — they were standing at
+  the real house, so the pin is what's wrong.
+- Nothing is corrected on suspicion. Each suspect is re-checked against the **address itself**, and
+  only a confident, clearly-different answer wins.
+- Corrected doors keep their books. A door fixed this way stays in whatever book was cut around its
+  old location until you re-cut that pass.
+
+Ask your Doorline contact to run it — it's an operator tool, not a page in the app.
+
 ## Shared voter database
 
 Every upload also **links its voters to canonical People** — one record per real human, shared
@@ -489,6 +527,71 @@ confidence gate (centroids rejected), and a negative cache with staleness. The p
 is **cache-only** (zero provider calls); the opt-in `POST /admin/imports/geocode-check` runs the
 live geocode (cost-confirmed, worker-backed) and caches results so a later apply is free. Off ⇒
 today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at worker boot.
+`resolve(map, { cacheOnly: true })` serves whatever the cache already knows and never calls the
+provider — how `repair:import-pins` audits for free.
+
+### Disagreeing coordinates across rows for one household
+
+Rows sharing a `normalizeAddress` key collapse into one household. The rule **was** "first row with
+valid coords wins", silently — no error, no counter, and the geocoder never re-checks a door that
+already HAS coordinates (`needsGeocode` tests for null), so a bad first row pinned the door
+permanently. `resolveCoordConflicts` ([csvImporter.js](../server/src/services/import/csvImporter.js))
+replaces row order, deciding in `finish()` rather than per row:
+
+1. Candidates are keyed at the shared ~1.1 m building precision, so identical rows collapse.
+2. Max pairwise distance ≤ `COORD_AGREE_M` (150 m, well under the audit layer's `FAR_CONFIRM_M` 250) ⇒
+   not a disagreement; the first pin stands and nothing is counted.
+3. Out-of-state candidates (`inStateBounds`, which fails open on unknown codes) are dropped — but only
+   when that leaves something.
+4. Most votes wins. A tie **keeps the first pin, never nulls it**, and sets `coordConflict` — because
+   `resolve()` DROPS a household it can't place, along with its voters, and losing a door is strictly
+   worse than a suspect pin. This is the one case the file cannot settle.
+
+Bounded for the streaming path: nothing is allocated until a household actually disagrees with itself
+(one integer, `coordVotes`, per household otherwise), and the candidate list caps at
+`COORD_CANDIDATE_CAP`. Counts surface as `rowIssues.coordConflicts` / `coordConflictTies` in the
+import diff and as the matching `ImportJob` fields.
+
+### `repair:import-pins` — settling ties and cleaning up old imports
+
+`server/src/migrations/repairImportPins.js`, proxied in the **root** `package.json` (the Heroku
+dashboard's Run console starts at the app root). Dry-run and cache-only by DEFAULT.
+
+```
+npm run repair:import-pins                              # report only, free
+npm run repair:import-pins -- --campaign=<id>           # or --org=<slug>
+npm run repair:import-pins -- --geocode                 # allow PAID provider lookups
+npm run repair:import-pins -- --apply --user=<userId>   # commit
+```
+
+The original CSV is **not** recoverable — `importProcessor` deletes the raw GridFS upload on success,
+`Voter` carries no coordinates, and `ImportJob` stores none — so this **re-derives** truth rather than
+reconstructing the disagreement. Three shortlist signals, none of which repairs anything on its own:
+out-of-state; a street-cohort outlier (grouped by `streetOf` + ZIP5 from
+[utils/streetName.js](../server/src/utils/streetName.js), de-duplicated by building key so a tower
+doesn't outvote its street, judged against the cohort **medoid** — never a mean, which an outlier drags
+— at `max(--min-meters, 4 × cohort median)`); and knock evidence (`CanvassActivity.distanceFromHouseMeters`
+≥ threshold with the *closest* knock still far, from 2+ distinct canvassers). Suspects are then
+adjudicated against the address via `geocodeResolve`, and only an `exact`-confidence answer more than
+`--min-meters` from the stored pin is confirmed.
+
+Traps this script is built around, each of which is a real failure mode:
+
+- **Scope is always `'unit'`.** `scope: 'building'` moves every door sharing the pin — catastrophic
+  here, since the bogus location may hold doors that legitimately belong there.
+- **Only `coordSource: 'file'` doors are eligible.** `'corrected'` is human-placed truth (overwriting it
+  is the regression the re-import pin shield exists to prevent) and `'geocodio'` already came from the address.
+- **`--apply` requires `--user`.** `HouseholdLocationChange.userId` is `required`, while
+  `updateHouseholdLocation` passes `byUserId || null` — without a real id the household **saves** and
+  *then* throws on its audit row, leaving a moved pin with no trail. The script refuses up front.
+- **`source: 'import_repair'`** is its own enum member rather than `'admin_drag'`: nobody dragged
+  anything, and mislabeling would put a lie in a permanent audit log.
+- **After-effects it prints out loud:** book/turf membership is untouched (so a repaired door stays in
+  the book cut around its old location until that pass is re-cut), and `coordSource: 'corrected'` enters
+  `buildPinFixMap`, downgrading past far-knock GPS flags at those doors — correct, but it moves
+  historical Audit numbers.
+
+Idempotent: a repaired door becomes `'corrected'` and is excluded from the next run.
 
 `coordSource`/`coordConfidence` are no longer import-only bookkeeping: the maps now **surface** them
 (an amber "approximate" ring on `interpolated` pins) and a pin can be **corrected** — which sets
