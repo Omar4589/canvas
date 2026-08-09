@@ -33,6 +33,7 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 //   npm run repair:import-pins -- --geocode                      # allow PAID Geocodio lookups
 //   npm run repair:import-pins -- --apply --user=<userId>        # fix confirmed doors
 //   npm run repair:import-pins -- --min-meters=250               # confirm threshold (default 250)
+//   npm run repair:import-pins -- --verify-all --campaign=<id>   # audit EVERY imported pin, not just suspects
 //
 // HOW A DOOR IS SHORTLISTED (any one signal is enough — all four are only suspicion):
 //   1. Out of state       — the pin isn't inside its own state's bounding box.
@@ -49,6 +50,17 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 //                           leaves no cohort to compare AND sits on the right street.
 //   4. Knock evidence     — two or more canvassers logged a knock far from the pin. They were
 //                           standing at the real house; the pin is what's wrong.
+//   5. (--verify-all)     — every remaining pin. The four signals above all need something to
+//                           CONTRADICT the pin — a state line, street-mates, a shared dot, a
+//                           knock. A pin that is wrong but SELF-CONSISTENT shows none of them:
+//                           a real 5-unit building placed on the wrong lot is one base address
+//                           (never a placeholder) and often its street's only pin (no cohort);
+//                           a street whose every door sits on one wrong spot IS its own cohort
+//                           medoid. Observed on a real file: "161 Jaycee Lions Dr", 5 units,
+//                           pinned among houses two streets over, invisible to signals 1–4.
+//                           --verify-all shortlists everything and lets the adjudicator's
+//                           exact-confidence + --min-meters gates decide, so a correct pin
+//                           costs one cache-first lookup and moves nothing.
 // Nothing is repaired on suspicion. A shortlisted door is then ADJUDICATED against the address
 // itself via the geocoder (cache-first, so it is usually free), and repaired only when the
 // geocoder is confident AND disagrees with the stored pin by more than --min-meters.
@@ -72,7 +84,7 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 // EMPTY campaign filter plus a stray argument — the empty filter silently widens the run to
 // EVERY campaign in the org, which on --apply is not what anyone typed.
 for (const a of process.argv.slice(2)) {
-  if (a === '--apply' || a === '--geocode') continue;
+  if (a === '--apply' || a === '--geocode' || a === '--verify-all') continue;
   // An id that isn't a 24-char hex ObjectId throws a raw Mongoose CastError deep in the run —
   // a stack trace where a one-line "you have a typo" belongs. Observed: a 25-char id with a
   // trailing character pasted in from the console.
@@ -96,10 +108,18 @@ for (const a of process.argv.slice(2)) {
 
 const APPLY = process.argv.includes('--apply');
 const ALLOW_GEOCODE = process.argv.includes('--geocode');
+const VERIFY_ALL = process.argv.includes('--verify-all');
 const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split('=')[1] || null;
 const CAMPAIGN_ID = (process.argv.find((a) => a.startsWith('--campaign=')) || '').split('=')[1] || null;
 const USER_ID = (process.argv.find((a) => a.startsWith('--user=')) || '').split('=')[1] || null;
 const MIN_METERS = Number((process.argv.find((a) => a.startsWith('--min-meters=')) || '').split('=')[1]) || 250;
+
+// --verify-all probes EVERY imported address in scope; unscoped, that is the entire database,
+// and with --geocode a paid lookup per address nobody priced. Make the blast radius a choice.
+if (VERIFY_ALL && !CAMPAIGN_ID && !ORG_SLUG) {
+  console.error('ERROR: --verify-all probes every imported address in scope — narrow it with --campaign=<id> or --org=<slug>.');
+  process.exit(1);
+}
 
 // The confirm floor for STACKED-pin suspects (placeholder pins + strays). Deliberately far
 // below MIN_METERS: their suspicion is identity (the door provably shares one exact dot with
@@ -259,6 +279,15 @@ async function auditCampaign(campaign) {
   for (const [id, info] of await knockOutliers(households.map((h) => h._id))) {
     addReason(id, `knocked from ${info.minDistance}m away, 2+ canvassers`);
   }
+  // Signals 1–4 all need something to contradict the pin; a self-consistent wrong pin (see
+  // the header) shows none of them. --verify-all shortlists every remaining door and lets the
+  // adjudicator decide — a correct pin refutes for the price of a cache-first lookup.
+  if (VERIFY_ALL) {
+    for (const h of households) {
+      const id = String(h._id);
+      if (!suspects.has(id)) addReason(id, 'full audit — checked against its own address');
+    }
+  }
 
   return { households, suspects, stackedIds };
 }
@@ -283,9 +312,14 @@ async function adjudicate(households, suspects, stackedIds) {
     });
     probeToId.set(h.normalizedAddress, id);
   }
-  if (!probe.size) return { confirmed: [], stats: null, skippedClose: 0 };
+  if (!probe.size) return { confirmed: [], stats: null, skippedClose: 0, unresolved: 0 };
 
   const { stats } = await geocodeResolve(probe, { cacheOnly: !ALLOW_GEOCODE });
+
+  // Addresses the resolver returned NO coordinates for. On a cache-only run this is the exact
+  // upper bound of what --geocode would spend — reported so the price is known before paying.
+  let unresolved = 0;
+  for (const p of probe.values()) if (p.latitude == null || p.longitude == null) unresolved += 1;
 
   const confirmed = [];
   let skippedClose = 0;
@@ -314,7 +348,7 @@ async function adjudicate(households, suspects, stackedIds) {
     }
     confirmed.push({ h, to: { lat: probed.latitude, lng: probed.longitude }, gap: Math.round(gap) });
   }
-  return { confirmed, stats, skippedClose };
+  return { confirmed, stats, skippedClose, unresolved };
 }
 
 async function main() {
@@ -353,20 +387,24 @@ async function main() {
 
   const campaigns = await Campaign.find(filter, { name: 1, organizationId: 1 }).lean();
   console.log(`Scanning ${campaigns.length} campaign(s) for mis-pinned imported doors.`);
-  console.log(`Confirm threshold: ${MIN_METERS}m. Geocoder: ${ALLOW_GEOCODE ? 'ALLOWED (may cost money)' : 'cache-only'}.\n`);
+  console.log(`Confirm threshold: ${MIN_METERS}m. Geocoder: ${ALLOW_GEOCODE ? 'ALLOWED (may cost money)' : 'cache-only'}.`);
+  if (VERIFY_ALL) console.log('FULL AUDIT (--verify-all): every imported pin is checked against its own address.');
+  console.log('');
 
   let totalSuspects = 0;
   let totalConfirmed = 0;
   let totalRepaired = 0;
   let totalNewLookups = 0;
+  let totalUnresolved = 0;
 
   for (const campaign of campaigns) {
     const audit = await auditCampaign(campaign);
     if (!audit || !audit.suspects.size) continue;
     totalSuspects += audit.suspects.size;
 
-    const { confirmed, stats, skippedClose } = await adjudicate(audit.households, audit.suspects, audit.stackedIds);
+    const { confirmed, stats, skippedClose, unresolved } = await adjudicate(audit.households, audit.suspects, audit.stackedIds);
     totalNewLookups += stats?.geocodedNew || 0;
+    totalUnresolved += unresolved;
     // "Refuted" ≠ "no answer": name the suspects whose exact geocode AGREED with the pin,
     // or a clean run reads like a cache miss and invites a pointless --geocode spend.
     const refutedNote = skippedClose ? ` (${skippedClose} refuted — the address geocodes to where the pin already is)` : '';
@@ -407,8 +445,14 @@ async function main() {
     );
     if (totalNewLookups) {
       console.log(`Paid geocoder lookups: ${totalNewLookups} (~${(geocodeCostCents(totalNewLookups) / 100).toFixed(2)} USD).`);
+    } else if (!ALLOW_GEOCODE && totalUnresolved) {
+      // The exact price of a --geocode run, known BEFORE paying: one lookup per uncached address.
+      console.log(
+        `Cache-only run — ${totalUnresolved} suspect address(es) have no cached answer; ` +
+          `--geocode would buy up to ${totalUnresolved} lookup(s) (~${(geocodeCostCents(totalUnresolved) / 100).toFixed(2)} USD).`
+      );
     } else if (!ALLOW_GEOCODE) {
-      console.log('Cache-only run — pass --geocode to let unconfirmed suspects hit the provider.');
+      console.log('Cache-only run — every suspect address already had a cached answer; --geocode has nothing to buy here.');
     }
     if (APPLY && totalRepaired) {
       console.log('\nBook membership was NOT changed — a repaired door stays in the book cut around its old');

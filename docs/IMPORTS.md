@@ -579,6 +579,7 @@ dashboard's Run console starts at the app root). Dry-run and cache-only by DEFAU
 npm run repair:import-pins                              # report only, free
 npm run repair:import-pins -- --campaign=<id>           # or --org=<slug>
 npm run repair:import-pins -- --geocode                 # allow PAID provider lookups
+npm run repair:import-pins -- --verify-all --campaign=<id>  # audit EVERY pin, not just suspects
 npm run repair:import-pins -- --apply --user=<userId>   # commit
 ```
 
@@ -604,6 +605,20 @@ agreeing within that refutes a distance suspicion. Stacked-pin suspects need onl
 area puts true rooftops well inside 250m. An exact answer that agrees with the pin is counted and
 reported as **refuted** ("N refuted — the address geocodes to where the pin already is"), so a clean
 run can't be misread as a cache miss.
+
+All four signals need something to **contradict** the pin — a state line, street-mates, a shared dot,
+a knock. A pin that is wrong but *self-consistent* shows none of them: a genuine 5-unit building
+placed on the wrong lot is one base address (so never a placeholder) and often its street's only pin
+(so no cohort), and a street whose every door sits on one wrong spot *is* its own cohort medoid.
+Observed on a real district file — "161 Jaycee Lions Dr", five units, pinned among houses two streets
+over, invisible to every signal. **`--verify-all`** closes that hole: it shortlists *every*
+`file`-pin door in scope and lets the same adjudication gates decide (`exact` confidence,
+`--min-meters` floor — the 25m stacked floor stays reserved for stacked suspects), so a correct pin
+costs one cache-first lookup and moves nothing. It requires a `--campaign`/`--org` scope (unscoped it
+would probe the whole database), and a cache-only dry run reports exactly how many addresses have no
+cached answer — the upper bound of what `--geocode` would spend — before any money moves. Run it
+**before** cutting a pass: books are cut around pin geography, so repairing after Accept leaves books
+drawn around fiction.
 
 **Sequencing trap: use `--geocode` on the FIRST apply.** The placeholder signal is stack-based, so
 once a pin's cached-answer neighbours move away, an uncached tail door at that pin is a lone door with

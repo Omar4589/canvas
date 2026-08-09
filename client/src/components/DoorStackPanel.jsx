@@ -75,7 +75,9 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, s
         <p className="border-b border-warning/30 bg-warning-tint px-4 py-2 text-[11px] leading-snug text-warning-fg">
           These doors have <strong>different addresses</strong> but identical map coordinates — usually a
           placeholder pin the voter file stamped on addresses it couldn&apos;t place, not a real building. The doors
-          are real and walkable; the dot is what&apos;s wrong. Ask your Doorline contact to run the pin repair.
+          are real and walkable; the dot is what&apos;s wrong. The pin repair fixes most of these from the address —
+          a stack that survives a repair run is one the geocoder couldn&apos;t place either, and{' '}
+          <strong>Move pin</strong> on each door is the way to place those by hand.
         </p>
       ) : (
         <p className="border-b border-border bg-sunken px-4 py-2 text-[11px] leading-snug text-fg-muted">
