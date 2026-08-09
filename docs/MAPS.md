@@ -154,7 +154,7 @@ An organizer sees the whole campaign at once:
   (scoping to a single round colors doors per-round instead — see §D). The pins never move; only their
   color changes.
 - **Arriving pre-filtered.** Other screens can open the map with filters already set: the **Survey
-  Explorer**'s "Open in Map" (web) and the answer drill's "View on map" (mobile) land here filtered
+  Explorer**'s per-entry "Map" link (web) and the answer drill's "View on map" (mobile) land here filtered
   to the same answer, canvasser, and date window they were showing — so the pins are exactly the
   doors behind the number you were looking at (see [SURVEYS.md](SURVEYS.md), and §D below for the
   parameters). The [Notes hub](NOTES.md)'s "view on map" similarly focuses a single door.
@@ -350,7 +350,7 @@ location:{lng,lat,accuracy}, distanceFromHouseMeters, canvasser:{id,firstName,la
 
 Both admin maps accept **client-side** params that seed their filters — none of these are server
 params; the map turns them into its normal filter state and fetches as usual. The main sender is
-the **answer drill-in** ([SURVEYS.md](SURVEYS.md) §J): the Survey Explorer's "Open in Map" and the
+the **answer drill-in** ([SURVEYS.md](SURVEYS.md) §J): the Survey Explorer's per-entry "Map" link and the
 mobile drill's "View on map".
 
 **Web ([MapPage.jsx](../client/src/pages/MapPage.jsx))** — read once in the state initializers:
@@ -426,7 +426,8 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
   despite the grep hit, it defines its own *local* `registerLayers`, imports nothing from `mapRender.js`,
   and draws only book polygons. Recorded so an audit by grep doesn't relitigate it.
   - `AnswerMiniMap` gets the **glyph only**: no click handler, because the card's hand-off is its
-    "Open in Map →" link. Its payload is already answer-filtered, so a glyph's count there means
+    fullscreen toggle (the "Open in Map →" link was removed — pins are clickable in place). Its
+    payload is already answer-filtered, so a glyph's count there means
     "doors WITH THIS ANSWER at this pin", not the building's size.
   - `ClientReportMap` gets the glyph, the click fix, and a **status-tally summary — never a door list.**
     The frozen `ClientReportMapPoint` carries no `addressLine2`, so a per-door list would print the same

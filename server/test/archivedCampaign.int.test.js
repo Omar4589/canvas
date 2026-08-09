@@ -154,6 +154,34 @@ test('archived: adding someone to the campaign roster is refused', { skip }, asy
   assert.equal(await CampaignAssignment.countDocuments({ campaignId: live.campaign._id }), 1);
 });
 
+test('archived: the crew door is shut too — creating a canvasser onto a finished campaign', { skip }, async () => {
+  const { org, token, archived, live } = ctx;
+  // The hole this closes: adding an EXISTING person to an archived campaign was refused
+  // (assignments.js mounts the guard) while "+ New canvasser" on the same page happily minted an
+  // account and rostered them. Both doors reach the roster, so both must be shut.
+  const body = { firstName: 'Late', lastName: 'Hire', email: 'late.hire@archived.co', password: 'password123' };
+  const blocked = await call('POST', `/admin/campaigns/${archived.campaign._id}/crew`, { token, orgId: org._id, body });
+  assertArchivedRefusal(blocked);
+  assert.equal(await User.countDocuments({ email: 'late.hire@archived.co' }), 0, 'and no account was created');
+
+  // Setting a crew re-stamps the campaign's ledger history, so it is a write to frozen reporting.
+  const coord = await call('PATCH', `/admin/campaigns/${archived.campaign._id}/crew/${ctx.walker._id}/coordinator`, {
+    token, orgId: org._id, body: { coordinatorId: null },
+  });
+  assertArchivedRefusal(coord);
+
+  // The lookup behind the add box is a read wearing a POST (an email address has no business in a
+  // URL), so it stays available on an archive — same carve-out as the turf previews.
+  const resolve = await call('POST', `/admin/campaigns/${archived.campaign._id}/crew/resolve`, {
+    token, orgId: org._id, body: { email: 'late.hire@archived.co' },
+  });
+  assert.notEqual(resolve.json?.code, 'campaign-archived', 'resolve must not be refused for being archived');
+  assert.equal(resolve.status, 200);
+
+  const allowed = await call('POST', `/admin/campaigns/${live.campaign._id}/crew`, { token, orgId: org._id, body });
+  assert.ok(allowed.status < 400, `live campaign crew create should succeed, got ${allowed.status}`);
+});
+
 test('archived: removing someone from the campaign roster is refused', { skip }, async () => {
   const { org, token, archived, walker } = ctx;
   // Seed the row directly — the point is that the ROUTE refuses, not that the row is missing.

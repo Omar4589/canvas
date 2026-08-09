@@ -71,7 +71,7 @@ If a door was double-knocked entirely outside the dates you're viewing, it isn't
 
 ## Arriving pre-filtered from a drill
 
-You don't always have to set the map's filters by hand. Drill into a survey answer — from the campaign Home or the [Survey Explorer](page-survey-explorer) — and **Open in Map** lands here with the same answer, canvasser, and date range already applied, so the pins are exactly the doors behind the number you were looking at. Each entry in those lists also has its own **Map** link that jumps straight to that one door. The same works on your phone: **View on map** from an answer's voter list pre-filters the mobile admin map.
+You don't always have to set the map's filters by hand. Drill into a survey answer — from the campaign Home or the [Survey Explorer](page-survey-explorer) — and the Explorer's own map shows exactly the doors behind the number you were looking at — click a pin there for the door's details without leaving the page. Each entry in those lists also has its own **Map** link that jumps straight to that one door on this page. The same works on your phone: **View on map** from an answer's voter list pre-filters the mobile admin map.
 
 ## Fixing an off-spot pin
 

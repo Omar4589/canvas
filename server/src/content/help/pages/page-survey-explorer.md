@@ -24,8 +24,17 @@ Two views of the same answer:
 
 ## Map and export
 
-A mini map shows exactly the filtered doors, and **Open in Map** takes you to the full Map page with the same filters already set. **Export CSV** downloads the current drill as a spreadsheet.
+The map sits above the list and shows exactly the filtered doors. **Click any pin** for that
+door's details — who lives there, who recorded the answer and when, and their note. Click a
+person in that card to open their full response, the same view the list below opens. A pin
+covering an apartment building lists every matching unit at that address.
 
-> Tip: For a quick answer to "who wants a yard sign today?" — pick that question, the **Yes** chip, leave the range on Today, and export or open the map. That's your pickup list.
+Use the **⤢** button in the map's header to fill the screen with it; **Esc** closes the door
+card, and **Esc** again leaves fullscreen.
+
+**Export CSV** downloads the current drill as a spreadsheet.
+
+> Tip: For a quick answer to "who wants a yard sign today?" — pick that question, the **Yes**
+> chip, leave the range on Today, and read the map or export. That's your pickup list.
 
 You can also get here from the campaign Home: expand any answer in the survey results and click **Open full view**.

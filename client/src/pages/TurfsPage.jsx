@@ -386,12 +386,14 @@ function PassPicker({ campaignId, passId, onChange }) {
   const passes = passesQ.data?.passes || [];
   const efforts = effortsQ.data?.efforts || [];
   const effortName = new Map(efforts.map((e) => [String(e._id), e.name]));
-  // Landing pass: the WALK LIST's status ranks first, the old pass ranking second. Rules and
-  // their tests live in lib/passPicker.js — the ranking is easy to regress silently, and a wrong
-  // landing sends you to cut a list nobody is walking.
+  // Landing pass: which walk list is actually BEING WALKED ranks first, the old pass ranking
+  // second. Rules and their tests live in lib/passPicker.js — the ranking regresses silently, and
+  // a wrong landing sends you to cut a list nobody is walking.
   //
-  // Waits for BOTH queries: ranking with `efforts` still empty would tier every pass as
-  // "unknown" and land on whatever the old rule picked, then not re-run (passId is set by then).
+  // Waits for BOTH queries. The ranking derives "is this list running" from the passes array, so
+  // it degrades gracefully if /efforts fails — but `efforts` is still what supplies the archived
+  // check and the newest-walk-list tie-break, and ranking before it arrives would land somewhere
+  // and then never re-run (passId is set by then).
   const ready = !passesQ.isLoading && !effortsQ.isLoading;
   useEffect(() => {
     if (passId || !ready || !passes.length) return;

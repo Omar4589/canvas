@@ -642,6 +642,31 @@ export default function SurveyExplorerPage() {
             </div>
           </div>
 
+          {/* WHERE those answers live, ABOVE the list on purpose: the map reads at a glance and
+              is where you actually want to start, while the table needed a long scroll to reach.
+              Clicking a pin gives the same per-response detail the table rows open, so the list
+              below is now the fallback for reading in bulk rather than the only way in.
+
+              Tag mode is skipped: the map endpoint's answer filter is per question+option only.
+              `passId` keeps the dots on the same round as the list; the 'legacy' sentinel is not
+              an ObjectId so the endpoint would ignore it — send nothing rather than mis-scope. */}
+          {!tag && hasOption && (
+            <AnswerMiniMap
+              campaignId={campaignId}
+              questionKey={q}
+              option={option}
+              optionId={optionId}
+              surveyTemplateId={resolvedTemplateId}
+              userId={userId}
+              effortId={effortId}
+              passId={passId && passId !== 'legacy' ? passId : undefined}
+              from={dateRange?.from}
+              to={dateRange?.to}
+              tz={tz}
+              onOpenResponse={setDetailId}
+            />
+          )}
+
           {!tag && view === 'canvassers' ? (
             canvassersQ.isLoading ? (
               <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">Loading…</div>
@@ -752,24 +777,6 @@ export default function SurveyExplorerPage() {
             </>
           )}
 
-          {/* Where those answers live. Tag mode is skipped: the map endpoint's answer
-              filter is per question+option only. `passId` keeps the dots on the same round as the
-              list beside them; the 'legacy' sentinel is not an ObjectId so the map endpoint would
-              ignore it — send nothing rather than silently mis-scope. */}
-          {!tag && hasOption && (
-            <AnswerMiniMap
-              campaignId={campaignId}
-              questionKey={q}
-              option={option}
-              optionId={optionId}
-              surveyTemplateId={resolvedTemplateId}
-              userId={userId}
-              effortId={effortId}
-              passId={passId && passId !== 'legacy' ? passId : undefined}
-              from={dateRange?.from}
-              to={dateRange?.to}
-            />
-          )}
         </div>
       )}
 

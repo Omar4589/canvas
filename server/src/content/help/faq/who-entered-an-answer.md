@@ -21,7 +21,7 @@ Flip the **Voters | By canvasser** toggle. It ranks everyone who recorded the an
 
 ## Where were those doors?
 
-Each entry has a **Map** link to its door, and the explorer shows a mini map of the whole drill — **Open in Map** loads the full Map page already filtered to the same answer, canvasser, and dates.
+Each entry has a **Map** link to its door, and the explorer shows a map of the whole drill above the list — click any pin to see who recorded that answer at that door, without leaving the page.
 
 ## Was an entry changed?
 

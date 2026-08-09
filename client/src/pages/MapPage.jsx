@@ -13,6 +13,8 @@ import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 import FlaggedEntryPanel from '../components/FlaggedEntryPanel.jsx';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
+import { IconButton } from '../components/ui/index.js';
+import { IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
@@ -89,6 +91,9 @@ export default function MapPage() {
   const mapRef = useRef(null);
   const qc = useQueryClient();
   const [mapReady, setMapReady] = useState(false);
+  // Fullscreen the map, matching the Turf Cutting page. Purely a container resize — see the
+  // ResizeObserver and the Esc handler below.
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   // Brief page-level confirmation after a flag review (the panel itself closes on refetch,
   // so the feedback has to live above it). Auto-dismisses.
   const [flagFlash, setFlagFlash] = useState(null);
@@ -636,6 +641,26 @@ export default function MapPage() {
     };
   }, [tokenQ.data]);
 
+  // Repaint the canvas whenever the container changes size (entering/leaving fullscreen, and
+  // any layout shift like the sidebar) — Mapbox needs an explicit resize(). This page had no
+  // observer at all, so without it the fullscreen box would render at the OLD canvas size until
+  // something else forced a resize.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!mapReady || !el) return undefined;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mapReady]);
+
+  // Esc leaves fullscreen. Listener only exists while fullscreen, and is removed on exit.
+  useEffect(() => {
+    if (!mapFullscreen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setMapFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mapFullscreen]);
+
   // New campaign = new geography: drop the viewport bound and re-arm the auto-fit so the next
   // (unbounded) pull re-frames the map on that campaign's doors instead of the old city's view.
   useEffect(() => {
@@ -1089,9 +1114,29 @@ export default function MapPage() {
             }}
           />
         </aside>
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div
+          // Fullscreen matches the Turf Cutting map exactly: the container just becomes a fixed,
+          // full-viewport box — no Fullscreen API, no separate render path — so every overlay,
+          // popup and layer inside keeps working untouched. The ResizeObserver below is what
+          // repaints the canvas at the new size.
+          style={mapFullscreen
+            ? { position: 'fixed', inset: 0, zIndex: 50, minHeight: 0 }
+            : { flex: 1, minHeight: 0, position: 'relative' }}
+          className={mapFullscreen ? 'overflow-hidden bg-card' : undefined}
+        >
           <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
-          <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="absolute left-4 top-4 z-10 items-start" />
+          {/* One top-left cluster so the style picker and the fullscreen toggle sit side by side
+              rather than the toggle landing under the picker's downward-opening menu. */}
+          <div className="absolute left-4 top-4 z-10 flex items-start gap-2">
+            <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="items-start" />
+            <IconButton
+              label={mapFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
+              className="h-10 w-10 border border-border bg-card/95 shadow-lg backdrop-blur"
+              onClick={() => setMapFullscreen((v) => !v)}
+            >
+              {mapFullscreen ? <IconMinimize /> : <IconExpand />}
+            </IconButton>
+          </div>
           {firstLastKnock.first && (
             <div
               style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 10 }}

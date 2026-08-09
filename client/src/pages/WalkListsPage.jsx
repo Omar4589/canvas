@@ -602,9 +602,16 @@ export default function WalkListsPage() {
                     {w.householdCount?.toLocaleString()} hh · {w.voterCount?.toLocaleString()} voters · {formatInTz(w.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}
                   </div>
                   <div className="text-xs text-fg-muted">
-                    {/* An import-generated revisit list has no author — say so rather than
-                        printing "by Unknown", which reads like data we lost. */}
-                    {w.createdBy?.name ? `by ${w.createdBy.name}` : 'built automatically by an import'}
+                    {/* Keyed on SOURCE, never on createdBy being null. An import-generated list
+                        normally DOES carry an author (collectRevisitHomes sets it to whoever ran
+                        the import), and the oldest lists — the ones migratePasses.js created as
+                        'All voters (initial)' — carry none at all while being source 'filter'.
+                        Reading null as "an import made this" would mislabel exactly those. */}
+                    {w.createdBy?.name
+                      ? `by ${w.createdBy.name}`
+                      : w.source === 'import'
+                      ? 'built automatically by an import'
+                      : 'author not recorded'}
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
                     <Link

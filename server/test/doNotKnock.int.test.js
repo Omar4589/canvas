@@ -45,6 +45,8 @@ const { resolveWalkList } = await import('../src/services/walklist/resolveWalkLi
 const { coverageBucketExpr } = await import('../src/services/reports/aggregations.js');
 const { KNOCKABLE_DOOR_FILTER } = await import('../src/services/canvass/knockableDoorFilter.js');
 const { deleteOrganization } = await import('../src/services/platform/deleteOrganization.js');
+const { runImport } = await import('../src/services/import/csvImporter.js');
+const { normalizeAddress, looseAddressKey } = await import('../src/utils/normalizeAddress.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -469,7 +471,56 @@ test('11. clearing a request that does not exist is a 404, not a silent success'
   assert.strictEqual(direct.cleared, false);
 });
 
-test('12. org deletion sweeps the register', { skip }, async () => {
+// Tests 8 and 9 call suppressedAddressSet / reapplyDoNotKnock DIRECTLY. That proves the services
+// work but NOT that csvImporter is actually wired to them — the seeding lives in a $setOnInsert
+// deep inside the household bulkWrite, which a service-level test never touches. This one drives
+// a REAL import end to end so the wiring itself is under test.
+test('12. a REAL import inserts an already-suppressed door (csvImporter $setOnInsert wiring)', { skip }, async () => {
+  await reset();
+  const addr = { addressLine1: '77 Import Rd', city: 'Town', state: 'FL', zipCode: '34741' };
+  // Build the request key with the REAL normalizer, never a hand-written string — the exact key
+  // is the entire sibling mechanism, and a fixture that merely looks right proves nothing.
+  const norm = normalizeAddress(addr);
+
+  await DoNotKnockAddress.create({
+    organizationId: ctx.org._id,
+    normalizedAddress: norm,
+    looseKey: looseAddressKey(addr),
+    ...addr,
+    reason: 'Asked never to return, before this file was ever imported',
+    source: 'admin',
+    byUserId: ctx.admin._id,
+    at: new Date(),
+  });
+  assert.strictEqual(
+    await Household.countDocuments({ campaignId: ctx.campA._id, normalizedAddress: norm }), 0,
+    'precondition: the door does not exist yet'
+  );
+
+  const csv = [
+    'State Voter ID,First Name,Last Name,Address,City,Registered State,Zip Code,p_Latitude,p_Longitude',
+    `IMP001,Ida,Import,${addr.addressLine1},${addr.city},${addr.state},${addr.zipCode},28.3,-81.4`,
+  ].join('\n');
+  await runImport({
+    buffer: Buffer.from(csv, 'utf8'),
+    filename: 'dnk-seed.csv',
+    userId: ctx.admin._id,
+    campaignId: ctx.campA._id,
+    organizationId: ctx.org._id,
+  });
+
+  const door = await Household.findOne({ campaignId: ctx.campA._id, normalizedAddress: norm }).lean();
+  assert.ok(door, 'the import created the door');
+  assert.strictEqual(
+    door.doNotKnock, true,
+    'it must arrive suppressed — not knockable until some later recompute'
+  );
+  // And it is genuinely out of the knockable set, not merely flagged.
+  const knockable = await Household.countDocuments({ _id: door._id, ...KNOCKABLE_DOOR_FILTER });
+  assert.strictEqual(knockable, 0);
+});
+
+test('13. org deletion sweeps the register', { skip }, async () => {
   await reset();
   await setDoNotKnock({
     organizationId: ctx.org._id,

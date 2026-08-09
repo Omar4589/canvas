@@ -23,6 +23,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Effort } = await import('../src/models/Effort.js');
+const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const bcrypt = (await import('bcryptjs')).default;
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -87,7 +88,7 @@ before(async () => {
   ]);
 
   Object.assign(ctx, {
-    org, A, B, hhA, hhB, actA, actB, shareToken,
+    org, A, B, hhA, hhB, actA, actB, shareToken, admin,
     survOverrideA, survDefaultB, survLeadDraft,
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
@@ -353,7 +354,7 @@ test('lead can create a canvasser onto a managed campaign via /crew, not onto B'
   assert.strictEqual(no.status, 403, 'crew create on B');
 });
 
-test('crew create issues a temp password + forced change; a lead can link an existing account (keeps its own password)', { skip }, async () => {
+test('crew create issues a temp password + forced change; an address that already has an account attaches the real person', { skip }, async () => {
   const { leadTok, org, A } = ctx;
   const opt = { token: leadTok, orgId: org._id };
 
@@ -374,24 +375,143 @@ test('crew create issues a temp password + forced change; a lead can link an exi
     passwordHash: 'existing-hash', isActive: true,
   });
 
-  // Trying to CREATE (not link) with that email is refused and nudges toward linking.
-  const dup = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
+  // 3) THE BLIND ATTACH. The lead types that address believing it is a new hire, and gives a name
+  //    and a password. The server resolves the address FIRST, finds a real account, and attaches
+  //    the real person instead of minting a second one — no 409, no checkbox, no second round trip
+  //    (EMAIL_EXISTS_USE_LINK is what this replaces). What was typed is discarded: overwriting a
+  //    stranger's name would be a lie and setting their password would be a takeover, since a
+  //    password is per-USER and reaches every org they belong to.
+  const attached = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
     ...opt,
-    body: { firstName: 'Rey', lastName: 'Returner', email: 'returner@t.co', password: 'password123' },
+    body: { firstName: 'Wrong', lastName: 'Guess', email: 'returner@t.co', password: 'password123' },
   });
-  assert.strictEqual(dup.status, 409, 'existing email create → 409');
-  assert.strictEqual(dup.json.code, 'EMAIL_EXISTS_USE_LINK', 'nudged to link');
-
-  // 3) The lead LINKS the existing account onto their campaign — now allowed — and it keeps
-  //    its own password (no temp password, no forced change).
-  const linked = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
-    ...opt,
-    body: { email: 'returner@t.co', linkExisting: true },
-  });
-  assert.strictEqual(linked.status, 201, 'lead links existing account');
+  assert.strictEqual(attached.status, 201, 'existing address attaches rather than 409ing');
+  assert.strictEqual(attached.json.attached, true, 'response says it attached, not created');
+  assert.strictEqual(attached.json.outcome, 'attached', 'outcome names the branch');
+  // The operator learns WHO only here, in the success body — never from a probe beforehand.
+  assert.strictEqual(attached.json.user.firstName, 'Rey', 'the real person landed, not the typed name');
   const afterLink = await User.findById(existing._id);
-  assert.strictEqual(afterLink.passwordHash, 'existing-hash', 'linked account keeps its password');
-  assert.ok(!afterLink.mustChangePassword, 'linked account is NOT forced to change');
+  assert.strictEqual(afterLink.firstName, 'Rey', 'typed name did NOT overwrite the account');
+  assert.strictEqual(afterLink.passwordHash, 'existing-hash', 'attached account keeps its password');
+  assert.ok(!afterLink.mustChangePassword, 'attached account is NOT forced to change');
+  assert.ok(
+    await CampaignAssignment.exists({ campaignId: A._id, userId: existing._id }),
+    'and they are on the campaign roster'
+  );
+});
+
+test('the crew list is THIS CAMPAIGN\'s people — never the organization directory', { skip }, async () => {
+  const { leadTok, adminTok, org, A, B, admin } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+
+  // Someone who works for this org on a campaign the lead does NOT manage. Before the campaign
+  // Team page was scoped, this person (name AND email) was handed to every lead in the org.
+  const stranger = await User.create({
+    firstName: 'Otto', lastName: 'Otherclient', email: 'otto@t.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({ userId: stranger._id, organizationId: org._id, role: 'canvasser', isActive: true });
+  await CampaignAssignment.create({ campaignId: B._id, userId: stranger._id, organizationId: org._id });
+
+  const list = await call('GET', `/api/admin/campaigns/${A._id}/crew`, opt);
+  assert.strictEqual(list.status, 200, 'lead reads their campaign crew');
+  const emails = (list.json.members || []).map((m) => m.user.email);
+  assert.ok(!emails.includes('otto@t.co'), 'a member of an unmanaged campaign is NOT listed');
+  // The org admin is an active member of the org but is on no campaign — the old query returned
+  // them too. Belt and braces over the whole body, which also catches a leak through any field
+  // added later.
+  assert.ok(!JSON.stringify(list.json).includes('otto@t.co'), 'no trace of them anywhere in the body');
+  assert.ok(emails.includes('cy@t.co'), "but the campaign's own crew is still listed");
+
+  // Coordinators are a separate, deliberately org-level list: resolveCoordinatorId accepts any
+  // active admin/lead, and managing a campaign does not put you on its roster — so scoping this to
+  // the roster would empty the crew picker. Names and roles only, no emails.
+  const coordIds = (list.json.coordinators || []).map((c) => c.id);
+  assert.ok(coordIds.includes(String(admin._id)), 'an org admin can still be picked as coordinator');
+  assert.ok(!JSON.stringify(list.json.coordinators).includes('@'), 'coordinator rows carry no email');
+
+  // Admins read the same campaign-scoped list — the endpoint no longer forks by role.
+  const asAdmin = await call('GET', `/api/admin/campaigns/${A._id}/crew`, { token: adminTok, orgId: org._id });
+  assert.strictEqual(asAdmin.status, 200, 'admin reads it too');
+  assert.ok(
+    !(asAdmin.json.members || []).map((m) => m.user.email).includes('otto@t.co'),
+    'and it is campaign-scoped for an admin as well'
+  );
+});
+
+test('resolve answers for colleagues and stays silent about everyone else', { skip }, async () => {
+  const { leadTok, org, A } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  const resolve = (email) => call('POST', `/api/admin/campaigns/${A._id}/crew/resolve`, { ...opt, body: { email } });
+
+  // Already on this campaign — created by an earlier test in this file.
+  const onCampaign = await resolve('cy@t.co');
+  assert.strictEqual(onCampaign.status, 200);
+  assert.strictEqual(onCampaign.json.outcome, 'on-campaign');
+  assert.strictEqual(onCampaign.json.person.firstName, 'Cy');
+
+  // In the org, on another campaign — named, because they are already this lead's colleague and
+  // the claim confirm has to say who it is about.
+  const inOrg = await resolve('otto@t.co');
+  assert.strictEqual(inOrg.json.outcome, 'in-org', 'a colleague resolves');
+  assert.strictEqual(inOrg.json.person.lastName, 'Otherclient');
+
+  // A switched-off membership is checked BEFORE role, so it can never resolve to a plain claim and
+  // leave a roster row for somebody who cannot sign in.
+  const off = await User.create({ firstName: 'Dee', lastName: 'Disabled', email: 'dee@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: off._id, organizationId: org._id, role: 'canvasser', isActive: false });
+  assert.strictEqual((await resolve('dee@t.co')).json.outcome, 'in-org-inactive');
+
+  // THE BOUNDARY. An account belonging to another customer and an address with no account at all
+  // must be indistinguishable — a lead may be the client's own manager, so any difference between
+  // these two is a cross-tenant disclosure. Compare the whole body, not just the outcome string.
+  const otherOrg = await Organization.create({ name: 'Rival Firm', slug: 'rival-firm-crew', isActive: true });
+  const rival = await User.create({ firstName: 'Ria', lastName: 'Rival', email: 'ria@rival.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: rival._id, organizationId: otherOrg._id, role: 'canvasser', isActive: true });
+  const foreign = await resolve('ria@rival.co');
+  const unknown = await resolve('nobody-at-all@nowhere.co');
+  assert.deepStrictEqual(foreign.json, unknown.json, 'a foreign account looks exactly like no account');
+  assert.deepStrictEqual(unknown.json, { outcome: 'outside', person: null }, 'and carries nothing else');
+});
+
+test('claiming a colleague rosters them without touching their membership; a switched-off one needs an admin', { skip }, async () => {
+  const { leadTok, adminTok, org, A } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+
+  // CLAIM: already in the org, not on this campaign. One roster row, no membership write — so a
+  // lead can never silently promote or demote anyone by adding them.
+  const otto = await User.findOne({ email: 'otto@t.co' });
+  const before = await Membership.findOne({ userId: otto._id, organizationId: org._id });
+  const claimed = await call('POST', `/api/admin/campaigns/${A._id}/crew`, { ...opt, body: { email: 'otto@t.co' } });
+  assert.strictEqual(claimed.status, 201, 'colleague claimed onto the campaign');
+  assert.strictEqual(claimed.json.outcome, 'in-org', 'reported as a claim');
+  assert.strictEqual(claimed.json.attached, false, 'not an attach — they were already ours');
+  assert.ok(await CampaignAssignment.exists({ campaignId: A._id, userId: otto._id }), 'roster row created');
+  const after = await Membership.findOne({ userId: otto._id, organizationId: org._id });
+  assert.strictEqual(String(after._id), String(before._id), 'the same membership row, untouched');
+  assert.strictEqual(after.role, before.role, 'role unchanged by the claim');
+
+  // Re-adding is idempotent, not an error.
+  const again = await call('POST', `/api/admin/campaigns/${A._id}/crew`, { ...opt, body: { email: 'otto@t.co' } });
+  assert.strictEqual(again.status, 201, 're-adding is a no-op, not a 409');
+  assert.strictEqual(again.json.outcome, 'on-campaign');
+
+  // A switched-off colleague is a reactivation, which is ORG-wide: the lead is told who and told to
+  // ask, the admin may do it inline.
+  const asLead = await call('POST', `/api/admin/campaigns/${A._id}/crew`, { ...opt, body: { email: 'dee@t.co' } });
+  assert.strictEqual(asLead.status, 409, 'lead cannot reactivate');
+  assert.strictEqual(asLead.json.code, 'MEMBER_DEACTIVATED');
+  assert.strictEqual(asLead.json.person.firstName, 'Dee', 'but is told who it is, so the message is actionable');
+  assert.ok(
+    !(await CampaignAssignment.exists({ campaignId: A._id, userId: (await User.findOne({ email: 'dee@t.co' }))._id })),
+    'and no ghost roster row was left behind'
+  );
+
+  const asAdmin = await call('POST', `/api/admin/campaigns/${A._id}/crew`, {
+    token: adminTok, orgId: org._id, body: { email: 'dee@t.co' },
+  });
+  assert.strictEqual(asAdmin.status, 201, 'admin reactivates and rosters in one step');
+  const dee = await Membership.findOne({ userId: (await User.findOne({ email: 'dee@t.co' }))._id, organizationId: org._id });
+  assert.strictEqual(dee.isActive, true, 'membership switched back on');
 });
 
 test('lead can load the campaign map for A, not B, and never org-wide', { skip }, async () => {
