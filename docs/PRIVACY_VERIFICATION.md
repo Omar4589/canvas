@@ -1844,7 +1844,8 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 
 > **[v4 2026-08-08 — a second caller of this path: `repair:import-pins`. NOT a new subprocessor, NOT a
 > DPA §6 event.]** `server/src/migrations/repairImportPins.js` re-checks the addresses of doors whose
-> import pin looks wrong (out of state, far from their own street, or knocked from far away by 2+
+> import pin looks wrong (out of state, far from their own street, sharing an exact pin with doors
+> from other streets — a vendor placeholder coordinate — or knocked from far away by 2+
 > canvassers) by calling the **same** `geocodeService.resolve()` with the **same** address string and the
 > same unit-line omission. Same recipient, same data category, same purpose (turning an address into a
 > coordinate) — so the subprocessor list in `docs/DPA.md` §6 and the Privacy Policy's service-providers

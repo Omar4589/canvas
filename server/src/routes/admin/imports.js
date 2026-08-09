@@ -241,9 +241,12 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     if (!campaign) return res.status(400).json({ error: 'Campaign not found' });
 
     const explode = req.body?.explode !== 'false';
-    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection } =
+    // Destructure and pass the coordinate-quality counters too, or the SYNC preview stays
+    // silent about disagreeing/placeholder pins while the worker preview warns — the two
+    // previews must tell the same story.
+    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors } =
       await buildImportRows(fs.readFileSync(req.file.path), req.file.originalname, resolved.mapping, { explode });
-    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource });
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {

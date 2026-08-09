@@ -94,14 +94,23 @@ An audit run finds them and can correct them:
 - It looks only at pins that came **from your file**. A pin someone dragged to the right spot by hand
   is field-verified truth and is never overwritten, and neither is one the geocoder placed.
 - A door is suspected when it's outside its state, when it's far from the other doors on its own
-  street, or when **two or more canvassers logged a knock far away from it** — they were standing at
-  the real house, so the pin is what's wrong.
+  street, when it **shares an exact map spot with doors from other streets** (a placeholder
+  coordinate the vendor stamped on addresses it couldn't place — a real apartment building is one
+  street address with many units, so it never trips this), or when **two or more canvassers logged a
+  knock far away from it** — they were standing at the real house, so the pin is what's wrong.
+- A real building carrying a couple of oddly-typed rows keeps its majority: the building stays put
+  and only the odd doors get a second look. An 89-door mobile-home park with two typo'd lots is a
+  park with two typos, not a fake pin.
 - Nothing is corrected on suspicion. Each suspect is re-checked against the **address itself**, and
   only a confident, clearly-different answer wins.
 - Corrected doors keep their books. A door fixed this way stays in whatever book was cut around its
-  old location until you re-cut that pass.
+  old location until you re-cut that pass. And if **Remove apartments** had excluded a fake stack,
+  fixing the pins does not put those doors back in books — re-include and re-cut (the script prints
+  the exact steps).
 
-Ask your Doorline contact to run it — it's an operator tool, not a page in the app.
+Ask your Doorline contact to run it — it's an operator tool, not a page in the app. The import
+preview also warns up front now: *"N doors sit on an exact map spot shared with doors from other streets"*
+means the file shipped placeholder coordinates and a repair run is worth scheduling before turf is cut.
 
 ## Shared voter database
 
@@ -552,6 +561,14 @@ Bounded for the streaming path: nothing is allocated until a household actually 
 `COORD_CANDIDATE_CAP`. Counts surface as `rowIssues.coordConflicts` / `coordConflictTies` in the
 import diff and as the matching `ImportJob` fields.
 
+`finish()` also runs `classifyStackedPins` over the resolved households (CROSS-household — a vendor
+that can't place an address stamps a centroid, piling different streets onto one dot). Detection
+only: the coords are **never nulled** — nulling would hand the doors to the geocoder, which DROPS
+what it can't place, and placeholder-stamped addresses (rural routes, new construction) are exactly
+the ones geocoders fail on. A suspect pin walks; a dropped door doesn't. Surfaces as
+`rowIssues.placeholderPins` / `placeholderPinDoors` + the same `ImportJob` fields, rendered in the
+preview's "Doors imported with a suspect map pin" block; `repair:import-pins` adjudicates after.
+
 ### `repair:import-pins` — settling ties and cleaning up old imports
 
 `server/src/migrations/repairImportPins.js`, proxied in the **root** `package.json` (the Heroku
@@ -566,14 +583,31 @@ npm run repair:import-pins -- --apply --user=<userId>   # commit
 
 The original CSV is **not** recoverable — `importProcessor` deletes the raw GridFS upload on success,
 `Voter` carries no coordinates, and `ImportJob` stores none — so this **re-derives** truth rather than
-reconstructing the disagreement. Three shortlist signals, none of which repairs anything on its own:
+reconstructing the disagreement. Four shortlist signals, none of which repairs anything on its own:
 out-of-state; a street-cohort outlier (grouped by `streetOf` + ZIP5 from
 [utils/streetName.js](../server/src/utils/streetName.js), de-duplicated by building key so a tower
 doesn't outvote its street, judged against the cohort **medoid** — never a mean, which an outlier drags
-— at `max(--min-meters, 4 × cohort median)`); and knock evidence (`CanvassActivity.distanceFromHouseMeters`
+— at `max(--min-meters, 4 × cohort median)`); a **placeholder pin** (`classifyStackedPins` in
+[utils/stackedPins.js](../server/src/utils/stackedPins.js) — doors from several different streets on one
+building-key pin; no street holding an outright majority ⇒ every door is suspect, a majority street ⇒
+the building stays and only the off-street strays are suspect — this is the signal the street cohort
+structurally misses, because a street that collapsed WHOLE leaves no cohort to compare against);
+and knock evidence (`CanvassActivity.distanceFromHouseMeters`
 ≥ threshold with the *closest* knock still far, from 2+ distinct canvassers). Suspects are then
-adjudicated against the address via `geocodeResolve`, and only an `exact`-confidence answer more than
-`--min-meters` from the stored pin is confirmed.
+adjudicated against the address via `geocodeResolve`, and only an `exact`-confidence answer can
+overrule a stored pin. **The confirm floor is per-signal**: distance-based suspects (out-of-state,
+street outlier, knock evidence) need the answer more than `--min-meters` (250) away — an exact answer
+agreeing within that refutes a distance suspicion. Stacked-pin suspects need only
+`STACKED_MIN_METERS` (25): their suspicion is *identity*, not distance — the door provably shares one
+~1.1m dot with other streets' doors, so the pin is wrong at any gap, and a centroid stamped on a small
+area puts true rooftops well inside 250m. An exact answer that agrees with the pin is counted and
+reported as **refuted** ("N refuted — the address geocodes to where the pin already is"), so a clean
+run can't be misread as a cache miss.
+
+**Sequencing trap: use `--geocode` on the FIRST apply.** The placeholder signal is stack-based, so
+once a pin's cached-answer neighbours move away, an uncached tail door at that pin is a lone door with
+no signal — a later `--geocode` pass can no longer find it. Adjudicate the whole stack in one run
+(`--geocode --apply --user=…`), while the stack still exists.
 
 Traps this script is built around, each of which is a real failure mode:
 

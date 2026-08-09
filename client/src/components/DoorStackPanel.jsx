@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { formatInTz } from '../lib/datetime.js';
+import { streetOf } from '../lib/streetName.js';
 
 // Every door hiding under one map pin. The household symbol layer draws with
 // icon-allow-overlap, so an 84-unit building used to render as 84 coincident
@@ -14,9 +15,28 @@ const unitLabel = (h) => String(h.addressLine2 || '').trim() || h.addressLine1 |
 export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, statusColors, statusLabels, tz }) {
   // One street line for the whole stack when the units agree; if an import
   // disagreed, say how many doors are here rather than picking one at random.
-  const title = useMemo(() => {
+  //
+  // multiStreet drives the honest explainer below, mirroring the SERVER classifier's verdict
+  // (utils/stackedPins.js) — both halves of its rule, or the amber note warns about pins the
+  // repair won't touch and stops being trustworthy:
+  //   · BASE STREETS, never raw lines: real files bake units into line1 ("845 Collier Ct
+  //     Apt 104" vs "Apt 204"), so a genuine tower's raw lines all differ while its street
+  //     is one.
+  //   · The DOMINANT-STREET rule: a pin where one street holds an outright majority is a real
+  //     building carrying a few odd rows (an 89-door park with two typo'd lots), not a
+  //     placeholder — the repair checks only the strays, so the panel must not cry placeholder.
+  const { title, multiStreet } = useMemo(() => {
     const lines = new Set(doors.map((d) => (d.addressLine1 || '').trim()).filter(Boolean));
-    return lines.size === 1 ? [...lines][0] : `${doors.length} doors at one pin`;
+    const freq = new Map();
+    for (const d of doors) {
+      const s = streetOf(d.addressLine1);
+      freq.set(s, (freq.get(s) || 0) + 1);
+    }
+    const modal = Math.max(0, ...freq.values());
+    return {
+      title: lines.size === 1 ? [...lines][0] : `${doors.length} doors at one pin`,
+      multiStreet: freq.size > 1 && modal / doors.length <= 0.5,
+    };
   }, [doors]);
 
   const sorted = useMemo(
@@ -49,9 +69,17 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, s
           ✕
         </button>
       </div>
-      <p className="border-b border-border bg-sunken px-4 py-2 text-[11px] leading-snug text-fg-muted">
-        These doors are all pinned to the same spot, so the map draws them as one building. Pick one to open it.
-      </p>
+      {multiStreet ? (
+        <p className="border-b border-warning/30 bg-warning-tint px-4 py-2 text-[11px] leading-snug text-warning-fg">
+          These doors have <strong>different street addresses</strong> but identical map coordinates — usually a
+          placeholder pin the voter file stamped on addresses it couldn&apos;t place, not a real building. The doors
+          are real and walkable; the dot is what&apos;s wrong. Ask your Doorline contact to run the pin repair.
+        </p>
+      ) : (
+        <p className="border-b border-border bg-sunken px-4 py-2 text-[11px] leading-snug text-fg-muted">
+          These doors are all pinned to the same spot, so the map draws them as one building. Pick one to open it.
+        </p>
+      )}
       <ul className="divide-y divide-border">
         {sorted.map((d) => (
           <li key={d.id}>

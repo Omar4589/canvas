@@ -101,6 +101,19 @@ On the web admin map you'll see:
 Two doors that are *near* each other but not identical still get their own pins. If they overlap on
 screen and your click hits both, the map now opens the same list instead of silently picking one.
 
+**When the "building" is really a bad pin.** A genuine building is one street address with many
+units. If the doors inside a stack come from **different streets with no street holding a clear
+majority**, that's not a building — the voter file stamped a placeholder coordinate on addresses it
+couldn't place, and unrelated houses piled onto one dot. (A stack where one street *does* hold the
+majority is a real building carrying a few oddly-typed rows — an 89-door park with two typo'd lots —
+and both the panel and the repair treat it that way: the building stands, only the strays are checked.) The panel says so in as many words (amber note: *"different street addresses but
+identical map coordinates … the dot is what's wrong"*) instead of pretending it's a tower, the import
+preview warns when a file arrives carrying such pins, and `repair:import-pins` re-places the doors
+from their addresses (see [IMPORTS.md](IMPORTS.md) → *Fixing pins that came in wrong*). Watch for the
+knock-on: **Remove apartments** keys on geocode stacking, so it will exclude a fake stack from books
+exactly as if it were a tower — real single-family homes silently out of the walk universe until the
+pins are fixed and the doors re-included.
+
 **Building grouping is not clustering.** A building sits at the doors' real location, never merges
 with the building next door, and never dissolves as you zoom. Doorline does not cluster map pins.
 

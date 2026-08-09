@@ -10,6 +10,7 @@ import { haversineMeters } from '../utils/normalizeAddress.js';
 import { inStateBounds } from '../utils/stateBounds.js';
 import { streetOf } from '../utils/streetName.js';
 import { buildingKeyForCoords } from '../utils/buildingKey.js';
+import { classifyStackedPins } from '../utils/stackedPins.js';
 import { resolve as geocodeResolve, geocodeCostCents } from '../services/import/geocode/geocodeService.js';
 import { updateHouseholdLocation } from '../services/households/updateHouseholdLocation.js';
 
@@ -33,10 +34,16 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 //   npm run repair:import-pins -- --apply --user=<userId>        # fix confirmed doors
 //   npm run repair:import-pins -- --min-meters=250               # confirm threshold (default 250)
 //
-// HOW A DOOR IS SHORTLISTED (any one signal is enough — all three are only suspicion):
+// HOW A DOOR IS SHORTLISTED (any one signal is enough — all four are only suspicion):
 //   1. Out of state       — the pin isn't inside its own state's bounding box.
 //   2. Street outlier     — far from the medoid of the other doors on its street + ZIP.
-//   3. Knock evidence     — two or more canvassers logged a knock far from the pin. They were
+//   3. Placeholder pin    — doors from several DIFFERENT streets share one exact coordinate
+//                           (a vendor stamped a centroid on addresses it couldn't place). A
+//                           real building shares one street line, so it can never trip this;
+//                           a building with a couple of odd-street strays keeps its majority
+//                           and only the strays are checked. Catches what #2 structurally
+//                           can't: a street that collapsed WHOLE leaves no cohort to compare.
+//   4. Knock evidence     — two or more canvassers logged a knock far from the pin. They were
 //                           standing at the real house; the pin is what's wrong.
 // Nothing is repaired on suspicion. A shortlisted door is then ADJUDICATED against the address
 // itself via the geocoder (cache-first, so it is usually free), and repaired only when the
@@ -62,6 +69,13 @@ const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split(
 const CAMPAIGN_ID = (process.argv.find((a) => a.startsWith('--campaign=')) || '').split('=')[1] || null;
 const USER_ID = (process.argv.find((a) => a.startsWith('--user=')) || '').split('=')[1] || null;
 const MIN_METERS = Number((process.argv.find((a) => a.startsWith('--min-meters=')) || '').split('=')[1]) || 250;
+
+// The confirm floor for STACKED-pin suspects (placeholder pins + strays). Deliberately far
+// below MIN_METERS: their suspicion is identity (the door provably shares one exact dot with
+// other streets' doors), not distance, so an exact answer only has to actually LEAVE the
+// shared dot to be an improvement. 25m is generously past the ~1.1m building-key rounding
+// while still refusing to churn a door onto a spot that is effectively the same place.
+const STACKED_MIN_METERS = 25;
 
 // A cohort needs enough doors to have an opinion, and an outlier has to be well clear of the
 // cohort's own spread — the same street name recurs miles apart on rural routes, which is what
@@ -190,6 +204,7 @@ async function auditCampaign(campaign) {
   // such pin, this catches all 18). A genuine building shares ONE street line, so it can never
   // trip this; a building carrying a couple of odd-street strays keeps its majority and only
   // the strays are checked (classifyStackedPins' dominant-street rule).
+  const stackedIds = new Set();
   {
     const stacked = classifyStackedPins(
       households.map((h) => {
@@ -198,6 +213,7 @@ async function auditCampaign(campaign) {
       })
     );
     for (const [id, info] of stacked.suspects) {
+      stackedIds.add(id);
       addReason(
         id,
         info.kind === 'placeholder'
@@ -210,10 +226,10 @@ async function auditCampaign(campaign) {
     addReason(id, `knocked from ${info.minDistance}m away, 2+ canvassers`);
   }
 
-  return { households, suspects };
+  return { households, suspects, stackedIds };
 }
 
-async function adjudicate(households, suspects) {
+async function adjudicate(households, suspects, stackedIds) {
   const byId = new Map(households.map((h) => [String(h._id), h]));
   // geocodeService takes (and mutates) a Map<normalizedAddress, householdLike>. Feed it copies
   // with null coords so it treats them as needing a lookup, leaving the real docs untouched.
@@ -233,11 +249,12 @@ async function adjudicate(households, suspects) {
     });
     probeToId.set(h.normalizedAddress, id);
   }
-  if (!probe.size) return { confirmed: [], stats: null };
+  if (!probe.size) return { confirmed: [], stats: null, skippedClose: 0 };
 
   const { stats } = await geocodeResolve(probe, { cacheOnly: !ALLOW_GEOCODE });
 
   const confirmed = [];
+  let skippedClose = 0;
   for (const [normAddr, probed] of probe) {
     if (probed.latitude == null || probed.longitude == null) continue;
     // Only a rooftop-grade answer is allowed to overrule a stored pin.
@@ -246,10 +263,24 @@ async function adjudicate(households, suspects) {
     const c = coordsOf(h);
     if (!c) continue;
     const gap = haversineMeters(c.lat, c.lng, probed.latitude, probed.longitude);
-    if (gap < MIN_METERS) continue;
+    // The gap gate is per-SIGNAL. For the distance-based signals (out-of-state, street
+    // outlier, knock evidence) a rooftop answer agreeing within MIN_METERS genuinely
+    // refutes the suspicion — the pin was fine. For a stacked-pin suspect the suspicion is
+    // IDENTITY, not distance: the door provably shares one ~1.1m dot with other streets'
+    // doors, so the pin is wrong at any gap, and a vendor centroid stamped on a small area
+    // (a block, a subdivision) puts true rooftops well inside 250m. There, any rooftop
+    // answer that actually leaves the shared dot (> STACKED_MIN_METERS, generously past
+    // building-key rounding) dissolves the stack and is taken.
+    const floor = stackedIds?.has(String(h._id)) ? STACKED_MIN_METERS : MIN_METERS;
+    if (gap < floor) {
+      // An exact answer that AGREES with the pin — the suspicion is refuted, not pending.
+      // Counted so "none confirmed" can't be misread as "no cache hit, try --geocode".
+      skippedClose += 1;
+      continue;
+    }
     confirmed.push({ h, to: { lat: probed.latitude, lng: probed.longitude }, gap: Math.round(gap) });
   }
-  return { confirmed, stats };
+  return { confirmed, stats, skippedClose };
 }
 
 async function main() {
@@ -300,15 +331,18 @@ async function main() {
     if (!audit || !audit.suspects.size) continue;
     totalSuspects += audit.suspects.size;
 
-    const { confirmed, stats } = await adjudicate(audit.households, audit.suspects);
+    const { confirmed, stats, skippedClose } = await adjudicate(audit.households, audit.suspects, audit.stackedIds);
     totalNewLookups += stats?.geocodedNew || 0;
+    // "Refuted" ≠ "no answer": name the suspects whose exact geocode AGREED with the pin,
+    // or a clean run reads like a cache miss and invites a pointless --geocode spend.
+    const refutedNote = skippedClose ? ` (${skippedClose} refuted — the address geocodes to where the pin already is)` : '';
     if (!confirmed.length) {
-      console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), none confirmed by the address.`);
+      console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), none confirmed by the address${refutedNote}.`);
       continue;
     }
     totalConfirmed += confirmed.length;
 
-    console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), ${confirmed.length} confirmed:`);
+    console.log(`${campaign.name}: ${audit.suspects.size} suspect(s), ${confirmed.length} confirmed${refutedNote}:`);
     for (const { h, to, gap } of confirmed) {
       const why = audit.suspects.get(String(h._id)).join('; ');
       console.log(
@@ -347,6 +381,13 @@ async function main() {
       console.log('location until you re-cut that pass. Run `npm run recompute:territories -- --apply` if a');
       console.log('book OUTLINE now looks wrong. Past "far from house" GPS flags at these doors are now');
       console.log('downgraded, so historical Audit counts will drop.');
+      console.log('\nIf "Remove apartments" had excluded any of these stacks (collapsed single-family homes');
+      console.log('read as buildings), fixing the pins does NOT un-exclude the doors. On Turf Cutting, the');
+      console.log('"N apartment doors excluded" strip has a "Re-include" button — it only appears while the');
+      console.log('round has no published books, so on a published round Discard (or start a new round)');
+      console.log('first. Re-include clears EVERY excluded door on that walk list, real apartment buildings');
+      console.log('included, so run "Remove apartments" again before cutting if you still want genuine');
+      console.log('buildings held out — it will now only catch the real ones.');
     }
     if (!APPLY) console.log('\nRe-run with --apply --user=<userId> to commit.');
   }

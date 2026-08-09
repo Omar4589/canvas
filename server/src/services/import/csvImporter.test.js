@@ -183,3 +183,69 @@ test('separate addresses never pool their coordinates', () => {
   assert.equal(r.householdMap.size, 2);
   assert.equal(r.coordConflicts, 0);
 });
+
+// ── Placeholder pins: many DIFFERENT streets on one exact coordinate ─────────
+//
+// A vendor that can't place an address stamps a ZIP/area centroid, so unrelated streets
+// pile onto one dot. Detection only — the coords are never nulled (nulling would hand
+// the doors to the geocoder, which DROPS what it can't place, and placeholder-stamped
+// addresses are exactly the ones geocoders fail on).
+
+const at = (id, addr, lat, lng) => ({
+  ID: id, FN: `F${id}`, LN: `L${id}`,
+  ADDR: addr, CITY: 'Labelle', ST: 'FL', ZIP: '33935',
+  LAT: String(lat), LNG: String(lng),
+});
+
+test('a placeholder pin is counted; the doors keep their coords and still import', () => {
+  const rows = [
+    at('A', '370 Mahogony Ct', 26.76, -81.45),
+    at('B', '800 Gen Chesty Puller Ct', 26.76, -81.45),
+    at('C', '2100 G Rd', 26.76, -81.45),
+    at('D', '55 Solo St', 26.9, -81.2), // a normal lone door
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 1);
+  assert.equal(r.placeholderPinDoors, 3);
+  // Never nulled — a suspect pin walks, a dropped door doesn't.
+  for (const h of r.householdMap.values()) assert.ok(h.latitude != null);
+  assert.equal(r.householdMap.size, 4);
+});
+
+test('a real building — one street line, units in the address — is not a placeholder', () => {
+  const rows = [
+    at('A', '1000 Lely Palms Dr Apt 151', 26.1, -81.7),
+    at('B', '1000 Lely Palms Dr Apt 152', 26.1, -81.7),
+    at('C', '1000 Lely Palms Dr Apt 153', 26.1, -81.7),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 0);
+  assert.equal(r.placeholderPinDoors, 0);
+});
+
+test('a dominant-street building with one stray counts only the stray', () => {
+  const rows = [
+    at('A', '900 Aqua Isles Blvd Lot 1', 26.76, -81.452),
+    at('B', '900 Aqua Isles Blvd Lot 2', 26.76, -81.452),
+    at('C', '900 Aqua Isles Blvd Lot 3', 26.76, -81.452),
+    at('D', '19007 Broad Shore Walk', 26.76, -81.452), // the stray
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 0, 'the park is not a placeholder');
+  assert.equal(r.placeholderPinDoors, 1, 'only the stray is suspect');
+});
+
+test('placeholder detection runs on RESOLVED coordinates — after the per-household vote', () => {
+  // Two rows for one address disagree; majority resolves it AWAY from the shared spot, so
+  // the resolved pin no longer stacks and no placeholder is counted. Order of operations
+  // matters: judging pre-vote coords would report a placeholder that won't exist on disk.
+  const rows = [
+    at('A', '10 Vote St', 26.76, -81.45), // loses the vote
+    at('B', '10 Vote St', 26.9, -81.2),
+    at('C', '10 Vote St', 26.9, -81.2), // majority
+    at('D', '20 Other Ave', 26.76, -81.45),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.coordConflicts, 1);
+  assert.equal(r.placeholderPins, 0, 'after the vote, only one door remains at the shared spot');
+});

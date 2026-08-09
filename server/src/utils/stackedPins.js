@@ -19,6 +19,12 @@
 //     one "the building" would leave a genuinely mis-pinned door unchecked. Half strangers
 //     is not a building.
 //
+// KNOWN LIMIT: streetName.js strips ONE trailing unit designator, so chained lines
+// ("100 Main St Bldg 3 Apt 101") leave "Main St Bldg 3" — a complex with per-building lines
+// reads as several pseudo-streets and can classify as a placeholder. Harm is bounded by the
+// adjudication gate (each address geocodes back to the complex, so nothing moves far), and
+// looping the strip would change walk-packet street bands, which share the parser. Left as-is.
+//
 // Consumed by the import validator (to warn in the preview) and repair:import-pins (to
 // shortlist doors for geocode adjudication). Pure — callers supply { id, street, pinKey }.
 

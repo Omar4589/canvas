@@ -87,7 +87,11 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
   overlaps the first shows fewer houses).
 
 Cuts only include **knockable** doors — already-voted (fully-voted) doors are skipped, and you can also
-**remove apartments** (any building with **N+ units at one address**, default 4): those doors are
+**remove apartments** (any building with **N+ units at one address**, default 4 — but note it keys on
+*coordinate stacking*, so a vendor placeholder pin holding collapsed single-family homes from many
+streets reads as a "building" and gets excluded too; the import preview and the admin map's door panel
+both call these out, and `repair:import-pins` fixes them — see [IMPORTS.md](IMPORTS.md) →
+*Fixing pins that came in wrong*): those doors are
 persistently excluded from cutting, book door counts, printed packets, and the canvasser list — exactly
 like already-voted doors — until you re-include them. **Not from the admin map:** that map is the record
 of what exists and what was worked, so an excluded door stays visible there, is counted in its own

@@ -216,27 +216,28 @@ function ReviewPanel({ diff }) {
         </SampleList>
         {/* Kept doors whose PIN is suspect — nothing here is skipped (a suspect pin walks; a
             dropped door doesn't). These import as-is and are what `repair:import-pins` cleans
-            up afterward. Old persisted diffs lack the fields, hence the || 0 guards. */}
-        {(rowIssues.coordConflicts || 0) + (rowIssues.placeholderPinDoors || 0) > 0 && (
+            up afterward. The gate and the count use the SAME expression: only what still needs
+            a human's attention (unsettled ties + placeholder-pin doors) — a disagreement the
+            majority vote already settled is resolved, not suspect. Old persisted diffs lack
+            the fields, hence the || 0 guards. */}
+        {(rowIssues.coordConflictTies || 0) + (rowIssues.placeholderPinDoors || 0) > 0 && (
           <SampleList
             title="Doors imported with a suspect map pin"
             count={(rowIssues.coordConflictTies || 0) + (rowIssues.placeholderPinDoors || 0)}
           >
-            {(rowIssues.coordConflicts || 0) > 0 && (
+            {(rowIssues.coordConflictTies || 0) > 0 && (
               <div>
-                {fmt(rowIssues.coordConflicts)} addresses had rows disagreeing about where the house is
-                {(rowIssues.coordConflictTies || 0) > 0
-                  ? ` — ${fmt(rowIssues.coordConflictTies)} were ties the file couldn't settle (first pin kept)`
-                  : ' (settled by majority vote)'}
+                {fmt(rowIssues.coordConflictTies)}{' '}
+                {rowIssues.coordConflictTies === 1 ? 'address' : 'addresses'} had rows disagreeing about where
+                the house is, with nothing to settle it — the first pin was kept
               </div>
             )}
             {(rowIssues.placeholderPinDoors || 0) > 0 && (
               <div>
-                {fmt(rowIssues.placeholderPinDoors)} doors share an exact map spot with doors from{' '}
-                <em>other streets</em>
-                {(rowIssues.placeholderPins || 0) > 0 && ` across ${fmt(rowIssues.placeholderPins)} spots`} — usually
-                placeholder coordinates the vendor stamped on addresses it couldn&apos;t place. They import and
-                stay walkable, but sit on the wrong dot; ask your Doorline contact to run the pin repair.
+                {fmt(rowIssues.placeholderPinDoors)} {rowIssues.placeholderPinDoors === 1 ? 'door sits' : 'doors sit'} on
+                an exact map spot shared with doors from <em>other streets</em> — usually placeholder coordinates the
+                vendor stamped on addresses it couldn&apos;t place. They import and stay walkable, but on the wrong
+                dot; ask your Doorline contact to run the pin repair before cutting turf.
               </div>
             )}
           </SampleList>

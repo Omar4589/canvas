@@ -28,6 +28,7 @@ Up top, next to the door count, you'll see how many buildings there are and how 
 Two things this is *not*:
 
 - **It isn't clustering.** The building sits at the doors' real location, never merges with the building next door, and never breaks apart as you zoom in.
+- **It isn't always a real building.** Open one and check the addresses: a real building is one street address with many units. If the list shows **different streets on one dot**, your voter file stamped a placeholder coordinate on addresses it couldn't place — the doors are real, the dot is wrong, and the panel says so with an amber note. Ask your Doorline contact to run the pin repair; those doors are usually worth it, because [turf cutting](page-turf-cutting)'s Remove apartments will otherwise exclude them from books as if they were a tower.
 - **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments (N+ units)** option that keeps big buildings out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. See the next section.
 
 ## Doors you left out of your books
