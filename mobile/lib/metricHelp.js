@@ -4,10 +4,19 @@
 export const metricHelp = {
   doors:
     'Doors knocked in the selected range — one per house, per pass. If two canvassers knock the same house in the same pass it counts ONCE for the campaign (though it shows on both their rows). Going back in a later pass counts again.',
+  // "…what the connection rate divides by" was backwards: this is the rate's NUMERATOR, and
+  // Knocks is what it divides BY. The tile's own math line ("survey doors ÷ knocks") had it
+  // right, so the popup was contradicting the label it explained.
   surveyDoors:
-    'Doors where at least one survey was taken — one per house, per pass. This is what the connection rate divides by. It is usually lower than "Surveyed voters", because one house can have several voters.',
+    'Doors where at least one survey was taken — one per house, per pass. This is the top of the connection rate (it is divided by Knocks). It is usually lower than "Voters surveyed", because one house can have several voters.',
   surveyedVoters:
-    'Distinct people surveyed — not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
+    'Distinct people surveyed — counted once each, however many passes you surveyed them in. Not how many forms were filled out. One house can have several voters, so this is usually higher than "Survey doors".',
+  // The THIRD unit — was missing from this file entirely, so mobile could not explain the
+  // number it already prints. Copy is metricHelp.surveysTaken from client/src/lib/metricHelp.js,
+  // verbatim: the two files are kept in sync BY HAND (see the header), and this one had already
+  // drifted on the two strings above.
+  surveysTaken:
+    'How many surveys were filled out. Survey the same person again in a later pass and that is another survey — so this can be higher than "Voters surveyed", which counts each person once.',
   // `litDrops` describes litKnocks — the DOOR count, one per house per pass — and is what the
   // lit rate divides. `litDropEvents` describes litDropped, the raw number of drop actions,
   // which is higher wherever one door was lit twice in a pass. They are different server

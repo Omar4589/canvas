@@ -5,8 +5,11 @@
 export const metricHelp = {
   doors:
     'Doors knocked in the selected range — one per house, per pass. If two canvassers knock the same house in the same pass it counts ONCE for the campaign (though it shows on both their rows). Going back in a later pass counts again.',
+  // "…what the connection rate divides by" was backwards: this is the rate's NUMERATOR, and
+  // Knocks is what it divides BY. The tile's own hint ("survey doors ÷ knocks") had it right,
+  // so the popup was contradicting the label it explained.
   surveyDoors:
-    'Doors where at least one survey was taken — one per house, per pass. This is what the connection rate divides by. It is usually lower than "Voters surveyed", because one house can have several voters.',
+    'Doors where at least one survey was taken — one per house, per pass. This is the top of the connection rate (it is divided by Knocks). It is usually lower than "Voters surveyed", because one house can have several voters.',
   // ONE key for one metric. There were briefly two (`surveyedVoters` + `votersSurveyed`) with
   // different wording, consumed by different components — which is precisely the drift this module
   // exists to prevent.

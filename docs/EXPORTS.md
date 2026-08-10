@@ -299,6 +299,8 @@ the event document — that guard is what blanks a do-not-contact person's row.
   name; Address, City, State, Zip; Author first/last/status; Edited, Edited at (ISO), Note;
   Voter DB id, Note DB id.
 - **`knocks-by-round.csv`** (backup only) — Walk list, Pass, Pass name, Pass status,
-  Activated/Archived (ISO); Knocks, Survey doors, Lit knocks, Refused; [Restricted doors,
-  Billable doors when restricted billing is on]; Connection rate %, Contact rate %, New homes
-  reached; TOTAL row.
+  Activated/Archived (ISO); Knocks, Survey doors, **Surveys taken**, Lit knocks, Refused;
+  [Restricted doors, Billable doors when restricted billing is on]; Connection rate %,
+  Contact rate %, New homes reached; TOTAL row. `Surveys taken` is the response unit and sits
+  beside the door unit deliberately — the two are read together, and only the DOOR column feeds
+  the rates. Column order matches `/admin/reports/knocks-by-pass.csv` exactly.

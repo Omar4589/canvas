@@ -295,6 +295,29 @@ export default function DashboardPage() {
     [allRoundOptions, effortId]
   );
 
+  // Every filter the Survey results section silently honours, spelled out. The server scopes
+  // that section by date range, walk list, crew AND pass (reports.js /survey-results baseMatch),
+  // but the section is the only one on this page that never said so — Coverage is the sole
+  // section with a scope caption today, and it needs one LESS than this.
+  const surveyScopeLabel = useMemo(() => {
+    const parts = ['selected range'];
+    if (effortId) {
+      // `_id`, not `id` — the walk-list picker above keys its options off `ef._id`.
+      const name = efforts.find((e) => String(e._id) === String(effortId))?.name;
+      parts.push(name ? `walk list: ${name}` : 'this walk list');
+    }
+    if (coordinatorId) {
+      const name = coordinatorOptions.find((c) => String(c.id) === String(coordinatorId))?.name;
+      parts.push(name ? `crew: ${name}` : 'this crew');
+    }
+    parts.push(
+      surveyPassId
+        ? roundOptions.find((r) => String(r.id) === String(surveyPassId))?.label || 'one pass'
+        : 'all passes'
+    );
+    return parts.join(' · ');
+  }, [effortId, effortsQ.data, coordinatorId, coordinatorOptions, surveyPassId, roundOptions]);
+
   const surveyResultsRef = useRef(null);
 
   // Resolve the ?survey= deep-link: the CURRENT survey's id normalizes to '' (the
@@ -349,9 +372,11 @@ export default function DashboardPage() {
       ...r,
       dayKnocks: r.knocks ?? r.homesKnocked ?? 0,
       // Two units, deliberately. `surveyKnocks` = DOORS with a survey (the connection-rate
-      // numerator); `surveysSubmitted` = VOTERS surveyed (one door can survey several). They are
-      // different questions with different answers — showing one under the bare label "Surveys"
-      // is why this table and the Timeline appeared to contradict each other.
+      // numerator); `surveysSubmitted` = SURVEYS TAKEN, the response-unit row count (one door
+      // can survey several voters, and a later round re-surveys the same person). It is NOT the
+      // voter unit — that is `surveyedVoters`, a distinct-voter count, which no per-canvasser
+      // row carries. They are different questions with different answers — showing one under the
+      // bare label "Surveys" is why this table and the Timeline appeared to contradict each other.
       daySurveys: r.surveyKnocks ?? 0,
       dayVoterSurveys: r.surveysSubmitted ?? 0,
       dayLit: r.litDropped ?? 0,
@@ -559,7 +584,14 @@ export default function DashboardPage() {
             Error: {rollupQ.error.message}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          /* Three tiles on a lit-drop campaign, FIVE on a survey one (the three survey units
+             plus Knocks and the rate) — so the column count can't be a constant. 3-up at md
+             wraps 5 as 3+2 rather than starving every tile; 5-up only once there's room. */
+          <div
+            className={`grid grid-cols-2 gap-4 md:grid-cols-3 ${
+              isLitDrop ? '' : 'xl:grid-cols-5'
+            }`}
+          >
             <StatCard
               label="Knocks"
               value={rangeStats.knocks?.toLocaleString()}
@@ -577,12 +609,14 @@ export default function DashboardPage() {
               />
             ) : (
               <>
-                {/* Survey DOORS — the connection rate's numerator, so the row proves itself. This
-                    card used to show surveysSubmitted (VOTERS), which is the same number as
-                    "Surveyed voters" beside it: in a single-round campaign a voter can only have one
-                    response (unique index on {voterId, passId}), so the two were always identical.
-                    Meanwhile the number the rate actually divides by appeared nowhere, and anyone
-                    checking 297 ÷ 1,252 got 24% and concluded the rate was broken. */}
+                {/* ALL THREE survey units, side by side — docs/METRICS.md's labelling rule.
+                    Survey DOORS is the connection rate's numerator, so the row proves itself.
+                    This card used to show surveysSubmitted (response ROWS) and the third unit
+                    had no tile at all — which was harmless only while a campaign ran ONE round,
+                    because the unique index on {voterId, passId} makes rows and people the same
+                    number there. Run a second round and they part company: the per-question
+                    "N answered" counts below are response-unit, so with only the door and voter
+                    tiles on screen they read as impossibly large. */}
                 <StatCard
                   label="Survey doors"
                   value={rangeStats.surveyedKnocks?.toLocaleString()}
@@ -591,9 +625,15 @@ export default function DashboardPage() {
                   help={metricHelp.surveyDoors}
                 />
                 <StatCard
-                  label="Surveyed voters"
+                  label="Surveys taken"
+                  value={rangeStats.surveysSubmitted?.toLocaleString()}
+                  hint="forms filled out"
+                  help={metricHelp.surveysTaken}
+                />
+                <StatCard
+                  label="Voters surveyed"
                   value={rangeStats.surveyedVoters?.toLocaleString()}
-                  hint="distinct voters reached"
+                  hint="distinct people reached"
                   help={metricHelp.surveyedVoters}
                 />
               </>
@@ -638,6 +678,14 @@ export default function DashboardPage() {
                   <th className="px-4 py-2 text-left">Pass</th>
                   <th className="px-4 py-2 text-right">Knocks</th>
                   <th className="px-4 py-2 text-right">{isLitDrop ? 'Lit drops' : 'Survey doors'}</th>
+                  {!isLitDrop && (
+                    <th className="px-4 py-2 text-right">
+                      <span className="inline-flex items-center gap-1">
+                        Surveys taken
+                        <InfoHint label="About surveys taken">{metricHelp.surveysTaken}</InfoHint>
+                      </span>
+                    </th>
+                  )}
                   <th className="px-4 py-2 text-right">Conn %</th>
                   <th className="px-4 py-2 text-right">
                     <span className="inline-flex items-center gap-1">
@@ -665,6 +713,11 @@ export default function DashboardPage() {
                     <td className="px-4 py-2 text-right tabular-nums text-fg">
                       {((isLitDrop ? r.litKnocks : r.surveyedKnocks) || 0).toLocaleString()}
                     </td>
+                    {!isLitDrop && (
+                      <td className="px-4 py-2 text-right tabular-nums text-fg">
+                        {(r.surveysTaken || 0).toLocaleString()}
+                      </td>
+                    )}
                     <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{ratePct(r.connectionRate)}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.coverageGained || 0).toLocaleString()}</td>
                   </tr>
@@ -678,6 +731,11 @@ export default function DashboardPage() {
                     <td className="px-4 py-2 text-right tabular-nums">
                       {((isLitDrop ? byRoundQ.data.totals.litKnocks : byRoundQ.data.totals.surveyedKnocks) || 0).toLocaleString()}
                     </td>
+                    {!isLitDrop && (
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        {(byRoundQ.data.totals.surveysTaken || 0).toLocaleString()}
+                      </td>
+                    )}
                     <td className="px-4 py-2 text-right tabular-nums">{ratePct(byRoundQ.data.totals.connectionRate)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{(byRoundQ.data.totals.coverageGained || 0).toLocaleString()}</td>
                   </tr>
@@ -765,12 +823,18 @@ export default function DashboardPage() {
                           onChange={(e) => setSelectedTemplateId(e.target.value)}
                           className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                         >
+                          {/* "all-time" is load-bearing: responseCount comes from
+                              /admin/reports/surveys, which is scoped to the campaign and NOTHING
+                              else — no range, no crew, no pass — so it sat unlabelled beside
+                              per-question counts that are all three, reading as a contradiction. */}
                           <option value="">
-                            {current ? `${current.name} (current) · ${current.responseCount}` : 'Current survey'}
+                            {current
+                              ? `${current.name} (current) · ${current.responseCount} all-time`
+                              : 'Current survey'}
                           </option>
                           {past.map((s) => (
                             <option key={s.id} value={s.id}>
-                              {s.name} · {s.responseCount}
+                              {s.name} · {s.responseCount} all-time
                             </option>
                           ))}
                         </select>
@@ -787,6 +851,22 @@ export default function DashboardPage() {
               </>
             );
           })()}
+          {/* The section's own total + the scope it was computed under. `totalResponses` is
+              template- AND pass-scoped, so it is the true ceiling for every per-question count
+              below — unlike the Activity row's "Surveys taken", which spans every survey used by
+              the campaign and ignores the pass picker. The two are deliberately different numbers,
+              which is exactly why each states its own scope instead of leaving the reader to
+              assume they should match. */}
+          {surveyResultsQ.data?.surveyTemplate && (
+            <p className="mb-3 text-xs text-fg-muted">
+              <span className="font-semibold text-fg">
+                {(surveyResultsQ.data.totalResponses || 0).toLocaleString()}
+              </span>{' '}
+              surveys taken
+              <span className="mx-1.5 text-fg-subtle">·</span>
+              {surveyScopeLabel}
+            </p>
+          )}
           {surveyResultsQ.isLoading ? (
             <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">
               Loading survey results…

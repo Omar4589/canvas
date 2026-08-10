@@ -9,7 +9,7 @@ summary: Voters who were surveyed more than once — filter by canvasser, duplic
 tags: duplicate surveys, audit, canvasser, surveys, page, mobile
 ---
 
-The **Duplicate Surveys** page lists every voter with **more than one survey response**. That's the reason your **Surveys** number can read higher than **Surveyed voters** — one person answered twice, so they count once as a voter but twice as a survey.
+The **Duplicate Surveys** page lists every voter with **more than one survey response**. That's the reason your **Surveys taken** number can read higher than **Voters surveyed** — one person answered twice, so they count once as a voter but twice as a survey.
 
 Each entry shows the voter, their address, how many times they were surveyed, and one line per response: **who** took it, **when**, and **which round**. On the web, **Open voter** goes to their profile, where you can compare the answers side by side and delete the extra response if it was a mistake — or **restore** a replaced one (see below). On the phone you handle it right on this screen — see below.
 

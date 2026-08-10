@@ -370,19 +370,24 @@ test('CSV default view: exact headers, one row per round, TOTAL row, attachment'
 
   // Seeded cells contain no commas/quotes, so plain splits are safe here.
   const lines = csv.text.split('\n');
+  // 'Surveys taken' sits between the door count and the lit count. This fixture seeds the
+  // ACTIVITY ledger only (survey_submitted rows, no SurveyResponse docs), so every Surveys-taken
+  // cell is 0 while Survey doors is 2 — which is the point worth pinning: the two are separate
+  // ledgers read by separate pipelines, and the door column must not be reused as the response
+  // column just because it is usually non-zero alongside it.
   assert.deepStrictEqual(lines[0].split(','), [
     'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
-    'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
+    'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
     'Connection rate %', 'Contact rate %', 'New homes reached',
   ]);
   assert.strictEqual(lines.length, 5, 'header + R1 + R2 + legacy + TOTAL');
   assert.deepStrictEqual(
     lines[1].split(','),
-    ['North', '1', 'Round 1', 'archived', '2026-06-09T12:00:00.000Z', '2026-06-11T12:00:00.000Z', '1', '0', '0', '0', '0', '0', '0', '1']
+    ['North', '1', 'Round 1', 'archived', '2026-06-09T12:00:00.000Z', '2026-06-11T12:00:00.000Z', '1', '0', '0', '0', '0', '0', '0', '0', '1']
   );
   assert.deepStrictEqual(
     lines[4].split(','),
-    ['TOTAL', '', '', '', '', '', '8', '2', '0', '2', '0', '25', '50', '7'],
+    ['TOTAL', '', '', '', '', '', '8', '2', '0', '0', '2', '0', '25', '50', '7'],
     'the TOTAL row is the invoice headline'
   );
 });
@@ -397,8 +402,8 @@ test('CSV groupBy=canvasser: per-user headers, no TOTAL row (no honest per-user 
   const lines = csv.text.split('\n');
   assert.deepStrictEqual(lines[0].split(','), [
     'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
-    'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
-    'Connection rate %', 'Contact rate %',
+    'Email', 'Status', 'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused',
+    'No soliciting', 'Connection rate %', 'Contact rate %',
   ]);
   assert.strictEqual(lines.length, 5, 'header + 4 canvasser×round rows, no TOTAL');
   assert.ok(!lines.some((l) => l.startsWith('TOTAL')), 'no TOTAL row in the canvasser view');

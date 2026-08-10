@@ -2603,7 +2603,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
   }
 });
 
-// Voters with MORE THAN ONE survey response (a "Surveys" count above "Surveyed voters" means
+// Voters with MORE THAN ONE survey response (a "Surveys taken" count above "Voters surveyed" means
 // someone was surveyed twice). Live rows are always cross-round (the unique {voterId, passId}
 // index); preserved SAME-round overwrites join via $unionWith from SurveyResponseArchive as the
 // worst kind, `sameRoundOverwritten` — a second canvasser's submit replaced the first's answers
@@ -3158,19 +3158,23 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
     if (built.byCanvasser) {
       headers = [
         'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
-        'Email', 'Status', 'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
-        ...doorCols, 'Connection rate %', 'Contact rate %',
+        'Email', 'Status', 'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused',
+        'No soliciting', ...doorCols, 'Connection rate %', 'Contact rate %',
       ];
       rows = built.byCanvasser.map((r) => [
         r.effortName || '', r.roundNumber ?? '', r.roundName ?? r.roundLabel,
         r.firstName, r.lastName, r.email, r.status,
-        r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks, r.noSolicitingKnocks,
+        r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
+        r.noSolicitingKnocks,
         ...doorVals(r), r.connectionRate, r.contactRate,
       ]);
     } else {
+      // 'Surveys taken' sits immediately after 'Survey doors' on purpose: the two survey units
+      // are only ever misread when they are far apart, and the invoice reader needs to see that
+      // the DOOR column is the one the connection rate is built from.
       headers = [
         'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
-        'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
+        'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
         ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
       ];
       rows = built.rounds.map((r) => [
@@ -3178,13 +3182,15 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
         r.roundName ?? r.roundLabel, r.status || '',
         r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
         r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
-        r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks, r.noSolicitingKnocks,
+        r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
+        r.noSolicitingKnocks,
         ...doorVals(r), r.connectionRate, r.contactRate, r.coverageGained,
       ]);
       const t = built.totals;
       rows.push([
         'TOTAL', '', '', '', '', '',
-        t.knocks, t.surveyedKnocks, t.litKnocks, t.refusedKnocks, t.noSolicitingKnocks,
+        t.knocks, t.surveyedKnocks, t.surveysTaken, t.litKnocks, t.refusedKnocks,
+        t.noSolicitingKnocks,
         ...doorVals(t), t.connectionRate, t.contactRate, t.coverageGained,
       ]);
     }
@@ -3517,7 +3523,10 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         homesKnocked,
         // TWO survey units, both named — one door can survey several voters, so these genuinely
         // differ and must never share a bare "Surveys" label. surveyDoors is the connection-rate
-        // numerator; surveysSubmitted is voters (SurveyResponse rows).
+        // numerator (door-unit); surveysSubmitted is the RESPONSE unit — SurveyResponse rows,
+        // a countDocuments, surfaced as "Surveys taken". It is NOT the voter unit: that is
+        // `surveyedVoters`, a distinct voterId count, and the two part company the moment a
+        // campaign runs a second round. See docs/METRICS.md's three-units box.
         surveyDoors: actions.survey_submitted,
         surveysSubmitted,
         litDropped: actions.lit_dropped,

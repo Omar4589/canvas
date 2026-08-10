@@ -832,9 +832,12 @@ export const buildKnocksByRound = async (ctx, sink) => {
   });
   const doorCols = built.billRestricted ? ['Restricted doors', 'Billable doors'] : [];
   const doorVals = (r) => (built.billRestricted ? [r.restrictedDoors, r.billableDoors] : []);
+  // Column order mirrors /admin/reports/knocks-by-pass.csv exactly — 'Surveys taken' (the
+  // response unit) directly after 'Survey doors' (the door unit the rates are built from).
+  // The two files are read side by side; a divergence here reads as a data difference.
   const writer = await sink.file('knocks-by-round', [
     'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
-    'Knocks', 'Survey doors', 'Lit knocks', 'Refused', 'No soliciting',
+    'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
     ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
   ]);
   for (const r of built.rounds) {
@@ -842,14 +845,16 @@ export const buildKnocksByRound = async (ctx, sink) => {
       r.effortName || '', r.roundNumber ?? '', r.roundName ?? r.roundLabel, r.status || '',
       r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
       r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
-      r.knocks, r.surveyedKnocks, r.litKnocks, r.refusedKnocks, r.noSolicitingKnocks,
+      r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
+      r.noSolicitingKnocks,
       ...doorVals(r), r.connectionRate, r.contactRate, r.coverageGained,
     ]);
   }
   const t = built.totals;
   await writer.writeRow([
     'TOTAL', '', '', '', '', '',
-    t.knocks, t.surveyedKnocks, t.litKnocks, t.refusedKnocks, t.noSolicitingKnocks,
+    t.knocks, t.surveyedKnocks, t.surveysTaken, t.litKnocks, t.refusedKnocks,
+    t.noSolicitingKnocks,
     ...doorVals(t), t.connectionRate, t.contactRate, t.coverageGained,
   ]);
   return { files: [{ name: 'knocks-by-round', rows: writer.rowsWritten }] };

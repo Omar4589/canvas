@@ -163,9 +163,10 @@ export default function CampaignDetail() {
   const canvass = overviewQ.data?.canvass || {};
   const rangeStats = rollupQ.data?.campaigns?.[0] || {};
   const rangeKnocks = rangeStats.knocks || 0;
-  // Survey DOORS (the connection-rate numerator), not voters — the tile used to show
-  // surveysSubmitted (voters) under a bare "Surveys", so the rate beside it couldn't be checked
-  // from the screen's own numbers. Voters keep their own tile ("Surveyed voters") below.
+  // Survey DOORS (the connection-rate numerator) — the tile used to show surveysSubmitted (the
+  // RESPONSE unit) under a bare "Surveys", so the rate beside it couldn't be checked from the
+  // screen's own numbers. The other two units keep their own tiles below ("Surveys taken" for
+  // the response count, "Voters surveyed" for the distinct-voter count).
   const rangePrimary = isLitDrop ? rangeStats.litDropped || 0 : rangeStats.surveyedKnocks || 0;
   const rangeRate = rateFromPct(rangeStats.connectionRate);
 
@@ -202,9 +203,20 @@ export default function CampaignDetail() {
       },
     ];
     if (!isLitDrop) {
+      // The response unit and the voter unit, in that order — both, always. They are equal only
+      // while a campaign runs ONE round (SurveyResponse is unique on {voterId, passId}), and the
+      // per-question counts in Survey results below are response-unit, so omitting "Surveys
+      // taken" made those counts look larger than every number on this screen.
+      m.push({
+        key: 'surveys',
+        label: 'Surveys taken',
+        value: (rangeStats.surveysSubmitted || 0).toLocaleString(),
+        unit: 'forms',
+        help: metricHelp.surveysTaken,
+      });
       m.push({
         key: 'voters',
-        label: 'Surveyed voters',
+        label: 'Voters surveyed',
         value: (rangeStats.surveyedVoters || 0).toLocaleString(),
         unit: 'people',
         help: metricHelp.surveyedVoters,
@@ -232,7 +244,14 @@ export default function CampaignDetail() {
       help: metricHelp.connectionRate,
     });
     return m;
-  }, [isLitDrop, rangeKnocks, rangePrimary, rangeStats.surveyedVoters, rangeRate]);
+  }, [
+    isLitDrop,
+    rangeKnocks,
+    rangePrimary,
+    rangeStats.surveysSubmitted,
+    rangeStats.surveyedVoters,
+    rangeRate,
+  ]);
 
   // The Top-canvassers column key. Same shape as activityMetrics minus the live values —
   // these explain a table's columns, not four numbers on screen.
@@ -246,7 +265,7 @@ export default function CampaignDetail() {
         // field/definition mismatch as the Activity row above — see the note there.
         help: isLitDrop ? metricHelp.litDropEvents : metricHelp.surveyDoors,
       },
-      ...(isLitDrop ? [] : [{ key: 'voters', label: 'Surveyed voters', help: metricHelp.surveyedVoters }]),
+      ...(isLitDrop ? [] : [{ key: 'voters', label: 'Voters surveyed', help: metricHelp.surveyedVoters }]),
       { key: 'conn', label: 'Conn %', help: metricHelp.connectionRate },
       { key: 'contact', label: 'Contact %', help: metricHelp.contactRate },
       { key: 'pace', label: 'Doors / hr', help: metricHelp.doorsPerHour },
@@ -318,7 +337,7 @@ export default function CampaignDetail() {
         dayKnocks,
         // Survey DOORS, matching the web leaderboard (DashboardPage maps `surveyKnocks` here too)
         // and `canvasserMetrics` below, which labels this column "Survey doors". It read
-        // `surveysSubmitted` — a VOTER-unit count in a door-unit slot, so the card's own
+        // `surveysSubmitted` — a RESPONSE-unit count in a door-unit slot, so the card's own
         // server-computed connectionRate (built from surveyKnocks) could not be checked against the
         // number printed beside it.
         daySurveys: c.surveyKnocks ?? 0,
@@ -664,9 +683,16 @@ export default function CampaignDetail() {
           {/* Survey results */}
           {!isLitDrop && questions.length > 0 && (
             <>
+              {/* toLocaleString: this was the one raw number on the screen, reading "3049"
+                  beside comma-grouped neighbours. The scope now rides along too — these counts
+                  are narrowed by range, crew and pass server-side, and saying only the total
+                  invited the reader to compare it against the campaign-wide Activity tiles.
+                  (Walk list is deliberately absent: survey results scope by their own chips.) */}
               <SectionHeader
                 title="Survey results"
-                subtitle={`${surveyResultsQ.data?.totalResponses ?? 0} surveys taken`}
+                subtitle={`${(surveyResultsQ.data?.totalResponses ?? 0).toLocaleString()} surveys taken · ${
+                  coordinatorId ? 'this crew · ' : ''
+                }${surveyPassId ? 'one pass' : 'all passes'} · in range`}
               />
               {/* Round filter. Only worth showing once a campaign HAS a second round — before that
                   "All rounds" is the only answer. Labelled per walk list because roundNumber

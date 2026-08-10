@@ -114,7 +114,7 @@ export default function DuplicateSurveysPage() {
           <h1 className="text-xl font-semibold text-fg">Duplicate surveys</h1>
           <p className="mt-1 max-w-xl text-sm text-fg-muted">
             Voters with more than one survey response — the reason “Surveys” can read higher than
-            “Surveyed voters.” Same round · overwritten means a second canvasser's submit replaced
+            “Voters surveyed.” Same round · overwritten means a second canvasser's submit replaced
             the first one's answers — the originals are preserved on the voter profile and can be
             restored there. Same canvasser, same day is usually a double-submit; different
             canvassers in a later round is usually a legitimate revisit.

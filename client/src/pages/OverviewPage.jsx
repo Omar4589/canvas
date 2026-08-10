@@ -74,12 +74,15 @@ function CampaignCard({ campaign, onClick }) {
           <StatRow label="Lit drops" value={fmt(c.litDropped)} />
         ) : (
           <>
-            {/* Doors, not voters — this is the Connection rate's numerator, so the card can be
-                checked from its own rows. It used to show surveysSubmitted (voters), which is the
-                SAME number as "Surveyed voters" below in a single-round campaign (one response per
-                voter per pass) — two identical rows, and the rate's numerator nowhere. */}
+            {/* All THREE survey units. "Survey doors" is the Connection rate's numerator, so the
+                card can be checked from its own rows. "Surveys taken" (response rows) was dropped
+                from here once, because in a single-round campaign it is the SAME number as
+                "Voters surveyed" (one response per voter per pass) — that premise dies the moment
+                a campaign runs a second round, and then only two of the three units are on screen
+                while the survey-results counts below are computed in the missing one. */}
             <StatRow label="Survey doors" value={fmt(c.surveyedKnocks)} />
-            <StatRow label="Surveyed voters" value={fmt(c.surveyedVoters)} />
+            <StatRow label="Surveys taken" value={fmt(c.surveysSubmitted)} />
+            <StatRow label="Voters surveyed" value={fmt(c.surveyedVoters)} />
           </>
         )}
         <StatRow label={c.type === 'lit_drop' ? 'Lit rate' : 'Connection'} value={ratePct(c.connectionRate)} />
@@ -244,11 +247,20 @@ export default function OverviewPage() {
                 hint="doors with a survey"
                 accent="green"
               />
+              {/* The response unit, the third of the three (docs/METRICS.md). It was missing
+                  here for the same expired reason as on the campaign home: with one round per
+                  campaign it equals "Voters surveyed" exactly, so it looked redundant. */}
               <StatCard
                 compact
-                label="Surveyed voters"
+                label="Surveys taken"
+                value={cumulative.surveysSubmitted?.toLocaleString()}
+                hint="forms filled out"
+              />
+              <StatCard
+                compact
+                label="Voters surveyed"
                 value={cumulative.surveyedVoters?.toLocaleString()}
-                hint="distinct voters reached"
+                hint="distinct people reached"
               />
               <StatCard
                 compact

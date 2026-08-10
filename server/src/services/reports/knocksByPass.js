@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
 import {
@@ -32,6 +33,9 @@ const oid = (v) => new mongoose.Types.ObjectId(String(v));
 //
 // `timestampRange` is the pre-resolved { $gte / $lt } window over `timestamp` (built by the
 // caller in the ANCHOR timezone — parseDateRange on the route, zonedDayRange in the worker).
+// The SURVEY side reuses the same window against `submittedAt` — the response ledger's own
+// clock, exactly as /campaign-rollup and /canvassers window it. Applying `timestampRange` to
+// `timestamp` on SurveyResponse would match nothing (no such field) and report a silent zero.
 //
 // `team` is a teamMatch-shaped clause (routes build it via crewFilter; the Export Center's
 // full-backup passes nothing) — merged via withTeam, never spread, and applied only to the
@@ -49,6 +53,13 @@ export async function buildKnocksByPassData({
   if (effortId) cFilter.effortId = oid(effortId);
   const windowed = timestampRange ? { timestamp: timestampRange } : {};
   const match = withTeam({ ...cFilter, ...windowed }, team);
+  // The response-unit ledger. Same org/campaign/effort scope and the same crew clause — only
+  // the date FIELD differs (see the note above). effortId is denormalized onto SurveyResponse,
+  // so cFilter scopes it without a join, exactly as it does for CanvassActivity.
+  const surveyMatch = withTeam(
+    { ...cFilter, ...(timestampRange ? { submittedAt: timestampRange } : {}) },
+    team
+  );
 
   // Org-scope the metadata lookups too — the activity aggregates are org-scoped via cFilter,
   // but without organizationId here a foreign campaignId would still leak another org's
@@ -62,7 +73,7 @@ export async function buildKnocksByPassData({
   const billRestricted = await billRestrictedFor(cFilter.organizationId, cFilter.campaignId);
   const knockOpts = { includeRestricted: true };
 
-  const [perPass, totalRows, firstKnockRows, passes, efforts] = await Promise.all([
+  const [perPass, totalRows, firstKnockRows, surveysPerPass, passes, efforts] = await Promise.all([
     CanvassActivity.aggregate(knocksPipeline(match, { ...knockOpts, byPass: true })),
     CanvassActivity.aggregate(knocksPipeline(match, knockOpts)),
     CanvassActivity.aggregate([
@@ -93,6 +104,16 @@ export async function buildKnocksByPassData({
       ...(windowed.timestamp ? [{ $match: { firstAt: windowed.timestamp } }] : []),
       { $group: { _id: '$firstPassId', coverageGained: { $sum: 1 } } },
     ]),
+    // Surveys taken (response ROWS) per round — the third survey unit, beside the door-unit
+    // `surveyedKnocks` the same table already shows. A bare {$sum: 1} is the whole definition:
+    // SurveyResponse is unique on {voterId, passId}, so one row IS one form, and every row
+    // carries exactly one passId. That makes Σ(rounds) === totals hold by construction, the
+    // way `knocks` does — and it is the reason a DISTINCT-VOTER column could never live here
+    // (a voter surveyed in two rounds belongs to both, so the rows could not partition).
+    SurveyResponse.aggregate([
+      { $match: surveyMatch },
+      { $group: { _id: '$passId', surveysTaken: { $sum: 1 } } },
+    ]),
     Pass.find(passFilter, 'roundNumber name status effortId activatedAt archivedAt').lean(),
     Effort.find({ organizationId: cFilter.organizationId, campaignId: cFilter.campaignId }, 'name').lean(),
   ]);
@@ -101,11 +122,22 @@ export async function buildKnocksByPassData({
   const passById = new Map(passes.map((p) => [String(p._id), p]));
   const countsByPass = new Map(perPass.map((r) => [String(r._id), r]));
   const coverageByPass = new Map(firstKnockRows.map((r) => [String(r._id), r.coverageGained]));
+  const surveysByPass = new Map(surveysPerPass.map((r) => [String(r._id), r.surveysTaken]));
 
   // Row set = every round of the campaign/effort (even 0-knock ones — "R2 active, no
   // knocks yet" is real information) + any agg bucket without a Pass doc (legacy
   // passId:null, or a knock whose pass was deleted).
-  const rowKeys = new Set([...passes.map((p) => String(p._id)), ...perPass.map((r) => String(r._id))]);
+  //
+  // The SURVEY buckets are unioned in too, not just the knock ones. A response whose paired
+  // survey_submitted row was deleted (a re-disposition cleans up only the submitting user's
+  // activity rows) would otherwise land in a bucket the table never renders — and since
+  // totals.surveysTaken is the sum of the DISPLAYED rows, those forms would vanish from the
+  // total while still existing. Unioning keeps Σ(rounds) === the true count.
+  const rowKeys = new Set([
+    ...passes.map((p) => String(p._id)),
+    ...perPass.map((r) => String(r._id)),
+    ...surveysPerPass.map((r) => String(r._id)),
+  ]);
   const shapeRow = (key) => {
     const p = passById.get(key) || null;
     const k = countsByPass.get(key) || {
@@ -124,6 +156,10 @@ export async function buildKnocksByPassData({
       archivedAt: p?.archivedAt || null,
       knocks: k.knocks,
       surveyedKnocks: k.surveyedKnocks,
+      // The response unit — "Surveys taken". NEVER interchangeable with surveyedKnocks above
+      // (doors) or with a distinct-voter count: one door can survey several voters, and one
+      // voter can be surveyed again in a later round. See docs/METRICS.md's three-units box.
+      surveysTaken: surveysByPass.get(key) || 0,
       litKnocks: k.litKnocks,
       refusedKnocks: k.refusedKnocks,
       noSolicitingKnocks: k.noSolicitingKnocks,
@@ -163,6 +199,11 @@ export async function buildKnocksByPassData({
     // effort-unscoped (see above), so under ?effortId other efforts' buckets exist but
     // aren't shown, and the TOTAL must stay the sum of the table.
     coverageGained: rounds.reduce((s, r) => s + r.coverageGained, 0),
+    // Also summed from the displayed rows, for the same reason — and safe to do so because
+    // rowKeys unions the survey buckets, so no bucket can exist without a row to carry it.
+    // This is the per-round breakdown of /campaign-rollup's `surveysSubmitted` under the same
+    // window, effort and crew, so the two surfaces reconcile.
+    surveysTaken: rounds.reduce((s, r) => s + r.surveysTaken, 0),
   };
 
   let byCanvasser;
@@ -172,7 +213,7 @@ export async function buildKnocksByPassData({
     // Mirrors knocksPipeline's action set and hasKnock fold, one dimension wider (per user), so a
     // per-canvasser export and the round totals it breaks down count the same doors. NOT_BULK is
     // already applied campaign-wide here, so nothing extra is needed to keep desk marks out.
-    const [userRows, nonBulkPerPass] = await Promise.all([
+    const [userRows, nonBulkPerPass, surveysPerUser] = await Promise.all([
       CanvassActivity.aggregate([
         { $match: { ...match, ...NOT_BULK, actionType: { $in: BILLABLE_WITH_RESTRICTED } } },
         {
@@ -202,7 +243,18 @@ export async function buildKnocksByPassData({
       // per-user rows above: comparing a restricted-inclusive per-user sum against a
       // knocks-only round total would report phantom overlap on every restricted door.
       CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK }, { ...knockOpts, byPass: true })),
+      // Surveys taken per (round, canvasser). Unlike the DOOR columns beside it this needs no
+      // over-claim correction and gets no crossCanvasser subtraction: a response carries exactly
+      // one userId, so Σ(canvassers) === the round's surveysTaken exactly. NOT_BULK has no
+      // analogue here either — a desk bulk-mark writes activity rows, never a SurveyResponse.
+      SurveyResponse.aggregate([
+        { $match: surveyMatch },
+        { $group: { _id: { passId: '$passId', userId: '$userId' }, surveysTaken: { $sum: 1 } } },
+      ]),
     ]);
+    const surveysByUserPass = new Map(
+      surveysPerUser.map((r) => [`${String(r._id.passId)}|${String(r._id.userId)}`, r.surveysTaken])
+    );
     const userMap = await hydrateCanvassers(
       userRows.filter((r) => r._id.userId != null).map((r) => String(r._id.userId)),
       cFilter.organizationId,
@@ -226,6 +278,9 @@ export async function buildKnocksByPassData({
           status: info.status || 'deleted',
           knocks: r.knocks,
           surveyedKnocks: r.surveyedKnocks,
+          // Keyed off the RAW passId (not the `p ? key : null` display value above) so the
+          // legacy no-pass bucket still finds its responses.
+          surveysTaken: surveysByUserPass.get(`${key}|${String(r._id.userId)}`) || 0,
           litKnocks: r.litKnocks,
           refusedKnocks: r.refusedKnocks,
           noSolicitingKnocks: r.noSolicitingKnocks,

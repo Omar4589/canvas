@@ -38,7 +38,7 @@ import InsetGroup, {
 
 // Mobile Duplicate surveys — the port of web's client/src/pages/DuplicateSurveysPage.jsx, on the
 // same GET /admin/reports/duplicate-surveys (no server changes). Voters with more than one survey
-// response, which is why "Surveys" can read higher than "Surveyed voters".
+// response, which is why "Surveys taken" can read higher than "Voters surveyed".
 //
 // Two things set it apart from its sibling report screens:
 //  1. An org admin can DELETE the extra response here, closing the fix loop on the phone. The

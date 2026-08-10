@@ -148,9 +148,19 @@ export default function AdminOverview() {
       unit: 'houses',
       help: metricHelp.surveyDoors,
     },
+    // The response unit and the voter unit — both, in that order. They are the same number only
+    // while every campaign in scope runs one round; the app's per-question survey counts are
+    // response-unit, so the org rollup has to name that unit too. See docs/METRICS.md §G.
+    {
+      key: 'surveys',
+      label: 'Surveys taken',
+      value: fmt(cumulative.surveysSubmitted),
+      unit: 'forms',
+      help: metricHelp.surveysTaken,
+    },
     {
       key: 'voters',
-      label: 'Surveyed voters',
+      label: 'Voters surveyed',
       value: fmt(cumulative.surveyedVoters),
       unit: 'people',
       help: metricHelp.surveyedVoters,
@@ -245,8 +255,14 @@ export default function AdminOverview() {
                   value={fmt(cumulative.surveyedKnocks)}
                 />,
                 <InsetRow
+                  key="surveys"
+                  label="Surveys taken"
+                  unit="forms"
+                  value={fmt(cumulative.surveysSubmitted)}
+                />,
+                <InsetRow
                   key="voters"
-                  label="Surveyed voters"
+                  label="Voters surveyed"
                   unit="people"
                   value={fmt(cumulative.surveyedVoters)}
                 />,

@@ -34,13 +34,15 @@ Click **Review overlap doors** to see exactly which houses, and who knocked them
 
 Either way, an overlap is **never billed twice** — this is just there to help you spot and coach the wasted effort.
 
-## Surveys: two numbers, two questions
+## Surveys: three numbers, three questions
 
-You'll see **two** survey figures, and they are both correct. They answer different questions:
+You'll see **three** survey figures, and they are all correct. They answer different questions:
 
-- **Survey doors** — houses where at least one survey was taken. **This is what the connection rate divides by.**
-- **Voters surveyed** — how many *people* were surveyed, counted once each however many rounds you spoke to them in. One house can have several voters, so this is usually higher than survey doors.
+- **Survey doors** — houses where at least one survey was taken. **This is the top of the connection rate** (it gets divided by Knocks).
 - **Surveys taken** — how many *forms* were filled out. Same as "Voters surveyed" until you run a second round; survey the same person again in Round 2 and that's another survey but still one person.
+- **Voters surveyed** — how many *people* were surveyed, counted once each however many rounds you spoke to them in. One house can have several voters, so this is usually higher than survey doors.
+
+The **Survey results** section counts in the same unit as **Surveys taken** — so a question's "answered" count can be larger than "Voters surveyed" without anything being wrong.
 
 If a canvasser shows 18 survey doors but 37 voters surveyed, they've been working houses deeply — two voters per door on average. Neither number is wrong, and **nothing adds them together**. See [Why do I see different survey numbers?](two-survey-numbers).
 

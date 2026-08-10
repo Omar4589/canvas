@@ -53,6 +53,15 @@ async function call(path) {
   return { status: res.status, json };
 }
 
+// The .csv routes return an attachment, not JSON — so the invoice export's COLUMNS can be
+// asserted, not just the JSON the table renders from.
+async function callText(path) {
+  const res = await fetch(`${base}/api${path}`, {
+    headers: { Authorization: `Bearer ${ctx.token}`, 'X-Org-Id': String(ctx.org._id) },
+  });
+  return { status: res.status, text: await res.text() };
+}
+
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
@@ -300,6 +309,58 @@ test('per-round KNOCKS still sum to the campaign total (the door axis is unaffec
     res.json.totals.coverageGained, 2,
     'new homes reached counts each home once — a revisit adds a knock, never coverage'
   );
+});
+
+test('per-round SURVEYS TAKEN partition, and reconcile with the rollup headline', { skip }, async () => {
+  // The response unit, broken down per round. It partitions where a distinct-VOTER column never
+  // could: every SurveyResponse carries exactly one passId, so Maria's two forms land in two
+  // different rows — whereas Maria herself belongs to both rounds and could not be split.
+  const { campaign } = ctx;
+  const res = await call(`/admin/reports/knocks-by-pass?campaignId=${campaign._id}`);
+  assert.equal(res.status, 200);
+
+  const byRound = new Map(res.json.rounds.map((r) => [r.roundNumber, r]));
+  assert.equal(byRound.get(1).surveysTaken, 2, 'round 1: Maria + Bob = two forms');
+  assert.equal(byRound.get(2).surveysTaken, 1, 'round 2: Maria again = a third form');
+
+  const sum = res.json.rounds.reduce((n, r) => n + r.surveysTaken, 0);
+  assert.equal(sum, res.json.totals.surveysTaken, 'Σ(rounds) === totals — the whole point');
+  assert.equal(res.json.totals.surveysTaken, 3);
+
+  // The cross-surface contract: this table breaks down the SAME number the campaign home's
+  // "Surveys taken" tile shows, under the same window. If these ever disagree, one of the two
+  // is windowing the survey ledger on the wrong field (submittedAt, never timestamp).
+  const rollup = await call(`/admin/reports/campaign-rollup?campaignId=${campaign._id}`);
+  assert.equal(rollup.status, 200);
+  const row = rollup.json.campaigns[0];
+  assert.equal(
+    res.json.totals.surveysTaken, row.surveysSubmitted,
+    'knocks-by-pass surveysTaken === campaign-rollup surveysSubmitted'
+  );
+
+  // …and it is NOT the voter unit, which is the confusion this whole file exists to prevent.
+  assert.equal(row.surveyedVoters, 2, 'Maria + Bob — two people');
+  assert.notEqual(
+    res.json.totals.surveysTaken, row.surveyedVoters,
+    'three forms, two people — a second round is what separates them'
+  );
+});
+
+test('the invoice CSV carries Surveys taken beside Survey doors', { skip }, async () => {
+  const { campaign } = ctx;
+  const res = await callText(`/admin/reports/knocks-by-pass.csv?campaignId=${campaign._id}`);
+  assert.equal(res.status, 200);
+  const [header, ...lines] = res.text.split('\n');
+  const cols = header.split(',');
+  const doorIdx = cols.indexOf('Survey doors');
+  const takenIdx = cols.indexOf('Surveys taken');
+  assert.ok(doorIdx > -1, 'Survey doors column present');
+  assert.equal(takenIdx, doorIdx + 1, 'Surveys taken sits immediately after Survey doors');
+
+  // The TOTAL row is the invoice's checkable line, so the new column has to be right there too.
+  const total = lines.find((l) => l.startsWith('TOTAL'));
+  assert.ok(total, 'TOTAL row present');
+  assert.equal(total.split(',')[takenIdx], '3', 'TOTAL carries the response-unit count');
 });
 
 test('?passId=legacy reaches the pre-turf bucket, so the rounds add up to the headline', { skip }, async () => {

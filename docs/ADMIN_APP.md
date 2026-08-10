@@ -69,7 +69,7 @@ next sync.
 
 **Part 1 — For everyone.** Open a campaign and the first thing you see is **Activity** for the date
 range you picked — the range is named right under the heading, so a number is never undated. Knocks
-leads as the big number; beneath it, one row each for Survey doors, Surveyed voters, and the
+leads as the big number; beneath it, one row each for Survey doors, Surveys taken, Voters surveyed, and the
 Connection rate. Small grey words under two of them (`houses`, `people`) say what's being counted,
 because a house can hold several voters and those two numbers are deliberately different. The
 connection rate carries a colored badge and a plain-English verdict — *On target · 986 of 4,136

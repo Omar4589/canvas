@@ -29,11 +29,11 @@ Everything activity-based follows it — the activity numbers, the By pass table
 
 Not sure whether a number means houses or people? In the **mobile app**, the Activity list ends with a **How these are counted** line. Tap it and a panel slides up explaining every number in the group — using your actual figures, not examples — along with what the connection rate's colors mean and where the target sits. There's a matching line under **Top canvassers** for that table's columns.
 
-Two of the numbers also carry a small grey word telling you the unit: **Survey doors** counts *houses*, **Surveyed voters** counts *people*. They're usually different, because one house can hold several voters. And the connection rate says its verdict in words next to the percentage — *On target*, *Watch*, or *Low* — with the fraction it came from, so you can check it against the two numbers printed just above.
+Three of the numbers also carry a small grey word telling you the unit: **Survey doors** counts *houses*, **Surveys taken** counts *forms*, and **Voters surveyed** counts *people*. They're usually all different — one house can hold several voters, and going back in a later pass means another form from the same person. And the connection rate says its verdict in words next to the percentage — *On target*, *Watch*, or *Low* — with the fraction it came from, so you can check it against the two numbers printed just above.
 
 ## The By pass breakdown
 
-Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
+Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), surveys taken, the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
 
 **New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. With a crew selected, "first-ever" is still judged campaign-wide — a home counts for the crew only if that crew made its very first knock, so a door another crew reached first is never a "new home" here. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 
