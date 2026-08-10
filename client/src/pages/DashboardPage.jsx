@@ -296,7 +296,6 @@ export default function DashboardPage() {
   );
 
   const surveyResultsRef = useRef(null);
-  const questionResultsRefs = useRef({});
 
   // Resolve the ?survey= deep-link: the CURRENT survey's id normalizes to '' (the
   // switcher's canonical "current" value), then scroll the results into view once.
@@ -820,28 +819,41 @@ export default function DashboardPage() {
                 />
               </div>
             )}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {/* auto-fit, not lg:grid-cols-2. `lg:` is a VIEWPORT query, but these cards live in
+                viewport − sidebar − 48px, and the sidebar's width is a localStorage preference no
+                media query can see. Solving for it, the two-up card was NARROWER than the one-up
+                card at every viewport below ~1774px — so widening the window past 1024px made
+                labels truncate harder. A container-driven track list only opens a second column
+                once each one can actually hold 34rem. */}
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,34rem),1fr))]">
               {surveyResultsQ.data.questions.map((q) => (
-                <div
+                /* effortId + coordinatorId + passId flow through to the drill-in lists
+                   (voters-by-answer / answer-canvassers) so they honor the same
+                   walk-list, crew, and round filters as the counts above them.
+
+                   A long question takes the whole row instead of pairing with a short one: a grid
+                   row is as tall as its tallest member, and an 11-option card beside a 3-option
+                   card was the ~280px of dead page in the original report. This shrinks that gap
+                   rather than always removing it — auto-placement can still leave one half-row
+                   empty when a spanning card follows an odd number of normal ones, and the empty
+                   half is now the height of the SHORT card, not the tall one. The alternative,
+                   `grid-auto-flow: dense`, backfills that hole by pulling a later question
+                   forward, and survey questions are ordered deliberately — a hole is cheaper than
+                   showing question 4 before question 3. What makes the remainder read as
+                   deliberate is the card itself: it is the grid item now, so it stretches to the
+                   row and pins its footer (see QuestionResults). */
+                <QuestionResults
                   key={q.key}
-                  ref={(el) => {
-                    questionResultsRefs.current[q.key] = el;
-                  }}
-                >
-                  {/* effortId + coordinatorId + passId flow through to the drill-in lists
-                      (voters-by-answer / answer-canvassers) so they honor the same
-                      walk-list, crew, and round filters as the counts above them. */}
-                  <QuestionResults
-                    question={q}
-                    surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
-                    dateRange={dateRange}
-                    campaignId={campaignId}
-                    effortId={effortId}
-                    passId={surveyPassId}
-                    coordinatorId={coordinatorId}
-                    tz={tz}
-                  />
-                </div>
+                  question={q}
+                  surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
+                  dateRange={dateRange}
+                  campaignId={campaignId}
+                  effortId={effortId}
+                  passId={surveyPassId}
+                  coordinatorId={coordinatorId}
+                  className={(q.options?.length || 0) > 6 ? '[grid-column:1/-1]' : ''}
+                  tz={tz}
+                />
               ))}
             </div>
             </>

@@ -14,8 +14,10 @@ export default function AnswerCanvasserTable({ rows = [], selectedUserId = '', o
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-card">
-      <table className="w-full min-w-[640px] text-sm">
+    // max-h-80 matches the voter list on the other half of the same Segmented control — this
+    // side was uncapped, so switching views could grow the card by the height of the whole crew.
+    <div className="max-h-80 overflow-auto rounded-lg border border-border bg-card">
+      <table className="w-full min-w-[32rem] text-sm">
         <thead>
           <tr className="border-b border-border bg-sunken text-left text-xs uppercase tracking-wide text-fg-muted">
             <th className="px-3 py-2 font-medium">#</th>

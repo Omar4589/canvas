@@ -6,8 +6,9 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { percentsTo100 } from '../lib/percent.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
-import { Badge, Segmented } from './ui/index.js';
+import { Badge, IconChevronRight, Segmented } from './ui/index.js';
 import AnswerCanvasserTable from './AnswerCanvasserTable.jsx';
+import InfoHint from './InfoHint.jsx';
 import ResponseDetailDrawer from './ResponseDetailDrawer.jsx';
 import TagTeamTable from './TagTeamTable.jsx';
 
@@ -147,17 +148,30 @@ function VoterList({
             className="flex cursor-pointer items-start justify-between gap-3 px-3 py-2 text-sm transition-colors hover:bg-card"
           >
             <div className="min-w-0">
-              <div className="truncate text-fg">
-                {v.voter?.fullName || 'Unknown'}
+              {/* The name is a real button so the drawer is reachable by keyboard — the row's
+                  own onClick is a mouse affordance only and fires nothing on Enter. The party
+                  chip and Offline badge are siblings now: inside the truncating name line they
+                  were silently clipped off the end of a long name. */}
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenResponse?.(v.responseId);
+                  }}
+                  className="min-w-0 truncate text-left text-fg hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                >
+                  {v.voter?.fullName || 'Unknown'}
+                </button>
                 {v.voter?.party && (
-                  <span className="ml-2 rounded bg-sunken px-1.5 py-0.5 text-xs text-fg-muted">
+                  <span className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-xs text-fg-muted">
                     {v.voter.party}
                   </span>
                 )}
                 {v.wasOfflineSubmission && (
-                  <Badge variant="info" className="ml-2">
-                    Offline
-                  </Badge>
+                  <span className="shrink-0">
+                    <Badge variant="info">Offline</Badge>
+                  </span>
                 )}
               </div>
               {v.household && (
@@ -430,6 +444,13 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, pass
   );
 }
 
+// Two bands: the label owns line 1, the bar owns line 2. The old row was a 12-column grid
+// (4 label / 6 bar / 2 numbers) whose eleven `gap-3` gutters cost a flat 132px at every width,
+// so inside a 568px card the label got ~168px — about 22 characters — while the numbers needed
+// more than the 78px their own cell had and printed over the bar. Giving each element its own
+// line is also what the rest of the house already does: ReportBreakdown's Bars, and mobile,
+// which states the rule outright ("a proportional bar loses data when squeezed").
+// Children are spans, not divs: a <button>'s content model is phrasing content.
 function OptionRow({
   option,
   count,
@@ -445,76 +466,105 @@ function OptionRow({
       type="button"
       onClick={expandable ? onToggle : undefined}
       disabled={!expandable}
+      aria-expanded={expandable ? expanded : undefined}
       className={
-        'grid w-full grid-cols-12 items-center gap-3 py-1.5 text-left text-sm ' +
-        (expandable ? 'cursor-pointer rounded px-1 hover:bg-sunken' : 'px-1') +
-        (retired ? ' opacity-50' : '')
+        'block w-full rounded px-2 py-2 text-left text-sm ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
+        (expandable ? 'cursor-pointer hover:bg-sunken' : '')
       }
     >
-      <div className="col-span-4 flex items-center gap-1 truncate text-fg-muted" title={option}>
+      <span className="flex items-start gap-2">
         {expandable && (
-          <span
+          <IconChevronRight
+            size={14}
             className={
-              'inline-block transition-transform ' + (expanded ? 'rotate-90' : '')
+              'mt-0.5 shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')
             }
-          >
-            ▸
-          </span>
+          />
         )}
-        <span className="truncate">{option}</span>
+        {/* Wraps to two lines before it ellipsises, so a real option label never truncates.
+            The label keeps full-strength color even when retired: the row used to carry
+            opacity-50, which dropped the label to 1.98:1 and the chip to 1.50:1. The Badge is
+            what marks the state now — a legible label with a badge beats an illegible one. */}
+        <span className="line-clamp-2 min-w-0 flex-1 text-fg-muted" title={option}>
+          {option}
+        </span>
         {retired && (
-          <span
-            className="shrink-0 rounded bg-sunken px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-subtle"
-            title="This option is no longer asked"
-          >
-            retired
+          // Badge destructures {variant, dot, className, children} with no ...rest, so a title
+          // handed to it is dropped — it has to live on the wrapper.
+          <span className="shrink-0" title="This option is no longer asked">
+            <Badge variant="neutral">Retired</Badge>
           </span>
         )}
-      </div>
-      <div className="col-span-6">
-        <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
-          <div className="h-full bg-brand-500" style={{ width: `${width}%` }} />
-        </div>
-      </div>
-      <div className="col-span-2 flex items-baseline justify-end gap-2">
-        <span className="font-semibold text-fg">{percent.toFixed(1)}%</span>
-        <span className="text-xs text-fg-muted">({count})</span>
-      </div>
+        {/* Fixed tabular tracks: `justify-end` used to anchor the trailing (count), so a
+            3-digit count shoved the percent left of a 2-digit one and no column edge existed. */}
+        {/* 3.5rem clears "100.0%" at 14px semibold. These are min-widths, not widths: a wider
+            value grows its own track rather than overflowing, losing the shared edge on that one
+            row instead of printing outside the card the way the old fixed cell did. */}
+        <span className="min-w-[3.5rem] shrink-0 text-right font-semibold tabular-nums text-fg">
+          {width.toFixed(1)}%
+        </span>
+        <span className="min-w-[3.5rem] shrink-0 text-right text-xs tabular-nums text-fg-muted">
+          ({(count || 0).toLocaleString()})
+        </span>
+      </span>
+      {/* bg-border, not bg-sunken: docs/THEMING.md measures sunken-on-card at 1.10:1 light and
+          1.04:1 dark, so a short bar had no visible track to be read against. */}
+      <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-border">
+        <span
+          // A retired option's bar goes neutral rather than brand — fg-muted, not fg-subtle,
+          // which would sit at ~1.9:1 against the track and read as an empty bar.
+          className={'block h-full rounded-full ' + (retired ? 'bg-fg-muted' : 'bg-brand-600')}
+          // A px floor, not a percentage floor: 1.5% of a 300px card and 1.5% of a 750px card are
+          // different marks, 3px is not. Conditioned on a real count, so a true zero still paints
+          // nothing — previously a 0.1% answer rounded sub-pixel and rounded-full clipped it away.
+          style={{ width: `${width}%`, minWidth: count > 0 ? '3px' : 0 }}
+        />
+      </span>
     </button>
   );
 }
 
+// Same two-band grammar as OptionRow — the tag counts are the widest text on this surface
+// ("1,234 voters · 900 current"), so they were the worst fit for a fixed 3-of-12 cell.
 function TagRow({ tag, voterCount, currentVoterCount, percent, expanded, onToggle }) {
   const width = Math.max(0, Math.min(100, percent || 0));
   return (
     <button
       type="button"
       onClick={onToggle}
-      className="grid w-full grid-cols-12 items-center gap-3 py-1.5 text-left text-sm cursor-pointer rounded px-1 hover:bg-sunken"
+      aria-expanded={expanded}
+      className="block w-full cursor-pointer rounded px-2 py-2 text-left text-sm hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
     >
-      <div className="col-span-4 flex items-center gap-1 truncate text-fg" title={tag}>
-        <span className={'inline-block transition-transform ' + (expanded ? 'rotate-90' : '')}>
-          ▸
+      <span className="flex items-start gap-2">
+        <IconChevronRight
+          size={14}
+          className={
+            'mt-0.5 shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')
+          }
+        />
+        <span className="line-clamp-2 min-w-0 flex-1 font-medium text-fg" title={tag}>
+          {tag}
         </span>
-        <span className="truncate font-medium">{tag}</span>
-      </div>
+        <span className="shrink-0 whitespace-nowrap tabular-nums">
+          <span className="font-semibold text-fg">{voterCount.toLocaleString()}</span>
+          <span className="ml-1 text-xs text-fg-muted">voters</span>
+          {/* Absent on an old server — render nothing rather than a fake "0 current". */}
+          {currentVoterCount != null && (
+            <span className="ml-1 text-xs text-fg-muted">
+              · {currentVoterCount.toLocaleString()} current
+            </span>
+          )}
+        </span>
+      </span>
       {/* The bar stays scaled to IDENTIFIED; current is text only — a second bar (or a percent)
           would assert a share these voter counts don't have. */}
-      <div className="col-span-5">
-        <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
-          <div className="h-full bg-brand-500" style={{ width: `${width}%` }} />
-        </div>
-      </div>
-      <div className="col-span-3 flex items-baseline justify-end gap-1.5 whitespace-nowrap">
-        <span className="font-semibold text-fg">{voterCount.toLocaleString()}</span>
-        <span className="text-xs text-fg-muted">voters</span>
-        {/* Absent on an old server — render nothing rather than a fake "0 current". */}
-        {currentVoterCount != null && (
-          <span className="text-xs text-fg-muted">
-            · {currentVoterCount.toLocaleString()} current
-          </span>
-        )}
-      </div>
+      <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-border">
+        <span
+          className="block h-full rounded-full bg-brand-600"
+          style={{ width: `${width}%`, minWidth: voterCount > 0 ? '3px' : 0 }}
+        />
+      </span>
     </button>
   );
 }
@@ -560,8 +610,10 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
                   onTagClick ? onTagClick(t.tag) : setExpandedTag(isOpen ? null : t.tag)
                 }
               />
+              {/* ml-8 / pr-2 land on the row's own text origin (px-2 + a 14px chevron + gap-2)
+                  and its right inset, so the sub-list is a true indent of the label above it. */}
               {(t.options || []).length > 0 && (
-                <ul className="mb-1 ml-6 space-y-0.5 text-xs text-fg-subtle">
+                <ul className="mb-1 ml-8 space-y-0.5 pr-2 text-xs text-fg-muted">
                   {t.options.map((o) => (
                     <li
                       key={`${o.questionKey}:${o.optionId}`}
@@ -597,7 +649,9 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
           );
         })}
       </div>
-      <div className="mt-2 text-xs text-fg-subtle">
+      {/* fg-muted, not fg-subtle: subtle measures 2.54:1 on card in light — under the 4.5:1
+          floor for body-size instructional copy. */}
+      <div className="mt-2 text-xs text-fg-muted">
         {onTagClick ? 'Click any tag to drill into it.' : 'Click any tag to see its voters and the by-team split.'}
       </div>
       {detailId && (
@@ -617,14 +671,19 @@ function TextAnswers({ options }) {
     return <div className="text-sm text-fg-muted">No responses yet.</div>;
   }
   return (
-    <ul className="space-y-1">
+    <ul>
       {options.map((o, i) => (
         <li
           key={i}
-          className="flex items-start justify-between gap-3 border-b border-border py-1.5 text-sm last:border-b-0"
+          // px-2 matches the choice rows' inset, so a text card and a choice card sitting side
+          // by side in the grid start their labels on the same line.
+          className="flex items-start justify-between gap-3 border-b border-border px-2 py-2 text-sm last:border-b-0"
         >
-          <span className="text-fg">{o.option}</span>
-          <span className="shrink-0 text-xs text-fg-muted">{o.count}×</span>
+          {/* min-w-0 + break-words: one unbroken write-in token used to run past the card edge. */}
+          <span className="min-w-0 break-words text-fg">{o.option}</span>
+          <span className="shrink-0 text-xs tabular-nums text-fg-muted">
+            {(o.count || 0).toLocaleString()}×
+          </span>
         </li>
       ))}
     </ul>
@@ -639,17 +698,27 @@ export default function QuestionResults({
   effortId,
   passId,
   coordinatorId,
+  className = '',
   tz,
 }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const { key, label, type, options = [] } = question;
+  const isText = type === 'text';
   // Σ of the option counts — i.e. SELECTIONS, not people. On a multiple-choice question one
   // respondent picking three options adds three, so this exceeds the number of responses and each
   // percentage is a share of picks rather than a share of people. Same number the percentages
   // divide by, so the bars stay internally consistent either way.
   const totalAnswered = options.reduce((sum, o) => sum + (o.count || 0), 0);
   const multi = type === 'multiple_choice';
+  // A text question's `options` are the server's TOP TEN distinct answers — reports.js caps that
+  // aggregation at `$limit: 10` — so summing them and labelling it "answered" stated a number
+  // that is simply wrong on any question with more than ten distinct write-ins. Describe the rows
+  // we actually have instead, and say which case we're in.
+  const textSummary =
+    options.length >= 10
+      ? 'top 10 answers'
+      : `${options.length} distinct ${options.length === 1 ? 'answer' : 'answers'}`;
   // Round so the question's options total exactly 100.0% (largest-remainder, from the counts).
   const percents = percentsTo100(options.map((o) => o.count || 0));
   const [expandedOption, setExpandedOption] = useState(null);
@@ -657,19 +726,30 @@ export default function QuestionResults({
   const expandable = type === 'single_choice' || type === 'multiple_choice';
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="mb-3 flex items-baseline justify-between gap-3">
+    // flex h-full flex-col: the card is now the grid item itself, so `stretch` reaches the
+    // painted box and bottom borders line up across a row; the footer pins with mt-auto.
+    <div className={'flex h-full flex-col rounded-lg border border-border bg-card p-4 ' + className}>
+      {/* Stacked, not one flex line: the meta chip was shrink-0, so a long question got starved
+          into a one-word-per-line ribbon beside it. InfoHint replaces a hover-only title=,
+          which was unreachable by keyboard and touch. */}
+      <div className="mb-3">
         <h3 className="font-medium text-fg">{label}</h3>
-        <span
-          className="shrink-0 text-xs uppercase tracking-wide text-fg-muted"
-          title={
-            multi
-              ? 'Counts SELECTIONS, not people — someone picking three options adds three. Percentages are a share of picks.'
-              : 'Counts answers to this question. Survey the same person again in a later round and that is another answer.'
-          }
-        >
-          {type.replace('_', ' ')} · {totalAnswered} {multi ? 'selections' : 'answered'}
-        </span>
+        <div className="mt-0.5 flex items-center gap-1 text-xs uppercase tracking-wide text-fg-muted">
+          <span>
+            {/* Global regex: replace('_',' ') only ever swapped the first underscore. */}
+            {type.replace(/_/g, ' ')} ·{' '}
+            {isText
+              ? textSummary
+              : `${totalAnswered.toLocaleString()} ${multi ? 'selections' : 'answered'}`}
+          </span>
+          <InfoHint label="What this counts">
+            {isText
+              ? 'The most common free-text answers, ranked by how often the same wording came back. The server returns at most ten, so this is not the number of people who answered.'
+              : multi
+                ? 'Counts SELECTIONS, not people — someone picking three options adds three. Percentages are a share of picks.'
+                : 'Counts answers to this question. Survey the same person again in a later round and that is another answer.'}
+          </InfoHint>
+        </div>
       </div>
       {type === 'text' ? (
         <TextAnswers options={options} />
@@ -716,8 +796,10 @@ export default function QuestionResults({
           })}
         </div>
       )}
+      {/* mt-auto parks the hint on the card's bottom edge, so a card that stretches to a tall
+          row's height reads as deliberate rather than as a card that stopped early. */}
       {expandable && (
-        <div className="mt-2 text-xs text-fg-subtle">
+        <div className="mt-auto pt-3 text-xs text-fg-muted">
           Click any option to see who selected it.
         </div>
       )}

@@ -39,6 +39,14 @@ Below the activity numbers, the **By pass** section lists one row per walk list 
 
 **Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. See [Understanding the numbers](metrics) for how each column is counted.
 
+## Reading the survey results
+
+Each question gets a card, with one row per answer: the answer's wording on its own line, its percentage and count lined up on the right, and the bar underneath running the full card. Long answers wrap rather than getting cut off, and the percentages line up as a column you can compare down the card. A bar is only ever as long as the number printed beside it.
+
+On a **single choice** question the percentages are a share of the people who answered and add to 100%. On a **multiple choice** question one person can pick several answers, so they're a share of *picks* — which is why no bar gets very long when a question has many options. The **(i)** by the card's heading says which you're looking at. An answer you retired keeps its wording, is marked **Retired**, and still counts, because the people who gave it really did.
+
+Free-text questions group identical wording and show the most common answers; when more than ten different things were typed the heading says **top 10 answers**.
+
 ## Drill into a survey answer
 
 In the survey results, **click any answer** to see the entries behind its count — each one names the voter, the address, **who recorded it and at what time**, any note, and an Offline badge if it synced later. Click an entry for the full response, flip to **By canvasser** to see who's been recording that answer, or click **Open full view** to take the drill to the [Survey Explorer](page-survey-explorer) with a map and export.

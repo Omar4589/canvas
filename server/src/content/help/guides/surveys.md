@@ -6,7 +6,7 @@ kind: guide
 order: 11
 sourceDoc: SURVEYS.md
 summary: Build a survey, attach it to a campaign, run different surveys per walk list, and edit it safely.
-tags: surveys, questions, branching, tags, walk lists, editing
+tags: surveys, questions, branching, tags, walk lists, editing, results, percentages
 ---
 
 A **survey** is the questionnaire your canvassers run at the door. You build it once, then attach it to a campaign — and canvassers on that campaign start seeing it.
@@ -23,7 +23,7 @@ On any choice question, tick **Other (specify)**. At the door the canvasser gets
 
 Those write-ins are tracked like any other answer:
 
-- Survey results show an **Other** bar next to your real options.
+- Survey results show an **Other** row next to your real options.
 - Click it and you get the list of people who wrote something in, **each row showing what they typed**.
 - You can filter the map to Other, and exports spell it out as `Other — potholes`, so a write-in is never confused with a real option that happens to use the same word.
 - On a voter's page you can read the typed text, and change or clear it like any other answer.
@@ -44,6 +44,20 @@ Any question after the first can be set to **Show only if...** an earlier answer
 ## Different surveys for different groups
 
 Most campaigns use one survey for everyone. When a group needs different questions, a **walk list can override the campaign default** with its own — set it on the Survey tab's coverage table or on the Walk Lists page. Each door gets the right questions automatically. See [Running more than one survey](multiple-surveys).
+
+## Reading the results
+
+Each question gets its own card on the campaign's **Home** page, with one row per answer.
+
+The answer's wording comes first, on its own line, with the percentage and the count lined up on the right — so a long answer wraps onto a second line instead of being cut off, and the percentages read down the card as a column you can compare by eye. The bar sits underneath, running the full width of the card. A bar is only ever as long as the percentage printed beside it, so the two can't disagree; an answer only one or two people gave still shows a visible sliver, and an answer nobody gave shows nothing.
+
+**Click any row** to see the people who chose that answer.
+
+An answer you removed after people had already given it keeps its real wording and is marked **Retired** — it still counts toward the question's total, because those people really did give it.
+
+**About the percentages.** On a **single choice** question they're a share of the people who answered and they add up to 100%. On a **multiple choice** question one person can pick three answers, so they're a share of *picks*, not of people — which is why no single bar gets very long when a question has a lot of options. The small **(i)** beside the card's heading tells you which one you're looking at.
+
+**Free-text questions** group identical wording together and show the most common answers. When more than ten different things were typed, the heading says **top 10 answers** — the card is showing the ten most common, not everything.
 
 ## Auditing answers — who chose it, who recorded it
 
