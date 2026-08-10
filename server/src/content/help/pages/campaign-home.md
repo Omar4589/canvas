@@ -41,7 +41,7 @@ Below the activity numbers, the **By pass** section lists one row per walk list 
 
 ## Reading the survey results
 
-Each question gets a card, with one row per answer: the answer's wording on its own line, its percentage and count lined up on the right, and the bar underneath running the full card. Long answers wrap rather than getting cut off, and the percentages line up as a column you can compare down the card. A bar is only ever as long as the number printed beside it.
+Each question gets a card, with one row per answer: the answer's wording first, then a short bar, then its percentage and count. Long answers aren't cut off mid-word — they wrap when the window is narrow — and the percentages line up as a column you can compare down the card. A bar is only ever as long as the number printed beside it.
 
 On a **single choice** question the percentages are a share of the people who answered and add to 100%. On a **multiple choice** question one person can pick several answers, so they're a share of *picks* — which is why no bar gets very long when a question has many options. The **(i)** by the card's heading says which you're looking at. An answer you retired keeps its wording, is marked **Retired**, and still counts, because the people who gave it really did.
 

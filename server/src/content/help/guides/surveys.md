@@ -49,7 +49,7 @@ Most campaigns use one survey for everyone. When a group needs different questio
 
 Each question gets its own card on the campaign's **Home** page, with one row per answer.
 
-The answer's wording comes first, on its own line, with the percentage and the count lined up on the right — so a long answer wraps onto a second line instead of being cut off, and the percentages read down the card as a column you can compare by eye. The bar sits underneath, running the full width of the card. A bar is only ever as long as the percentage printed beside it, so the two can't disagree; an answer only one or two people gave still shows a visible sliver, and an answer nobody gave shows nothing.
+The answer's wording comes first and takes as much of the row as it needs, then a short bar, then the percentage and the count. A long answer isn't cut off mid-word — it fits on one line at normal window sizes and wraps onto a second in a narrow one — and the percentages read down the card as a column you can compare by eye. A bar is only ever as long as the percentage printed beside it, so the two can't disagree; an answer only one or two people gave still shows a visible sliver, and an answer nobody gave shows nothing. The bar is short on purpose: it's there so you can see the shape of the answers at a glance, with the exact figure right beside it.
 
 **Click any row** to see the people who chose that answer.
 

@@ -831,17 +831,15 @@ export default function DashboardPage() {
                    (voters-by-answer / answer-canvassers) so they honor the same
                    walk-list, crew, and round filters as the counts above them.
 
-                   A long question takes the whole row instead of pairing with a short one: a grid
-                   row is as tall as its tallest member, and an 11-option card beside a 3-option
-                   card was the ~280px of dead page in the original report. This shrinks that gap
-                   rather than always removing it — auto-placement can still leave one half-row
-                   empty when a spanning card follows an odd number of normal ones, and the empty
-                   half is now the height of the SHORT card, not the tall one. The alternative,
-                   `grid-auto-flow: dense`, backfills that hole by pulling a later question
-                   forward, and survey questions are ordered deliberately — a hole is cheaper than
-                   showing question 4 before question 3. What makes the remainder read as
-                   deliberate is the card itself: it is the grid item now, so it stretches to the
-                   row and pins its footer (see QuestionResults). */
+                   No full-row span for long questions. It was tried — an arbitrary grid-column
+                   span above six options — and it made things worse on real data: auto-placement
+                   left the half-row beside the preceding card empty, and stretching the tallest
+                   card across the full width made it taller still. A grid row being as tall as its
+                   tallest member is fine now that the rows inside a card are one line each; the
+                   short card simply stretches and pins its footer (see QuestionResults).
+                   (Deliberately not naming that class here in bracket form: Tailwind's scanner is
+                   a regex over raw file text, so a class string mentioned in a comment still gets
+                   emitted — the rule outlived its only use until this wording changed.) */
                 <QuestionResults
                   key={q.key}
                   question={q}
@@ -851,7 +849,6 @@ export default function DashboardPage() {
                   effortId={effortId}
                   passId={surveyPassId}
                   coordinatorId={coordinatorId}
-                  className={(q.options?.length || 0) > 6 ? '[grid-column:1/-1]' : ''}
                   tz={tz}
                 />
               ))}

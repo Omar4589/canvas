@@ -444,12 +444,20 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, pass
   );
 }
 
-// Two bands: the label owns line 1, the bar owns line 2. The old row was a 12-column grid
-// (4 label / 6 bar / 2 numbers) whose eleven `gap-3` gutters cost a flat 132px at every width,
-// so inside a 568px card the label got ~168px — about 22 characters — while the numbers needed
-// more than the 78px their own cell had and printed over the bar. Giving each element its own
-// line is also what the rest of the house already does: ReportBreakdown's Bars, and mobile,
-// which states the rule outright ("a proportional bar loses data when squeezed").
+// One line, intrinsic widths. This is NOT the old `grid-cols-12` split (4 label / 6 bar / 2
+// numbers): that failed because the tracks were fixed PROPORTIONS and the eleven `gap-3` gutters
+// cost a flat 132px at every width, so a 568px card left the label ~168px — about 22 characters,
+// hard-truncated — while the numbers overflowed their own 78px cell onto the bar. Here the label
+// is the only `flex-1`, so it absorbs every spare pixel and everything else is intrinsic; the bar
+// and number block therefore land on the same x in every row of a card, which is what makes the
+// percentages read as a column.
+//
+// The bar is a fixed 96px column rather than a full-width band on its own line. That halves the
+// row (50px → 32px) and follows the existing house idiom for a bar that accompanies a printed
+// number: CampaignsTable's `h-1.5 w-16` beside the knocked count, CoverageBar's and PassManager's
+// `h-2 w-40` beside their text. (Mobile's opposite rule — RowBar always full-width — is an
+// inset-group idiom for ~44px touch rows; a web results card is scanned in bulk.) `h-2` costs
+// nothing vertically: at `items-center` the 20px text line box governs the row height.
 // Children are spans, not divs: a <button>'s content model is phrasing content.
 function OptionRow({
   option,
@@ -468,21 +476,23 @@ function OptionRow({
       disabled={!expandable}
       aria-expanded={expandable ? expanded : undefined}
       className={
-        'block w-full rounded px-2 py-2 text-left text-sm ' +
+        'block w-full rounded px-2 py-1.5 text-left text-sm ' +
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ' +
         (expandable ? 'cursor-pointer hover:bg-sunken' : '')
       }
     >
-      <span className="flex items-start gap-2">
+      <span className="flex items-center gap-3">
         {expandable && (
           <IconChevronRight
             size={14}
             className={
-              'mt-0.5 shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')
+              'shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')
             }
           />
         )}
-        {/* Wraps to two lines before it ellipsises, so a real option label never truncates.
+        {/* No `truncate` — a label that outgrows its share WRAPS, growing this row alone to two
+            lines, and line-clamp-2 is only the ceiling behind `title`. At a 780px card the label
+            gets ~460px (≈66 characters), so every real option fits on one line.
             The label keeps full-strength color even when retired: the row used to carry
             opacity-50, which dropped the label to 1.98:1 and the chip to 1.50:1. The Badge is
             what marks the state now — a legible label with a badge beats an illegible one. */}
@@ -496,9 +506,22 @@ function OptionRow({
             <Badge variant="neutral">Retired</Badge>
           </span>
         )}
+        {/* bg-border, not bg-sunken: docs/THEMING.md measures sunken-on-card at 1.10:1 light and
+            1.04:1 dark, so a short bar had no visible track to be read against. */}
+        <span className="h-2 w-24 shrink-0 overflow-hidden rounded-full bg-border">
+          <span
+            // A retired option's bar goes neutral rather than brand — fg-muted, not fg-subtle,
+            // which would sit at ~1.9:1 against the track and read as an empty bar.
+            className={'block h-full rounded-full ' + (retired ? 'bg-fg-muted' : 'bg-brand-600')}
+            // A px floor, not a percentage floor: 1.5% of a 300px card and 1.5% of a 750px card
+            // are different marks, 3px is not. Conditioned on a real count, so a true zero still
+            // paints nothing — a 0.1% answer used to round sub-pixel and rounded-full clipped it.
+            style={{ width: `${width}%`, minWidth: count > 0 ? '3px' : 0 }}
+          />
+        </span>
         {/* Fixed tabular tracks: `justify-end` used to anchor the trailing (count), so a
-            3-digit count shoved the percent left of a 2-digit one and no column edge existed. */}
-        {/* 3.5rem clears "100.0%" at 14px semibold. These are min-widths, not widths: a wider
+            3-digit count shoved the percent left of a 2-digit one and no column edge existed.
+            3.5rem clears "100.0%" at 14px semibold. These are min-widths, not widths: a wider
             value grows its own track rather than overflowing, losing the shared edge on that one
             row instead of printing outside the card the way the old fixed cell did. */}
         <span className="min-w-[3.5rem] shrink-0 text-right font-semibold tabular-nums text-fg">
@@ -508,25 +531,13 @@ function OptionRow({
           ({(count || 0).toLocaleString()})
         </span>
       </span>
-      {/* bg-border, not bg-sunken: docs/THEMING.md measures sunken-on-card at 1.10:1 light and
-          1.04:1 dark, so a short bar had no visible track to be read against. */}
-      <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-border">
-        <span
-          // A retired option's bar goes neutral rather than brand — fg-muted, not fg-subtle,
-          // which would sit at ~1.9:1 against the track and read as an empty bar.
-          className={'block h-full rounded-full ' + (retired ? 'bg-fg-muted' : 'bg-brand-600')}
-          // A px floor, not a percentage floor: 1.5% of a 300px card and 1.5% of a 750px card are
-          // different marks, 3px is not. Conditioned on a real count, so a true zero still paints
-          // nothing — previously a 0.1% answer rounded sub-pixel and rounded-full clipped it away.
-          style={{ width: `${width}%`, minWidth: count > 0 ? '3px' : 0 }}
-        />
-      </span>
     </button>
   );
 }
 
-// Same two-band grammar as OptionRow — the tag counts are the widest text on this surface
-// ("1,234 voters · 900 current"), so they were the worst fit for a fixed 3-of-12 cell.
+// Same one-line grammar as OptionRow, with the "N voters · M current" cluster standing in for the
+// two number tracks — it is the widest text on this surface, which is exactly why a fixed
+// proportional cell never fitted it.
 function TagRow({ tag, voterCount, currentVoterCount, percent, expanded, onToggle }) {
   const width = Math.max(0, Math.min(100, percent || 0));
   return (
@@ -534,17 +545,23 @@ function TagRow({ tag, voterCount, currentVoterCount, percent, expanded, onToggl
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="block w-full cursor-pointer rounded px-2 py-2 text-left text-sm hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
     >
-      <span className="flex items-start gap-2">
+      <span className="flex items-center gap-3">
         <IconChevronRight
           size={14}
-          className={
-            'mt-0.5 shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')
-          }
+          className={'shrink-0 text-fg-subtle transition-transform ' + (expanded ? 'rotate-90' : '')}
         />
         <span className="line-clamp-2 min-w-0 flex-1 font-medium text-fg" title={tag}>
           {tag}
+        </span>
+        {/* The bar stays scaled to IDENTIFIED; current is text only — a second bar (or a percent)
+            would assert a share these voter counts don't have. */}
+        <span className="h-2 w-24 shrink-0 overflow-hidden rounded-full bg-border">
+          <span
+            className="block h-full rounded-full bg-brand-600"
+            style={{ width: `${width}%`, minWidth: voterCount > 0 ? '3px' : 0 }}
+          />
         </span>
         <span className="shrink-0 whitespace-nowrap tabular-nums">
           <span className="font-semibold text-fg">{voterCount.toLocaleString()}</span>
@@ -556,14 +573,6 @@ function TagRow({ tag, voterCount, currentVoterCount, percent, expanded, onToggl
             </span>
           )}
         </span>
-      </span>
-      {/* The bar stays scaled to IDENTIFIED; current is text only — a second bar (or a percent)
-          would assert a share these voter counts don't have. */}
-      <span className="mt-1.5 block h-2 w-full overflow-hidden rounded-full bg-border">
-        <span
-          className="block h-full rounded-full bg-brand-600"
-          style={{ width: `${width}%`, minWidth: voterCount > 0 ? '3px' : 0 }}
-        />
       </span>
     </button>
   );
@@ -583,7 +592,7 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h3 className="font-medium text-fg">Tags</h3>
+        <h3 className="text-sm font-semibold text-fg">Tags</h3>
         <span className="shrink-0 text-xs uppercase tracking-wide text-fg-muted">
           {tags.length} {tags.length === 1 ? 'tag' : 'tags'}
         </span>
@@ -698,7 +707,6 @@ export default function QuestionResults({
   effortId,
   passId,
   coordinatorId,
-  className = '',
   tz,
 }) {
   const orgTz = useOrgTimeZone();
@@ -728,13 +736,20 @@ export default function QuestionResults({
   return (
     // flex h-full flex-col: the card is now the grid item itself, so `stretch` reaches the
     // painted box and bottom borders line up across a row; the footer pins with mt-auto.
-    <div className={'flex h-full flex-col rounded-lg border border-border bg-card p-4 ' + className}>
-      {/* Stacked, not one flex line: the meta chip was shrink-0, so a long question got starved
-          into a one-word-per-line ribbon beside it. InfoHint replaces a hover-only title=,
-          which was unreachable by keyboard and touch. */}
-      <div className="mb-3">
-        <h3 className="font-medium text-fg">{label}</h3>
-        <div className="mt-0.5 flex items-center gap-1 text-xs uppercase tracking-wide text-fg-muted">
+    <div className="flex h-full flex-col rounded-lg border border-border bg-card p-4">
+      {/* One line, wrapping — not stacked. The house rule across the console is that a descriptive
+          sentence stacks under its title while a short scope chip shares the line (TagResults does
+          exactly that 100 lines down). Stacking cost every card a line; what actually caused the
+          starving was `shrink-0` with no floor on the title, so `flex-wrap` + `basis-48` fixes it
+          properly: the chip drops to its own line only when it genuinely cannot share.
+          text-sm font-semibold is the console's in-card heading (ReportBreakdown, ReportTagList,
+          SetupProgress, VoterHighlights, MapFilters…); the bare `font-medium` that used to be here
+          was one of only two headings in client/src still inheriting 16px from body.
+          InfoHint replaces a hover-only title=, unreachable by keyboard and touch; its trigger is
+          16px tall, so it fits the text-xs line box without growing the row. */}
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <h3 className="min-w-0 flex-1 basis-48 text-sm font-semibold text-fg">{label}</h3>
+        <div className="inline-flex shrink-0 items-center gap-1 text-xs uppercase tracking-wide text-fg-muted">
           <span>
             {/* Global regex: replace('_',' ') only ever swapped the first underscore. */}
             {type.replace(/_/g, ' ')} ·{' '}
@@ -799,7 +814,7 @@ export default function QuestionResults({
       {/* mt-auto parks the hint on the card's bottom edge, so a card that stretches to a tall
           row's height reads as deliberate rather than as a card that stopped early. */}
       {expandable && (
-        <div className="mt-auto pt-3 text-xs text-fg-muted">
+        <div className="mt-auto pt-2 text-xs text-fg-muted">
           Click any option to see who selected it.
         </div>
       )}
