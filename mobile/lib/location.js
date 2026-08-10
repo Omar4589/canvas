@@ -84,6 +84,49 @@ export function promptEnableServices() {
   return Location.enableNetworkProviderAsync();
 }
 
+// Proactive iOS Precise-off probe. expo-location v19 exposes no accuracyAuthorization,
+// so on iOS reduced accuracy is invisible to getLocationGateStatus above — a canvasser
+// with Precise Location off only found out one blocked tap at a time. The map's puck
+// streams its fixes here: a sustained run of coarse readings lights the same
+// PRECISE_OFF banner the tap-time gate would (deep-indoor GNSS-less fixes trip the
+// tap gate's identical >1km heuristic, so probe and gate always agree), BEFORE the
+// first wasted knock — and one precise fix clears it. Hysteresis is load-bearing,
+// in both count and TIME: the first fixes after a cold start can legitimately be
+// km-coarse cell/Wi-Fi fixes while GNSS warms, and a stale run of coarse readings
+// from hours ago must not combine with one warm-up fix to trip it — so readings
+// only count within a rolling window, and the run must span real seconds.
+// iOS-only: Android's permission API reports coarse directly.
+const PRECISE_OFF_MIN_COUNT = 6;
+const PRECISE_OFF_MIN_SPAN_MS = 15 * 1000;
+const PRECISE_OFF_MAX_GAP_MS = 30 * 1000;
+let coarseCount = 0;
+let coarseFirstAt = 0;
+let coarseLastAt = 0;
+
+export const reportFixAccuracy = (accuracy) => {
+  if (Platform.OS !== 'ios' || accuracy == null) return;
+  const now = Date.now();
+  if (accuracy > IOS_REDUCED_ACCURACY_MIN_M) {
+    if (!coarseCount || now - coarseLastAt > PRECISE_OFF_MAX_GAP_MS) {
+      coarseCount = 0;
+      coarseFirstAt = now;
+    }
+    coarseCount += 1;
+    coarseLastAt = now;
+    // setGateBlock dedups identical codes, and a coarse stream can't co-occur with
+    // the blocks that gate fixes off entirely (services off / permission denied) —
+    // no fixes reach the puck in those states — so no guard on the current code.
+    if (coarseCount >= PRECISE_OFF_MIN_COUNT && now - coarseFirstAt >= PRECISE_OFF_MIN_SPAN_MS) {
+      setGateBlock('PRECISE_OFF');
+    }
+  } else {
+    coarseCount = 0;
+    // Only clear what this probe (or a coarse tap-time fix) set — a precise fix
+    // is proof the Precise toggle is on again.
+    if (lastGateBlock === 'PRECISE_OFF') setGateBlock(null);
+  }
+};
+
 // THE canvassing gate — every disposition/survey stamp comes from here, and a throw
 // means the action must NOT be recorded (no location = no knock). Acquisition order:
 //   1. device location services on, app permission granted, precise (not coarse);

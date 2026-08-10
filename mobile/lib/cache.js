@@ -98,11 +98,33 @@ function withBootstrapLock(fn) {
 let pendingSave = null;
 let queuedSave = null;
 
+// Save-health signal: a failed snapshot write means offline progress is NOT being
+// persisted — the realistic cause is a full disk (the atomic tmp write needs room
+// for a complete second copy of the multi-MB roster, so it fails first). The old
+// console.warn was invisible in the field; a phone can canvass all day silently
+// serving a morning-stale snapshot on every cold start. One boolean, latest write
+// wins; any later successful write clears it. The map renders it as a warning.
+let bootstrapSaveFailed = false;
+const saveHealthSubs = new Set();
+const setBootstrapSaveFailed = (failed) => {
+  if (bootstrapSaveFailed === failed) return;
+  bootstrapSaveFailed = failed;
+  for (const fn of saveHealthSubs) fn(failed);
+};
+export const subscribeBootstrapSaveHealth = (fn) => {
+  saveHealthSubs.add(fn);
+  fn(bootstrapSaveFailed);
+  return () => saveHealthSubs.delete(fn);
+};
+
 // Best-effort by design: a failed cache write must never fail the data path —
 // the map/books queryFns call this right after a successful fetch, and the
 // delta poll + recordAction call it fire-and-forget with no catch of their own.
 export function saveBootstrap(data) {
-  pendingSave = { ...data, cachedAt: new Date().toISOString() };
+  // fromDiskCache is a serving-path annotation (set by the cold-start fallback in
+  // bootstrapQuery.js), never data — persisting it would make every later load
+  // wear the offline marker regardless of how fresh the snapshot really is.
+  pendingSave = { ...data, fromDiskCache: undefined, cachedAt: new Date().toISOString() };
   if (queuedSave) return queuedSave;
   queuedSave = withBootstrapLock(async () => {
     queuedSave = null; // saves arriving once this write starts queue a fresh one
@@ -111,8 +133,10 @@ export function saveBootstrap(data) {
     try {
       await FileSystem.writeAsStringAsync(BOOTSTRAP_TMP, JSON.stringify(snapshot));
       await FileSystem.moveAsync({ from: BOOTSTRAP_TMP, to: BOOTSTRAP_FILE });
+      setBootstrapSaveFailed(false);
     } catch (err) {
       console.warn('saveBootstrap failed', err);
+      setBootstrapSaveFailed(true);
     }
   });
   return queuedSave;
@@ -147,6 +171,13 @@ export function clearBootstrap() {
   });
 }
 
+// Every loader below reads through this: loaders NEVER reject. They already
+// swallowed corrupt JSON but let an AsyncStorage.getItem rejection through — an
+// odd split with real teeth, since callers chain .then() with no catch (the map's
+// mount restore, the boot screen's Promise.all, books, stats): one storage read
+// rejection pinned those screens on their loading state until force-close.
+const readItem = (key) => AsyncStorage.getItem(key).catch(() => null);
+
 export async function saveActiveCampaign(campaign) {
   if (!campaign) {
     await AsyncStorage.removeItem(CAMPAIGN_KEY);
@@ -156,7 +187,7 @@ export async function saveActiveCampaign(campaign) {
 }
 
 export async function loadActiveCampaign() {
-  const raw = await AsyncStorage.getItem(CAMPAIGN_KEY);
+  const raw = await readItem(CAMPAIGN_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -178,7 +209,7 @@ export async function saveCurrentUser(user) {
 }
 
 export async function loadCurrentUser() {
-  const raw = await AsyncStorage.getItem(USER_KEY);
+  const raw = await readItem(USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -200,7 +231,7 @@ export async function saveMemberships(memberships) {
 }
 
 export async function loadMemberships() {
-  const raw = await AsyncStorage.getItem(MEMBERSHIPS_KEY);
+  const raw = await readItem(MEMBERSHIPS_KEY);
   if (!raw) return [];
   try {
     return JSON.parse(raw);
@@ -222,7 +253,7 @@ export async function saveActiveOrgId(orgId) {
 }
 
 export async function loadActiveOrgId() {
-  return AsyncStorage.getItem(ACTIVE_ORG_KEY);
+  return readItem(ACTIVE_ORG_KEY);
 }
 
 // The active org's display name, cached alongside its id when the user picks an
@@ -237,7 +268,7 @@ export async function saveActiveOrgName(name) {
 }
 
 export async function loadActiveOrgName() {
-  return AsyncStorage.getItem(ACTIVE_ORG_NAME_KEY);
+  return readItem(ACTIVE_ORG_NAME_KEY);
 }
 
 export async function clearActiveOrgId() {
@@ -262,7 +293,7 @@ export async function saveSelectedBooks(campaignId, books) {
 }
 
 export async function loadSelectedBooks(campaignId) {
-  const raw = await AsyncStorage.getItem(SELECTED_BOOKS_KEY);
+  const raw = await readItem(SELECTED_BOOKS_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -294,7 +325,7 @@ export async function saveCurrentEffort(campaignId, effortId) {
 }
 
 export async function loadCurrentEffort(campaignId) {
-  const raw = await AsyncStorage.getItem(CURRENT_EFFORT_KEY);
+  const raw = await readItem(CURRENT_EFFORT_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -323,7 +354,7 @@ export async function saveViewMode(campaignId, mode) {
 }
 
 export async function loadViewMode(campaignId) {
-  const raw = await AsyncStorage.getItem(VIEW_MODE_KEY);
+  const raw = await readItem(VIEW_MODE_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -347,7 +378,7 @@ export async function saveMapStyle(styleId) {
 }
 
 export async function loadMapStyle() {
-  return AsyncStorage.getItem(MAP_STYLE_KEY);
+  return readItem(MAP_STYLE_KEY);
 }
 
 // Small bag of server-reported facts the app needs before/independent of any
@@ -364,7 +395,7 @@ export async function saveServerMeta(meta) {
 }
 
 export async function loadServerMeta() {
-  const raw = await AsyncStorage.getItem(SERVER_META_KEY);
+  const raw = await readItem(SERVER_META_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -386,5 +417,5 @@ export async function saveThemePreference(pref) {
 }
 
 export async function loadThemePreference() {
-  return AsyncStorage.getItem(THEME_KEY);
+  return readItem(THEME_KEY);
 }

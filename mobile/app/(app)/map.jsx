@@ -42,11 +42,12 @@ import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
-import { ensureLocationPermission } from '../../lib/location';
+import { ensureLocationPermission, reportFixAccuracy } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
 import EntitlementBanner from '../../components/EntitlementBanner';
 import LocationBlockedBanner from '../../components/LocationBlockedBanner';
+import DataHealthBanner from '../../components/DataHealthBanner';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { useMapStyle } from '../../lib/mapStyles';
@@ -239,6 +240,9 @@ export default function MapScreen() {
 
   useEffect(() => {
     let mounted = true;
+    // This chain is the only writer of these states before the render gate, so it
+    // must always settle them — cache.js loaders never reject (readItem) precisely
+    // so a storage failure here can't pin the screen on "Loading houses…" forever.
     loadActiveCampaign().then((c) => {
       if (!mounted) return;
       if (!c) {
@@ -343,6 +347,14 @@ export default function MapScreen() {
   useEffect(() => {
     if (restoredBooks === undefined) return; // selection not restored yet
     if (!data) return;
+    // Never evict a SELECTION on the disk snapshot: a dead-signal cold start
+    // serves a books list as old as the last successful save, and a book assigned
+    // since then is simply absent from it — bouncing on that showed the canvasser
+    // yesterday's world as if they'd been moved out of their book. Only fresh
+    // server data may say a selection is gone. (The render below shows an offline
+    // notice.) With NO selection at all the redirect still runs — the books picker
+    // is the right destination and renders the same snapshot fine offline.
+    if (data.fromDiskCache && selectedBookSet) return;
     const books = data.books || [];
     if (!books.length) return;
     const validIds = new Set(books.map((b) => String(b.id)));
@@ -487,6 +499,16 @@ export default function MapScreen() {
   useEffect(() => {
     const result = changesQ.data;
     if (!result) return;
+    // First successful delta while serving the cold-start disk snapshot: the
+    // network is back, but a delta can never freshen `books` (it ships only
+    // household/voter rows) — so a marker strip alone would let the eviction
+    // effect treat the snapshot's stale books list as server authority. Pull a
+    // full bootstrap instead: fresh truth replaces the snapshot wholesale, which
+    // clears the offline banner and re-arms eviction on real data. (Also covers
+    // the empty delta, which skips the fold below entirely.)
+    if (qc.getQueryData(['bootstrap'])?.fromDiskCache) {
+      qc.invalidateQueries({ queryKey: ['bootstrap'] });
+    }
     const { households = [], voters = [], serverTime } = result;
     if (households.length || voters.length) {
       qc.setQueryData(['bootstrap'], (prev) => {
@@ -815,6 +837,27 @@ export default function MapScreen() {
   const hasValidBook =
     selectedBookSet && booksList.some((b) => selectedBookSet.has(String(b.id)));
   if (booksList.length > 0 && !hasValidBook) {
+    // Offline on the disk snapshot WITH a selection: the redirect above
+    // deliberately does NOT run (the stale list can't prove the book is gone), so
+    // this branch would spin forever. Name the situation instead — the selection
+    // likely postdates the snapshot, and reconnecting resolves it either way.
+    // Same escape hatches as the sibling stuck-states: Retry + switch campaign.
+    if (data.fromDiskCache && selectedBookSet) {
+      return (
+        <SafeAreaView style={styles.center}>
+          <Text style={styles.errorText}>
+            You're offline, and your current book isn't in the data saved on this phone yet.
+            Reconnect to load it — everything you recorded is safe and will sync.
+          </Text>
+          <Pressable onPress={onRefresh} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>Retry</Text>
+          </Pressable>
+          <Pressable onPress={switchCampaign} style={[styles.secondaryButton, { marginTop: 10 }]}>
+            <Text style={styles.secondaryButtonText}>Choose a different campaign</Text>
+          </Pressable>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator color={colors.brand} />
@@ -868,6 +911,9 @@ export default function MapScreen() {
           onUpdate={(loc) => {
             const c = loc?.coords;
             if (!c) return;
+            // Feed the puck's accuracy to the iOS Precise-off probe — the only
+            // way that state is detectable before a tap fails (lib/location.js).
+            reportFixAccuracy(c.accuracy);
             const next = [c.longitude, c.latitude];
             // Only re-sort the list when the canvasser has actually moved (~>10m).
             setUserCoords((prev) => {
@@ -1026,6 +1072,12 @@ export default function MapScreen() {
         {/* Location-gate notice (permission/services/precise off) — map + list mode.
             Advisory; the hard block is the tap-time gate in recordAction.js. */}
         <LocationBlockedBanner />
+
+        {/* Data-trust notices (offline snapshot age / storage-full save failure) —
+            map + list mode, same soft-banner family as the two above. asOf is the
+            snapshot's SERVER stamp (generatedAt): cachedAt is re-stamped by every
+            local optimistic save, so it understates how old the server truth is. */}
+        <DataHealthBanner fromCache={!!data?.fromDiskCache} asOf={data?.generatedAt || data?.cachedAt} />
 
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>

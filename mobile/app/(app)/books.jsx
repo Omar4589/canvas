@@ -53,6 +53,7 @@ export default function BooksScreen() {
   const qc = useQueryClient();
   const cameraRef = useRef(null);
   const cameraInitRef = useRef(false);
+  const enteringRef = useRef(false); // double-tap guard for the Enter button
   const [activeCampaign, setActiveCampaign] = useState(undefined);
   const [selected, setSelected] = useState(null); // a single book id, or null
   const [mapReady, setMapReady] = useState(false);
@@ -260,10 +261,15 @@ export default function BooksScreen() {
   );
 
   async function onEnter() {
-    if (!selected) return;
+    if (!selected || enteringRef.current) return;
+    enteringRef.current = true;
     // Persist the choice so a cold start can re-scope the map to this book
-    // instead of falling open to all houses.
-    await saveSelectedBooks(activeCampaign?.id, selected);
+    // instead of falling open to all houses. The nav param below carries this
+    // session either way, so a failed write must not eat the button press —
+    // it used to: no catch meant the tap silently did nothing.
+    try {
+      await saveSelectedBooks(activeCampaign?.id, selected);
+    } catch {}
     router.replace({ pathname: '/(app)/map', params: { selectedBooks: selected } });
   }
 
@@ -456,7 +462,10 @@ export default function BooksScreen() {
 
       {selectedBook && (
         <SafeAreaView edges={['bottom']} style={styles.enterWrap} pointerEvents="box-none">
-          <Pressable onPress={onEnter} style={styles.enterButton}>
+          <Pressable
+            onPress={onEnter}
+            style={({ pressed }) => [styles.enterButton, pressed && { opacity: 0.7 }]}
+          >
             <Text style={styles.enterButtonText} numberOfLines={1}>
               Enter {selectedBook.name} →
             </Text>

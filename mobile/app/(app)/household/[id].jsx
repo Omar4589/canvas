@@ -236,12 +236,28 @@ export default function HouseholdDetail() {
       onAccepted: () => router.back(),
     })
       .then((res) => {
-        if (res?.blocked) {
-          firedRef.current = false;
-          setIsSubmitting(false);
+        if (res?.duplicate) {
+          // The same action on this door is already recording — usually the list
+          // quick-tap a few seconds earlier, still in flight on weak signal. That
+          // first submit owns the write, so behave like accepted and go back — but
+          // never silently: a note typed here rode on THIS tap and would vanish.
+          if (note.trim()) {
+            Alert.alert(
+              'Already recording',
+              'This door is already being recorded from an earlier tap, so the note typed here was not attached.'
+            );
+          } else {
+            router.back();
+          }
         }
       })
-      .catch(() => {});
+      // Every settle releases the latch: on success the screen already navigated
+      // away at onAccepted (release is a no-op there), and blocked/duplicate/error
+      // must re-enable the buttons — one release site instead of one per branch.
+      .finally(() => {
+        firedRef.current = false;
+        setIsSubmitting(false);
+      });
   }
 
   // DNC voters can't be surveyed, so they're excluded from BOTH sides of the

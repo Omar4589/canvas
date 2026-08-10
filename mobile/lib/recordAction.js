@@ -1,4 +1,4 @@
-import { Alert, Linking, Platform } from 'react-native';
+import { Alert, AppState, Linking, Platform } from 'react-native';
 import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
 import { submitOrQueue, flushQueue } from './offlineQueue';
 import { saveBootstrap } from './cache';
@@ -139,6 +139,29 @@ const inFlightPaths = new Set();
 // so a reload at that instant would lose the knock silently.
 export const hasInFlightActions = () => inFlightPaths.size > 0;
 
+// Native alerts must only be REQUESTED while the app is active. Both platforms
+// mishandle an Alert.alert fired while backgrounded — the exact window a canvasser
+// hits by pocketing the phone during the ~6s GPS gate: Android's DialogModule drops
+// the show outright (button callbacks never fire), and iOS builds the alert window
+// from a nil windowScene (invisible, untappable, or worse). Either way the caller's
+// promise — settled only by a button tap — hangs forever and the screen's buttons
+// stay latched. So: show now if active, else defer to the next foreground. Never
+// skip a deferred alert, however late: for NO_FIX (the common weak-signal block)
+// the LocationBlockedBanner deliberately stays silent, so this alert is the ONLY
+// "nothing was recorded" feedback — a late popup over the still-open door screen
+// beats a silently lost knock.
+const alertWhenActive = (show) => {
+  if (AppState.currentState === 'active') {
+    show();
+    return;
+  }
+  const sub = AppState.addEventListener('change', (status) => {
+    if (status !== 'active') return;
+    sub.remove();
+    show();
+  });
+};
+
 // Per-code "you're blocked" alert for a failed location gate. Cancel resolves the
 // caller's blocked result; Try again re-enters the same submit. Deliberately NO copy
 // for mock locations — mock detection is recorded silently server-side, never shown here.
@@ -225,9 +248,13 @@ export function optimisticSubmit(qc, opts) {
     onAccepted,
   } = opts;
 
-  // If a submit to this exact path is already in flight, ignore the duplicate outright — the
+  // If a submit to this exact path is already in flight, don't start a second — the
   // first call already patched the cache; a second would just race to create another row.
-  if (inFlightPaths.has(path)) return Promise.resolve(null);
+  // The sentinel (NOT null, NOT blocked) lets screen callers release their button latch:
+  // resolving null here left household/survey screens latched forever, because their
+  // only un-latch path checked res?.blocked — the field report was "buttons dead until
+  // force-close", easiest to hit on weak signal where the first submit hangs ~20s.
+  if (inFlightPaths.has(path)) return Promise.resolve({ ok: false, duplicate: true });
   inFlightPaths.add(path);
   // Single-release guard: a blocked gate releases the lock so "Try again" can re-enter
   // optimisticSubmit (which re-acquires it) — the outer finally must not free the
@@ -250,10 +277,12 @@ export function optimisticSubmit(qc, opts) {
       } catch (err) {
         release();
         return new Promise((resolve) => {
-          locationBlockedAlert(err, {
-            onCancel: () => resolve({ ok: false, queued: false, blocked: err.code || 'NO_FIX' }),
-            onRetry: () => resolve(optimisticSubmit(qc, opts)),
-          });
+          alertWhenActive(() =>
+            locationBlockedAlert(err, {
+              onCancel: () => resolve({ ok: false, queued: false, blocked: err.code || 'NO_FIX' }),
+              onRetry: () => resolve(optimisticSubmit(qc, opts)),
+            })
+          );
         });
       }
     } else {
@@ -357,9 +386,14 @@ export function recordHouseholdAction(qc, householdId, action, { note = null, on
 // by pendingLocations until synced), offline-safe via the shared queue. coords in
 // { lat, lng }; the endpoint is POST so flushQueue can replay a queued fix verbatim.
 export function recordLocationCorrection(qc, householdId, { lat, lng, source, accuracy = null, scope = 'unit' }) {
+  const path = `/mobile/households/${householdId}/location`;
+  // Duplicate-drag check BEFORE marking: marking first would overlay the pin at a
+  // coordinate the dedup then never submits — it would appear to stick, survive on
+  // the pending overlay, and silently snap back when the overlay expires.
+  if (inFlightPaths.has(path)) return Promise.resolve({ ok: false, duplicate: true });
   markPendingLocation(householdId, [lng, lat]);
   const p = optimisticSubmit(qc, {
-    path: `/mobile/households/${householdId}/location`,
+    path,
     body: { lat, lng, source, accuracy, scope },
     optimisticPatch: (prev) => setHouseholdLocation(prev, householdId, [lng, lat]),
     reconcile: (prev, response) => {
@@ -374,9 +408,10 @@ export function recordLocationCorrection(qc, householdId, { lat, lng, source, ac
     requireFix: false,
   });
   // On a hard reject (not queued), drop the optimistic move so the invalidate that
-  // optimisticSubmit fires restores the server's real (un-moved) coordinate.
+  // optimisticSubmit fires restores the server's real (un-moved) coordinate. A
+  // duplicate is not a reject — the first drag's submit still owns the overlay.
   p.then((result) => {
-    if (result && !result.ok && !result.queued) clearPendingLocation(householdId);
+    if (result && !result.ok && !result.queued && !result.duplicate) clearPendingLocation(householdId);
   }).catch(() => {});
   return p;
 }

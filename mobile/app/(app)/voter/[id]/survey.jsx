@@ -349,16 +349,35 @@ export default function VoterSurvey() {
       hardFailTitle: 'Survey not saved',
       hardFailMessage: 'Could not save this survey. Please try again.',
       // Navigate only once the location gate passes and the optimistic patch lands;
-      // a blocked gate keeps the canvasser here with the form intact.
-      onAccepted: () => router.replace('/(app)/map'),
+      // a blocked gate keeps the canvasser here with the form intact. dismiss(2), not
+      // replace: replace swapped only THIS route, so every survey left its household
+      // and a fresh param-less map screen mounted in the stack — dozens of live
+      // Mapbox views by end of shift, and an edge-swipe could resurface a map still
+      // scoped to an earlier book. Popping survey + household returns to the screen
+      // the door was opened from (map, or a building's unit list) with its params
+      // untouched — dismissTo would REWRITE the map's params from the bare href
+      // (StackRouter POP_TO without merge), wiping selectedBooks; a plain POP can't.
+      onAccepted: () => router.dismiss(2),
     })
       .then((res) => {
-        if (res?.blocked) {
-          firedRef.current = false;
-          setIsSubmitting(false);
+        if (res?.duplicate) {
+          // A submit for this voter is still in flight — and it carries the EARLIER
+          // tap's answers, not this form. Never imply these answers were captured:
+          // once that submit settles, Save again re-submits (the legal re-survey /
+          // overwrite path), so the honest guidance is wait-then-retry.
+          Alert.alert(
+            'Still saving an earlier response',
+            'An earlier response for this voter is still saving, so these answers are not saved yet. Wait a moment, then tap Save again.'
+          );
         }
       })
-      .catch(() => {});
+      // Every settle releases the latch: on success the screen already navigated
+      // away at onAccepted (release is a no-op there), and blocked/duplicate/error
+      // must re-enable Save — one release site instead of one per branch.
+      .finally(() => {
+        firedRef.current = false;
+        setIsSubmitting(false);
+      });
   }
 
   return (

@@ -62,7 +62,11 @@ Sign in
 
 If you only have one organization, you skip that screen. If a campaign has a single effort (the
 common case), picking it drops you straight on the book picker. The app also remembers the last book
-you were working, so a cold start reopens it instead of making you pick again.
+you were working, so a cold start reopens it instead of making you pick again — **even with no
+signal**: the map opens on the houses saved on your phone, with an amber notice showing how old that
+saved copy is (it clears on its own once you're back online). If the book you switched to mid-shift
+isn't in the saved copy yet, the app says so and offers Retry — it never quietly drops you back into
+an older book, and nothing you recorded is lost.
 
 **Your very first sign-in** uses the temporary password your admin or team lead gave you; the app
 immediately asks you to choose your own strong password before you can start knocking.
@@ -185,7 +189,15 @@ block.
 **Offline still works exactly as before.** GPS comes from satellites, not cell signal — airplane
 mode or a dead zone doesn't stop it, as long as the Location toggle itself is on. Your knocks record
 with a real GPS stamp and sync when you're back in signal. The only thing that blocks recording is
-location itself being off.
+location itself being off. If a "can't get your location" message is triggered right as you lock the
+phone, it simply waits and shows the moment you're back — so you always find out when a door did
+**not** record, even if it happens in your pocket.
+
+Two data-trust notices can appear at the top of the map (same soft-banner family as the location
+notice): an **amber offline notice** when the app is showing the saved copy of your houses because
+it can't reach the server (with how old that copy is), and a **red storage notice** when your phone
+is too full to save map data for offline use — free up space, or the next signal-less cold start
+will show older houses than you expect.
 
 ### Refused (someone answered, but said no)
 
@@ -537,12 +549,24 @@ All route through `submitAction`, which fires `recordHouseholdAction(qc, id, act
 `firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is
 **location-gated**: `optimisticSubmit` acquires a fresh GPS stamp *before* the optimistic recolor
 (no location = no knock — see [AUDIT.md](AUDIT.md) §B.6), so navigation happens via `onAccepted`
-(`router.back()` once the gate passes and the pin recolors), and a blocked gate resets
-`firedRef`/`isSubmitting` so the canvasser can fix location and tap again. The at-door survey
-(`voter/[id]/survey.jsx`) follows the same pattern with `router.replace('/(app)/map')` in its
-`onAccepted`. The map mounts a persistent
+(`router.back()` once the gate passes and the pin recolors). **Every settle releases the latch**
+(a single `.finally`): a duplicate of an in-flight submit resolves `{duplicate: true}` — never
+`null`, which once left the buttons latched forever — and the screen explains it (a typed note
+that would silently drop gets an alert; otherwise it just goes back). The at-door survey
+(`voter/[id]/survey.jsx`) follows the same pattern with `router.dismiss(2)` in its `onAccepted` —
+a pure POP back to the screen the door was opened from (map, or a building's unit list). It is
+deliberately **not** `replace` (which stacked a fresh param-less map screen per survey — dozens of
+live Mapbox views by end of shift, and stale-book screens reachable by edge-swipe) and **not**
+`dismissTo` (StackRouter `POP_TO` without merge rewrites the target's params from the href, wiping
+`selectedBooks`). The gate's blocked alert is **deferred to the next foreground**
+(`alertWhenActive`): both platforms mishandle `Alert.alert` fired while backgrounded — Android
+drops it, iOS builds it on a nil windowScene — which orphaned the promise and froze the buttons
+when a canvasser pocketed the phone during the GPS wait. The map mounts a persistent
 [LocationBlockedBanner](../mobile/components/LocationBlockedBanner.jsx) (below the entitlement
-banner) that warns when services/permission/precise location are off.
+banner) that warns when services/permission/precise location are off — on iOS, Precise-off is
+additionally detected *proactively* by streaming the puck's fix accuracies through
+`reportFixAccuracy` (lib/location.js: >1km sustained across a rolling window, since expo-location
+exposes no `accuracyAuthorization`), so the banner lights before the first wasted knock.
 
 ### The voter identity line (one component, both door surfaces)
 

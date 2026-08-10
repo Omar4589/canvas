@@ -33,7 +33,24 @@ export function bootstrapQueryFn(qc, campaignId) {
       const live = qc.getQueryData(['bootstrap']);
       if (live && String(live.campaign?.id) === String(campaignId)) throw err;
       const cached = await loadBootstrap();
-      if (cached && String(cached.campaign?.id) === String(campaignId)) return cached;
+      if (cached && String(cached.campaign?.id) === String(campaignId)) {
+        // Cold-start offline fallback. Two amendments before serving it:
+        // 1. Re-apply the pending overlays — actions queued AFTER this snapshot
+        //    was written aren't in it, so without this a dead-signal cold start
+        //    painted doors the canvasser just worked as un-knocked ("the app
+        //    moved me back in time").
+        // 2. Mark it as the disk snapshot (`fromDiskCache`). The map banners its
+        //    server age (generatedAt) and — crucially — must NOT treat its
+        //    possibly-outdated books list as authority to evict the canvasser
+        //    from their selected book. The first successful delta triggers a full
+        //    bootstrap refetch (map.jsx), whose fresh data replaces this marker;
+        //    saveBootstrap never persists it.
+        return {
+          ...cached,
+          households: reconcilePendingLocations(reconcilePendingHouseholds(cached.households)),
+          fromDiskCache: true,
+        };
+      }
       throw err;
     }
   };
