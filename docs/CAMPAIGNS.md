@@ -113,6 +113,12 @@ list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaig
 `/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
 switcher are how you pick which campaign you're working in.
 
+The Home dashboard's numbers filter three ways: by **date range**, by **walk list**, and by **crew**
+(a coordinator dropdown — everyone by default, one coordinator's crew, or "No coordinator"; the
+same filter the Timeline has). Every activity number on the page follows the crew filter; the
+**Coverage** section deliberately doesn't — doors don't belong to a crew — and says so while a crew
+is selected. Counting rules in [METRICS.md](METRICS.md).
+
 The switcher lists **active campaigns only** — archived ones are reached from **Campaigns** or
 **Overview**, each of which has an archived section, and that is also where you reactivate them.
 An archived campaign you are *currently in* stays in the switcher (labelled `· Archived`) so the

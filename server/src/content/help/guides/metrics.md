@@ -44,6 +44,10 @@ You'll see **two** survey figures, and they are both correct. They answer differ
 
 If a canvasser shows 18 survey doors but 37 voters surveyed, they've been working houses deeply — two voters per door on average. Neither number is wrong, and **nothing adds them together**. See [Why do I see different survey numbers?](two-survey-numbers).
 
+## Tags: identified vs still current
+
+Survey **tags** (like "Supporter") count **people, once each** — and each tag shows two figures. **Identified** is everyone who ever gave a tagged answer; it never goes down. **Still current** is how many kept a tagged answer the last time you asked — someone who said Support in round 1 and Opposed in round 2 stays identified but is no longer current, so this is the number for "how many supporters do we have *now*." A tag's **By team** table splits those voters by crew — the team that found each voter first gets the credit, so the team rows always add up exactly to the campaign line. See [How do I count our supporters?](how-do-i-count-supporters).
+
 ## Rates
 
 - **Connection rate** — of the doors you knocked, the share where the goal was completed: a **survey taken**, or (on a lit-drop campaign) **literature left**. It divides by **doors, not voters** — so 273 survey doors ÷ 1,252 doors = 22%.

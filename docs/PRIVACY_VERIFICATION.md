@@ -1342,6 +1342,16 @@ stamp above.]*
 
 **The fifth (knocks-by-pass.csv) is aggregate counts, not records — no policy text change.** Its default layout carries no personal data at all (walk-list/round names and tallies); the `groupBy=canvasser` layout re-exposes canvasser name/email/status to **exactly the audience** that already downloads them from `canvassers.csv` (same admin-or-lead gate, plus the stricter always-required `campaignId`). No voter fields appear in any layout, no new party receives data, and no new category of data leaves the system, **so no Privacy Policy / ToS / DPA text change is required for it.** Staff (grant-based) access is covered by the fail-closed central access log (E13 — no exemption for this route).
 
+> **[v5 2026-08-09 — `voters-by-answer.csv` and `knocks-by-pass.csv` accept an optional
+> `?coordinatorId` crew filter (the campaign home's crew scoping). Re-verified: no policy change.]**
+> The parameter only **narrows** the row set to one coordinator's crew (or the no-crew bucket) —
+> same gates, same audience, same columns, no new field and no new recipient; an omitted parameter
+> is byte-identical to before. Line anchors in the table above have drifted with unrelated code
+> insertions; as of this stamp: `voters-by-answer.csv` `reports.js:1516` (`EXPORT_CAP` `:1522`),
+> `canvassers.csv` `:2770`, `buildKnocksByPass` `:2959` (threads the crew filter to the JSON route
+> and the CSV alike), `knocks-by-pass.csv` `:3004`, `canvassers/:userId/export.csv` `:4035`, the
+> admin-or-lead router gate `:51`.
+
 > **[v4 2026-08-08 — the drill now RETURNS rows for the "Other" bucket, and each row carries the
 > rendered answer. Re-verified: same audience, same categories, no policy change.]** Two facts
 > changed. (1) Drilling the write-in bucket previously returned **zero** rows — the bucket carried a
@@ -1480,6 +1490,28 @@ The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReport
 > One inference does change shape: a glyph now makes the *number* of canvassed doors at one coordinate
 > legible at a glance, where before it was N coincident icons. That is the same disclosure ("this
 > household was canvassed") already recorded below, rendered honestly rather than hidden under itself.
+
+> **[v5 2026-08-10 — "Voter groups" (tag) rows on published reports: NEW OPT-IN EXPOSURE, verified.]**
+> A published report can now carry a **Voter groups** section: per operator-ticked tag, the tag's
+> **display name** and two **aggregate integers** (`identifiedVoters`, `currentVoters`) — frozen
+> into `ClientReport.stats.*.tagBreakdowns` at compute time (`services/reports/computeReport.js`
+> `computeTagBreakdowns`) and shaped at `services/reports/clientReportView.js` (`shapeWindow`).
+> What reaches the unauthenticated page: **operator-authored label text + two campaign-level
+> counts. No voter identity, no addresses, no per-door data, no canvasser identity** — the same
+> exposure class as the report title and walk-list name recorded above. Three guards, all
+> code-verified: (1) **opt-in allowlist** — `visibility.visibleTags` with **empty = show NONE**
+> (deliberately the opposite of `visibleQuestionKeys`; a tag never appears without an affirmative
+> per-tag tick, so internal labels like "Hostile" stay internal by default and every pre-feature
+> report shows nothing); (2) the allowlist itself is **not emitted** to clients — only the
+> filtered rows ride the wire; (3) tag names are structurally **operator-authored, never
+> canvasser-typed** — `tagOptionMap` (services/surveys/tags.js) reads `option.tag` only, and the
+> `'__other__'` write-in is a question flag that can never be a tag member, so the free-text
+> channel documented in the map-point qualification below has no analogue here. Published policy:
+> **no edit needed** — no new data is collected, retained, or sent to any third party; this is a
+> new *presentation* of existing aggregate survey data behind the existing opt-in share-link
+> surface, and the policy's report-sharing language already covers operator-published aggregates.
+> Pinned by `server/test/surveyTagUnits.int.test.js` (opt-in default none; unticked names absent;
+> old reports render nothing).
 
 **Unknocked households are omitted** (`computeReport.js:200`), so a point's mere presence discloses that the household was canvassed.
 

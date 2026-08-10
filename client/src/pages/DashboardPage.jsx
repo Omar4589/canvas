@@ -18,6 +18,7 @@ import { livePollOptions } from '../lib/livePoll.js';
 import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDates.js';
 import { metricHelp } from '../lib/metricHelp.js';
 import { todayInTz, shiftDays } from '../lib/datePresets.js';
+import { useRoundOptions } from '../lib/useRoundOptions.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 
 function buildQuery(params) {
@@ -61,6 +62,10 @@ export default function DashboardPage() {
   const deepLinkedRef = useRef(false);
   const [selectedCanvasser, setSelectedCanvasser] = useState(null);
   const [effortId, setEffortId] = useState('');
+  // '' = everyone, an id = that coordinator's crew, 'none' = the "No coordinator" bucket.
+  const [coordinatorId, setCoordinatorId] = useState('');
+  // Round scope for the Survey results section ('' = all rounds, a Pass _id, or 'legacy').
+  const [surveyPassId, setSurveyPassId] = useState('');
 
   // The sidebar campaign switcher re-renders this SAME mounted page with a new
   // :campaignId — reset per-campaign selections so campaign A's template/effort
@@ -71,9 +76,18 @@ export default function DashboardPage() {
     prevCampaignRef.current = campaignId;
     setSelectedTemplateId(surveyParam || '');
     setEffortId('');
+    setCoordinatorId('');
+    setSurveyPassId('');
     setSelectedCanvasser(null);
     deepLinkedRef.current = false;
   }, [campaignId, surveyParam]);
+
+  // A pass belongs to ONE walk list (roundNumber restarts per effort) — switching the walk-list
+  // filter must clear it, or another list's pass silently keeps scoping the survey numbers.
+  // Same rule the mobile campaign screen applies to its pass chips.
+  useEffect(() => {
+    setSurveyPassId('');
+  }, [effortId]);
 
   // Home has no Live toggle — it polls unconditionally. Routed through the shared helper so it
   // inherits the background-tab pause: these four were the only pollers in the app still hitting the
@@ -112,6 +126,8 @@ export default function DashboardPage() {
     setDateRange(defaultRange(current && current.isActive === false ? 'all' : 'today', tz));
   }, [tzReady, tz, current]);
 
+  // Deliberately NO coordinatorId here: /overview only feeds Coverage, and doors don't belong
+  // to a crew — the server would have nothing to filter (and the Coverage section says so).
   const overviewQ = useQuery({
     queryKey: ['reports', 'overview', campaignId, effortId],
     queryFn: () =>
@@ -120,14 +136,35 @@ export default function DashboardPage() {
     ...HOME_POLL,
   });
 
+  // The crew picker's options — from /team-breakdown like the Timeline's (it includes
+  // ledger-only coordinators a roster join would drop, and its ready:false gate hides the
+  // picker until the attribution backfill has run). Scoped by campaign ONLY — never by the
+  // filters, so applying one can never unmount the picker that set it. Polled so a newly
+  // formed crew appears without a reload.
+  const teamsQ = useQuery({
+    queryKey: ['reports', 'team-breakdown', campaignId],
+    queryFn: () => api(`/admin/reports/team-breakdown${buildQuery({ campaignId })}`),
+    enabled: !!campaignId,
+    ...HOME_POLL,
+  });
+  const coordinatorOptions = useMemo(
+    () =>
+      ((teamsQ.data?.teams) || [])
+        .filter((t) => t.coordinatorId)
+        .map((t) => ({ id: t.coordinatorId, name: t.coordinatorName || 'Coordinator' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [teamsQ.data?.teams]
+  );
+
   // Range-scoped activity (knocks/surveys/rate). Coverage stays all-time from /overview.
   const rollupQ = useQuery({
-    queryKey: ['reports', 'campaign-rollup', campaignId, effortId, dateRange?.from, dateRange?.to],
+    queryKey: ['reports', 'campaign-rollup', campaignId, effortId, coordinatorId, dateRange?.from, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/campaign-rollup${buildQuery({
           campaignId,
           effortId: effortId || undefined,
+          coordinatorId: coordinatorId || undefined,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
@@ -139,12 +176,13 @@ export default function DashboardPage() {
   // Per-round breakdown (walk list × pass) over the billing pipeline — same window +
   // effort filter as the Activity cards above it, so the rows sum to the same headline.
   const byRoundQ = useQuery({
-    queryKey: ['reports', 'knocks-by-pass', campaignId, effortId, dateRange?.from, dateRange?.to],
+    queryKey: ['reports', 'knocks-by-pass', campaignId, effortId, coordinatorId, dateRange?.from, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/knocks-by-pass${buildQuery({
           campaignId,
           effortId: effortId || undefined,
+          coordinatorId: coordinatorId || undefined,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
@@ -169,6 +207,7 @@ export default function DashboardPage() {
       const qs = buildQuery({
         campaignId,
         effortId: effortId || undefined,
+        coordinatorId: coordinatorId || undefined,
         from: dateRange?.from,
         to: dateRange?.to,
       });
@@ -201,12 +240,13 @@ export default function DashboardPage() {
   });
 
   const canvassersQ = useQuery({
-    queryKey: ['reports', 'canvassers', campaignId, effortId, dateRange?.from, dateRange?.to],
+    queryKey: ['reports', 'canvassers', campaignId, effortId, coordinatorId, dateRange?.from, dateRange?.to],
     queryFn: () =>
       api(
         `/admin/reports/canvassers${buildQuery({
           campaignId,
           effortId: effortId || undefined,
+          coordinatorId: coordinatorId || undefined,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
@@ -221,6 +261,8 @@ export default function DashboardPage() {
       'survey-results',
       campaignId,
       effortId,
+      coordinatorId,
+      surveyPassId,
       selectedTemplateId,
       dateRange?.from,
       dateRange?.to,
@@ -230,6 +272,9 @@ export default function DashboardPage() {
         `/admin/reports/survey-results${buildQuery({
           campaignId,
           effortId: effortId || undefined,
+          coordinatorId: coordinatorId || undefined,
+          // 'legacy' rides verbatim — passFilterOf's pre-turf sentinel, not a label.
+          passId: surveyPassId || undefined,
           surveyTemplateId: selectedTemplateId,
           from: dateRange?.from,
           to: dateRange?.to,
@@ -239,6 +284,16 @@ export default function DashboardPage() {
     enabled: !!campaignId && !!dateRange && selectedCampaign?.type !== 'lit_drop',
     ...HOME_POLL,
   });
+
+  // Round-picker options — the shared hook (same labels + legacy sentinel as the Explorer's
+  // picker). Polled: this page is under the Live-pill contract, and the options feed a filter
+  // (the teamsQ precedent — a newly cut round should appear without a reload). When a walk-list
+  // filter is set, only that list's passes are offered (the legacy bucket belongs to no list).
+  const { roundOptions: allRoundOptions } = useRoundOptions(campaignId, { poll: HOME_POLL });
+  const roundOptions = useMemo(
+    () => (effortId ? allRoundOptions.filter((r) => r.effortId === String(effortId)) : allRoundOptions),
+    [allRoundOptions, effortId]
+  );
 
   const surveyResultsRef = useRef(null);
   const questionResultsRefs = useRef({});
@@ -410,6 +465,20 @@ export default function DashboardPage() {
               ))}
             </select>
           )}
+          {coordinatorOptions.length > 0 && (
+            <select
+              value={coordinatorId}
+              onChange={(e) => setCoordinatorId(e.target.value)}
+              title="Filter to one coordinator's crew"
+              className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              <option value="">All coordinators</option>
+              {coordinatorOptions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+              <option value="none">No coordinator</option>
+            </select>
+          )}
           <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} />
           {overview.tzAbbrev && (
             <span className="self-center text-xs font-medium text-fg-subtle" title={`Dates & times in ${overview.timeZone}`}>
@@ -577,6 +646,12 @@ export default function DashboardPage() {
                       <InfoHint label="About new homes reached">
                         Homes reached for the <strong>first</strong> time (in the selected range,
                         when one is set) — a re-knocked door adds a knock but not a new home.
+                        {coordinatorId ? (
+                          <>
+                            {' '}With a crew selected, "first" is still judged campaign-wide: a
+                            door counts here only if this crew made its first-ever knock.
+                          </>
+                        ) : null}
                       </InfoHint>
                     </span>
                   </th>
@@ -620,7 +695,9 @@ export default function DashboardPage() {
           title="Coverage"
           right={
             <span className="flex items-center gap-1 text-xs text-fg-muted">
-              All-time
+              {/* Doors don't belong to a crew, so Coverage can't be crew-filtered — say so
+                  rather than leave a number on screen that silently ignores the filter. */}
+              {coordinatorId ? 'All-time · campaign-wide (not filtered to this crew)' : 'All-time'}
               <InfoHint label="About Coverage">{metricHelp.households}</InfoHint>
             </span>
           }
@@ -667,22 +744,39 @@ export default function DashboardPage() {
                 <SectionHeading
                   title="Survey results"
                   right={
-                    past.length ? (
-                      <select
-                        value={selectedTemplateId}
-                        onChange={(e) => setSelectedTemplateId(e.target.value)}
-                        className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                      >
-                        <option value="">
-                          {current ? `${current.name} (current) · ${current.responseCount}` : 'Current survey'}
-                        </option>
-                        {past.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} · {s.responseCount}
+                    <div className="flex items-center gap-2">
+                      {roundOptions.length > 1 && (
+                        <select
+                          value={surveyPassId}
+                          onChange={(e) => setSurveyPassId(e.target.value)}
+                          title="Filter survey results to one pass"
+                          className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        >
+                          <option value="">All passes</option>
+                          {roundOptions.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {past.length ? (
+                        <select
+                          value={selectedTemplateId}
+                          onChange={(e) => setSelectedTemplateId(e.target.value)}
+                          className="rounded border border-border bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        >
+                          <option value="">
+                            {current ? `${current.name} (current) · ${current.responseCount}` : 'Current survey'}
                           </option>
-                        ))}
-                      </select>
-                    ) : null
+                          {past.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} · {s.responseCount}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
                   }
                 />
                 {viewingPast && (
@@ -720,6 +814,8 @@ export default function DashboardPage() {
                   dateRange={dateRange}
                   campaignId={campaignId}
                   effortId={effortId}
+                  passId={surveyPassId}
+                  coordinatorId={coordinatorId}
                   tz={tz}
                 />
               </div>
@@ -732,15 +828,17 @@ export default function DashboardPage() {
                     questionResultsRefs.current[q.key] = el;
                   }}
                 >
-                  {/* effortId flows through to the drill-in lists (voters-by-answer /
-                      answer-canvassers) so they honor the same walk-list filter as the
-                      counts above them. */}
+                  {/* effortId + coordinatorId + passId flow through to the drill-in lists
+                      (voters-by-answer / answer-canvassers) so they honor the same
+                      walk-list, crew, and round filters as the counts above them. */}
                   <QuestionResults
                     question={q}
                     surveyTemplateId={surveyResultsQ.data.surveyTemplate.id}
                     dateRange={dateRange}
                     campaignId={campaignId}
                     effortId={effortId}
+                    passId={surveyPassId}
+                    coordinatorId={coordinatorId}
                     tz={tz}
                   />
                 </div>
@@ -787,6 +885,7 @@ export default function DashboardPage() {
           dateRange={dateRange}
           campaignId={campaignId}
           effortId={effortId}
+          coordinatorId={coordinatorId}
           tz={tz}
           onClose={() => setSelectedCanvasser(null)}
         />

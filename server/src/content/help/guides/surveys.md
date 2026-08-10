@@ -39,7 +39,7 @@ Two things worth knowing:
 
 Any question after the first can be set to **Show only if...** an earlier answer matches — the app builds branch, skip, and skip-to-end flows from that one rule. Hidden questions never show at the door and their answers aren't saved.
 
-**Tags** are short labels (like "Supporter") you stick on answer options across different questions, so a report or a [saved search](saved-searches) can roll up everyone who matched — no double-counting. Canvassers never see tags.
+**Tags** are short labels (like "Supporter") you stick on answer options across different questions, so a report or a [saved search](saved-searches) can roll up everyone who matched — no double-counting. Each tag shows **two numbers**: how many voters were **ever identified** (each person once, even across rounds) and how many are **still current** — their most recent answer still carries the tag, so someone who flipped to Opposed in a later round drops out of this one. The report also splits each tag **by team** — the team that found the voter first gets the credit, so the team rows add up exactly to the campaign total. Canvassers never see tags. See [How do I count our supporters?](how-do-i-count-supporters).
 
 ## Different surveys for different groups
 
@@ -47,7 +47,7 @@ Most campaigns use one survey for everyone. When a group needs different questio
 
 ## Auditing answers — who chose it, who recorded it
 
-Counts tell you *how many* picked an answer; the drill tells you **who**. On the campaign Home, click any answer in the survey results: every entry shows the voter, the address, **which canvasser recorded it and exactly when**, any note, and an Offline badge if it synced later. Click an entry for the full response — including an *"Edited by …"* line if an admin changed it.
+Counts tell you *how many* picked an answer; the drill tells you **who**. On the campaign Home, click any answer in the survey results: every entry shows the voter, the address, **which canvasser recorded it and exactly when**, any note, and an Offline badge if it synced later. Click an entry for the full response — including an *"Edited by …"* line if an admin changed it. A **tag** drill works the same way, with one difference in the numbers: the list counts **entries** (one per round — someone surveyed in two rounds appears twice), while the tag's own number counts **people, once** — the list says so right at the top. Tag drills have no per-canvasser view (several questions can feed one voter's tag, so "who recorded it" has no single answer) — the **By team** table is the split that adds up.
 
 For the full workbench, open the campaign's **Survey Explorer** tab: filters (question, answer, canvasser, walk list, dates), a **By canvasser** ranking ("who's entering Opposed the most, and how much of their own answers is that?"), a map of exactly the matching doors, and a CSV export of the drill. See [The Survey Explorer page](page-survey-explorer) and [How do I see who recorded a survey answer?](who-entered-an-answer).
 

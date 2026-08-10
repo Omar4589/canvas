@@ -28,6 +28,7 @@ function editableSnapshot(src) {
       visibleQuestionKeys: [...(src.visibility?.visibleQuestionKeys || [])].sort(),
       mapAnswerKeys: [...(src.visibility?.mapAnswerKeys || [])].sort(),
       showMap: src.visibility?.showMap !== false,
+      visibleTags: [...(src.visibility?.visibleTags || [])].sort(),
     },
   });
 }
@@ -59,6 +60,7 @@ export default function ClientReportBuilderPage() {
         visibleQuestionKeys: report.visibility?.visibleQuestionKeys || [],
         mapAnswerKeys: report.visibility?.mapAnswerKeys || [],
         showMap: report.visibility?.showMap !== false,
+        visibleTags: report.visibility?.visibleTags || [],
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,6 +124,9 @@ export default function ClientReportBuilderPage() {
 
   const isDraft = report.status === 'draft';
   const questions = report.stats?.cumulative?.surveyBreakdowns || [];
+  // Tag rows come from the SNAPSHOT (like `questions`), so the checklist offers exactly what a
+  // publish would show. Defensive: a report computed before tags existed simply offers none.
+  const reportTags = report.stats?.cumulative?.tagBreakdowns || [];
 
   // Soft publish gate: unreviewed mock-GPS flags inside this report's window (server-
   // computed on GET). The deep link seeds the Audit page with the widest range the
@@ -358,6 +363,14 @@ export default function ClientReportBuilderPage() {
               <span className={chipCls}>
                 {visibleCount} of {questions.length} question{questions.length === 1 ? '' : 's'} shown
               </span>
+              {reportTags.length > 0 && (
+                <span className={chipCls}>
+                  Tags:{' '}
+                  {draft.visibility.visibleTags.length
+                    ? `${draft.visibility.visibleTags.length} shown`
+                    : 'none'}
+                </span>
+              )}
               <span className={chipCls}>Map: {draft.visibility.showMap ? 'On' : 'Off'}</span>
             </div>
             {supportHidden && (
@@ -416,6 +429,43 @@ export default function ClientReportBuilderPage() {
                   {questions.length === 0 && <div className="text-sm text-fg-muted">No survey questions.</div>}
                 </div>
               </div>
+            </div>
+
+            {/* Tags are OPT-IN — the opposite default of the question checklist above. Tag
+                names are internal labels ("Hostile", "Do not return") that would land on an
+                unauthenticated page, so nothing shows without an explicit tick. */}
+            <div className="mt-5 border-t border-border pt-4">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">
+                Visible tags
+              </div>
+              <p className="mb-2 text-xs text-fg-muted">
+                Tags are hidden until you tick them — an unticked tag never appears on the report.
+                A shown tag reports two counts: voters identified, and how many still gave a tagged
+                answer at last contact.
+              </p>
+              {reportTags.length === 0 ? (
+                <div className="text-sm text-fg-muted">
+                  No tagged answers in this report's numbers. Recompute after tagging survey options
+                  to pick them up.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  {reportTags.map((t) => (
+                    <label key={t.tag} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draft.visibility.visibleTags.includes(t.tag)}
+                        disabled={!isDraft}
+                        onChange={() => toggleKey('visibleTags', t.tag)}
+                      />
+                      <span className="text-fg">{t.tag}</span>
+                      <span className="text-xs text-fg-muted">
+                        · {(t.identifiedVoters || 0).toLocaleString()} identified
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="mt-5 border-t border-border pt-4">

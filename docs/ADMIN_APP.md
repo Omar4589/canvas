@@ -313,6 +313,15 @@ query (`/admin/reports/team-breakdown`, which never carries `coordinatorId`), so
 filtering cannot remove the filter
 ([client/src/pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx)).
 
+The **campaign home** now carries the same crew filter on both platforms, built the same safe way:
+web [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) feeds its coordinator `<select>` from
+its own campaign-scoped, never-filtered `/team-breakdown` query (so the `ready:false` pre-backfill
+gate hides the picker for free), and the mobile campaign screen reuses the Timeline chip strip and
+gate verbatim. Every activity surface on the page (Activity KPIs, By pass + its CSV, Survey results
++ drills, the canvasser leaderboard + responses modal) takes the filter server-side; **Coverage
+deliberately does not** — doors don't belong to a crew — and its caption says so while a crew is
+selected.
+
 Both strips (walk list *and* crew) also moved **out of the `ScrollView`** and above the
 `rangeInvalid` / error / loading branches, so no state of the screen can take them away.
 
@@ -690,7 +699,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate) and the **walk-list pill row** (Timeline's `TabSwitcher` pattern, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows). |
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list pill row** (Timeline's `TabSwitcher` pattern, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew pill row** (Timeline's pattern verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |

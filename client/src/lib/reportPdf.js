@@ -148,10 +148,37 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
     y += 10;
   };
 
+  // ── Voter groups (tags): plain label/number rows — VOTER counts, no track/fill and no
+  //    percent, because "identified · still current" are overlapping people, not shares. ──
+  const tagsBlock = (section) => {
+    const estHeight = 30 + Math.max(1, section.items.length) * 18 + 10;
+    ensure(estHeight);
+    setFont(13, 'bold', DARK);
+    doc.text(String(section.title), MARGIN, y);
+    y += 13;
+    setFont(9, 'normal', GRAY);
+    doc.text(String(section.subtitle || ''), MARGIN, y);
+    y += 15;
+    section.items.forEach((it) => {
+      ensure(18);
+      setFont(9.5, 'normal', GRAY);
+      doc.text(String(it.label), MARGIN, y);
+      setFont(9.5, 'bold', DARK);
+      const right =
+        it.current != null
+          ? `${formatCount(it.identified)} identified  ·  ${formatCount(it.current)} still current`
+          : `${formatCount(it.identified)} identified`;
+      doc.text(right, MARGIN + contentW, y, { align: 'right' });
+      y += 18;
+    });
+    y += 10;
+  };
+
   barsBlock(sections.contact.title, sections.contact.subtitle, sections.contact.items);
   if (sections.support) {
     barsBlock(sections.support.title, sections.support.subtitle, sections.support.items, true);
   }
+  if (sections.tags) tagsBlock(sections.tags);
   sections.others.forEach((b) => barsBlock(b.title, null, b.items));
 
   // ── Canvasser observations ──────────────────────────────────────────────────
@@ -181,6 +208,7 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
   for (const k of sections.kpis) if (k.help) defs.push([k.label, k.help]);
   if (sections.contact?.help) defs.push([sections.contact.title, sections.contact.help]);
   for (const it of sections.contact?.items || []) if (it.help) defs.push([it.label, it.help]);
+  if (sections.tags?.help) defs.push([sections.tags.title, sections.tags.help]);
   if (defs.length) {
     y += 4;
     ensure(34);

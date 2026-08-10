@@ -6,9 +6,12 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { saveActiveCampaign } from '../../../lib/cache';
 import InsetGroup, {
+  InsetRow,
   InsetNavRow,
   InsetActionRow,
   InsetNoteRow,
+  InsetTitleRow,
+  GroupFooter,
 } from '../../../components/InsetGroup';
 import TabSwitcher from '../../../components/TabSwitcher';
 import { deviceTimezone } from '../../../lib/dateRanges';
@@ -57,8 +60,15 @@ export default function AnswerVoters() {
   const optionId = one(params.optionId);
   const label = one(params.label);
   const surveyTemplateId = one(params.surveyTemplateId);
+  // TAG mode: a cross-question drill — `tag` + the template id replace questionKey/option.
+  // The list is still response-unit entries; the by-team group below is the voter-unit split.
+  const tag = one(params.tag);
+  const byTag = !!tag;
   // Round scope, forwarded by whoever opened this drill. Absent = all rounds.
   const passId = one(params.passId);
+  // Crew scope, forwarded the same way — the drill's total must match the count that was
+  // tapped, which is crew-scoped when the campaign screen has a crew picked.
+  const coordinatorId = one(params.coordinatorId);
   const from = one(params.from);
   const to = one(params.to);
 
@@ -73,7 +83,7 @@ export default function AnswerVoters() {
   // synchronously during render whenever the identifying params change. The
   // local canvasser filter is part of the identity (switching it must reset the
   // pages), while a fresh SET of route params also clears the filter itself.
-  const paramsKey = `${campaignId}|${questionKey}|${optionId}|${option}|${surveyTemplateId}|${passId}|${from}|${to}`;
+  const paramsKey = `${campaignId}|${questionKey}|${optionId}|${option}|${tag}|${surveyTemplateId}|${passId}|${coordinatorId}|${from}|${to}`;
   const identityKey = `${paramsKey}|${canvasserId}`;
   const [prevParamsKey, setPrevParamsKey] = useState(paramsKey);
   const [prevKey, setPrevKey] = useState(identityKey);
@@ -100,31 +110,40 @@ export default function AnswerVoters() {
   const tz = campaign?.timeZone;
 
   const q = useQuery({
-    queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, surveyTemplateId, passId, canvasserId, from, to, skip],
+    queryKey: ['admin', 'answer-voters', campaignId, questionKey, optionId, option, tag, surveyTemplateId, passId, coordinatorId, canvasserId, from, to, skip],
     queryFn: () => {
       const p = new URLSearchParams({
         campaignId,
-        questionKey,
-        option: option ?? '',
         tz: deviceTimezone(),
         limit: String(PAGE),
         skip: String(skip),
       });
-      if (optionId) p.set('optionId', optionId);
+      // Tag mode swaps the option identity for the cross-question one; the server's
+      // buildVotersByAnswerFilter requires the template id to resolve the tag's members.
+      if (byTag) {
+        p.set('tag', tag);
+      } else {
+        p.set('questionKey', questionKey);
+        p.set('option', option ?? '');
+        if (optionId) p.set('optionId', optionId);
+      }
       if (surveyTemplateId) p.set('surveyTemplateId', surveyTemplateId);
       if (passId) p.set('passId', passId);
+      if (coordinatorId) p.set('coordinatorId', coordinatorId);
       if (canvasserId) p.set('userId', canvasserId);
       if (from) p.set('from', from);
       if (to) p.set('to', to);
       return api(`/admin/reports/voters-by-answer?${p.toString()}`);
     },
-    enabled: !!campaignId && !!questionKey && option != null,
+    enabled: !!campaignId && (byTag ? !!surveyTemplateId : !!questionKey && option != null),
   });
 
   // Per-canvasser breakdown for this option — powers the "By canvasser" tab AND
   // the canvasser filter menu (its rows are the only canvassers worth listing).
+  // DISABLED in tag mode: the server 400s it by design (a distinct-voter rollup has no
+  // honest per-canvasser sum), and a designed refusal must never render as an error here.
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'answer-canvassers', campaignId, questionKey, optionId, option, surveyTemplateId, passId, from, to],
+    queryKey: ['admin', 'answer-canvassers', campaignId, questionKey, optionId, option, surveyTemplateId, passId, coordinatorId, from, to],
     queryFn: () => {
       const p = new URLSearchParams({
         campaignId,
@@ -135,13 +154,32 @@ export default function AnswerVoters() {
       if (optionId) p.set('optionId', optionId);
       if (surveyTemplateId) p.set('surveyTemplateId', surveyTemplateId);
       if (passId) p.set('passId', passId);
+      if (coordinatorId) p.set('coordinatorId', coordinatorId);
       if (from) p.set('from', from);
       if (to) p.set('to', to);
       return api(`/admin/reports/answer-canvassers?${p.toString()}`);
     },
-    enabled: !!campaignId && !!questionKey && option != null,
+    enabled: !byTag && !!campaignId && !!questionKey && option != null,
   });
   const canvasserRows = canvassersQ.data?.rows || [];
+
+  // The by-team split for a tag drill — first-finder credit, so teams + "No team" add up
+  // exactly to the campaign line, both units. Hidden entirely when the org's team backfill
+  // hasn't run (ready:false) or on error — never an authoritative-looking zero table.
+  const tagTeamsQ = useQuery({
+    queryKey: ['admin', 'tag-teams', campaignId, tag, surveyTemplateId, passId, coordinatorId, from, to],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId, tag, tz: deviceTimezone() });
+      if (surveyTemplateId) p.set('surveyTemplateId', surveyTemplateId);
+      if (passId) p.set('passId', passId);
+      if (coordinatorId) p.set('coordinatorId', coordinatorId);
+      if (from) p.set('from', from);
+      if (to) p.set('to', to);
+      return api(`/admin/reports/tag-teams?${p.toString()}`);
+    },
+    enabled: byTag && !!campaignId && !!surveyTemplateId,
+  });
+  const tagTeams = tagTeamsQ.data?.ready ? tagTeamsQ.data : null;
 
   // Web VoterList semantics: the first page REPLACES (so a refetch after returning to a
   // cached drill shows fresh rows, not the stale cache-then-discard), later pages dedup
@@ -192,7 +230,9 @@ export default function AnswerVoters() {
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Text style={styles.back}>‹ Back</Text>
         </Pressable>
-        {campaign ? (
+        {/* No map link in tag mode — the map endpoint's answer filter is per question+option
+            only, so the link would silently drop the drill's identity (the web minimap rule). */}
+        {campaign && !byTag ? (
           <Pressable onPress={goMap} hitSlop={8}>
             <Text style={styles.mapLink}>View on map ›</Text>
           </Pressable>
@@ -204,23 +244,68 @@ export default function AnswerVoters() {
         {/* "entries", not "voters" — this is response-unit (a voter re-surveyed in a
             later round appears once per round), same wording as the web explorer. */}
         <Text style={styles.subtitle}>
-          “{option}” ·{' '}
-          {q.error && !q.data ? '—' : `${total.toLocaleString()} ${total === 1 ? 'entry' : 'entries'}`}
+          {byTag ? 'Tag' : `“${option}”`} ·{' '}
+          {q.error && !q.data
+            ? '—'
+            : `${total.toLocaleString()} ${total === 1 ? 'entry' : 'entries'} — one per round`}
         </Text>
 
-        {/* Negative margin cancels the content padding — TabSwitcher carries its own. */}
-        <View style={{ marginHorizontal: -spacing.lg }}>
-          <TabSwitcher
-            tabs={[
-              { key: 'voters', label: 'Voters', count: q.data ? total : null },
-              { key: 'canvassers', label: 'By canvasser', count: canvassersQ.data ? canvasserRows.length : null },
-            ]}
-            activeKey={tab}
-            onChange={setTab}
-          />
-        </View>
+        {/* Tag mode has no By-canvasser tab: tags count distinct voters across questions, which
+            have no per-canvasser sum (the server refuses it by design). Say so instead. */}
+        {byTag ? (
+          <Text style={styles.tagCaption}>
+            Tags count distinct voters across questions, so there's no per-canvasser breakdown.
+          </Text>
+        ) : (
+          /* Negative margin cancels the content padding — TabSwitcher carries its own. */
+          <View style={{ marginHorizontal: -spacing.lg }}>
+            <TabSwitcher
+              tabs={[
+                { key: 'voters', label: 'Voters', count: q.data ? total : null },
+                { key: 'canvassers', label: 'By canvasser', count: canvassersQ.data ? canvasserRows.length : null },
+              ]}
+              activeKey={tab}
+              onChange={setTab}
+            />
+          </View>
+        )}
 
-        {tab === 'voters' ? (
+        {/* The by-team split (tag mode only): first-finder credit, so the rows + "No team" add
+            up exactly to the Campaign line. Absent until the org's team backfill has run. */}
+        {byTag && tagTeams && (tagTeams.teams || []).length > 0 ? (
+          <View style={{ marginBottom: spacing.md }}>
+            <InsetGroup>
+              <InsetTitleRow title="By team" />
+              {(tagTeams.teams || []).map((t) => (
+                <InsetRow
+                  key={t.coordinatorId}
+                  label={t.coordinatorName || 'Team'}
+                  value={(t.identifiedVoters || 0).toLocaleString()}
+                  sub={`${(t.currentVoters || 0).toLocaleString()} still current`}
+                />
+              ))}
+              {(tagTeams.noTeam?.identifiedVoters || 0) > 0 ? (
+                <InsetRow
+                  label="No team"
+                  value={(tagTeams.noTeam.identifiedVoters || 0).toLocaleString()}
+                  sub={`${(tagTeams.noTeam.currentVoters || 0).toLocaleString()} still current`}
+                />
+              ) : null}
+              <InsetRow
+                label="Campaign"
+                value={(tagTeams.totals?.identifiedVoters || 0).toLocaleString()}
+                sub={`${(tagTeams.totals?.currentVoters || 0).toLocaleString()} still current`}
+              />
+            </InsetGroup>
+            <GroupFooter>
+              Each voter is credited to the team whose canvasser tagged them first, so the team
+              rows add up exactly to the Campaign line. “No team” is voters first tagged by
+              someone with no crew.
+            </GroupFooter>
+          </View>
+        ) : null}
+
+        {byTag || tab === 'voters' ? (
           <>
             {/* `|| canvasserId` so the chip can never unmount while a filter is applied: the rows
                 behind it come from a query a picked canvasser narrows, and a background refetch
@@ -290,7 +375,7 @@ export default function AnswerVoters() {
                 // An error must never render as an authoritative zero on an audit surface.
                 <InsetNoteRow>{q.error.message}</InsetNoteRow>
               ) : items.length === 0 ? (
-                <InsetNoteRow>No voters for this answer.</InsetNoteRow>
+                <InsetNoteRow>{byTag ? 'No voters with this tag.' : 'No voters for this answer.'}</InsetNoteRow>
               ) : items.length < total ? (
                 q.isFetching ? (
                   <InsetNoteRow loading>Loading more…</InsetNoteRow>
@@ -354,6 +439,8 @@ function makeStyles(t) {
   mapLink: { color: colors.brand, fontWeight: '600', fontSize: 14 },
   title: { ...type.h2, marginTop: spacing.xs },
   subtitle: { ...type.caption, marginBottom: spacing.md },
+  // Tag mode's stand-in for the By-canvasser tab — the "why there isn't one" line.
+  tagCaption: { ...type.caption, color: colors.textMuted, marginBottom: spacing.md },
 
   filterRow: { flexDirection: 'row', marginBottom: spacing.sm },
   filterChip: {

@@ -68,6 +68,9 @@ const updateSchema = z.object({
       visibleQuestionKeys: z.array(z.string()).optional(),
       mapAnswerKeys: z.array(z.string()).optional(),
       showMap: z.boolean().optional(),
+      // Opt-in tag allowlist (empty = show none — see the model comment). Max length matches
+      // nothing in particular; it just bounds a hostile payload.
+      visibleTags: z.array(z.string().max(120)).optional(),
     })
     .optional(),
 });
@@ -520,6 +523,12 @@ router.patch('/:id', async (req, res, next) => {
       }
 
       if (data.visibility.showMap !== undefined) report.visibility.showMap = data.visibility.showMap;
+
+      // No template validation, unlike mapAnswerKeys above — this is a pure allowlist against
+      // COMPUTED tagBreakdowns rows: an unknown string matches nothing and can never render,
+      // so there is no typed-text hazard to guard.
+      if (data.visibility.visibleTags !== undefined)
+        report.visibility.visibleTags = data.visibility.visibleTags;
     }
     if (data.supportQuestionKey !== undefined) {
       report.supportQuestionKey = data.supportQuestionKey || null;

@@ -9,6 +9,7 @@ import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Badge, Segmented } from './ui/index.js';
 import AnswerCanvasserTable from './AnswerCanvasserTable.jsx';
 import ResponseDetailDrawer from './ResponseDetailDrawer.jsx';
+import TagTeamTable from './TagTeamTable.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -40,6 +41,8 @@ function VoterList({
   dateRange,
   campaignId,
   effortId,
+  passId,
+  coordinatorId,
   userId,
   tz,
   onOpenResponse,
@@ -49,8 +52,8 @@ function VoterList({
 
   // A tag query is cross-question: it sends `tag` + `surveyTemplateId` instead of
   // questionKey/optionId/option.
-  // Callers key <VoterList> on the identifying props (incl. userId/effortId), so a
-  // filter change remounts with fresh skip/accumulated state.
+  // Callers key <VoterList> on the identifying props (incl. userId/effortId/coordinatorId),
+  // so a filter change remounts with fresh skip/accumulated state.
   const byTag = !!tag;
 
   const queryString = buildQuery(
@@ -60,6 +63,8 @@ function VoterList({
           surveyTemplateId,
           campaignId,
           effortId,
+          passId,
+          coordinatorId,
           userId,
           from: dateRange?.from,
           to: dateRange?.to,
@@ -73,6 +78,8 @@ function VoterList({
           surveyTemplateId,
           campaignId,
           effortId,
+          passId,
+          coordinatorId,
           userId,
           from: dateRange?.from,
           to: dateRange?.to,
@@ -91,6 +98,8 @@ function VoterList({
       surveyTemplateId,
       campaignId,
       effortId,
+      passId,
+      coordinatorId,
       userId,
       dateRange?.from,
       dateRange?.to,
@@ -123,6 +132,13 @@ function VoterList({
 
   return (
     <div>
+      {/* The unit line — this list is ENTRIES, not people, and the difference is exactly what
+          the tag bar above it counts differently. Without this line the tag drill reads
+          "Showing 4" under a bar reading 3 and looks broken instead of honest. */}
+      <div className="border-b border-border px-3 py-1.5 text-xs text-fg-subtle">
+        {total.toLocaleString()} {total === 1 ? 'entry' : 'entries'} — one per round; a voter
+        surveyed in two rounds appears twice.
+      </div>
       <ul className="max-h-80 divide-y divide-border overflow-y-auto">
         {accumulated.map((v) => (
           <li
@@ -184,7 +200,7 @@ function VoterList({
       </ul>
       <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs">
         <span className="text-fg-muted">
-          Showing {accumulated.length} of {total}
+          Showing {accumulated.length} of {total} {total === 1 ? 'entry' : 'entries'}
         </span>
         {remaining > 0 && (
           <button
@@ -244,6 +260,8 @@ function OptionDrill({
   dateRange,
   campaignId,
   effortId,
+  passId,
+  coordinatorId,
   tz,
   onOpenResponse,
 }) {
@@ -261,6 +279,8 @@ function OptionDrill({
     range: dateRange && !dateRange.from && !dateRange.to ? 'all' : '',
     userId,
     effortId,
+    pass: passId,
+    coordinatorId,
   })}`;
 
   const canvassersQ = useQuery({
@@ -273,6 +293,8 @@ function OptionDrill({
       option,
       surveyTemplateId,
       effortId,
+      passId,
+      coordinatorId,
       dateRange?.from,
       dateRange?.to,
     ],
@@ -285,6 +307,8 @@ function OptionDrill({
           surveyTemplateId,
           campaignId,
           effortId,
+          passId,
+          coordinatorId,
           from: dateRange?.from,
           to: dateRange?.to,
         })}`
@@ -339,6 +363,8 @@ function OptionDrill({
           dateRange={dateRange}
           campaignId={campaignId}
           effortId={effortId}
+          passId={passId}
+          coordinatorId={coordinatorId}
           userId={userId}
           tz={tz}
           onOpenResponse={onOpenResponse}
@@ -349,8 +375,12 @@ function OptionDrill({
 }
 
 // The expanded-tag drill: canvasser filter + full-view link, but NO by-canvasser toggle —
-// tag counts are distinct voters across questions, which have no per-canvasser sum.
-function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, onOpenResponse }) {
+// tag counts are distinct voters across questions, which have no per-canvasser sum. The
+// BY-TEAM table is the sanctioned split instead: first-finder attribution gives each voter
+// exactly one team, so it partitions where a per-canvasser column could not. The drill's
+// local canvasser filter deliberately does NOT feed the team table — narrowing a team split
+// to one person would re-create the per-canvasser lie through the side door.
+function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, passId, coordinatorId, tz, onOpenResponse }) {
   const [userId, setUserId] = useState('');
 
   const fullViewHref = `/campaigns/${campaignId}/explorer${buildQuery({
@@ -362,6 +392,8 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, 
     range: dateRange && !dateRange.from && !dateRange.to ? 'all' : '',
     userId,
     effortId,
+    pass: passId,
+    coordinatorId,
   })}`;
 
   return (
@@ -372,6 +404,15 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, 
           Open full view →
         </Link>
       </div>
+      <TagTeamTable
+        campaignId={campaignId}
+        tag={tag}
+        surveyTemplateId={surveyTemplateId}
+        effortId={effortId}
+        passId={passId}
+        coordinatorId={coordinatorId}
+        dateRange={dateRange}
+      />
       <VoterList
         key={userId}
         tag={tag}
@@ -379,6 +420,8 @@ function TagDrill({ tag, surveyTemplateId, dateRange, campaignId, effortId, tz, 
         dateRange={dateRange}
         campaignId={campaignId}
         effortId={effortId}
+        passId={passId}
+        coordinatorId={coordinatorId}
         userId={userId}
         tz={tz}
         onOpenResponse={onOpenResponse}
@@ -441,7 +484,7 @@ function OptionRow({
   );
 }
 
-function TagRow({ tag, voterCount, percent, expanded, onToggle }) {
+function TagRow({ tag, voterCount, currentVoterCount, percent, expanded, onToggle }) {
   const width = Math.max(0, Math.min(100, percent || 0));
   return (
     <button
@@ -455,19 +498,28 @@ function TagRow({ tag, voterCount, percent, expanded, onToggle }) {
         </span>
         <span className="truncate font-medium">{tag}</span>
       </div>
-      <div className="col-span-6">
+      {/* The bar stays scaled to IDENTIFIED; current is text only — a second bar (or a percent)
+          would assert a share these voter counts don't have. */}
+      <div className="col-span-5">
         <div className="h-2 w-full overflow-hidden rounded-full bg-sunken">
           <div className="h-full bg-brand-500" style={{ width: `${width}%` }} />
         </div>
       </div>
-      <div className="col-span-2 flex items-baseline justify-end gap-2">
+      <div className="col-span-3 flex items-baseline justify-end gap-1.5 whitespace-nowrap">
         <span className="font-semibold text-fg">{voterCount.toLocaleString()}</span>
+        <span className="text-xs text-fg-muted">voters</span>
+        {/* Absent on an old server — render nothing rather than a fake "0 current". */}
+        {currentVoterCount != null && (
+          <span className="text-xs text-fg-muted">
+            · {currentVoterCount.toLocaleString()} current
+          </span>
+        )}
       </div>
     </button>
   );
 }
 
-export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId, effortId, tz }) {
+export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId, effortId, passId, coordinatorId, tz, onTagClick }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const [expandedTag, setExpandedTag] = useState(null);
@@ -487,7 +539,10 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
         </span>
       </div>
       <p className="mb-3 text-xs text-fg-muted">
-        Tags group answers across questions. Counts are distinct voters reached.
+        Tags group answers across questions. <strong className="text-fg-muted">Voters</strong>{' '}
+        counts everyone who ever gave a tagged answer — each person once.{' '}
+        <strong className="text-fg-muted">Current</strong> counts the people whose most recent
+        answer still carries the tag.
       </p>
       <div>
         {tags.map((t) => {
@@ -498,9 +553,12 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
               <TagRow
                 tag={t.tag}
                 voterCount={t.voterCount || 0}
+                currentVoterCount={t.currentVoterCount ?? null}
                 percent={percent}
                 expanded={isOpen}
-                onToggle={() => setExpandedTag(isOpen ? null : t.tag)}
+                onToggle={() =>
+                  onTagClick ? onTagClick(t.tag) : setExpandedTag(isOpen ? null : t.tag)
+                }
               />
               {(t.options || []).length > 0 && (
                 <ul className="mb-1 ml-6 space-y-0.5 text-xs text-fg-subtle">
@@ -510,20 +568,26 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
                       className="flex items-baseline justify-between gap-3"
                     >
                       <span className="truncate" title={o.text}>{o.text}</span>
-                      <span className="shrink-0 text-fg-muted">({o.count})</span>
+                      {/* Response-unit on purpose — a two-round voter's answer counts twice
+                          here while the bar above counts them once. Say so. */}
+                      <span className="shrink-0 text-fg-muted">
+                        ({o.count} {o.count === 1 ? 'answer' : 'answers'})
+                      </span>
                     </li>
                   ))}
                 </ul>
               )}
-              {isOpen && (
+              {isOpen && !onTagClick && (
                 <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
                   <TagDrill
-                    key={`${t.tag}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
+                    key={`${t.tag}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${passId ?? ''}|${coordinatorId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                     tag={t.tag}
                     surveyTemplateId={surveyTemplateId}
                     dateRange={dateRange}
                     campaignId={campaignId}
                     effortId={effortId}
+                    passId={passId}
+                    coordinatorId={coordinatorId}
                     tz={zone}
                     onOpenResponse={setDetailId}
                   />
@@ -534,7 +598,7 @@ export function TagResults({ tags = [], surveyTemplateId, dateRange, campaignId,
         })}
       </div>
       <div className="mt-2 text-xs text-fg-subtle">
-        Click any tag to see the voters reached.
+        {onTagClick ? 'Click any tag to drill into it.' : 'Click any tag to see its voters and the by-team split.'}
       </div>
       {detailId && (
         <ResponseDetailDrawer
@@ -573,6 +637,8 @@ export default function QuestionResults({
   dateRange,
   campaignId,
   effortId,
+  passId,
+  coordinatorId,
   tz,
 }) {
   const orgTz = useOrgTimeZone();
@@ -630,7 +696,7 @@ export default function QuestionResults({
                 {isOpen && (
                   <div className="mt-1 mb-2 rounded-md border border-border bg-sunken">
                     <OptionDrill
-                      key={`${key}|${o.id ?? o.option}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
+                      key={`${key}|${o.id ?? o.option}|${surveyTemplateId ?? ''}|${campaignId ?? ''}|${effortId ?? ''}|${passId ?? ''}|${coordinatorId ?? ''}|${dateRange?.from ?? ''}|${dateRange?.to ?? ''}`}
                       questionKey={key}
                       optionId={o.id}
                       option={o.option}
@@ -638,6 +704,8 @@ export default function QuestionResults({
                       dateRange={dateRange}
                       campaignId={campaignId}
                       effortId={effortId}
+                      passId={passId}
+                      coordinatorId={coordinatorId}
                       tz={zone}
                       onOpenResponse={setDetailId}
                     />

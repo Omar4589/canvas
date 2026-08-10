@@ -109,3 +109,88 @@ export function answerTagClause(template, tag) {
   }
   return ors.length ? { $or: ors } : { _id: null };
 }
+
+// Pipeline fragment for "latest answer wins": after the caller's $match, resolve — per
+// (voter, question) — the answer keys of the voter's most RECENT in-scope response that
+// actually ANSWERS that question. A later response that skipped the question (branching
+// drops the answers[] entry entirely) never produces a row for it, so it can neither
+// carry a tag forward nor erase an earlier answer — exactly the "latest answer", not
+// "latest response", semantics the current-tag rollup is defined on.
+export function latestAnswerKeyStages(questionKeys) {
+  return [
+    { $unwind: '$answers' },
+    { $match: { 'answers.questionKey': { $in: questionKeys } } },
+    // Dual-read key set — same id-native-first $cond as choiceKeyStages above.
+    {
+      $addFields: {
+        _answerKeys: {
+          $cond: [
+            { $gt: [{ $size: { $ifNull: ['$answers.optionIds', []] } }, 0] },
+            '$answers.optionIds',
+            { $cond: [{ $isArray: '$answers.answer' }, '$answers.answer', ['$answers.answer']] },
+          ],
+        },
+      },
+    },
+    // "Answers the question" = at least one non-null, non-empty key. Ghost rows (an admin
+    // edit preserves hidden-question entries with null answers — normalizeAnswers.js with
+    // dropHidden:false) carry nothing, so they can neither current NOR un-current a voter.
+    {
+      $addFields: {
+        _validKeys: {
+          $filter: {
+            input: '$_answerKeys',
+            cond: { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] },
+          },
+        },
+      },
+    },
+    { $match: { '_validKeys.0': { $exists: true } } },
+    // Slim before the blocking sort: sort memory holds only these four fields per row.
+    { $project: { voterId: 1, submittedAt: 1, _qk: '$answers.questionKey', _validKeys: 1 } },
+    // Latest wins: max submittedAt, tie-break _id desc — the order-dependent $sort + $first
+    // pairing (the survey-results preview uses the same idiom). The mirror image of the
+    // first-finder attribution's min/asc sort.
+    { $sort: { submittedAt: -1, _id: -1 } },
+    {
+      $group: {
+        _id: { voterId: '$voterId', questionKey: '$_qk' },
+        latestKeys: { $first: '$_validKeys' },
+      },
+    },
+  ];
+}
+
+// One tag's member keys, per question: Map<questionKey, Set<option id | option text>>.
+// Both dual-read lanes share one set — a row's latestKeys are ids OR texts, never mixed
+// (choiceKeyStages' branch picks one lane per row). No '__other__' case is needed: tags
+// live on options[] rows only (tagOptionMap iterates q.options) and the write-in is a
+// question FLAG, so the sentinel can never be a tag member.
+export function tagMemberKeySets(entry) {
+  const byQ = new Map();
+  for (const m of entry?.members || []) {
+    let set = byQ.get(m.questionKey);
+    if (!set) {
+      set = new Set();
+      byQ.set(m.questionKey, set);
+    }
+    if (m.optionId) set.add(m.optionId);
+    if (m.text != null && m.text !== '') set.add(m.text);
+  }
+  return byQ;
+}
+
+// Fold latestAnswerKeyStages output into the set of voters who CURRENTLY carry the tag:
+// a voter is current when ANY member question's latest answer selects a tag-carrying
+// option. Rows for non-member questions are ignored (the caller may aggregate once over
+// the union of several tags' questions and fold per tag).
+export function currentTagVoterSet(rows, entry) {
+  const byQ = tagMemberKeySets(entry);
+  const out = new Set();
+  for (const row of rows || []) {
+    const set = byQ.get(row._id.questionKey);
+    if (!set) continue;
+    if ((row.latestKeys || []).some((k) => set.has(k))) out.add(String(row._id.voterId));
+  }
+  return out;
+}

@@ -17,7 +17,7 @@ The last line is the **TOTAL row**: the sum of every pass above it, and always e
 
 Three things to know:
 
-- **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading.
+- **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading. The same goes for the **coordinator filter**: if a crew is selected, the export is that crew's rows and TOTAL, not the campaign's — leave it on "All coordinators" for an invoice.
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
 - **No-soliciting doors are already in there.** They're knocks like any other, counted in the **Knocks** column, plus their own **No soliciting** column so you can see how many there were.
 - **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).

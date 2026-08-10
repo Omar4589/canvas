@@ -1,5 +1,6 @@
 import StatCard from './StatCard.jsx';
 import ReportBreakdown from './ReportBreakdown.jsx';
+import ReportTagList from './ReportTagList.jsx';
 import Card from './ui/Card.jsx';
 import { deriveReportSections, formatCount } from '../lib/reportDerive.js';
 
@@ -25,7 +26,7 @@ function kpiProps(k) {
 }
 
 export default function ClientReportView({ report }) {
-  const { kpis, contact, support, others, isQuietWeek } = deriveReportSections(report);
+  const { kpis, contact, support, tags, others, isQuietWeek } = deriveReportSections(report);
 
   return (
     <div className="space-y-8">
@@ -65,6 +66,14 @@ export default function ClientReportView({ report }) {
             variant="segmented"
             emphasis
           />
+        </section>
+      )}
+
+      {/* Voter groups (opt-in tags) sit right after Support: the supporter universe in people,
+          where the section above it is answers. Old reports carry no tags → renders nothing. */}
+      {tags && (
+        <section>
+          <ReportTagList title={tags.title} subtitle={tags.subtitle} help={tags.help} items={tags.items} />
         </section>
       )}
 

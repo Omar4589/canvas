@@ -161,8 +161,30 @@ export function deriveReportSections(report) {
       items: (b.options || []).map((o) => ({ label: o.option, count: o.count })),
     }));
 
+  // Voter groups (tags) — VOTER counts, deliberately NOT run through percentsTo100 like every
+  // other section: "400 identified · 380 still current" are two views of overlapping people,
+  // not shares of a whole, and a percent would assert one. The server already filtered these
+  // to the operator's ticked tags; old frozen reports have no tagBreakdowns → tags:null → the
+  // section simply doesn't render, keeping pre-feature reports byte-identical.
+  const tagsRaw = isLit ? [] : cum.tagBreakdowns || [];
+  const tags = tagsRaw.length
+    ? {
+        title: 'Voter groups',
+        subtitle: 'Counted once per person, across every question',
+        help:
+          "A group collects answers from different questions — anyone who gave any of them counts, once. " +
+          "'Identified' is everyone we've ever counted; 'still current' means their most recent answer still " +
+          'places them in the group. These are counts of people, not percentages.',
+        items: tagsRaw.map((b) => ({
+          label: b.tag,
+          identified: b.identifiedVoters || 0,
+          current: b.currentVoters ?? null,
+        })),
+      }
+    : null;
+
   // A "quiet week": no new doors knocked in the reported period (drives the empty-state banner).
   const isQuietWeek = (d.doorsKnocked || 0) === 0;
 
-  return { isLit, kpis, contact, support, others, isQuietWeek };
+  return { isLit, kpis, contact, support, tags, others, isQuietWeek };
 }

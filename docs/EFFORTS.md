@@ -299,6 +299,12 @@ instead of taking a query param ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)). The over
 `effortName` and prefix `roundLabel` with the walk-list name when the campaign has 2+ efforts
 (`passLabeler`; single-list campaigns keep the short "Pass N · name" label).
 
+The campaign home pages (web DashboardPage, mobile campaign screen) and the Timeline carry a second,
+orthogonal filter dimension alongside the walk list: the **crew** filter (`?coordinatorId`). It
+composes with `effortId` (the two intersect) and scopes the same activity/survey queries — but never
+Households/Coverage, since a crew, unlike an effort, is **not** denormalized onto `Household`. See
+[METRICS.md](METRICS.md) §F.
+
 ## F. Deploy & migrate (runbook)
 
 [migrations/migrateEfforts.js](../server/src/migrations/migrateEfforts.js) (`--apply`): per campaign,

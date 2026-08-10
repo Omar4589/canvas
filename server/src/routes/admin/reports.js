@@ -15,6 +15,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
+import { currentVoterSetsByTag } from '../../services/surveys/currentTags.js';
 import { OTHER_OPTION_ID } from '../../services/surveys/otherOption.js';
 import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
@@ -30,6 +31,8 @@ import {
   contactRate,
   coverageBucketExpr,
   teamFoldStage,
+  teamMatch,
+  withTeam,
   NON_KNOCKED_STATUSES,
   NON_KNOCKED_BUCKETS,
 } from '../../services/reports/aggregations.js';
@@ -211,25 +214,18 @@ function passFilterOf(req) {
 // there would make every household query match zero documents and silently ZERO OUT Coverage.
 // effortId only gets away with living in baseFilter because it IS denormalized onto Household.
 //
-// So this is opt-in, and is spread ONLY into CanvassActivity / SurveyResponse matches.
+// So this is opt-in, merged via withTeam (NEVER a spread) into CanvassActivity / SurveyResponse
+// matches only. Wired on: /canvasser-timeline, /campaign-rollup, /canvassers, /survey-results,
+// /voters-by-answer (+.csv), /answer-canvassers, /canvassers/:userId/responses, and
+// /knocks-by-pass (+.csv, via the buildKnocksByPass adapter → team param).
 //
 //   ?coordinatorId=<id>   → that team
 //   ?coordinatorId=none   → the "No team" bucket (a candidate knocking their own district, etc.)
 //
-// A team is its crew PLUS THE LEAD'S OWN DOORS. `coordinatorId` answers "who oversees me", so a
-// lead's own knocks stamp *their* coordinator (usually nobody) and would otherwise fall into the
-// No-team bucket — the lead would be missing from their own team's number. Hence the $or.
-// `none` then has to exclude the leads, or their doors would be counted twice.
-export function teamMatch(coordinatorId, allLeadIds = []) {
-  if (!coordinatorId) return {};
-  if (coordinatorId === 'none') {
-    return allLeadIds.length
-      ? { coordinatorId: null, userId: { $nin: allLeadIds } }
-      : { coordinatorId: null };
-  }
-  const id = new mongoose.Types.ObjectId(String(coordinatorId));
-  return { $or: [{ coordinatorId: id }, { userId: id, coordinatorId: null }] };
-}
+// teamMatch and withTeam live in services/reports/aggregations.js (imported above) — the
+// knocks-by-pass service needs them too, and it can't import from a route file. Re-exported
+// here so the export surface of this module is unchanged.
+export { teamMatch };
 
 // The users who run a crew in this scope — i.e. whose OWN unstamped doors should fold onto their
 // own team row, and who the "No team" bucket must therefore exclude (or their doors count twice).
@@ -302,17 +298,9 @@ async function crewFilter(req) {
   return teamMatch(raw, leads);
 }
 
-// Merge a team clause into a match. NEVER spread it — teamMatch can return `$or`, and a plain
-// spread would clobber any `$or` the match already carries (the cross-timezone date windows build
-// one). $and composes safely no matter what either side contains.
-function withTeam(match, team) {
-  if (!team || !Object.keys(team).length) return match;
-  if (!team.$or) return { ...match, ...team };
-  return { ...match, $and: [...(match.$and || []), { $or: team.$or }] };
-}
-
-// KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr now live in
-// services/reports/aggregations.js (shared with the client report builder).
+// KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr, teamMatch, withTeam now
+// live in services/reports/aggregations.js (shared with the client report builder and the
+// knocks-by-pass service).
 
 // Parse a csv query param into a Set of allowed values, or null when absent/empty (= no filter).
 function csvSet(value, allowed) {
@@ -625,17 +613,23 @@ router.get('/campaign-rollup', async (req, res, next) => {
       ? { effortId: new mongoose.Types.ObjectId(req.query.effortId) }
       : {};
     const match = { organizationId, campaignId: { $in: ids }, ...effortMatch };
-    const activityMatch = { ...match, ...dateMatch('timestamp') };
-    const surveyMatch = { ...match, ...dateMatch('submittedAt') };
+    // Optional crew scope (?coordinatorId) — applied to the ACTIVITY/SURVEY matches only, never
+    // the Household coverage aggregation below: doors don't belong to a crew, so Coverage stays
+    // campaign-wide by design (the clients caption it). withTeam, never a spread — dateMatch can
+    // return the cross-timezone $or, and the `none` shape carries a userId key.
+    const team = await crewFilter(req);
+    const activityMatch = withTeam({ ...match, ...dateMatch('timestamp') }, team);
+    const surveyMatch = withTeam({ ...match, ...dateMatch('submittedAt') }, team);
 
     // All-time, whole-campaign scope with every campaign's stats trusted → read the
     // CanvassActivity numbers straight off Campaign.stats (maintained write-side by
     // services/reports/campaignCounters.js) and skip every CanvassActivity aggregation below.
-    // Any date window, effort scoping, or unseeded legacy campaign (stats.reconciledAt null,
-    // pre-migrate:campaign-stats) falls back to the live pipelines — stats are exact or unused,
-    // never approximate.
+    // Any date window, effort scoping, crew scoping, or unseeded legacy campaign
+    // (stats.reconciledAt null, pre-migrate:campaign-stats) falls back to the live pipelines —
+    // stats are exact or unused, never approximate. (A crew has no counter equivalent.)
     const useStats =
-      !fromDay && !toDay && !req.query.effortId && campaigns.every((c) => c.stats?.reconciledAt);
+      !fromDay && !toDay && !req.query.effortId && !req.query.coordinatorId &&
+      campaigns.every((c) => c.stats?.reconciledAt);
 
     const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
       await Promise.all([
@@ -904,8 +898,11 @@ router.get('/canvassers', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const cFilter = baseFilter(req);
-    const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK };
+    // Optional crew scope (?coordinatorId): both ledgers take the identical clause so a
+    // crew-scoped leaderboard row's knocks AND surveys agree (aggregation context — see teamMatch).
+    const team = await crewFilter(req);
+    const surveyMatch = withTeam({ ...parseDateRange(req, 'submittedAt'), ...cFilter }, team);
+    const activityMatch = withTeam({ ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK }, team);
 
     const [surveyAgg, activityAgg, rangeAgg] = await Promise.all([
       SurveyResponse.aggregate([
@@ -1180,7 +1177,13 @@ router.get('/survey-results', async (req, res, next) => {
         ? new mongoose.Types.ObjectId(req.query.userId)
         : null;
     const compareToOrg = req.query.compareToOrg === 'true' && !!userIdParam;
-    const baseMatch = { surveyTemplateId: template._id, ...dateRange, ...cFilter, ...passFilterOf(req) };
+    // Optional crew scope (?coordinatorId) — wrapped into baseMatch once, so every per-question
+    // pipeline, the totals, the org comparison, and the tag distinct-voter queries all inherit it.
+    // ($and composition: the userId spread below stays an intersection, never a clobber.)
+    const baseMatch = withTeam(
+      { surveyTemplateId: template._id, ...dateRange, ...cFilter, ...passFilterOf(req) },
+      await crewFilter(req)
+    );
     const match = userIdParam ? { ...baseMatch, userId: userIdParam } : baseMatch;
     const [totalResponses, orgTotalResponses] = await Promise.all([
       SurveyResponse.countDocuments(match),
@@ -1341,10 +1344,18 @@ router.get('/survey-results', async (req, res, next) => {
     }
 
     // Tag rollup: DISTINCT voters who chose ANY option carrying each tag (across questions).
-    // Counts come from a per-tag distinct-voter query (answerTagClause); the contributing
-    // options + their counts are pulled from the per-question breakdown built above.
+    // Two units per tag, both voter-unit: `voterCount` ("identified") = distinct voters EVER
+    // tagged, from a per-tag distinct-voter query (answerTagClause); `currentVoterCount` =
+    // voters whose LATEST in-scope answer still carries the tag (currentTags.js — latest
+    // ANSWER wins, so a later response that skipped the question via branching changes
+    // nothing). Current ⊆ identified. Both inherit `match`, so ?userId/?passId/?coordinatorId
+    // narrow both numbers together. The contributing options + their counts are pulled from
+    // the per-question breakdown built above (response-unit — a deliberately different unit,
+    // labelled as such in the UIs).
+    const tagMap = tagOptionMap(template);
+    const currentByTag = tagMap.size ? await currentVoterSetsByTag(match, template) : new Map();
     const tags = [];
-    for (const entry of tagOptionMap(template).values()) {
+    for (const entry of tagMap.values()) {
       const memberKeys = new Set(entry.members.map((m) => `${m.questionKey}|${m.optionId}`));
       const tagOptions = [];
       for (const q of questions) {
@@ -1355,7 +1366,12 @@ router.get('/survey-results', async (req, res, next) => {
         }
       }
       const voterIds = await SurveyResponse.distinct('voterId', { ...match, ...answerTagClause(template, entry.display) });
-      tags.push({ tag: entry.display, voterCount: voterIds.length, options: tagOptions });
+      tags.push({
+        tag: entry.display,
+        voterCount: voterIds.length,
+        currentVoterCount: (currentByTag.get(normalizeTag(entry.display)) || new Set()).size,
+        options: tagOptions,
+      });
     }
     tags.sort((a, b) => b.voterCount - a.voterCount);
 
@@ -1414,7 +1430,10 @@ async function buildVotersByAnswerFilter(req) {
   if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) {
     filter.userId = new mongoose.Types.ObjectId(req.query.userId);
   }
-  return { filter, template, wantsTag };
+  // Optional crew scope (?coordinatorId) — wrapped LAST, after the userId key above, so the
+  // team clause lands in $and and intersects with (never replaces) a canvasser drill. The
+  // answerClause is itself $or-shaped, which is why $and composition is mandatory here.
+  return { filter: withTeam(filter, await crewFilter(req)), template, wantsTag };
 }
 
 // One stored answer rendered for a human — the drill-in list, its CSV, and any other
@@ -1648,7 +1667,13 @@ router.get('/answer-canvassers', async (req, res, next) => {
     if (!questionKey || (!option && !optionId)) {
       return res.status(400).json({ error: 'questionKey and option (or optionId) are required' });
     }
-    const match = { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req), ...passFilterOf(req) };
+    // Optional crew scope (?coordinatorId): the identical clause /survey-results wraps into its
+    // baseMatch, so the counting contract (these rows sum to the option's count) holds under a
+    // crew filter too. Rows stay RAW per-user — filtering the response set is not folding credit.
+    const match = withTeam(
+      { ...parseDateRange(req, 'submittedAt'), ...baseFilter(req), ...passFilterOf(req) },
+      await crewFilter(req)
+    );
     if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
       match.surveyTemplateId = new mongoose.Types.ObjectId(surveyTemplateId);
     }
@@ -2063,6 +2088,131 @@ router.get('/team-breakdown', async (req, res, next) => {
       // the same doors, which is worth knowing.
       crossTeamDoors: Math.max(0, teamSum - k.knocks),
       teamSum,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One tag's voter rollup split by team — "this team identified N supporters, M still are."
+//
+// FIRST-FINDER attribution (owner ruling, Aug 2026): the voter is credited to the team on their
+// EARLIEST in-scope tag-carrying response (min submittedAt, tie-break _id). That team stamp is
+// the frozen-then-restamped coordinatorId the whole teams contract runs on, so credit follows
+// the row and the row follows the canvasser's current crew — a reassignment moves found voters
+// exactly like it moves doors. Because each voter resolves to exactly ONE team, both units
+// PARTITION: Σ(teams) + noTeam === totals, for identified AND current. This is the one
+// distinct-voter team surface that is allowed to exist — the teamFoldStage-only shape cannot
+// partition (a voter surveyed by two teams belongs to both rows; see /team-breakdown's
+// surveysTaken note), which is also why /answer-canvassers still 400s tag mode: no first-finder
+// ruling exists for CANVASSERS, so a per-person split would still be a lie.
+//
+// `leadIdsForScope(baseFilter(req))` is deliberately UN-windowed (org/campaign/effort only) —
+// crewFilter's own precedent. A windowed scope would need per-collection date keys (timestamp
+// vs submittedAt) and would let a lead's fold flicker with the report range.
+router.get('/tag-teams', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+
+    if (!req.query.tag) return res.status(400).json({ error: 'tag is required' });
+
+    // Template resolution mirrors /survey-results: explicit ?surveyTemplateId (in-org), else the
+    // campaign's attached survey. Unlike survey-results there is no empty-200 fallback — the tag
+    // param is mandatory, so with no template there is nothing meaningful to return.
+    let template = null;
+    const { surveyTemplateId } = req.query;
+    if (surveyTemplateId && mongoose.isValidObjectId(surveyTemplateId)) {
+      template = await SurveyTemplate.findOne({ _id: surveyTemplateId, organizationId: orgId }).lean();
+    }
+    const cFilter = baseFilter(req);
+    if (!template && cFilter.campaignId) {
+      const campaign = await Campaign.findOne({ _id: cFilter.campaignId, organizationId: orgId }).lean();
+      if (campaign?.surveyTemplateId) {
+        template = await SurveyTemplate.findOne({
+          _id: campaign.surveyTemplateId,
+          organizationId: orgId,
+        }).lean();
+      }
+    }
+    if (!template) return res.status(404).json({ error: 'Survey not found' });
+
+    const entry = tagOptionMap(template).get(normalizeTag(req.query.tag));
+    // 404, not an empty 200 — a typo'd tag must not read as an honest zero.
+    if (!entry) return res.status(404).json({ error: 'Tag not found on this survey' });
+
+    // Same refuse-rather-than-mislead gate as /team-breakdown: before the backfill, history has
+    // no team stamp and every voter would land in "No team", which looks like data.
+    const org = await Organization.findById(orgId, 'teamAttributionReadyAt').lean();
+    if (!org?.teamAttributionReadyAt) {
+      return res.json({ ready: false, tag: entry.display, teams: [], noTeam: null, totals: null });
+    }
+
+    // Identical fold order to /survey-results' baseMatch, so this table always reconciles with
+    // the tag row that opened it. Team clause via withTeam (never baseFilter — the household-
+    // poisoning rule); ?passId=legacy → {passId: null} via passFilterOf.
+    const match = withTeam(
+      {
+        surveyTemplateId: template._id,
+        ...parseDateRange(req, 'submittedAt'),
+        ...cFilter,
+        ...passFilterOf(req),
+      },
+      await crewFilter(req)
+    );
+    const leadIds = await leadIdsForScope(cFilter);
+
+    const [firstFinder, currentByTag] = await Promise.all([
+      // One row per voter: their earliest tag-carrying response's folded team. Per-voter rows,
+      // never per-team $push arrays — no 16MB document risk at any campaign size.
+      SurveyResponse.aggregate([
+        { $match: { ...match, ...answerTagClause(template, entry.display) } },
+        teamFoldStage(leadIds),
+        { $project: { voterId: 1, submittedAt: 1, team: 1 } },
+        { $sort: { submittedAt: 1, _id: 1 } },
+        { $group: { _id: '$voterId', team: { $first: '$team' } } },
+      ]),
+      currentVoterSetsByTag(match, template, [entry.display]),
+    ]);
+    const currentSet = currentByTag.get(normalizeTag(entry.display)) || new Set();
+
+    const buckets = new Map(); // teamId string | null → { identifiedVoters, currentVoters }
+    for (const row of firstFinder) {
+      const key = row.team ? String(row.team) : null;
+      const b = buckets.get(key) || { identifiedVoters: 0, currentVoters: 0 };
+      b.identifiedVoters += 1;
+      if (currentSet.has(String(row._id))) b.currentVoters += 1;
+      buckets.set(key, b);
+    }
+    const noTeam = buckets.get(null) || { identifiedVoters: 0, currentVoters: 0 };
+    buckets.delete(null);
+
+    const teamIds = [...buckets.keys()];
+    const names = teamIds.length
+      ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
+      : [];
+    const nameById = new Map(names.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+
+    const teams = teamIds
+      .map((id) => ({
+        coordinatorId: id,
+        coordinatorName: nameById.get(id) || 'Unknown',
+        ...buckets.get(id),
+      }))
+      .sort((a, b) => b.identifiedVoters - a.identifiedVoters);
+
+    res.json({
+      ready: true,
+      tag: entry.display,
+      surveyTemplate: { id: String(template._id), name: template.name, version: template.version },
+      teams,
+      // A dedicated sibling rather than a null-id row, so the client's partition arithmetic
+      // (Σ teams + noTeam === totals) cannot be gotten wrong by a missed null check.
+      noTeam,
+      totals: {
+        identifiedVoters: firstFinder.length, // one row per voter, by construction
+        currentVoters: currentSet.size, // current ⊆ identified, so the set IS the total
+      },
     });
   } catch (err) {
     next(err);
@@ -2683,11 +2833,18 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
     const skip = parseInt(req.query.skip, 10) || 0;
     const dateRange = parseDateRange(req, 'submittedAt');
     const cFilter = baseFilter(req);
-    const filter = {
-      userId: new mongoose.Types.ObjectId(userId),
-      ...dateRange,
-      ...cFilter,
-    };
+    // Optional crew scope (?coordinatorId): with a crew selected on the Dashboard, the
+    // leaderboard row this modal drills is crew-scoped — unscoped, the modal would disagree
+    // with the row for anyone who knocked for two crews in the window. withTeam is $and-based,
+    // so the `none` shape's userId key intersects with (never replaces) the drilled userId.
+    const filter = withTeam(
+      {
+        userId: new mongoose.Types.ObjectId(userId),
+        ...dateRange,
+        ...cFilter,
+      },
+      await crewFilter(req)
+    );
 
     const [user, total, responses] = await Promise.all([
       User.findById(userId, 'firstName lastName email').lean(),
@@ -2950,6 +3107,9 @@ async function buildKnocksByPass(req) {
     effortId: cFilter.effortId || null,
     timestampRange: windowed.timestamp || null,
     groupByCanvasser: req.query.groupBy === 'canvasser',
+    // Optional crew scope (?coordinatorId) — threads to the JSON route AND the CSV through
+    // this one adapter. The Export Center's full-backup calls the service directly, no team.
+    team: await crewFilter(req),
   });
 }
 

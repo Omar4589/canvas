@@ -77,7 +77,7 @@ function ResponseCard({ r, tz }) {
   );
 }
 
-export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, effortId, onClose, tz }) {
+export default function CanvasserResponsesModal({ canvasser, dateRange, campaignId, effortId, coordinatorId, onClose, tz }) {
   const orgTz = useOrgTimeZone();
   const zone = tz || orgTz;
   const [skip, setSkip] = useState(0);
@@ -86,7 +86,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
   useEffect(() => {
     setSkip(0);
     setAccumulated([]);
-  }, [canvasser?.userId, dateRange?.from, dateRange?.to, campaignId, effortId]);
+  }, [canvasser?.userId, dateRange?.from, dateRange?.to, campaignId, effortId, coordinatorId]);
 
   useEffect(() => {
     function onKey(e) {
@@ -97,9 +97,12 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
   }, [onClose]);
 
   const userId = canvasser?.userId;
+  // coordinatorId keeps the modal in step with a crew-scoped leaderboard row — for someone
+  // who knocked under two crews, the unscoped list would disagree with the row that opened it.
   const queryString = buildQuery({
     campaignId,
     effortId: effortId || undefined,
+    coordinatorId: coordinatorId || undefined,
     from: dateRange?.from,
     to: dateRange?.to,
     skip,
@@ -113,6 +116,7 @@ export default function CanvasserResponsesModal({ canvasser, dateRange, campaign
       userId,
       campaignId,
       effortId,
+      coordinatorId,
       dateRange?.from,
       dateRange?.to,
       skip,

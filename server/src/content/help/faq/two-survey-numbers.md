@@ -37,7 +37,11 @@ None of those is wrong. If a number looks like it jumped after you started a sec
 
 Answers are counted **per survey**. If Maria asks for a yard sign in Round 1 and again in Round 2, that counts as **2** — because you handed out two signs. That's deliberate: it's a count of what you did, not of how many people you spoke to.
 
-You can also look at one round on its own. On the **Survey Explorer**, use the round filter to see, say, only the yard signs requested in Round 2. Each round's numbers add up to the all-rounds total.
+You can also look at one round on its own. Use the round filter (on the campaign Home's Survey results or the **Survey Explorer**) to see, say, only the yard signs requested in Round 2. Each round's numbers add up to the all-rounds total.
+
+## And tags?
+
+**Tags count people, once each** — they're the voter-unit answer. If you tag "Support" as *Supporter*, Maria answering Support in both rounds is **one** identified supporter, not two. Each tag shows two figures: **identified** (ever gave a tagged answer — never goes down) and **still current** (their most recent answer still carries it — this one *can* go down when someone changes their mind in a later round, without anything being deleted). See [How do I count our supporters?](how-do-i-count-supporters).
 
 ## Which one does the connection rate use?
 

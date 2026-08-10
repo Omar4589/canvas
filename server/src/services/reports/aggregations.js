@@ -82,6 +82,44 @@ export function teamFoldStage(leadIds) {
   };
 }
 
+// The QUERY-context twin of teamFoldStage: resolve a ?coordinatorId into a match clause.
+//
+// A team is its crew PLUS THE LEAD'S OWN DOORS. `coordinatorId` answers "who oversees me", so a
+// lead's own knocks stamp *their* coordinator (usually nobody) and would otherwise fall into the
+// No-team bucket — the lead would be missing from their own team's number. Hence the $or.
+// `none` then has to exclude the leads, or their doors would be counted twice.
+//
+//   coordinatorId=<id>   → that team ($or: stamped onto the team, or the lead's own null rows)
+//   coordinatorId=none   → the "No team" bucket (a candidate knocking their own district, etc.)
+//
+// `allLeadIds` (only needed for `none`) comes from leadIdsForScope in routes/admin/reports.js —
+// ledger-derived, deliberately. The ids arrive as STRINGS and are cast here because this clause
+// is used in aggregation $matches too (knocksByPass coverageGained, /canvasser-timeline), where
+// Mongoose does no schema casting — a string $nin against an ObjectId userId excludes nothing
+// and silently double-counts every lead's doors into `none`. Same reason teamFoldStage casts.
+//
+// teamAttribution.int.test.js asserts this filter and the teamFoldStage fold never drift.
+export function teamMatch(coordinatorId, allLeadIds = []) {
+  if (!coordinatorId) return {};
+  if (coordinatorId === 'none') {
+    const ids = allLeadIds.map((s) => new mongoose.Types.ObjectId(String(s)));
+    return ids.length
+      ? { coordinatorId: null, userId: { $nin: ids } }
+      : { coordinatorId: null };
+  }
+  const id = new mongoose.Types.ObjectId(String(coordinatorId));
+  return { $or: [{ coordinatorId: id }, { userId: id, coordinatorId: null }] };
+}
+
+// Merge a team clause into a match. NEVER spread it — teamMatch can return `$or` (which a plain
+// spread would clobber against the cross-timezone date windows' own `$or`), and the `none` shape
+// carries a `userId` key that would silently REPLACE a canvasser-drill's userId filter. $and
+// composes safely no matter what either side contains, so it is used unconditionally.
+export function withTeam(match, team) {
+  if (!team || !Object.keys(team).length) return match;
+  return { ...match, $and: [...(match.$and || []), team] };
+}
+
 // Billable "knock" = one distinct (household, pass). Re-knocking a house within the SAME
 // pass (a correction, or a second/overlapping canvasser) counts once; going back in a NEW
 // pass counts again. passId:null collapses to a single legacy bucket per household (pre-turf

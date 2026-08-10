@@ -178,18 +178,36 @@ hunting through individual surveys to fix a label.
 > **Tags are an admin-only convenience.** They're metadata you attach for *your* reporting and list-
 > building. **Canvassers never see tags** at the door — the mobile survey is unchanged.
 
-Once options are tagged, tags show up in two places:
+Once options are tagged, tags show up in four places:
 
-- **The survey report → "Tags" section.** Open the campaign's survey results and, below the
-  per-question charts, you'll find a **Tags** panel: one bar per tag showing **how many distinct
-  voters** carry it (counted **once** even if they hit the tag in several questions). Click a tag to
-  see exactly which options feed it, and to drill into the **list of voters** reached.
+- **The survey report → "Tags" section.** Open the campaign's survey results (the campaign
+  dashboard **or** the Survey Explorer) and you'll find a **Tags** panel. Each tag carries **two
+  numbers**, both counting **people, once each**:
+  - **Voters** (*identified*) — everyone who **ever** gave a tagged answer, counted once even if
+    they hit the tag in several questions or several rounds. This number never goes down.
+  - **Current** — of those, how many people's **most recent answer still carries the tag**. Someone
+    who said *Support* in round 1 and *Opposed* in round 2 stays in *identified* but drops out of
+    *current*. A later visit that **skipped** the question (the survey branched around it) changes
+    nothing — the last answer they actually gave still stands. This is the number to quote for
+    "how many supporters do we have **now**".
+- **The by-team split.** Click a tag and you'll also get a **By team** table: each crew's
+  identified and still-current voters, plus a "No team" row and the campaign line. Credit goes to
+  the **first team to tag the voter** — a voter reached by two teams stays with the first — so the
+  team rows always **add up exactly** to the campaign total, both columns.
 - **Building a list "by tag."** When you create a **saved search** (walk list), the answer-filter
   panel has a **By tag** row of tag chips. Pick "Supporter" and the resulting list is **every
   household with someone who matched that tag in any question** — a cross-question reach that the
   per-question answer filters can't express on their own. From the Saved Searches list you can then
   **Export CSV** to download those voters (name, party, age, phone, precinct, address) for a re-
   canvass, a phone bank, or a mail house.
+- **Client reports (opt-in).** The report builder has a **Visible tags** checklist — a ticked tag
+  shows up on the published report as a "Voter groups" row ("400 identified · 380 still current").
+  **Nothing shows unless you tick it**, so internal tags like "Hostile" or "Do not return" can
+  never reach a candidate's page by accident. See [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
+
+> **"Current" always means "within the view you're looking at."** Scope the results to round 1
+> and a round-2 flip is invisible — the latest answer *in that scope* is the round-1 one. The
+> all-rounds view is the one that answers "current supporters, today."
 
 ## The campaign's "Survey" tab (every survey this campaign uses)
 
@@ -295,7 +313,8 @@ How the counts split, so you can trust the numbers:
 - **Tags do not roll up across different surveys.** A "Supporter" tag on survey A and a "Supporter"
   tag on survey B are counted independently. If you want one combined supporter universe, **evolve a
   single survey by editing it** (add the new question — see "Editing a survey…" below) rather than
-  standing up a second survey for the same question.
+  standing up a second survey for the same question. Both tag units — identified **and** still
+  current — are judged **within the survey you're viewing**, and so is the by-team split.
 
 ## Auditing answers — who chose one, who recorded it, and when
 
@@ -365,13 +384,18 @@ feet/miles), an *"Edited by … on …"* line if an admin later changed it, a sm
 
 **Tags drill differently.** A tag rollup counts *distinct voters* across questions, so there is no
 honest per-canvasser split ("who recorded this voter's tag" has no single answer when three
-questions feed it). A tag drill gets the enriched voter list, the canvasser filter, and the CSV —
-but no By-canvasser view and no mini map.
+questions feed it). A tag drill gets the enriched voter list (labelled in **entries** — one per
+round, so a voter surveyed in two rounds appears twice and the list deliberately reads bigger than
+the voter number above it), the **By team** table (the sanctioned split — first-finder credit gives
+each voter exactly one team, which is what a per-canvasser column can't do), the canvasser filter,
+and the CSV — but no By-canvasser view and no mini map.
 
 **Team leads** get all of this for the campaigns they manage. **On mobile**, tapping an answer's
 count on the campaign screen opens the same voter list with the **Voters | By canvasser** toggle
 and canvasser filter, and a **View on map** that opens the mobile admin map pre-filtered to the same
-drill; the response detail screen shows the same edited-by and offline-synced lines.
+drill; the response detail screen shows the same edited-by and offline-synced lines. Tapping a
+**tag** on the campaign screen's Tags card opens the same drill in tag mode — entries list plus the
+By-team card, no By-canvasser tab and no map link, with the reason stated on screen.
 
 ## What a canvasser sees (mobile)
 
@@ -756,9 +780,9 @@ the wire), [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndO
 | [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. **Filters out retired questions and retired options** — the preview shows what canvassers actually see in the field. |
 | [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
 | [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown (in `components/campaigns/CampaignFormDrawer.jsx`) shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). Hides **archived** templates unless attached — anchored to the survey attached **when the drawer opened**, so deselecting an archived one mid-edit doesn't make it vanish from the options. |
-| [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). Exports **`TagResults`** — the report's **"Tags"** panel: one `TagRow` per `tags[]` entry (bar scaled to the most-reached tag, **distinct** `voterCount`), expandable to its contributing options and an inline `VoterList` that drills via `voters-by-answer?tag=<tag>&surveyTemplateId=<id>` (see §I). Each expanded option/tag now hosts the **answer drill-in** (`OptionDrill`/`TagDrill` — canvasser filter, Voters \| By-canvasser toggle, enriched rows, response drawer, Open-full-view link) — see §J. |
+| [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). Exports **`TagResults`** — the **"Tags"** panel: one `TagRow` per `tags[]` entry showing **both voter units** ("N voters · M current"; the bar stays scaled to identified — current is text only, since these are counts, not shares; `currentVoterCount` absent from an old server renders nothing rather than a fake 0), contributing options labelled "(N answers)" (response-unit, said out loud), expandable to `TagDrill` — the **`TagTeamTable`** ([TagTeamTable.jsx](../client/src/components/TagTeamTable.jsx), the first-finder by-team split from `/tag-teams`, §I) plus an inline `VoterList` that drills via `voters-by-answer?tag=<tag>&surveyTemplateId=<id>` and opens with **its own unit line** ("N entries — one per round…"). `TagResults` also takes `onTagClick` — the Survey Explorer passes it so a row click deep-links to `?tag=` instead of expanding inline. Each expanded option/tag hosts the **answer drill-in** (`OptionDrill`/`TagDrill` — canvasser filter, Voters \| By-canvasser toggle, enriched rows, response drawer, Open-full-view link) — see §J. All drills thread `passId` (the Dashboard round picker). |
 | [client/src/pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | The **Survey Explorer** — the full-page answer drill-in/audit workspace (`/campaigns/:campaignId/explorer`). Filters, headline stats, voters + by-canvasser tables, mini map, CSV export. Full spec in §J. |
-| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders the **Survey results** section. A **survey switcher** appears in the section header when the campaign has answers under a survey other than the one currently attached: `GET /admin/reports/surveys?campaignId=` now returns **every** survey with responses for the campaign (each row flagged **`current`**, current-first), and picking a past one re-queries `survey-results` with that `surveyTemplateId` and shows a "no longer attached" note — so a swapped campaign's old answers are one click away, never hidden. Accepts a **`?survey=<templateId>` deep-link** (the Surveys quick-view's results links): seeds the switcher (the *current* survey's id normalizes to `''`) and scrolls the section into view once both the switcher list and the campaign are known; per-campaign selections (template/effort/canvasser) **reset when `:campaignId` changes**, since the sidebar campaign switcher re-renders the same mounted page. Renders `<TagResults>` below the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. |
+| [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Renders the **Survey results** section. A **survey switcher** appears in the section header when the campaign has answers under a survey other than the one currently attached: `GET /admin/reports/surveys?campaignId=` now returns **every** survey with responses for the campaign (each row flagged **`current`**, current-first), and picking a past one re-queries `survey-results` with that `surveyTemplateId` and shows a "no longer attached" note — so a swapped campaign's old answers are one click away, never hidden. Accepts a **`?survey=<templateId>` deep-link** (the Surveys quick-view's results links): seeds the switcher (the *current* survey's id normalizes to `''`) and scrolls the section into view once both the switcher list and the campaign are known; per-campaign selections (template/effort/canvasser/pass) **reset when `:campaignId` changes**, since the sidebar campaign switcher re-renders the same mounted page. The section header also carries a **round picker** (`surveyPassId`: `''` \| Pass `_id` \| `'legacy'`) fed by the shared **`useRoundOptions`** hook ([lib/useRoundOptions.js](../client/src/lib/useRoundOptions.js) — sourced from `GET /admin/campaigns/:id/passes` + `legacyResponseCount`, NEVER from knocks-by-pass rows: picker options must not depend on the filters they set, and the legacy bucket must key on null-pass RESPONSES; same labels as the Explorer's picker by construction; polled under HOME_POLL per the Live-pill contract). The pass is cleared on effort switch (a pass belongs to one walk list) and threads into `survey-results`, `<TagResults>`, and every `<QuestionResults>` drill. Renders `<TagResults>` above the per-question charts when `surveyResultsQ.data.tags` is non-empty, passing `surveyTemplateId` for the tag drill. (Mobile's campaign screen keeps its knocks-by-pass-derived chips — a documented divergence.) |
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The saved-search / targeted-round answer-filter chips. Beyond per-question `answerFilters`, it renders a **"By tag"** chip row from the `tags` palette prop (falling back to the case-insensitive union of option tags) and emits selected tags to the parent via `onTagChange` as **`answerTagFilters: [{ tag }]`** (case-insensitive, display-cased). |
 | [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | Saved-search builder. Wires `AnswerFilters` with `tags={surveyTags}` (from `survey-results` `tags[]`) + `answerTagFilters` into the filter (sent to `resolveWalkList`). Per saved search, **Export CSV** (`exportCsv`) does an **authenticated blob download**: `fetch` the export endpoint with `Authorization: Bearer` + `X-Org-Id` headers, read `res.blob()`, then click a synthetic `<a download>` (filename from `Content-Disposition`). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |
@@ -869,15 +893,62 @@ per member and flattening their `$or`s — a **single cross-question predicate**
 the **dual-read** behavior (stable id **OR** legacy answer text), so retired/renamed options keep
 counting.
 
-**Reporting rollup — distinct voters per tag.** `GET /admin/reports/survey-results`
+**Reporting rollup — two voter units per tag.** `GET /admin/reports/survey-results`
 ([reports.js](../server/src/routes/admin/reports.js)) appends a
-`tags: [{ tag, voterCount, options: [{ questionKey, optionId, text, count }] }]` array: for each
-`tagOptionMap` entry it runs `SurveyResponse.distinct('voterId', { ...match, ...answerTagClause(...) })`
-so `voterCount` is **distinct voters** (counted **once** even if they hit the tag in several
-questions), pulls the contributing `options` + per-option counts from the per-question breakdown
-already built, and sorts by `voterCount` desc. Rendered by `TagResults`
-([QuestionResults.jsx](../client/src/components/QuestionResults.jsx)) inside
-[DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) (see §G).
+`tags: [{ tag, voterCount, currentVoterCount, options: [{ questionKey, optionId, text, count }] }]`
+array:
+
+- `voterCount` (**identified**): for each `tagOptionMap` entry it runs
+  `SurveyResponse.distinct('voterId', { ...match, ...answerTagClause(...) })` — **distinct voters,
+  ever** (counted **once** even if they hit the tag in several questions or rounds).
+- `currentVoterCount` (**current**, latest answer wins): computed by
+  `currentVoterSetsByTag(match, template)`
+  ([services/surveys/currentTags.js](../server/src/services/surveys/currentTags.js)) — **one**
+  aggregation over the union of all tags' member questionKeys, using `latestAnswerKeyStages`
+  ([answerAgg.js](../server/src/services/surveys/answerAgg.js)): per **(voter, member question)**,
+  resolve the latest in-scope response **that answers the question** (branching-skipped responses
+  produce no row, so they can neither current nor un-current anyone; sort
+  `{submittedAt:-1,_id:-1}` + `$first`), then a voter is current when ANY member question's latest
+  answer selects a tag-carrying option (`currentTagVoterSet`, dual-read: option ids ∪ member
+  texts). `current ⊆ identified` by construction, and **current is scope-relative** — the same
+  `match` (date/pass/crew/userId) narrows both numbers, so a later flip is invisible to an
+  earlier-round scope. The service is the ONE owner of these semantics; `/tag-teams` and the
+  client-report freeze call the same function so the three surfaces cannot drift.
+
+The contributing `options` + per-option counts come from the per-question breakdown already built
+(response-unit — labelled "answers" in the UIs), sorted by `voterCount` desc. Rendered by
+`TagResults` ([QuestionResults.jsx](../client/src/components/QuestionResults.jsx)) inside
+[DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) and
+[SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) (see §G).
+
+**By-team split — `GET /admin/reports/tag-teams`** ([reports.js](../server/src/routes/admin/reports.js),
+next to `/team-breakdown`). Query: `campaignId`, `tag` (**required** — missing → 400, unknown →
+404, case-insensitive via `normalizeTag`), `surveyTemplateId?` (else the campaign's attached
+survey; none → 404 — unlike survey-results there is no empty-200, since the tag param is
+mandatory), `from/to?`, `effortId?`, `passId?` (incl. the `legacy` sentinel), `coordinatorId?`
+(`none` ok). Response:
+
+```jsonc
+{ "ready": true, "tag": "Supporter", "surveyTemplate": { … },
+  "teams":  [{ "coordinatorId": "…", "coordinatorName": "Lee Lead",
+               "identifiedVoters": 4, "currentVoters": 4 }],
+  "noTeam": { "identifiedVoters": 1, "currentVoters": 1 },   // dedicated sibling, never a null-id row
+  "totals": { "identifiedVoters": 8, "currentVoters": 7 } }
+```
+
+**FIRST-FINDER attribution** (owner ruling, Aug 2026): one aggregation over the in-scope
+tag-carrying responses — `teamFoldStage(leadIds)` (the standard lead fold; `leadIdsForScope`
+over the **un-windowed** `baseFilter` scope, `crewFilter`'s own precedent) → `$sort
+{submittedAt:1,_id:1}` → `$group {_id: voterId, team: $first}` — credits each voter to the team
+on their **earliest** tagged response. That stamp follows crew re-stamps, so credit moves with
+the canvasser like every other team number. Because each voter resolves to exactly ONE team,
+**both units partition**: `Σ teams + noTeam === totals`, identified and current — the property
+the `teamFoldStage`-only shape cannot provide (see the callout in §J and
+[METRICS.md](METRICS.md) §F). Gated on `Organization.teamAttributionReadyAt` exactly like
+`/team-breakdown` (`ready:false` → the clients render nothing). Pinned end-to-end by
+[surveyTagUnits.int.test.js](../server/test/surveyTagUnits.int.test.js). Rendered by
+[TagTeamTable.jsx](../client/src/components/TagTeamTable.jsx) inside the web tag drills and as
+the mobile drill's "By team" card.
 
 **Drill to voters by tag.** `GET /admin/reports/voters-by-answer?tag=<tag>&surveyTemplateId=<id>`
 ([reports.js](../server/src/routes/admin/reports.js)) — when `tag` is present it requires
@@ -918,9 +989,9 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /admin/reports/answer-canvassers` | Per-canvasser breakdown for **one option** — "who is entering Opposed the most?". Params: `questionKey` + (`optionId` and/or `option`) required, plus `surveyTemplateId`, `campaignId`, `effortId`, `from`/`to`. Returns `{ total, rows: [{ userId, firstName, lastName, status, count, share, questionTotal, pctOfOwnAnswers, lastAt }] }` sorted `count` desc. `share` = % of the option's total; `questionTotal` = that canvasser's **total selections on this question** (any option); `pctOfOwnAnswers` = `count ÷ questionTotal` — "12% of everything they record on this question is Opposed". Identity via `hydrateCanvassers` (`status: 'deleted'` fallback, so a departed canvasser's rows survive). **No `userId` param and no pagination** — clients render the full crew-sized table so a row click can *toggle* a filter. **`tag` → `400` by design** (see the contract below). |
-| `GET /admin/reports/voters-by-answer` | The entry list. Same option/tag filter as before (§I), built by the shared `buildVotersByAnswerFilter` — **now also takes `userId`** (narrows to one canvasser's entries, works in option **and** tag mode), and each row **now carries `wasOfflineSubmission`**. Row shape: `{ responseId, submittedAt, voter{id,fullName,party}, household{id,addressLine1,city,state}, canvasser{id,firstName,lastName}, note, wasOfflineSubmission }`; paginated (`limit` ≤ 200, `skip`), plus `total`. |
-| `GET /admin/reports/voters-by-answer.csv` | The same drill as a **CSV attachment** — same params (incl. `userId` + tag mode) through the **same** `buildVotersByAnswerFilter`, so the file can never disagree with the JSON list. No pagination; hard `EXPORT_CAP = 50000`. Columns: `Submitted (ISO)`, `Date`, `Time (<tz-abbrev>)` (campaign tz), `Voter`, `Party`, `Address`, `City`, `State`, `Zip`, `Canvasser first/last name`, `Question`, `Answer` (the drilled question's **snapshots** — `questionLabel` + `answer` text + `otherText`, honest even after an option rename; tag mode collects every answer entry carrying the tag), `Note`, `Offline submission` (yes/no), `Response id`. **This is the 4th server-side CSV export** — same audience as the JSON (org admin + granted lead, campaign-scoped); recorded in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) §B8. |
+| `GET /admin/reports/answer-canvassers` | Per-canvasser breakdown for **one option** — "who is entering Opposed the most?". Params: `questionKey` + (`optionId` and/or `option`) required, plus `surveyTemplateId`, `campaignId`, `effortId`, `coordinatorId` (`ObjectId \| 'none'` — the identical `withTeam` clause `survey-results` takes, so the counting contract below holds under a crew filter; rows stay RAW per-user), `from`/`to`. Returns `{ total, rows: [{ userId, firstName, lastName, status, count, share, questionTotal, pctOfOwnAnswers, lastAt }] }` sorted `count` desc. `share` = % of the option's total; `questionTotal` = that canvasser's **total selections on this question** (any option); `pctOfOwnAnswers` = `count ÷ questionTotal` — "12% of everything they record on this question is Opposed". Identity via `hydrateCanvassers` (`status: 'deleted'` fallback, so a departed canvasser's rows survive). **No `userId` param and no pagination** — clients render the full crew-sized table so a row click can *toggle* a filter. **`tag` → `400` by design** (see the contract below). |
+| `GET /admin/reports/voters-by-answer` | The entry list. Same option/tag filter as before (§I), built by the shared `buildVotersByAnswerFilter` — **now also takes `userId`** (narrows to one canvasser's entries, works in option **and** tag mode) and **`coordinatorId`** (`ObjectId \| 'none'`, wrapped `$and`-style AFTER `userId` so the two intersect — a crew clause must never replace a canvasser drill), and each row **now carries `wasOfflineSubmission`**. Row shape: `{ responseId, submittedAt, voter{id,fullName,party}, household{id,addressLine1,city,state}, canvasser{id,firstName,lastName}, note, wasOfflineSubmission }`; paginated (`limit` ≤ 200, `skip`), plus `total`. |
+| `GET /admin/reports/voters-by-answer.csv` | The same drill as a **CSV attachment** — same params (incl. `userId`, `coordinatorId` + tag mode) through the **same** `buildVotersByAnswerFilter`, so the file can never disagree with the JSON list. No pagination; hard `EXPORT_CAP = 50000`. Columns: `Submitted (ISO)`, `Date`, `Time (<tz-abbrev>)` (campaign tz), `Voter`, `Party`, `Address`, `City`, `State`, `Zip`, `Canvasser first/last name`, `Question`, `Answer` (the drilled question's **snapshots** — `questionLabel` + `answer` text + `otherText`, honest even after an option rename; tag mode collects every answer entry carrying the tag), `Note`, `Offline submission` (yes/no), `Response id`. **This is the 4th server-side CSV export** — same audience as the JSON (org admin + granted lead, campaign-scoped); recorded in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) §B8. |
 | `GET /admin/reports/responses/:responseId?campaignId=` | One response in full (the detail drawer/screen): answers, note, GPS + `distanceFromHouseMeters`, voter, household (with coordinates for the dot map), canvasser, round — **now also `syncedAt`** (server receipt time; trails `submittedAt` by however long the phone stayed offline), **`editedAt`**, and **`editedBy{id,firstName,lastName}`**. Re-checks the response's own `campaignId` against the lead's grants (defense-in-depth beyond the router gate). |
 
 > **Each drill row carries its `answer`** — the response's answer to the drilled question, rendered
@@ -944,7 +1015,11 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   surface: it answers "who pressed the button", never "whose team gets credit". Contrast the
 >   team-attribution model in [METRICS.md](METRICS.md).
 > - **Tag mode is a `400` by design**: a tag rollup is a **distinct-voter** count across questions
->   (§I), which has no honest per-canvasser sum — three questions can feed one voter's tag.
+>   (§I), which has no honest per-canvasser sum — three questions can feed one voter's tag. The
+>   **one sanctioned exception is `/tag-teams`** (§I): FIRST-FINDER attribution assigns each voter
+>   to exactly one **team**, so a per-TEAM distinct-voter split partitions honestly. No such ruling
+>   exists for canvassers — the 400 here stays, and this feature must not be read as license to
+>   remove it.
 > - **The `'__other__'` write-in keys on the sentinel ALONE** here (`keys = ['__other__']`, not
 >   `[optionId, option]`). Including its display text would count a legacy row that `mergeOptionRows`
 >   files under a *different* bucket, breaking this very contract.
@@ -962,6 +1037,9 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   it does not change with the wording.)
 > - **`?passId=` scopes any of these to one round** (`survey-results`, `voters-by-answer`(+`.csv`),
 >   `answer-canvassers`), via `passFilterOf` in [reports.js](../server/src/routes/admin/reports.js).
+>   **`?coordinatorId=` scopes the same trio to one crew** (`withTeam` + `crewFilter` — the
+>   campaign home's crew filter; all three take the identical clause, so option counts, drills,
+>   and per-canvasser rows keep summing to each other under it).
 >   Σ(rounds) === the all-rounds total. It is deliberately **not** part of `baseFilter`:
 >   `/knocks-by-pass` builds its row set from every Pass while counting through the same filter, so
 >   narrowing there would render every other round as a real-looking zero. A walk-list filter is no
@@ -976,18 +1054,19 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 
 | File | Role |
 |---|---|
-| [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Route `/campaigns/:campaignId/explorer` ([App.jsx](../client/src/App.jsx), console group — **admins and leads**; `CAMPAIGN_NAV` slug `explorer` in [navItems.js](../client/src/components/navItems.js)). **The URL is the filter state** — `?survey&q&optionId&option&userId&effortId&pass&tag&view&from&to` (`pass` = a **Pass `_id`**, never a round number — `roundNumber` restarts per walk list, so the selector reads "Walk list · Pass N"), written with `replace` so filter twiddling doesn't spam the back stack; a drill is shareable. Date range defaults to **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding, the DashboardPage pattern); a `?from/&to` deep link seeds a custom range. The headline stats re-query `survey-results` with **identical** filters (incl. `userId`, which that endpoint accepts) so the headline can never disagree with the accordion; the By-canvasser table stays deliberately un-`userId`-filtered so a row click toggles the filter. Tag mode: voter list + CSV only (by-canvasser hidden with an explanation, minimap hidden — the map endpoint has no tag filter). CSV via authenticated `fetch` + blob (the WalkListsPage idiom). **Single-fetch, no live polling** (the repo's Live-pill contract — a page without polling carries no pill). Campaign-switch resets state (same mounted page). |
+| [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Route `/campaigns/:campaignId/explorer` ([App.jsx](../client/src/App.jsx), console group — **admins and leads**; `CAMPAIGN_NAV` slug `explorer` in [navItems.js](../client/src/components/navItems.js)). **The URL is the filter state** — `?survey&q&optionId&option&userId&effortId&coordinatorId&pass&tag&view&from&to` (`pass` = a **Pass `_id`**, never a round number — `roundNumber` restarts per walk list, so the selector reads "Walk list · Pass N"; `coordinatorId` = the crew scope, `ObjectId \| 'none'`, with its own select fed by a campaign-scoped never-filtered `/team-breakdown` query — the Dashboard/Timeline picker pattern, incl. the pre-backfill `ready:false` self-hiding and a "Selected crew" fallback option for a deep-linked crew the options haven't resolved), written with `replace` so filter twiddling doesn't spam the back stack; a drill is shareable. Date range defaults to **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding, the DashboardPage pattern); a `?from/&to` deep link seeds a custom range. The headline stats re-query `survey-results` with **identical** filters (incl. `userId`, which that endpoint accepts) so the headline can never disagree with the accordion; the By-canvasser table stays deliberately un-`userId`-filtered so a row click toggles the filter. Tag mode: **two headline StatCards** ("Voters identified" / "Still current", read off the same `survey-results` payload — zero extra fetches), the **`TagTeamTable`** by-team split (one plain fetch, still no polling; deliberately NOT narrowed by `?userId` — a team split filtered to one person would re-create the per-canvasser lie), voter list + CSV (by-canvasser hidden with an explanation, minimap hidden — the map endpoint has no tag filter). The **no-drill empty state renders `<TagResults onTagClick>`** (the same rollup panel as the Dashboard; a row click sets `?tag=`) above the pick-a-question chips. The round picker comes from the shared `useRoundOptions` hook (same options as the Dashboard's, un-polled here). CSV via authenticated `fetch` + blob (the WalkListsPage idiom). **Single-fetch, no live polling** (the repo's Live-pill contract — a page without polling carries no pill). Campaign-switch resets state (same mounted page). |
 | [components/AnswerCanvasserTable.jsx](../client/src/components/AnswerCanvasserTable.jsx) | The ranked breakdown table: rank, canvasser (+ muted status), count, `share`, `pctOfOwnAnswers` (with an info hint), last entry. Row click calls `onSelect(userId)` (toggle); active row highlighted. |
 | [components/ResponseDetailDrawer.jsx](../client/src/components/ResponseDetailDrawer.jsx) | The response detail — **the first lead-accessible response detail on web**. Fetches `responses/:id?campaignId=`; renders voter/household/canvasser, submitted time (`hh:mm:ss`, campaign tz), Offline badge + synced time, round, `formatDistanceImperial` distance (ft/mi rule), all Q/A pairs (+ `otherText`), note, the edited-by audit line, a small non-interactive Mapbox dot map, **View on map**, and a **Voter record** link gated on `isOrgAdmin` (mirrors the `/voters/:id` RoleGate — never offered to a lead). |
-| [components/AnswerMiniMap.jsx](../client/src/components/AnswerMiniMap.jsx) | Single-fetch `GET /admin/households/map` with the drill's filters and **no `bbox`** (the filtered set is small); renders via the shared `mapRender` helpers. Camera `fitBounds` over the **returned features** — **never `includeBounds`**, which is the campaign-wide extent and would mis-frame a filtered subset. Pin clicks are bound ONCE at init for both `households-symbols` and `building-symbols` (a stack is otherwise inert), and read the current stacks through a ref because the handler cannot close over a later memo. **Fullscreen sets `margin: 0` alongside `inset: 0`** — the card sits in a `space-y-4` stack, and a fixed box with both a margin and `inset: 0` is over-constrained, so it rendered 16px short until that was added. |
-| [components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) `OptionDrill`/`TagDrill` | The accordion quick look: enriched `VoterList` rows (exact time, note, Offline badge, row click → drawer, stop-propagation Map link), per-option canvasser select + Voters \| By-canvasser toggle + **Open full view →** (pre-seeded explorer link). `answer-canvassers` is fetched **only when the By-canvasser view is open** (one fetch saved per expanded option). `TagDrill` = same row enrichment, no by-canvasser. `effortId` threads from [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) into the drills so an effort-scoped chart never drills unscoped. |
+| [components/AnswerMiniMap.jsx](../client/src/components/AnswerMiniMap.jsx) | Single-fetch `GET /admin/households/map` with the drill's filters and **no `bbox`** (the filtered set is small). The map endpoint takes no `coordinatorId`, so on a crew-scoped drill the mini-map stays campaign-wide (doors don't belong to a crew — the Coverage exception); renders via the shared `mapRender` helpers. Camera `fitBounds` over the **returned features** — **never `includeBounds`**, which is the campaign-wide extent and would mis-frame a filtered subset. Pin clicks are bound ONCE at init for both `households-symbols` and `building-symbols` (a stack is otherwise inert), and read the current stacks through a ref because the handler cannot close over a later memo. **Fullscreen sets `margin: 0` alongside `inset: 0`** — the card sits in a `space-y-4` stack, and a fixed box with both a margin and `inset: 0` is over-constrained, so it rendered 16px short until that was added. |
+| [components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) `OptionDrill`/`TagDrill` | The accordion quick look: enriched `VoterList` rows (exact time, note, Offline badge, row click → drawer, stop-propagation Map link), per-option canvasser select + Voters \| By-canvasser toggle + **Open full view →** (pre-seeded explorer link). `answer-canvassers` is fetched **only when the By-canvasser view is open** (one fetch saved per expanded option). `TagDrill` = same row enrichment, no by-canvasser. `effortId` + `coordinatorId` thread from [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) into the drills so an effort- or crew-scoped chart never drills unscoped, and both **Open full view →** links carry `coordinatorId` so the explorer opens with the same crew scope. |
 | [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Seeds its answer filter from `?questionKey/&option/&optionId` (plus the existing `userId`/`from`/`to`) — the explorer's Open-in-Map target. Deep-link spec in [MAPS.md](MAPS.md). |
 
 **Frontend (mobile — OTA-safe, JS-only).**
 
 | File | Role |
 |---|---|
-| [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | The drill list, reached by tapping an answer's count on [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) (which now passes `surveyTemplateId` so the drill stays template-scoped). Adds a **Voters \| By canvasser** `TabSwitcher` (ranked rows; tap sets the canvasser filter and flips back to Voters), a canvasser filter pill fed by the `answer-canvassers` rows, enriched `VoterRow`s (exact campaign-tz time, note/Offline badges from `wasOfflineSubmission`), and a **View on map** header action: `saveActiveCampaign` first (the goTimeline idiom), then push the map with `{ questionKey, optionId, alabel, userId, from, to, scid, seedAt }`. |
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | The Survey results section gains a **Tags** `InsetGroup` above the per-question cards (gated `!isLitDrop && tags.length > 0`): one `InsetNavRow` per tag — `value` "N voters", `sub` "M still current" (absent from an old server → no sub, never a fake 0) — reading the SAME `surveyResultsQ` payload, so the rows honor the round chips + crew filter exactly like the question counts; a `GroupFooter` carries the two-unit definition. Tapping pushes `answer-voters` in tag mode via `goTagVoters` (same param-carrying discipline as `goVoters`: tag, template id, passId, coordinatorId, from/to). |
+| [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | The drill list, reached by tapping an answer's count on [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) (which now passes `surveyTemplateId` so the drill stays template-scoped). Adds a **Voters \| By canvasser** `TabSwitcher` (ranked rows; tap sets the canvasser filter and flips back to Voters), a canvasser filter pill fed by the `answer-canvassers` rows, enriched `VoterRow`s (exact campaign-tz time, note/Offline badges from `wasOfflineSubmission`), and a **View on map** header action: `saveActiveCampaign` first (the goTimeline idiom), then push the map with `{ questionKey, optionId, alabel, userId, from, to, scid, seedAt }`. **Tag mode** (`?tag=` + `surveyTemplateId`, pushed by the campaign screen's Tags card): the voters query swaps the option identity for `tag`, the `answer-canvassers` query is **disabled** (the server's designed 400 must never be requested, let alone render as an error) and the TabSwitcher gives way to a caption saying why; the map link hides (the map endpoint has no tag filter); a **"By team"** `InsetGroup` renders the `/tag-teams` split (rows + "No team" + Campaign line, `GroupFooter` states the first-finder partition; hidden when `ready:false` or on error). Subtitle reads "Tag · N entries — one per round". |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes those params **one-shot** (a `seededRef` nonce on `seedAt`, the household/focusAt idiom), waiting until the active campaign equals `scid` before applying; then strips them via `router.setParams` with `''` values. The map's `answerFilter` now carries and sends the option **text** alongside `optionId` (dual-read, matching web). Deep-link spec in [MAPS.md](MAPS.md). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | Now renders *"Edited by X · <exact time>"* when `editedAt`, a **Synced** row when `wasOfflineSubmission`, exact times via `formatExact` in the campaign tz, and the distance row through the shared ft/mi formatter. |
 

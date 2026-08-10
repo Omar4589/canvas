@@ -17,7 +17,13 @@ While you're still setting up, Home shows the **Setup progress** card: an ordere
 
 ## Once you're live
 
-After the first pass is activated and knocks start coming in, Home becomes a **monitoring dashboard**: households, houses knocked, knocks, active canvassers, and a coverage bar — filterable by date range and by walk list. On a **survey** campaign you'll also see surveys and a connection rate; on a **lit-drop** campaign, lit drops and a lit rate instead.
+After the first pass is activated and knocks start coming in, Home becomes a **monitoring dashboard**: households, houses knocked, knocks, active canvassers, and a coverage bar — filterable by date range, by walk list, and by **crew**. On a **survey** campaign you'll also see surveys and a connection rate; on a **lit-drop** campaign, lit drops and a lit rate instead.
+
+## Filter by crew
+
+Once your campaign has coordinators, a **coordinator filter** appears next to the walk-list one (a dropdown on the web, a pill row in the app — the same control the Timeline has). Leave it on **All coordinators** for everyone's numbers, pick a coordinator to see just their crew's, or pick **No coordinator** for people who aren't on any crew. A coordinator's own door-knocking counts toward their crew.
+
+Everything activity-based follows it — the activity numbers, the By pass table and its CSV export, the survey results (the Tags panel included) and their drill-ins, and the canvasser list. The one exception is **Coverage**: doors don't belong to a crew, so coverage always shows the whole campaign's progress, and its caption says so while a crew is selected.
 
 ## "How these are counted"
 
@@ -29,7 +35,7 @@ Two of the numbers also carry a small grey word telling you the unit: **Survey d
 
 Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
 
-**New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
+**New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. With a crew selected, "first-ever" is still judged campaign-wide — a home counts for the crew only if that crew made its very first knock, so a door another crew reached first is never a "new home" here. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 
 **Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. See [Understanding the numbers](metrics) for how each column is counted.
 
@@ -37,4 +43,8 @@ Below the activity numbers, the **By pass** section lists one row per walk list 
 
 In the survey results, **click any answer** to see the entries behind its count — each one names the voter, the address, **who recorded it and at what time**, any note, and an Offline badge if it synced later. Click an entry for the full response, flip to **By canvasser** to see who's been recording that answer, or click **Open full view** to take the drill to the [Survey Explorer](page-survey-explorer) with a map and export.
 
-> Tip: Use the walk-list filter to see one operation's numbers, or leave it on "All walk lists" for the whole-campaign totals. Everything on the page follows it — including the survey-answer drill, so the entries behind a count always match the count.
+The section header also has a **pass picker** once your campaign has more than one pass — pick one to scope every survey number on the section (the Tags panel and the drills included) to that round; each round adds up to the all-rounds view.
+
+If your survey uses **tags**, a **Tags** panel sits above the question charts: each tag shows **voters identified** and how many are **still current**, and clicking one opens its voters plus a **By team** table — the team that found each voter first gets the credit, so the rows add up exactly to the campaign line. See [How do I count our supporters?](how-do-i-count-supporters).
+
+> Tip: Use the walk-list filter to see one operation's numbers, or the coordinator filter to see one crew's — or combine them. Leave them on "All walk lists" / "All coordinators" for the whole-campaign totals. Everything activity-based on the page follows both — including the survey-answer drill, so the entries behind a count always match the count.

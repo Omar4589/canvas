@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeOptionRows, voterAnswerClause, choiceKeyStages } from './answerAgg.js';
+import {
+  mergeOptionRows,
+  voterAnswerClause,
+  choiceKeyStages,
+  latestAnswerKeyStages,
+  tagMemberKeySets,
+  currentTagVoterSet,
+} from './answerAgg.js';
 import { OTHER_OPTION_ID, otherBucketLabel } from './otherOption.js';
 
 // The "Other: ___" write-in is a question FLAG, not a row in options[]. Everything here pins the
@@ -102,4 +109,90 @@ test('choiceKeyStages groups on optionIds when present, so a write-in keys on th
   const cond = addFields.$addFields._answerKeys.$cond;
   // id-native branch first: a row carrying optionIds never falls back to its typed snapshot.
   assert.deepEqual(cond[1], '$answers.optionIds');
+});
+
+// ---- The "current" tag unit (latest answer wins) ------------------------------------------
+// A tagOptionMap entry spanning two questions — the cross-question shape tags exist for.
+
+const supporterEntry = {
+  display: 'Supporter',
+  members: [
+    { questionKey: 'support', optionId: 'opt_s', text: 'Support' },
+    { questionKey: 'support', optionId: 'opt_l', text: 'Likely Support' },
+    { questionKey: 'yard', optionId: 'opt_y', text: 'Yard sign' },
+  ],
+};
+
+const latestRow = (voterId, questionKey, latestKeys) => ({ _id: { voterId, questionKey }, latestKeys });
+
+test('tagMemberKeySets carries BOTH dual-read lanes in one set, merged per question', () => {
+  const byQ = tagMemberKeySets(supporterEntry);
+  assert.deepEqual([...byQ.keys()].sort(), ['support', 'yard']);
+  const support = byQ.get('support');
+  // two members on one question merge; each contributes its id AND its text
+  for (const k of ['opt_s', 'Support', 'opt_l', 'Likely Support']) assert.ok(support.has(k), k);
+  assert.ok(byQ.get('yard').has('opt_y'));
+  assert.ok(byQ.get('yard').has('Yard sign'));
+});
+
+test('currentTagVoterSet: id-native and legacy-text latest answers both qualify', () => {
+  const out = currentTagVoterSet(
+    [latestRow('v1', 'support', ['opt_s']), latestRow('v2', 'support', ['Support'])],
+    supporterEntry
+  );
+  assert.deepEqual([...out].sort(), ['v1', 'v2']);
+});
+
+test('currentTagVoterSet: a latest answer on a non-member option drops the voter', () => {
+  const out = currentTagVoterSet([latestRow('v1', 'support', ['opt_o'])], supporterEntry);
+  assert.equal(out.size, 0);
+});
+
+test('currentTagVoterSet: ANY member question keeps the voter current (cross-question OR)', () => {
+  // support's latest answer misses, yard's hits — the voter stays current.
+  const out = currentTagVoterSet(
+    [latestRow('v1', 'support', ['opt_o']), latestRow('v1', 'yard', ['opt_y'])],
+    supporterEntry
+  );
+  assert.deepEqual([...out], ['v1']);
+});
+
+test('currentTagVoterSet: rows for non-member questions are ignored', () => {
+  // The caller aggregates ONCE over the union of several tags' questions; foreign rows are noise.
+  const out = currentTagVoterSet([latestRow('v1', 'followup', ['opt_s'])], supporterEntry);
+  assert.equal(out.size, 0);
+});
+
+test('currentTagVoterSet: one matching element of a multi-select latest answer suffices', () => {
+  const out = currentTagVoterSet([latestRow('v1', 'support', ['opt_o', 'opt_l'])], supporterEntry);
+  assert.deepEqual([...out], ['v1']);
+});
+
+test('currentTagVoterSet stringifies voter ids', () => {
+  const oid = { toString: () => 'abc123' };
+  const out = currentTagVoterSet([latestRow(oid, 'support', ['opt_s'])], supporterEntry);
+  assert.ok(out.has('abc123'));
+});
+
+test('latestAnswerKeyStages: dual-read branch is byte-equal to choiceKeyStages', () => {
+  // The two fragments must read a row's keys identically or the "current" unit could disagree
+  // with the identified unit about what an answer even says.
+  const ours = latestAnswerKeyStages(['support']).find((s) => s.$addFields?._answerKeys);
+  const theirs = choiceKeyStages('support').find((s) => s.$addFields?._answerKeys);
+  assert.deepEqual(ours.$addFields._answerKeys, theirs.$addFields._answerKeys);
+});
+
+test('latestAnswerKeyStages: the validity filter drops null AND the empty string', () => {
+  const filter = latestAnswerKeyStages(['support']).find((s) => s.$addFields?._validKeys)
+    .$addFields._validKeys.$filter;
+  assert.deepEqual(filter.cond, { $and: [{ $ne: ['$$this', null] }, { $ne: ['$$this', ''] }] });
+});
+
+test('latestAnswerKeyStages: the sort immediately precedes the $first group — that adjacency IS latest-wins', () => {
+  const stages = latestAnswerKeyStages(['support']);
+  const sortIdx = stages.findIndex((s) => s.$sort);
+  assert.deepEqual(stages[sortIdx].$sort, { submittedAt: -1, _id: -1 });
+  const group = stages[sortIdx + 1];
+  assert.ok(group?.$group, 'the group must directly follow the sort');
+  assert.deepEqual(group.$group.latestKeys, { $first: '$_validKeys' });
 });

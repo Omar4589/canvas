@@ -3,7 +3,9 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Household } from '../../models/Household.js';
 import { resolveStatus } from '../../utils/statusPrecedence.js';
 import { KNOCK_ACTIONS, knocksPipeline, connectionRate, contactRate } from './aggregations.js';
-import { choiceKeyStages, mergeOptionRows } from '../surveys/answerAgg.js';
+import { choiceKeyStages, mergeOptionRows, answerTagClause } from '../surveys/answerAgg.js';
+import { currentVoterSetsByTag } from '../surveys/currentTags.js';
+import { tagOptionMap, normalizeTag } from '../surveys/tags.js';
 import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
 
 // Compute service for the client report builder. Everything here is WINDOWED by an explicit
@@ -88,6 +90,41 @@ export async function computeSurveyBreakdowns({ surveyScopeMatch, template, supp
   return out;
 }
 
+// Per-tag voter rollup for one window, matching the admin /survey-results tag math:
+// `identifiedVoters` = distinct voters with ANY in-window response selecting a tag-carrying
+// option (dual-read via answerTagClause); `currentVoters` = voters whose LATEST in-window
+// answer still carries the tag (currentTags.js — latest ANSWER wins; a response that skipped
+// the question via branching overrides nothing). VOTER counts, never shares — no percent.
+//
+// Window semantics: for the CUMULATIVE window ({$lt: rangeEnd}) "current" reads as-of the
+// week's end. For the PERIOD window it is the same math confined to [rangeStart, rangeEnd):
+// identified-this-week = voters with a tag-carrying response IN the week; current-this-week =
+// of those, whose latest answer WITHIN the week still carries it. Responses outside a window
+// never participate in that window's numbers — a voter who flipped this week against a tag
+// earned last week shows in NEITHER period column (the cumulative window carries the flip).
+export async function computeTagBreakdowns({ surveyScopeMatch, template }) {
+  if (!template) return [];
+  const tagMap = tagOptionMap(template);
+  if (!tagMap.size) return [];
+  const templateMatch = { ...surveyScopeMatch, surveyTemplateId: template._id };
+  const currentByTag = await currentVoterSetsByTag(templateMatch, template); // ONE aggregation
+  const out = [];
+  for (const entry of tagMap.values()) {
+    // Same per-tag distinct posture as the admin rollup (reports.js /survey-results).
+    const voterIds = await SurveyResponse.distinct('voterId', {
+      ...templateMatch,
+      ...answerTagClause(template, entry.display),
+    });
+    out.push({
+      tag: entry.display,
+      identifiedVoters: voterIds.length,
+      currentVoters: (currentByTag.get(normalizeTag(entry.display)) || new Set()).size,
+    });
+  }
+  out.sort((a, b) => b.identifiedVoters - a.identifiedVoters); // mirrors the admin tag sort
+  return out;
+}
+
 // One window's frozen aggregates: totals (KPI cards), contactBreakdown (voter-contact
 // outcomes), and surveyBreakdowns. `range` is {$gte?,$lt?} in UTC. Reuses the shared knock
 // primitives so the numbers match the admin dashboards.
@@ -156,8 +193,9 @@ export async function computeWindowStats({
     template,
     supportQuestionKey,
   });
+  const tagBreakdowns = await computeTagBreakdowns({ surveyScopeMatch, template });
 
-  return { totals, contactBreakdown: events, coverage: {}, surveyBreakdowns };
+  return { totals, contactBreakdown: events, coverage: {}, surveyBreakdowns, tagBreakdowns };
 }
 
 // A public map point may carry the CHOICE VALUE only — never anything a canvasser typed. A

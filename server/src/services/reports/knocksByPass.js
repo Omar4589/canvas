@@ -10,6 +10,7 @@ import {
   billableDoorsOf,
   connectionRate,
   contactRate,
+  withTeam,
 } from './aggregations.js';
 import { billRestrictedFor } from './billRestricted.js';
 import { hydrateCanvassers } from './canvasserIdentity.js';
@@ -31,17 +32,23 @@ const oid = (v) => new mongoose.Types.ObjectId(String(v));
 //
 // `timestampRange` is the pre-resolved { $gte / $lt } window over `timestamp` (built by the
 // caller in the ANCHOR timezone — parseDateRange on the route, zonedDayRange in the worker).
+//
+// `team` is a teamMatch-shaped clause (routes build it via crewFilter; the Export Center's
+// full-backup passes nothing) — merged via withTeam, never spread, and applied only to the
+// ACTIVITY pipelines: the Pass/Effort metadata rows stay campaign-wide so a crew that never
+// worked round 3 still shows a real zero row, same as the effort filter behaves.
 export async function buildKnocksByPassData({
   organizationId,
   campaignId,
   effortId = null,
   timestampRange = null,
   groupByCanvasser = false,
+  team = null,
 }) {
   const cFilter = { organizationId: oid(organizationId), campaignId: oid(campaignId) };
   if (effortId) cFilter.effortId = oid(effortId);
   const windowed = timestampRange ? { timestamp: timestampRange } : {};
-  const match = { ...cFilter, ...windowed };
+  const match = withTeam({ ...cFilter, ...windowed }, team);
 
   // Org-scope the metadata lookups too — the activity aggregates are org-scoped via cFilter,
   // but without organizationId here a foreign campaignId would still leak another org's
@@ -59,6 +66,12 @@ export async function buildKnocksByPassData({
     CanvassActivity.aggregate(knocksPipeline(match, { ...knockOpts, byPass: true })),
     CanvassActivity.aggregate(knocksPipeline(match, knockOpts)),
     CanvassActivity.aggregate([
+      // The first-ever determination stays CAMPAIGN-WIDE even under a crew filter — "new" means
+      // new to the campaign, not new to the crew. The crew clause is applied AFTER the per-house
+      // group, against the first knock's own stamp: a door counts for a crew iff the campaign's
+      // first-ever knock on it was that crew's. The $first accumulators below deliberately carry
+      // teamMatch's field names (coordinatorId, userId) so the clause applies verbatim — casts
+      // matter here, this is an uncast aggregation context.
       {
         $match: {
           organizationId: cFilter.organizationId,
@@ -72,8 +85,11 @@ export async function buildKnocksByPassData({
           _id: '$householdId',
           firstAt: { $first: '$timestamp' },
           firstPassId: { $first: '$passId' },
+          coordinatorId: { $first: { $ifNull: ['$coordinatorId', null] } },
+          userId: { $first: '$userId' },
         },
       },
+      ...(team && Object.keys(team).length ? [{ $match: team }] : []),
       ...(windowed.timestamp ? [{ $match: { firstAt: windowed.timestamp } }] : []),
       { $group: { _id: '$firstPassId', coverageGained: { $sum: 1 } } },
     ]),

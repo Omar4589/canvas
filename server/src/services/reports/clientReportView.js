@@ -3,16 +3,27 @@
 // so the operator sees byte-for-byte what recipients will. Applies the visibility whitelist and
 // drops admin-only internals.
 
-function shapeWindow(w = {}, visibleQuestionKeys = []) {
+import { normalizeTag } from '../surveys/tags.js';
+
+function shapeWindow(w = {}, { visibleQuestionKeys = [], visibleTags = [] } = {}) {
   const breakdowns = w.surveyBreakdowns || [];
   const filtered = visibleQuestionKeys.length
     ? breakdowns.filter((b) => visibleQuestionKeys.includes(b.questionKey))
     : breakdowns;
+  // OPT-IN, the OPPOSITE of visibleQuestionKeys: empty = show NONE. Tag names are
+  // operator-authored strings on an unauthenticated page, so each is an affirmative tick.
+  // Case-insensitive match (normalizeTag) so a palette re-casing between compute and tick
+  // can never silently hide a chosen tag.
+  const tagSet = new Set(visibleTags.map(normalizeTag));
+  const tagBreakdowns = tagSet.size
+    ? (w.tagBreakdowns || []).filter((b) => tagSet.has(normalizeTag(b.tag)))
+    : [];
   return {
     totals: w.totals || {},
     contactBreakdown: w.contactBreakdown || {},
     coverage: w.coverage || {},
     surveyBreakdowns: filtered,
+    tagBreakdowns,
   };
 }
 
@@ -39,7 +50,10 @@ export function shapeReportListRow(r) {
 
 export function shapeReportForClient(report) {
   const r = typeof report.toObject === 'function' ? report.toObject() : report;
-  const visKeys = r.visibility?.visibleQuestionKeys || [];
+  const vis = {
+    visibleQuestionKeys: r.visibility?.visibleQuestionKeys || [],
+    visibleTags: r.visibility?.visibleTags || [],
+  };
   return {
     id: String(r._id),
     campaignId: String(r.campaignId),
@@ -53,9 +67,11 @@ export function shapeReportForClient(report) {
     observations: (r.observations || []).map((s) => ({ heading: s.heading, body: s.body })),
     supportQuestionKey: r.supportQuestionKey || null,
     stats: {
-      cumulative: shapeWindow(r.stats?.cumulative, visKeys),
-      period: shapeWindow(r.stats?.period, visKeys),
+      cumulative: shapeWindow(r.stats?.cumulative, vis),
+      period: shapeWindow(r.stats?.period, vis),
     },
+    // visibleTags itself is deliberately NOT emitted — the filtered rows already encode it,
+    // and the unticked tag names have no business on the wire (least exposure).
     visibility: {
       mapAnswerKeys: r.visibility?.mapAnswerKeys || [],
       showMap: r.visibility?.showMap !== false,

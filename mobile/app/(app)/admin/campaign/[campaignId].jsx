@@ -103,15 +103,22 @@ export default function CampaignDetail() {
   // (surveyPassId below already leans on the same fact).
   const [effortId, setEffortId] = useState('');
   const effortParam = effortId ? { effortId } : {};
+  // Crew scoping (the Timeline's ?coordinatorId, applied SERVER-SIDE for the same reason:
+  // deduped billable doors can't be produced by summing rows here). '' = everyone,
+  // 'none' = the "No coordinator" bucket. Same remount-per-campaign fact as effortId.
+  const [coordinatorId, setCoordinatorId] = useState('');
+  const coordParam = coordinatorId ? { coordinatorId } : {};
 
+  // Deliberately NO coordinatorId: /overview only feeds Coverage, and doors don't belong to
+  // a crew — the subtitle on that section says so when a crew is picked.
   const overviewQ = useQuery({
     queryKey: ['admin', 'reports', 'overview', cId, effortId],
     queryFn: () => api(`/admin/reports/overview?campaignId=${cId}${effortId ? `&effortId=${effortId}` : ''}`),
     enabled: !!cId,
   });
   const canvassersQ = useQuery({
-    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to, effortId],
-    queryFn: () => api(`/admin/reports/canvassers?${rangeParams(effortParam).toString()}`),
+    queryKey: ['admin', 'reports', 'canvassers', cId, range?.from, range?.to, effortId, coordinatorId],
+    queryFn: () => api(`/admin/reports/canvassers?${rangeParams({ ...effortParam, ...coordParam }).toString()}`),
     enabled: !!cId && !!range,
   });
   // Roster for the coordinator label (shared cache with Books/Timeline).
@@ -124,12 +131,13 @@ export default function CampaignDetail() {
   // roundNumber restarts per walk list, so "Pass 2" names a different round in each one.
   const [surveyPassId, setSurveyPassId] = useState('');
   const surveyResultsQ = useQuery({
-    queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to, surveyPassId],
+    queryKey: ['admin', 'reports', 'survey-results', cId, range?.from, range?.to, surveyPassId, coordinatorId],
     queryFn: () =>
       api(
         `/admin/reports/survey-results?${rangeParams({
           voterPreview: '5',
           ...(surveyPassId ? { passId: surveyPassId } : {}),
+          ...coordParam,
         }).toString()}`
       ),
     enabled: !!cId && !isLitDrop && !!range,
@@ -137,17 +145,17 @@ export default function CampaignDetail() {
   // In-range totals from the same rollup the landing uses (deduped door-days),
   // so the detail's numbers match the Overview exactly.
   const rollupQ = useQuery({
-    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range?.from, range?.to, effortId],
-    queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams(effortParam).toString()}`),
+    queryKey: ['admin', 'reports', 'campaign-rollup', 'one', cId, range?.from, range?.to, effortId, coordinatorId],
+    queryFn: () => api(`/admin/reports/campaign-rollup?${rangeParams({ ...effortParam, ...coordParam }).toString()}`),
     enabled: !!cId && !!range,
   });
   // Per-round knocks (walk list × round) over the SAME window — the billing
   // pipeline's rows, so they sum exactly to the invoice. Server sorts: walk list
-  // asc, round asc, legacy last. Follows the walk-list filter so the By-pass rows
-  // reconcile against the (also filtered) Activity knocks above them.
+  // asc, round asc, legacy last. Follows the walk-list and crew filters so the By-pass
+  // rows reconcile against the (also filtered) Activity knocks above them.
   const roundsQ = useQuery({
-    queryKey: ['admin', 'reports', 'knocks-by-pass', cId, range?.from, range?.to, effortId],
-    queryFn: () => api(`/admin/reports/knocks-by-pass?${rangeParams(effortParam).toString()}`),
+    queryKey: ['admin', 'reports', 'knocks-by-pass', cId, range?.from, range?.to, effortId, coordinatorId],
+    queryFn: () => api(`/admin/reports/knocks-by-pass?${rangeParams({ ...effortParam, ...coordParam }).toString()}`),
     enabled: !!cId && !!range,
   });
 
@@ -273,6 +281,25 @@ export default function CampaignDetail() {
     }
     return m;
   }, [assignmentsQ.data]);
+  // The crew chips' options — rows ∪ roster, the mobile Timeline's pattern: the ledger rows
+  // name every coordinator whose crew has knocked (even one since removed from the roster),
+  // and the roster adds a coordinator whose whole crew hasn't knocked yet. NOT the filtered
+  // rows alone — they are the ?coordinatorId-scoped response, and options must never depend
+  // on the filter they set.
+  const coordinatorOptions = useMemo(() => {
+    const seen = new Map();
+    for (const r of canvassersQ.data || []) {
+      if (r.coordinatorId && !seen.has(r.coordinatorId)) seen.set(r.coordinatorId, r.coordinatorName);
+    }
+    for (const a of assignmentsQ.data?.assignments || []) {
+      const coordId = a.coordinatorId ? String(a.coordinatorId) : null;
+      if (coordId && !seen.has(coordId)) seen.set(coordId, a.coordinatorName);
+    }
+    return [...seen.entries()]
+      .map(([id, name]) => ({ id, name: name || 'Coordinator' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [canvassersQ.data, assignmentsQ.data]);
+
   const topCanvasserRows = useMemo(() => {
     // Re-sort by the DOOR count this card actually displays. /admin/reports/canvassers sorts by
     // surveysSubmitted (response rows); once the card switched to surveyKnocks (survey doors) the
@@ -318,6 +345,28 @@ export default function CampaignDetail() {
         // Carry the ROUND. The on-screen option count is round-scoped when a chip is active, and
         // the drill must sum to it — the counting contract /answer-canvassers is built on.
         ...(surveyPassId ? { passId: String(surveyPassId) } : {}),
+        // Carry the CREW for the same reason — the drill's total must match the count tapped.
+        ...(coordinatorId ? { coordinatorId: String(coordinatorId) } : {}),
+        ...(range?.from ? { from: range.from } : {}),
+        ...(range?.to ? { to: range.to } : {}),
+      },
+    });
+  }
+
+  // Tag drill — same param-carrying discipline as goVoters (the list must match the number
+  // tapped), but cross-question: `tag` + the template id replace questionKey/option.
+  function goTagVoters(t) {
+    const tplId = surveyResultsQ.data?.surveyTemplate?.id;
+    if (!tplId) return; // tag drills are template-scoped or nothing
+    router.push({
+      pathname: '/(app)/admin/answer-voters',
+      params: {
+        campaignId: cId,
+        tag: String(t.tag),
+        label: String(t.tag),
+        surveyTemplateId: String(tplId),
+        ...(surveyPassId ? { passId: String(surveyPassId) } : {}),
+        ...(coordinatorId ? { coordinatorId: String(coordinatorId) } : {}),
         ...(range?.from ? { from: range.from } : {}),
         ...(range?.to ? { to: range.to } : {}),
       },
@@ -441,6 +490,29 @@ export default function CampaignDetail() {
             }}
           />
         )}
+        {/* Crew filter (Timeline's pattern, gate included: `|| coordinatorId` keeps an escape
+            even when the picked coordinator has left both the ledger and the roster — a
+            control that can empty the screen must never depend on what it filtered). */}
+        {coordinatorOptions.length > 0 || coordinatorId ? (
+          <TabSwitcher
+            tabs={[
+              { key: '', label: 'All' },
+              ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
+              { key: 'none', label: 'No coordinator' },
+            ]}
+            activeKey={coordinatorId}
+            onChange={(k) => {
+              setCoordinatorId(k);
+              // The 'Legacy / no pass' chip is gated on the (crew-filtered) By-pass rows, and
+              // legacy knocks are mostly unstamped — so a crew pick can remove the chip while a
+              // stale 'legacy' selection keeps scoping the survey numbers with nothing on screen
+              // saying so (the hidden-scope trap the walk-list switcher above clears too). Real
+              // Pass chips always survive (the row set keeps every Pass doc), so only the
+              // legacy sentinel needs clearing.
+              if (surveyPassId === 'legacy') setSurveyPassId('');
+            }}
+          />
+        ) : null}
 
         <View style={{ paddingHorizontal: spacing.lg }}>
           {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
@@ -520,10 +592,16 @@ export default function CampaignDetail() {
             </>
           )}
 
-          {/* Coverage (all-time; effortId narrows it to one walk list's doors) */}
+          {/* Coverage (all-time; effortId narrows it to one walk list's doors). A crew can't:
+              doors don't belong to a crew, so with one picked the subtitle says the section
+              deliberately ignores that filter. */}
           <SectionHeader
             title="Coverage"
-            subtitle={effortId ? 'All-time walk-list progress' : 'All-time campaign progress'}
+            subtitle={
+              coordinatorId
+                ? 'All-time · campaign-wide (not filtered to this crew)'
+                : effortId ? 'All-time walk-list progress' : 'All-time campaign progress'
+            }
           />
           <InsetGroup>
             <InsetRow
@@ -617,6 +695,37 @@ export default function CampaignDetail() {
                     }
                   )}
                 </ScrollView>
+              )}
+              {/* Tags — the voter-unit rollup, above the per-question (answer-unit) cards.
+                  Reads the SAME survey-results payload, so the rows honor the round chips and
+                  crew filter exactly like the question counts below them. */}
+              {(surveyResultsQ.data?.tags || []).length > 0 && (
+                <View style={styles.qGroup}>
+                  <InsetGroup>
+                    <InsetTitleRow title="Tags" />
+                    {(surveyResultsQ.data?.tags || []).map((t) => (
+                      <InsetNavRow
+                        key={String(t.tag)}
+                        label={String(t.tag)}
+                        value={`${(t.voterCount || 0).toLocaleString()} voters`}
+                        // Absent on an old server → no sub, never a fake "0 still current".
+                        sub={
+                          t.currentVoterCount != null
+                            ? `${t.currentVoterCount.toLocaleString()} still current`
+                            : null
+                        }
+                        hint="Opens the voters with this tag"
+                        onPress={() => goTagVoters(t)}
+                      />
+                    ))}
+                  </InsetGroup>
+                  <GroupFooter>
+                    A tag groups answers from different questions. The number is voters ever
+                    identified — each person once, even if several answers carry the tag. “Still
+                    current” is how many kept a tagged answer the last time we asked. Tap a tag
+                    for the voters behind it.
+                  </GroupFooter>
+                </View>
               )}
               {questions.map((qn) => (
                 <View key={qn.key} style={styles.qGroup}>

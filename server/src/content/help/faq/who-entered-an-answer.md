@@ -27,4 +27,8 @@ Each entry has a **Map** link to its door, and the explorer shows a map of the w
 
 Click the entry to open the full response. If an admin later edited it, you'll see an *"Edited by … on …"* line; entries recorded offline also show when they synced.
 
-The same drill works on your phone: tap an answer's count on the campaign screen.
+## Why doesn't a tag have "By canvasser"?
+
+A **tag** rolls up distinct voters across several questions, so "who recorded this voter's tag" has no single answer — three different canvassers can each have recorded one of the answers that feed it. That's why a tag drill shows a **By team** table instead (the team that found the voter first gets the credit, and the rows add up exactly). To audit who's entering a specific answer, drill that answer, not the tag.
+
+The same drill works on your phone: tap an answer's count — or a tag — on the campaign screen.

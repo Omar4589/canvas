@@ -42,15 +42,30 @@ const surveyBreakdownSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Frozen per-tag voter rollup for one window. `identifiedVoters` = distinct voters with ANY
+// in-window response selecting a tag-carrying option (ever tagged); `currentVoters` = distinct
+// voters whose LATEST in-window answer per member question still selects one (a later response
+// that skipped the question via branching does not override). currentVoters <= identifiedVoters
+// always. VOTER counts, not shares — the renderers must never derive a percent from these.
+const tagBreakdownSchema = new mongoose.Schema(
+  {
+    tag: { type: String, required: true }, // display casing from the template's tag palette
+    identifiedVoters: { type: Number, default: 0 },
+    currentVoters: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 // One time-window's frozen aggregates. `totals`/`contactBreakdown`/`coverage` are free-form
-// computed blobs (Mixed) mirroring the report aggregation service output; surveyBreakdowns is
-// structured so the client UI can render bars without guessing shape.
+// computed blobs (Mixed) mirroring the report aggregation service output; surveyBreakdowns and
+// tagBreakdowns are structured so the client UI can render without guessing shape.
 const windowStatsSchema = new mongoose.Schema(
   {
     totals: { type: mongoose.Schema.Types.Mixed, default: {} },
     contactBreakdown: { type: mongoose.Schema.Types.Mixed, default: {} },
     coverage: { type: mongoose.Schema.Types.Mixed, default: {} },
     surveyBreakdowns: { type: [surveyBreakdownSchema], default: [] },
+    tagBreakdowns: { type: [tagBreakdownSchema], default: [] },
   },
   { _id: false }
 );
@@ -117,6 +132,11 @@ const clientReportSchema = new mongoose.Schema(
       // Which survey-answer keys become client-side map filters.
       mapAnswerKeys: { type: [String], default: [] },
       showMap: { type: Boolean, default: true },
+      // Tags the client may see. EMPTY = SHOW NONE — the OPPOSITE default of
+      // visibleQuestionKeys' empty=all, on purpose: tag names are operator-authored strings
+      // rendered on an unauthenticated share page, so each one is an explicit opt-in tick,
+      // and every report created before this field shows no tags with no migration.
+      visibleTags: { type: [String], default: [] },
     },
 
     // Denormalized count of frozen ClientReportMapPoint docs (for list views).

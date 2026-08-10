@@ -265,6 +265,11 @@ test('team rows are RESPONSE-unit and therefore still partition the campaign tot
   // 3 responses, not 2 distinct voters. The row count is what makes this sum work: teamFoldStage
   // puts each response on exactly ONE team. A distinct-voter column could not — a voter surveyed
   // by two teams would belong to both rows and the sum would exceed the campaign.
+  //
+  // ONE sanctioned exception exists: /tag-teams splits a tag's DISTINCT voters by team and DOES
+  // partition — but only because it uses FIRST-FINDER attribution (each voter credited to the
+  // team on their earliest tagged response, one team per voter by construction), not this fold
+  // alone. surveyTagUnits.int.test.js pins that contract; do not "unify" the two shapes.
   assert.equal(sum, 3, 'Σ(team surveysTaken) === the campaign response total');
   for (const t of res.json.teams) {
     assert.equal(t.votersSurveyed, undefined, 'the old field, which promised people and counted rows, is gone');

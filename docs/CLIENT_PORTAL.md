@@ -41,6 +41,11 @@ A report reads top to bottom as a document, in this order:
   but wouldn't take the survey — a real contact, not a survey — shown in amber.
 - **Support breakdown** — the question you designate as "support" (e.g. *1,394 Support · 404 Likely
   Support · 889 Undecided · 50 Opposed*), emphasized as the headline.
+- **Voter groups** — the survey **tags** you explicitly chose to show (see below), one row each:
+  *Supporter — 400 identified · 380 still current*. These are **counts of people, once each** —
+  "identified" is everyone who ever gave a tagged answer; "still current" is how many kept one at
+  their most recent answer — deliberately shown without percentages (they're overlapping groups,
+  not slices of a whole). Reports published before this feature simply don't have the section.
 - **Survey breakdowns** — per-question option counts and percentages for the questions you choose to
   show. Percentages total exactly 100% per question (see [SURVEYS.md](SURVEYS.md)).
 - **Canvasser observations** — your written, sectioned narrative (e.g. *Voter Intent*, *Opponent
@@ -77,8 +82,15 @@ In the builder you:
 
 - Write the **Canvasser observations** as sections (a heading + a paragraph each; add, reorder, remove).
 - Choose the **headline support question** and which **survey questions** the recipient may see. A
-  **"What the client sees"** recap (Support / N of M questions shown / Map on-off) updates live, and a
-  warning flags if your support question isn't in the visible set (the client wouldn't see its bars).
+  **"What the client sees"** recap (Support / N of M questions shown / Tags / Map on-off) updates
+  live, and a warning flags if your support question isn't in the visible set (the client wouldn't
+  see its bars).
+- Tick which **tags** the recipient may see (the **Visible tags** checklist). **Tags are hidden
+  until ticked** — the opposite default from the question list, on purpose: tag names are internal
+  labels ("Hostile", "Needs follow-up") that would otherwise land on an unauthenticated page, and a
+  tag you create months from now must not auto-appear on the next publish. A ticked tag's name is
+  operator-authored text readable by anyone with the link — the same exposure class as the report
+  title and walk-list name, so name tags accordingly.
 - Choose whether to show the **map**, and which survey answers become map filters.
 - **Recompute** at any time while it's a draft. The header shows an **Unsaved changes / All changes
   saved** indicator, and **Preview** (instant — it's prefetched) shows exactly what the recipient will
@@ -143,10 +155,18 @@ publish appear automatically — so you share it once. Recipients only ever see 
 - `status`: `draft | published | archived`.
 - `observations`: `[{ heading, body }]`.
 - `stats`: **dual-window** — `cumulative` and `period`, each `{ totals, contactBreakdown, coverage,
-  surveyBreakdowns[] }`. The KPI cards read `cumulative.totals.X` as the big number and
-  `period.totals.X` as the "+N this week" delta. Breakdowns render from `cumulative`.
+  surveyBreakdowns[], tagBreakdowns[] }`. The KPI cards read `cumulative.totals.X` as the big number
+  and `period.totals.X` as the "+N this week" delta. Breakdowns render from `cumulative`.
+  `tagBreakdowns` rows are `{ tag, identifiedVoters, currentVoters }` — frozen VOTER counts (see
+  [SURVEYS.md](SURVEYS.md) §I for the two units); computed for **all** tags at compute time,
+  filtered to the ticked ones at shaping. Absent on pre-feature reports → the section doesn't
+  render; no migration (the `viewCount` absent-field pattern).
 - `supportQuestionKey`, `campaignType`, and `visibility: { visibleQuestionKeys[], mapAnswerKeys[],
-  showMap }`.
+  showMap, visibleTags[] }`. ⚠️ **`visibleTags` empty = show NONE** — the deliberate OPPOSITE of
+  `visibleQuestionKeys`' empty = all. Tag names are operator-authored strings bound for an
+  unauthenticated page, so each is an affirmative per-tag opt-in, and every report created before
+  the field shows no tags by default. Two whitelists, two empty-defaults, on one card — flagged
+  here so the next reader doesn't "unify" them.
 - `mapPointCount`, `publishedAt`, `publishedBy`, `createdBy`.
 - `openMockFlagsAtPublish` — unreviewed mock-GPS flags inside the cumulative window at freeze time
   (the soft publish gate's audit trail; `null` on pre-feature reports, operator-only).
@@ -182,6 +202,15 @@ a snapshot is reproducible and can't drift. It reuses the shared knock primitive
 report itself** — so create, recompute, and the publish-time recompute all stay scoped without any
 caller passing it. `effortId` is denormalized onto the activity/response rows
 ([EFFORTS.md](EFFORTS.md) §E), so the one filter scopes knocks, surveys, and breakdowns together.
+
+**Tag breakdowns are window-local.** `computeTagBreakdowns` (same file) freezes both tag units per
+window via the shared `currentVoterSetsByTag` (the ONE owner of "latest answer wins" —
+[SURVEYS.md](SURVEYS.md) §I). Cumulative reads as-of the week's end. **Period is the same math
+confined to the week**: identified-this-week = voters with a tag-carrying response IN the week;
+current-this-week = of those, whose latest answer WITHIN the week still carries it. A voter who
+flipped this week against a tag earned last week appears in **neither** period column — the
+cumulative window is where the flip lands. Pinned by
+[surveyTagUnits.int.test.js](../server/test/surveyTagUnits.int.test.js).
 
 **Voter-contact breakdown is a DOOR-OUTCOME breakdown, not a raw-event count.** `contactBreakdown`
 collapses each `(household, pass)` to its single resolved outcome via
@@ -293,6 +322,13 @@ active `ReportShareLink` (404 otherwise):
   distinguishable on the share list without opening each) and `shapeReportForClient` — **never
   `effortId`** or any other internal id. The name is operator-authored metadata, the same exposure
   class as the report title (flagged in Part 1).
+- **Tag rows are shaped through the opt-in allowlist**: `shapeWindow`
+  ([clientReportView.js](../server/src/services/reports/clientReportView.js)) filters
+  `tagBreakdowns` to `visibility.visibleTags` (case-insensitive via `normalizeTag`, so a palette
+  re-casing between compute and tick can't hide a chosen tag) and **empty = none**. The
+  `visibleTags` array itself is deliberately NOT emitted to clients — the filtered rows already
+  encode it, and unticked tag names have no business on the wire. A ticked tag's name + two
+  integers is the entire exposure (see the privacy note in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)).
 - **Revoke is immediate**: `isActive:false` (Disable) or **Rotate** (new token) makes the old URL 404
   on the next request; a share JWT can't be re-minted without the password/link.
 - The Mapbox token is the public `pk.` `MAPBOX_PUBLIC_TOKEN`, served at `/share/:token/mapbox-token`
@@ -313,8 +349,13 @@ active `ReportShareLink` (404 otherwise):
   [PublicReportDetailPage](../client/src/pages/PublicReportDetailPage.jsx). Routes `/r/:token` and
   `/r/:token/reports/:reportId` live **outside** `ProtectedRoute` in [App.jsx](../client/src/App.jsx).
 - Shared derivation: [lib/reportDerive.js](../client/src/lib/reportDerive.js) `deriveReportSections()`
-  returns the report's KPIs, contact/support/other breakdowns and section **order** as plain data — the
-  single source consumed by **both** the on-screen view and the PDF, so they can't drift.
+  returns the report's KPIs, contact/support/**tags**/other breakdowns and section **order** as plain
+  data — the single source consumed by **both** the on-screen view and the PDF, so they can't drift.
+  The `tags` section is the one deliberate exception to this module's derive-percents rule: voter
+  counts, no percent, rendered by [ReportTagList](../client/src/components/ReportTagList.jsx) (its
+  own component — `ReportBreakdown` unconditionally derives percents) and the PDF's `tagsBlock`
+  (label/number rows, no track/fill). Old reports: `cum.tagBreakdowns` absent → `tags: null` →
+  neither renderer emits the section, keeping pre-feature reports byte-identical.
 - PDF export: [lib/reportPdf.js](../client/src/lib/reportPdf.js) `generateReportPdf()` lazily imports
   `jspdf` (its own bundle chunk — never on the report's first paint) and draws the document from
   `deriveReportSections` (header + KPI grid + labeled bars + observations; **map omitted**). A scoped

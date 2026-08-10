@@ -12,6 +12,9 @@ import { Badge, DataTable, Segmented } from '../components/ui/index.js';
 import { formatInTz } from '../lib/datetime.js';
 import { percentsTo100 } from '../lib/percent.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { useRoundOptions } from '../lib/useRoundOptions.js';
+import { TagResults } from '../components/QuestionResults.jsx';
+import TagTeamTable from '../components/TagTeamTable.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -39,8 +42,8 @@ export default function SurveyExplorerPage() {
   const orgTz = useOrgTimeZone();
   const { homePath } = useAuth();
 
-  // URL is the filter state (survey/q/optionId/option/userId/effortId/view/tag + from/to),
-  // written with replace so twiddling filters doesn't spam the back stack.
+  // URL is the filter state (survey/q/optionId/option/userId/effortId/coordinatorId/view/tag
+  // + from/to), written with replace so twiddling filters doesn't spam the back stack.
   const [searchParams, setSearchParams] = useSearchParams();
   const survey = searchParams.get('survey') || '';
   const q = searchParams.get('q') || '';
@@ -48,6 +51,9 @@ export default function SurveyExplorerPage() {
   const option = searchParams.get('option') || '';
   const userId = searchParams.get('userId') || '';
   const effortId = searchParams.get('effortId') || '';
+  // Crew scoping ('' = everyone, an id = that crew, 'none' = no coordinator) — seeded by the
+  // Dashboard drills' "Open full view →" so a crew-scoped drill stays crew-scoped here.
+  const coordinatorId = searchParams.get('coordinatorId') || '';
   // Round scoping. `roundNumber` restarts per walk list, so this is a Pass _id, never a number.
   const passId = searchParams.get('pass') || '';
   const tag = searchParams.get('tag') || '';
@@ -137,38 +143,26 @@ export default function SurveyExplorerPage() {
   });
   const efforts = effortsQ.data?.efforts || [];
 
-  // Rounds, for the round filter. Labelled "walk list · Pass N" because `roundNumber` restarts per
-  // effort (models/Pass.js) — a bare "Pass 2" names a different round in every walk list. Same
-  // effort-then-round ordering the knocks-by-pass report uses, so the two read alike.
-  const passesQ = useQuery({
-    queryKey: ['admin', 'passes', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+  // Rounds, for the round filter — the shared hook, so this picker and the Dashboard's can
+  // never drift on labels, ordering, or the legacy sentinel. No polling here on purpose.
+  const { roundOptions } = useRoundOptions(campaignId);
+
+  // The crew picker's options — the Dashboard/Timeline pattern: fed by a separate,
+  // campaign-scoped, never-filtered /team-breakdown query (includes ledger-only coordinators,
+  // hides itself pre-backfill via the ready:false gate), so filtering can't unmount the picker.
+  const teamsQ = useQuery({
+    queryKey: ['reports', 'team-breakdown', campaignId],
+    queryFn: () => api(`/admin/reports/team-breakdown${buildQuery({ campaignId })}`),
     enabled: !!campaignId,
   });
-  const roundOptions = useMemo(() => {
-    const effortName = new Map(efforts.map((ef) => [String(ef._id), ef.name]));
-    const rows = (passesQ.data?.passes || [])
-      .map((p) => ({
-        id: String(p._id),
-        effortName: effortName.get(String(p.effortId)) || '',
-        roundNumber: p.roundNumber,
-        label: `${effortName.get(String(p.effortId)) || 'Walk list'} · Pass ${p.roundNumber}`,
-      }))
-      .sort(
-        (a, b) =>
-          (a.effortName || '￿').localeCompare(b.effortName || '￿') ||
-          (a.roundNumber ?? Infinity) - (b.roundNumber ?? Infinity)
-      );
-    // Pre-turf responses carry passId:null and belong to no Pass document. Without this option
-    // they'd sit in "All passes" and in no selectable pass, so the passes would not add up to the
-    // headline. Sorted last, mirroring the "Legacy / no pass" row on the knocks-by-pass report.
-    // This label is synthesized HERE, not supplied by the server, so it has to be kept in step with
-    // routes/admin/reports.js by hand. The 'legacy' id is the server sentinel and never changes.
-    if ((passesQ.data?.legacyResponseCount || 0) > 0) {
-      rows.push({ id: 'legacy', effortName: '￿', roundNumber: Infinity, label: 'Legacy / no pass' });
-    }
-    return rows;
-  }, [passesQ.data, efforts]);
+  const coordinatorOptions = useMemo(
+    () =>
+      ((teamsQ.data?.teams) || [])
+        .filter((t) => t.coordinatorId)
+        .map((t) => ({ id: t.coordinatorId, name: t.coordinatorName || 'Coordinator' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [teamsQ.data?.teams]
+  );
 
   // allMembers, not members: the canvasser filter must list whoever RECORDED responses,
   // including someone since deactivated — their entries are still on the page.
@@ -200,6 +194,7 @@ export default function SurveyExplorerPage() {
       'explorer',
       campaignId,
       effortId,
+      coordinatorId,
       passId,
       survey,
       userId,
@@ -211,6 +206,7 @@ export default function SurveyExplorerPage() {
         `/admin/reports/survey-results${buildQuery({
           campaignId,
           effortId,
+          coordinatorId,
           passId,
           surveyTemplateId: survey,
           userId,
@@ -263,6 +259,7 @@ export default function SurveyExplorerPage() {
       option,
       resolvedTemplateId,
       effortId,
+      coordinatorId,
       passId,
       dateRange?.from,
       dateRange?.to,
@@ -276,6 +273,7 @@ export default function SurveyExplorerPage() {
           surveyTemplateId: resolvedTemplateId,
           campaignId,
           effortId,
+          coordinatorId,
           passId,
           from: dateRange?.from,
           to: dateRange?.to,
@@ -292,6 +290,7 @@ export default function SurveyExplorerPage() {
         campaignId,
         userId,
         effortId,
+        coordinatorId,
         passId,
         from: dateRange?.from,
         to: dateRange?.to,
@@ -304,6 +303,7 @@ export default function SurveyExplorerPage() {
         campaignId,
         userId,
         effortId,
+        coordinatorId,
         passId,
         from: dateRange?.from,
         to: dateRange?.to,
@@ -312,7 +312,7 @@ export default function SurveyExplorerPage() {
   // Any filter change returns to the first page.
   useEffect(() => {
     setPage(0);
-  }, [q, optionId, option, tag, survey, userId, effortId, passId, dateRange?.from, dateRange?.to]);
+  }, [q, optionId, option, tag, survey, userId, effortId, coordinatorId, passId, dateRange?.from, dateRange?.to]);
 
   const listQ = useQuery({
     queryKey: [
@@ -327,6 +327,7 @@ export default function SurveyExplorerPage() {
       resolvedTemplateId,
       userId,
       effortId,
+      coordinatorId,
       passId,
       dateRange?.from,
       dateRange?.to,
@@ -488,6 +489,29 @@ export default function SurveyExplorerPage() {
               ))}
             </select>
           )}
+          {(coordinatorOptions.length > 0 || coordinatorId) && (
+            <select
+              value={coordinatorId}
+              onChange={(e) => updateParams({ coordinatorId: e.target.value })}
+              title="Filter to one coordinator's crew"
+              className={SELECT_CLS}
+            >
+              <option value="">All coordinators</option>
+              {/* A deep link can carry a crew the options haven't (yet) resolved — without
+                  this the controlled select silently DISPLAYS "All coordinators" while the
+                  page filters to the crew (the canvasser select's departed-entry rule). */}
+              {coordinatorId && coordinatorId !== 'none' &&
+                !coordinatorOptions.some((c) => c.id === coordinatorId) && (
+                  <option value={coordinatorId}>Selected crew</option>
+                )}
+              {coordinatorOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              <option value="none">No coordinator</option>
+            </select>
+          )}
           {roundOptions.length > 1 && (
             <select
               value={passId}
@@ -553,35 +577,44 @@ export default function SurveyExplorerPage() {
           This campaign has no survey linked yet.
         </div>
       ) : !drillActive ? (
-        // Nothing picked yet: every question's options as clickable chips.
-        <div className="rounded-lg border border-dashed border-border bg-sunken p-6">
-          <p className="text-sm font-medium text-fg">Pick a question and answer to explore</p>
-          <p className="mt-1 text-sm text-fg-muted">
-            You'll see the count, who recorded it, every individual response, and the doors on a map.
-          </p>
-          <div className="mt-4 space-y-4">
-            {choiceQuestions.length === 0 && (
-              <p className="text-sm text-fg-muted">No choice questions in this survey.</p>
-            )}
-            {choiceQuestions.map((qq) => (
-              <div key={qq.key}>
-                <div className="mb-1 text-xs font-medium text-fg-muted">{qq.label}</div>
-                <div className="flex flex-wrap gap-1">
-                  {qq.options.map((o) => (
-                    <button
-                      key={o.id ?? o.option}
-                      type="button"
-                      onClick={() => selectOption(qq.key, o)}
-                      title={`${o.count} responses`}
-                      className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-fg-muted transition-colors hover:bg-card hover:text-fg"
-                    >
-                      {o.option}
-                      <span className="ml-1 text-fg-subtle">{o.count}</span>
-                    </button>
-                  ))}
+        // Nothing picked yet: the tag rollup (already on this payload — zero extra fetches;
+        // a row click deep-links into the tag drill), then every question's options as chips.
+        <div className="space-y-4">
+          {(resultsQ.data?.tags || []).length > 0 && (
+            <TagResults
+              tags={resultsQ.data.tags}
+              onTagClick={(t) => updateParams({ tag: t, q: '', optionId: '', option: '', view: '' })}
+            />
+          )}
+          <div className="rounded-lg border border-dashed border-border bg-sunken p-6">
+            <p className="text-sm font-medium text-fg">Pick a question and answer to explore</p>
+            <p className="mt-1 text-sm text-fg-muted">
+              You'll see the count, who recorded it, every individual response, and the doors on a map.
+            </p>
+            <div className="mt-4 space-y-4">
+              {choiceQuestions.length === 0 && (
+                <p className="text-sm text-fg-muted">No choice questions in this survey.</p>
+              )}
+              {choiceQuestions.map((qq) => (
+                <div key={qq.key}>
+                  <div className="mb-1 text-xs font-medium text-fg-muted">{qq.label}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {qq.options.map((o) => (
+                      <button
+                        key={o.id ?? o.option}
+                        type="button"
+                        onClick={() => selectOption(qq.key, o)}
+                        title={`${o.count} responses`}
+                        className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-fg-muted transition-colors hover:bg-card hover:text-fg"
+                      >
+                        {o.option}
+                        <span className="ml-1 text-fg-subtle">{o.count}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       ) : (
@@ -609,6 +642,32 @@ export default function SurveyExplorerPage() {
               />
             </div>
           )}
+          {/* Tag-mode headline: both voter units, read off the SAME survey-results payload the
+              accordion uses (identical filters), so the headline can never disagree with the
+              Tags panel. The entries list below reports its own total — a different unit
+              (one row per round), never equated. */}
+          {tag && (() => {
+            const tagRow = (resultsQ.data?.tags || []).find((t) => t.tag === tag) || null;
+            return (
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                <StatCard
+                  label="Voters identified"
+                  value={tagRow ? (tagRow.voterCount || 0).toLocaleString() : '—'}
+                  hint="ever gave a tagged answer"
+                  accent="brand"
+                />
+                <StatCard
+                  label="Still current"
+                  value={
+                    tagRow && tagRow.currentVoterCount != null
+                      ? tagRow.currentVoterCount.toLocaleString()
+                      : '—'
+                  }
+                  hint="latest answer still carries the tag"
+                />
+              </div>
+            );
+          })()}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -665,6 +724,24 @@ export default function SurveyExplorerPage() {
               tz={tz}
               onOpenResponse={setDetailId}
             />
+          )}
+
+          {/* The by-team split — first-finder credit, partitions exactly. One plain fetch, no
+              polling (this page is single-fetch by contract). Deliberately not narrowed by the
+              page's ?userId: a team split filtered to one person would re-create the
+              per-canvasser lie the 400 exists to prevent. */}
+          {tag && (
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
+              <TagTeamTable
+                campaignId={campaignId}
+                tag={tag}
+                surveyTemplateId={resolvedTemplateId}
+                effortId={effortId}
+                passId={passId}
+                coordinatorId={coordinatorId}
+                dateRange={dateRange}
+              />
+            </div>
           )}
 
           {!tag && view === 'canvassers' ? (
