@@ -18,6 +18,10 @@ Open a campaign and pick **Exports** in the sidebar.
 - **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's
   timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), or the
   **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names).
+- **Include contact & demographic details** — on the two survey exports only. Off by default;
+  tick it to add phone, phone type, cell phone, gender, date of birth, county, latitude and
+  longitude, precinct and districts to every row, for matching results back into another
+  system. It adds columns, never rows, so the row count doesn't move.
 - **Queue export** — creates the job. Building happens in the background; the history below
   polls until it's done. If the background worker is offline you'll see a notice — the export
   starts when it returns.
@@ -28,7 +32,9 @@ current data, not the original uploaded file.
 ## Export history
 
 Each row shows the type, the scope it was queued with, its status (**Queued → Building →
-Ready**), who requested it, row count, size, and when it expires (files keep for 7 days).
+Ready**), who requested it, row count, size, and when it expires (files keep for 7 days). A
+survey export queued with the detail columns on says **contact & demographic details** in its
+scope, so the history is a lasting record of which files carried them.
 
 - **Download** — saves the file. Ready rows only.
 - **Retry** — re-queues a failed export with the same scope.

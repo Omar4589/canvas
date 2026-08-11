@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator, Switch, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,6 +50,9 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   const [userId, setUserId] = useState('');
   const [roundStatus, setRoundStatus] = useState('');
   const [importJobId, setImportJobId] = useState('');
+  // Off by default (the web page's rule, and the server's) — a survey export shouldn't carry
+  // a date of birth unless someone asked for one.
+  const [includeVoterDetail, setIncludeVoterDetail] = useState(false);
 
   // The web page's rule: a round belongs to a walk list, so changing the list resets it.
   function pickEffort(id) {
@@ -91,7 +94,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const imports = (importsQ.data?.jobs || []).filter((j) => j.status === 'completed' && !j.undone);
 
-  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId });
+  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail });
   // Debouncing the SERIALIZED params gives a stable query key and kills object-identity
   // churn in one move; api() threads react-query's abort signal, so a superseded count
   // stops on the wire.
@@ -243,6 +246,26 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
               </View>
             ) : null}
 
+            {wants('voterDetail') ? (
+              <View style={styles.filterBlock}>
+                <Text style={styles.filterLabel}>Columns</Text>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchText}>
+                    <Text style={styles.switchLabel}>Contact &amp; demographic details</Text>
+                    <Text style={styles.switchSub}>
+                      Adds phone, cell, gender, date of birth, county, coordinates, precinct and
+                      districts — for matching back to your own voter file.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={includeVoterDetail}
+                    onValueChange={setIncludeVoterDetail}
+                    trackColor={{ true: colors.brand }}
+                  />
+                </View>
+              </View>
+            ) : null}
+
             {meta.id === 'voter-file' ? (
               <View style={styles.warn}>
                 <Text style={styles.warnText}>
@@ -332,6 +355,23 @@ function makeStyles(t) {
     optionRowActive: { borderColor: colors.brand },
     optionText: { ...type.caption, color: colors.textPrimary },
     optionTextActive: { color: colors.brand, fontWeight: '600' },
+
+    // The switch sits in the sunken well the estimate uses, so an opt-in that widens the
+    // file reads as a block rather than a stray control between two pill strips.
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      backgroundColor: colors.sunken,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    switchText: { flex: 1 },
+    switchLabel: { ...type.bodyStrong, marginBottom: 2 },
+    switchSub: { ...type.caption },
 
     warn: {
       backgroundColor: colors.warnBg,

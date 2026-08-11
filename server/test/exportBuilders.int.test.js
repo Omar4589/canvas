@@ -133,9 +133,21 @@ before(async () => {
     });
   // uid = the vendor's import UID; the flagged voters get one too so the registry-driven
   // sweep below proves the UID column is under the same no-leak guarantee as the name.
-  ctx.alice = await mkVoter(ctx.h1, 'SV1', 'Alice', 'Able', 'DEM', { uid: 'UAL1' });
+  // Alice carries the full contact/demographic set: she is the control for the opt-in
+  // detail block on the two survey exports (includeVoterDetail).
+  ctx.alice = await mkVoter(ctx.h1, 'SV1', 'Alice', 'Able', 'DEM', {
+    uid: 'UAL1',
+    phone: '512-555-0101', phoneType: 'Landline', cellPhone: '512-555-0199',
+    gender: 'F', dateOfBirth: new Date('1979-03-04T00:00:00Z'),
+    precinct: 'PCT-7', congressionalDistrict: 'TX-35',
+    stateSenateDistrict: 'SD-14', stateHouseDistrict: 'HD-49',
+  });
+  // The flagged voters carry sentinel contact data for the same reason they carry a uid: the
+  // registry-driven sweep below proves a do-not-contact person's PHONE and DATE OF BIRTH are
+  // under the same "appears in NO artifact" guarantee as their name.
   ctx.donna = await mkVoter(ctx.h1, 'SVDNC1', 'Donna', 'Dncerson', 'REP', {
     uid: 'UIDDNC1',
+    phone: '555-DNCPHONE-1', cellPhone: '555-DNCCELL-1', dateOfBirth: new Date('1911-11-11T00:00:00Z'),
     doNotContact: { flagged: true, at: new Date(), reason: 'asked at door', source: 'admin' },
   });
   ctx.frank = await mkVoter(ctx.h2, 'SV2', '=HYPERLINK("http://evil","x")', 'Formula', 'DEM');
@@ -143,6 +155,7 @@ before(async () => {
   ctx.dave = await mkVoter(ctx.h4, 'SV4', 'Dave', 'Doorman', 'DEM', { uid: 'UDAV1' });
   ctx.edna = await mkVoter(ctx.h5, 'SVDNC2', 'Edna', 'Dncerson', 'REP', {
     uid: 'UIDDNC2',
+    phone: '555-DNCPHONE-2', cellPhone: '555-DNCCELL-2', dateOfBirth: new Date('1911-11-11T00:00:00Z'),
     doNotContact: { flagged: true, at: new Date(), reason: 'asked', source: 'upload' },
   });
 
@@ -266,7 +279,11 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
   for (const type of Object.keys(EXPORT_TYPES)) {
     const { doc, text } = await runExport(type, await paramsFor(type));
     ctx.artifacts[type] = { doc, text };
-    for (const leak of ['Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2', 'UIDDNC1', 'UIDDNC2']) {
+    for (const leak of [
+      'Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2', 'UIDDNC1', 'UIDDNC2',
+      // contact/demographic cells are identity too — same guarantee as the name
+      '555-DNCPHONE-1', '555-DNCPHONE-2', '555-DNCCELL-1', '555-DNCCELL-2', '1911-11-11',
+    ]) {
       assert.ok(!text.includes(leak), `${type}: DNC identity "${leak}" must not appear`);
     }
     for (const leak of ['ARCHIVED-ANSWER-SENTINEL', 'ARCHIVED-NOTE-SENTINEL']) {
@@ -377,6 +394,53 @@ test('survey-answers (long): one row per answer entry, snapshot text', { skip },
   assert.ok(text.includes('o-yes'), 'stable option ids exported for joins');
 });
 
+test('survey exports: contact/demographic columns are OPT-IN, and DNC-guarded when opted in', { skip }, async () => {
+  const DETAIL_HEADERS = [
+    'Gender', 'Date of birth', 'Phone', 'Phone type', 'Cell phone',
+    'County', 'Latitude', 'Longitude',
+    'Precinct', 'Congressional district', 'State senate district', 'State house district',
+  ];
+  // Alice's values, one per added column. Coordinates are READ BACK from her household
+  // rather than written out here — the fixture builds them by arithmetic (-97.74 + n/1000),
+  // so a literal would pin a float-formatting accident instead of the contract.
+  const [lng, lat] = ctx.h1.location.coordinates;
+  const ALICE_DETAIL = [
+    'F', '1979-03-04', '512-555-0101', 'Landline', '512-555-0199',
+    'Travis', String(lat), String(lng), 'PCT-7', 'TX-35', 'SD-14', 'HD-49',
+  ];
+
+  for (const type of ['survey-results', 'survey-answers']) {
+    // OFF (the default the whole fixture already exercised): not a single cell of it.
+    const off = csvLines(ctx.artifacts[type].text);
+    for (const h of DETAIL_HEADERS) {
+      assert.ok(!off[0].split(',').includes(h), `${type} default: "${h}" column must not exist`);
+    }
+    for (const v of ['512-555-0101', '1979-03-04', 'TX-35', 'HD-49']) {
+      assert.ok(!ctx.artifacts[type].text.includes(v), `${type} default: "${v}" must not appear`);
+    }
+
+    // ON.
+    const { doc, text } = await runExport(type, { includeVoterDetail: true });
+    const lines = csvLines(text);
+    const header = lines[0].split(',');
+    for (const h of DETAIL_HEADERS) {
+      assert.ok(header.includes(h), `${type} with detail: "${h}" column present`);
+    }
+    const aliceRow = lines.find((l) => l.includes('Able'));
+    for (const v of ALICE_DETAIL) {
+      assert.ok(aliceRow.includes(v), `${type} with detail: Alice's "${v}" present`);
+    }
+    // Row COUNT is unchanged — this is a column option, never a filter (what makes the
+    // estimate correct without knowing about it).
+    assert.strictEqual(doc.rowCount, ctx.artifacts[type].doc.rowCount, `${type}: detail changes columns, not rows`);
+    assert.strictEqual(doc.excludedDncCount, ctx.artifacts[type].doc.excludedDncCount, `${type}: same DNC drops`);
+    // The whole point of routing every cell through the DNC-guarded voter object.
+    for (const leak of ['555-DNCPHONE-1', '555-DNCPHONE-2', '555-DNCCELL-1', '555-DNCCELL-2', '1911-11-11', 'Dncerson']) {
+      assert.ok(!text.includes(leak), `${type} with detail: DNC "${leak}" must still not appear`);
+    }
+  }
+});
+
 // ---- voter files -----------------------------------------------------------------------
 
 test('voter-file (current roster): DNC absent, formula guard applied end to end', { skip }, async () => {
@@ -460,6 +524,11 @@ test('estimates match filtered builds (estimate==build under params)', { skip },
     ['doors-by-round', { roundStatuses: ['not_home'] }],
     ['doors-by-round', { passId: 'legacy' }],
     ['survey-results', { surveyTemplateId: String(ctx.template._id) }],
+    // The detail toggle rides the SAME params to /estimate (the mobile sheet sends it), and
+    // the estimate deliberately knows nothing about it — these two cases are what makes
+    // "columns, not rows" a pinned contract rather than a claim in a comment.
+    ['survey-results', { includeVoterDetail: true }],
+    ['survey-answers', { includeVoterDetail: true }],
   ];
   for (const [type, params] of cases) {
     const validated = await EXPORT_TYPES[type].validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });

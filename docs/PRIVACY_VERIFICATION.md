@@ -770,6 +770,47 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   subprocessor change; DPA §6 untouched.** Recorded because "we added a map" is exactly the change
   where coordinates leak to a vendor by default if nobody writes down that they must not.]*
 
+- *(v5 2026-08-11)* **The two survey exports gained an OPT-IN contact/demographic column block
+  (`params.includeVoterDetail`).** With it ticked, `survey-results*.csv` and `survey-answers.csv`
+  add **Gender, Date of birth, Phone, Phone type, Cell phone** beside the identity columns and
+  **County, Latitude, Longitude, Precinct, Congressional / State senate / State house district**
+  beside the address block. Requested so a customer can match survey results back to the voter
+  universe it supplied and write tags into its own system. Docs: [EXPORTS.md](EXPORTS.md).
+  **Why this is not a new exposure — code facts, not a judgment call.** **(i) Same audience,
+  exactly.** Both survey types are `adminOnly: false`, so the gate is admin-or-lead-who-manages —
+  byte-identical to the gate on `voter-file` and `voters-filtered`, which already emit **every one
+  of these fields** under their `CANONICAL_FIELDS` headers (`exportBuilders.js` `buildVoterFile`),
+  and to `walklists.js`'s eleven-column CSV in §B8, which already exposes Phone and a DOB-derived
+  Age to the same people. Nobody can tick this box who could not already download the same fields
+  about the same people one card away. **(ii) Nothing new is collected or retained.** No new field,
+  no new source, no new store, same `ExportJob` + `exportArtifacts` bucket, same 7-day TTL and
+  sweeper, same org/campaign delete cascade, **same MongoDB Atlas — no new subprocessor, DPA §6
+  untouched, no customer notice event.** **(iii) Do-not-contact is structurally unchanged.** Every
+  added cell is read off the SAME DNC-guarded voter object as the name (`detailPlan`'s
+  `voterDetailCells` takes the voter the builder already suppressed), so a flagged person's phone
+  and DOB are as unreachable as their name — now pinned directly: the flagged fixture voters carry
+  sentinel phone/cell/DOB values, the registry-driven "appears in NO artifact" sweep asserts them,
+  and a dedicated case re-asserts them with the toggle ON (`test/exportBuilders.int.test.js`).
+  **(iv) It adds columns, never rows** — `rowCount` and `excludedDncCount` are asserted equal
+  across both settings, so no count, estimate or reconciliation moves.
+  **What IS new, stated rather than buried.** This is the first artifact that puts **raw
+  `dateOfBirth` and phone on the same ROW as survey answers** — i.e. beside GDPR Art. 9
+  special-category political opinion, which the "Survey answers are stored linked to a NAMED,
+  IDENTIFIED voter" finding below already flags. The fields and the audience are old; the
+  *combination in one file* is new. Three deliberate mitigations, all code: **off by default**
+  (the packets `includeGeo=1` precedent — the smaller disclosure stays the normal one, and
+  projections widen only when it is on, so an export not printing a phone does not read one);
+  **frozen into `ExportJob.params`**, so the Exports history row permanently records which files
+  carried it (surfaced as "contact & demographic details" in the web `scopeLabel`); and the
+  **full-backup deliberately does NOT inherit it** — it composes the builders with empty params,
+  because a bundle that silently upgraded itself to full PII would defeat the toggle.
+  **Assessment: NO published Privacy Policy / ToS / DPA sentence changes; no new subprocessor;
+  DPA §6 untouched.** Verified against the same sentences the packets entry above turns on:
+  `terms.html:91` / `:106` frame this as the customer exporting its own data, and
+  `privacy.html:90`'s do-not-contact promise ("future canvassing lists and exports") is honored by
+  (iii). Recorded because "we added some columns" is exactly the change that quietly turns a
+  narrow file into a voter file if nobody writes down which columns and why.
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -1327,6 +1368,12 @@ customer's own import ids — the walk-list CSV below already exposed a Voter-ID
 the same audience), and a read-only `POST /admin/exports/estimate` previews row counts before
 queueing. Column contracts: [EXPORTS.md](EXPORTS.md) appendix; details in the v4 amendment
 stamp above.]*
+
+*[v5 2026-08-11: the two survey exports take an **opt-in** `includeVoterDetail` block — phone /
+phone type / cell / gender / date of birth, and county / lat / lng / precinct / districts. Same
+admin-or-lead gate as the `voter-file` export that already emits all of it, off by default,
+DNC-guarded through the same suppressed voter object, columns-not-rows. The full-backup does not
+inherit it. Full reasoning in the v5 2026-08-11 watchlist entry.]*
 
 **VERIFIED.** There is **no full-account export**. A repo-wide grep for `exportOrg|fullExport|dataExport|exportAll` returns nothing.
 

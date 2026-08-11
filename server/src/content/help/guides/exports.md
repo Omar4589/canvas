@@ -35,6 +35,8 @@ keep, open in Excel or Google Sheets, or load into another tool.
   more than one survey, you get one file per survey.
 - **Survey answers (detailed)** — one row per recorded answer, exactly as captured at the door,
   even if a question's wording changed later.
+
+Both survey exports offer **Include contact & demographic details** — see below.
 - **Voter file** — everyone currently in the campaign. Pick one of your uploads in the
   **Columns** selector to get the file back under that vendor's own column names.
 - **Filtered voters** — only the voters matching one of your saved searches.
@@ -51,6 +53,25 @@ The voter-bearing files carry two IDs side by side: **State voter ID** (the id f
 file) and **UID** (the vendor id from your original upload, when it had one). Either lets
 another tool match the same people — so an export here re-matches cleanly wherever it goes
 next.
+
+### Contact & demographic details on the survey exports
+
+By default a survey export identifies the person by name, party and address — enough to read,
+not enough to be a copy of your voter file. When you need to write results back into another
+system, tick **Include contact & demographic details** on **Survey results** or **Survey answers
+(detailed)** and each row also carries:
+
+**Phone**, **Phone type**, **Cell phone**, **Gender**, **Date of birth**, **County**,
+**Latitude** and **Longitude**, **Precinct**, and the **Congressional**, **State senate** and
+**State house** districts.
+
+It's off by default on purpose — most survey exports don't need somebody's phone number and date
+of birth sitting beside their political opinions. Nothing about *who* is in the file changes: it
+adds columns, never rows, and everyone excluded from the export stays excluded. The Exports
+history records which exports were run with it on, so you can always tell.
+
+Handing the file to someone outside your organization? Those columns are personal data about
+real people — send them only when the recipient actually needs them.
 
 ## About the voter file
 

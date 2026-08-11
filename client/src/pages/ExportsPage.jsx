@@ -45,13 +45,13 @@ const TYPES = [
     id: 'survey-results',
     label: 'Survey results',
     desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row.',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
   },
   {
     id: 'survey-answers',
     label: 'Survey answers (detailed)',
     desc: 'One row per recorded answer, exactly as captured at the door — the audit-grade record.',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
   },
   {
     id: 'voter-file',
@@ -134,6 +134,9 @@ function scopeLabel(job, { effortName, passName, canvasserName }) {
   if (p.userId) bits.push(canvasserName(p.userId) || 'Canvasser');
   if (p.roundStatuses?.length) bits.push(`Status: ${p.roundStatuses.join(', ')}`);
   if (p.from || p.to) bits.push([p.from, p.to].filter(Boolean).join(' → '));
+  // Surfaced deliberately: the history is the record of which exports carried contact and
+  // date-of-birth columns, so it has to say so on the row.
+  if (p.includeVoterDetail) bits.push('contact & demographic details');
   return bits.join(' · ') || 'Everything';
 }
 
@@ -152,6 +155,9 @@ export default function ExportsPage() {
   const [roundStatus, setRoundStatus] = useState('');
   const [savedSearchId, setSavedSearchId] = useState('');
   const [importJobId, setImportJobId] = useState('');
+  // Off by default on purpose (services/export/exportBuilders.js detailPlan) — a survey
+  // export shouldn't carry a date of birth unless someone asked for one.
+  const [includeVoterDetail, setIncludeVoterDetail] = useState(false);
   const [backupScope, setBackupScope] = useState('campaign');
   const [skip, setSkip] = useState(0);
   const [rowBusy, setRowBusy] = useState(null); // jobId of an in-flight download/delete
@@ -272,6 +278,7 @@ export default function ExportsPage() {
     if (wants('roundStatus') && roundStatus) p.roundStatuses = [roundStatus];
     if (wants('savedSearch')) p.savedSearchId = savedSearchId;
     if (wants('import') && importJobId) p.importJobId = importJobId;
+    if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;
     return p;
   }
 
@@ -439,6 +446,29 @@ export default function ExportsPage() {
                 <option value="campaign">This campaign</option>
                 <option value="org">Entire organization</option>
               </Select>
+            </div>
+          )}
+          {/* w-full so it wraps onto its own line: the toggle reads as a decision about the
+              file, not as one more narrowing filter beside the pickers. */}
+          {wants('voterDetail') && (
+            <div className="w-full rounded-md border border-border bg-sunken px-3 py-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={includeVoterDetail}
+                  onChange={(e) => setIncludeVoterDetail(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-fg">Include contact &amp; demographic details</span>
+                  <span className="block text-xs text-fg-muted">
+                    Adds phone, phone type, cell phone, gender, date of birth, county, latitude and
+                    longitude, precinct and districts — the columns for matching these answers back
+                    to your own voter file. Leave it off and the file carries name, party and address
+                    only.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
           <Button onClick={queueExport} loading={createMut.isPending} disabled={createDisabled}>

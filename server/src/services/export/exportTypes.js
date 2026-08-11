@@ -84,6 +84,7 @@ const BACKUP_NOTES = [
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
   'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file.',
+  'The survey files here use the default columns (name, party, address). For phone, date of birth, districts, precinct and coordinates beside each answer, queue Survey results on its own with "Include contact & demographic details" — voterfile-current.csv in this bundle already carries all of those, keyed by State Voter ID.',
 ];
 
 const buildFullBackup = async (ctx, sink) => {
@@ -223,9 +224,9 @@ export const EXPORT_TYPES = {
   },
   'survey-results': {
     label: 'Survey results',
-    desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row. If the campaign ran more than one survey, you get one file per survey.',
+    desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row. If the campaign ran more than one survey, you get one file per survey. Tick "contact & demographic details" to add phone, date of birth, districts and coordinates for matching back to your own voter file.',
     oneRowIs: 'one survey taken, one column per question',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
@@ -240,6 +241,10 @@ export const EXPORT_TYPES = {
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope);
       delete out.coordinatorId;
+      // Opt-in contact/demographic columns (exportBuilders detailPlan). Frozen into
+      // ExportJob.params, so the history row permanently records which exports carried a
+      // date of birth and a phone number — the audit trail the toggle exists for.
+      if (params.includeVoterDetail) out.includeVoterDetail = true;
       if (params.surveyTemplateId) {
         if (!isId(params.surveyTemplateId)) throw new ExportUserError('surveyTemplateId is not valid.');
         const t = await SurveyTemplate.findOne({ _id: params.surveyTemplateId, organizationId: scope.organizationId }, '_id').lean();
@@ -252,9 +257,9 @@ export const EXPORT_TYPES = {
   },
   'survey-answers': {
     label: 'Survey answers (detailed)',
-    desc: 'One row per recorded answer, exactly as captured at the door — the audit-grade record that survives question re-wording.',
+    desc: 'One row per recorded answer, exactly as captured at the door — the audit-grade record that survives question re-wording. Takes the same "contact & demographic details" option as Survey results.',
     oneRowIs: 'one recorded answer, exactly as captured at the door',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',

@@ -87,6 +87,58 @@ const loadPassEffortMaps = async (ctx) => {
 
 const canvasserCells = (info) => [info?.firstName || '', info?.lastName || '', info?.status || ''];
 
+// ── the opt-in detail block on the two survey exports (params.includeVoterDetail) ────────
+// Owner decision 2026-08-11: OFF by default. A survey CSV is a record of what a named person
+// said about politics; most of them have no business also carrying that person's date of
+// birth and phone number on the same row. Every field here already leaves via the voter-file
+// export to the IDENTICAL admin-or-lead audience, so the toggle is data minimization, not a
+// new gate — and because it is frozen into ExportJob.params, the history row is a permanent
+// record of which exports carried it.
+//
+// Split in two because the sources differ: the contact/demographic cells hang off the voter
+// (and therefore off the DNC-guarded voter object like every other identity cell — a
+// do-not-contact person is dropped before any of this is read), the geography cells off the
+// household, with districts/precinct file-authoritative on the voter (the DNC-flag ruling).
+const VOTER_DETAIL_HEADERS = ['Gender', 'Date of birth', 'Phone', 'Phone type', 'Cell phone'];
+const GEO_DETAIL_HEADERS = [
+  'County', 'Latitude', 'Longitude',
+  'Precinct', 'Congressional district', 'State senate district', 'State house district',
+];
+
+const dateOnly = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+
+const voterDetailCells = (v) => [
+  v?.gender || '', dateOnly(v?.dateOfBirth), v?.phone || '', v?.phoneType || '', v?.cellPhone || '',
+];
+const geoDetailCells = (v, h) => [
+  h?.county || '',
+  h?.location?.coordinates?.[1] ?? '',
+  h?.location?.coordinates?.[0] ?? '',
+  v?.precinct || '', v?.congressionalDistrict || '', v?.stateSenateDistrict || '', v?.stateHouseDistrict || '',
+];
+
+// Projections widen only when the toggle is on — an export that isn't printing a phone
+// number should not be reading one out of Mongo either.
+const SURVEY_VOTER_PROJ = 'stateVoterId uid firstName lastName party';
+const SURVEY_VOTER_DETAIL_PROJ =
+  `${SURVEY_VOTER_PROJ} gender dateOfBirth phone phoneType cellPhone precinct congressionalDistrict stateSenateDistrict stateHouseDistrict`;
+const SURVEY_HH_PROJ = 'addressLine1 addressLine2 city state zipCode';
+const SURVEY_HH_DETAIL_PROJ = `${SURVEY_HH_PROJ} county location`;
+
+// The four things a survey builder needs to know about the toggle, resolved once.
+const detailPlan = (ctx) => {
+  const on = !!ctx.params.includeVoterDetail;
+  return {
+    on,
+    voterProj: on ? SURVEY_VOTER_DETAIL_PROJ : SURVEY_VOTER_PROJ,
+    hhProj: on ? SURVEY_HH_DETAIL_PROJ : SURVEY_HH_PROJ,
+    voterHeaders: on ? VOTER_DETAIL_HEADERS : [],
+    geoHeaders: on ? GEO_DETAIL_HEADERS : [],
+    voterCells: on ? voterDetailCells : () => [],
+    geoCells: on ? geoDetailCells : () => [],
+  };
+};
+
 // ---------------------------------------------------------------------------------------
 // canvass-activity — one row per CanvassActivity (door-unit ledger)
 
@@ -385,6 +437,7 @@ export const surveyBaseQuery = (ctx) => {
 
 export const buildSurveyResultsWide = async (ctx, sink) => {
   const q = surveyBaseQuery(ctx);
+  const detail = detailPlan(ctx);
   const templateIds = (await SurveyResponse.distinct('surveyTemplateId', q)).filter(Boolean);
   if (!templateIds.length) {
     await sink.file('survey-results', ['Submitted (ISO)']);
@@ -453,7 +506,9 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
       'Submitted (ISO)', 'Date', `Time (${fmts.tzLabel})`,
       'Walk list', 'Pass', 'Pass name',
       'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
+      ...detail.voterHeaders,
       'Address', 'Address line 2', 'City', 'State', 'Zip',
+      ...detail.geoHeaders,
       'Canvasser first name', 'Canvasser last name', 'Canvasser status', 'Team',
       'Template', 'Template version', 'Offline submission', 'Edited', 'Note',
       ...cols.map(columnOf),
@@ -467,8 +522,8 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
       const vIds = [...new Set(batch.map((r) => String(r.voterId)))];
       const hhIds = [...new Set(batch.map((r) => String(r.householdId)))];
       const [voters, homes] = await Promise.all([
-        Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean(),
-        Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode').lean(),
+        Voter.find({ _id: { $in: vIds } }, detail.voterProj).lean(),
+        Household.find({ _id: { $in: hhIds } }, detail.hhProj).lean(),
       ]);
       const voterById = new Map(voters.map((v) => [String(v._id), v]));
       const homeById = new Map(homes.map((h) => [String(h._id), h]));
@@ -495,7 +550,9 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
           p ? effortNameById.get(String(p.effortId)) || '' : '',
           p ? p.roundNumber : '', p ? p.name : passLabel(p),
           v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '', v.party || '',
+          ...detail.voterCells(v),
           h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '',
+          ...detail.geoCells(v, h),
           ...canvasserCells(canv),
           team ? `${team.firstName} ${team.lastName}`.trim() : '',
           template?.name || '', r.surveyTemplateVersion ?? '',
@@ -526,6 +583,7 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
 
 export const buildSurveyAnswersLong = async (ctx, sink) => {
   const q = surveyBaseQuery(ctx);
+  const detail = detailPlan(ctx);
   const fmts = instantFmts(ctx.anchorTz);
   const { passById, effortNameById } = await loadPassEffortMaps(ctx);
   const [userIds, total, templates] = await Promise.all([
@@ -540,7 +598,9 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
   const writer = await sink.file('survey-answers', [
     'Submitted (ISO)', 'Date', `Time (${fmts.tzLabel})`,
     'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
+    ...detail.voterHeaders,
     'Address', 'Address line 2', 'City', 'State', 'Zip',
+    ...detail.geoHeaders,
     'Canvasser first name', 'Canvasser last name', 'Canvasser status',
     'Walk list', 'Pass', 'Pass name', 'Template', 'Template version',
     'Question', 'Question key', 'Answer', 'Option ids', 'Other text',
@@ -556,8 +616,8 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
     const vIds = [...new Set(batch.map((r) => String(r.voterId)))];
     const hhIds = [...new Set(batch.map((r) => String(r.householdId)))];
     const [voters, homes] = await Promise.all([
-      Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean(),
-      Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode').lean(),
+      Voter.find({ _id: { $in: vIds } }, detail.voterProj).lean(),
+      Household.find({ _id: { $in: hhIds } }, detail.hhProj).lean(),
     ]);
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
     const homeById = new Map(homes.map((h) => [String(h._id), h]));
@@ -583,7 +643,9 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
       const shared = [
         ...instantCells(r.submittedAt, fmts),
         v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '', v.party || '',
+        ...detail.voterCells(v),
         h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '',
+        ...detail.geoCells(v, h),
         ...canvasserCells(canv),
         p ? effortNameById.get(String(p.effortId)) || '' : '',
         p ? p.roundNumber : '', p ? p.name : passLabel(p),

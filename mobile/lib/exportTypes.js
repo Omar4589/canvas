@@ -39,8 +39,8 @@ export const EXPORT_TYPE_META = [
     desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row. If the campaign ran more than one survey, you get one file per survey.',
     oneRowIs: 'one survey taken, one column per question',
     contents:
-      'Submission time, voter identity (State voter ID, UID, name, party), address, canvasser and team, walk list and round, and one column per survey question.',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+      'Submission time, voter identity (State voter ID, UID, name, party), address, canvasser and team, walk list and round, and one column per survey question. Contact and demographic columns are opt-in below.',
+    filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
   },
   {
     id: 'voter-file',
@@ -77,7 +77,7 @@ export function mergeTypeMeta(serverTypes) {
 // Mirror of the web page's paramsForCreate: only non-empty filters go on the wire, and the
 // SAME params feed both POST /admin/exports/estimate and POST /admin/exports — what the
 // preview counted is what the queue builds.
-export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId }) {
+export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail }) {
   const wants = (f) => (meta.filters || []).includes(f);
   const p = {};
   if (wants('date') && range && (range.from || range.to)) {
@@ -89,5 +89,8 @@ export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, 
   if (wants('canvasser') && userId) p.userId = userId;
   if (wants('roundStatus') && roundStatus) p.roundStatuses = [roundStatus];
   if (wants('import') && importJobId) p.importJobId = importJobId;
+  // Columns only — it never changes the row count, so the estimate is unaffected. It still
+  // rides the wire params so what the sheet previewed is exactly what the queue builds.
+  if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;
   return p;
 }

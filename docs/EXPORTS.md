@@ -47,8 +47,8 @@ still works** — that window exists precisely so you can take your data with yo
 |---|---|---|
 | **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) | the full field record; audits; "what happened at this address" |
 | **Doors by round** | one door in one round, with its round status and visit count | re-knock lists; per-round door detail that adds up to the invoice numbers |
-| **Survey results** | one survey taken, one column per question | analysis in a spreadsheet; one file per survey when a campaign ran several |
-| **Survey answers (detailed)** | one recorded answer, exactly as captured at the door | the audit-grade record — survives question re-wording |
+| **Survey results** | one survey taken, one column per question | analysis in a spreadsheet; one file per survey when a campaign ran several; opt-in contact/demographic columns for matching back |
+| **Survey answers (detailed)** | one recorded answer, exactly as captured at the door | the audit-grade record — survives question re-wording; takes the same opt-in columns |
 | **Voter file** | one voter currently in the campaign | your file back; optionally with the column names from one of your uploads |
 | **Filtered voters** | one voter matching a saved search | handing a targeted subset to another tool |
 | **Voter notes** (admins only) | one staff note about a voter | the one dataset that previously had no way out |
@@ -65,6 +65,34 @@ only when the event named a voter — a survey at the door; plain knocks (not ho
 drop) are records about the *door*, nobody was picked, and their voter columns are blank on
 purpose. **Doors by round** is a household file and deliberately has no voter columns at all —
 use Canvassing activity for who was reached.
+
+## Contact & demographic details (the two survey exports)
+
+By default a survey export identifies the person by **name, party and address** — enough to read
+the results, not a copy of your voter file. Tick **Include contact & demographic details** on
+**Survey results** or **Survey answers (detailed)** and every row also carries **Phone**, **Phone
+type**, **Cell phone**, **Gender**, **Date of birth**, **County**, **Latitude**, **Longitude**,
+**Precinct**, and the **Congressional / State senate / State house** districts — the columns you
+need to write results back into a system that keys on more than a name.
+
+It is **off by default deliberately**: most survey exports have no reason to put somebody's phone
+number and date of birth on the same row as their political opinions. Three things stay true when
+it is on:
+
+- **It adds columns, never rows.** The row count, the do-not-contact exclusions and the preview
+  count are all unchanged — it is a column option, not a filter.
+- **Do-not-contact still wins.** Every added cell is read off the same suppressed voter record as
+  the name, so a flagged person's phone and date of birth can no more appear than their name can.
+- **The history remembers.** The choice is frozen into the export job, and the Exports history
+  row says *contact & demographic details* — so which files carried them is answerable later.
+
+Nothing here is newly collected or newly reachable: the same fields already leave via the
+**Voter file** export to the same people. The toggle is about not spreading them by default.
+
+The **Full backup** builds its survey files with the default columns — it composes the same
+builders with no params, and a bundle that quietly upgraded itself to full PII would defeat the
+point of the toggle. Its `voterfile-current.csv` already carries every one of those fields keyed
+by State Voter ID, so the backup loses nothing; its README says so.
 
 ## The voter-file caveats (please read before relying on it)
 
@@ -163,6 +191,27 @@ full-backup **composes** them (never re-implements a file), and its `knocks-by-r
 [`services/reports/knocksByPass.js`](../server/src/services/reports/knocksByPass.js) — the
 req-free core extracted from `buildKnocksByPass`, shared with `GET /admin/reports/knocks-by-pass`
 and its CSV — so Σ rounds === totals holds by construction.
+
+**The opt-in detail block (`params.includeVoterDetail`)** — the two survey types declare the
+`voterDetail` filter token and whitelist the boolean in `survey-results`'s `validateParams`
+(survey-answers delegates to it, so there is one gate). `exportBuilders.js` resolves it ONCE per
+build through **`detailPlan(ctx)`**, which returns the projections, the two header slices and the
+two cell functions together — so a builder cannot widen its headers without widening its Mongo
+projection to match, or vice versa. Two slices because the sources differ: `voterDetailCells`
+(Gender, Date of birth, Phone, Phone type, Cell phone) hangs off the **voter** and therefore off
+the same DNC-guarded object every other identity cell reads; `geoDetailCells` (County, Latitude,
+Longitude, then Precinct + the three districts) mixes household geography with the
+file-authoritative district/precinct fields on the voter. **Projections widen only when the
+toggle is on** — an export that is not printing a phone number does not read one out of Mongo.
+It is a COLUMN option, never a filter: row counts, `excludedDncCount` and therefore every
+estimate are untouched, which is why `exportEstimates.js` needs no knowledge of it (pinned:
+`exportBuilders.int.test.js` asserts equal `rowCount`/`excludedDncCount` across both settings,
+and that flagged-fixture phone/DOB sentinels appear in NO artifact with the toggle ON).
+Off by default (owner decision 2026-08-11); frozen into `ExportJob.params`, and the web history's
+`scopeLabel` surfaces it so the record of which exports carried DOB survives the artifact's TTL.
+Adding an optional param is backward-compatible in both directions — an old client never sends
+it, and a new client sending it to an old server has the key dropped by the whitelist rather than
+4xx'd — so it needs no `CLIENT_API_VERSION` bump.
 
 Shared rules: CSV dialect from
 [`services/export/csvWriter.js`](../server/src/services/export/csvWriter.js) (UTF-8 BOM, CRLF,
@@ -281,14 +330,18 @@ the event document — that guard is what blanks a do-not-contact person's row.
   by first/last/status; Campaign status, Active door, Household DB id. **No voter columns by
   design** (household grain).
 - **`survey-results*.csv`** — Submitted (ISO)/Date/Time; Walk list, Pass, Pass name; **State
-  voter ID, UID**, Voter first/last name, Party; Address block minus County; Canvasser + Team; Template,
+  voter ID, UID**, Voter first/last name, Party; *[with `includeVoterDetail`: Gender, Date of
+  birth, Phone, Phone type, Cell phone]*; Address block minus County; *[with
+  `includeVoterDetail`: County, Latitude, Longitude, Precinct, Congressional district, State
+  senate district, State house district]*; Canvasser + Team; Template,
   Template version, Offline submission, Edited, Note; one column per question (current text,
   `Label (key)` on duplicates); Household/Voter/Response DB ids. An **"Other (specify)" write-in**
   renders as **`Other — <typed text>`** (the sentinel is seeded into the export's option lookup), so
   it can't be read as a canonical option that happens to share the typed wording; a multi-select
   keeps its other picks (`Yes; Other — potholes`).
 - **`survey-answers.csv`** — Submitted (ISO)/Date/Time; **State voter ID, UID**, Voter
-  first/last name, Party; Address block minus County; Canvasser; Walk list, Pass, Pass name, Template,
+  first/last name, Party; *[with `includeVoterDetail`: the same two blocks as above, in the same
+  two positions — one `detailPlan` serves both files]*; Address block minus County; Canvasser; Walk list, Pass, Pass name, Template,
   Template version; Question, Question key, Answer (snapshot), Option ids, Other text; Note,
   Offline submission; Household/Voter/Response DB ids.
 - **`voterfile-current.csv` / `voters-filtered.csv`** — every `CANONICAL_FIELDS` label (State
