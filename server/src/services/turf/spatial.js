@@ -48,12 +48,19 @@ export function hilbertIndex(x, y, order) {
 export function hilbertSort(points, order = 16) {
   const proj = projectToMeters(points);
   if (proj.length <= 1) return proj;
-  const xs = proj.map((p) => p.x);
-  const ys = proj.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
+  // Bounds in ONE pass — never Math.min(...xs). Spreading one argument per door
+  // overflows the call stack (RangeError) somewhere past 100k points, and campaigns
+  // that size exist, so the whole cut died on exactly the campaigns that need it most.
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of proj) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
   const n = 1 << order;
   const sx = maxX > minX ? (n - 1) / (maxX - minX) : 0;
   const sy = maxY > minY ? (n - 1) / (maxY - minY) : 0;
