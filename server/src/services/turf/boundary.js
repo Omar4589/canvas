@@ -72,7 +72,10 @@ function padBbox([minX, minY, maxX, maxY], frac) {
 // books: [{ households, centroid? }]. Returns Polygon|MultiPolygon geometries aligned to
 // `books` (plain hull as the per-book fallback — containment beats disjointness on failure).
 // Measured at production scale (16.5k doors / 128 books): ~1.6s, 0 doors outside, 0 m²
-// overlap. Deterministic (no randomness), so worker re-runs reproduce identical shapes.
+// overlap. Deterministic (no randomness) PROVIDED `books` arrives in a canonical order — the
+// coordinate dedupe below is first-book-wins, so book order decides who owns an apartment
+// stack's cell. Both callers in generateTurf.js sort by _id, so worker re-runs reproduce
+// identical shapes.
 //
 // onlyIndices (Set<number>|null): compute the diagram over ALL books' doors (seams depend on
 // everyone) but run the expensive per-book union/intersect ONLY for these indices — the rest

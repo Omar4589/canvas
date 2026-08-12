@@ -22,6 +22,24 @@ const CUT_COLUMNS = {
   countyValue: 1,
 };
 
+// Mongo returns documents in no guaranteed order, and the cut is order-SENSITIVE: seeds
+// in balancedKMeans are picked by position in the Hilbert-sorted array, and doors that tie
+// on every geometric key — an apartment stack shares one geocode, so it ties on all of
+// them — break by arrival order. Without a canonical order the same pass could re-cut into
+// different books on a re-run or a retried job, which the module header, boundary.js and
+// the docs all promise it does not.
+//
+// Sorted HERE rather than with a Mongo `.sort({_id:1})` deliberately: no Household index
+// ends in _id (models/Household.js), so the server would satisfy it with a blocking
+// in-memory sort — the failure mode that shows up only on the biggest campaigns, which are
+// exactly the ones that need the cut. The cut already materializes every document, so this
+// costs nothing and cannot depend on which indexes prod happens to have built.
+const byId = (docs) => docs.sort((a, b) => {
+  const x = String(a._id);
+  const y = String(b._id);
+  return x < y ? -1 : x > y ? 1 : 0;
+});
+
 // Orchestrates a turf generation run: load the pass's walk-list households,
 // dispatch to the cut mode, compute boundary/centroid/walk-order per book, and
 // persist Turf docs as drafts atomically (clearing prior drafts for the pass so
@@ -97,10 +115,10 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     const claimed = new Set();
     for (const polygon of polygons) {
       idx += 1;
-      const found = await Household.find(
+      const found = byId(await Household.find(
         { ...baseFilter, location: { $geoWithin: { $geometry: polygon } } },
         CUT_COLUMNS
-      ).lean();
+      ).lean());
       const hh = found.filter((h) => !claimed.has(String(h._id)));
       hh.forEach((h) => claimed.add(String(h._id)));
       if (!hh.length) continue;
@@ -113,7 +131,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     }
     if (!books.length) throw new Error('No doors inside the drawn area(s)');
   } else {
-    const households = await Household.find(baseFilter, CUT_COLUMNS).lean();
+    const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
     await onProgress?.({ phase: 'clustering', pct: 25 });
     if (mode === 'attribute') {
       books = attributeCut(households, { attribute: params.attribute, capN: params.capN || null });
@@ -246,7 +264,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     baseFilter._id = { $in: fresh };
   }
 
-  const households = await Household.find(baseFilter, CUT_COLUMNS).lean();
+  const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
   if (!households.length) return { added: 0, bookCount: 0, bookIds: [] };
 
   const books = geometricCut(households, { maxDoors });
@@ -289,10 +307,10 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
 // Recompute a turf's geometry + walk order after an edit changes its members,
 // and re-mirror turfId/walkOrder onto its households.
 export async function recomputeTurf(turfDoc) {
-  const households = await Household.find(
+  const households = byId(await Household.find(
     { _id: { $in: turfDoc.householdIds } },
     { location: 1, addressLine1: 1 }
-  ).lean();
+  ).lean());
   const ordered = computeWalkOrder(households, { optimize: true });
   turfDoc.householdIds = ordered;
   turfDoc.doorCount = ordered.length;
@@ -321,10 +339,13 @@ export async function recomputeTurf(turfDoc) {
 // stored shapes, which remain exactly correct (moves don't change the diagram)
 // or conservatively contained (removals only grow the remaining cells).
 export async function recomputePassTerritories(passId, { onlyTurfIds = null } = {}) {
-  const turfs = await Turf.find(
+  // Sorted for the same reason as the household loads: computeTerritories dedupes
+  // shared coordinates first-book-wins (boundary.js), so which book owns an apartment
+  // stack's Voronoi cell — and therefore both books' drawn shapes — follows this order.
+  const turfs = byId(await Turf.find(
     { passId, status: { $in: ['draft', 'published'] } },
     { _id: 1, centroid: 1, householdIds: 1 }
-  ).lean();
+  ).lean());
   if (!turfs.length) return;
   const allIds = turfs.flatMap((t) => t.householdIds || []);
   const households = await Household.find({ _id: { $in: allIds } }, { location: 1 }).lean();

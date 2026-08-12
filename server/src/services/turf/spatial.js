@@ -45,6 +45,14 @@ export function hilbertIndex(x, y, order) {
 
 // Project + sort points along a Hilbert curve. Returns the points (with x/y/h
 // added) in contiguous spatial order.
+//
+// The comparator is a TOTAL order (h, then x, then y) and Array#sort is stable, so
+// the output depends only on the caller's input order — which callers must make
+// canonical (generateTurf sorts its households by _id). Two doors at the SAME
+// geocode — an apartment stack — are genuinely indistinguishable here and keep the
+// caller's order; that is why the caller's sort is load-bearing rather than a
+// nicety. Ordering feeds seed selection in balancedKMeans, so a wobble here
+// silently re-cuts the whole pass.
 export function hilbertSort(points, order = 16) {
   const proj = projectToMeters(points);
   if (proj.length <= 1) return proj;
@@ -69,7 +77,7 @@ export function hilbertSort(points, order = 16) {
       ...p,
       h: hilbertIndex(Math.round((p.x - minX) * sx), Math.round((p.y - minY) * sy), order),
     }))
-    .sort((a, b) => a.h - b.h);
+    .sort((a, b) => a.h - b.h || a.x - b.x || a.y - b.y);
 }
 
 export function centroid(points) {

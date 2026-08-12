@@ -521,7 +521,11 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 `generateTurf({ campaignId, passId, mode, params })`
 ([generateTurf.js](../server/src/services/turf/generateTurf.js)):
 
-1. **Load households** ([:36-44](../server/src/services/turf/generateTurf.js#L36-L44)) — base filter
+1. **Load households** ([:75-81](../server/src/services/turf/generateTurf.js#L75-L81)) — the result is
+   sorted by `_id` through the `byId` helper, in JS rather than with a Mongo `.sort({_id:1})`: no
+   `Household` index ends in `_id`, so the server would fall back to a **blocking in-memory sort** on
+   exactly the largest campaigns, and prod runs with `autoIndex` off. The cut already materializes
+   every document, so the JS sort is free. Base filter
    = `{ campaignId, isActive: true, effortId: pass.effortId, 'location.coordinates': {$exists,$ne:null} }`
    — a round cuts only its **effort's** owned doors (see [EFFORTS.md](EFFORTS.md)). When
    `params.excludeRestricted` is set, the base filter also gets **`status: { $ne: 'restricted' }`**, so
@@ -550,7 +554,12 @@ The route enqueues this as an async job and returns a `jobId` to poll
 as possible, treating `maxDoors` as an **approximate target**, not a hard equal cap. (The old
 capacity-balanced cut forced near-equal sizes, which exiled boundary houses into far books — a canvasser
 driving across the area for one door.) Everything runs on Hilbert-projected meters and is fully
-**deterministic** (no `Math.random`, so a worker re-run reproduces identical books):
+**deterministic** — but the absence of `Math.random` is only half of why. Seeds are chosen by
+**position** in the Hilbert-sorted array and equally-placed doors break ties by **index**, so the
+order the doors arrive in reaches book membership. Mongo guarantees no document order, so
+`generateTurf` sorts every cut-feeding load by `_id` (the `byId` helper) before anything touches it,
+and `hilbertSort`'s comparator is a total order (`h`, then `x`, then `y`). Both are load-bearing:
+without them a re-run or a retried worker job could produce different books:
 
 - **k & soft band:** `k = ceil(n / maxDoors)` books; `softMax = ceil(maxDoors·(1+tolerance))` (initial
   balance), `hardMax = ceil(maxDoors·(1+1.5·tolerance))` (true ceiling), `softMin = floor(maxDoors·(1−tolerance))`.
@@ -589,7 +598,8 @@ seeded at the book's centroid), under which a door nearer a neighbour's centroid
 outline (measured then: 7 of 24 doors lost from a street book). The door-level union retires that
 trade-off. Measured at production scale (16.5k doors / 128 books): **~1.5s full recompute, 0 doors
 outside, 0 m² overlap**, ~95 KB total geometry. Deterministic — worker re-runs reproduce identical
-shapes. Duplicate coordinates (apartment stacks) are deduped first-book-wins; a coordinate genuinely
+shapes, because the books are handed in `_id` order (`byId`) and the first-book-wins dedupe below
+therefore always picks the same owner. Duplicate coordinates (apartment stacks) are deduped first-book-wins; a coordinate genuinely
 split across two books can only be strictly inside one of two disjoint shapes, so the minority units
 rely on the ring/popup (the one honest residual). Contract pinned by `test/turfBoundary.test.js`.
 

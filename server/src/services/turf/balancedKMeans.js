@@ -9,8 +9,10 @@ import { hilbertSort } from './spatial.js';
 // pass moves any house to a strictly-nearer book that has room (no reciprocal
 // partner needed). Net: nobody drives across the area for one door.
 //
-// Deterministic — projection + seeds come from the Hilbert curve, never Math.random
-// — so a worker re-run reproduces the same books.
+// Deterministic — projection + seeds come from the Hilbert curve, never Math.random.
+// That alone is NOT enough: seeds are picked by POSITION in `items` and ties break by
+// index, so the caller must hand doors over in a canonical order (generateTurf sorts
+// every cut-feeding load by _id). Given that, a worker re-run reproduces the same books.
 //
 // items: [{ doc, lng, lat }] (all must have coords). maxDoors: target/book.
 // opts.tolerance (default 0.4): how far book sizes may flex from maxDoors.
