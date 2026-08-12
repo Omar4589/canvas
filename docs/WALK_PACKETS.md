@@ -367,8 +367,22 @@ seeded into a bounded 2-opt). `buildPacket.orderForPrint` may regroup it for pap
    reaches them** (not alphabetically — that could send a volunteer across the book and back),
    and within a street runs odds ascending then evens descending. A street with only one parity
    falls back to plain ascending, so a one-sided street doesn't zigzag.
-2. Both orders are measured with `walkLength` over the door coordinates, and the grouped one is
-   used **only if it is not longer**.
+2. Both orders are measured over the door coordinates, and the grouped one is used **only if it
+   is not longer**.
+
+   **Both candidates must be measured with the SAME ruler as the route was built with**, and that
+   is now road distance wherever road data covers the book
+   ([PASSES_AND_TURF.md §B.3](PASSES_AND_TURF.md)). Scoring a road-aware route with a straight
+   line penalises it exactly where it is most right: a route that correctly walks around a canal
+   is longer as the crow flies, so a straight-line comparison would reject it and print the
+   street-grouped order instead — silently undoing the fix on paper while the phone kept it.
+   `orderForPrint` loads the graph via `loadRoadGraph` and scores through
+   `walkOrder.walkLength`, falling back to the straight-line `walkLength` when no artifact covers
+   the doors. The road lookup is wrapped: **printing never fails because road data did.**
+
+   One consequence worth expecting: on canal geography, street grouping now wins more often than
+   the "76% worse on cul-de-sacs" measurement below suggests. That number was taken with a
+   straight-line ruler, and going around the water is genuinely what you have to do there.
 
 Measured on four synthetic shapes (`scratchpad/shapes.mjs`, throwaway):
 
