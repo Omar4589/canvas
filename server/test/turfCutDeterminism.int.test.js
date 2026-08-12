@@ -116,8 +116,17 @@ test('books match the cut of the SAME doors ordered by _id — load order never 
   // This is the assertion that fails if a `byId(...)` wrapper is dropped from generateTurf:
   // the reference is computed from an explicitly _id-sorted array, while the doors were
   // INSERTED in the opposite order.
+  //
+  // `roadAware: false` is required, not incidental. The fixture's coordinates sit on Marco
+  // Island, which the committed Collier road artifact covers, so the default path now cuts
+  // along streets while the reference below is a straight-line geometricCut. Pinning the
+  // straight-line path here is the point: byId runs BEFORE the road/straight dispatch, so
+  // this still guards both. Road-path reproducibility is covered by roadCut.int.test.js.
   await generateTurf({
-    campaignId: ctx.camp._id, passId: ctx.pass._id, mode: 'geometric', params: { maxDoors: MAX_DOORS, tolerance: 0.4 },
+    campaignId: ctx.camp._id,
+    passId: ctx.pass._id,
+    mode: 'geometric',
+    params: { maxDoors: MAX_DOORS, tolerance: 0.4, roadAware: false },
   });
   const actual = bookShape(await Turf.find({ passId: ctx.pass._id }, { householdIds: 1 }).lean());
 

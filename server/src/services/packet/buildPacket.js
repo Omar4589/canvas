@@ -9,7 +9,8 @@ import { VotedVoter } from '../../models/VotedVoter.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
 import { streetOf, UNIT_SUFFIX } from '../../utils/streetName.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
-import { computeWalkOrder } from '../turf/walkOrder.js';
+import { computeWalkOrder, walkLength as roadWalkLength } from '../turf/walkOrder.js';
+import { loadRoadGraph } from '../turf/roads/loadRoadGraph.js';
 
 // Assembles the data a PRINTED walk packet needs. Print-only by design: nothing here
 // writes, and nothing a volunteer marks on the paper ever comes back (docs/WALK_PACKETS.md).
@@ -169,10 +170,23 @@ const metresBetween = (a, b) => {
   return Math.sqrt(dx * dx + dy * dy);
 };
 
+// Straight-line length of a sequence. Superseded by the road metric below whenever road
+// data covers the book — see orderForPrint.
 const walkLength = (doors) => {
   let total = 0;
   for (let i = 1; i < doors.length; i++) total += metresBetween(doors[i - 1]._loc, doors[i]._loc);
   return total;
+};
+
+// The comparison below has to use the SAME ruler the route was built with. Once a book's
+// stored sequence follows streets, measuring it with a straight line penalises it exactly
+// where it is most right: a route that correctly walks around a canal is "longer" as the
+// crow flies, so a straight-line comparison would discard it and print the street-grouped
+// order instead. Falls back to straight-line when no road data covers the book.
+const lengthUnder = (doors, roadGraph) => {
+  if (!roadGraph) return walkLength(doors);
+  const pts = doors.filter((d) => d._loc).map((d) => ({ lng: d._loc[0], lat: d._loc[1] }));
+  return roadWalkLength(pts, { roadGraph });
 };
 
 // Streets in the order the ROUTE first reaches them — not alphabetically, which could send a
@@ -202,7 +216,14 @@ const orderForPrint = (doors) => {
   // Without coordinates there is nothing to compare, so the book's own order stands.
   if (!doors.some((d) => d._loc)) return { doors, printOrder: 'route' };
   const grouped = streetGroupedOrder(doors);
-  return walkLength(grouped) <= walkLength(doors)
+  let roadGraph = null;
+  try {
+    const loaded = loadRoadGraph(doors.filter((d) => d._loc).map((d) => ({ location: { coordinates: d._loc } })));
+    roadGraph = loaded?.graph || null;
+  } catch {
+    roadGraph = null; // printing must never fail because road data did
+  }
+  return lengthUnder(grouped, roadGraph) <= lengthUnder(doors, roadGraph)
     ? { doors: grouped, printOrder: 'street' }
     : { doors, printOrder: 'route' };
 };

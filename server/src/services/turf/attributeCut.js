@@ -26,7 +26,12 @@ const SUBBOOK_SUFFIX = (i) => {
 // flagged in cutConflicts) land in a surfaced "Unassigned" book. When capN is
 // set, oversized groups are geometrically subdivided into balanced sub-books
 // that stay within the attribute value.
-export function attributeCut(households, { attribute, capN = null } = {}) {
+//
+// `cutOpts` is forwarded to that subdivision — notably `roadGraph`, so an oversized
+// precinct is split along streets rather than straight lines. The grouping itself is
+// unaffected: a sub-book still never crosses the attribute value, because only that
+// group's members are ever handed to the subdivider.
+export function attributeCut(households, { attribute, capN = null } = {}, cutOpts = {}) {
   const col = ATTR_COLUMN[attribute];
   if (!col) throw new Error(`Unknown attribute: ${attribute}`);
 
@@ -44,7 +49,7 @@ export function attributeCut(households, { attribute, capN = null } = {}) {
       continue;
     }
     if (capN && members.length > capN) {
-      const sub = geometricSubdivide(members, capN);
+      const sub = geometricSubdivide(members, capN, cutOpts);
       sub.forEach((chunk, i) => books.push({ name: `${value} ${SUBBOOK_SUFFIX(i)}`, households: chunk }));
     } else {
       books.push({ name: String(value), households: members });

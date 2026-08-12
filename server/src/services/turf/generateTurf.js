@@ -9,6 +9,7 @@ import { resolveWalkList, isActiveTargetFilter } from '../walklist/resolveWalkLi
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
+import { loadRoadGraph } from './roads/loadRoadGraph.js';
 
 const CUT_COLUMNS = {
   location: 1,
@@ -39,6 +40,42 @@ const byId = (docs) => docs.sort((a, b) => {
   const y = String(b._id);
   return x < y ? -1 : x > y ? 1 : 0;
 });
+
+// Road-aware cutting, opt-out rather than opt-in: where we hold road geometry for the
+// campaign's area, measuring along streets is simply the better answer, and asking the
+// admin to know that is asking them to do our job. `params.roadAware === false` turns it
+// off; anything else means "use it if we have it".
+//
+// It never fails a cut. Every way it can not apply — no artifact for this area, doors too
+// far from any street — falls through to the straight-line cut with a reason recorded, so
+// the admin is told which one they got instead of guessing from the shapes.
+const resolveRoads = (households, params, report) => {
+  if (params.roadAware === false) {
+    report.reason = 'turned-off';
+    return {};
+  }
+  let loaded = null;
+  try {
+    loaded = loadRoadGraph(households);
+  } catch (err) {
+    report.reason = 'road-data-unreadable';
+    console.error('[turf] road graph failed to load, falling back to straight-line', err);
+    return {};
+  }
+  if (!loaded) {
+    report.reason = 'no-road-data-for-this-area';
+    return {};
+  }
+  report.counties = loaded.counties;
+  return {
+    roadGraph: loaded.graph,
+    onRoadResult: (r) => {
+      report.applied = r.applied;
+      report.offNetwork = (report.offNetwork || 0) + (r.offNetwork || 0);
+      if (!r.applied && r.reason) report.reason = r.reason;
+    },
+  };
+};
 
 // Orchestrates a turf generation run: load the pass's walk-list households,
 // dispatch to the cut mode, compute boundary/centroid/walk-order per book, and
@@ -100,6 +137,14 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   // Record (or clear) what this round targeted — for reproducibility + a label.
   await Pass.updateOne({ _id: passId }, { $set: { targetFilter: targeted ? params.targetFilter : null } });
 
+  // Filled in by resolveRoads/geometricChunks below, stamped onto every book and returned
+  // to the job so the admin can be told whether their books followed streets or straight lines.
+  const road = { applied: false, reason: null, counties: null, offNetwork: 0 };
+  // Held for the walk-order pass below: the SAME graph that decided book membership also
+  // decides the sequence inside each book, so a book that wraps around a canal is walked
+  // the way you would drive it instead of zig-zagging across the water.
+  let roadGraph = null;
+
   let books;
   if (mode === 'manual') {
     // One or more hand-drawn areas. Each area is one book by default; with subCutN
@@ -113,17 +158,28 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     // book (double-assignment would double-count doors and leave the turfId
     // mirror pointing at a random book).
     const claimed = new Set();
+    // Resolve every area's doors BEFORE cutting any of them: the road graph is built once
+    // from the whole drawn set, not per area. Building it inside the loop would rebuild a
+    // county graph for each polygon, and each area would get its own coordinate origin.
+    const areas = [];
     for (const polygon of polygons) {
-      idx += 1;
       const found = byId(await Household.find(
         { ...baseFilter, location: { $geoWithin: { $geometry: polygon } } },
         CUT_COLUMNS
       ).lean());
       const hh = found.filter((h) => !claimed.has(String(h._id)));
       hh.forEach((h) => claimed.add(String(h._id)));
+      areas.push({ polygon, hh });
+    }
+    const manualRoads = resolveRoads(areas.flatMap((a) => a.hh), params, road);
+    roadGraph = manualRoads.roadGraph || null;
+    for (const { polygon, hh } of areas) {
+      idx += 1;
       if (!hh.length) continue;
       if (subCutN > 0 && hh.length > subCutN) {
-        const chunks = geometricCut(hh, { maxDoors: subCutN });
+        // Sub-cutting a drawn area is where roads matter most in manual mode: an area big
+        // enough to split is big enough to contain a canal.
+        const chunks = geometricCut(hh, { maxDoors: subCutN, ...manualRoads });
         chunks.forEach((c, j) => books.push({ name: `Area ${idx} · ${j + 1}`, households: c.households }));
       } else {
         books.push({ name: `Area ${idx}`, households: hh, boundary: polygon });
@@ -132,11 +188,13 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     if (!books.length) throw new Error('No doors inside the drawn area(s)');
   } else {
     const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
-    await onProgress?.({ phase: 'clustering', pct: 25 });
+    const roads = resolveRoads(households, params, road);
+    roadGraph = roads.roadGraph || null;
+    await onProgress?.({ phase: 'clustering', pct: 25, roadAware: road.applied });
     if (mode === 'attribute') {
-      books = attributeCut(households, { attribute: params.attribute, capN: params.capN || null });
+      books = attributeCut(households, { attribute: params.attribute, capN: params.capN || null }, roads);
     } else if (mode === 'geometric') {
-      books = geometricCut(households, { maxDoors: params.maxDoors || 65, tolerance: params.tolerance });
+      books = geometricCut(households, { maxDoors: params.maxDoors || 65, tolerance: params.tolerance, ...roads });
     } else {
       throw new Error(`Unknown mode: ${mode}`);
     }
@@ -161,7 +219,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   let done = 0;
   for (const book of books) {
     const members = book.households;
-    const ordered = computeWalkOrder(members, { optimize: params.optimizeWalk !== false });
+    const ordered = computeWalkOrder(members, { optimize: params.optimizeWalk !== false, roadGraph });
     const centroid = computeCentroid(members);
     turfDocs.push({
       organizationId: campaign.organizationId,
@@ -169,7 +227,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       passId,
       name: book.name,
       mode,
-      params,
+      params: { ...params, road },
       boundary: book.boundary || null,
       centroid,
       householdIds: ordered,
@@ -210,7 +268,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   }
 
   await onProgress?.({ phase: 'done', pct: 100, booksTotal: inserted.length });
-  return { bookCount: inserted.length };
+  return { bookCount: inserted.length, road };
 }
 
 // Add supplemental book(s) to an existing pass from its currently-UNASSIGNED
@@ -219,7 +277,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // through the normal Accept → Assign steps) and the whole pass is re-tessellated
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
-export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false }) {
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false, roadAware = undefined }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
   // Same mid-delete guard as generateTurf above.
@@ -267,16 +325,20 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
   if (!households.length) return { added: 0, bookCount: 0, bookIds: [] };
 
-  const books = geometricCut(households, { maxDoors });
+  // Supplemental books must be cut the same way the pass was, or a top-up book quietly
+  // straddles a canal inside an otherwise road-aware round. Same opt-out as the main cut.
+  const road = { applied: false, reason: null, counties: null, offNetwork: 0 };
+  const roads = resolveRoads(households, { roadAware }, road);
+  const books = geometricCut(households, { maxDoors, ...roads });
   const turfDocs = books.map((book, i) => {
-    const ordered = computeWalkOrder(book.households, { optimize: true });
+    const ordered = computeWalkOrder(book.households, { optimize: true, roadGraph: roads.roadGraph || null });
     return {
       organizationId: campaign.organizationId,
       campaignId,
       passId,
       name: books.length > 1 ? `${name} ${i + 1}` : name,
       mode: 'geometric',
-      params: { supplemental: true, maxDoors },
+      params: { supplemental: true, maxDoors, road },
       boundary: null, // filled by recomputePassTerritories below
       centroid: computeCentroid(book.households),
       householdIds: ordered,
@@ -311,7 +373,15 @@ export async function recomputeTurf(turfDoc) {
     { _id: { $in: turfDoc.householdIds } },
     { location: 1, addressLine1: 1 }
   ).lean());
-  const ordered = computeWalkOrder(households, { optimize: true });
+  // A hand edit must not silently downgrade the book's route: this runs on every
+  // move / merge / split, so without the graph one moved door would re-order the whole
+  // book by straight line and undo the road-aware sequence it was cut with. The graph is
+  // LRU-cached per county, so repeated edits pay for it once.
+  const edited = { applied: false, reason: null, counties: null, offNetwork: 0 };
+  const ordered = computeWalkOrder(households, {
+    optimize: true,
+    roadGraph: resolveRoads(households, {}, edited).roadGraph || null,
+  });
   turfDoc.householdIds = ordered;
   turfDoc.doorCount = ordered.length;
   turfDoc.boundary = computeBoundary(households);
