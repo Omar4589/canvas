@@ -238,6 +238,15 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     });
     bookData.push({ centroid, households: members });
     done += 1;
+    // YIELD EVERY BOOK, report progress every fifth. BullMQ renews a job's lock on a TIMER,
+    // and a timer cannot fire while the event loop is blocked — so a long unbroken run of
+    // synchronous work makes the lock lapse, the job get redelivered, and the cut restart
+    // from the top ("job stalled more than allowable limit"). Road-aware walk order builds a
+    // shortest-path matrix per book, which took one run of five books to 4.7s on a laptop and
+    // several times that on a Standard-2X dyno. The setImmediate is nearly free and keeps the
+    // longest block to a single book; the progress write stays every fifth because it costs a
+    // Redis round-trip and there is no reason to pay it 400 times.
+    await new Promise((resolve) => setImmediate(resolve));
     if (onProgress && done % 5 === 0) {
       await onProgress({
         phase: 'boundaries',

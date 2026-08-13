@@ -85,7 +85,15 @@ export const roadCut = (items, maxDoors, opts = {}) => {
   const g = opts.graph;
   if (!g) throw new Error('roadCut requires opts.graph');
   const tolerance = opts.tolerance != null ? opts.tolerance : 0.4;
-  const probes = opts.medoidProbes != null ? opts.medoidProbes : 8;
+  // OFF by default, and the default is load-bearing: at 8 probes this refinement was ~27 of
+  // the 33 seconds a Palm Beach cut spent in ONE unbroken synchronous block, which exceeded
+  // BullMQ's 30s job lock, stalled the job, and got it redelivered — the cut visibly restarted
+  // and eventually died with "job stalled more than allowable limit". Measured on real doors,
+  // it also buys nothing: Palm Beach 69/122 books over 1.5 km with probes vs 70/122 without,
+  // Marco 7/41 with vs 6/41 WITHOUT. Kept as a tunable rather than deleted, because it may
+  // earn its cost on geography we haven't measured — but turn it on only with a measurement
+  // in hand, and only if the caller can tolerate the block.
+  const probes = opts.medoidProbes != null ? opts.medoidProbes : 0;
   const n = items.length;
   if (!n) return { clusters: [], offNetwork: 0 };
 

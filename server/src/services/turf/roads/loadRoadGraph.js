@@ -95,9 +95,26 @@ export const loadRoadGraph = (households, { padDeg = 0.05 } = {}) => {
     return cached;
   }
 
+  // CLIP to the doors' own neighbourhood. Artifacts are whole counties, but a campaign is a
+  // town — Hendry's 5,577 doors were pulling 891k nodes because its padded box touches two
+  // neighbouring counties, and building that graph is a single unbroken block of synchronous
+  // work that BullMQ's 30s job lock cannot survive on a Standard-2X dyno.
+  //
+  // The pad is deliberately the same generous ~5.5 km used to pick counties, NOT something
+  // tight: the detours this whole feature exists to find run kilometres out of their way (the
+  // Marco canal case is 2.86 km on foot for a 140 m gap), so clipping close to the doors would
+  // sever the very routes we are trying to measure. Keep a line if ANY vertex falls inside.
+  const clip = {
+    w: bounds.w - padDeg, e: bounds.e + padDeg,
+    s: bounds.s - padDeg, n: bounds.n + padDeg,
+  };
+  const inClip = ([lng, lat]) => lng >= clip.w && lng <= clip.e && lat >= clip.s && lat <= clip.n;
+
   const roads = [];
   for (const m of hits) {
-    roads.push(...decodeRoads(JSON.parse(readFileSync(join(DATA_DIR, m.file), 'utf8'))));
+    for (const road of decodeRoads(JSON.parse(readFileSync(join(DATA_DIR, m.file), 'utf8')))) {
+      if (road.coords.some(inClip)) roads.push(road);
+    }
   }
   if (!roads.length) return null;
 
