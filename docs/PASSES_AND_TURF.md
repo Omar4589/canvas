@@ -75,13 +75,6 @@ geography in Round 2 is a *new* book in the Round-2 pass, not the same object re
   area for one or two stray doors). Compactness is prioritized over even book sizes. A **Tight /
   Balanced / Compact** control sets how much book sizes may flex (Compact by default — the least
   driving). See Part 2 §B.1.
-
-  **Where we hold road data for the area, "close" means close ON FOOT.** Two houses either side of a
-  canal can be 150 m apart on the map and 3 km apart along the streets; measuring in straight lines
-  put them in the same book and sent a canvasser across a bridge for one door. With road data the cut
-  follows real streets instead, and so does the order the doors are walked. It needs no setting and
-  no drawing — where we have the data it is simply on, and where we don't the cut behaves exactly as
-  it always has. See Part 2 §B.3.
 - **Attribute** — one book per precinct / county / city / ZIP / district, etc. Before you cut, the
   page **previews each group's door count** so you can set a smart cap (oversized groups are split).
   The grouping values are the household's denormalized district/precinct/ZIP/county fields, derived
@@ -556,10 +549,6 @@ The route enqueues this as an async job and returns a `jobId` to poll
 
 ## B.1 The geometric cut (compactness-first)
 
-> **Metric note.** This section describes the STRAIGHT-LINE cut, which is what runs wherever we hold
-> no road data for the area. Where we do, the same capacity/tolerance semantics apply but distance is
-> measured along streets by a different algorithm — see **§B.3**.
-
 `balancedKMeans(items, maxDoors, { tolerance = 0.4 })`
 ([balancedKMeans.js](../server/src/services/turf/balancedKMeans.js)) makes books as **tight and walkable**
 as possible, treating `maxDoors` as an **approximate target**, not a hard equal cap. (The old
@@ -638,88 +627,6 @@ passes `params` straight through). Lower → tighter, more even books; higher �
 compactness. On a synthetic benchmark vs. the old cut, the farthest house from its book center dropped
 from ~5 km to ~1 km, and "misplaced" doors (a closer book exists) from ~100 to 0–7. The same engine
 powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalBooks`.
-
-## B.3 The road-aware cut (walking distance)
-
-**The problem.** Straight-line distance cannot see water, because water is the ABSENCE of something.
-On barrier-island geography this is not a rounding error. Measured on the real Collier voter file
-(`FL-22-Door-Walk-Universe-i360`, 25,942 households): **11% of door pairs within 150 m of each other
-are more than 400 m apart on foot**, median detour 1.32×, worst 32×. Concretely, Treasure Ct ↔
-Lighthouse Ct on Marco Island are **140 m apart and 2.86 km apart on foot**. The straight-line cut put
-pairs like that in one book and the printed route walked between them.
-
-**What was rejected first**, so nobody re-proposes it:
-
-- *Inferring barriers from the door cloud* (prune long edges from a neighbour graph, cluster the
-  connected components). Beautiful on invented geometry, dead on real plats: catching every Collier
-  canal needs a prune factor below **1.27**, while keeping Golden Gate Estates in one piece needs
-  above **1.52**. Empty intersection — a rural street link and a Marco canal crossing are
-  geometrically identical. It also collapses on targeted rounds, where thinning the doors drops the
-  canal signal from 1.50 to 0.75.
-- *Admin-drawn no-cross zones.* Mechanically fine; rejected because Marco Island has dozens of finger
-  canals and tracing them by hand is worse than the problem.
-- *A routing API (Mapbox Directions/Matrix).* Out on scale (the Matrix API caps at 25 coordinates
-  against millions of lookups per cut) and against the written ruling in
-  [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) that household coordinates do not go in a vendor
-  URL.
-
-**What ships.** A road network, held as committed data, with distance measured along it.
-
-| Piece | File | Job |
-|---|---|---|
-| Shapefile readers | [roads/shapefile.js](../server/src/services/turf/roads/shapefile.js) | Hand-rolled `.shp` (PolyLine) + `.dbf` readers — **no new dependency**. Filters to walkable `MTFCC` classes. |
-| Artifact format | [roads/artifact.js](../server/src/services/turf/roads/artifact.js) | Delta-encoded integer micro-degrees. Collier: 2.97 MB as plain floats → **1.15 MB**. A micro-degree is ~11 cm, finer than any geocode we hold. |
-| Graph | [roads/graph.js](../server/src/services/turf/roads/graph.js) | Joins disjoint TIGER segments on coincident coordinates (99.2% of Collier lands in one component), subdivides long spans every 25 m, and answers the one query the cut needs — `nearestSources`, ONE multi-source Dijkstra returning each node's M nearest book-centres. |
-| The cut | [roads/roadCut.js](../server/src/services/turf/roads/roadCut.js) | Capacity-balanced k-**medoids**. Not k-means: a mean AVERAGES coordinates, and the average of two doors on opposite banks sits in the water, which has no position on a road graph. Centres are real doors. |
-| Loader | [roads/loadRoadGraph.js](../server/src/services/turf/roads/loadRoadGraph.js) | Picks artifacts by **door bounding-box overlap** — never `Household.countyValue`, which comes from the import file and defaults to null. LRU-caches the built graph per county set. |
-
-**Source: TIGER/Line ROADS, committed per county** under `server/src/data/roads/{fips}.json`, built
-offline by [`fetchCountyRoads.js`](../server/src/utils/roadData/fetchCountyRoads.js) — the same
-fetch-offline-commit-the-artifact pattern as `utils/demoData/fetchDemoAddresses.js`. TIGER is a US
-federal government work, so it is **public domain**: no attribution, no share-alike. **Nothing hits
-the network at cut time**, so census.gov is not a subprocessor and DPA §6 is untouched. (OpenStreetMap
-maps these streets in more detail — measured, it finds ~2× the detours TIGER does on the same bounding
-box — but carries ODbL share-alike, which is why TIGER is the default.)
-
-**Default ON, opt-out, never fatal.** Dispatch is one line in
-[geometricCut.js](../server/src/services/turf/geometricCut.js): `opts.roadGraph ? roadCut : balancedKMeans`.
-`params.roadAware === false` turns it off. Every way it can fail to apply — no artifact covers the
-doors, too few doors near a street, an unreadable artifact — falls through to the straight-line cut
-with a reason recorded on **`Turf.params.road`** and returned by the job, so a book can always explain
-its own provenance. A campaign in a county with no artifact behaves **exactly** as it did before.
-
-**Walk order too.** [walkOrder.js](../server/src/services/turf/walkOrder.js) takes an optional
-`roadGraph` and injects road distance into the same bounded 2-opt. Fixing the grouping without the
-order would leave a book that correctly wraps a canal being *walked* back and forth across it.
-
-**Measured on the real Collier file** (65-door target):
-
-| | books | total spread | worst book | books >1.5 km | walk order |
-|---|---|---|---|---|---|
-| Marco Island — straight-line | 39 | 83.9 km | 7.16 km | 23/39 | 371.9 km |
-| Marco Island — road-aware | 41 | **55.4 km** | **5.64 km** | **12/41** | **238.3 km (−35.9%)** |
-| Naples — straight-line | 147 | 603.0 km | 15.39 km | 136/147 | 2,168 km |
-| Naples — road-aware | 151 | **337.5 km** | **7.86 km** | **97/151** | **1,383.9 km (−36.2%)** |
-
-**Cost, and the two traps that decide it.** Marco 0.5 s → 4.2 s; Naples 5.7 s → 23 s; all three
-counties at once (25,942 doors, 891k-node graph) 88.8 s. Both traps are the same mistake:
-
-1. **Never run an unbounded shortest-path sweep for a local question.** Refining one book's medoid or
-   building its distance matrix only needs its own neighbourhood. Bounding the search to ~4× the
-   book's diagonal took a Naples cut from **386 s to 23 s**, and a per-book distance matrix from
-   2,537 ms to **53 ms**, with zero unreachable pairs either way.
-2. **Never run one sweep per book-centre.** `nearestSources` labels every node with its M nearest
-   centres in a single pass; the per-centre version measured 521 s against 1.8 s on the same data.
-
-**Memory is the real ceiling at scale.** The worker runs with `--max-old-space-size=384`. Three
-Florida counties peak right at it; Los Angeles County alone peaks at ~525 MB building its graph.
-**Clipping road lines to the doors' bounding box before building is required before trusting this
-beyond a handful of counties**, and is not implemented yet.
-
-**Not road-aware:** `computeBoundary` / `computeTerritories` (book outlines are display-only, and a
-road-aware book that legitimately wraps a canal will draw a shape that spans water), and the
-`streetGroupedOrder` alternative in the printed packet — though the *comparison* between it and the
-route is now scored with the road metric. See [WALK_PACKETS.md](WALK_PACKETS.md).
 
 ## C. Lifecycle & routes
 

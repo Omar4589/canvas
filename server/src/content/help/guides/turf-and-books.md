@@ -16,8 +16,6 @@ A **book** is a walkable, ordered slice of households — one canvasser's turf f
 On the Turf Cutting page, pick how to slice the doors:
 
 - **Geometric** (the default) groups households into compact, walkable books by location. Your door count is an *approximate target*, not a hard cap — books flex so no house is stranded far from the rest. A **Tight / Balanced / Compact** control sets how much sizes may flex.
-
-  Where we hold street data for the area, "nearby" means **nearby on foot**, not as the crow flies. It matters most on water: two houses on opposite banks of a canal can look next door to each other on the map and be a couple of miles apart by road. There, books follow the streets — and so does the order the doors are listed in. There's nothing to turn on and nothing to draw. Where we don't have street data for an area, books are grouped by straight-line distance exactly as before.
 - **By attribute** makes one book per precinct, county, city, ZIP, or district. You'll see each group's door count first, so you can set a smart cap.
 - **Manual** lets you draw areas on the map — each area becomes a book, with live house and voter counts as you draw.
 

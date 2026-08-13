@@ -8,7 +8,6 @@
     "start": "node src/server.js",
     "test": "node --test",
     "test:int": "bash scripts/test-int.sh",
-    "roads:fetch": "node src/utils/roadData/fetchCountyRoads.js",
     "seed:admin": "node src/utils/seedAdmin.js",
     "seed:demo": "node src/utils/seedDemoOrg.js",
     "reconcile:counts": "node src/utils/reconcileCounts.js",

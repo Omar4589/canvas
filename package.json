@@ -21,7 +21,6 @@
     "purge:deleted-identities": "npm --prefix server run purge:deleted-identities --",
     "reconcile:counts": "npm --prefix server run reconcile:counts --",
     "audit:mobile-api": "node scripts/mobile-api-surface.mjs",
-    "roads:fetch": "npm --prefix server run roads:fetch --",
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
     "remirror:pass": "npm --prefix server run remirror:pass --",

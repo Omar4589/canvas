@@ -197,37 +197,6 @@ deleted for 180 days. Set it up now anyway, so you don't forget.
 
 ## One-off commands
 
-### Add road data for a new county (better books near water)
-
-**This is a developer-machine task, NOT a Run console one** — the script writes a file into the
-repo, and a Run console dyno's filesystem is thrown away when it exits. Run it locally, commit the
-result, deploy.
-
-```
-npm run roads:fetch -- 12021          # Collier County FL
-npm run roads:fetch -- 12021 --year 2024
-```
-
-It downloads that county's TIGER/Line ROADS layer from census.gov and writes
-`server/src/data/roads/<fips>.json`. **Commit that file** — it is the data the cut reads. Sizes are
-small: Collier 1.1 MB, Palm Beach 2.6 MB, Hendry 568 KB; Los Angeles County (about the worst in the
-country) would be ~14 MB.
-
-County FIPS codes are the 5-digit state+county code — Collier FL `12021`, Palm Beach FL `12099`,
-Hendry FL `12051`, Lee FL `12071`. Any list of "county FIPS codes" will give you the rest.
-
-**What happens without it:** nothing breaks. A campaign in a county we hold no artifact for cuts by
-straight-line distance exactly as it always has, and the job result records
-`road.reason = 'no-road-data-for-this-area'`. Adding a county later only changes **future** cuts —
-books already cut stay as they are until you re-cut.
-
-**Do not delete these files.** Removing one silently reverts that county to straight-line books with
-no error. They are permanent assets, not a cache.
-
-**Before adding many counties**, read the memory ceiling in
-[PASSES_AND_TURF.md §B.3](PASSES_AND_TURF.md): three Florida counties at once peak right at the
-worker's 384 MB heap cap, and road lines are not yet clipped to the doors' bounding box.
-
 ### Repair a round's door mirror after cutting a future round
 
 `Household.turfId`/`walkOrder` mirror the **latest cut anywhere in the campaign**, so cutting a
