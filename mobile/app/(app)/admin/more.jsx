@@ -192,7 +192,7 @@ export default function AdminMore() {
                   ? 'If your canvassers clock in with FbTime, an org admin can connect it on the web dashboard (Integrations) so doors-per-hour uses measured clock time. Reports label every figure measured or estimated.'
                   : fbtime.status === 'errored'
                     ? `Hours have stopped syncing${fbtime.lastSyncError ? ` (${fbtime.lastSyncError})` : ''}. Replace the API key on the web dashboard (Integrations).`
-                    : `Connected to ${fbtime.fbtimeOrgName || 'FbTime'} — ${fbtime.linkCount || 0} canvasser${fbtime.linkCount === 1 ? '' : 's'} linked${fbtime.lastSyncAt ? `, last synced ${new Date(fbtime.lastSyncAt).toLocaleString()}` : ''}. Key, hours figure and canvasser mapping are managed on the web dashboard (Integrations).`,
+                    : `Connected to ${fbtime.fbtimeOrgName || 'FbTime'} — ${fbtime.linkCount || 0} canvasser${fbtime.linkCount === 1 ? '' : 's'} linked${fbtime.lastSyncAt ? `, last synced ${new Date(fbtime.lastSyncAt).toLocaleString()}` : ''}. Key, hours figure and canvasser mapping are managed on the web dashboard (Integrations). Doorline shows daily totals only — exact clock-ins, clock-outs and breaks live on the person's timesheet in FbTime.`,
               })
             }
           />

@@ -56,6 +56,8 @@ automatically. For the rest, use the mapping table on the Integrations page. A p
   day falls back to the estimate.
 - A day someone was clocked in but knocked nothing still counts its hours — time driving between
   turfs is exactly what the estimate could never see.
+- Doorline shows **daily totals only**. For shift-level detail — exact clock-in and clock-out
+  times, breaks, who edited a shift — open the person's timesheet in FbTime itself.
 - Disconnecting reverts every report to estimates immediately and destroys the stored key. Your
   canvasser links are kept for a reconnect.
 

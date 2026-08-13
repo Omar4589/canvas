@@ -243,6 +243,11 @@ function StatusCard({ data, onChanged }) {
         </div>
       </dl>
 
+      <p className="mt-3 text-xs text-fg-muted">
+        Doorline stores only each person's daily totals. Shift-level detail — exact clock-ins,
+        clock-outs, and breaks — lives on their timesheet in FbTime.
+      </p>
+
       {data.lastSyncError && (
         <p className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
           {errored
