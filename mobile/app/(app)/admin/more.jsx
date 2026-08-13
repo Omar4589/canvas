@@ -64,6 +64,23 @@ export default function AdminMore() {
   });
   const openMockTotal = (campaignsQ.data?.campaigns || []).reduce((n, c) => n + (c.openMockFlags || 0), 0);
 
+  // FbTime integration status — READ-ONLY here by design. Pasting a 43-character
+  // API key and driving the two-roster mapping table are desktop work; this row
+  // answers "is it on, and is it healthy" and points at the web dashboard.
+  const fbtimeQ = useQuery({
+    queryKey: ['admin', 'integrations', 'fbtime'],
+    queryFn: () => api('/admin/integrations/fbtime'),
+    staleTime: 60 * 1000,
+  });
+  const fbtime = fbtimeQ.data;
+  const fbtimeSub = !fbtime
+    ? 'Manage on the web'
+    : !fbtime.connected
+      ? 'Not connected'
+      : fbtime.status === 'errored'
+        ? 'Needs attention'
+        : 'Connected — measured hours on';
+
   useEffect(() => {
     loadCurrentUser().then(setUser);
   }, []);
@@ -161,6 +178,24 @@ export default function AdminMore() {
           <InsetNavRow emphasis="menu" leading={<RowEmoji>📤</RowEmoji>} label="CSV import" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.import)} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>🗳️</RowEmoji>} label="Early voting" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>✂️</RowEmoji>} label="Turf cutting" sub="Drawing is web-only" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.turf)} />
+          <InsetNavRow
+            emphasis="menu"
+            leading={<RowEmoji>⏱️</RowEmoji>}
+            label="FbTime hours"
+            sub={fbtimeSub}
+            badge={fbtime?.status === 'errored' ? { text: '!' } : null}
+            hint="Explains where to manage this"
+            onPress={() =>
+              setWebNote({
+                title: 'FbTime hours',
+                body: !fbtime?.connected
+                  ? 'If your canvassers clock in with FbTime, an org admin can connect it on the web dashboard (Integrations) so doors-per-hour uses measured clock time. Reports label every figure measured or estimated.'
+                  : fbtime.status === 'errored'
+                    ? `Hours have stopped syncing${fbtime.lastSyncError ? ` (${fbtime.lastSyncError})` : ''}. Replace the API key on the web dashboard (Integrations).`
+                    : `Connected to ${fbtime.fbtimeOrgName || 'FbTime'} — ${fbtime.linkCount || 0} canvasser${fbtime.linkCount === 1 ? '' : 's'} linked${fbtime.lastSyncAt ? `, last synced ${new Date(fbtime.lastSyncAt).toLocaleString()}` : ''}. Key, hours figure and canvasser mapping are managed on the web dashboard (Integrations).`,
+              })
+            }
+          />
         </InsetGroup>
 
         <SectionHeader caption title="Support" />

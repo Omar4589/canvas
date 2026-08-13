@@ -33,7 +33,7 @@ export const metricHelp = {
   // under-reported pace roughly threefold over a multi-day range. It is the sum of each DAY's
   // working span.
   doorsPerHour:
-    "Doors knocked per hour actively on doors — each day's first knock to its last knock, added up. Time between days is not counted.",
+    "Doors knocked per hour actively on doors. If your organization has connected FbTime, this divides by measured clock time (marked with a dot); otherwise it is estimated from each day's first knock to its last knock, added up. Time between days is not counted.",
   coordinator:
     'The team this canvasser\'s doors count toward — whoever their coordinator is now. Change someone\'s coordinator and their earlier doors move with them; someone leaving moves nothing.',
   start: 'The first door this canvasser knocked in the range.',

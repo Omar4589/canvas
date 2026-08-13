@@ -310,6 +310,23 @@ create and estimate pass read-only, export-DELETE still 402),
 `test/accessLogCoverage.int.test.js` (the new URL shapes — including `/estimate` and `/types` —
 must log), `test/orgDelete.int.test.js` (bucket emptiness after org delete).
 
+## The hours-stamp rule (standing)
+
+**Any frozen artifact that carries an hours or per-hour figure must say inside the file when those
+hours were true and where they came from** — a visible `hours as of <generatedAt>` and a per-row
+hours source. Live surfaces always re-derive; a generated file deliberately stops moving, and with
+the FbTime integration ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md)) an hours figure can now
+change retroactively (a shift edited or deleted after the file was made). A stamp only on the row
+that produced the file leaves whoever opens it in six months holding a number with no provenance.
+
+Today exactly ONE artifact carries hours — the legacy leaderboard CSV,
+`GET /admin/reports/canvassers.csv` (not an Export Center type). It opens with two preamble rows
+(`Canvasser export, <range>, hours as of <ISO>`, then a blank line) before the header, and ends
+every row with an `Hours source` column (`Measured`/`Estimated`/`Mixed` — always present, so the
+file shape is constant whether or not an org connected FbTime). Import scripts that assumed row 1
+was the header must skip three rows. No Export Center type, statement, or client report carries
+hours; if one ever grows an hours column, it inherits this rule.
+
 ## Appendix — column contracts (per type)
 
 The header arrays in `exportBuilders.js` are the source of truth; this is the readable copy.

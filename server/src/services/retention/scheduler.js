@@ -7,6 +7,18 @@ import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformSt
 import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
 import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExports.js';
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
+import {
+  runFbtimeSync,
+  syncOrgHours,
+  FBTIME_RECENT_JOB,
+  FBTIME_DEEP_JOB,
+  FBTIME_ORG_JOB,
+  FBTIME_RECENT_CRON,
+  FBTIME_DEEP_CRON,
+  RECENT_WINDOW_DAYS,
+  DEEP_WINDOW_DAYS,
+} from '../fbtime/sync.js';
+import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { PLATFORM_METRICS } from '../../models/PlatformStats.js';
 
 // Registers the repeatable maintenance jobs on the worker dyno.
@@ -80,6 +92,12 @@ export const MAINTENANCE_JOBS = [
   { name: EXPORT_SWEEP_JOB, cron: EXPORT_SWEEP_CRON, label: 'The nightly export-artifact sweep' },
   // Same reasoning — hygiene, not the retention promise.
   { name: IMPORT_SWEEP_JOB, cron: IMPORT_SWEEP_CRON, label: 'The nightly stale-import sweep' },
+  // FbTime measured-hours sync (opt-in per org; a no-op sweep when nobody has
+  // connected, and fully dormant without CREDENTIAL_SEAL_KEY). Off the
+  // quarter-hour on purpose — :00/:15/:30/:45 is where the world's crons pile
+  // up; the deep run sits after the overnight ladder above ends at 05:53.
+  { name: FBTIME_RECENT_JOB, cron: FBTIME_RECENT_CRON, label: 'The FbTime hours sync (recent window)' },
+  { name: FBTIME_DEEP_JOB, cron: FBTIME_DEEP_CRON, label: 'The nightly FbTime deep re-pull' },
 ];
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
@@ -162,6 +180,42 @@ export async function processMaintenanceJob(job) {
     const res = await sweepStaleImportJobs();
     console.log(
       `[maintenance] ${IMPORT_SWEEP_JOB}: expired ${res.expired} stuck job(s), deleted ${res.rawDeleted} orphaned raw upload(s)`
+    );
+    return res;
+  }
+  if (job.name === FBTIME_RECENT_JOB) {
+    const res = await runFbtimeSync({ windowDays: RECENT_WINDOW_DAYS });
+    if (!res.dormant && res.orgs > 0) {
+      console.log(
+        `[maintenance] ${FBTIME_RECENT_JOB}: ${res.ok}/${res.orgs} org(s) synced` +
+        (res.errored ? `, ${res.errored} errored` : '')
+      );
+    }
+    return res;
+  }
+  if (job.name === FBTIME_DEEP_JOB) {
+    const res = await runFbtimeSync({ windowDays: DEEP_WINDOW_DAYS, recoverErrored: true });
+    if (!res.dormant && res.orgs > 0) {
+      console.log(
+        `[maintenance] ${FBTIME_DEEP_JOB}: ${res.ok}/${res.orgs} org(s) synced` +
+        (res.recovered ? `, ${res.recovered} recovered` : '') +
+        (res.errored ? `, ${res.errored} errored` : '')
+      );
+    }
+    return res;
+  }
+  if (job.name === FBTIME_ORG_JOB) {
+    // One-off from the connect route: deep window so a fresh connection shows
+    // a season of measured hours in seconds, not at the next cron tick.
+    const connection = await FbTimeConnection.findOne({
+      organizationId: job.data?.organizationId,
+      status: 'connected',
+    });
+    if (!connection) return { skipped: true }; // disconnected before we ran — not an error
+    const res = await syncOrgHours(connection, { windowDays: DEEP_WINDOW_DAYS });
+    console.log(
+      `[maintenance] ${FBTIME_ORG_JOB}: org ${job.data.organizationId} — ` +
+      `${res.pulled} day-row(s), ${res.deleted} removed`
     );
     return res;
   }

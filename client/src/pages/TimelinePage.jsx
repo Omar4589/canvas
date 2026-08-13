@@ -221,17 +221,35 @@ export default function TimelinePage() {
     let rawSurveys = 0;
     let rawLit = 0;
     let hours = 0;
+    // Measured hours (FbTime), applied ALL-OR-NOTHING over the rows in view: the
+    // tile divides by measured time only when every included canvasser is fully
+    // measured — one estimated contributor and the whole tile stays span-based.
+    // Computed here rather than from the server's measuredKpi because the crew
+    // filter changes who "included" means; the per-row fields are server-computed,
+    // this only sums them (never re-derives — see docs/METRICS.md).
+    let measuredHours = 0;
+    let allMeasured = filteredRows.length > 0;
     for (const r of filteredRows) {
       rawSurveys += r.daySurveys || 0;
       rawLit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
+      if (r.hoursSource === 'measured' && r.measuredHoursOnDoors != null) {
+        measuredHours += r.measuredHoursOnDoors;
+      } else {
+        allMeasured = false;
+      }
     }
     if (surveys == null) surveys = rawSurveys;
     if (lit == null) lit = rawLit;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's per-person time on doors, not a billing figure.
     const rawDoors = filteredRows.reduce((n, r) => n + (r.dayKnocks || 0), 0);
-    const doorsPerHour = hours > 0 ? rawDoors / hours : null;
+    const hoursMeasured = allMeasured && measuredHours > 0;
+    const doorsPerHour = hoursMeasured
+      ? rawDoors / measuredHours
+      : hours > 0
+        ? rawDoors / hours
+        : null;
     // The invoice figure when this campaign bills for restricted homes. Deliberately NOT fed
     // into connPct above — a locked gate answered nobody, so it can't sit in a rate denominator.
     return {
@@ -239,6 +257,7 @@ export default function TimelinePage() {
       surveys,
       connPct,
       doorsPerHour,
+      hoursMeasured,
       billableDoors: data.billableDoors ?? doors,
       restrictedDoors: data.restrictedDoors ?? 0,
       billRestricted: Boolean(data.billRestrictedDoors),
@@ -447,7 +466,7 @@ export default function TimelinePage() {
             <StatCard
               label="Doors / hour"
               value={kpis.doorsPerHour != null ? kpis.doorsPerHour.toFixed(1) : '—'}
-              hint="While on doors"
+              hint={kpis.hoursMeasured ? 'Measured hours (FbTime)' : 'While on doors · estimated'}
             />
             <StatCard
               label="Knocking"

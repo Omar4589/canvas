@@ -30,6 +30,7 @@ export const ORG_NAV = [
   { to: '/voters', label: 'Voters' },
   { to: '/users', label: 'Users' },
   { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },
+  { to: '/integrations', label: 'Integrations' },
   { to: '/billing', label: 'Billing' },
 ];
 

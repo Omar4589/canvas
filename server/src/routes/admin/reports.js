@@ -37,6 +37,12 @@ import {
   NON_KNOCKED_BUCKETS,
 } from '../../services/reports/aggregations.js';
 import { billRestrictedFor, resolveBillRestricted } from '../../services/reports/billRestricted.js';
+import {
+  loadMeasuredHours,
+  foldUserHours,
+  aggregateSource,
+  spanHours,
+} from '../../services/reports/hoursSource.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
@@ -944,16 +950,11 @@ router.get('/canvassers', async (req, res, next) => {
             coordinatorIds: { $addToSet: { $ifNull: ['$coordinatorId', null] } },
           },
         },
-        {
-          $group: {
-            _id: '$_id.userId',
-            firstActivityAt: { $min: '$first' },
-            lastActivityAt: { $max: '$last' },
-            hoursOnDoors: { $sum: { $divide: [{ $subtract: ['$last', '$first'] }, 3600000] } },
-            daysActive: { $sum: 1 },
-            coordinatorIdSets: { $addToSet: '$coordinatorIds' },
-          },
-        },
+        // Per-DAY rows now leave the pipeline; the per-user fold happens in JS via
+        // services/reports/hoursSource.js, because each day's denominator may come
+        // from a different source — the measured FbTime row where one exists, the
+        // knock span where none does — and that choice cannot be expressed in a
+        // $group. The sum is still a sum of per-DAY spans, never a calendar span.
       ]),
     ]);
 
@@ -1006,22 +1007,41 @@ router.get('/canvassers', async (req, res, next) => {
         u.lastActivityAt = row.lastAt;
       }
     }
+    // Fold the per-day rows per user, merging in measured hours where the org
+    // has connected FbTime. from/to are the same day strings the $match window
+    // was built from, so the measured overlay covers exactly the report range.
+    const measured = await loadMeasuredHours({
+      organizationId: activeOrgId(req),
+      from: req.query.from ? String(req.query.from).slice(0, 10) : null,
+      to: req.query.to ? String(req.query.to).slice(0, 10) : null,
+      tz: tzOf(req),
+    });
+
+    const dayRowsByUser = new Map();
     const coordSetsByUser = new Map();
     for (const row of rangeAgg) {
-      const u = ensure(row._id);
-      u.firstActivityAt = row.firstActivityAt;
-      u.hoursOnDoors = row.hoursOnDoors || 0;
-      u.daysActive = row.daysActive || 0;
-      if (
-        row.lastActivityAt &&
-        (!u.lastActivityAt || row.lastActivityAt > u.lastActivityAt)
-      ) {
-        u.lastActivityAt = row.lastActivityAt;
+      const uid = String(row._id.userId);
+      if (!dayRowsByUser.has(uid)) dayRowsByUser.set(uid, []);
+      dayRowsByUser.get(uid).push({
+        day: row._id.day,
+        spanHours: spanHours(row.first, row.last),
+      });
+
+      const u = ensure(row._id.userId);
+      if (!u.firstActivityAt || row.first < u.firstActivityAt) u.firstActivityAt = row.first;
+      if (row.last && (!u.lastActivityAt || row.last > u.lastActivityAt)) {
+        u.lastActivityAt = row.last;
       }
-      coordSetsByUser.set(
-        String(row._id),
-        new Set((row.coordinatorIdSets || []).flat().map((c) => (c ? String(c) : null)))
-      );
+      u.daysActive += 1; // knock-days, unchanged in meaning
+
+      if (!coordSetsByUser.has(uid)) coordSetsByUser.set(uid, new Set());
+      const set = coordSetsByUser.get(uid);
+      for (const c of row.coordinatorIds || []) set.add(c ? String(c) : null);
+    }
+
+    const foldByUser = new Map();
+    for (const [uid, perDayRows] of dayRowsByUser) {
+      foldByUser.set(uid, foldUserHours({ userId: uid, perDayRows, measured }));
     }
 
     const [userMap, coordLabels] = await Promise.all([
@@ -1035,6 +1055,7 @@ router.get('/canvassers', async (req, res, next) => {
     const rows = Array.from(byUser.values())
       .map((u) => {
         const info = userMap.get(u.userId);
+        const fold = foldByUser.get(u.userId);
         // Billable knocks = this canvasser's distinct (household, pass) door interactions.
         // surveyKnocks/litDropped are mutually exclusive by campaign type, so they're the
         // completion-action numerator for the connection rate.
@@ -1071,13 +1092,28 @@ router.get('/canvassers', async (req, res, next) => {
           }),
           firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
-          // Sum of per-DAY working spans — the same method the timeline and the CSV use, so the
-          // three surfaces finally agree. Clients must NOT re-derive this from first/last: that is
-          // a calendar span, and it under-reports pace by ~3x over a multi-day range.
-          hoursOnDoors: Math.round((u.hoursOnDoors || 0) * 100) / 100,
+          // Sum of per-DAY denominators — measured FbTime hours where the org has
+          // connected and that day has a usable row, the knock span otherwise. Same
+          // method as the timeline and the CSV, so the three surfaces agree. Clients
+          // must NOT re-derive this from first/last: that is a calendar span, and it
+          // under-reports pace by ~3x over a multi-day range.
+          hoursOnDoors: fold ? fold.hoursOnDoors : 0,
           daysActive: u.daysActive || 0,
           doorsPerHour:
-            u.hoursOnDoors > 0 ? Math.round((knocks / u.hoursOnDoors) * 100) / 100 : 0,
+            fold && fold.hoursOnDoors > 0
+              ? Math.round((knocks / fold.hoursOnDoors) * 100) / 100
+              : 0,
+          // Provenance: 'measured' | 'estimated' | 'mixed' (mixed only ever at this
+          // per-person grain), plus the provider's trust flags rolled up so a UI can
+          // say WHY a measured number moved ("includes an open shift").
+          hoursSource: fold ? fold.hoursSource : 'estimated',
+          hoursFlags: fold
+            ? {
+                hasOpenShift: fold.hasOpenShift,
+                hasStaleShift: fold.hasStaleShift,
+                hasManualEntry: fold.hasManualEntry,
+              }
+            : { hasOpenShift: false, hasStaleShift: false, hasManualEntry: false },
         };
       })
       .sort((a, b) => {
@@ -2372,6 +2408,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     // Per-(user, bucket) tally → per-canvasser rows.
     const byUser = new Map();
     const activeHours = new Set(); // single-day only
+    // Per-(user, DAY) span rows, kept alongside the fold above so the measured-hours
+    // overlay can be merged per day — its grain — without touching the derived sums.
+    const dayRowsByUser = new Map();
     for (const r of bucketAgg) {
       const uid = String(r._id.userId);
       if (!byUser.has(uid)) {
@@ -2415,6 +2454,14 @@ router.get('/canvasser-timeline', async (req, res, next) => {
         // is exactly the canvasser-summary endpoint's "sum of per-day active spans" method.
         // Restricted marks are in the bucket, so their time counts toward shift hours (by design).
         row.hoursOnDoors += (r.last - r.first) / 3600000;
+        // r._id.bucket is the DAY even in week mode (folding to Mondays happens above,
+        // on the key — not in the aggregation), which is exactly the grain measured
+        // hours arrive at.
+        if (!dayRowsByUser.has(uid)) dayRowsByUser.set(uid, []);
+        dayRowsByUser.get(uid).push({
+          day: r._id.bucket,
+          spanHours: (r.last - r.first) / 3600000,
+        });
       }
       row.dayKnocks += r.knocks;
       row.daySurveys += r.surveys;
@@ -2431,9 +2478,25 @@ router.get('/canvasser-timeline', async (req, res, next) => {
     // Single day: buckets are hours, so the active span is (overall last - first) —
     // summing per-hour spans would drop the gaps between active hours.
     if (singleDay) {
-      for (const row of byUser.values()) {
+      for (const [uid, row] of byUser) {
         if (row.first && row.last) row.hoursOnDoors = (row.last - row.first) / 3600000;
+        dayRowsByUser.set(uid, [{ day: from, spanHours: row.hoursOnDoors }]);
       }
+    }
+
+    // The measured-hours overlay for the window. Totals mode aggregates an
+    // unbounded window while from/to still hold a date, so it loads unbounded
+    // too — the overlay must cover every day the span rows cover, or real
+    // measured days would read as estimated for a reason nobody could see.
+    const measured = await loadMeasuredHours({
+      organizationId: orgId,
+      from: totalsMode ? null : from,
+      to: totalsMode ? null : to,
+      tz,
+    });
+    const foldByUser = new Map();
+    for (const [uid, perDayRows] of dayRowsByUser) {
+      foldByUser.set(uid, foldUserHours({ userId: uid, perDayRows, measured }));
     }
 
     // Contiguous active-hour window (min..max) so the grid has no gaps; [] when no activity.
@@ -2508,10 +2571,25 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           coordinatorName: coordinatorName ?? null,
           firstActivityAt: row.first,
           lastActivityAt: row.last,
+          // DELIBERATELY still the derived span, not the merged figure. Both clients
+          // sum this field across rows into the KPI tile; replacing its value would
+          // make ALREADY-SHIPPED builds silently blend measured and estimated hours
+          // in one rate — the exact thing the contract forbids. Measured arrives
+          // additively below; new clients prefer it, old clients keep exactly the
+          // number they had.
           hoursOnDoors: Math.round(rawHours * 100) / 100,
           // Divide by the RAW hours and round only the quotient (matches the canvasser
           // summary endpoint). One-knock windows have a zero span: 0, never Infinity.
           doorsPerHour: rawHours > 0 ? Math.round((row.dayKnocks / rawHours) * 100) / 100 : 0,
+          // The merged per-person figure (measured days where usable, span days
+          // otherwise) and its provenance. null when the org has no live connection.
+          measuredHoursOnDoors: measured.enabled ? (foldByUser.get(uid)?.hoursOnDoors ?? null) : null,
+          hoursSource: foldByUser.get(uid)?.hoursSource ?? 'estimated',
+          hoursFlags: {
+            hasOpenShift: foldByUser.get(uid)?.hasOpenShift ?? false,
+            hasStaleShift: foldByUser.get(uid)?.hasStaleShift ?? false,
+            hasManualEntry: foldByUser.get(uid)?.hasManualEntry ?? false,
+          },
           connectionRate: connectionRate({
             knocks: row.dayKnocks,
             surveyedKnocks: row.daySurveys,
@@ -2566,6 +2644,21 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       tz,
       tzAbbrev: tzAbbrev(tz),
       canvassers,
+      // THE AGGREGATE RULE, decided server-side (the billRestrictedDoors echo
+      // pattern — the server says which label applies, clients render it):
+      // hoursOnDoors is non-null ONLY when every canvasser in the window is
+      // fully measured; then it is the sum of their measured hours and the KPI
+      // tile may divide by it. Anything less and it is null + 'estimated' —
+      // the tile keeps the derived sum it computes today. A rate that mixes
+      // measured and estimated contributors is never offered.
+      measuredKpi: (() => {
+        const folds = [...foldByUser.values()];
+        if (!measured.enabled || !folds.length || aggregateSource(folds) !== 'measured') {
+          return { hoursOnDoors: null, hoursSource: 'estimated' };
+        }
+        const total = folds.reduce((n, f) => n + f.hoursOnDoors, 0);
+        return { hoursOnDoors: Math.round(total * 100) / 100, hoursSource: 'measured' };
+      })(),
       grandKnocks,
       grandSurveys,
       billableKnocks,
@@ -2939,17 +3032,18 @@ router.get('/canvassers.csv', async (req, res, next) => {
             last: { $max: '$timestamp' },
           },
         },
-        {
-          $group: {
-            _id: '$_id.userId',
-            hoursOnDoors: {
-              $sum: { $divide: [{ $subtract: ['$last', '$first'] }, 3600000] },
-            },
-            daysActive: { $sum: 1 },
-          },
-        },
+        // Per-DAY rows out; the per-user fold happens in JS so each day can take
+        // its denominator from the measured FbTime row where one exists (see
+        // services/reports/hoursSource.js — same merge as /canvassers).
       ]),
     ]);
+
+    const measured = await loadMeasuredHours({
+      organizationId: activeOrgId(req),
+      from: req.query.from ? String(req.query.from).slice(0, 10) : null,
+      to: req.query.to ? String(req.query.to).slice(0, 10) : null,
+      tz,
+    });
 
     const byUser = new Map();
     const ensure = (id) => {
@@ -2986,10 +3080,18 @@ router.get('/canvassers.csv', async (req, res, next) => {
       if (!u.firstActivityAt || r.firstAt < u.firstActivityAt) u.firstActivityAt = r.firstAt;
       if (!u.lastActivityAt || r.lastAt > u.lastActivityAt) u.lastActivityAt = r.lastAt;
     }
+    const csvDayRows = new Map();
     for (const r of hoursAgg) {
-      const u = ensure(r._id);
-      u.hoursOnDoors = r.hoursOnDoors;
-      u.daysActive = r.daysActive;
+      const uid = String(r._id.userId);
+      if (!csvDayRows.has(uid)) csvDayRows.set(uid, []);
+      csvDayRows.get(uid).push({ day: r._id.day, spanHours: spanHours(r.first, r.last) });
+      ensure(r._id.userId).daysActive += 1; // knock-days, unchanged in meaning
+    }
+    for (const [uid, perDayRows] of csvDayRows) {
+      const fold = foldUserHours({ userId: uid, perDayRows, measured });
+      const u = ensure(uid);
+      u.hoursOnDoors = fold.hoursOnDoors;
+      u.hoursSource = fold.hoursSource;
     }
 
     const userMap = await hydrateCanvassers(Array.from(byUser.keys()), activeOrgId(req), {
@@ -3001,6 +3103,10 @@ router.get('/canvassers.csv', async (req, res, next) => {
       'Knocks', 'Surveys taken', 'Lit drops', 'Not home', 'Wrong address',
       'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys taken/hr',
       'First activity', 'Last activity', 'Refused', 'Restricted', 'No soliciting',
+      // APPENDED LAST so existing column positions never shift under anyone's
+      // saved import script. Present for every org — 'Estimated' when FbTime was
+      // never connected — because a conditional column is a different file shape.
+      'Hours source',
     ];
     const enriched = Array.from(byUser.values())
       .map((u) => {
@@ -3058,14 +3164,30 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.refused,
       u.restricted,
       u.noSoliciting,
+      u.hoursSource === 'measured' ? 'Measured' : u.hoursSource === 'mixed' ? 'Mixed' : 'Estimated',
     ]);
+
+    // The in-file stamp (owner-ruled, snapshot-and-stamp): a frozen artifact must
+    // say ON ITS FACE when its hours were true — the person who opens this file in
+    // six months has no database row to consult. Two preamble rows above the
+    // header (the billing statement CSV's precedent), then a blank line. Anyone's
+    // import script that assumed row 1 was the header skips 3 rows now; the
+    // per-row 'Hours source' column is appended last so nothing else moved.
+    const rangeLabel =
+      req.query.from || req.query.to
+        ? `${String(req.query.from || '').slice(0, 10) || 'start'} to ${String(req.query.to || '').slice(0, 10) || 'today'}`
+        : 'all time';
+    const preamble = [
+      ['Canvasser export', rangeLabel, `hours as of ${new Date().toISOString()}`].map(csvCell).join(','),
+      '',
+    ].join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="canvassers-${new Date().toISOString().slice(0, 10)}.csv"`
     );
-    res.send(toCsv(headers, rows));
+    res.send(`${preamble}\n${toCsv(headers, rows)}`);
   } catch (err) {
     next(err);
   }
@@ -3241,17 +3363,18 @@ router.get('/team-averages', async (req, res, next) => {
             last: { $max: '$timestamp' },
           },
         },
-        {
-          $group: {
-            _id: '$_id.userId',
-            hoursOnDoors: {
-              $sum: { $divide: [{ $subtract: ['$last', '$first'] }, 3600000] },
-            },
-            daysActive: { $sum: 1 },
-          },
-        },
+        // Per-DAY rows out — see services/reports/hoursSource.js. The averages
+        // below apply the aggregate all-or-nothing rule: measured only when
+        // EVERY canvasser is fully measured, span-based for everyone otherwise.
       ]),
     ]);
+
+    const measured = await loadMeasuredHours({
+      organizationId: activeOrgId(req),
+      from: req.query.from ? String(req.query.from).slice(0, 10) : null,
+      to: req.query.to ? String(req.query.to).slice(0, 10) : null,
+      tz,
+    });
 
     const blank = () => ({ homesKnocked: 0, completionKnocks: 0, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
     const byUser = new Map();
@@ -3263,12 +3386,29 @@ router.get('/team-averages', async (req, res, next) => {
       if (!byUser.has(k)) byUser.set(k, blank());
       byUser.get(k).surveysSubmitted = r.surveysSubmitted;
     }
+    const taDayRows = new Map();
     for (const r of perUserHours) {
-      const k = String(r._id);
+      const k = String(r._id.userId);
       if (!byUser.has(k)) byUser.set(k, blank());
-      const u = byUser.get(k);
-      u.hoursOnDoors = r.hoursOnDoors;
-      u.daysActive = r.daysActive;
+      byUser.get(k).daysActive += 1; // knock-days, unchanged in meaning
+      if (!taDayRows.has(k)) taDayRows.set(k, []);
+      taDayRows.get(k).push({ day: r._id.day, spanHours: spanHours(r.first, r.last) });
+    }
+
+    // THE AGGREGATE RULE: the team average divides by measured hours only when
+    // every canvasser with hours is fully measured. One estimated (or mixed)
+    // contributor and the whole average stays span-based — a mean of two
+    // different instruments is a number nobody can defend to a client.
+    const taFolds = new Map(
+      [...taDayRows].map(([uid, perDayRows]) => [uid, foldUserHours({ userId: uid, perDayRows, measured })])
+    );
+    const teamSource = measured.enabled && taFolds.size ? aggregateSource(taFolds.values()) : 'estimated';
+    for (const [uid, fold] of taFolds) {
+      const u = byUser.get(uid);
+      u.hoursOnDoors =
+        teamSource === 'measured'
+          ? fold.hoursOnDoors
+          : (taDayRows.get(uid) || []).reduce((n, d) => n + d.spanHours, 0);
     }
 
     const users = Array.from(byUser.values());
@@ -3291,6 +3431,9 @@ router.get('/team-averages', async (req, res, next) => {
 
     res.json({
       canvasserCount: n,
+      // 'measured' only when every canvasser's hours are (the all-or-nothing
+      // rule above); clients label the averages accordingly.
+      hoursSource: teamSource,
       avg: {
         homesKnocked: Math.round(homesKnocked * 10) / 10,
         surveysSubmitted: Math.round(surveysSubmitted * 10) / 10,
@@ -3411,14 +3554,27 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     const surveysSubmitted = surveysCount;
 
-    // Per-day shift sum
+    // Per-day denominators: the measured FbTime row where the org has connected
+    // and the day has a usable one, the shift span otherwise (one fold for the
+    // KPI, per-day sources for the row lists below — services/reports/hoursSource.js).
     const dailySorted = [...dailyAgg].sort((a, b) => (a._id < b._id ? -1 : 1));
-    let hoursOnDoors = 0;
-    for (const d of dailySorted) {
-      const ms = new Date(d.last) - new Date(d.first);
-      hoursOnDoors += ms / 3600000;
-    }
+    const measured = await loadMeasuredHours({
+      organizationId: orgId,
+      from: req.query.from ? String(req.query.from).slice(0, 10) : null,
+      to: req.query.to ? String(req.query.to).slice(0, 10) : null,
+      tz,
+    });
+    const fold = foldUserHours({
+      userId,
+      perDayRows: dailySorted.map((d) => ({ day: d._id, spanHours: spanHours(d.first, d.last) })),
+      measured,
+    });
+    const hoursOnDoors = fold.hoursOnDoors;
     const daysActive = dailySorted.length;
+    const measuredDayOf = (day) => {
+      const m = measured.enabled ? measured.byUserDay.get(`${String(userId)}|${day}`) : null;
+      return m && m.hours > 0 && !m.isStale ? m : null;
+    };
 
     // Best day (by homesKnocked)
     let bestDay = null;
@@ -3452,13 +3608,20 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
     const dowBuckets = Array.from({ length: 7 }, (_, i) => ({ dow: i, count: 0 }));
     for (const r of dowAgg) dowBuckets[r._id - 1].count = r.count;
 
-    const lastSevenDays = dailySorted.slice(-7).map((d) => ({
-      date: d._id,
-      homesKnocked: d.homesKnocked,
-      hoursOnDoors: Math.round(((new Date(d.last) - new Date(d.first)) / 3600000) * 100) / 100,
-      firstActivityAt: d.first,
-      lastActivityAt: d.last,
-    }));
+    const lastSevenDays = dailySorted.slice(-7).map((d) => {
+      const m = measuredDayOf(d._id);
+      return {
+        date: d._id,
+        homesKnocked: d.homesKnocked,
+        hoursOnDoors: m
+          ? Math.round(m.hours * 100) / 100
+          : Math.round(((new Date(d.last) - new Date(d.first)) / 3600000) * 100) / 100,
+        // Exactly one source per DAY — 'mixed' exists only at range grain.
+        hoursSource: m ? 'measured' : 'estimated',
+        firstActivityAt: d.first,
+        lastActivityAt: d.last,
+      };
+    });
 
     const qual = qualityAgg[0] || {
       total: 0,
@@ -3542,6 +3705,14 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         doorsPerHour: Math.round(doorsPerHour * 100) / 100,
         surveysPerHour: Math.round(surveysPerHour * 100) / 100,
         avgMinutesPerDoor: Math.round(avgMinutesPerDoor * 10) / 10,
+        // Provenance for every hours-derived figure above (all four divide by the
+        // same merged hoursOnDoors, so one label covers them).
+        hoursSource: fold.hoursSource,
+        hoursFlags: {
+          hasOpenShift: fold.hasOpenShift,
+          hasStaleShift: fold.hasStaleShift,
+          hasManualEntry: fold.hasManualEntry,
+        },
       },
       highlights: {
         bestDay,
@@ -3645,10 +3816,22 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
       d.surveysSubmitted = r.surveysSubmitted;
     }
 
+    // The measured overlay — each day takes exactly one source ('mixed' exists
+    // only at range grain; a single day is measured or it is not).
+    const measured = await loadMeasuredHours({
+      organizationId: activeOrgId(req),
+      from: req.query.from ? String(req.query.from).slice(0, 10) : null,
+      to: req.query.to ? String(req.query.to).slice(0, 10) : null,
+      tz,
+    });
+
     const rows = Array.from(byDay.values())
       .map((d) => {
-        const hoursOnDoors =
-          d.firstActivityAt && d.lastActivityAt
+        const m = measured.enabled ? measured.byUserDay.get(`${String(userId)}|${d.date}`) : null;
+        const usable = m && m.hours > 0 && !m.isStale;
+        const hoursOnDoors = usable
+          ? m.hours
+          : d.firstActivityAt && d.lastActivityAt
             ? (new Date(d.lastActivityAt) - new Date(d.firstActivityAt)) / 3600000
             : 0;
         const connectionRatePct =
@@ -3658,6 +3841,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
         return {
           ...d,
           hoursOnDoors: Math.round(hoursOnDoors * 100) / 100,
+          hoursSource: usable ? 'measured' : 'estimated',
           connectionRatePct: Math.round(connectionRatePct * 10) / 10,
           doorsPerHour:
             hoursOnDoors > 0 ? Math.round((d.homesKnocked / hoursOnDoors) * 100) / 100 : 0,

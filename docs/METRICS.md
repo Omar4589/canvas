@@ -1113,6 +1113,25 @@ own hours that way and divided a week's doors by a week of wall-clock, under-rep
 (4.9 doors/hr where the truth was 13.7). `/canvassers` now returns `hoursOnDoors` and `doorsPerHour`
 computed the same way the timeline and the CSV do; **clients must not re-derive them.**
 
+**Measured hours (FbTime), when an org opts in.** Each per-day denominator may come from the
+connected FbTime clock instead of the knock span — the merge lives in ONE place,
+[`services/reports/hoursSource.js`](../server/src/services/reports/hoursSource.js), and routes
+never read the connection or the hours cache directly (the `billRestricted.js`
+resolver-not-direct-read pattern). The rules, in full in
+[FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md):
+
+- Per user-day: the measured row wins when usable (`hours > 0`, not a stale forgotten-clock-out);
+  otherwise the span. Absence is never zero.
+- Every figure carries `hoursSource`: `measured` | `estimated` | `mixed` — mixed only at the
+  labeled per-person grain.
+- **Aggregates are all-or-nothing**: a team/campaign rate is measured only when EVERY contributor
+  is fully measured, otherwise it is the span figure for everyone, labeled estimated. One blended
+  rate is never presented.
+- The timeline's per-row `hoursOnDoors` deliberately stays the derived span (shipped builds sum it
+  into the KPI tile); the merged figure rides additively as `measuredHoursOnDoors`, and the
+  "clients must not re-derive" rule extends to `hoursSource` — clients compose these fields,
+  never recompute them.
+
 - **A knock is a historical fact. Losing a person never moves a number.** Deactivating a canvasser,
   removing them from a campaign, removing them from the org, or deleting their account **does not
   change a single count** — not the campaign totals, not the leaderboard, not the invoice. Whether

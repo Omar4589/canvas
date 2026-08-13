@@ -96,7 +96,21 @@ export default function CanvasserCard({
         </View>
         <Text style={styles.metaSmall}>
           {row.contactRate}% contact
-          {row.doorsPerHour > 0 ? ` · ${row.hoursOnDoors}h · ${row.doorsPerHour.toFixed(1)}/hr` : ''}
+          {/* Prefer measured hours where the server sent them: timeline rows keep the
+              derived span in hoursOnDoors (old builds sum it) and ship the merged
+              figure additively as measuredHoursOnDoors; leaderboard rows arrive
+              already merged. The dot marks measured/partly-measured time. */}
+          {(() => {
+            const hours =
+              row.measuredHoursOnDoors != null && row.measuredHoursOnDoors > 0
+                ? row.measuredHoursOnDoors
+                : row.hoursOnDoors;
+            const rate = hours > 0 ? (row.dayKnocks || 0) / hours : row.doorsPerHour || 0;
+            if (!(rate > 0)) return '';
+            const mark =
+              row.hoursSource === 'measured' || row.hoursSource === 'mixed' ? '•' : '';
+            return ` · ${Math.round(hours * 100) / 100}h${mark} · ${rate.toFixed(1)}/hr`;
+          })()}
         </Text>
         {shift ? <Text style={styles.shift}>🕘 {shift}</Text> : null}
       </View>

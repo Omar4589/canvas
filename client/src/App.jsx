@@ -33,6 +33,7 @@ const HelpPage = lazy(() => import('./pages/HelpPage.jsx'));
 const HelpArticlePage = lazy(() => import('./pages/HelpArticlePage.jsx'));
 const DuplicateSurveysPage = lazy(() => import('./pages/DuplicateSurveysPage.jsx'));
 const BillingPage = lazy(() => import('./pages/BillingPage.jsx'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
 const UsersPage = lazy(() => import('./pages/UsersPage.jsx'));
@@ -200,6 +201,9 @@ export default function App() {
             <Route path="/surveys/:surveyId/edit" element={<SurveyEditorPage mode="edit" />} />
             <Route path="/tags" element={<TagsPage />} />
             <Route path="/admin/duplicate-surveys" element={<DuplicateSurveysPage />} />
+            {/* Org-admin only (no billingAccess needed): connecting an outside tool is an
+                administration act, not a billing one. */}
+            <Route path="/integrations" element={<IntegrationsPage />} />
             {/* Billing is further gated to admins granted billingAccess. */}
             <Route element={<RoleGate require="billing" />}>
               <Route path="/billing" element={<BillingPage />} />

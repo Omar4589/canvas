@@ -57,8 +57,23 @@ function sortValue(row, key) {
   if (key === 'firstActivityAt' || key === 'lastActivityAt') {
     return row[key] ? new Date(row[key]).getTime() : null;
   }
-  if (key === 'doorsPerHour') return row.doorsPerHour > 0 ? row.doorsPerHour : null;
+  if (key === 'doorsPerHour') {
+    const v = mergedDoorsPerHour(row);
+    return v > 0 ? v : null;
+  }
   return row[key] ?? null;
+}
+
+// The per-row rate, preferring measured hours where the server sent them.
+// Timeline rows keep the derived figure in `doorsPerHour` (old builds sum it)
+// and ship the merged hours additively as `measuredHoursOnDoors`; leaderboard
+// rows arrive already merged. This composes server figures — never re-derives
+// a span (docs/METRICS.md).
+function mergedDoorsPerHour(row) {
+  if (row.measuredHoursOnDoors != null && row.measuredHoursOnDoors > 0 && row.dayKnocks != null) {
+    return row.dayKnocks / row.measuredHoursOnDoors;
+  }
+  return row.doorsPerHour || 0;
 }
 
 export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = false, onRowClick }) {
@@ -163,7 +178,26 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
           </td>
           <td className="px-3 py-2 text-right text-fg-muted">{ratePct(r.contactRate)}</td>
           <td className="px-3 py-2 text-right text-fg">
-            {r.doorsPerHour > 0 ? r.doorsPerHour.toFixed(1) : '—'}
+            {mergedDoorsPerHour(r) > 0 ? (
+              <span
+                title={
+                  r.hoursSource === 'measured'
+                    ? 'Measured hours (FbTime)'
+                    : r.hoursSource === 'mixed'
+                      ? 'Partly measured hours (FbTime)'
+                      : 'Estimated from knock times'
+                }
+              >
+                {mergedDoorsPerHour(r).toFixed(1)}
+                {(r.hoursSource === 'measured' || r.hoursSource === 'mixed') && (
+                  <span aria-hidden className="ml-0.5 text-success-fg">
+                    •
+                  </span>
+                )}
+              </span>
+            ) : (
+              '—'
+            )}
           </td>
           <td className="px-3 py-2 text-right text-fg-muted">
             {(r.dayNoSoliciting || 0).toLocaleString()}

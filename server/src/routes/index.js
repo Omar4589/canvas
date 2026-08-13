@@ -32,6 +32,7 @@ import adminLeadCrewRouter from './admin/leadCrew.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
 import superAdminBillingRouter from './superAdmin/billing.js';
 import adminBillingRouter from './admin/billing.js';
+import adminIntegrationsRouter from './admin/integrations.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminAccessRouter from './superAdmin/access.js';
@@ -106,6 +107,9 @@ router.use('/super-admin/billing', superAdminStatementsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/billing', adminBillingRouter);
+// The FbTime integration (opt-in measured hours). Admin-only, org-wide; after
+// accessLog like everything above, so support-grant reads of it are recorded.
+router.use('/admin/integrations', adminIntegrationsRouter);
 router.use('/admin/memberships', adminMembershipsRouter);
 router.use('/admin/imports', adminImportsRouter);
 // The Export Center. Must sit AFTER requireEntitlement (its POST rides a narrow carve-out

@@ -174,7 +174,10 @@ export default function DayDetail() {
               label="Connection"
               value={`${Math.round(s.kpi.connectionRatePct)}%`}
             />
-            <Stat label="Hours" value={s.kpi.hoursOnDoors.toFixed(1)} />
+            <Stat
+              label={s.kpi.hoursSource === 'measured' ? 'Hours (measured)' : 'Hours'}
+              value={s.kpi.hoursOnDoors.toFixed(1)}
+            />
           </View>
         )}
         {s?.highlights?.firstActivityAt ? (

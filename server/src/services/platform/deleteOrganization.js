@@ -12,6 +12,10 @@ import { DoNotKnockAddress } from '../../models/DoNotKnockAddress.js';
 import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { ExportJob } from '../../models/ExportJob.js';
+import { FbTimeConnection } from '../../models/FbTimeConnection.js';
+import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
+import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
+import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { Household } from '../../models/Household.js';
@@ -57,7 +61,9 @@ export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
   Effort, EffortMember,
-  ExportJob, FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, Membership, Pass,
+  ExportJob, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink,
+  FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
+  Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
   SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,

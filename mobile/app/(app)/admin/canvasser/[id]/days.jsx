@@ -122,6 +122,7 @@ export default function DaysScreen() {
                 <Text style={styles.shift}>
                   {formatRange(d.firstActivityAt, d.lastActivityAt, campaign?.timeZone)} ·{' '}
                   {d.hoursOnDoors.toFixed(1)}h on doors
+                  {d.hoursSource === 'measured' ? ' (measured)' : ''}
                 </Text>
                 <View style={styles.statsRow}>
                   <Stat label="Knocks" value={d.homesKnocked} />

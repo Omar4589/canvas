@@ -811,6 +811,41 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   (iii). Recorded because "we added some columns" is exactly the change that quietly turns a
   narrow file into a voter file if nobody writes down which columns and why.
 
+- *(v5 2026-08-13)* **The FbTime integration — the first per-org connection to an outside
+  service, and a NEW subprocessor.** An organization's own admin may connect FbTime (the owner's
+  time-tracking product) so doors-per-hour divides by measured clock hours
+  ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md)). Connecting is the act of consent: nobody at
+  Doorline can wire it up for a customer, and the admin confirms the FbTime organization's name
+  before the key is stored.
+  **What it holds.** Per organization: the FbTime API key **sealed with AES-256-GCM**
+  (`utils/sealedSecret.js`, env master key `CREDENTIAL_SEAL_KEY` — the first encrypted-at-rest
+  secret in the system; only the display prefix is ever readable); FbTime person ids, names and
+  emails (`FbTimePersonLink`, for the canvasser mapping); and per-person **daily hour totals**
+  (`FbTimeDailyHours`). Deliberately NOT held: GPS from clock-ins, pay rates, break detail —
+  the client never requests them and the provider's partner API does not expose them to us.
+  **What LEAVES.** Doorline sends the provider only date ranges and a timezone; canvasser
+  identities are matched by email locally, from the roster FbTime already holds. No voter data,
+  knock data, or survey data ever flows to FbTime — the integration is read-only inbound.
+  **Who can read it.** Org admins only (`requireOrgRole('admin')` on the whole router; leads
+  deliberately excluded — the connection is org-wide and the lead tier is location-scoped).
+  Staff reads under a support grant hit the normal AccessLog mount. Lifecycle events
+  (connect/rotate/disconnect/link/sync-fail) land in `IntegrationEvent`, append-only.
+  **Retention/deletion.** Disconnect destroys the sealed key and deletes the hours cache
+  immediately (links + history are kept — the org's own labor and audit trail). All four
+  collections are in the org-delete `ORG_SCOPED` sweep, verified by the sweep-exhaustiveness
+  test.
+  **Assessment: DPA §6 and the Privacy Policy service-providers paragraph MUST change** — FbTime
+  becomes a subprocessor of workforce personal information (staff names, emails, daily hours).
+  Customer notice per DPA §6 was given by the owner BEFORE this feature went live (confirmed
+  first-hand 2026-08-13). *[Stamped 2026-08-13: both sentences APPROVED by the owner verbatim and
+  LANDED in the same change — DPA.md §6 (appended sentence: FbTime engaged by Customer, Doorline
+  sends only date ranges + timezone, receives staff names/emails/daily totals) and
+  privacy.html:106 (service-providers paragraph, same substance in plain language).]* The ToS is
+  unaffected. Workforce data is a new
+  CATEGORY on an existing lawful surface: the same people already appear as User accounts; what is
+  new is their daily hour totals held here and their identifiers flowing to/from a second system
+  the customer itself operates.
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact

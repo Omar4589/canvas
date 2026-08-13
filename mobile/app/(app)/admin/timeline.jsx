@@ -334,11 +334,23 @@ export default function AdminTimeline() {
     let rawLit = 0;
     let hours = 0;
     let rawDoors = 0;
+    // Measured hours (FbTime), ALL-OR-NOTHING over the rows in view: the tile
+    // divides by measured time only when every included canvasser is fully
+    // measured — one estimated contributor and it stays span-based. Summed here
+    // (not taken from the server's measuredKpi) because the crew filter changes
+    // who is included; the per-row fields are server-computed, this only adds them.
+    let measuredHours = 0;
+    let allMeasured = coordRows.length > 0;
     for (const r of coordRows) {
       rawDoors += r.dayKnocks || 0;
       rawSurveys += r.daySurveys || 0;
       rawLit += r.dayLit || 0;
       hours += r.hoursOnDoors || 0;
+      if (r.hoursSource === 'measured' && r.measuredHoursOnDoors != null) {
+        measuredHours += r.measuredHoursOnDoors;
+      } else {
+        allMeasured = false;
+      }
     }
     // Older server: fall back to the raw sums rather than render a blank card. BOTH numerator
     // terms are deduped when the server ships them — a raw lit term over a deduped denominator was
@@ -347,7 +359,12 @@ export default function AdminTimeline() {
     if (lit == null) lit = rawLit;
     const connPct = doors ? Math.round(((surveys + lit) / doors) * 100) : null;
     // Pace stays raw effort: it's a per-person rate, not a billing figure.
-    const doorsPerHour = hours > 0 ? rawDoors / hours : null;
+    const hoursMeasured = allMeasured && measuredHours > 0;
+    const doorsPerHour = hoursMeasured
+      ? rawDoors / measuredHours
+      : hours > 0
+        ? rawDoors / hours
+        : null;
     // The invoice figure when this campaign bills for restricted homes (a door the canvasser
     // walked to and couldn't reach). Never fed into connPct — nobody answered a locked gate.
     return {
@@ -355,6 +372,7 @@ export default function AdminTimeline() {
       surveys,
       connPct,
       doorsPerHour,
+      hoursMeasured,
       billableDoors: data.billableDoors ?? doors,
       restrictedDoors: data.restrictedDoors ?? 0,
       billRestricted: Boolean(data.billRestrictedDoors),
@@ -470,7 +488,7 @@ export default function AdminTimeline() {
       key: 'pace',
       label: 'Doors / hour',
       value: kpis.doorsPerHour != null ? kpis.doorsPerHour.toFixed(1) : '—',
-      sub: 'While on doors',
+      sub: kpis.hoursMeasured ? 'Measured (FbTime)' : 'While on doors · estimated',
       help: metricHelp.doorsPerHour,
     },
     {

@@ -11,6 +11,7 @@ import { processOrgDeleteJob } from './services/platform/deleteOrgProcessor.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
+import { FbTimeDailyHours } from './models/FbTimeDailyHours.js';
 import { ImportJob } from './models/ImportJob.js';
 import { Campaign } from './models/Campaign.js';
 import { Organization } from './models/Organization.js';
@@ -53,6 +54,9 @@ async function main() {
   // Same reason for ExportJob (another new collection the worker writes; the deploy-time
   // buildIndexes migration remains the primary path — this is the no-op belt-and-braces).
   await ExportJob.syncIndexes().catch((e) => console.error('[worker] ExportJob.syncIndexes failed', e?.message || e));
+  // And for the FbTime hours cache — the sync jobs upsert on its unique
+  // {org, person, day} key, which without the index would quietly allow duplicates.
+  await FbTimeDailyHours.syncIndexes().catch((e) => console.error('[worker] FbTimeDailyHours.syncIndexes failed', e?.message || e));
 
   // Bound the boot probe: against an unreachable Redis, ioredis
   // (maxRetriesPerRequest: null) queues the CONFIG GET forever and this await

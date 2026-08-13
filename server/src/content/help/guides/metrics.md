@@ -84,7 +84,9 @@ Coverage is always for the whole campaign — it can't be narrowed to one team, 
 
 ## Doors per hour
 
-Time actually spent on doors — each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
+Time actually spent on doors. If your organization has connected **FbTime** (see [Measured hours from FbTime](fbtime-hours)), this divides by measured clock time — those figures are marked **measured** (or with a • dot). Otherwise it's estimated from each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
+
+Measured and estimated hours are never mixed into one team rate: a team figure only says "measured" when every canvasser in it is fully measured.
 
 ## No soliciting
 

@@ -192,7 +192,15 @@ export default function CanvasserOverview() {
       {
         label: 'Hours on doors',
         value: (k.hoursOnDoors || 0).toFixed(1),
-        sub: `${k.daysActive || 0} active day${k.daysActive === 1 ? '' : 's'}`,
+        // The provenance rides the sub line: measured = FbTime clock time,
+        // estimated = knock-span, partly = a mix of measured and estimated days.
+        sub: `${k.daysActive || 0} active day${k.daysActive === 1 ? '' : 's'}${
+          k.hoursSource === 'measured'
+            ? ' · measured'
+            : k.hoursSource === 'mixed'
+              ? ' · partly measured'
+              : ' · estimated'
+        }`,
         delta: team ? delta(k.hoursOnDoors, team.hoursOnDoors, 'h') : null,
       },
       {
@@ -441,7 +449,7 @@ export default function CanvasserOverview() {
                 <Text style={styles.dayDate}>{fmtDate(d.date)}</Text>
                 <Text style={styles.dayMeta}>
                   {formatRange(d.firstActivityAt, d.lastActivityAt, campaign?.timeZone)} ·{' '}
-                  {d.hoursOnDoors.toFixed(1)}h
+                  {d.hoursOnDoors.toFixed(1)}h{d.hoursSource === 'measured' ? '•' : ''}
                 </Text>
               </View>
               <Text style={styles.dayDoors}>{d.homesKnocked} knocks</Text>

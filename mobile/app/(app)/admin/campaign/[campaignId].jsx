@@ -329,9 +329,6 @@ export default function CampaignDetail() {
       .slice(0, 5)
       .map((c) => {
       const dayKnocks = c.knocks ?? c.homesKnocked ?? 0;
-      const first = c.firstActivityAt ? new Date(c.firstActivityAt).getTime() : null;
-      const last = c.lastActivityAt ? new Date(c.lastActivityAt).getTime() : null;
-      const hours = first && last ? (last - first) / 3600000 : 0;
       return {
         ...c,
         dayKnocks,
@@ -342,8 +339,13 @@ export default function CampaignDetail() {
         // number printed beside it.
         daySurveys: c.surveyKnocks ?? 0,
         dayLit: c.litDropped ?? 0,
-        hoursOnDoors: Math.round(hours * 100) / 100,
-        doorsPerHour: hours > 0 ? Math.round((dayKnocks / hours) * 100) / 100 : 0,
+        // The SERVER's figures, not a local derivation. This card used to compute
+        // (lastActivityAt − firstActivityAt) — a CALENDAR span, the exact anti-pattern
+        // docs/METRICS.md forbids ("clients must not re-derive"), under-reporting pace
+        // ~3x over a multi-day range and ignoring the per-day sum (now measured-hours
+        // aware) sitting on the same payload. hoursSource rides along for the badge.
+        hoursOnDoors: c.hoursOnDoors ?? 0,
+        doorsPerHour: c.doorsPerHour ?? 0,
         coordinatorName: coordByUserId.get(String(c.userId)) || null,
       };
     });
