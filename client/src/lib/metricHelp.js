@@ -36,7 +36,7 @@ export const metricHelp = {
   // under-reported pace roughly threefold over a multi-day range (737 doors over 6 days read 4.9/hr
   // instead of 13.7). It is the sum of each DAY's working span.
   doorsPerHour:
-    "Doors knocked per hour actively on doors. If your organization has connected FbTime, this divides by measured clock time (marked with a dot); otherwise it is estimated from each day's first knock to its last knock, added up. Time between days is not counted.",
+    "Doors knocked per hour actively on doors. If your organization has connected FbTime, this divides by measured clock time; otherwise it is estimated from each day's first knock to its last knock, added up. Time between days is not counted. The label beside each canvasser's rate says which it is — and, when it is estimated, why.",
   coordinator:
     'The team this canvasser\'s doors count toward — whoever their coordinator is now. Change someone\'s coordinator and their earlier doors move with them; someone leaving moves nothing. "Multiple" means they knocked for more than one team in this range.',
   start: 'The first door this canvasser knocked in the range.',
@@ -48,4 +48,8 @@ export const metricHelp = {
     'Inaccessible homes — a locked building, a gate, no legal access. Recorded and shown, but never counted as a knock and never billed.',
   noSoliciting:
     'Homes where a posted no-soliciting sign ended the visit. The canvasser reached the door, so these ARE knocks and count toward doors/hour — but nobody answered, so they never count toward the contact rate.',
+  // The one metric on the campaign Home page that ignores the date range, walk-list and crew
+  // filters. If that sentence ever leaves this string, the card starts lying quietly.
+  doorGoal:
+    'Progress toward the campaign\'s door goal, counted in billable doors — the same doors the invoice counts. This is ALWAYS the campaign\'s all-time total: the date range, walk list and crew filters do not change it. "Needed" is the doors left divided by the calendar days left, including days nobody knocks. "Current pace" is the last 14 days on the same calendar basis, so the two can be compared directly. No ahead/behind verdict appears until there are at least 5 days of canvassing to judge.',
 };

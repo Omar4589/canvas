@@ -9,6 +9,8 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CampaignManager } from '../../models/CampaignManager.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { FbTimeConnection } from '../../models/FbTimeConnection.js';
+import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds } from '../../services/authz/campaignManagement.js';
@@ -784,7 +786,7 @@ router.get('/:userId/stats', async (req, res, next) => {
     }
     const dayStr = (date) => dayFormatter.format(date);
 
-    const [activities, surveysSubmitted] = await Promise.all([
+    const [activities, surveysSubmitted, fbtimeConn, fbtimeLink] = await Promise.all([
       CanvassActivity.find({
         userId,
         organizationId: orgId,
@@ -795,6 +797,14 @@ router.get('/:userId/stats', async (req, res, next) => {
         .select('timestamp location actionType campaignId')
         .lean(),
       SurveyResponse.countDocuments({ userId, organizationId: orgId }),
+      // Whether THIS person's hours are measured — answerable only here, because the
+      // Integrations page is admin-only and a lead had no way to find out at all.
+      FbTimeConnection.findOne({ organizationId: orgId, status: 'connected' })
+        .select('_id')
+        .lean(),
+      FbTimePersonLink.findOne({ organizationId: orgId, userId })
+        .select('fbtimeName fbtimeEmail source linkedAt')
+        .lean(),
     ]);
 
     let doorsKnocked = 0;
@@ -840,6 +850,17 @@ router.get('/:userId/stats', async (req, res, next) => {
       distanceMeters: Math.round(distanceMeters),
       campaignsWorked: campaignSet.size,
       lastActivityAt: lastActivityAt ? lastActivityAt.toISOString() : null,
+      // Link state only — never this person's hours. The modal answers "are their
+      // doors-per-hour built on clock time?", which the mapping alone decides; the
+      // numbers themselves stay on the report surfaces that already carry them.
+      // `connected:false` collapses the whole thing to nothing on screen, so an org
+      // that never connected FbTime sees no new row.
+      fbtime: {
+        connected: Boolean(fbtimeConn),
+        linked: Boolean(fbtimeLink),
+        personName: fbtimeLink?.fbtimeName || fbtimeLink?.fbtimeEmail || null,
+        source: fbtimeLink?.source || null,
+      },
     });
   } catch (err) {
     next(err);

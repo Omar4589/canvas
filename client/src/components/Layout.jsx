@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -8,6 +8,7 @@ import Logo, { LogoMark } from './Logo.jsx';
 import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
 import { navIcon, IconSignOut, IconChevron, IconHelp } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
+import { Tooltip } from './ui/Popover.jsx';
 import IconButton from './ui/IconButton.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import SupportAccessGate from './SupportAccessGate.jsx';
@@ -26,54 +27,16 @@ function navClass(collapsed) {
     ].join(' ');
 }
 
-// Names the icons on the collapsed rail. The native `title` this replaces took about a second to
-// appear, looked like an OS artifact, and was easy to miss entirely — so a rail of eighteen
-// unlabeled glyphs was effectively unreadable.
-//
-// position:FIXED, and that is load-bearing: the nav is `overflow-y-auto`, and CSS resolves the
-// other axis to `auto` too whenever one axis is not `visible` — so an absolutely-positioned tip
-// would be clipped at the 64px rail edge, which is the whole bug it exists to avoid. Same reason
-// RowMenu is fixed-positioned.
-//
-// pointer-events-none so the tip can never sit under the cursor and start a hide/show flicker.
+// Names the icons on the collapsed rail — a rail of eighteen unlabeled glyphs is otherwise
+// unreadable. The floating/clipping/aria mechanics all live in the shared ui Tooltip now (this
+// component was where they were first worked out); what stays here is the rail's own geometry:
+// the tip sits to the RIGHT of the icon, and `block` keeps the wrapper filling the nav item the
+// way the original span did rather than shrink-wrapping the glyph.
 function RailTip({ label, enabled, children }) {
-  const [pos, setPos] = useState(null);
-  const ref = useRef(null);
-
-  const show = () => {
-    if (!enabled || !ref.current) return;
-    const r = ref.current.getBoundingClientRect();
-    setPos({
-      // Centered on the icon, but clamped so an item scrolled to the very top or bottom of the
-      // rail still gets a fully visible tip.
-      top: Math.min(Math.max(r.top + r.height / 2, 18), window.innerHeight - 18),
-      left: r.right + 10,
-    });
-  };
-  const hide = () => setPos(null);
-
   return (
-    <span
-      ref={ref}
-      className="block"
-      onMouseEnter={show}
-      onMouseLeave={hide}
-      onFocus={show}
-      onBlur={hide}
-    >
+    <Tooltip label={label} enabled={enabled} placement="right" block>
       {children}
-      {enabled && pos && (
-        <span
-          // aria-hidden: the control itself carries an aria-label when collapsed, so announcing
-          // this too would read the name twice.
-          aria-hidden="true"
-          style={{ position: 'fixed', top: pos.top, left: pos.left, transform: 'translateY(-50%)' }}
-          className="pointer-events-none z-50 whitespace-nowrap rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-fg shadow-lg"
-        >
-          {label}
-        </span>
-      )}
-    </span>
+    </Tooltip>
   );
 }
 

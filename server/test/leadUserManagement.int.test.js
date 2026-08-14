@@ -208,6 +208,11 @@ test('lead identity edits: their canvassers only, and the multi-org email lock h
 test('per-user read drills follow visibility: in-scope 200, out-of-scope 403', { skip }, async () => {
   const inScope = await call('GET', `/api/admin/memberships/${ctx.canvA._id}/stats`, asLead());
   assert.strictEqual(inScope.status, 200);
+  // An org that never connected FbTime reports connected:false, which is what collapses the
+  // profile modal's whole hours row to nothing — no org grows a row about a product it
+  // does not use. A lead gets the same field an admin does; only the CTA differs, client-side.
+  assert.strictEqual(inScope.json.fbtime.connected, false);
+  assert.strictEqual(inScope.json.fbtime.linked, false);
   const inScopeCamps = await call('GET', `/api/admin/memberships/${ctx.canvA._id}/campaigns`, asLead());
   assert.strictEqual(inScopeCamps.status, 200);
 

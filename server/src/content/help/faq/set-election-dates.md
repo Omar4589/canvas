@@ -11,6 +11,8 @@ tags: election day, early voting, dates, countdown, early voting window
 
 Open the campaign's **edit drawer** (org admins) and fill in **Election Day**, the **early-voting start and end**, and an optional note. That's it.
 
+Election Day does one extra job: if the campaign has a **door goal** with no goal date of its own, the pace countdown uses Election Day. Set a goal date only when you want to be finished earlier. See [How many doors a day do we need?](how-many-doors-a-day).
+
 Once set, they show up in a few places:
 
 - On the **campaign cards** and the **campaign dashboard** for your admins and leads.

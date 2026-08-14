@@ -197,10 +197,25 @@ clients; no OTA/app release is needed to fix help copy.
 ## House rules
 
 - **Plain JavaScript only** — no TypeScript.
-- **Use `grep -a` under `server/src/services/person/`.** `resolvePerson.js` and `mergePersons.js`
-  contain deliberate NUL bytes (composite map-key separators); plain macOS `grep` treats them as
-  binary and **skips them silently** — a `grep -r` audit of the Person layer will wrongly conclude
-  the matching/merge engine doesn't exist. It already misled one audit.
+- **Use `grep -a` on the four NUL-bearing files.** Composite map keys are built as
+  `` `${a}\0${b}` `` — a deliberate separator no id can contain, so two-part keys can't collide.
+  Plain macOS `grep` treats those files as binary and **skips them silently**, so an audit
+  concludes the code isn't there. Verified list (2026-08-14):
+
+  | File | NULs |
+  |---|---|
+  | `server/src/services/person/resolvePerson.js` | 6 |
+  | `server/src/services/fbtime/sync.js` | 3 |
+  | `server/src/services/dnc/recomputeDoNotKnock.js` | 3 |
+  | `server/src/services/person/mergePersons.js` | 2 |
+
+  It has already misled two audits — the Person layer once, and `sync.js` again on 2026-08-14
+  (a grep for `FbTimeDailyHours` in it returned nothing while the file imports and writes it).
+  Two follow-on traps: `git diff` renders these files as **`Binary files … differ`**, so a diff
+  review shows you nothing — use `git diff --text`. And a NUL prints as a blank in terminal
+  output, so `` `${id}\0${day}` `` reads as `` `${id} ${day}` `` when you cat it. Re-scan with the
+  `python3` walk in the session log rather than `grep -c $'\0'` — bash cannot put a NUL in a
+  string, so that command silently tests for the empty string and always "passes".
 - **Light theme + red brand accent.** Use the existing semantic design tokens
   (`bg-card`/`text-fg`/…); never hard-coded grays or dark sections.
 - Match each file's neighbors in style, naming, and comment density.

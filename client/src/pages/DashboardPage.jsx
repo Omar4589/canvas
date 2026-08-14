@@ -10,6 +10,7 @@ import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
+import GoalProgressCard from '../components/GoalProgressCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import ArchiveNudge from '../components/ArchiveNudge.jsx';
 import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
@@ -554,6 +555,16 @@ export default function DashboardPage() {
       {current && current.isActive !== false && (
         <div className="mb-6">
           <SetupProgress campaignId={campaignId} />
+        </div>
+      )}
+
+      {/* Door goal. Sits above Activity because it's the all-time frame everything below
+          narrows — and unlike everything below, it ignores the range/walk-list/crew filters
+          (the card says so). Hidden entirely until there are doors: a goal bar over an empty
+          campaign is noise on top of the setup checklist. */}
+      {hasDoors && (
+        <div className="mb-6">
+          <GoalProgressCard goal={rollupRow?.goal} />
         </div>
       )}
 

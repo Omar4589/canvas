@@ -20,8 +20,13 @@ changes for you and everything keeps working exactly as before.
 
 Every hours figure in your reports says where it came from:
 
-- **Measured** (marked with a • dot or the word "measured") — real clock time from FbTime.
+- **Measured** (marked **FbTime**, or the word "measured" on mobile) — real clock time from FbTime.
 - **Estimated** — the knock-span math, used wherever no measured hours exist.
+
+On the canvasser tables, the marker beside each person's doors-per-hour also tells you **why** an
+estimated number is estimated — **No link** (nobody mapped them yet), **Open shift** (a missed
+clock-out), or plain **Est** (they're linked, they just didn't clock in). Only the first two are
+anybody's to fix. See [Why does doors-per-hour say "estimated"?](why-does-doors-per-hour-say-estimated)
 
 The two are **never mixed into one team rate**. A team's doors-per-hour only says "measured" when
 every canvasser in it is fully measured; otherwise it stays estimated for everyone, so you never
@@ -49,9 +54,17 @@ Hours only count for canvassers linked to their FbTime person. Same email in bot
 automatically. For the rest, use the mapping table on the Integrations page. A person showing a
 **"has hours"** badge has clocked time that counts nowhere until you link them.
 
+To check one person without coming here, open them from Users or a campaign's Team page — their
+profile says **FbTime linked** or **FbTime not linked**, with a shortcut back to this page. Team
+leads can see that too, even though they can't open the Integrations page themselves.
+
 ## Good to know
 
-- A canvasser still on the clock counts "so far" — the number keeps moving until they clock out.
+- A canvasser still on the clock counts "so far" — the number keeps moving until they clock out,
+  and the reports say when that's what you're looking at.
+- **Several shifts in one day are added together for you.** FbTime sends the day's total, so a
+  morning and an evening shift are one day's hours — nothing to configure.
+- Hours an admin typed into FbTime by hand still count, and the reports note it.
 - A shift someone forgot to close is ignored for that day (it would read as a 30-hour day) and the
   day falls back to the estimate.
 - A day someone was clocked in but knocked nothing still counts its hours — time driving between

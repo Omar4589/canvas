@@ -830,6 +830,20 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   deliberately excluded — the connection is org-wide and the lead tier is location-scoped).
   Staff reads under a support grant hit the normal AccessLog mount. Lifecycle events
   (connect/rotate/disconnect/link/sync-fail) land in `IntegrationEvent`, append-only.
+  *[v5 2026-08-14: **narrowed, and the "admins only" sentence above is now imprecise.** The
+  `/admin/integrations/fbtime…` router is still admin-only in full — key, hours figure, mapping
+  table and event history are unchanged and unreachable by a lead. What changed is that
+  `GET /admin/memberships/:userId/stats` now returns
+  `fbtime {connected, linked, personName, source}` for the single user being viewed, and that
+  route is admin **or lead** via its pre-existing `leadMaySeeTarget` gate
+  (`memberships.js:762`). A lead therefore learns one boolean plus an FbTime display name about
+  a canvasser **already inside their scope** — never hours, never the key, never anyone else's
+  link. Assessment: **no policy text change.** No new data category (the mapping identifiers
+  were already disclosed in this entry), no new recipient, no new export, and no widening of
+  which *customer* data leaves the system — only which of the customer's own staff may read one
+  fact about their own staff. Rationale for the widening: a lead who cannot see why a
+  doors-per-hour is estimated cannot act on it, which is the failure the `hoursReason` work
+  exists to fix. Staff reads under a grant still hit the AccessLog mount (E13, no exemption).]*
   **Retention/deletion.** Disconnect destroys the sealed key and deletes the hours cache
   immediately (links + history are kept — the org's own labor and audit trail). All four
   collections are in the org-delete `ORG_SCOPED` sweep, verified by the sweep-exhaustiveness
@@ -1594,6 +1608,32 @@ The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReport
 > surface, and the policy's report-sharing language already covers operator-published aggregates.
 > Pinned by `server/test/surveyTagUnits.int.test.js` (opt-in default none; unticked names absent;
 > old reports render nothing).
+
+> **[v5 2026-08-14 — door-goal progress on published reports: NEW OPT-IN EXPOSURE, verified, no
+> policy edit needed.]**
+> A published report can now carry a **Door goal** block: the campaign's **door target**, an
+> optional **goal date** (`YYYY-MM-DD`), and three derived integers — doors done, doors remaining,
+> and a percent — frozen into `ClientReport.goalSnapshot` by `snapshotGoal()`
+> (`server/src/routes/admin/clientReports.js`, inside `computeBothWindows`) and shaped at
+> `services/reports/clientReportView.js` (`shapeReportForClient`). What reaches the unauthenticated
+> page: **an operator-authored target number, an operator-authored date, and campaign-level door
+> counts the report already published in its "Doors knocked" card.** No voter identity, no
+> addresses, no per-door data, no canvasser identity, no personal information of any kind — the
+> same exposure class as the report title, the walk-list name, and the tag rows above. Guards, all
+> code-verified: (1) **opt-in** — `visibility.showGoal`, **default `false`**, deliberately following
+> `visibleTags` rather than `visibleQuestionKeys` precisely because this page is unauthenticated, so
+> every report published before this feature shows nothing and needs no migration; (2) the block is
+> **omitted from the shaped payload entirely** unless ticked — an unticked goal never crosses the
+> wire, so no downstream renderer can leak it; (3) **progress only** — the model stores no pace, no
+> ahead/behind verdict and no projected finish date, so a frozen artifact cannot keep asserting a
+> stale judgement; (4) an **effort-scoped report gets no snapshot at all**, and ticking the box
+> without one is a `400 NO_GOAL_SNAPSHOT` rather than a silent empty render. **What we collect,
+> how long we keep it, who can access it, and who we share it with are all unchanged** — this is a
+> new presentation of aggregate door counts already inside the report, behind the existing opt-in
+> share-link surface. Published Privacy Policy / ToS / DPA: **no sentence changes** (the §B8
+> framing — *"aggregate counts, not records"* — applies directly). Pinned by
+> `server/test/campaignGoal.int.test.js` (the goal fields themselves) and the
+> `NO_GOAL_SNAPSHOT` refusal path.
 
 **Unknocked households are omitted** (`computeReport.js:200`), so a point's mere presence discloses that the household was canvassed.
 

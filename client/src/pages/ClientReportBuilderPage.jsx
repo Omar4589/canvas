@@ -29,6 +29,7 @@ function editableSnapshot(src) {
       mapAnswerKeys: [...(src.visibility?.mapAnswerKeys || [])].sort(),
       showMap: src.visibility?.showMap !== false,
       visibleTags: [...(src.visibility?.visibleTags || [])].sort(),
+      showGoal: !!src.visibility?.showGoal,
     },
   });
 }
@@ -61,6 +62,7 @@ export default function ClientReportBuilderPage() {
         mapAnswerKeys: report.visibility?.mapAnswerKeys || [],
         showMap: report.visibility?.showMap !== false,
         visibleTags: report.visibility?.visibleTags || [],
+        showGoal: !!report.visibility?.showGoal,
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,6 +126,9 @@ export default function ClientReportBuilderPage() {
 
   const isDraft = report.status === 'draft';
   const questions = report.stats?.cumulative?.surveyBreakdowns || [];
+  // Present only when the campaign has a door goal AND this report is campaign-wide — the
+  // server writes it during recompute (routes/admin/clientReports.js snapshotGoal).
+  const goalSnapshot = report.goalSnapshot?.target ? report.goalSnapshot : null;
   // Tag rows come from the SNAPSHOT (like `questions`), so the checklist offers exactly what a
   // publish would show. Defensive: a report computed before tags existed simply offers none.
   const reportTags = report.stats?.cumulative?.tagBreakdowns || [];
@@ -466,6 +471,29 @@ export default function ClientReportBuilderPage() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Door goal — opt-in, and only offered when there's actually a frozen snapshot to
+                show (no goal on the campaign, or a walk-list-scoped report, means there isn't
+                one; the server rejects ticking it in those cases rather than silently showing
+                the client nothing). */}
+            <div className="mt-5 border-t border-border pt-4">
+              <label className={`flex items-center gap-2 text-sm ${goalSnapshot ? '' : 'opacity-60'}`}>
+                <input
+                  type="checkbox"
+                  checked={!!draft.visibility.showGoal}
+                  disabled={!isDraft || !goalSnapshot}
+                  onChange={(e) => setDraft((d) => ({ ...d, visibility: { ...d.visibility, showGoal: e.target.checked } }))}
+                />
+                <span className="text-fg">Show door-goal progress to the client</span>
+              </label>
+              <p className="mt-1 text-xs text-fg-muted">
+                {goalSnapshot
+                  ? `${goalSnapshot.done?.toLocaleString() ?? 0} of ${goalSnapshot.target?.toLocaleString()} doors as of this report's week — progress only, never a pace or an "on track" verdict. Off by default: anyone with the share link can read it.`
+                  : report?.effortId
+                    ? 'Door goals are campaign-wide, so they can’t be shown on a walk-list-scoped report.'
+                    : 'This campaign has no door goal set. Add one from the Campaigns page, then recompute.'}
+              </p>
             </div>
 
             <div className="mt-5 border-t border-border pt-4">

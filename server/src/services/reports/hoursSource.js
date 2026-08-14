@@ -1,5 +1,7 @@
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
+import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
+import { zonedDayStr } from '../../utils/timezone.js';
 
 // Where an hours denominator comes from: measured (FbTime) or estimated (the
 // first-to-last knock span). THE resolver, in the billRestricted.js sense —
@@ -9,10 +11,19 @@ import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
 // THE RULES (owner-ruled + provider contract; see docs/FBTIME_INTEGRATION.md):
 //
 //  · Per user-day: use the measured row where one exists AND is usable —
-//    hours > 0 (a zero denominator reads as an infinite rate) and not isStale
+//    hours > 0 (a zero denominator reads as an infinite rate) and not stale
 //    (an open shift from an earlier day is a forgotten clock-out, not a
 //    30-hour shift; that day falls back to the span and keeps its flag).
 //    Absence of a row is NEVER zero hours — it means "not measured, estimate".
+//  · STALENESS ONLY REACHES BACKWARD: sync writes isStale broad
+//    (person.hasStaleShift && day.hasOpenShift — the provider names the person,
+//    never the shift), so someone with an old forgotten clock-out who is on the
+//    clock right now gets TODAY's healthy row flagged too. Narrowed here at
+//    read time, not at sync: shifts belong entirely to the day they started
+//    (FbTimeDailyHours.day), so a runaway shift can never contaminate another
+//    day's row — and "stale" MEANS open since an earlier day, so today's open
+//    shift is just open. Read time, because a "today" baked into a cached row
+//    goes wrong at midnight and freezes wrong when sync errors.
 //  · A user's day set is the UNION of knock-days and measured days: a day
 //    with clocked hours and no knocks still spends hours, and hiding it would
 //    flatter the rate. That is the mismatch that actually bites — "clocked in
@@ -23,6 +34,11 @@ import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
 //    when EVERY contributing user is fully measured; otherwise it is the
 //    span-based figure for EVERYONE, labeled 'estimated'. Partial substitution
 //    would blend two different instruments into one number nobody can defend.
+//  · 'estimated' is not one state, it is FOUR, and a UI that cannot tell them
+//    apart is unreadable: the org never connected, this person is not linked,
+//    they were linked but never clocked in, or they clocked in and forgot to
+//    clock out. Only the middle two are somebody's to fix, so `hoursReason`
+//    names which one it is rather than making an admin guess from an absence.
 //
 // Which of the three wire figures a measured row contributes is the
 // connection's hourFigure setting, resolved here at read time — changing the
@@ -34,8 +50,19 @@ const round2 = (n) => Math.round(n * 100) / 100;
 export const spanHours = (first, last) =>
   first && last ? Math.max(0, (new Date(last) - new Date(first)) / 3600000) : 0;
 
+/**
+ * Does this row's stale flag actually disqualify THIS day? Only a day strictly
+ * before today can be stale (see the STALENESS ONLY REACHES BACKWARD rule
+ * above). No `today` (a legacy caller or fixture) keeps the old broad
+ * behavior — never narrow without having looked at the calendar. Plain string
+ * comparison is correct: both sides are 'YYYY-MM-DD'.
+ */
+export const staleDay = (m, day, today) =>
+  Boolean(m?.isStale) && (!today || !day || day < today);
+
 /** Is this measured row a usable denominator for its day? */
-export const usableMeasuredDay = (m) => Boolean(m) && m.hours > 0 && !m.isStale;
+export const usableMeasuredDay = (m, day, today) =>
+  Boolean(m) && m.hours > 0 && !staleDay(m, day, today);
 
 /**
  * The measured-hours overlay for an org and date range (inclusive
@@ -52,7 +79,14 @@ export const usableMeasuredDay = (m) => Boolean(m) && m.hours > 0 && !m.isStale;
  * docs/FBTIME_INTEGRATION.md.
  */
 export async function loadMeasuredHours({ organizationId, from = null, to = null, tz }) {
-  const none = { enabled: false, hourFigure: null, byUserDay: new Map(), daysByUser: new Map() };
+  const none = {
+    enabled: false,
+    hourFigure: null,
+    byUserDay: new Map(),
+    daysByUser: new Map(),
+    linkedUserIds: new Set(),
+    today: null,
+  };
   if (!organizationId || !tz) return none;
 
   const connection = await FbTimeConnection.findOne({ organizationId, status: 'connected' })
@@ -67,9 +101,17 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     if (to) q.day.$lte = to;
   }
 
-  const rows = await FbTimeDailyHours.find(q)
-    .select('userId day grossHours adjustedHours workedHours isOpen isStale isManualEntry')
-    .lean();
+  // The link set rides along with the hours because the two answer ONE question
+  // between them ("why is this person estimated?") and a caller that had to load
+  // links separately would be the caller that forgets to. Covered by the unique
+  // {organizationId, userId} index, and it is a roster-sized read — one small
+  // document per linked canvasser, not per day.
+  const [rows, links] = await Promise.all([
+    FbTimeDailyHours.find(q)
+      .select('userId day grossHours adjustedHours workedHours isOpen isStale isManualEntry')
+      .lean(),
+    FbTimePersonLink.find({ organizationId }).select('userId').lean(),
+  ]);
 
   const byUserDay = new Map();
   const daysByUser = new Map();
@@ -85,15 +127,45 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     daysByUser.get(uid).add(r.day);
   }
 
-  return { enabled: true, hourFigure: connection.hourFigure, byUserDay, daysByUser };
+  return {
+    enabled: true,
+    hourFigure: connection.hourFigure,
+    byUserDay,
+    daysByUser,
+    linkedUserIds: new Set(links.map((l) => String(l.userId))),
+    // The calendar anchor for staleDay, in the SAME zone the rows were bucketed
+    // under — evaluated per request, so it can never itself go stale.
+    today: zonedDayStr(new Date(), tz),
+  };
 }
+
+/**
+ * WHY a row is not fully measured — null when it is (nothing to explain).
+ *
+ * Precedence is "who can act on it", outermost first: an org that never
+ * connected has nothing to fix, an unlinked person is an admin's two-click fix
+ * on the Integrations page, a stale shift is somebody's forgotten clock-out in
+ * FbTime, and 'no-hours' is the residue that is usually just a day off.
+ *
+ * `linkedUserIds` absent (a caller that predates it) yields 'no-hours' rather
+ * than 'not-linked': never accuse a mapping of being missing without having
+ * looked at the mapping.
+ */
+const hoursReasonFor = ({ uid, measured, hoursSource, hasStaleShift }) => {
+  if (hoursSource === 'measured') return null;
+  if (!measured.enabled) return 'not-connected';
+  const links = measured.linkedUserIds;
+  if (links instanceof Set && !links.has(uid)) return 'not-linked';
+  if (hasStaleShift) return 'stale-shift';
+  return 'no-hours';
+};
 
 /**
  * Fold one user's per-day span rows together with the measured overlay.
  *
  * perDayRows: [{ day, spanHours }] — this user's knock-day buckets.
  * Returns hours + provenance for the row:
- *   { hoursOnDoors, hoursSource, measuredDays, estimatedDays,
+ *   { hoursOnDoors, hoursSource, hoursReason, measuredDays, estimatedDays,
  *     extraMeasuredDays, hasOpenShift, hasStaleShift, hasManualEntry }
  */
 export function foldUserHours({ userId, perDayRows, measured }) {
@@ -110,7 +182,7 @@ export function foldUserHours({ userId, perDayRows, measured }) {
   for (const d of perDayRows) {
     knockDays.add(d.day);
     const m = measured.enabled ? measured.byUserDay.get(`${uid}|${d.day}`) : null;
-    if (usableMeasuredDay(m)) {
+    if (usableMeasuredDay(m, d.day, measured.today)) {
       hours += m.hours;
       measuredDays += 1;
       hasOpenShift ||= m.isOpen;
@@ -118,7 +190,9 @@ export function foldUserHours({ userId, perDayRows, measured }) {
     } else {
       hours += d.spanHours;
       estimatedDays += 1;
-      if (m?.isStale) hasStaleShift = true;
+      // staleDay, not the raw flag: the rolled-up flag feeds hoursReason
+      // 'stale-shift', which must only ever name days that actually fell back.
+      if (staleDay(m, d.day, measured.today)) hasStaleShift = true;
     }
   }
 
@@ -128,7 +202,7 @@ export function foldUserHours({ userId, perDayRows, measured }) {
     for (const day of measured.daysByUser.get(uid) || []) {
       if (knockDays.has(day)) continue;
       const m = measured.byUserDay.get(`${uid}|${day}`);
-      if (!usableMeasuredDay(m)) continue;
+      if (!usableMeasuredDay(m, day, measured.today)) continue;
       hours += m.hours;
       measuredDays += 1;
       extraMeasuredDays += 1;
@@ -147,6 +221,7 @@ export function foldUserHours({ userId, perDayRows, measured }) {
   return {
     hoursOnDoors: round2(hours),
     hoursSource,
+    hoursReason: hoursReasonFor({ uid, measured, hoursSource, hasStaleShift }),
     measuredDays,
     estimatedDays,
     extraMeasuredDays,

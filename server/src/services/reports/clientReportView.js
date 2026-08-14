@@ -70,6 +70,19 @@ export function shapeReportForClient(report) {
       cumulative: shapeWindow(r.stats?.cumulative, vis),
       period: shapeWindow(r.stats?.period, vis),
     },
+    // Frozen goal progress, and ONLY when the operator ticked it. Same least-exposure rule as
+    // visibleTags: an unticked goal never reaches the wire at all, so nothing downstream can
+    // render it by accident. Progress only — the model deliberately freezes no verdict.
+    goal:
+      r.visibility?.showGoal && r.goalSnapshot?.target
+        ? {
+            target: r.goalSnapshot.target,
+            deadline: r.goalSnapshot.deadline || null,
+            done: r.goalSnapshot.done || 0,
+            remaining: r.goalSnapshot.remaining || 0,
+            percent: r.goalSnapshot.percent || 0,
+          }
+        : null,
     // visibleTags itself is deliberately NOT emitted — the filtered rows already encode it,
     // and the unticked tag names have no business on the wire (least exposure).
     visibility: {

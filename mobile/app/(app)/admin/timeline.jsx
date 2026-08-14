@@ -566,6 +566,10 @@ export default function AdminTimeline() {
     const params = new URLSearchParams();
     params.set('campaignId', cId);
     if (effortId) params.set('effortId', effortId);
+    // The crew filter was missing here: the rows on screen were server-scoped by
+    // ?coordinatorId and the export was not, so filtering to one crew and pressing this
+    // handed back every canvasser in the campaign with nothing to say the scope had changed.
+    if (coordinatorId) params.set('coordinatorId', coordinatorId);
     if (fromDay) params.set('from', fromDay);
     if (effectiveTo) params.set('to', effectiveTo);
     params.set('tz', deviceTimezone());

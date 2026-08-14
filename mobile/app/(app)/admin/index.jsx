@@ -24,12 +24,14 @@ import InsetGroup, {
   InsetActionRow,
   InsetBlockRow,
   InsetNoteRow,
+  RowBar,
   GroupFooter,
 } from '../../../components/InsetGroup';
 import MetricSheet from '../../../components/MetricSheet';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
 import { metricHelp } from '../../../lib/metricHelp';
+import { verdictOf, shortCount } from '../../../lib/goalPace';
 import { rateFromPct, makeRateColors, tierWord } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -66,6 +68,38 @@ function campaignRowProps(c, isLitDrop) {
     subAccent: `${pct(c.connectionRate)} conn`,
     rate,
   };
+}
+
+// Coverage bar plus, when the campaign carries one, a door-goal bar under it. Both live in the
+// row's `accessory` because a proportional bar loses data when squeezed into the label column.
+// The goal line is ALL-TIME and campaign-wide while everything else on the row honors the range
+// picker — hence the explicit "all time" tag, which is the only thing keeping the two bars from
+// being read as the same kind of number.
+function RowAccessory({ campaign, colors, styles }) {
+  const goal = campaign.goal || null;
+  const v = verdictOf(goal);
+  const tone = {
+    success: colors.successFg,
+    danger: colors.dangerFg,
+    warning: colors.warnFg,
+    brand: colors.brand,
+    muted: colors.textMuted,
+  }[v.tone];
+  return (
+    <View>
+      <CoverageBar canvass={campaign.coverage} compact />
+      {goal?.target ? (
+        <View style={styles.goalRow}>
+          <Text style={styles.goalLabel}>
+            Goal {shortCount(goal.done)} / {shortCount(goal.target)} · all time
+            {v.label ? ' · ' : ''}
+            {v.label ? <Text style={{ color: tone }}>{v.label}</Text> : null}
+          </Text>
+          <RowBar pct={goal.percent} />
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 export default function AdminOverview() {
@@ -314,7 +348,7 @@ export default function AdminOverview() {
                     key={c.id}
                     {...rowProps}
                     accentColor={rate ? rateColors[rate.level].deep : null}
-                    accessory={<CoverageBar canvass={c.coverage} compact />}
+                    accessory={<RowAccessory campaign={c} colors={colors} styles={styles} />}
                     hint="Opens this campaign"
                     onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
                   />
@@ -386,5 +420,7 @@ function makeStyles(t) {
   },
   seamBannerText: { ...type.caption, color: colors.warnFg },
   coverageLine: { ...type.caption, marginTop: spacing.sm, fontVariant: ['tabular-nums'] },
+  goalRow: { marginTop: spacing.sm, gap: 4 },
+  goalLabel: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
   });
 }

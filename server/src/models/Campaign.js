@@ -60,6 +60,21 @@ const campaignSchema = new mongoose.Schema(
     earlyVotingEnd: { type: String, default: null },
     // Free-form admin note shown beside the dates (e.g. polling-place quirks).
     datesNote: { type: String, default: '', trim: true, maxlength: 280 },
+    // Door goal. `doorGoal` counts BILLABLE DOORS — knocks, plus restricted-only doors when this
+    // campaign bills them (services/reports/billRestricted.js) — so the goal and the invoice speak
+    // the same unit. `goalDate` is a 'YYYY-MM-DD' civil date in the campaign's timeZone, same
+    // convention and same reason as the key dates above; null falls back to electionDay, so a
+    // campaign that only ever set an Election Day still gets a countdown and a pace.
+    //
+    // FLAT, not a `goal` subdoc, on purpose: the PATCH handler assigns field-by-field, and a
+    // subdoc would let a partial `{ goal: { target } }` silently clear the date.
+    //
+    // Unlike every other campaign date, a TEAM LEAD may set these (owner ruling 2026-08-14): a
+    // lead running a campaign owns its target. Deliberately absent from the org-admin-only field
+    // list in routes/admin/campaigns.js — do not "fix" that by adding them.
+    // All progress/pace math has ONE owner: services/reports/goalProgress.js.
+    doorGoal: { type: Number, default: null, min: 1 },
+    goalDate: { type: String, default: null },
     // When an admin dismisses the "Setup complete — this campaign is live" dashboard
     // banner. Set once (for all admins of the campaign); null = never dismissed. Only
     // silences the go-live confirmation — incomplete-setup guidance still shows.

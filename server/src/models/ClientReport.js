@@ -125,6 +125,21 @@ const clientReportSchema = new mongoose.Schema(
     },
     supportQuestionKey: { type: String, default: null },
 
+    // FROZEN door-goal progress at publish time, when the operator opted in
+    // (visibility.showGoal). Progress ONLY — no pace, no verdict, no projected finish: a
+    // frozen "behind pace" is a claim that keeps being made long after it stopped being true,
+    // and whether to tell a client you're behind is an operator's call, not a report's.
+    // `done` is the same all-time billable-door figure the console shows
+    // (services/reports/goalProgress.js). Null on every report where no goal was set.
+    goalSnapshot: {
+      target: { type: Number, default: null },
+      deadline: { type: String, default: null }, // 'YYYY-MM-DD' in the campaign's timeZone
+      done: { type: Number, default: null },
+      remaining: { type: Number, default: null },
+      percent: { type: Number, default: null },
+      asOf: { type: Date, default: null },
+    },
+
     // Editorial control over what the client sees.
     visibility: {
       // Survey questions the client may see. Empty = all.
@@ -137,6 +152,11 @@ const clientReportSchema = new mongoose.Schema(
       // rendered on an unauthenticated share page, so each one is an explicit opt-in tick,
       // and every report created before this field shows no tags with no migration.
       visibleTags: { type: [String], default: [] },
+      // Door-goal progress on the client-facing report. DEFAULT FALSE, same reasoning as
+      // visibleTags above: the share page is unauthenticated, so putting a contracted target
+      // in front of whoever holds the link is an affirmative tick, never a default. Every
+      // report published before this field keeps rendering exactly as it was, no migration.
+      showGoal: { type: Boolean, default: false },
     },
 
     // Denormalized count of frozen ClientReportMapPoint docs (for list views).

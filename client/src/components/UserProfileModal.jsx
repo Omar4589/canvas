@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
+import Badge from './ui/Badge.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { formatDate, formatRelative as sharedFormatRelative } from '../lib/dates.js';
@@ -58,7 +59,7 @@ function Stat({ label, value }) {
 export default function UserProfileModal({ membership, onClose }) {
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const { user: currentUser, isSuperAdmin } = useAuth();
+  const { user: currentUser, isSuperAdmin, isOrgAdmin } = useAuth();
   const user = membership.user;
   const isSelf = currentUser?.id === user?.id;
   const membershipActive = !!membership.isActive;
@@ -588,6 +589,48 @@ export default function UserProfileModal({ membership, onClose }) {
                   <> · Last activity {formatRelative(stats.lastActivityAt)}</>
                 )}
               </div>
+              {/* Whether this person's doors-per-hour is built on clock time. Renders only for
+                  an org that has connected FbTime, so nobody else grows a row about a product
+                  they don't use. The NOT-linked state is the one worth the pixels — "linked ✓"
+                  is reassuring but inert, while "not linked" is the two-click fix that stops
+                  their hours landing nowhere. Leads see the same sentence but no link: the
+                  Integrations page is admin-only, and pointing them at a 403 is worse than
+                  telling them to ask an admin. */}
+              {stats.fbtime?.connected && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  <Badge variant={stats.fbtime.linked ? 'success' : 'warning'}>
+                    {stats.fbtime.linked ? 'FbTime linked' : 'FbTime not linked'}
+                  </Badge>
+                  <span className="text-fg-muted">
+                    {stats.fbtime.linked ? (
+                      <>
+                        Hours measured from their clock time
+                        {stats.fbtime.personName ? ` as ${stats.fbtime.personName}` : ''}
+                        {stats.fbtime.source === 'auto-email' ? ' (auto-matched by email)' : ''}.
+                      </>
+                    ) : (
+                      <>
+                        Their doors-per-hour is estimated from knock times — any hours they clock
+                        in FbTime count nowhere until they are linked.
+                        {isOrgAdmin ? (
+                          <>
+                            {' '}
+                            <Link
+                              to="/integrations"
+                              onClick={onClose}
+                              className="font-medium text-brand-600 underline underline-offset-2"
+                            >
+                              Link them
+                            </Link>
+                          </>
+                        ) : (
+                          ' Ask an org admin to link them.'
+                        )}
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
             </>
           ) : null}
         </div>

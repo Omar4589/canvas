@@ -5,11 +5,13 @@ import assert from 'node:assert';
 // fixtures hand-computed against the provider contract's own worked example
 // (a 6h shift with one 45-minute break: gross 6.00, adjusted 5.50, worked 5.25).
 //   node --test test/hoursSourceFold.test.js
-const { foldUserHours, aggregateSource, usableMeasuredDay, spanHours } = await import(
+const { foldUserHours, aggregateSource, usableMeasuredDay, staleDay, spanHours } = await import(
   '../src/services/reports/hoursSource.js'
 );
 
-const measuredWith = (entries, { enabled = true, hourFigure = 'adjustedHours' } = {}) => {
+// `today` deliberately DEFAULTS TO ABSENT: most fixtures predate the stale
+// narrowing, and absent-today = the old broad behavior, which those tests pin.
+const measuredWith = (entries, { enabled = true, hourFigure = 'adjustedHours', today } = {}) => {
   const byUserDay = new Map();
   const daysByUser = new Map();
   for (const [uid, day, row] of entries) {
@@ -17,7 +19,7 @@ const measuredWith = (entries, { enabled = true, hourFigure = 'adjustedHours' } 
     if (!daysByUser.has(uid)) daysByUser.set(uid, new Set());
     daysByUser.get(uid).add(day);
   }
-  return { enabled, hourFigure, byUserDay, daysByUser };
+  return { enabled, hourFigure, byUserDay, daysByUser, today };
 };
 
 const noFlags = { isOpen: false, isStale: false, isManualEntry: false };
@@ -159,4 +161,156 @@ test('spanHours guards nulls and inverted ranges', () => {
   const t = Date.now();
   assert.strictEqual(spanHours(new Date(t), new Date(t - 1000)), 0);
   assert.strictEqual(spanHours(new Date(t), new Date(t + 3600000)), 1);
+});
+
+// ── hoursReason: WHICH kind of "estimated" ──────────────────────────────────
+// A missing measured-hours marker has four meanings and three of them are
+// somebody's to fix. These pin the precedence so the UI can name the cause
+// instead of showing an absence.
+
+const linkedWith = (entries, userIds, opts) => ({
+  ...measuredWith(entries, opts),
+  linkedUserIds: new Set(userIds),
+});
+
+test('hoursReason is null when the range is fully measured — nothing to explain', () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-10', spanHours: 4.9 }],
+    measured: linkedWith([['u1', '2026-08-10', { hours: 5.5, ...noFlags }]], ['u1']),
+  });
+  assert.strictEqual(fold.hoursSource, 'measured');
+  assert.strictEqual(fold.hoursReason, null);
+});
+
+test("hoursReason 'not-connected' when the org has no live connection", () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-10', spanHours: 3.5 }],
+    measured: { enabled: false, byUserDay: new Map(), daysByUser: new Map(), linkedUserIds: new Set() },
+  });
+  assert.strictEqual(fold.hoursReason, 'not-connected');
+});
+
+test("hoursReason 'not-linked' outranks everything else — unlinked people have no rows to be stale", () => {
+  const fold = foldUserHours({
+    userId: 'u2', // connected org, but u2 was never mapped to an FbTime person
+    perDayRows: [{ day: '2026-08-10', spanHours: 3.5 }],
+    measured: linkedWith([['u1', '2026-08-10', { hours: 5.5, ...noFlags }]], ['u1']),
+  });
+  assert.strictEqual(fold.hoursSource, 'estimated');
+  assert.strictEqual(fold.hoursReason, 'not-linked');
+});
+
+test("hoursReason 'stale-shift' when a linked person's day fell back on a missed clock-out", () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-10', spanHours: 4.0 }],
+    measured: linkedWith(
+      [['u1', '2026-08-10', { hours: 31.2, isOpen: true, isStale: true, isManualEntry: false }]],
+      ['u1']
+    ),
+  });
+  assert.strictEqual(fold.hoursReason, 'stale-shift');
+  assert.strictEqual(fold.hoursOnDoors, 4.0);
+});
+
+test("hoursReason 'no-hours' when a linked person simply did not clock in", () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-10', spanHours: 3.5 }],
+    measured: linkedWith([], ['u1']),
+  });
+  assert.strictEqual(fold.hoursReason, 'no-hours');
+});
+
+test('a MIXED row still reports why its estimated half is estimated', () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [
+      { day: '2026-08-10', spanHours: 4.9 },
+      { day: '2026-08-11', spanHours: 3.0 }, // no row → span
+    ],
+    measured: linkedWith([['u1', '2026-08-10', { hours: 5.5, ...noFlags }]], ['u1']),
+  });
+  assert.strictEqual(fold.hoursSource, 'mixed');
+  assert.strictEqual(fold.hoursReason, 'no-hours');
+});
+
+test('a caller that supplies no link set never accuses the mapping of being missing', () => {
+  // measuredWith() has no linkedUserIds at all — the pre-existing fixture shape.
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-10', spanHours: 3.5 }],
+    measured: measuredWith([]),
+  });
+  assert.strictEqual(fold.hoursReason, 'no-hours', "must not claim 'not-linked' without having looked");
+});
+
+// ── staleness only reaches backward ─────────────────────────────────────────
+// Sync writes isStale broad (person.hasStaleShift && day.hasOpenShift), so an
+// old forgotten clock-out flags TODAY's healthy open shift too. The fold
+// narrows it: only a day strictly before `today` can be stale. Shifts belong
+// to the day they started, so the runaway shift's own day still falls back.
+
+test("TODAY's open shift is not stale — an old runaway shift must not poison today", () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-08-14', spanHours: 3.0 }],
+    measured: measuredWith(
+      [['u1', '2026-08-14', { hours: 4.5, isOpen: true, isStale: true, isManualEntry: false }]],
+      { today: '2026-08-14' }
+    ),
+  });
+  assert.strictEqual(fold.hoursOnDoors, 4.5, "today's clock time counts");
+  assert.strictEqual(fold.hoursSource, 'measured');
+  assert.strictEqual(fold.hoursReason, null);
+  assert.strictEqual(fold.hasOpenShift, true, 'still labeled as running');
+  assert.strictEqual(fold.hasStaleShift, false, 'today cannot be the forgotten clock-out');
+});
+
+test('the runaway shift\'s OWN day still falls back — narrowing must not resurrect the ghost', () => {
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [
+      { day: '2026-08-12', spanHours: 4.0 }, // the forgotten clock-out's day
+      { day: '2026-08-14', spanHours: 3.0 }, // today, healthy open shift
+    ],
+    measured: measuredWith(
+      [
+        ['u1', '2026-08-12', { hours: 31.2, isOpen: true, isStale: true, isManualEntry: false }],
+        ['u1', '2026-08-14', { hours: 4.5, isOpen: true, isStale: true, isManualEntry: false }],
+      ],
+      { today: '2026-08-14' }
+    ),
+  });
+  assert.strictEqual(fold.hoursOnDoors, 8.5, 'span 4.0 for the ghost day + measured 4.5 today');
+  assert.strictEqual(fold.hoursSource, 'mixed');
+  assert.strictEqual(fold.hoursReason, 'stale-shift', 'the estimated half is estimated BECAUSE of the ghost');
+  assert.strictEqual(fold.hasStaleShift, true, 'the ghost day keeps its flag');
+});
+
+test('midnight boundary: yesterday stale, today exempt — nothing else', () => {
+  const stale = { hours: 9.9, isOpen: true, isStale: true, isManualEntry: false };
+  assert.strictEqual(usableMeasuredDay(stale, '2026-08-13', '2026-08-14'), false, 'yesterday');
+  assert.strictEqual(usableMeasuredDay(stale, '2026-08-14', '2026-08-14'), true, 'today');
+});
+
+test('no `today` on the overlay keeps the old broad behavior', () => {
+  // The pre-narrowing stale test above ("a STALE measured day...") is the real
+  // guard; this pins the helper directly so the fallback is named, not implied.
+  const stale = { hours: 5, isStale: true };
+  assert.strictEqual(usableMeasuredDay(stale, '2026-08-14', undefined), false);
+  assert.strictEqual(usableMeasuredDay(stale, undefined, '2026-08-14'), false, 'no day → broad too');
+});
+
+test('staleDay truth table', () => {
+  const s = { isStale: true };
+  const clean = { isStale: false };
+  assert.strictEqual(staleDay(s, '2026-08-13', '2026-08-14'), true, 'past + stale');
+  assert.strictEqual(staleDay(s, '2026-08-14', '2026-08-14'), false, 'today + stale');
+  assert.strictEqual(staleDay(s, '2026-08-13', undefined), true, 'no calendar → broad');
+  assert.strictEqual(staleDay(s, undefined, '2026-08-14'), true, 'no day → broad');
+  assert.strictEqual(staleDay(clean, '2026-08-13', '2026-08-14'), false, 'never invents staleness');
+  assert.strictEqual(staleDay(null, '2026-08-13', '2026-08-14'), false, 'absent row');
 });

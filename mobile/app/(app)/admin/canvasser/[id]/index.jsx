@@ -194,12 +194,17 @@ export default function CanvasserOverview() {
         value: (k.hoursOnDoors || 0).toFixed(1),
         // The provenance rides the sub line: measured = FbTime clock time,
         // estimated = knock-span, partly = a mix of measured and estimated days.
+        // The two trust flags follow it, exceptions only — an open shift explains
+        // why this figure keeps moving, and a hand-typed entry is the one the
+        // published docs promise the report will name.
         sub: `${k.daysActive || 0} active day${k.daysActive === 1 ? '' : 's'}${
           k.hoursSource === 'measured'
             ? ' · measured'
             : k.hoursSource === 'mixed'
               ? ' · partly measured'
               : ' · estimated'
+        }${k.hoursFlags?.hasOpenShift ? ' · shift still running' : ''}${
+          k.hoursFlags?.hasManualEntry ? ' · includes hand-entered hours' : ''
         }`,
         delta: team ? delta(k.hoursOnDoors, team.hoursOnDoors, 'h') : null,
       },

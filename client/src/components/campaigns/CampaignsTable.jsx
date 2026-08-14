@@ -3,7 +3,7 @@ import RowMenu from '../RowMenu.jsx';
 import { DataTable } from '../ui/index.js';
 import { daysUntil, formatDateLabel } from '../../lib/electionDates.js';
 import { useRowNavigation, stopRowClick } from '../../lib/rowNavigation.js';
-import { TypePill, StatusBadge, CountdownChip } from './CampaignCard.jsx';
+import { TypePill, StatusBadge, CountdownChip, GoalCell } from './CampaignCard.jsx';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -72,6 +72,9 @@ function CampaignRow({ campaign: c, menuItems }) {
           </span>
         </div>
       </td>
+      <td className="px-4 py-3">
+        <GoalCell goal={c.goal} />
+      </td>
       <td className="px-4 py-3 text-right tabular-nums">
         {c.type === 'survey' ? fmt(c.counts?.surveysSubmitted) : fmt(c.counts?.litDropped)}
       </td>
@@ -100,6 +103,7 @@ export default function CampaignsTable({ campaigns, menuItems }) {
           <th className="px-4 py-3">Election Day</th>
           <th className="px-4 py-3 text-right">Households</th>
           <th className="px-4 py-3 text-right">Knocked</th>
+          <th className="px-4 py-3 text-right">Door goal</th>
           <th className="px-4 py-3 text-right">Surveys taken / Lit</th>
           <th className="px-4 py-3">Status</th>
           <th className="px-4 py-3 text-right">

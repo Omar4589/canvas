@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { api } from '../api/client.js';
+import { api, getToken, getActiveOrgId } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import Segmented from '../components/ui/Segmented.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
@@ -157,6 +157,52 @@ export default function TimelinePage() {
     ...livePollOptions(live, includesToday),
     placeholderData: keepPreviousData,
   });
+  // The stamped per-canvasser CSV — the only portable record of whose hours were measured and
+  // whose were estimated, and until now downloadable ONLY from the phone. An attachment, not
+  // JSON, so the shared api() helper can't carry it: raw fetch + blob, the DashboardPage
+  // pattern. Every filter on screen rides along, crew included — the server honors the same
+  // ?coordinatorId the table above does, so the file and the table can never disagree.
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [csvExportError, setCsvExportError] = useState('');
+  async function exportCanvassersCsv() {
+    setCsvExportError('');
+    setExportingCsv(true);
+    try {
+      const headers = {};
+      const token = getToken();
+      const orgId = getActiveOrgId();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (orgId) headers['X-Org-Id'] = orgId;
+      const qs = buildQuery({
+        campaignId,
+        effortId: effortId || undefined,
+        coordinatorId: coordinatorId || undefined,
+        tz,
+        // All-time sends no bounds, exactly as the table's own query does — the stamp then
+        // reads "all time" rather than inventing a window the rows were never clipped to.
+        ...(allTime ? {} : { from: fromDay, to: dateRange?.to || undefined }),
+      });
+      const res = await fetch(`/api/admin/reports/canvassers.csv${qs}`, { headers });
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const disp = res.headers.get('Content-Disposition') || '';
+      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
+      const fileName = m ? decodeURIComponent(m[1]) : 'canvassers.csv';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setCsvExportError(err.message || 'Export failed');
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
   const data = timelineQ.data || {};
   // From the PAYLOAD, never recomputed from the picked range: keepPreviousData shows the
   // previous payload while a new range fetches, and the caption/notes must describe the grid
@@ -515,6 +561,20 @@ export default function TimelinePage() {
             </div>
           ) : (
             <>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {csvExportError && <span className="text-xs text-danger">{csvExportError}</span>}
+                <span className="text-xs text-fg-muted">
+                  {coordinatorId ? 'This crew · selected range' : 'Selected range'}
+                </span>
+                <button
+                  type="button"
+                  onClick={exportCanvassersCsv}
+                  disabled={exportingCsv}
+                  className="rounded border border-border-strong bg-card px-3 py-1 text-sm text-fg-muted hover:bg-sunken disabled:opacity-50"
+                >
+                  {exportingCsv ? 'Exporting…' : 'Export CSV'}
+                </button>
+              </div>
               <CanvasserSummaryTable
                 rows={filteredRows}
                 tz={tz}

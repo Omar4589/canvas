@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { US_STATES } from '../../lib/validators.js';
+import { daysUntil, formatDateLabel } from '../../lib/electionDates.js';
 import { Drawer, Input, Select, Textarea, Button } from '../ui/index.js';
 
 const US_TIMEZONES = [
@@ -38,11 +39,33 @@ export default function CampaignFormDrawer({
   const [earlyVotingStart, setEarlyVotingStart] = useState(initial?.earlyVotingStart || '');
   const [earlyVotingEnd, setEarlyVotingEnd] = useState(initial?.earlyVotingEnd || '');
   const [datesNote, setDatesNote] = useState(initial?.datesNote || '');
+  // Door goal — kept as a STRING so the field can be emptied (a number state would coerce '' to
+  // 0, and 0 is not a legal goal). '' ⇄ null on the wire, same as the dates.
+  const [doorGoal, setDoorGoal] = useState(
+    initial?.doorGoal != null ? String(initial.doorGoal) : ''
+  );
+  const [goalDate, setGoalDate] = useState(initial?.goalDate || '');
   // Tri-state, carried through the form as a STRING because a <select> has no null:
   // 'inherit' | 'yes' | 'no' ⇄ null | true | false on the wire.
   const [billRestricted, setBillRestricted] = useState(
     initial?.billRestrictedDoors === true ? 'yes' : initial?.billRestrictedDoors === false ? 'no' : 'inherit'
   );
+
+  const parsedGoal = Number(doorGoal) > 0 ? Math.floor(Number(doorGoal)) : null;
+  // The live preview only makes sense on an existing campaign: `goal.done` comes from the list
+  // row, and a campaign being created has knocked nothing yet.
+  const goalPreview = (() => {
+    if (!parsedGoal) return null;
+    const deadline = goalDate || electionDay;
+    if (!deadline) return `${parsedGoal.toLocaleString()} doors — add a goal date (or an Election Day) to see a daily pace.`;
+    const done = initial?.goal?.done || 0;
+    const remaining = Math.max(0, parsedGoal - done);
+    const days = daysUntil(deadline, timeZone || initial?.timeZone);
+    if (days == null || days < 0) return `${parsedGoal.toLocaleString()} doors by ${formatDateLabel(deadline)} — that date has passed.`;
+    if (!remaining) return `${parsedGoal.toLocaleString()} doors by ${formatDateLabel(deadline)} — already there.`;
+    const perDay = Math.ceil(remaining / Math.max(1, days + 1));
+    return `${remaining.toLocaleString()} doors left over ${days + 1} ${days === 0 ? 'day' : 'days'} — about ${perDay.toLocaleString()} a day.`;
+  })();
 
   function submit(e) {
     e.preventDefault();
@@ -57,6 +80,10 @@ export default function CampaignFormDrawer({
       earlyVotingStart: earlyVotingStart || null,
       earlyVotingEnd: earlyVotingEnd || null,
       datesNote: datesNote.trim(),
+      // Number or null — never '' and never 0. Clearing the goal clears its date with it, or
+      // the server rejects the pair (a countdown to a target that doesn't exist).
+      doorGoal: parsedGoal,
+      goalDate: parsedGoal ? goalDate || null : null,
       billRestrictedDoors: billRestricted === 'yes' ? true : billRestricted === 'no' ? false : null,
     });
   }
@@ -241,6 +268,42 @@ export default function CampaignFormDrawer({
               Admins, leads, and canvassers will see this alongside the campaign&apos;s key dates.
             </p>
           </div>
+        </div>
+
+        <div className="space-y-4 border-t border-border pt-4">
+          <div>
+            <div className="text-sm font-semibold text-fg">Door goal</div>
+            <p className="mt-0.5 text-xs text-fg-muted">
+              Optional — how many doors this campaign is aiming for, and by when. Admins and leads
+              see progress and the daily pace on Home. Canvassers never see it.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">Door goal</label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={doorGoal}
+                onChange={(e) => setDoorGoal(e.target.value)}
+                placeholder="10000"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-muted">Goal date</label>
+              <Input
+                type="date"
+                value={goalDate}
+                onChange={(e) => setGoalDate(e.target.value)}
+                disabled={!parsedGoal}
+              />
+              <p className="mt-1 text-xs text-fg-muted">
+                Blank uses Election Day.
+              </p>
+            </div>
+          </div>
+          {goalPreview && <p className="text-xs text-fg-muted">{goalPreview}</p>}
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 text-sm">

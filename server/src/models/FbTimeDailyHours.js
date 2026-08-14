@@ -49,6 +49,13 @@ const fbTimeDailyHoursSchema = new mongoose.Schema(
     // Per-day rollups of the provider's trust flags. isStale (an open shift
     // from an earlier day — almost certainly a forgotten clock-out) makes the
     // day unusable as a denominator; the others ride along as labels.
+    //
+    // isStale is written BROAD and narrowed at READ time — the provider names
+    // the stale *person*, not the stale shift, so sync's conjunction also
+    // flags today's healthy open shift for anyone carrying an old forgotten
+    // clock-out. services/reports/hoursSource.js `staleDay()` is the authority:
+    // only a day strictly before today can be stale. Never re-derive that rule
+    // from this field alone.
     isOpen: { type: Boolean, default: false },
     isStale: { type: Boolean, default: false },
     isManualEntry: { type: Boolean, default: false },

@@ -37,6 +37,7 @@ import {
   NON_KNOCKED_BUCKETS,
 } from '../../services/reports/aggregations.js';
 import { billRestrictedFor, resolveBillRestricted } from '../../services/reports/billRestricted.js';
+import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import {
   loadMeasuredHours,
   foldUserHours,
@@ -304,6 +305,18 @@ async function crewFilter(req) {
   return teamMatch(raw, leads);
 }
 
+// The human-readable crew scope for a frozen export's stamp. Empty string (falsy, so it drops
+// out of the preamble) when no crew filter was applied — an unfiltered file should not carry a
+// row saying so, since that is the normal case and every export would grow noise.
+async function crewStampLabel(raw) {
+  if (!raw) return '';
+  if (raw === 'none') return 'Crew: no coordinator';
+  if (!mongoose.isValidObjectId(raw)) return '';
+  const u = await User.findById(raw, 'firstName lastName').lean();
+  const name = u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : '';
+  return `Crew: ${name || 'unknown coordinator'}`;
+}
+
 // KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr, teamMatch, withTeam now
 // live in services/reports/aggregations.js (shared with the client report builder and the
 // knocks-by-pass service).
@@ -556,7 +569,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       }
     }
 
-    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1, stats: 1, billRestrictedDoors: 1 }).lean();
+    const campaigns = await Campaign.find(filter, { name: 1, type: 1, isActive: 1, timeZone: 1, surveyTemplateId: 1, electionDay: 1, earlyVotingStart: 1, earlyVotingEnd: 1, datesNote: 1, doorGoal: 1, goalDate: 1, stats: 1, billRestrictedDoors: 1 }).lean();
     const ids = campaigns.map((c) => c._id);
     // Org default for the billable-door policy; each row resolves its own override against it,
     // because a rollup can legitimately span campaigns that answer differently.
@@ -637,7 +650,7 @@ router.get('/campaign-rollup', async (req, res, next) => {
       !fromDay && !toDay && !req.query.effortId && !req.query.coordinatorId &&
       campaigns.every((c) => c.stats?.reconciledAt);
 
-    const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers] =
+    const [coverageAgg, eventAgg, knockAgg, surveyAgg, canvasserAgg, cumulativeCanvassers, goals] =
       await Promise.all([
         Household.aggregate([
           { $match: { organizationId, campaignId: { $in: ids }, isActive: true, ...effortMatch } },
@@ -699,6 +712,12 @@ router.get('/campaign-rollup', async (req, res, next) => {
               { $project: { activeCanvassers: { $size: '$users' }, last: 1 } },
             ]),
         useStats ? [] : CanvassActivity.distinct('userId', { ...activityMatch, ...NOT_BULK }),
+        // Door-goal progress. Deliberately takes `campaigns` and NOT the match objects above:
+        // this block is ALL-TIME and campaign-wide even when the caller passed from/to,
+        // effortId or coordinatorId, because a goal is a whole-campaign contract number. The
+        // clients caption the card accordingly. Costs zero queries when no campaign in scope
+        // carries a goal — which is what keeps the useStats fast path above genuinely fast.
+        goalProgressFor({ organizationId, campaigns, orgDefaults }),
       ]);
 
     // Per-campaign setup progress + management flags (campaign-wide; independent of
@@ -805,6 +824,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
           earlyVotingStart: campaign.earlyVotingStart ?? null,
           earlyVotingEnd: campaign.earlyVotingEnd ?? null,
           datesNote: campaign.datesNote ?? '',
+          // ALL-TIME + campaign-wide, unlike every other number on this row (see the
+          // goalProgressFor call above). null when no goal is set.
+          goal: goals.get(String(campaign._id)) || null,
           setupComplete: setup.setupComplete,
           stepsDone: setup.stepsDone,
           stepsTotal: setup.stepsTotal,
@@ -1107,6 +1129,10 @@ router.get('/canvassers', async (req, res, next) => {
           // per-person grain), plus the provider's trust flags rolled up so a UI can
           // say WHY a measured number moved ("includes an open shift").
           hoursSource: fold ? fold.hoursSource : 'estimated',
+          // WHY it is not measured — 'not-connected' | 'not-linked' | 'stale-shift' |
+          // 'no-hours', null when it IS measured. No fold means no knock-days in the
+          // window, so there is no rate on screen to explain: null, not a reason.
+          hoursReason: fold ? fold.hoursReason : null,
           hoursFlags: fold
             ? {
                 hasOpenShift: fold.hasOpenShift,
@@ -2585,6 +2611,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           // otherwise) and its provenance. null when the org has no live connection.
           measuredHoursOnDoors: measured.enabled ? (foldByUser.get(uid)?.hoursOnDoors ?? null) : null,
           hoursSource: foldByUser.get(uid)?.hoursSource ?? 'estimated',
+          // Why not measured — see /canvassers. Same four values, same null-when-measured.
+          hoursReason: foldByUser.get(uid)?.hoursReason ?? null,
           hoursFlags: {
             hasOpenShift: foldByUser.get(uid)?.hasOpenShift ?? false,
             hasStaleShift: foldByUser.get(uid)?.hasStaleShift ?? false,
@@ -2999,13 +3027,20 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Leaderboard CSV export — same shape as GET /canvassers, rendered as text/csv.
+//
+// "Same shape" has to include the SCOPE, and for a long time it did not: /canvassers honored
+// ?coordinatorId and this route silently dropped it, so filtering the Timeline to one crew and
+// pressing Export handed you every canvasser in the campaign with nothing on screen or in the
+// file to say so. A download that disagrees with the table it sits under is worse than no
+// download. Both matches now take the identical crew clause, exactly as /canvassers does.
 router.get('/canvassers.csv', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     const cFilter = baseFilter(req);
     const tz = tzOf(req);
-    const surveyMatch = { ...parseDateRange(req, 'submittedAt'), ...cFilter };
-    const activityMatch = { ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK };
+    const team = await crewFilter(req);
+    const surveyMatch = withTeam({ ...parseDateRange(req, 'submittedAt'), ...cFilter }, team);
+    const activityMatch = withTeam({ ...parseDateRange(req, 'timestamp'), ...cFilter, ...NOT_BULK }, team);
 
     const [surveyAgg, activityAgg, hoursAgg] = await Promise.all([
       SurveyResponse.aggregate([
@@ -3177,8 +3212,17 @@ router.get('/canvassers.csv', async (req, res, next) => {
       req.query.from || req.query.to
         ? `${String(req.query.from || '').slice(0, 10) || 'start'} to ${String(req.query.to || '').slice(0, 10) || 'today'}`
         : 'all time';
+    // The crew scope joins the stamp for the same reason the range and the as-of time are
+    // there: a file holding one crew's rows and a file holding the whole campaign look
+    // identical once they are on someone's desktop. Named, so the reader does not have to
+    // recognise a 24-hex id — and resolved through the same User lookup the report rows use,
+    // so a departed coordinator still prints as a person.
+    const crewLabel = await crewStampLabel(req.query.coordinatorId);
     const preamble = [
-      ['Canvasser export', rangeLabel, `hours as of ${new Date().toISOString()}`].map(csvCell).join(','),
+      ['Canvasser export', rangeLabel, `hours as of ${new Date().toISOString()}`, crewLabel]
+        .filter(Boolean)
+        .map(csvCell)
+        .join(','),
       '',
     ].join('\n');
 

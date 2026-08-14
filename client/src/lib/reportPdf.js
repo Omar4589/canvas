@@ -110,6 +110,38 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
   }
   y += 6;
 
+  // ── Door goal: one progress track against a fixed target. Not barsBlock, which normalizes
+  //    every bar against the biggest ITEM — here the denominator is the target, so a 34% goal
+  //    would have rendered as a full-width bar. Progress only; the snapshot freezes no verdict.
+  const goalBlock = (goal) => {
+    ensure(74);
+    setFont(13, 'bold', DARK);
+    doc.text(String(goal.title), MARGIN, y);
+    y += 13;
+    setFont(9, 'normal', GRAY);
+    doc.text(String(goal.subtitle), MARGIN, y);
+    y += 18;
+    setFont(9.5, 'normal', GRAY);
+    doc.text(`${formatCount(goal.done)} of ${formatCount(goal.target)} doors`, MARGIN, y);
+    setFont(9.5, 'bold', DARK);
+    doc.text(`${goal.percent}%`, MARGIN + contentW, y, { align: 'right' });
+    const trackY = y + 5;
+    doc.setFillColor(TRACK[0], TRACK[1], TRACK[2]);
+    doc.roundedRect(MARGIN, trackY, contentW, 6, 3, 3, 'F');
+    if (goal.percent > 0) {
+      const [r, g, b] = accentRgb('brand');
+      doc.setFillColor(r, g, b);
+      doc.roundedRect(MARGIN, trackY, Math.max(2, (goal.percent / 100) * contentW), 6, 3, 3, 'F');
+    }
+    y += 24;
+    if (goal.remaining > 0) {
+      setFont(9, 'normal', SUBTLE);
+      doc.text(`${formatCount(goal.remaining)} doors to go.`, MARGIN, y);
+      y += 14;
+    }
+    y += 10;
+  };
+
   // ── A labeled-bars block (contact / support / each survey question) ─────────
   const barsBlock = (title, subtitle, items, emphasis = false) => {
     const estHeight = (subtitle ? 30 : 18) + Math.max(1, items.length) * 24 + 14;
@@ -174,6 +206,8 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
     y += 10;
   };
 
+  // Same order as the screen: goal frames the headline numbers, then the breakdowns slice them.
+  if (sections.goal) goalBlock(sections.goal);
   barsBlock(sections.contact.title, sections.contact.subtitle, sections.contact.items);
   if (sections.support) {
     barsBlock(sections.support.title, sections.support.subtitle, sections.support.items, true);
@@ -206,6 +240,7 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
   //    same definitions here — same `help` strings from reportDerive, single source of truth) ──
   const defs = [];
   for (const k of sections.kpis) if (k.help) defs.push([k.label, k.help]);
+  if (sections.goal?.help) defs.push([sections.goal.title, sections.goal.help]);
   if (sections.contact?.help) defs.push([sections.contact.title, sections.contact.help]);
   for (const it of sections.contact?.items || []) if (it.help) defs.push([it.label, it.help]);
   if (sections.tags?.help) defs.push([sections.tags.title, sections.tags.help]);

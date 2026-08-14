@@ -43,4 +43,8 @@ export const metricHelp = {
     'People who recorded at least one door in the selected range — not everyone assigned to a campaign. Someone assigned but not out yet does not appear here.',
   restricted:
     'Inaccessible homes — a locked building, a gate, no legal access. Recorded and shown, but never counted as a knock and never billed.',
+  // The one metric on this screen that ignores the date range and walk-list filters. If that
+  // sentence ever leaves this string, the card starts lying quietly.
+  doorGoal:
+    'Progress toward the campaign\'s door goal, counted in billable doors — the same doors the invoice counts. This is ALWAYS the campaign\'s all-time total: the date range and walk list filters do not change it. "Needed" is the doors left divided by the calendar days left, including days nobody knocks. "Current pace" is the last 14 days on the same calendar basis, so the two can be compared directly. No ahead/behind verdict appears until there are at least 5 days of canvassing to judge.',
 };

@@ -16,6 +16,7 @@ import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
+import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
@@ -42,10 +43,19 @@ const createSchema = z.object({
   earlyVotingStart: isoDateSchema.nullable().optional(),
   earlyVotingEnd: isoDateSchema.nullable().optional(),
   datesNote: z.string().trim().max(280).optional(),
+  // Door goal (billable doors) + its own deadline. goalDate is checked against the merged doc
+  // in the handlers, same as the early-voting window, so a one-field PATCH validates against
+  // what's already stored.
+  doorGoal: z.number().int().min(1).max(10_000_000).nullable().optional(),
+  goalDate: isoDateSchema.nullable().optional(),
   // TRI-STATE: null = inherit the org default, true/false = explicit override. `.nullable()`
   // is the whole point — a plain boolean would make "inherit" unexpressible from the UI.
   billRestrictedDoors: z.boolean().nullable().optional(),
 });
+
+// A goal date with no goal is a dead field: nothing to count down to a target that doesn't
+// exist. Checked on the MERGED values so clearing the goal and keeping the date is caught too.
+const goalDateNeedsGoal = (doorGoal, goalDate) => Boolean(goalDate) && !(Number(doorGoal) > 0);
 
 const updateSchema = createSchema.partial();
 
@@ -75,7 +85,7 @@ const queueOp = (promise, ms = Number(process.env.CAMPAIGN_DELETE_ENQUEUE_TIMEOU
 
 async function withCounts(campaigns, organizationId) {
   const ids = campaigns.map((c) => c._id);
-  const [householdAgg, surveyAgg, activityAgg, summaries] = await Promise.all([
+  const [householdAgg, surveyAgg, activityAgg, summaries, goals] = await Promise.all([
     Household.aggregate([
       // isActive: true matches the canonical count in reports.js — soft-deleted
       // (voterless) doors are excluded so this list agrees with the dashboard.
@@ -93,6 +103,9 @@ async function withCounts(campaigns, organizationId) {
     // Setup progress + management flags (setupComplete, hasCanvassed, deletable,
     // canEditType) so the Campaigns list can gate edit/archive/delete by progress.
     campaignSummaries({ organizationId, campaigns }),
+    // Door-goal progress + pace. Issues NO queries at all when nothing in this list carries a
+    // goal, which is the common case for an org that never sets one.
+    goalProgressFor({ organizationId, campaigns }),
   ]);
 
   const byCampaign = new Map();
@@ -130,6 +143,9 @@ async function withCounts(campaigns, organizationId) {
       surveysSubmitted: 0,
       litDropped: 0,
     },
+    // ALL-TIME and campaign-wide by construction (services/reports/goalProgress.js), unlike
+    // `counts` above. null when no goal is set.
+    goal: goals.get(String(c._id)) || null,
     ...(summaries.get(String(c._id)) || {}),
   }));
 }
@@ -201,6 +217,9 @@ router.post('/', async (req, res, next) => {
     if (data.earlyVotingStart && data.earlyVotingEnd && data.earlyVotingEnd < data.earlyVotingStart) {
       return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
     }
+    if (goalDateNeedsGoal(data.doorGoal, data.goalDate)) {
+      return res.status(400).json({ error: 'Set a door goal before a goal date.', code: 'goal-date-without-goal' });
+    }
     const campaign = await Campaign.create({
       organizationId: orgId,
       name: data.name,
@@ -214,6 +233,8 @@ router.post('/', async (req, res, next) => {
       earlyVotingStart: data.earlyVotingStart ?? null,
       earlyVotingEnd: data.earlyVotingEnd ?? null,
       datesNote: data.datesNote ?? '',
+      doorGoal: data.doorGoal ?? null,
+      goalDate: data.goalDate ?? null,
       // Undefined → null → inherit the org default. New campaigns never hard-code a value.
       billRestrictedDoors: data.billRestrictedDoors ?? null,
       createdBy: req.user._id,
@@ -238,8 +259,12 @@ router.patch('/:campaignId', async (req, res, next) => {
     }
     const data = updateSchema.parse(req.body);
     // A lead is a campaign-scoped admin: they can edit their campaign's name,
-    // survey, and timezone — but archiving (isActive), the type, the state, the
-    // key dates, and the billable-door policy stay with org admins.
+    // survey, timezone and DOOR GOAL — but archiving (isActive), the type, the state,
+    // the key dates, and the billable-door policy stay with org admins.
+    //
+    // doorGoal/goalDate are absent from this list on purpose (owner ruling 2026-08-14): a lead
+    // running a campaign owns its target, even though every other date here is admin-only.
+    // Do not "tidy" them in — campaignGoal.int.test.js asserts a lead can set them.
     if (!isOrgAdmin(req)) {
       for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote', 'billRestrictedDoors']) {
         if (data[field] !== undefined) {
@@ -272,6 +297,14 @@ router.patch('/:campaignId', async (req, res, next) => {
       return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
     }
 
+    // Same merged-value treatment for the goal pair: clearing the goal while leaving a goal
+    // date stored would leave a countdown to nothing.
+    const mergedGoal = data.doorGoal !== undefined ? data.doorGoal : campaign.doorGoal;
+    const mergedGoalDate = data.goalDate !== undefined ? data.goalDate : campaign.goalDate;
+    if (goalDateNeedsGoal(mergedGoal, mergedGoalDate)) {
+      return res.status(400).json({ error: 'Set a door goal before a goal date.', code: 'goal-date-without-goal' });
+    }
+
     if (data.name !== undefined) campaign.name = data.name;
     if (data.state !== undefined) campaign.state = data.state;
     if (data.timeZone !== undefined) campaign.timeZone = data.timeZone;
@@ -280,6 +313,9 @@ router.patch('/:campaignId', async (req, res, next) => {
     if (data.earlyVotingStart !== undefined) campaign.earlyVotingStart = data.earlyVotingStart;
     if (data.earlyVotingEnd !== undefined) campaign.earlyVotingEnd = data.earlyVotingEnd;
     if (data.datesNote !== undefined) campaign.datesNote = data.datesNote;
+    // Explicit null clears the goal (and, with the merged check above, its date).
+    if (data.doorGoal !== undefined) campaign.doorGoal = data.doorGoal;
+    if (data.goalDate !== undefined) campaign.goalDate = data.goalDate;
     // Explicit null restores "inherit the org default". Deliberately NOT locked by
     // hasCanvassed like `type` is: this is a read-time reporting policy — no stored count
     // changes — so flipping it mid-campaign is legitimate and fully reversible.

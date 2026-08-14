@@ -31,11 +31,26 @@ The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archi
 - **Timezone** — editable, but once there's field activity you'll see a warning: changing it re-buckets every past daily stat. Nothing is lost and all-time totals stay the same, but day-by-day numbers shift.
 - **Type (survey ↔ lit drop)** — locks the moment canvassing starts. To run a different type, create a new campaign instead.
 - **Key dates** — admins only. As a lead you can see them but not change them (see [Team lead vs admin](team-lead-vs-admin)).
+- **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target.
 - **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back. See [Can I bill for restricted doors?](bill-restricted-doors).
 
 ## Key dates
 
 An admin can set an Election Day, an early-voting window, and a short note. Election Day shows the actual date with a countdown beside it — "Election Day · Wed, Nov 4," then "in 12 days." The early-voting window always names **both** of its ends: "Opens Oct 20 · through Nov 1" before it starts, "Open now · Oct 20 – Nov 1" while it runs, "Ended Nov 1" after. Canvassers see all of this on their campaign picker **and** at the top of their book list once they're working, so the dates stay in front of the field team. See [Setting election dates](set-election-dates).
+
+## Door goal
+
+Give a campaign a **door goal** — say 10,000 doors — and an optional **goal date**, and the campaign's Home page tells you whether you're going to make it. You'll see how many doors are done, how many are left, **how many a day and a week it takes** from here, what your crew is actually averaging, and a plain **Ahead / On track / Behind**. Leave the goal date blank and Election Day is used instead.
+
+Both fields sit in the same create/edit drawer as the key dates, and unlike the dates, **a team lead can set them** on a campaign they run. The Campaigns list shows a small progress bar on every campaign so you can see which ones are falling behind without opening each. Canvassers never see any of it.
+
+Three things that trip people up:
+
+- **The goal card ignores the filters above it.** Change the date range, pick a walk list, filter by crew — the rest of the page moves, the goal doesn't. It's always the campaign's all-time total, and the card says so underneath.
+- **Days off count.** "412 a day" divides the doors left by every remaining day on the calendar, including the ones nobody knocks. Your current pace is measured the same way, so the two numbers are fair to compare.
+- **No verdict for the first few days.** You need about 5 days of canvassing before Ahead/Behind appears. Judging a campaign that started Tuesday would just be guessing, so we show you the target and stay quiet about the rest.
+
+See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## Archive vs. delete
 

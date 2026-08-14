@@ -4,6 +4,7 @@ import { useRowNavigation, stopRowClick } from '../../lib/rowNavigation.js';
 import { Card, Badge, Button } from '../ui/index.js';
 import { formatDateInTz } from '../../lib/datetime.js';
 import { daysUntil, formatDateLabel, earlyVotingState, countdownLabel } from '../../lib/electionDates.js';
+import { verdictOf, shortCount, daysLeftLabel } from '../../lib/goalPace.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -58,6 +59,65 @@ export function CountdownChip({ days }) {
     >
       {label}
     </span>
+  );
+}
+
+// Door-goal progress, compact. Two shapes, one source: the `goal` block the server puts on each
+// campaign row (services/reports/goalProgress.js), which is ALL-TIME and campaign-wide. Shared
+// with CampaignsTable so the card and table views can't drift.
+function GoalTrack({ goal, className = '' }) {
+  const pct = Math.min(100, Math.max(0, goal.percent || 0));
+  return (
+    <span className={`h-1.5 overflow-hidden rounded-full bg-sunken ${className}`}>
+      <span
+        className={`block h-full rounded-full ${goal.verdict === 'complete' ? 'bg-success' : 'bg-brand-600'}`}
+        style={{ width: `${pct}%` }}
+      />
+    </span>
+  );
+}
+
+// Table cell: "3.4k / 10k" + bar + a verdict dot. The dot alone never carries the meaning —
+// it's title-ed, and the row's own Home page states it in words.
+export function GoalCell({ goal }) {
+  if (!goal?.target) return <span className="block text-right text-fg-muted">—</span>;
+  const v = verdictOf(goal);
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <span className="tabular-nums">
+        {shortCount(goal.done)} / {shortCount(goal.target)}
+      </span>
+      <GoalTrack goal={goal} className="w-16" />
+      {v.label && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${v.dot}`} title={v.label} />}
+    </div>
+  );
+}
+
+// Card block: the same numbers with room for the verdict in words.
+export function GoalBlock({ goal }) {
+  if (!goal?.target) return null;
+  const v = verdictOf(goal);
+  const days = daysLeftLabel(goal);
+  return (
+    <div className="space-y-1.5 rounded-lg bg-sunken px-3 py-2">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="text-fg-muted">Door goal</span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-medium tabular-nums text-fg">
+            {shortCount(goal.done)} / {shortCount(goal.target)}
+          </span>
+          {v.label && <Badge variant={v.variant} dot>{v.label}</Badge>}
+        </span>
+      </div>
+      <GoalTrack goal={goal} className="block w-full" />
+      {(goal.requiredPerDay != null || days) && (
+        <p className="text-xs text-fg-muted">
+          {[days, goal.requiredPerDay != null ? `${goal.requiredPerDay.toLocaleString()} a day needed` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -138,6 +198,8 @@ export default function CampaignCard({ campaign: c, menuItems, onAssign }) {
           {c.datesNote && <p className="text-xs text-fg-muted">{c.datesNote}</p>}
         </div>
       )}
+
+      {!gone && <GoalBlock goal={c.goal} />}
 
       <div className="space-y-1.5">
         <StatRow label="State" value={c.state || '—'} />

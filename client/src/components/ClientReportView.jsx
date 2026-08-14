@@ -26,7 +26,7 @@ function kpiProps(k) {
 }
 
 export default function ClientReportView({ report }) {
-  const { kpis, contact, support, tags, others, isQuietWeek } = deriveReportSections(report);
+  const { kpis, goal, contact, support, tags, others, isQuietWeek } = deriveReportSections(report);
 
   return (
     <div className="space-y-8">
@@ -44,6 +44,38 @@ export default function ClientReportView({ report }) {
           ))}
         </div>
       </section>
+
+      {/* Door goal, when the operator opted in. Right under the headline numbers because it
+          frames them: it answers "is that a lot?" before the breakdowns start slicing it up.
+          Progress only — no pace, no verdict (see ClientReport.goalSnapshot). */}
+      {goal && (
+        <section>
+          <SectionHeading>{goal.title}</SectionHeading>
+          <Card className="p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-sm text-fg-muted">{goal.subtitle}</span>
+              <span className="text-sm font-semibold tabular-nums text-fg">{goal.percent}%</span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-semibold tabular-nums text-fg">
+                {formatCount(goal.done)}
+              </span>
+              <span className="text-sm text-fg-muted">of {formatCount(goal.target)} doors</span>
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-sunken">
+              <div
+                className="h-full rounded-full bg-brand-600"
+                style={{ width: `${goal.percent}%` }}
+              />
+            </div>
+            {goal.remaining > 0 && (
+              <p className="mt-2 text-xs text-fg-muted">
+                {formatCount(goal.remaining)} doors to go.
+              </p>
+            )}
+          </Card>
+        </section>
+      )}
 
       {/* Voter contact breakdown always reads first — right after the headline numbers and before
           the support question — so the client sees outcomes-across-all-doors up front. */}

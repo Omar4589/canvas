@@ -26,8 +26,26 @@ clock.
 
 Every hours figure in your reports now says which it is:
 
-- **Measured** — from FbTime clock time. Marked with a dot (•) or the word "measured".
+- **Measured** — from FbTime clock time. Marked **FbTime** on the canvasser tables, or the word
+  "measured" on mobile.
 - **Estimated** — the old knock-span math, used wherever no measured hours exist.
+
+### Why someone's hours are estimated
+
+"Estimated" is not one situation, it is four, and only two of them are anybody's to fix. Rather
+than leaving you to work out which from a missing marker, the canvasser tables label the cause
+next to that person's doors-per-hour:
+
+| Marker | What it means | What to do |
+|---|---|---|
+| **FbTime** | Every day in range came from their clock time. | Nothing. |
+| **Part** | Some days measured, the rest estimated. | Nothing, unless the split surprises you — hover for the reason. |
+| **No link** | FbTime is connected, but this person is not mapped to an FbTime profile, so **none** of their clocked hours count. | Link them on the Integrations page. |
+| **Open shift** | A shift was left open from an earlier day (a missed clock-out), so it was ignored rather than counted as a 30-hour day. | Close it in FbTime; the range re-measures itself on the next sync. |
+| **Est** | They're linked and everything is healthy — they just have no clocked hours in this range. | Usually nothing; this is a day off. |
+
+An organization that has not connected FbTime sees **no marker at all** on any row, exactly as
+before the integration existed. Hovering any marker explains it in full.
 
 **The two are never mixed into one team or campaign rate.** A team rate shows measured numbers only
 when *every* contributor is fully measured; otherwise it stays estimated for everyone. A rate that
@@ -55,13 +73,34 @@ Canvassers whose email differs between the two apps are linked by hand on the sa
 with clocked hours but no link shows a **"has hours"** badge — their hours count nowhere until
 linked.
 
+### Checking one person without leaving what you're doing
+
+The Integrations page is the only place links are *edited*, and it is admin-only. But whether a
+particular canvasser's hours are measured shows up in two other places, so you rarely have to go
+looking:
+
+- **Their profile** — open anyone from Users (or a campaign's Team page) and the Activity section
+  says **"FbTime linked"** or **"FbTime not linked"**, with a shortcut to go fix it. **Team leads
+  see this too**, since they cannot open the Integrations page at all; theirs reads "ask an org
+  admin to link them" instead of offering the shortcut.
+- **The canvasser tables** on Campaign Home and Timeline — the marker beside doors-per-hour, above.
+
 ### Trust notes
 
 - A shift still open right now counts "so far" and keeps moving until clock-out.
 - A shift someone forgot to close (open since an earlier day) is **ignored** for that day's rate —
   a 30-hour ghost shift must not flatten someone's pace — and the day falls back to the estimate.
+  **Only that day is affected.** The same person's other days, including one they are on the clock
+  for right now, still measure normally — so one forgotten clock-out costs you a single day, not
+  that canvasser's whole week.
 - Hours an admin typed into FbTime by hand count, and the report notes the range includes manual
-  entries.
+  entries — hover the marker beside doors-per-hour on the canvasser tables, or read the sub-line
+  under **Hours on doors** on a canvasser's detail screen in the mobile app.
+- **Someone can work several shifts in one day, and that is handled** — FbTime returns a day's
+  shifts already added together, so a 9–12 and a 2–6 arrive as one day of 7 hours (with a shift
+  count). Doorline never sees or stores individual shifts.
+- A day that carries a shift someone is **still clocked into** is marked as such, because that
+  day's number keeps moving until they clock out.
 - A day someone was clocked in but knocked no doors still counts its hours — that is exactly the
   time the estimate could never see.
 
@@ -86,6 +125,8 @@ kept, so reconnecting later finds the roster already mapped.
 | The hours resolver (merge + labels) | [`server/src/services/reports/hoursSource.js`](../server/src/services/reports/hoursSource.js) |
 | Admin routes | [`server/src/routes/admin/integrations.js`](../server/src/routes/admin/integrations.js) (`/admin/integrations/fbtime…`) |
 | Web UI | [`client/src/pages/IntegrationsPage.jsx`](../client/src/pages/IntegrationsPage.jsx) (`/integrations`, orgAdmin RoleGate) |
+| Per-row provenance marker | [`client/src/components/CanvasserSummaryTable.jsx`](../client/src/components/CanvasserSummaryTable.jsx) `HOURS_MARK` — the five states, their words and their tooltips, in one table |
+| Per-person link state | [`client/src/components/UserProfileModal.jsx`](../client/src/components/UserProfileModal.jsx) Activity section, off `stats.fbtime` |
 | Mobile | read-only status row on admin **More**; badges on every hours surface |
 | Tests | `test/fbtimeClient.test.js`, `test/hoursSourceFold.test.js`, `test/fbtimeSync.int.test.js`, `test/fbtimeIntegration.int.test.js`, `test/reportsHoursSource.int.test.js` |
 
@@ -128,9 +169,31 @@ mark-and-continue and never change status.
 
 ### The merge rules (`services/reports/hoursSource.js`)
 
+- **The day is the atom, and the provider defines it.** `GET /hours` returns `person.days[]`
+  already summed across every shift that day (`shiftCount` rides along) — Doorline never sees a
+  shift. Multi-shift days therefore need no handling here and get none. The consequence to know:
+  a day is usable or not *as a whole*, so a day holding one clean shift **and** one runaway open
+  one falls back to the span estimate entirely rather than salvaging the clean half. Conservative
+  and honest; separating them would require shift-level data the contract does not offer and
+  `FbTimeDailyHours` deliberately does not store.
 - Per **user-day**: the measured row wins when present AND usable — `hours > 0` and not `isStale`
   (a forgotten clock-out falls back to the span and keeps its flag). `isOpen` days count ("so
   far"); `isManualEntry` days count, flag rolled up.
+- **Staleness only reaches BACKWARD, and the narrowing is at read time.** `sync.js` writes
+  `isStale` broad — `person.hasStaleShift && d.hasOpenShift`, a **person**-level provider flag
+  ANDed with a **day**-level one, because the provider says *that this person has a stale shift*
+  and never *which*. Left alone that flags today's healthy open shift for anyone carrying an old
+  forgotten clock-out, estimating them every working day until someone closes it. `staleDay(m,
+  day, today)` narrows it: **only a day strictly before today can be stale.** Safe because a
+  shift belongs entirely to the day it *started*, so a runaway shift's hours never reach another
+  day's row — and "stale" *means* open since an earlier day, so today's open shift is just open.
+  The runaway shift's own day still falls back and still raises `hasStaleShift`.
+  **Read time, not sync time**, deliberately: a "today" baked into a cached row is wrong from the
+  next midnight and frozen wrong for any org whose sync is erroring. `loadMeasuredHours` resolves
+  `today` per request via `zonedDayStr(new Date(), tz)` — the row's own stamped zone, so the
+  comparison is against the same calendar the day buckets were built in. An overlay with no
+  `today` (a legacy caller or fixture) keeps the old broad behavior: never narrow without having
+  looked at the calendar. The provider contract is untouched — same request, same fields read.
 - A user's day set is the **union** of knock-days and measured days — clocked-but-not-knocking
   lowers the rate. `daysActive` keeps its knock-day meaning.
 - Per-canvasser rows: `hoursSource` = `measured` | `estimated` | `mixed` (mixed exists ONLY at this
@@ -138,13 +201,23 @@ mark-and-continue and never change status.
 - **Aggregates are all-or-nothing**: a campaign/team figure is measured only when every
   contributing user is fully measured; otherwise it is the span figure for everyone, labeled
   estimated. `mixed` never appears at aggregate level.
+- **`hoursReason` names WHICH estimated** — `null` when the row is fully measured, otherwise
+  `not-connected` | `not-linked` | `stale-shift` | `no-hours`, in that precedence. Precedence is
+  "who can act on it", outermost first: an unconnected org has nothing to fix, an unlinked person
+  is an admin's two-click fix, a stale shift is somebody's forgotten clock-out, and `no-hours` is
+  the residue that is usually a day off. `loadMeasuredHours` carries the org's `linkedUserIds`
+  alongside the hours for exactly this — the two answer one question between them, and a caller
+  that had to load links separately is the caller that forgets to. A fold whose overlay has **no**
+  `linkedUserIds` (a pre-existing fixture) yields `no-hours`, never `not-linked`: never accuse a
+  mapping of being missing without having looked at the mapping.
 
 ### Endpoint additions (all additive — no client-version bump)
 
 | Endpoint | Added |
 |---|---|
-| `/admin/reports/canvassers` | rows' `hoursOnDoors`/`doorsPerHour` become **merged** values + `hoursSource`, `hoursFlags` |
-| `/admin/reports/canvasser-timeline` | rows **keep the derived** `hoursOnDoors` (shipped builds sum it into the KPI — replacing it would make them blend) + additive `measuredHoursOnDoors`, `hoursSource`, `hoursFlags`; top-level `measuredKpi {hoursOnDoors, hoursSource}` (all-or-nothing; null when not all-measured) |
+| `/admin/reports/canvassers` | rows' `hoursOnDoors`/`doorsPerHour` become **merged** values + `hoursSource`, `hoursReason`, `hoursFlags` |
+| `/admin/reports/canvasser-timeline` | rows **keep the derived** `hoursOnDoors` (shipped builds sum it into the KPI — replacing it would make them blend) + additive `measuredHoursOnDoors`, `hoursSource`, `hoursReason`, `hoursFlags`; top-level `measuredKpi {hoursOnDoors, hoursSource}` (all-or-nothing; null when not all-measured) |
+| `/admin/memberships/:userId/stats` | `fbtime {connected, linked, personName, source}` — **link state only, never this person's hours**. Admin **or lead** (the route's existing `leadMaySeeTarget` gate), which is the only FbTime fact a lead can see anywhere |
 | `/admin/reports/team-averages` | all-or-nothing applied server-side + top-level `hoursSource` |
 | `/admin/reports/canvassers/:id/summary` | merged `kpi.hoursOnDoors` + `kpi.hoursSource`/`hoursFlags`; `lastSevenDays[].hoursSource` |
 | `/admin/reports/canvassers/:id/daily` | per-day merge; each day exactly `measured` or `estimated` |
@@ -168,5 +241,13 @@ immediately. Links **survive disconnect**; the hours cache does not.
 The org's own admin connects it — that act is the consent. What Doorline stores: the sealed key,
 FbTime person ids/names/emails for the mapping, and per-person **daily hour totals** (never GPS,
 never pay rates — the provider doesn't offer them and the client never asks). All four collections
-are org-scoped and in the org-delete sweep. Admin-only surface; leads deliberately cannot see it.
+are org-scoped and in the org-delete sweep.
+
+**Who sees what.** Everything that *configures* the integration — the key, the hours figure, the
+mapping table, the event history — is admin-only, and leads deliberately cannot reach any of it.
+The one thing a lead can see is **whether a canvasser they already manage is linked**, on that
+person's profile modal, because a lead reading a doors-per-hour they cannot explain is the whole
+problem this feature exists to solve. That is a boolean about a person already in their scope
+(the route's existing `leadMaySeeTarget` gate), never hours, never the key, never the roster of
+other people's links, and it adds no new data category and no new recipient.
 See PRIVACY_VERIFICATION.md (v5 entry) and the DPA §6 subprocessor listing.

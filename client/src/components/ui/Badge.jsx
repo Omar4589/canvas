@@ -17,9 +17,12 @@ const DOT = {
   info: 'bg-info',
 };
 
-export default function Badge({ variant = 'neutral', dot = false, className = '', children }) {
+// ...rest so a badge can be made focusable (tabIndex) or described (aria-*) by its caller —
+// a pill that carries the only explanation of a state has to be reachable without a mouse.
+export default function Badge({ variant = 'neutral', dot = false, className = '', children, ...rest }) {
   return (
     <span
+      {...rest}
       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${VARIANTS[variant] || VARIANTS.neutral} ${className}`}
     >
       {dot && <span className={`h-1.5 w-1.5 rounded-full ${DOT[variant] || DOT.neutral}`} />}

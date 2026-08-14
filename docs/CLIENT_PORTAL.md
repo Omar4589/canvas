@@ -35,6 +35,11 @@ A report reads top to bottom as a document, in this order:
 - **Activity at a glance** — headline cards (doors knocked, surveys taken, voters surveyed, connection
   rate). Each card shows the **cumulative total** as the big number and a **"+N this week"** pill. A
   quiet week (no new doors) says so plainly above the cards.
+- **Door goal** *(only if the operator ticked it)* — progress toward the campaign's door target:
+  *3,412 of 10,000 doors · 34%*, with a bar and the doors remaining, measured **as of this report's
+  week**, not today. **Progress only** — never a pace, an "on track" verdict, or a projected finish
+  date. Those are live management numbers; frozen onto a document a client reads weeks later they
+  would keep asserting something that had stopped being true.
 - **Voter contact breakdown** — outcomes across the doors (surveyed, *declined to participate*, not
   home, wrong address, lit dropped), shown as one stacked bar with a legend. This reads **first**, right
   after the numbers. On survey campaigns, **Declined to participate** is the door where someone answered
@@ -85,6 +90,12 @@ In the builder you:
   **"What the client sees"** recap (Support / N of M questions shown / Tags / Map on-off) updates
   live, and a warning flags if your support question isn't in the visible set (the client wouldn't
   see its bars).
+- Tick **Show door-goal progress to the client** if you want the campaign's door target on the
+  report. **Off by default**, same reasoning as the tag list below: the share page is
+  unauthenticated, so a contracted number goes on it only by an affirmative tick. The checkbox is
+  disabled — with the reason spelled out beneath it — when there is nothing to show: the campaign
+  has no door goal, or this report is scoped to a walk list (goals are campaign-wide, so measuring
+  one walk list's doors against the whole campaign's target would understate it badly).
 - Tick which **tags** the recipient may see (the **Visible tags** checklist). **Tags are hidden
   until ticked** — the opposite default from the question list, on purpose: tag names are internal
   labels ("Hostile", "Needs follow-up") that would otherwise land on an unauthenticated page, and a
@@ -162,11 +173,23 @@ publish appear automatically — so you share it once. Recipients only ever see 
   filtered to the ticked ones at shaping. Absent on pre-feature reports → the section doesn't
   render; no migration (the `viewCount` absent-field pattern).
 - `supportQuestionKey`, `campaignType`, and `visibility: { visibleQuestionKeys[], mapAnswerKeys[],
-  showMap, visibleTags[] }`. ⚠️ **`visibleTags` empty = show NONE** — the deliberate OPPOSITE of
-  `visibleQuestionKeys`' empty = all. Tag names are operator-authored strings bound for an
-  unauthenticated page, so each is an affirmative per-tag opt-in, and every report created before
+  showMap, visibleTags[], showGoal }`. ⚠️ **`visibleTags` empty = show NONE** — the deliberate
+  OPPOSITE of `visibleQuestionKeys`' empty = all. Tag names are operator-authored strings bound for
+  an unauthenticated page, so each is an affirmative per-tag opt-in, and every report created before
   the field shows no tags by default. Two whitelists, two empty-defaults, on one card — flagged
-  here so the next reader doesn't "unify" them.
+  here so the next reader doesn't "unify" them. **`showGoal` follows `visibleTags`, not
+  `visibleQuestionKeys`: default `false`**, for the same unauthenticated-page reason.
+- `goalSnapshot: { target, deadline, done, remaining, percent, asOf }` — frozen door-goal progress,
+  written by `snapshotGoal()` inside `computeBothWindows` (so it refreshes on every recompute and at
+  publish). **Progress only** — no pace, verdict or projection is ever frozen; see the Part 1 note
+  for why. Two deliberate choices: `done` is the report's OWN `cumulative.totals.doorsKnocked`, not
+  the live all-time figure, so a June report published in July doesn't count July's doors and the
+  goal bar counts exactly the doors the "Doors knocked" card above it counts (that is `knocks`, so
+  on a campaign that bills restricted doors it runs slightly under the console's billable-door
+  basis — a client-facing document agreeing with itself beats agreeing with an internal screen);
+  and an **effort-scoped report never gets a snapshot at all**, because a campaign-wide target
+  measured against one walk list's doors understates progress. `PATCH …/visibility.showGoal: true`
+  with no snapshot is a **400 `NO_GOAL_SNAPSHOT`** rather than a silent no-op.
 - `mapPointCount`, `publishedAt`, `publishedBy`, `createdBy`.
 - `openMockFlagsAtPublish` — unreviewed mock-GPS flags inside the cumulative window at freeze time
   (the soft publish gate's audit trail; `null` on pre-feature reports, operator-only).
@@ -322,6 +345,9 @@ active `ReportShareLink` (404 otherwise):
   distinguishable on the share list without opening each) and `shapeReportForClient` — **never
   `effortId`** or any other internal id. The name is operator-authored metadata, the same exposure
   class as the report title (flagged in Part 1).
+- **The goal block is shaped through the same opt-in gate**: `shapeReportForClient` emits `goal`
+  only when `visibility.showGoal && goalSnapshot.target`. An unticked goal never reaches the wire at
+  all, so nothing downstream can render it by accident — least exposure, same rule as the tags below.
 - **Tag rows are shaped through the opt-in allowlist**: `shapeWindow`
   ([clientReportView.js](../server/src/services/reports/clientReportView.js)) filters
   `tagBreakdowns` to `visibility.visibleTags` (case-insensitive via `normalizeTag`, so a palette
@@ -348,8 +374,11 @@ active `ReportShareLink` (404 otherwise):
   [PublicReportListPage](../client/src/pages/PublicReportListPage.jsx) (the archive, newest first), and
   [PublicReportDetailPage](../client/src/pages/PublicReportDetailPage.jsx). Routes `/r/:token` and
   `/r/:token/reports/:reportId` live **outside** `ProtectedRoute` in [App.jsx](../client/src/App.jsx).
+- The builder's door-goal tick lives beside the map/tag toggles; it is disabled (with the reason)
+  when `report.goalSnapshot.target` is absent, mirroring the server's `NO_GOAL_SNAPSHOT` refusal.
 - Shared derivation: [lib/reportDerive.js](../client/src/lib/reportDerive.js) `deriveReportSections()`
-  returns the report's KPIs, contact/support/**tags**/other breakdowns and section **order** as plain
+  returns the report's KPIs, **goal**, contact/support/**tags**/other breakdowns and section
+  **order** as plain
   data — the single source consumed by **both** the on-screen view and the PDF, so they can't drift.
   The `tags` section is the one deliberate exception to this module's derive-percents rule: voter
   counts, no percent, rendered by [ReportTagList](../client/src/components/ReportTagList.jsx) (its

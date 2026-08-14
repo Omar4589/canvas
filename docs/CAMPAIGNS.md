@@ -32,7 +32,8 @@ progress** card on the campaign's dashboard walks you through it — it's a live
 1. **Create the campaign** — **Campaigns → New campaign** (a slide-in drawer): name, type (survey /
    lit drop), state (a dropdown of real US states), timezone (auto-fills from the state), and the
    optional **key dates** (Election Day, the early-voting window, a short note — see "Key dates"
-   below). A survey is **not** required at creation.
+   below) plus an optional **door goal** and **goal date** ("Door goal and pace", below). A survey
+   is **not** required at creation.
 2. **Import voters** — **Voter Import**: upload a voter file (geocoded for you if it has no lat/lng).
    New addresses land in **Intake** (owned by no walk list yet). See [IMPORTS.md](IMPORTS.md).
 3. **Attach a survey** *(survey campaigns only)* — on the campaign's **Survey** tab, pick or build
@@ -100,6 +101,43 @@ asked when it *ends*. All date math runs in the **campaign's timezone** (dates a
 `YYYY-MM-DD` civil dates), so every admin and canvasser sees the same day regardless of where they
 are.
 
+## Door goal and pace (added 2026-08)
+
+A campaign can carry a **door goal** — how many doors it's aiming for — and an optional **goal
+date**. Set both in the same create/edit drawer as the key dates. Unlike the key dates, **a team
+lead can set a campaign's goal**: a lead running a campaign owns its target.
+
+- **Door goal** — a count of **billable doors**, the same doors an invoice counts (see
+  [METRICS.md](METRICS.md)). One house counts once per round, so going back for a second round
+  adds to the total. Leave it blank and none of this appears.
+- **Goal date** — when you want to be there. **Leave it blank and Election Day is used**, so a
+  campaign that only ever filled in an Election Day still gets a countdown and a pace. Setting it
+  explicitly is for the common case of wanting the turf walked *before* Election Day.
+
+Once a goal is set, the campaign's **Home** page grows a card above Activity showing progress, the
+doors left, how many a day and a week it takes to get there, what the crew is *actually* averaging,
+and a plain verdict — **Ahead / On track / Behind** — with a projected finish date. The Campaigns
+list carries a compact version (a bar and `3.4k / 10k`) on both the cards and the table, and the
+mobile admin campaign screen shows the full card.
+
+Three things worth knowing about how the numbers behave:
+
+- **The goal card ignores the page's filters.** Everything else on Home honors the date range, the
+  walk list, and the crew picker. The goal is always the campaign's all-time, campaign-wide total —
+  the card says so under it. Without that, "3,412 / 10,000" would silently mean "3,412 this week"
+  the moment someone changed the range.
+- **Days are calendar days**, including days nobody knocks. The pace you're *doing* is measured the
+  same way (the last 14 days on the same calendar basis), so the two numbers are directly
+  comparable — a crew that takes Sundays off sees that reflected on both sides, not just one.
+- **No verdict appears until there's something to judge.** A campaign needs at least 5 days of
+  canvassing since its first round went active; before that you still get the required rate, just
+  no Ahead/Behind claim and no projection. A campaign two days old would otherwise divide two days
+  of doors by fourteen and read "Behind" while doing fine.
+
+**Canvassers never see the goal** — not on the campaign picker, not in Books, nowhere in the
+canvasser app. It's a management number. It *can* be shown to a client on a published weekly
+report, but only as an explicit per-report tick (see [CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
+
 ## Navigating a campaign (the drill-in)
 
 **Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
@@ -151,7 +189,9 @@ in the drawer). The rules protect your data once canvassing has started:
 
 - **Name, state** — always editable.
 - **Key dates + note** — always editable, **org admins only** (a lead can edit the campaign's name,
-  survey, and timezone, but not its dates).
+  survey, timezone, and door goal, but not its dates).
+- **Door goal + goal date** — always editable, **by org admins AND team leads.** The deliberate
+  exception to the line above: a lead running a campaign owns its target. See "Door goal and pace".
 - **Restricted doors on invoices** — always editable, **org admins only.** Three choices: *use the
   organization default* (which the drawer spells out for you), *count them*, or *don't count them*.
   Deliberately **not** locked by canvassing activity, unlike Type: it's a reporting policy that's
@@ -258,7 +298,9 @@ in [validators.js](../server/src/utils/validators.js)), `surveyTemplateId` (null
 archive flag), `timeZone`, and the key dates: `electionDay` / `earlyVotingStart` / `earlyVotingEnd`
 (**`'YYYY-MM-DD'` strings, default null** — civil dates interpreted in the campaign's `timeZone`;
 strings on purpose, a `Date` at UTC midnight would render a day early in US zones) plus `datesNote`
-(trimmed string, max 280), and `billRestrictedDoors` (**tri-state Boolean, default `null`** — `null`
+(trimmed string, max 280), the door goal `doorGoal` (**Number, default null, min 1** — a count of
+BILLABLE doors) and `goalDate` (same `'YYYY-MM-DD'` civil-date convention as the key dates; null
+falls back to `electionDay`), and `billRestrictedDoors` (**tri-state Boolean, default `null`** — `null`
 = inherit `Organization.billRestrictedDoors`, `true`/`false` = explicit override; always resolve via
 [billRestricted.js](../server/src/services/reports/billRestricted.js), since reading the field raw
 collapses "inherit" into "off"). ISO date strings order chronologically as plain strings, so all
@@ -291,13 +333,19 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   canEditType }`.
 - **POST `/admin/campaigns`** — create; survey type requires a valid in-org `surveyTemplateId`.
   Key-date fields validate as `isoDateSchema` (shared, in `validators.js`); an inverted early-voting
-  window (`earlyVotingEnd < earlyVotingStart`, lexicographic) is a `400`.
+  window (`earlyVotingEnd < earlyVotingStart`, lexicographic) is a `400`. `doorGoal` is
+  `z.number().int().min(1).max(10_000_000).nullable()` (there is no shared numeric validator — this
+  follows the inline precedent in `superAdmin/billing.js`); a `goalDate` with no `doorGoal` is a
+  `400 { code: 'goal-date-without-goal' }`.
 - **PATCH `/admin/campaigns/:id`** — update. **Type-lock guard:** if `type` changes and
   `campaignHasCanvassed(id)` (any `CanvassActivity` or `SurveyResponse`), returns `400
   { code: 'type-locked' }`. Archive/reactivate is just `{ isActive }`. The key-date fields join
   `isActive`/`type`/`state` in the **org-admin-only** list (a lead's PATCH of them is a `403`);
   explicit `null` clears a date; the window check runs against the **merged** values (incoming ??
-  stored), so PATCHing one bound still validates against the other.
+  stored), so PATCHing one bound still validates against the other. **`doorGoal`/`goalDate` are
+  deliberately NOT in that org-admin-only list** (owner ruling 2026-08-14) — a lead may set their
+  own campaign's target. The goal pair gets the same merged-value treatment, so clearing the goal
+  while a date is stored is the same `400` as setting a date with no goal.
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),
@@ -306,6 +354,11 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   ignore them; bootstrap carries them so the Books header + mobile admin detail can show the chip
   in-campaign, not just on the picker). Covered end-to-end by
   [campaignDates.int.test.js](../server/test/campaignDates.int.test.js).
+- **Where the GOAL surfaces — deliberately narrower.** `doorGoal`/`goalDate` ride the lean spread on
+  GET `/admin/campaigns`, and both that route and the rollup additionally attach a computed **`goal`
+  block** (below). They are **NOT** added to `/mobile/campaigns` or `/mobile/bootstrap`: canvassers
+  never see a goal. Covered by
+  [campaignGoal.int.test.js](../server/test/campaignGoal.int.test.js).
 - **`billRestrictedDoors` surfaces differently** — it is a *policy*, not a display field, so nothing
   ships the raw tri-state to a client except the edit drawer. `GET /admin/campaigns` returns it via
   the lean spread **plus** an envelope-level `orgBillRestrictedDoors` (so the drawer can label what
@@ -396,6 +449,20 @@ The cold-start readiness chain is a pure derivation in
   active-only validity check once left an all-archived org with nothing selectable).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
+- **Door goal:** the server owns every number
+  ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
+  and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin
+  [mobile/lib/goalPace.js](../mobile/lib/goalPace.js) (the metricHelp rule: reword one, reword both).
+  Rendered by [GoalProgressCard.jsx](../client/src/components/GoalProgressCard.jsx) on
+  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) — placed **above** the Activity section
+  and captioned *"Campaign-wide, all time — not affected by the filters above"*, which is
+  load-bearing: it is the only number on that page that ignores the range/walk-list/crew pickers.
+  Compact `GoalCell` / `GoalBlock` are exported from
+  [CampaignCard.jsx](../client/src/components/campaigns/CampaignCard.jsx) and reused by
+  [CampaignsTable.jsx](../client/src/components/campaigns/CampaignsTable.jsx), the same way
+  `CountdownChip` already is. Mobile: the Door goal `InsetGroup` on
+  `admin/campaign/[campaignId].jsx` and the goal bar in `RowAccessory` on `admin/index.jsx`. Mobile
+  has **no goal editor** — it is read-only for campaign fields, exactly like the key dates.
 - Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the KPI `StatCard`
   strip (client-side sums over active campaigns), search/sort, the Cards | Table `Segmented` toggle
   (persisted to localStorage `campaignsView`), the collapsible archived section, skeleton loading,

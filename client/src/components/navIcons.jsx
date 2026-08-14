@@ -334,6 +334,20 @@ export function IconPrinter({ size = 22 }) {
   );
 }
 
+// A plug going into its socket — connecting an OUTSIDE tool, which is what the page does.
+// Not a chain link: that reads as a hyperlink, and this nav already spends its link metaphor
+// on the FbTime canvasser "links" inside the page.
+export function IconPlug({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M9 3v5" />
+      <path d="M15 3v5" />
+      <path d="M6 8h12v4a6 6 0 0 1-12 0V8Z" />
+      <path d="M12 18v3" />
+    </svg>
+  );
+}
+
 export const NAV_ICONS = {
   '/admin': IconDashboard,
   '/map': IconPin,
@@ -358,6 +372,7 @@ export const NAV_ICONS = {
   // Overlaps reuses the duplicate glyph — two canvassers on one door is the same idea, and
   // navIcon() silently falls back to a generic dot for any key missing here.
   '/overlaps': IconDuplicate,
+  '/integrations': IconPlug,
   '/billing': IconBilling,
   '/super-admin': IconGauge,
   '/super-admin/users': IconUsers,

@@ -16,6 +16,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { computeWindowStats, buildFrozenMapPoints } from '../../services/reports/computeReport.js';
 import { countOpenMockFlags } from '../../services/reports/campaignSummaries.js';
+import { deadlineFor, goalPercent } from '../../services/reports/goalProgress.js';
 import {
   shapeReportForClient,
   shapeMapPoints,
@@ -71,6 +72,8 @@ const updateSchema = z.object({
       // Opt-in tag allowlist (empty = show none — see the model comment). Max length matches
       // nothing in particular; it just bounds a hostile payload.
       visibleTags: z.array(z.string().max(120)).optional(),
+      // Opt-in door-goal progress. Same reason as visibleTags: unauthenticated share page.
+      showGoal: z.boolean().optional(),
     })
     .optional(),
 });
@@ -120,6 +123,39 @@ async function computeBothWindows(report, campaign, template) {
   ]);
   report.stats = { cumulative, period };
   report.markModified('stats');
+  snapshotGoal(report, campaign);
+}
+
+// Freeze the campaign's door-goal progress AS OF this report's window. Progress only — the
+// model deliberately stores no pace or verdict (see ClientReport.goalSnapshot).
+//
+// Two deliberate choices:
+//   `done` is the report's OWN cumulative doorsKnocked, not the live all-time figure, so a
+//   report for the week of Jun 1 published in July doesn't quietly count July's doors. It also
+//   keeps the artifact internally consistent: the goal bar counts exactly the doors the
+//   "Doors knocked" card right above it counts. (That is `knocks`, so on a campaign that bills
+//   restricted doors it runs slightly under the console's billable-door basis — a client-facing
+//   document agreeing with itself matters more than agreeing with an internal screen.)
+//
+//   An EFFORT-SCOPED report never gets a snapshot: goals are campaign-wide, and measuring one
+//   walk list's doors against the whole campaign's target would understate progress badly. The
+//   toggle is refused on those reports rather than silently rendering nothing.
+function snapshotGoal(report, campaign) {
+  const target = Number(campaign?.doorGoal) > 0 ? campaign.doorGoal : null;
+  if (!target || report.effortId) {
+    report.goalSnapshot = { target: null, deadline: null, done: null, remaining: null, percent: null, asOf: null };
+    return;
+  }
+  const done = report.stats?.cumulative?.totals?.doorsKnocked || 0;
+  const { deadline } = deadlineFor(campaign);
+  report.goalSnapshot = {
+    target,
+    deadline,
+    done,
+    remaining: Math.max(0, target - done),
+    percent: goalPercent(done, target),
+    asOf: report.rangeEndUtc,
+  };
 }
 
 function reflagSupport(report) {
@@ -529,6 +565,21 @@ router.patch('/:id', async (req, res, next) => {
       // so there is no typed-text hazard to guard.
       if (data.visibility.visibleTags !== undefined)
         report.visibility.visibleTags = data.visibility.visibleTags;
+
+      if (data.visibility.showGoal !== undefined) {
+        // Refuse rather than silently render nothing: there IS no snapshot on an effort-scoped
+        // report or on a campaign with no goal (see snapshotGoal), so ticking the box would
+        // look like it worked and then show a client nothing.
+        if (data.visibility.showGoal && !report.goalSnapshot?.target) {
+          return res.status(400).json({
+            error: report.effortId
+              ? 'Door goals are campaign-wide, so they cannot be shown on a walk-list-scoped report.'
+              : 'This campaign has no door goal set.',
+            code: 'NO_GOAL_SNAPSHOT',
+          });
+        }
+        report.visibility.showGoal = data.visibility.showGoal;
+      }
     }
     if (data.supportQuestionKey !== undefined) {
       report.supportQuestionKey = data.supportQuestionKey || null;

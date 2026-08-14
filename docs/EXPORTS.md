@@ -321,10 +321,21 @@ that produced the file leaves whoever opens it in six months holding a number wi
 
 Today exactly ONE artifact carries hours — the legacy leaderboard CSV,
 `GET /admin/reports/canvassers.csv` (not an Export Center type). It opens with two preamble rows
-(`Canvasser export, <range>, hours as of <ISO>`, then a blank line) before the header, and ends
-every row with an `Hours source` column (`Measured`/`Estimated`/`Mixed` — always present, so the
-file shape is constant whether or not an org connected FbTime). Import scripts that assumed row 1
-was the header must skip three rows. No Export Center type, statement, or client report carries
+(`Canvasser export, <range>, hours as of <ISO>`, plus `Crew: <name>` when a crew filter was
+applied, then a blank line) before the header, and ends every row with an `Hours source` column
+(`Measured`/`Estimated`/`Mixed` — always present, so the file shape is constant whether or not an
+org connected FbTime). Import scripts that assumed row 1 was the header must skip three rows.
+
+**Scope belongs in the stamp too.** The route honors `?coordinatorId` — the same crew filter
+`GET /canvassers` takes — and names the crew in the preamble, because one crew's rows and a whole
+campaign's look identical once the file is on someone's desktop. It did **not** honor it until
+2026-08-14: the Timeline's crew filter scoped the table server-side while the export silently
+returned everyone, so a crew-filtered download disagreed with the table it came from. Any future
+export that sits under a filtered table inherits this rule — **the download must carry every
+filter the table carries, or say on its face that it didn't.**
+
+Downloadable from the **web** Timeline and the **mobile** admin Timeline; both send the campaign,
+walk list, crew and range currently on screen. No Export Center type, statement, or client report carries
 hours; if one ever grows an hours column, it inherits this rule.
 
 ## Appendix — column contracts (per type)

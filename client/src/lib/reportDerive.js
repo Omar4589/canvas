@@ -54,7 +54,20 @@ const KPI_HELP = {
   homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many passes).',
   surveyRate: 'Of the doors we knocked, the share where we completed at least one survey.',
   litRate: 'Of the doors we knocked, the share where we dropped literature.',
+  goal: 'Progress toward the campaign\'s door target, counted in the same doors as "Doors knocked" above and measured as of the end of this report\'s week — not today.',
 };
+
+// A frozen 'YYYY-MM-DD' civil date → 'Oct 28'. Parsed part-by-part and formatted in UTC so the
+// label can never shift a day in a behind-UTC browser (new Date('YYYY-MM-DD') is UTC midnight).
+function formatFrozenDate(dayStr) {
+  const [y, m, d] = String(dayStr).split('-').map(Number);
+  if (!y || !m || !d) return dayStr;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
 
 // Best-effort color for common support categories so the headline breakdown reads at a glance.
 // These are literal hexes on purpose — they also feed jsPDF's RGB API directly (it can't read CSS
@@ -183,8 +196,29 @@ export function deriveReportSections(report) {
       }
     : null;
 
+  // Door goal — present ONLY when the operator ticked it (the server drops it from the payload
+  // otherwise, so an unticked goal never reaches this function at all). Progress only: the
+  // frozen snapshot deliberately carries no pace, verdict or projection, because a report is
+  // read long after the week it describes and a stale "behind" would keep asserting itself.
+  // Old reports have no `goal` → null → the section doesn't render, keeping them byte-identical.
+  const g = report?.goal || null;
+  const goal =
+    g?.target > 0
+      ? {
+          title: 'Door goal',
+          subtitle: g.deadline
+            ? `Target ${formatCount(g.target)} doors by ${formatFrozenDate(g.deadline)}`
+            : `Target ${formatCount(g.target)} doors`,
+          help: KPI_HELP.goal,
+          target: g.target,
+          done: g.done || 0,
+          remaining: g.remaining || 0,
+          percent: Math.min(100, Math.max(0, g.percent || 0)),
+        }
+      : null;
+
   // A "quiet week": no new doors knocked in the reported period (drives the empty-state banner).
   const isQuietWeek = (d.doorsKnocked || 0) === 0;
 
-  return { isLit, kpis, contact, support, tags, others, isQuietWeek };
+  return { isLit, kpis, goal, contact, support, tags, others, isQuietWeek };
 }

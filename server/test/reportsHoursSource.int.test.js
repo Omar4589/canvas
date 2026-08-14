@@ -23,6 +23,8 @@ const { Campaign } = await import('../src/models/Campaign.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { FbTimeConnection } = await import('../src/models/FbTimeConnection.js');
 const { FbTimeDailyHours } = await import('../src/models/FbTimeDailyHours.js');
+const { FbTimePersonLink } = await import('../src/models/FbTimePersonLink.js');
+const { zonedDayStr } = await import('../src/utils/timezone.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -55,7 +57,7 @@ async function knock(userId, day, hourLocal, actionType = 'not_home') {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CanvassActivity, FbTimeConnection, FbTimeDailyHours]) {
+  for (const M of [Organization, User, Membership, Campaign, CanvassActivity, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink]) {
     await M.deleteMany({});
   }
 
@@ -81,6 +83,13 @@ before(async () => {
   await FbTimeConnection.create({
     organizationId: org._id, status: 'connected', keyCiphertext: 'unused-here', keyPrefix: 'fbt_test_xx',
     hourFigure: 'adjustedHours', fbtimeOrgId: 'f1', fbtimeOrgName: 'Fake',
+  });
+  // u1 is LINKED and u2 is not — the shape production actually produces, since a link is
+  // what stamps userId onto an hours row in the first place. It is also what separates the
+  // two flavours of "estimated" that hoursReason exists to tell apart.
+  await FbTimePersonLink.create({
+    organizationId: org._id, userId: u1._id, fbtimePersonId: P1,
+    fbtimeEmail: 'm@rep.co', fbtimeName: 'Maria M', source: 'auto-email',
   });
   await FbTimeDailyHours.create({
     organizationId: org._id, fbtimePersonId: P1, userId: u1._id, day: DAY_A, timeZone: TZ,
@@ -142,6 +151,20 @@ test('/canvassers rows carry MERGED hours + provenance', { skip }, async () => {
   const r2 = body.find((c) => c.userId === String(ctx.u2._id));
   assert.strictEqual(r2.hoursOnDoors, 3, 'no measured row → the span, as before');
   assert.strictEqual(r2.hoursSource, 'estimated');
+
+  // WHY, not just whether: an admin looking at Sam's row has to be able to tell
+  // "nobody mapped him" from "he took the day off", and the wire is where that
+  // distinction has to survive.
+  assert.strictEqual(r1.hoursReason, null, 'a measured row has nothing to explain');
+  assert.strictEqual(r2.hoursReason, 'not-linked', 'Sam has no FbTimePersonLink');
+});
+
+test('/canvasser-timeline carries the same reason as /canvassers for the same person', { skip }, async () => {
+  const { body } = await get(`/admin/reports/canvasser-timeline?from=${DAY_A}&to=${DAY_B}`);
+  const r1 = body.canvassers.find((c) => c.userId === String(ctx.u1._id));
+  const r2 = body.canvassers.find((c) => c.userId === String(ctx.u2._id));
+  assert.strictEqual(r1.hoursReason, null);
+  assert.strictEqual(r2.hoursReason, 'not-linked');
 });
 
 test('team-averages applies the aggregate rule server-side and says which it used', { skip }, async () => {
@@ -194,4 +217,78 @@ test('a DISCONNECTED org is indistinguishable from never-connected on every surf
   } finally {
     await FbTimeConnection.updateOne({ organizationId: ctx.org._id }, { $set: { status: 'connected' } });
   }
+});
+
+// ── the export's scope must equal the table's scope ─────────────────────────
+// /canvassers honored ?coordinatorId and canvassers.csv silently did not, so a
+// crew-filtered Timeline exported the whole campaign. The file and the table it
+// sits under have to agree, and the file has to SAY which crew it holds.
+
+test('canvassers.csv honors ?coordinatorId and stamps the crew it exported', { skip }, async () => {
+  // A DEDICATED coordinator who knocked nothing. Using u1 here would prove nothing: teamMatch
+  // deliberately counts a lead's OWN doors in their own crew (`{userId: id, coordinatorId: null}`),
+  // so u1 would come back legitimately and the filter would look broken when it wasn't.
+  const boss = await User.create({
+    firstName: 'Dana', lastName: 'D', email: 'dana@rep.co', passwordHash: 'x', isActive: true,
+  });
+  await Membership.create({
+    userId: boss._id, organizationId: ctx.org._id, role: 'lead', isActive: true,
+  });
+  await CanvassActivity.updateMany(
+    { organizationId: ctx.org._id, userId: ctx.u2._id },
+    { $set: { coordinatorId: boss._id } }
+  );
+
+  const all = await get(`/admin/reports/canvassers.csv?from=${DAY_A}&to=${DAY_B}`, true);
+  assert.ok(all.body.includes('s@rep.co'), 'unfiltered export holds Sam');
+  assert.ok(all.body.includes('m@rep.co'), 'unfiltered export holds Maria');
+  assert.ok(!all.body.split('\n')[0].includes('Crew:'), 'no crew filter → no crew stamp');
+
+  const crew = await get(
+    `/admin/reports/canvassers.csv?from=${DAY_A}&to=${DAY_B}&coordinatorId=${boss._id}`,
+    true
+  );
+  assert.strictEqual(crew.status, 200);
+  assert.ok(crew.body.includes('s@rep.co'), "the crew's own canvasser is in");
+  assert.ok(
+    !crew.body.includes('m@rep.co'),
+    'Maria knocked with no coordinator — a crew-scoped export must NOT return her'
+  );
+  assert.match(crew.body.split('\n')[0], /Crew: Dana D/, 'the frozen file names its scope');
+
+  await CanvassActivity.updateMany(
+    { organizationId: ctx.org._id, userId: ctx.u2._id },
+    { $unset: { coordinatorId: '' } }
+  );
+});
+
+// ── staleness only reaches backward, over the real app ──────────────────────
+// The unit tests pin the rule; this pins the WIRING — that loadMeasuredHours
+// resolves "today" in the row's own zone and threads it to the fold. Appended
+// last, and it cleans up after itself: the fixtures are shared, and every test
+// above pins an explicit [DAY_A..DAY_B] window that today can never fall in.
+
+test("a stale row dated TODAY still measures — an old clock-out must not estimate today", { skip }, async () => {
+  const today = zonedDayStr(new Date(), TZ);
+  // u1 on the clock right now: sync would write isStale here too, because u1
+  // has SOME stale shift and today has an open one.
+  await knock(ctx.u1._id, today, 9);
+  await knock(ctx.u1._id, today, 11);
+  await FbTimeDailyHours.create({
+    organizationId: ctx.org._id, fbtimePersonId: P1, userId: ctx.u1._id, day: today, timeZone: TZ,
+    grossHours: 5, adjustedHours: 4.5, workedHours: 4.25, shiftCount: 1,
+    isOpen: true, isStale: true,
+  });
+
+  const { body } = await get(`/admin/reports/canvassers?from=${today}&to=${today}`);
+  const r1 = body.find((c) => c.userId === String(ctx.u1._id));
+  assert.ok(r1, 'u1 knocked today');
+  assert.strictEqual(r1.hoursSource, 'measured', "today's open shift is not a forgotten clock-out");
+  assert.strictEqual(r1.hoursOnDoors, 4.5, 'the measured figure, not the 2h knock span');
+  assert.strictEqual(r1.hoursReason, null);
+  assert.strictEqual(r1.hoursFlags.hasOpenShift, true, 'still labeled as running');
+  assert.strictEqual(r1.hoursFlags.hasStaleShift, false);
+
+  await FbTimeDailyHours.deleteMany({ organizationId: ctx.org._id, day: today });
+  await CanvassActivity.deleteMany({ organizationId: ctx.org._id, timestamp: { $gte: at(today, 0) } });
 });

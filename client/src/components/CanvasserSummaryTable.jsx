@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import DataTable from './ui/DataTable.jsx';
 import Badge from './ui/Badge.jsx';
+import { Tooltip } from './ui/Popover.jsx';
 import InfoHint from './InfoHint.jsx';
 import { ratePct, rateLevel } from '../lib/rates.js';
 import { formatInTz } from '../lib/datetime.js';
@@ -62,6 +63,67 @@ function sortValue(row, key) {
     return v > 0 ? v : null;
   }
   return row[key] ?? null;
+}
+
+// The hours-provenance marker beside Doors/hr. It used to be a bare green dot on measured
+// rows and NOTHING otherwise — which made the useful half of the feature unreadable, because
+// a missing dot has four different meanings and three of them are somebody's to fix. The
+// server names which one in `hoursReason`; this maps it to a word.
+//
+// Two rules hold the noise down. An org that never connected FbTime gets 'not-connected' on
+// every row and renders no marker at all — byte-identical to life before the integration.
+// And the marker is a WORD, not a hue: at 11px a coloured dot is a coin toss, and these four
+// states have to be distinguishable at a glance, not on hover.
+const HOURS_MARK = {
+  measured: {
+    text: 'FbTime',
+    variant: 'success',
+    tip: 'Measured hours — every day in this range came from their FbTime clock time.',
+  },
+  mixed: {
+    text: 'Part',
+    variant: 'info',
+    tip: 'Partly measured — some days came from FbTime clock time, the rest are estimated from knock times.',
+  },
+  'not-linked': {
+    text: 'No link',
+    variant: 'warning',
+    tip: 'Estimated. FbTime is connected but this person is not linked to an FbTime profile, so none of their clocked hours count. Link them on the Integrations page.',
+  },
+  'stale-shift': {
+    text: 'Open shift',
+    variant: 'warning',
+    tip: 'Estimated. A shift was left open from an earlier day (a missed clock-out), so it was ignored rather than counted as a 30-hour day. Close it in FbTime and this range re-measures itself.',
+  },
+  'no-hours': {
+    text: 'Est',
+    variant: 'neutral',
+    tip: 'Estimated from knock times. This person is linked, but has no clocked FbTime hours in this range.',
+  },
+};
+
+// The provider's trust flags, appended to whatever the marker already says. These are the
+// answers to two questions the bare number provokes and could not answer: "why is this
+// different from the figure I screenshotted at lunch?" (a shift still running keeps accruing)
+// and "did a person type this, or did a clock?" (docs/FBTIME_INTEGRATION.md promises the
+// report says so). Exceptions only — a normal closed, clocked shift adds no sentence.
+const HOURS_FLAG_NOTES = [
+  ['hasOpenShift', 'Includes a shift still running, so this number will keep moving until they clock out.'],
+  ['hasManualEntry', 'Includes hours entered by hand in FbTime rather than clocked.'],
+];
+
+// 'not-connected' and null both mean "nothing to say here" — no org-level flag needed, the
+// per-row reason already carries it.
+function hoursMark(row) {
+  const base =
+    row.hoursSource === 'measured' || row.hoursSource === 'mixed'
+      ? HOURS_MARK[row.hoursSource]
+      : HOURS_MARK[row.hoursReason];
+  if (!base) return null;
+  // hasStaleShift is deliberately absent: it is already the 'Open shift' marker itself, and
+  // repeating it as a trailing sentence would say the same thing twice in one tooltip.
+  const notes = HOURS_FLAG_NOTES.filter(([key]) => row.hoursFlags?.[key]).map(([, text]) => text);
+  return notes.length ? { ...base, tip: [base.tip, ...notes].join(' ') } : base;
 }
 
 // The per-row rate, preferring measured hours where the server sent them.
@@ -179,21 +241,25 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
           <td className="px-3 py-2 text-right text-fg-muted">{ratePct(r.contactRate)}</td>
           <td className="px-3 py-2 text-right text-fg">
             {mergedDoorsPerHour(r) > 0 ? (
-              <span
-                title={
-                  r.hoursSource === 'measured'
-                    ? 'Measured hours (FbTime)'
-                    : r.hoursSource === 'mixed'
-                      ? 'Partly measured hours (FbTime)'
-                      : 'Estimated from knock times'
-                }
-              >
+              <span className="inline-flex items-center justify-end gap-1.5">
                 {mergedDoorsPerHour(r).toFixed(1)}
-                {(r.hoursSource === 'measured' || r.hoursSource === 'mixed') && (
-                  <span aria-hidden className="ml-0.5 text-success-fg">
-                    •
-                  </span>
-                )}
+                {(() => {
+                  const mark = hoursMark(r);
+                  if (!mark) return null;
+                  return (
+                    <Tooltip label={mark.tip}>
+                      {/* tabIndex so the explanation is reachable without a mouse — it is the
+                          only place the four estimated states are spelled out in full. */}
+                      <Badge
+                        variant={mark.variant}
+                        className="cursor-help px-1.5 py-0 text-[10px]"
+                        tabIndex={0}
+                      >
+                        {mark.text}
+                      </Badge>
+                    </Tooltip>
+                  );
+                })()}
               </span>
             ) : (
               '—'
