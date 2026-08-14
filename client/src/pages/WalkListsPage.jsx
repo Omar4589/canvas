@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, getToken, getActiveOrgId } from '../api/client.js';
+import { api } from '../api/client.js';
+import { downloadFile, saveTextFile } from '../lib/downloadFile.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -236,20 +237,13 @@ export default function WalkListsPage() {
   function downloadUnmatched() {
     const ids = csvPreview.data?.notFoundIds || [];
     if (!ids.length) return;
-    const blob = new Blob([`voterId\n${ids.join('\n')}\n`], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'unmatched-voter-ids.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    saveTextFile(`voterId\n${ids.join('\n')}\n`, 'unmatched-voter-ids.csv');
   }
 
   // Saved-search CSV export. The export endpoint streams a file attachment, not
-  // JSON, so the shared `api()` helper (which JSON-parses every body) can't be
-  // used. We replicate its auth: a raw fetch to the same `/api` base with the
-  // Bearer token + X-Org-Id header, read the response as a Blob, then trigger a
-  // browser download via an object URL + temporary <a download> (revoked after).
+  // JSON, so the shared `api()` helper (which JSON-parses every body) can't carry
+  // it; lib/downloadFile.js owns the authed fetch and the save. The fallback name
+  // is only used when the server sends no Content-Disposition.
   const [exportingId, setExportingId] = useState(null);
   const [exportError, setExportError] = useState('');
 
@@ -257,31 +251,9 @@ export default function WalkListsPage() {
     setExportError('');
     setExportingId(w._id);
     try {
-      const headers = {};
-      const token = getToken();
-      const orgId = getActiveOrgId();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (orgId) headers['X-Org-Id'] = orgId;
-      const res = await fetch(
-        `/api/admin/campaigns/${campaignId}/walklists/${w._id}/export.csv`,
-        { headers }
-      );
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      const blob = await res.blob();
-      // Prefer the server's Content-Disposition filename; fall back to the name.
-      const disp = res.headers.get('Content-Disposition') || '';
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
-      const fileName = m
-        ? decodeURIComponent(m[1])
-        : `${(w.name || 'walklist').replace(/[^\w.-]+/g, '_')}.csv`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadFile(`/admin/campaigns/${campaignId}/walklists/${w._id}/export.csv`, {
+        fallbackName: `${(w.name || 'walklist').replace(/[^\w.-]+/g, '_')}.csv`,
+      });
     } catch (err) {
       setExportError(err.message || 'Export failed');
     } finally {

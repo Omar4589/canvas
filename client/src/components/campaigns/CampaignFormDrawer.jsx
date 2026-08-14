@@ -21,6 +21,11 @@ export default function CampaignFormDrawer({
   saving,
   error,
   orgBillRestrictedDoors = false,
+  // Org admins edit everything. A LEAD reaches this drawer too (they can run a campaign), but the
+  // server only accepts name, survey, timezone and the door goal from them
+  // (routes/admin/campaigns.js) — so everything else renders read-only rather than letting them
+  // fill in a field the PATCH will 403. Create is admin-only, so this is an edit-mode concern.
+  canEditAdminFields = true,
 }) {
   const isEdit = !!initial?._id;
   // Once canvassing has started, the type flip is locked (server-enforced) and a
@@ -118,7 +123,7 @@ export default function CampaignFormDrawer({
                     type === t.value
                       ? 'border-brand-600 bg-brand-tint text-brand-accent'
                       : 'border-border-strong text-fg-muted hover:bg-sunken'
-                  } ${hasCanvassed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                  } ${hasCanvassed || !canEditAdminFields ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                 >
                   <input
                     type="radio"
@@ -126,7 +131,7 @@ export default function CampaignFormDrawer({
                     value={t.value}
                     checked={type === t.value}
                     onChange={() => setType(t.value)}
-                    disabled={hasCanvassed}
+                    disabled={hasCanvassed || !canEditAdminFields}
                     className="sr-only"
                   />
                   {t.label}
@@ -147,6 +152,7 @@ export default function CampaignFormDrawer({
               value={state}
               onChange={(e) => setState(e.target.value)}
               required
+              disabled={!canEditAdminFields}
               className="w-full"
             >
               <option value="">Select a state…</option>
@@ -226,7 +232,9 @@ export default function CampaignFormDrawer({
           <div>
             <div className="text-sm font-semibold text-fg">Key dates</div>
             <p className="mt-0.5 text-xs text-fg-muted">
-              Optional — surfaced on campaign cards and dashboards.
+              {canEditAdminFields
+                ? 'Optional — surfaced on campaign cards and dashboards.'
+                : 'Only an org admin can change the key dates. You can still set the door goal below.'}
             </p>
           </div>
           <div>
@@ -235,6 +243,7 @@ export default function CampaignFormDrawer({
               type="date"
               value={electionDay}
               onChange={(e) => setElectionDay(e.target.value)}
+              disabled={!canEditAdminFields}
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -244,6 +253,7 @@ export default function CampaignFormDrawer({
                 type="date"
                 value={earlyVotingStart}
                 onChange={(e) => setEarlyVotingStart(e.target.value)}
+                disabled={!canEditAdminFields}
               />
             </div>
             <div>
@@ -252,6 +262,7 @@ export default function CampaignFormDrawer({
                 type="date"
                 value={earlyVotingEnd}
                 onChange={(e) => setEarlyVotingEnd(e.target.value)}
+                disabled={!canEditAdminFields}
               />
             </div>
           </div>
@@ -260,6 +271,7 @@ export default function CampaignFormDrawer({
             <Textarea
               value={datesNote}
               onChange={(e) => setDatesNote(e.target.value)}
+              disabled={!canEditAdminFields}
               maxLength={280}
               rows={2}
               placeholder="e.g. Polls open 7am–7pm; early voting at the county clerk's office"

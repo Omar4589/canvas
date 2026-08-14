@@ -11,13 +11,18 @@
 //   3. Clamp to the viewport on all four sides, so even a menu taller than the window pins to the
 //      top margin instead of hanging off both ends.
 //
-// Horizontally the menu is right-aligned to the button (its natural anchor), then clamped so a
-// kebab near the left edge can't push it off-screen either.
+// Horizontally, `align` picks which edge the menu hangs off — then every mode is clamped, so a
+// trigger near either edge can't push the menu off-screen:
+//   'end'   (default) right-aligned to the button — the kebab's natural anchor.
+//   'start' left edges shared with the trigger — a menu under a wide row, e.g. the sidebar's
+//           expanded account button, where right-aligning would float it off that column.
+//   'after' beside the trigger rather than over it — the collapsed sidebar rail's flyout, where
+//           both other modes would lay the menu on top of the 64px rail it came from.
 
 export const GAP = 4; // breathing room between button and menu
 export const MARGIN = 8; // minimum clearance from every viewport edge
 
-export function resolveMenuPosition({ anchor, menu, viewport }) {
+export function resolveMenuPosition({ anchor, menu, viewport, align = 'end' }) {
   const roomBelow = viewport.height - anchor.bottom - GAP - MARGIN;
   const roomAbove = anchor.top - GAP - MARGIN;
 
@@ -31,7 +36,10 @@ export function resolveMenuPosition({ anchor, menu, viewport }) {
   // rather than pushed off the top by the min().
   top = Math.max(MARGIN, Math.min(top, viewport.height - MARGIN - menu.height));
 
-  let left = anchor.right - menu.width;
+  let left;
+  if (align === 'after') left = anchor.right + GAP;
+  else if (align === 'start') left = anchor.left;
+  else left = anchor.right - menu.width;
   left = Math.max(MARGIN, Math.min(left, viewport.width - MARGIN - menu.width));
 
   return { top, left, placement };

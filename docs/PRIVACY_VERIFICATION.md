@@ -228,6 +228,51 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   (`deleteCampaign.js`), so a campaign delete removes its `campaignId`-bearing rows; null-campaignId
   (old-model) rows survive by the filter's construction and still die with the org. See the
   2026-08-05 background-deletion entry in the v5 list.]*]*
+  *[v5 2026-08-14: **THE SURFACE THIS ENTRY RESERVED NOW EXISTS — and it is NOT org-admin-only.**
+  Twice above this entry says *"nothing exposes it over the API today… if a surface is ever added,
+  it belongs behind org-admin auth and must be listed here."* Listing it: **GET
+  `/admin/campaigns/:campaignId/history`** (`routes/admin/campaigns.js`) reads `CoordinatorChange`
+  rows for one campaign and renders them in the web `CampaignHistoryDrawer`. The gate is
+  **`canManageCampaign`, which admits a TEAM LEAD for a campaign they manage** — deliberately wider
+  than the "org-admin auth" this entry anticipated, so the deviation is stated rather than slipped
+  in. **Why it is still correct:** the rows disclose a staff-to-staff org-chart association
+  (who moved teams, from whom, to whom, by whom) plus two row counts — and a lead already sees
+  every one of those facts about their own campaign through the crew roster, the coordinator picker
+  and the per-team door breakdown (`/admin/reports/team-breakdown`, same `canManageCampaign` gate).
+  Nothing here is newly legible to a lead; it is the same facts with a timestamp. Only
+  `campaignId`-bearing rows are read — legacy null-campaignId rows are excluded by the query, so
+  the old org-wide moves gained no reader at all. **Still no voter data, no free text about any
+  person, no export, no subprocessor, no retention change.** Actor names resolve through
+  `hydrateCanvassers`, so a deleted account renders as its scrubbed tombstone ("Deleted user")
+  rather than resurrecting a name the deletion removed. **The Assessment above stands unchanged: no
+  published-policy sentence moves.** Pinned by `test/campaignHistory.int.test.js` (the lead-403 on
+  an unmanaged campaign, and the legacy-row exclusion).]*
+- *(v5 2026-08-14)* **New internal collection: `CampaignChange`.** A team lead can now set a
+  campaign's **door goal** — a contract number — so campaign configuration edits are recorded:
+  `server/src/models/CampaignChange.js`, one row per field per edit.
+  **What it holds:** `organizationId`, `campaignId`, the `field` key, `fromValue`/`toValue`, the
+  acting `byUserId`, and a `source` enum. The values are campaign *configuration* — a door count, a
+  civil date, a boolean policy, a campaign name — **not data about any person**. The only personal
+  reference is the actor id, exactly as `CoordinatorChange` carries one. It is a new **audit log**,
+  a named trigger, hence this entry.
+  **Which fields:** an explicit `AUDITED_FIELDS` allowlist — `doorGoal`, `goalDate`, `electionDay`,
+  `earlyVotingStart`, `earlyVotingEnd`, `datesNote`, `billRestrictedDoors`, `isActive`, `name`,
+  `type`, `state`. `datesNote` is the one free-text field in that list; it is operator-authored
+  campaign metadata (polling hours, a clerk's-office address), the same exposure class as the
+  campaign title, and it is already visible to canvassers on the campaign picker.
+  **Who can read it:** GET `/admin/campaigns/:campaignId/history`, gated by `canManageCampaign` —
+  org admins for any campaign, a lead for campaigns they manage. Never reaches a canvasser, never
+  reaches a public share link, never enters an export.
+  **Retention/deletion:** no TTL. In **both** `CAMPAIGN_SCOPED` (`deleteCampaign.js`) and
+  `ORG_SCOPED` (`deleteOrganization.js`) from the day it shipped — deliberately not repeating the
+  v4 wrinkle where `CoordinatorChange` outlived the campaigns its rows named.
+  `test/orgDelete.int.test.js` proves the org sweep exhaustive; `test/campaignHistory.int.test.js`
+  proves the campaign cascade removes it.
+  **Assessment: NO published-policy change.** Nothing leaves the tenant, no subprocessor receives
+  it, no new category of personal data about a *voter* is collected, and it dies with the campaign
+  and with the org. Same shelf as `CoordinatorChange`, `EmailLog` and `AccessLog` if a data
+  inventory is ever published: *deleted with the campaign and the organization, no TTL,
+  console-only.*
 - *(v4 2026-07-22)* **New field: `User.lastSeenAt`.** The All Users console's "Last active" column was
   derived from `CanvassActivity` — the last *door knocked* — so every admin, lead and staff account who
   never canvasses rendered the literal word "Never" beside "Last login: Just now". `requireAuth` now

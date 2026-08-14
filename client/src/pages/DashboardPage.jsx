@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { api, getToken, getActiveOrgId } from '../api/client.js';
+import { api } from '../api/client.js';
+import { downloadFile } from '../lib/downloadFile.js';
 import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
@@ -11,6 +12,7 @@ import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector
 import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
 import GoalProgressCard from '../components/GoalProgressCard.jsx';
+import CampaignHistoryDrawer from '../components/CampaignHistoryDrawer.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import ArchiveNudge from '../components/ArchiveNudge.jsx';
 import { CountdownChip } from '../components/campaigns/CampaignCard.jsx';
@@ -67,6 +69,7 @@ export default function DashboardPage() {
   const [coordinatorId, setCoordinatorId] = useState('');
   // Round scope for the Survey results section ('' = all rounds, a Pass _id, or 'legacy').
   const [surveyPassId, setSurveyPassId] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
 
   // The sidebar campaign switcher re-renders this SAME mounted page with a new
   // :campaignId — reset per-campaign selections so campaign A's template/effort
@@ -193,18 +196,13 @@ export default function DashboardPage() {
   });
 
   // The invoice-ready per-round CSV — an attachment, not JSON, so the shared api()
-  // helper can't be used; raw fetch + blob (the SurveyExplorer/WalkLists pattern).
+  // helper can't carry it; lib/downloadFile.js owns the fetch + save.
   const [exportingRounds, setExportingRounds] = useState(false);
   const [roundsExportError, setRoundsExportError] = useState('');
   async function exportRoundsCsv() {
     setRoundsExportError('');
     setExportingRounds(true);
     try {
-      const headers = {};
-      const token = getToken();
-      const orgId = getActiveOrgId();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (orgId) headers['X-Org-Id'] = orgId;
       const qs = buildQuery({
         campaignId,
         effortId: effortId || undefined,
@@ -212,20 +210,9 @@ export default function DashboardPage() {
         from: dateRange?.from,
         to: dateRange?.to,
       });
-      const res = await fetch(`/api/admin/reports/knocks-by-pass.csv${qs}`, { headers });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      const blob = await res.blob();
-      const disp = res.headers.get('Content-Disposition') || '';
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
-      const fileName = m ? decodeURIComponent(m[1]) : 'knocks-by-pass.csv';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadFile(`/admin/reports/knocks-by-pass.csv${qs}`, {
+        fallbackName: 'knocks-by-pass.csv',
+      });
     } catch (err) {
       setRoundsExportError(err.message || 'Export failed');
     } finally {
@@ -564,8 +551,16 @@ export default function DashboardPage() {
           campaign is noise on top of the setup checklist. */}
       {hasDoors && (
         <div className="mb-6">
-          <GoalProgressCard goal={rollupRow?.goal} />
+          <GoalProgressCard goal={rollupRow?.goal} onShowHistory={() => setShowHistory(true)} />
         </div>
+      )}
+
+      {showHistory && (
+        <CampaignHistoryDrawer
+          campaignId={campaignId}
+          timeZone={tz}
+          onClose={() => setShowHistory(false)}
+        />
       )}
 
       {overviewReady && !hasDoors ? (

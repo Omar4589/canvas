@@ -6,6 +6,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
+import { CampaignChange } from '../../models/CampaignChange.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
 import { DncUpload } from '../../models/DncUpload.js';
 import { DoNotKnockAddress } from '../../models/DoNotKnockAddress.js';
@@ -58,7 +59,7 @@ const CHUNK = Number(process.env.ORG_DELETE_CHUNK) || 5000;
 // to still exist to learn which canonical people this org pointed at. Exported so the integration
 // test can seed a stub row in every one and prove the sweep is exhaustive.
 export const ORG_SCOPED = [
-  Campaign, CampaignAssignment, CampaignManager, CanvassActivity, ClientReport,
+  Campaign, CampaignAssignment, CampaignChange, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
   Effort, EffortMember,
   ExportJob, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink,

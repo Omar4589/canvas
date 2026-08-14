@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import CampaignAssignmentsModal from '../components/CampaignAssignmentsModal.jsx';
+import CampaignHistoryDrawer from '../components/CampaignHistoryDrawer.jsx';
 import StatCard from '../components/StatCard.jsx';
 import CampaignFormDrawer from '../components/campaigns/CampaignFormDrawer.jsx';
 import CampaignCard from '../components/campaigns/CampaignCard.jsx';
@@ -102,6 +103,7 @@ export default function CampaignsPage() {
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [assigningCampaign, setAssigningCampaign] = useState(null);
+  const [historyCampaign, setHistoryCampaign] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [reactivating, setReactivating] = useState(null);
   const [search, setSearch] = useState('');
@@ -238,11 +240,15 @@ export default function CampaignsPage() {
     return [
       { label: 'View dashboard', onClick: () => navigate(`/campaigns/${c._id}`) },
       { label: 'Assignments', onClick: () => setAssigningCampaign(c) },
-      // Edit / Archive / Delete are org-admin acts — a lead runs the
-      // campaign but doesn't reshape or remove it.
+      // Who changed the door goal / the key dates / the invoice policy, and when. Open to leads
+      // as well as admins: a lead can edit a campaign's goal, so a lead can see the record of it.
+      { label: 'History', onClick: () => setHistoryCampaign(c) },
+      // Edit is open to LEADS too — the server has always accepted name / survey / timezone from
+      // them, and now the door goal as well, so the drawer renders with the org-admin-only fields
+      // read-only rather than being withheld entirely. Archive / Delete stay org-admin acts.
+      { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
       ...(isOrgAdmin
         ? [
-            { label: 'Edit', onClick: () => { setCreating(false); setEditing(c); } },
             // Archiving stays one-click — it only ever stops billing. Reactivating is the one
             // campaign action with a bill attached (the archived months become billable again),
             // so it routes through a confirm modal. update.reset(): same reason as del.reset().
@@ -308,6 +314,15 @@ export default function CampaignsPage() {
           }}
           saving={editing ? update.isPending : create.isPending}
           error={editing ? update.error : create.error}
+          canEditAdminFields={isOrgAdmin}
+        />
+      )}
+
+      {historyCampaign && (
+        <CampaignHistoryDrawer
+          campaignId={historyCampaign._id}
+          timeZone={historyCampaign.timeZone}
+          onClose={() => setHistoryCampaign(null)}
         />
       )}
 

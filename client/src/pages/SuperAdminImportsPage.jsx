@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import Pager from '../components/Pager.jsx';
 import { fmtUsd } from '../lib/billingStatus.jsx';
+import { saveCsvRows } from '../lib/downloadFile.js';
 
 const LIMIT = 50;
 
@@ -41,16 +42,6 @@ const VIEWS = [
   { key: 'month', label: 'By month' },
   { key: 'org', label: 'By organization' },
 ];
-
-function downloadCsv(rows, filename) {
-  const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export default function SuperAdminImportsPage() {
   const [month, setMonth] = useState('');
@@ -100,7 +91,7 @@ export default function SuperAdminImportsPage() {
 
   function exportCsv() {
     if (view === 'import') {
-      downloadCsv(
+      saveCsvRows(
         [
           ['When', 'Organization', 'File', 'Campaign', 'By', 'Status', 'Undone', 'Households', 'With coords', 'New lookups', 'Cached', 'Unplaceable', 'Cost'],
           ...rows.map((r) => [
@@ -122,7 +113,7 @@ export default function SuperAdminImportsPage() {
         `geocoding-imports-${month || 'all'}.csv`
       );
     } else {
-      downloadCsv(
+      saveCsvRows(
         [
           [view === 'month' ? 'Month' : 'Organization', 'Imports', 'Households', 'New lookups', 'Cached', 'Unplaceable', 'Cost'],
           ...groups.map((g) => [

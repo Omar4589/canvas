@@ -58,6 +58,49 @@ test('a kebab near the right edge stays inside the margin', () => {
   assert.ok(p.left + menu.width <= viewport.width - MARGIN);
 });
 
+// The sidebar account menu's two modes. Its trigger is a wide row (the expanded footer button) or
+// a 48px rail pill, not a 28px kebab, so it anchors on a different edge than RowMenu does.
+test("align:'start' shares a left edge with the trigger", () => {
+  const anchor = { top: 1150, bottom: 1194, left: 16, right: 240 };
+  const p = resolveMenuPosition({ anchor, menu: menuOf(4), viewport, align: 'start' });
+  assert.equal(p.left, anchor.left);
+  assert.equal(p.placement, 'above', 'a footer trigger has no room below it');
+});
+
+test("align:'after' puts the menu beside the trigger, clear of the rail", () => {
+  // The collapsed rail: a 48px pill inside a 64px aside.
+  const anchor = { top: 1150, bottom: 1198, left: 8, right: 56 };
+  const p = resolveMenuPosition({ anchor, menu: menuOf(4), viewport, align: 'after' });
+  assert.equal(p.left, anchor.right + GAP);
+  assert.ok(p.left > anchor.left, 'must not lie back over the rail it opened from');
+});
+
+test('omitting align still right-aligns — the RowMenu regression guard', () => {
+  const anchor = buttonAt(845, 300);
+  const menu = menuOf(4);
+  const withDefault = resolveMenuPosition({ anchor, menu, viewport });
+  const explicit = resolveMenuPosition({ anchor, menu, viewport, align: 'end' });
+  assert.equal(withDefault.left, anchor.right - menu.width);
+  assert.deepEqual(withDefault, explicit);
+});
+
+test('every align mode is clamped inside the viewport', () => {
+  // A trigger hard against each edge, where the unclamped math goes out of bounds.
+  const menu = menuOf(4);
+  for (const align of ['start', 'end', 'after']) {
+    const nearRight = { top: 300, bottom: 328, left: viewport.width - 30, right: viewport.width - 2 };
+    const nearLeft = { top: 300, bottom: 328, left: 2, right: 30 };
+    for (const anchor of [nearLeft, nearRight]) {
+      const { left } = resolveMenuPosition({ anchor, menu, viewport, align });
+      assert.ok(left >= MARGIN, `align=${align}: off the left (${left})`);
+      assert.ok(
+        left + menu.width <= viewport.width - MARGIN,
+        `align=${align}: off the right (${left + menu.width})`
+      );
+    }
+  }
+});
+
 test('a menu taller than the window pins to the top margin, not off both ends', () => {
   const shortWindow = { width: 1400, height: 200 };
   const menu = menuOf(6); // 178px tall — taller than 200 - 2*8

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams, useNavigationType } from 'react-router-dom';
-import { api, getToken, getActiveOrgId } from '../api/client.js';
+import { api } from '../api/client.js';
+import { downloadFile } from '../lib/downloadFile.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import StatCard from '../components/StatCard.jsx';
@@ -344,32 +345,16 @@ export default function SurveyExplorerPage() {
   const hasNext = pageStart + listRows.length < listTotal;
 
   // CSV of the current drill — the export endpoint streams an attachment, not JSON, so
-  // the shared api() helper can't be used; raw fetch + blob (the WalkListsPage pattern).
+  // the shared api() helper can't carry it; lib/downloadFile.js owns the fetch + save.
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   async function exportCsv() {
     setExportError('');
     setExporting(true);
     try {
-      const headers = {};
-      const token = getToken();
-      const orgId = getActiveOrgId();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (orgId) headers['X-Org-Id'] = orgId;
-      const res = await fetch(`/api/admin/reports/voters-by-answer.csv${buildQuery(listFilters)}`, { headers });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      const blob = await res.blob();
-      const disp = res.headers.get('Content-Disposition') || '';
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
-      const fileName = m ? decodeURIComponent(m[1]) : 'answers.csv';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadFile(`/admin/reports/voters-by-answer.csv${buildQuery(listFilters)}`, {
+        fallbackName: 'answers.csv',
+      });
     } catch (err) {
       setExportError(err.message || 'Export failed');
     } finally {

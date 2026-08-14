@@ -17,6 +17,9 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { goalProgressFor } from '../../services/reports/goalProgress.js';
+import { CampaignChange } from '../../models/CampaignChange.js';
+import { CoordinatorChange } from '../../models/CoordinatorChange.js';
+import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
@@ -56,6 +59,39 @@ const createSchema = z.object({
 // A goal date with no goal is a dead field: nothing to count down to a target that doesn't
 // exist. Checked on the MERGED values so clearing the goal and keeping the date is caught too.
 const goalDateNeedsGoal = (doorGoal, goalDate) => Boolean(goalDate) && !(Number(doorGoal) > 0);
+
+// Campaign fields whose edits are recorded to CampaignChange. The test is "could a silent change
+// here mislead someone about money, a deadline, or what was promised?" — which is why
+// `billRestrictedDoors` (moves the invoice figure) and `isActive` (archiving stops the billing
+// clock) are in, alongside the goal and the key dates.
+//
+// `timeZone` and `surveyTemplateId` are deliberately OUT: a timezone edit already announces
+// itself loudly (every day-bucketed number shifts, and the drawer warns before you do it), and
+// the attached survey is visible on the campaign's own Survey tab. Logging them would put a
+// harmless correction at the same weight as a halved contract number in the feed.
+const AUDITED_FIELDS = [
+  'doorGoal',
+  'goalDate',
+  'electionDay',
+  'earlyVotingStart',
+  'earlyVotingEnd',
+  'datesNote',
+  'billRestrictedDoors',
+  'isActive',
+  'name',
+  'type',
+  'state',
+];
+
+// Compare-and-store form. Mongoose hands back a String object for enum/String paths and `undefined`
+// for a path never set; both must compare equal to their plain/null counterparts or a no-op PATCH
+// would log a phantom change. Numbers and Booleans pass through so the feed can format them.
+function normalizeAudited(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'number' || typeof v === 'boolean') return v;
+  const s = String(v);
+  return s === '' ? null : s;
+}
 
 const updateSchema = createSchema.partial();
 
@@ -196,6 +232,102 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Per-campaign change history: configuration edits (CampaignChange) merged with team
+// reassignments (CoordinatorChange) into one feed, newest first.
+//
+// CoordinatorChange rows have existed since the re-stamp feature shipped and were readable only
+// from a database console — this is the first surface that reads them. Rows written before crews
+// became per-campaign carry no `campaignId` and are deliberately NOT swept in here: they are
+// org-wide under the old model, and guessing which campaign they belonged to would invent history.
+//
+// Both sources are low-volume by nature (a campaign sees a handful of config edits and crew moves
+// in its life), so the feed reads a bounded slice of each and merges in memory rather than
+// carrying a cross-collection cursor. `truncated` says plainly when a cap was hit.
+const HISTORY_CAP = 200;
+
+router.get('/:campaignId/history', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    // Same gate as the PATCH that writes these rows: a lead reads the history of a campaign they
+    // manage, and of no other.
+    if (!(await canManageCampaign(req, req.params.campaignId))) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const campaign = await Campaign.findOne(
+      { _id: req.params.campaignId, organizationId: orgId },
+      { name: 1, createdAt: 1, createdBy: 1 }
+    ).lean();
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const [configRows, teamRows] = await Promise.all([
+      CampaignChange.find({ campaignId: campaign._id, organizationId: orgId })
+        .sort({ createdAt: -1 })
+        .limit(HISTORY_CAP)
+        .lean(),
+      CoordinatorChange.find({ campaignId: campaign._id, organizationId: orgId })
+        .sort({ createdAt: -1 })
+        .limit(HISTORY_CAP)
+        .lean(),
+    ]);
+
+    // hydrateCanvassers, not a bare User.find: it never drops an id, so a change made by someone
+    // since deleted or removed from the org still renders with a name and a standing instead of
+    // silently losing its actor.
+    const ids = [campaign.createdBy];
+    for (const r of configRows) ids.push(r.byUserId);
+    for (const r of teamRows) ids.push(r.byUserId, r.userId, r.fromCoordinatorId, r.toCoordinatorId);
+    const people = await hydrateCanvassers(ids.filter(Boolean), orgId);
+    const who = (id) => {
+      if (!id) return null;
+      const p = people.get(String(id));
+      if (!p) return { id: String(id), name: 'Unknown user', status: 'deleted' };
+      return {
+        id: String(id),
+        name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user',
+        status: p.status,
+      };
+    };
+
+    const items = [
+      ...configRows.map((r) => ({
+        id: String(r._id),
+        kind: 'config',
+        at: r.createdAt,
+        by: who(r.byUserId),
+        field: r.field,
+        fromValue: r.fromValue ?? null,
+        toValue: r.toValue ?? null,
+      })),
+      ...teamRows.map((r) => ({
+        id: String(r._id),
+        kind: 'team',
+        at: r.createdAt,
+        by: who(r.byUserId),
+        user: who(r.userId),
+        fromCoordinator: who(r.fromCoordinatorId),
+        toCoordinator: who(r.toCoordinatorId),
+        activitiesMoved: r.activitiesMoved || 0,
+        surveysMoved: r.surveysMoved || 0,
+        // A torn re-stamp (membership written, ledger move threw) is the one case where the
+        // number on screen legitimately disagrees with the row — surface it, don't hide it.
+        restampError: r.restampError || null,
+      })),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+    res.json({
+      items,
+      truncated: configRows.length >= HISTORY_CAP || teamRows.length >= HISTORY_CAP,
+      // Anchors the bottom of the feed, so a campaign with no edits still reads as a timeline
+      // rather than an empty box.
+      createdAt: campaign.createdAt,
+      createdBy: who(campaign.createdBy),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -297,6 +429,11 @@ router.patch('/:campaignId', async (req, res, next) => {
       return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
     }
 
+    // Snapshot the audited fields BEFORE any mutation below — this is the only moment the old
+    // values still exist. See AUDITED_FIELDS and the write after save().
+    const beforeAudit = {};
+    for (const f of AUDITED_FIELDS) beforeAudit[f] = campaign[f];
+
     // Same merged-value treatment for the goal pair: clearing the goal while leaving a goal
     // date stored would leave a countdown to nothing.
     const mergedGoal = data.doorGoal !== undefined ? data.doorGoal : campaign.doorGoal;
@@ -363,6 +500,32 @@ router.patch('/:campaignId', async (req, res, next) => {
     // No survey-required guard here — a survey campaign may exist without a template; the
     // requirement is enforced at round activation (passes.js) instead.
     await campaign.save();
+
+    // Configuration audit trail — one row per field that actually moved. Read back by
+    // GET /admin/campaigns/:campaignId/history.
+    //
+    // Written AFTER save on purpose: a row here must mean "this change landed", so it can never
+    // be written ahead of the write it describes. The cost of that ordering is a narrow window
+    // where the save commits and the insert throws, leaving one edit unlogged and the request a
+    // 500 — accepted, and preferred over the alternative (logging a change a failed save never
+    // made). `await`ed rather than fire-and-forget for the same reason CoordinatorChange is: an
+    // audit trail that silently drops rows is not one.
+    const changes = [];
+    for (const f of AUDITED_FIELDS) {
+      const from = normalizeAudited(beforeAudit[f]);
+      const to = normalizeAudited(campaign[f]);
+      if (from === to) continue;
+      changes.push({
+        organizationId: orgId,
+        campaignId: campaign._id,
+        field: f,
+        fromValue: from,
+        toValue: to,
+        byUserId: req.user._id,
+        source: 'admin_campaigns',
+      });
+    }
+    if (changes.length) await CampaignChange.insertMany(changes);
     // Recompute ONLY on a transition INTO "restricted doors are billed" — not on every flip.
     // `stats.restrictedDoorCount` is read only while the policy resolves true, so a stale value
     // under an off policy is harmless, and the next turn-on is what repairs it. Turning the

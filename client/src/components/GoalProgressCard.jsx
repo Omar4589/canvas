@@ -23,7 +23,7 @@ function Figure({ label, value, sub }) {
   );
 }
 
-export default function GoalProgressCard({ goal, className = '' }) {
+export default function GoalProgressCard({ goal, onShowHistory, className = '' }) {
   if (!goal?.target) {
     return (
       <Card className={`px-4 py-3 ${className}`}>
@@ -53,9 +53,21 @@ export default function GoalProgressCard({ goal, className = '' }) {
           <InfoHint label="How the door goal is counted">{metricHelp.doorGoal}</InfoHint>
           {v.label && <Badge variant={v.variant} dot>{v.label}</Badge>}
         </div>
-        <span className="text-xs text-fg-muted">
-          {days ? `${days}${deadline ? ` · ${deadline}` : ''}` : deadline || 'No goal date'}
-        </span>
+        <div className="flex items-center gap-2 text-xs text-fg-muted">
+          <span>{days ? `${days}${deadline ? ` · ${deadline}` : ''}` : deadline || 'No goal date'}</span>
+          {/* A goal is a number someone chose, and it can be changed. When it looks wrong, the
+              next question is always "who moved it?" — so the answer is one click from the
+              number rather than three pages away. */}
+          {onShowHistory && (
+            <button
+              type="button"
+              onClick={onShowHistory}
+              className="font-semibold text-fg-muted underline underline-offset-2 hover:text-fg"
+            >
+              History
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="px-4 pb-3 pt-3">

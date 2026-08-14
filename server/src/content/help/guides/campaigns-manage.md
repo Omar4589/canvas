@@ -31,7 +31,8 @@ The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archi
 - **Timezone** — editable, but once there's field activity you'll see a warning: changing it re-buckets every past daily stat. Nothing is lost and all-time totals stay the same, but day-by-day numbers shift.
 - **Type (survey ↔ lit drop)** — locks the moment canvassing starts. To run a different type, create a new campaign instead.
 - **Key dates** — admins only. As a lead you can see them but not change them (see [Team lead vs admin](team-lead-vs-admin)).
-- **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target.
+- **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target. Every change is recorded with your name in the campaign's [History](#history--who-changed-what).
+- **Name, survey, timezone** — admins and leads. As a lead you open the same edit drawer; the admin-only fields show but are greyed out.
 - **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back. See [Can I bill for restricted doors?](bill-restricted-doors).
 
 ## Key dates
@@ -51,6 +52,16 @@ Three things that trip people up:
 - **No verdict for the first few days.** You need about 5 days of canvassing before Ahead/Behind appears. Judging a campaign that started Tuesday would just be guessing, so we show you the target and stay quiet about the rest.
 
 See [How many doors a day do we need?](how-many-doors-a-day).
+
+## History — who changed what
+
+A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal card when a number looks off.
+
+It also shows **team reassignments** — the other way a number moves without anyone knocking a door. Changing someone's coordinator moves all of their past doors onto the new team, so "why did Bo's team jump by 3,907?" is answerable here.
+
+The timezone and the attached survey aren't recorded — a timezone change already announces itself (every daily number shifts, and you're warned first), and the survey is visible on the campaign's Survey tab. As a lead you see the history of campaigns you run.
+
+Three things in this app are called "audit," and they answer different questions: **History** is who changed the campaign's *settings*; the **Audit** page is GPS quality flags on individual knocks; the **Timeline** is who knocked what, when.
 
 ## Archive vs. delete
 

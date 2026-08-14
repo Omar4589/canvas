@@ -14,6 +14,7 @@ import { splitBooks } from '../lib/packet/splitBooks.js';
 import { renderPacketPdf, renderManifestPdf, packetFilename } from '../lib/packet/packetPdf.js';
 import { packetZipPlan } from '../lib/packet/packetZip.js';
 import { zipStore } from '../lib/packet/zipStore.js';
+import { saveBlob } from '../lib/downloadFile.js';
 import { scanUnprintableNames } from '../lib/pdfText.js';
 
 // The Print Studio. Pick books on the left, watch the real PDF (or where the books are) in
@@ -231,13 +232,7 @@ export default function PrintPacketsPage() {
             data: new Uint8Array(m.output('arraybuffer')),
           });
         }
-        const blob = new Blob([zipStore(files)], { type: 'application/zip' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = zipName;
-        a.click();
-        URL.revokeObjectURL(url);
+        saveBlob(new Blob([zipStore(files)], { type: 'application/zip' }), zipName);
       } else {
         const doc = docRef.current || (await renderPacketPdf(splitPayload, effective));
         doc.save(packetFilename(splitPayload, effective));

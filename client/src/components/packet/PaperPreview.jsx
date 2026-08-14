@@ -9,6 +9,12 @@ import { Button } from '../ui/index.js';
 //
 // Two things this component must never leak: the object URL behind the iframe, and a render
 // that finished after a newer one started.
+//
+// NOT a lib/downloadFile.js caller, deliberately — it is the one URL.createObjectURL in the
+// client that is not a download. This URL feeds an on-screen <iframe> and lives as long as the
+// preview does (revoked on replace and on unmount, below); saveBlob's job is the opposite —
+// click once, revoke immediately, put a file on disk. Routing this through it would try to
+// save the preview.
 export default function PaperPreview({ payload, settings, onPages, onReady }) {
   const [url, setUrl] = useState(null);
   const [pages, setPages] = useState(0);

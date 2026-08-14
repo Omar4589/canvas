@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { BillingPill, BILLING_STATUS_META, fmtUsd, currentMonthStr } from '../lib/billingStatus.jsx';
+import { saveCsvRows } from '../lib/downloadFile.js';
 import Pager from './Pager.jsx';
 
 const STATUSES = ['trial', 'active', 'past_due', 'suspended', 'canceled', 'internal'];
@@ -250,15 +251,12 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
       ]),
       ['Total', '', '', '', '', '', '', '', '', '', (view.totalCents / 100).toFixed(2)],
     ];
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}-${
-      issued ? 'issued' : 'live'
-    }.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveCsvRows(
+      rows,
+      `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statement-${month}-${
+        issued ? 'issued' : 'live'
+      }.csv`
+    );
   }
 
   const orgInfo = billingQ.data?.organization;

@@ -49,8 +49,13 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
 - **Create, archive, or delete a campaign** — admins shape the campaign list; a lead is handed campaigns.
 - **Change a campaign's key dates, type, state, or its billable-door policy** (whether restricted
   homes count toward invoiced door totals — see [BILLING.md](BILLING.md)). A lead edits their
-  campaign's name, survey, and timezone; anything that changes what gets *invoiced* stays with org
-  admins. The server refuses with a 403 naming the field, so this can't be bypassed from the UI.
+  campaign's name, survey, timezone, and **door goal**; anything that changes what gets *invoiced*
+  stays with org admins. The server refuses with a 403 naming the field, so this can't be bypassed
+  from the UI. The door goal is the deliberate exception (owner ruling 2026-08-14): a lead running a
+  campaign owns its target, and because a target is a number someone can quietly lower, every edit
+  to it is recorded to the campaign's **History** feed with the actor's name (see
+  [CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*). Leads reach the campaign edit drawer for this
+  reason, with the org-admin-only fields rendered read-only rather than withheld.
 - **Run the org survey library, or touch the tag library.** Surveys are nuanced: a lead **can author**
   survey templates — create new ones, and edit or duplicate their own or any survey attached to a
   campaign they manage — but their **library is scoped to exactly that set**: the list, the attach

@@ -138,6 +138,33 @@ Three things worth knowing about how the numbers behave:
 canvasser app. It's a management number. It *can* be shown to a client on a published weekly
 report, but only as an explicit per-report tick (see [CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
 
+## Change history — who edited this campaign (added 2026-08)
+
+A door goal is a contract number, and a lead can change one. **History** records who changed what
+and when: the goal and its date, the key dates and note, the billable-doors policy, archiving and
+reactivating, and the campaign's name, type and state. Open it from a campaign's **⋮ menu →
+History**, or from the **History** link on the door-goal card when a number looks wrong.
+
+The feed also folds in **team reassignments**, which is the other way a number moves without anyone
+knocking a door: changing someone's coordinator re-stamps all of their past work onto the new team,
+so *"why did Bo's team jump by 3,907?"* is answerable here rather than only from a database console.
+A reassignment whose ledger re-stamp failed part-way says so in red — that is the one case where the
+by-team totals legitimately don't reconcile until it's re-run.
+
+Two edits are deliberately **not** recorded: the timezone (it already announces itself — every
+day-bucketed number on the campaign shifts, and the drawer warns you before you do it) and the
+attached survey (visible on the campaign's own Survey tab). Everything logged is something whose
+silent change could mislead someone about money, a deadline, or what was promised.
+
+Leads see the history of campaigns they run, and no others — the same scoping as every other
+campaign screen. There is no mobile view; it's a desk task.
+
+> **This is not the Audit page.** Three different things in this product are called "audit," and
+> they answer different questions. **History** (here) = who changed the campaign's *settings*.
+> **[Audit](AUDIT.md)** = GPS quality flags on individual knocks. **Timeline** = who knocked what,
+> when. And separately, `AccessLog` records **Doorline staff** reading customer data under a support
+> grant — that one is a privacy record, reviewed in the Control Room, not an org-facing feature.
+
 ## Navigating a campaign (the drill-in)
 
 **Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
@@ -308,6 +335,19 @@ window checks are lexicographic — no `Date` parsing. A `pre('validate')` invar
 campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
 is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
 
+**[CampaignChange.js](../server/src/models/CampaignChange.js)** — the configuration audit trail:
+`{ organizationId, campaignId, field, fromValue, toValue, byUserId, source }`, one row per field
+per edit, written from the campaigns PATCH handler against an explicit `AUDITED_FIELDS` list
+(`timeZone` and `surveyTemplateId` are deliberately absent — see Part 1). `fromValue`/`toValue` are
+`Mixed` because the audited fields span String, Number and tri-state Boolean, and `null` is a real
+value on both sides for most of them. Written **after** `campaign.save()` on purpose so a row can
+never describe a change that didn't land, and `await`ed rather than fire-and-forget — the narrow
+window where the save commits and the insert throws (one unlogged edit, a 500) is the accepted cost
+of that ordering, and it is the cheaper mistake than logging a change a failed save never made.
+Deliberately **not** `AccessLog`, for the reason `CoordinatorChange` already records: that
+collection is scoped to platform staff reading customer content under a support grant. In
+`CAMPAIGN_SCOPED` and `ORG_SCOPED`, so an audit row never outlives the thing it describes.
+
 **`isActive: false` is enforced, not decorative.** [middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)
 refuses field-mutating writes on an archived campaign with **409 `{ code: 'campaign-archived' }`**,
 mounted on the turf/books router, turf assignments, the campaign roster, and the campaign-nested
@@ -354,6 +394,17 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   ignore them; bootstrap carries them so the Books header + mobile admin detail can show the chip
   in-campaign, not just on the picker). Covered end-to-end by
   [campaignDates.int.test.js](../server/test/campaignDates.int.test.js).
+- **GET `/admin/campaigns/:campaignId/history`** — the change feed. Gated by `canManageCampaign`,
+  the same gate as the PATCH that writes it, so a lead reads only campaigns they run. Merges
+  [CampaignChange](../server/src/models/CampaignChange.js) (config edits) with
+  [CoordinatorChange](../server/src/models/CoordinatorChange.js) (team reassignments) in memory —
+  both are inherently low-volume per campaign, so it reads a bounded `HISTORY_CAP` slice of each
+  and reports `truncated` rather than carrying a cross-collection cursor. Legacy
+  `CoordinatorChange` rows with `campaignId: null` (pre per-campaign crews) are **excluded** —
+  guessing which campaign they belonged to would invent history. Actor names come from
+  `hydrateCanvassers`, which never drops an id, so an edit by someone since deleted still renders
+  with a name and a standing. Returns `{ items[], truncated, createdAt, createdBy }`; the creation
+  pair anchors the bottom of the feed so an unedited campaign still reads as a timeline.
 - **Where the GOAL surfaces — deliberately narrower.** `doorGoal`/`goalDate` ride the lean spread on
   GET `/admin/campaigns`, and both that route and the rollup additionally attach a computed **`goal`
   block** (below). They are **NOT** added to `/mobile/campaigns` or `/mobile/bootstrap`: canvassers
@@ -449,6 +500,18 @@ The cold-start readiness chain is a pure derivation in
   active-only validity check once left an all-archived org with nothing selectable).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
+- **Change history:** [CampaignHistoryDrawer.jsx](../client/src/components/CampaignHistoryDrawer.jsx),
+  mounted on both [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (⋮ → History) and
+  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) (the goal card's History link) — one
+  component, one query key `['admin','campaign-history',campaignId]`, two entry points. Labels and
+  value formatting live in [campaignHistory.js](../client/src/lib/campaignHistory.js), never on the
+  server, so re-wording a field label is not a data migration and an old row renders with today's
+  copy. `labelForField` falls back to a de-camel-cased guess, so a field the server starts logging
+  before the client knows about it still renders instead of vanishing.
+- **The edit drawer is open to LEADS**, not just org admins — the server has always accepted
+  `name`/`surveyTemplateId`/`timeZone` from them and now takes the goal too, so withholding the
+  drawer entirely left a lead unable to reach a field they own. `canEditAdminFields={isOrgAdmin}`
+  renders the org-admin-only inputs disabled with a one-line reason rather than hiding them.
 - **Door goal:** the server owns every number
   ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
   and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin

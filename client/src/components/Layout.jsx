@@ -6,10 +6,11 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo, { LogoMark } from './Logo.jsx';
 import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
-import { navIcon, IconSignOut, IconChevron, IconHelp } from './navIcons.jsx';
+import { navIcon, IconChevron } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import { Tooltip } from './ui/Popover.jsx';
 import IconButton from './ui/IconButton.jsx';
+import AccountMenu from './AccountMenu.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import SupportAccessGate from './SupportAccessGate.jsx';
 import BottomNav from './BottomNav.jsx';
@@ -75,34 +76,8 @@ function ContentFallback() {
   );
 }
 
-function ThemeToggleButton({ collapsed, dark, toggle }) {
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className={[
-        'flex items-center gap-3 rounded-md text-sm font-medium text-fg-muted transition-colors hover:bg-sunken hover:text-fg',
-        collapsed ? 'justify-center p-2' : 'w-full px-3 py-2',
-      ].join(' ')}
-    >
-      {dark ? <IconSun /> : <IconMoon />}
-      {!collapsed && <span>{dark ? 'Light mode' : 'Dark mode'}</span>}
-    </button>
-  );
-}
-
-// Wrapper so the collapsed rail's theme button gets the same tip as everything else on it.
-function ThemeToggle({ collapsed, dark, toggle }) {
-  return (
-    <RailTip label={dark ? 'Light mode' : 'Dark mode'} enabled={collapsed}>
-      <ThemeToggleButton collapsed={collapsed} dark={dark} toggle={toggle} />
-    </RailTip>
-  );
-}
-
 export default function Layout() {
-  const { user, logout, isSuperAdmin, isLead, canViewBilling } = useAuth();
+  const { user, isSuperAdmin, isLead, canViewBilling } = useAuth();
   // A team lead is a campaign-scoped admin: the top-level nav collapses to the items
   // they can use (Campaigns). The campaign drill-in nav stays full — inside a granted
   // campaign a lead does everything an admin does.
@@ -180,7 +155,7 @@ export default function Layout() {
         <div
           className={[
             'shrink-0',
-            collapsed ? 'mb-4 flex flex-col items-center gap-2' : 'mb-1 flex items-center justify-between px-1',
+            collapsed ? 'mb-4 flex flex-col items-center gap-2' : 'mb-1 flex items-center justify-between px-3',
           ].join(' ')}
         >
           {collapsed ? <LogoMark size={26} /> : <Logo size={26} />}
@@ -197,7 +172,7 @@ export default function Layout() {
         </div>
 
         {!collapsed && (
-          <div className="mb-4 px-1 text-xs text-fg-muted shrink-0">
+          <div className="mb-4 px-3 text-xs text-fg-muted shrink-0">
             Admin console{isSuperAdmin && <span className="ml-1 text-brand-accent">· super</span>}
             {isLead && <span className="ml-1 text-brand-accent">· team lead</span>}
           </div>
@@ -209,12 +184,33 @@ export default function Layout() {
           </div>
         )}
 
-        <nav className="flex-1 min-h-0 overflow-y-auto space-y-1">
+        {/* The nav is the sidebar's only scroll container, and the header and footer sit outside
+            it — so wherever the browser draws a CLASSIC (space-consuming) scrollbar it ate ~15px
+            of the collapsed rail's 48px column and shifted every nav icon left of the logo and
+            avatar. This is the confirmed cause of the rail misalignment, not a theoretical one.
+
+            Collapsed, the scrollbar is hidden outright (the rail still scrolls by wheel/trackpad)
+            — the same treatment every icon rail uses, and the only one that keeps the icons on the
+            column's true center AND leaves room for a full-width 48px hover pill. `scrollbar-gutter:
+            stable both-edges` would also center them, but it reserves the bar's width on BOTH sides:
+            30px out of 48 on a classic scrollbar, squeezing the pill to 18px.
+
+            Expanded there is nothing to center — labels are left-aligned — so the scrollbar stays
+            visible, with `stable` reserving its width so labels don't jump 15px sideways when the
+            9-item org nav swaps for the 18-item campaign nav. */}
+        <nav
+          className={[
+            'flex-1 min-h-0 space-y-1 overflow-y-auto',
+            collapsed
+              ? '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+              : '[scrollbar-gutter:stable]',
+          ].join(' ')}
+        >
           {inCampaign ? (
             <>
               {!collapsed && (
                 <div className="mb-3">
-                  <NavLink to="/campaigns" className="inline-flex items-center gap-1 px-1 text-xs font-medium text-fg-muted hover:text-brand-accent">
+                  <NavLink to="/campaigns" className="inline-flex items-center gap-1 px-3 text-xs font-medium text-fg-muted hover:text-brand-accent">
                     ‹ Campaigns
                   </NavLink>
                   <select
@@ -297,45 +293,10 @@ export default function Layout() {
           )}
         </nav>
 
-        <div
-          className={[
-            'mt-4 border-t border-border pt-3 shrink-0',
-            collapsed ? 'flex flex-col items-center gap-1' : '',
-          ].join(' ')}
-        >
-          <RailTip label="Help" enabled={collapsed}>
-            <NavLink
-              to="/help"
-              aria-label={collapsed ? 'Help' : undefined}
-              className={navClass(collapsed)}
-            >
-              <IconHelp size={20} />
-              {!collapsed && <span>Help</span>}
-            </NavLink>
-          </RailTip>
-          <ThemeToggle collapsed={collapsed} dark={dark} toggle={toggleTheme} />
-          {collapsed ? (
-            <RailTip label="Sign out" enabled>
-              <IconButton label="Sign out" onClick={logout} className="text-brand-accent hover:bg-brand-tint hover:text-brand-hover">
-                <IconSignOut size={20} />
-              </IconButton>
-            </RailTip>
-          ) : (
-            <div className="mt-2 px-1">
-              <NavLink to="/profile" className="block rounded-md py-0.5 hover:text-brand-accent">
-                <div className="truncate text-sm font-medium text-fg">
-                  {user?.firstName} {user?.lastName}
-                </div>
-                <div className="truncate text-xs text-fg-muted">{user?.email}</div>
-              </NavLink>
-              <button
-                onClick={logout}
-                className="mt-2 text-xs font-semibold text-brand-accent hover:text-brand-hover"
-              >
-                Sign out
-              </button>
-            </div>
-          )}
+        {/* No `items-center` when collapsed: that shrink-wrapped every footer control to its own
+            glyph, so each sat in a narrower pill than the 48px nav items right above it. */}
+        <div className="mt-4 shrink-0 border-t border-border pt-3">
+          <AccountMenu collapsed={collapsed} />
         </div>
       </aside>
 

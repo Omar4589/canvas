@@ -8,7 +8,7 @@ Related: [components/ui/Input.jsx](../client/src/components/ui/Input.jsx) (the s
 
 The app has a **light** and a **dark** theme.
 
-- **Switching:** use the light/dark toggle in the app. Your choice is saved on that device.
+- **Switching:** use the light/dark toggle in the app. On the **web console** it's in the account menu — click your name at the bottom of the left sidebar (on a phone-width window, the toggle is in the top bar instead). Your choice is saved on that device.
 - **First run:** if you've never chosen, the app follows your device/OS setting — a phone or computer already in dark mode opens dark.
 - **No flash:** the saved theme is applied before the page paints, so you never see a flash of the wrong theme while loading.
 - **The public marketing site stays light** regardless of the app theme — only the signed-in app responds to the toggle.

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { api, getToken, getActiveOrgId } from '../api/client.js';
+import { api } from '../api/client.js';
+import { downloadFile } from '../lib/downloadFile.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import Segmented from '../components/ui/Segmented.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
@@ -158,21 +159,16 @@ export default function TimelinePage() {
     placeholderData: keepPreviousData,
   });
   // The stamped per-canvasser CSV — the only portable record of whose hours were measured and
-  // whose were estimated, and until now downloadable ONLY from the phone. An attachment, not
-  // JSON, so the shared api() helper can't carry it: raw fetch + blob, the DashboardPage
-  // pattern. Every filter on screen rides along, crew included — the server honors the same
-  // ?coordinatorId the table above does, so the file and the table can never disagree.
+  // whose were estimated. An attachment, not JSON, so the shared api() helper can't carry it;
+  // lib/downloadFile.js owns the fetch + save. Every filter on screen rides along, crew
+  // included — the server honors the same ?coordinatorId the table above does, so the file and
+  // the table can never disagree.
   const [exportingCsv, setExportingCsv] = useState(false);
   const [csvExportError, setCsvExportError] = useState('');
   async function exportCanvassersCsv() {
     setCsvExportError('');
     setExportingCsv(true);
     try {
-      const headers = {};
-      const token = getToken();
-      const orgId = getActiveOrgId();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (orgId) headers['X-Org-Id'] = orgId;
       const qs = buildQuery({
         campaignId,
         effortId: effortId || undefined,
@@ -182,20 +178,7 @@ export default function TimelinePage() {
         // reads "all time" rather than inventing a window the rows were never clipped to.
         ...(allTime ? {} : { from: fromDay, to: dateRange?.to || undefined }),
       });
-      const res = await fetch(`/api/admin/reports/canvassers.csv${qs}`, { headers });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      const blob = await res.blob();
-      const disp = res.headers.get('Content-Disposition') || '';
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
-      const fileName = m ? decodeURIComponent(m[1]) : 'canvassers.csv';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadFile(`/admin/reports/canvassers.csv${qs}`, { fallbackName: 'canvassers.csv' });
     } catch (err) {
       setCsvExportError(err.message || 'Export failed');
     } finally {

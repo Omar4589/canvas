@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { saveTextFile } from '../lib/downloadFile.js';
 import { formatInTz } from '../lib/datetime.js';
 
 function fmt(n) {
@@ -65,13 +66,7 @@ export default function DoNotContactPage() {
   function downloadUnmatched() {
     const ids = preview.data?.notFoundIds || [];
     if (!ids.length) return;
-    const blob = new Blob([`voterId\n${ids.join('\n')}\n`], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'unmatched-voter-ids.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    saveTextFile(`voterId\n${ids.join('\n')}\n`, 'unmatched-voter-ids.csv');
   }
 
   const pv = preview.data;
