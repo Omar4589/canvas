@@ -882,10 +882,12 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md), the sync-model section). The granularity
   increase is the clock-in instant — same data subjects, same source, same read-only inbound
   direction, no new recipient, NOT a new subprocessor, no DPA §6 notice event. Assessment: the
-  published Privacy Policy service-providers sentence and the DPA §6 line both say "daily
-  totals", which stops being precise — **owner must approve the reworded sentences BEFORE this
-  deploys** (proposed text handed over 2026-08-15; the legal pages are edited deliberately by
-  the owner, never as a side effect of code).]*
+  published Privacy Policy service-providers sentence and the DPA §6 line both said "daily
+  totals", which stopped being precise — **both reworded sentences were approved by the owner
+  and applied at the owner's explicit direction 2026-08-15, in the same change, before deploy**
+  (privacy.html:106 now "each work shift's start time and hours worked"; DPA §6 now
+  "shift-level time records, of which Doorline retains each shift's start time and its
+  worked-hours figures").]*
   **What LEAVES.** Doorline sends the provider only date ranges and a timezone; canvasser
   identities are matched by email locally, from the roster FbTime already holds. No voter data,
   knock data, or survey data ever flows to FbTime — the integration is read-only inbound.
