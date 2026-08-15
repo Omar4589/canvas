@@ -97,6 +97,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="duplicate-surveys" options={{ href: null }} />
       <Tabs.Screen name="audit" options={{ href: null }} />
       <Tabs.Screen name="notes" options={{ href: null }} />
+      <Tabs.Screen name="history" options={{ href: null }} />
       <Tabs.Screen name="exports" options={{ href: null }} />
       <Tabs.Screen name="campaign/[campaignId]" options={{ href: null }} />
       <Tabs.Screen name="book/[turfId]" options={{ href: null }} />

@@ -232,7 +232,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   Twice above this entry says *"nothing exposes it over the API today… if a surface is ever added,
   it belongs behind org-admin auth and must be listed here."* Listing it: **GET
   `/admin/campaigns/:campaignId/history`** (`routes/admin/campaigns.js`) reads `CoordinatorChange`
-  rows for one campaign and renders them in the web `CampaignHistoryDrawer`. The gate is
+  rows for one campaign and renders them in the web `CampaignHistoryDrawer` and the mobile
+  `admin/history.jsx` screen (added 2026-08-14; **same endpoint, same `canManageCampaign` gate, no
+  new access path** — a second renderer of an already-listed surface, not a second surface). The gate is
   **`canManageCampaign`, which admits a TEAM LEAD for a campaign they manage** — deliberately wider
   than the "org-admin auth" this entry anticipated, so the deviation is stated rather than slipped
   in. **Why it is still correct:** the rows disclose a staff-to-staff org-chart association

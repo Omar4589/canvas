@@ -57,6 +57,8 @@ See [How many doors a day do we need?](how-many-doors-a-day).
 
 A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal card when a number looks off.
 
+On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
+
 It also shows **team reassignments** — the other way a number moves without anyone knocking a door. Changing someone's coordinator moves all of their past doors onto the new team, so "why did Bo's team jump by 3,907?" is answerable here.
 
 The timezone and the attached survey aren't recorded — a timezone change already announces itself (every daily number shifts, and you're warned first), and the survey is visible on the campaign's Survey tab. As a lead you see the history of campaigns you run.

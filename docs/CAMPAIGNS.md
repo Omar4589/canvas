@@ -157,7 +157,11 @@ attached survey (visible on the campaign's own Survey tab). Everything logged is
 silent change could mislead someone about money, a deadline, or what was promised.
 
 Leads see the history of campaigns they run, and no others — the same scoping as every other
-campaign screen. There is no mobile view; it's a desk task.
+campaign screen.
+
+**On the phone**, open the campaign and tap **Quick actions → History**; when the campaign has a
+door goal, the Door goal group carries a **History** row too, mirroring the web card's link. Same
+feed, same scoping, read-only on both.
 
 > **This is not the Audit page.** Three different things in this product are called "audit," and
 > they answer different questions. **History** (here) = who changed the campaign's *settings*.
@@ -500,6 +504,20 @@ The cold-start readiness chain is a pure derivation in
   active-only validity check once left an all-archived org with nothing selectable).
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
+- **Change history (mobile):** [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) — a flat
+  screen (nesting under `campaign/[campaignId]/` would mean restructuring that file), registered
+  as a hidden `<Tabs.Screen name="history" href={null} />` in
+  [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) or it renders as a visible tab.
+  Campaign-scoped by `CampaignChip` + the focus re-sync (the Overlaps/Notes shape), one `InsetGroup`
+  of INERT `InsetRow`s (nothing behind a row to open), the Overlaps state ladder verbatim
+  (resolving → no campaign → error+Try again → loading → list). A 403 is a legitimate state — a
+  lead on a campaign they don't manage — and lands in the error branch. Words come from
+  [mobile/lib/campaignHistory.js](../mobile/lib/campaignHistory.js), hand-mirrored from the web
+  copy with **one divergence**: it formats dates through `formatGoalDate` (goalPace.js) because
+  mobile's `electionDates.js` has no `formatDateLabel`. Reached from the Quick-actions
+  `NavTileGrid` tile (always present) and an `InsetNavRow` in the Door goal group (only when a goal
+  exists — hence the tile is primary). Uses the same react-query key as web,
+  `['admin','campaign-history',campaignId]`.
 - **Change history:** [CampaignHistoryDrawer.jsx](../client/src/components/CampaignHistoryDrawer.jsx),
   mounted on both [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (⋮ → History) and
   [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) (the goal card's History link) — one

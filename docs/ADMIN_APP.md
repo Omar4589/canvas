@@ -494,6 +494,11 @@ where relevant a grey line of explanation.
   entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Exports** —
   queues the everyday CSV types with a live row-count preview, and keeps working on an archived
   campaign ([EXPORTS.md](EXPORTS.md));
+  **History** — who changed this campaign's settings (the door goal, the key dates, the invoice
+  policy, archiving) plus team reassignments, read-only, campaign chip and all
+  ([CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*); it is reached from the campaign screen's
+  Quick actions rather than the More hub, since it answers a question you have while looking at a
+  campaign's numbers;
   **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";
@@ -608,7 +613,9 @@ marks are never touched). Bulk marks never appear in per-canvasser stats or the 
 ## Navigation
 [app/(app)/admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) is a `Tabs` navigator: visible
 tabs `index` (Overview), `timeline` (Timeline), `map`, `books`, `more`;
-all detail screens are `href:null` (pushed). The router gate sends `isConsoleRole(role) || isSuperAdmin`
+all detail screens are `href:null` (pushed). **A new file under `(app)/admin/` MUST get its own
+`<Tabs.Screen name="…" options={{ href: null }} />` line** — expo-router auto-discovers it, and
+without the entry it materializes as a visible tab. (`history` is the most recent addition.) The router gate sends `isConsoleRole(role) || isSuperAdmin`
 to `/(app)/admin` — i.e. admins **and team leads** (see [ROLES.md](ROLES.md)) — so super admins share
 these screens in-org. `isConsoleRole` lives in [lib/role.js](../mobile/lib/role.js) alongside the
 `isOrgAdmin` (unscoped org authority; **excludes** `lead`) vs `isConsoleUser` (may see the admin app;

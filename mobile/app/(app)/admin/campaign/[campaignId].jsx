@@ -465,6 +465,13 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/notes');
   }
 
+  // Same seat-then-push shape: the History screen scopes itself from the active campaign.
+  async function goHistory() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push('/(app)/admin/history');
+  }
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -597,6 +604,12 @@ export default function CampaignDetail() {
                     sub={`last ${goal.paceWindowDays} ${goal.paceWindowDays === 1 ? 'day' : 'days'}`}
                   />
                 ) : null}
+                <InsetNavRow
+                  label="History"
+                  sub="Who changed this goal, and when"
+                  hint="Opens this campaign's change history"
+                  onPress={goHistory}
+                />
                 <InsetActionRow
                   label="How this is counted"
                   onPress={() =>
@@ -895,6 +908,7 @@ export default function CampaignDetail() {
                 // standalone Team page merged into Users (one people surface, lead-scoped
                 // server-side, so it is safe for every console role).
                 { label: 'Team', subtitle: 'Crew & assignments', onPress: goTeam },
+              { label: 'History', subtitle: 'Who changed what', onPress: goHistory },
               ]}
             />
           </View>
