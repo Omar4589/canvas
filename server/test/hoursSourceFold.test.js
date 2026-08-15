@@ -248,10 +248,11 @@ test('a caller that supplies no link set never accuses the mapping of being miss
 });
 
 // ── staleness only reaches backward ─────────────────────────────────────────
-// Sync writes isStale broad (person.hasStaleShift && day.hasOpenShift), so an
-// old forgotten clock-out flags TODAY's healthy open shift too. The fold
-// narrows it: only a day strictly before `today` can be stale. Shifts belong
-// to the day they started, so the runaway shift's own day still falls back.
+// loadMeasuredHours now derives isStale exactly (an open shift on a day before
+// today), so overlay-built entries are never flagged broad. staleDay stays as
+// the guard for hand-built overlays like these — a flag with no calendar keeps
+// the conservative broad reading, and only a day strictly before `today` can
+// ever be stale. The runaway shift's own day still falls back.
 
 test("TODAY's open shift is not stale — an old runaway shift must not poison today", () => {
   const fold = foldUserHours({

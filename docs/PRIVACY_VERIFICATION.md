@@ -870,6 +870,22 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   emails (`FbTimePersonLink`, for the canvasser mapping); and per-person **daily hour totals**
   (`FbTimeDailyHours`). Deliberately NOT held: GPS from clock-ins, pay rates, break detail —
   the client never requests them and the provider's partner API does not expose them to us.
+  *[v5 2026-08-15: **the holdings sentence above is superseded — the cache is now
+  shift-level.** `FbTimeShift` replaces `FbTimeDailyHours`: per shift, Doorline holds the
+  provider's shift id, the clock-in instant, the three hour figures (each 2dp as sent), the
+  open/manual-entry flags, and the zone it was clocked in. Deliberately still NOT held, by data
+  minimization: clock-out times (an `isOpen` boolean carries the only fact reports need), the
+  breaks array, and every break-minutes figure — so "break detail: not held" above stays true as
+  written. Why the change: day totals are bucketed in exactly one timezone at pull time, and a
+  campaign anchored to any other zone silently read zero measured hours; shifts are instants,
+  bucketed per report, so measured hours reach a campaign in ANY zone
+  ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md), the sync-model section). The granularity
+  increase is the clock-in instant — same data subjects, same source, same read-only inbound
+  direction, no new recipient, NOT a new subprocessor, no DPA §6 notice event. Assessment: the
+  published Privacy Policy service-providers sentence and the DPA §6 line both say "daily
+  totals", which stops being precise — **owner must approve the reworded sentences BEFORE this
+  deploys** (proposed text handed over 2026-08-15; the legal pages are edited deliberately by
+  the owner, never as a side effect of code).]*
   **What LEAVES.** Doorline sends the provider only date ranges and a timezone; canvasser
   identities are matched by email locally, from the roster FbTime already holds. No voter data,
   knock data, or survey data ever flows to FbTime — the integration is read-only inbound.

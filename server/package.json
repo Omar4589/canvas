@@ -24,6 +24,7 @@
     "migrate:efforts": "node src/migrations/migrateEfforts.js",
     "migrate:ack-memberships": "node src/migrations/migrateAckMemberships.js",
     "migrate:timezones": "node src/migrations/migrateTimeZones.js",
+    "migrate:fbtime-shifts": "node src/migrations/migrateFbtimeShifts.js",
     "migrate:survey-dedup": "node src/migrations/migrateSurveyDedup.js",
     "migrate:survey-option-ids": "node src/migrations/migrateSurveyOptionIds.js",
     "migrate:org-tags": "node src/migrations/migrateOrgTags.js",

@@ -14,7 +14,7 @@ import { Effort } from '../../models/Effort.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { ExportJob } from '../../models/ExportJob.js';
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
-import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
+import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
@@ -62,7 +62,7 @@ export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignChange, CampaignManager, CanvassActivity, ClientReport,
   ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
   Effort, EffortMember,
-  ExportJob, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink,
+  ExportJob, FbTimeConnection, FbTimePersonLink, FbTimeShift,
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
   Membership, Pass,
   ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,

@@ -62,8 +62,10 @@ leads can see that too, even though they can't open the Integrations page themse
 
 - A canvasser still on the clock counts "so far" — the number keeps moving until they clock out,
   and the reports say when that's what you're looking at.
-- **Several shifts in one day are added together for you.** FbTime sends the day's total, so a
-  morning and an evening shift are one day's hours — nothing to configure.
+- **Several shifts in one day are added together for you.** A morning and an evening shift are one
+  day's hours — nothing to configure.
+- **Campaigns in different timezones all measure.** Hours follow each campaign's own calendar
+  automatically, so an Eastern campaign and a Central one both show measured hours.
 - Hours an admin typed into FbTime by hand still count, and the reports note it.
 - A shift someone forgot to close is ignored for that day (it would read as a 30-hour day) and the
   day falls back to the estimate.

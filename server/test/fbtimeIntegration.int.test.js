@@ -17,7 +17,7 @@ const { Organization } = await import('../src/models/Organization.js');
 const { User } = await import('../src/models/User.js');
 const { Membership } = await import('../src/models/Membership.js');
 const { FbTimeConnection } = await import('../src/models/FbTimeConnection.js');
-const { FbTimeDailyHours } = await import('../src/models/FbTimeDailyHours.js');
+const { FbTimeShift } = await import('../src/models/FbTimeShift.js');
 const { FbTimePersonLink } = await import('../src/models/FbTimePersonLink.js');
 const { IntegrationEvent } = await import('../src/models/IntegrationEvent.js');
 const { openSecret } = await import('../src/utils/sealedSecret.js');
@@ -37,7 +37,7 @@ const ctx = {};
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink, IntegrationEvent]) {
+  for (const M of [Organization, User, Membership, FbTimeConnection, FbTimeShift, FbTimePersonLink, IntegrationEvent]) {
     await M.deleteMany({});
   }
 
@@ -163,9 +163,9 @@ test('the figure setting accepts only the three wire names and audits changes', 
 });
 
 test('manual link backfills the cache immediately; unlink reverts it to unmapped', { skip }, async () => {
-  await FbTimeDailyHours.create({
-    organizationId: ctx.org._id, fbtimePersonId: P1, userId: null, day: '2026-08-10',
-    timeZone: 'America/New_York', grossHours: 6, adjustedHours: 5.5, workedHours: 5.25, shiftCount: 1,
+  await FbTimeShift.create({
+    organizationId: ctx.org._id, shiftId: 'link1', fbtimePersonId: P1, userId: null,
+    clockIn: new Date('2026-08-10T13:00:00Z'), grossHours: 6, adjustedHours: 5.5, workedHours: 5.25,
   });
 
   const bad = await call('POST', '/admin/integrations/fbtime/links', { ...ctx.admin, body: { userId: String(ctx.maria._id), fbtimePersonId: 'not-hex' } });
@@ -173,12 +173,12 @@ test('manual link backfills the cache immediately; unlink reverts it to unmapped
 
   const res = await call('POST', '/admin/integrations/fbtime/links', { ...ctx.admin, body: { userId: String(ctx.maria._id), fbtimePersonId: P1 } });
   assert.strictEqual(res.status, 201);
-  let row = await FbTimeDailyHours.findOne({ organizationId: ctx.org._id, fbtimePersonId: P1 });
+  let row = await FbTimeShift.findOne({ organizationId: ctx.org._id, fbtimePersonId: P1 });
   assert.strictEqual(String(row.userId), String(ctx.maria._id), 'cache backfilled without waiting for a poll');
 
   const gone = await call('DELETE', `/admin/integrations/fbtime/links/${ctx.maria._id}`, ctx.admin);
   assert.strictEqual(gone.status, 200);
-  row = await FbTimeDailyHours.findOne({ organizationId: ctx.org._id, fbtimePersonId: P1 });
+  row = await FbTimeShift.findOne({ organizationId: ctx.org._id, fbtimePersonId: P1 });
   assert.strictEqual(row.userId, null, 'unlink reverts rows to unmapped, never deletes them');
 });
 
@@ -202,9 +202,9 @@ test('auto-match links by lowercase email, skips the already-linked, and audits 
 });
 
 test('the roster proxy marks unmatched-with-hours and offers email suggestions', { skip }, async () => {
-  await FbTimeDailyHours.create({
-    organizationId: ctx.org._id, fbtimePersonId: P2, userId: null, day: '2026-08-11',
-    timeZone: 'America/New_York', grossHours: 3, adjustedHours: 3, workedHours: 3, shiftCount: 1,
+  await FbTimeShift.create({
+    organizationId: ctx.org._id, shiftId: 'unm1', fbtimePersonId: P2, userId: null,
+    clockIn: new Date('2026-08-11T13:00:00Z'), grossHours: 3, adjustedHours: 3, workedHours: 3,
   });
   installFbtimeFake({
     people: [
@@ -221,14 +221,14 @@ test('the roster proxy marks unmatched-with-hours and offers email suggestions',
 });
 
 test('disconnect clears the ciphertext, DELETES the cache, and keeps links + history', { skip }, async () => {
-  assert.ok(await FbTimeDailyHours.countDocuments({ organizationId: ctx.org._id }) > 0);
+  assert.ok(await FbTimeShift.countDocuments({ organizationId: ctx.org._id }) > 0);
   const res = await call('DELETE', '/admin/integrations/fbtime', ctx.admin);
   assert.strictEqual(res.status, 200);
 
   const connection = await FbTimeConnection.findOne({ organizationId: ctx.org._id });
   assert.strictEqual(connection.status, 'disconnected');
   assert.strictEqual(connection.keyCiphertext, null, 'a disconnected row holds no working credential');
-  assert.strictEqual(await FbTimeDailyHours.countDocuments({ organizationId: ctx.org._id }), 0, 'reports revert instantly');
+  assert.strictEqual(await FbTimeShift.countDocuments({ organizationId: ctx.org._id }), 0, 'reports revert instantly');
   assert.ok(await FbTimePersonLink.countDocuments({ organizationId: ctx.org._id }) > 0, 'the mapping labor survives');
   assert.ok(await IntegrationEvent.countDocuments({ organizationId: ctx.org._id, type: 'disconnected' }) === 1);
 

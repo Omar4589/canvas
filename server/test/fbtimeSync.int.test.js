@@ -2,52 +2,53 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import mongoose from 'mongoose';
 
-// The FbTime hours sync: replace-range semantics (hard-delete propagation),
+// The FbTime shifts sync: replace-range semantics (hard-delete propagation),
 // unmapped-person rows, fatal-vs-transient error handling, the exactly-one
-// audit event per failure transition, and deep-job recovery. Throwaway mongod:
+// audit event per failure transition, deep-job recovery — and the read-time
+// bucketing the shift cache exists for: one cache serving ANY anchor zone,
+// with day totals that reproduce the provider's own /hours math. Throwaway
+// mongod:
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/fbtsync node --test test/fbtimeSync.int.test.js
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-fbtime-sync';
 process.env.CREDENTIAL_SEAL_KEY = process.env.CREDENTIAL_SEAL_KEY || Buffer.alloc(32, 7).toString('base64');
 
 const { Organization } = await import('../src/models/Organization.js');
 const { FbTimeConnection } = await import('../src/models/FbTimeConnection.js');
-const { FbTimeDailyHours } = await import('../src/models/FbTimeDailyHours.js');
+const { FbTimeShift } = await import('../src/models/FbTimeShift.js');
 const { FbTimePersonLink } = await import('../src/models/FbTimePersonLink.js');
 const { IntegrationEvent } = await import('../src/models/IntegrationEvent.js');
 const { User } = await import('../src/models/User.js');
 const { sealSecret } = await import('../src/utils/sealedSecret.js');
 const { syncOrgHours, runFbtimeSync } = await import('../src/services/fbtime/sync.js');
+const { loadMeasuredHours } = await import('../src/services/reports/hoursSource.js');
+const { zonedDayStr, zonedTimeToUtc } = await import('../src/utils/timezone.js');
 const { installFbtimeFake, uninstallFbtimeFake, fbtimeCalls } = await import('./support/fbtimeFake.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
 
 const TZ = 'America/New_York';
-const dayStr = (offsetDays = 0) =>
-  new Date(Date.now() - offsetDays * 86_400_000).toLocaleDateString('en-CA', { timeZone: TZ });
+// An instant `offsetDays` back at `hourUtc` — clockIn fixtures are UTC instants
+// on purpose (that is what the cache stores); local days fall out per zone.
+const at = (offsetDays, hourUtc = 14) => {
+  const d = new Date(Date.now() - offsetDays * 86_400_000);
+  d.setUTCHours(hourUtc, 0, 0, 0);
+  return d;
+};
 
-// One fake person-day in the /hours response shape (person-level hasStaleShift,
-// day-level hasOpenShift/hasManualEntry — the provider's real contract).
-const personDays = (personId, days, { hasStaleShift = false } = {}) => ({
+// One fake shift in the /shifts response shape (per-shift figures, already
+// 2dp-rounded — the provider's real contract).
+const shift = (id, personId, clockIn, hours, extra = {}) => ({
+  id,
   userId: personId,
-  grossHours: days.reduce((n, d) => n + d.grossHours, 0),
-  adjustedHours: days.reduce((n, d) => n + d.adjustedHours, 0),
-  workedHours: days.reduce((n, d) => n + d.workedHours, 0),
-  shiftCount: days.length,
-  hasOpenShift: days.some((d) => d.hasOpenShift),
-  hasStaleShift,
-  hasManualEntry: days.some((d) => d.hasManualEntry),
-  days,
-});
-
-const day = (date, hours, extra = {}) => ({
-  date,
+  clockIn: clockIn.toISOString(),
+  isOpen: false,
+  isStale: false,
   grossHours: hours,
   adjustedHours: hours,
   workedHours: hours,
-  shiftCount: 1,
-  hasOpenShift: false,
-  hasManualEntry: false,
+  isManualEntry: false,
+  entryTimeZone: TZ,
   ...extra,
 });
 
@@ -61,7 +62,7 @@ let user1;
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink, IntegrationEvent, User]) {
+  for (const M of [Organization, FbTimeConnection, FbTimeShift, FbTimePersonLink, IntegrationEvent, User]) {
     await M.deleteMany({});
   }
   org = await Organization.create({ name: 'SyncOrg', slug: 'sync-org', isActive: true });
@@ -79,7 +80,7 @@ after(async () => {
 beforeEach(async () => {
   if (!URI) return;
   uninstallFbtimeFake();
-  for (const M of [FbTimeConnection, FbTimeDailyHours, FbTimePersonLink, IntegrationEvent]) {
+  for (const M of [FbTimeConnection, FbTimeShift, FbTimePersonLink, IntegrationEvent]) {
     await M.deleteMany({});
   }
 });
@@ -101,46 +102,62 @@ test('replace-range: upserts what the response holds, deletes what it no longer 
     organizationId: org._id, userId: user1._id, fbtimePersonId: P1, source: 'manual',
   });
 
-  // Pull 1: two days for P1, one for unmapped P2.
+  // Pull 1: two shifts for P1, one for unmapped P2.
   installFbtimeFake({
-    hours: { people: [personDays(P1, [day(dayStr(1), 5.5), day(dayStr(0), 3.25)]), personDays(P2, [day(dayStr(1), 4)])] },
+    shifts: [shift('s1', P1, at(1), 5.5), shift('s2', P1, at(0), 3.25), shift('s3', P2, at(1), 4)],
   });
   const first = await syncOrgHours(connection, { windowDays: 7 });
   assert.strictEqual(first.pulled, 3);
 
-  const rows = await FbTimeDailyHours.find({ organizationId: org._id }).lean();
+  const rows = await FbTimeShift.find({ organizationId: org._id }).lean();
   assert.strictEqual(rows.length, 3);
-  const p1Yesterday = rows.find((r) => r.fbtimePersonId === P1 && r.day === dayStr(1));
-  assert.strictEqual(p1Yesterday.adjustedHours, 5.5);
-  assert.strictEqual(String(p1Yesterday.userId), String(user1._id), 'link resolved at sync');
-  const p2Row = rows.find((r) => r.fbtimePersonId === P2);
-  assert.strictEqual(p2Row.userId, null, 'unmapped person kept with userId null');
-  assert.strictEqual(p2Row.timeZone, TZ, 'rows stamped with the zone they were pulled under');
+  const s1 = rows.find((r) => r.shiftId === 's1');
+  assert.strictEqual(s1.adjustedHours, 5.5);
+  assert.strictEqual(String(s1.userId), String(user1._id), 'link resolved at sync');
+  const s3 = rows.find((r) => r.shiftId === 's3');
+  assert.strictEqual(s3.userId, null, 'unmapped person kept with userId null');
+  assert.strictEqual(s3.entryTimeZone, TZ, 'the clocked-in zone rides along as a diagnostic');
+  assert.strictEqual(s1.isStale, undefined, "the provider's isStale is NEVER cached — it embeds a today");
 
-  // Pull 2: P1's yesterday shift was HARD-DELETED in FbTime (absent from the
-  // response) and today's was edited. The cache must equal the response.
+  // Pull 2: s1 was HARD-DELETED in FbTime (absent from the response) and s2
+  // was edited. The cache must equal the response.
   installFbtimeFake({
-    hours: { people: [personDays(P1, [day(dayStr(0), 4.0)]), personDays(P2, [day(dayStr(1), 4)])] },
+    shifts: [shift('s2', P1, at(0), 4.0), shift('s3', P2, at(1), 4)],
   });
   const second = await syncOrgHours(connection, { windowDays: 7 });
-  assert.strictEqual(second.deleted, 1, 'the vanished day-row was deleted');
+  assert.strictEqual(second.deleted, 1, 'the vanished shift was deleted');
 
-  const after2 = await FbTimeDailyHours.find({ organizationId: org._id }).lean();
+  const after2 = await FbTimeShift.find({ organizationId: org._id }).lean();
   assert.strictEqual(after2.length, 2);
-  assert.ok(!after2.some((r) => r.fbtimePersonId === P1 && r.day === dayStr(1)), 'hard delete propagated');
-  assert.strictEqual(after2.find((r) => r.fbtimePersonId === P1).adjustedHours, 4.0, 'edit propagated');
+  assert.ok(!after2.some((r) => r.shiftId === 's1'), 'hard delete propagated');
+  assert.strictEqual(after2.find((r) => r.shiftId === 's2').adjustedHours, 4.0, 'edit propagated');
 });
 
-test('rows outside the pulled window are never touched', { skip }, async () => {
+test('an edited clockIn UPDATES the same row — the shift id is the identity, not the instant', { skip }, async () => {
   const connection = await makeConnection(org._id);
-  // A row 30 days back, beyond the 7-day window.
-  await FbTimeDailyHours.create({
-    organizationId: org._id, fbtimePersonId: P1, userId: null, day: dayStr(30), timeZone: TZ,
-    grossHours: 2, adjustedHours: 2, workedHours: 2, shiftCount: 1,
-  });
-  installFbtimeFake({ hours: { people: [] } });
+  installFbtimeFake({ shifts: [shift('s1', P1, at(1, 14), 5.5)] });
   await syncOrgHours(connection, { windowDays: 7 });
-  assert.strictEqual(await FbTimeDailyHours.countDocuments({ organizationId: org._id }), 1, 'old row survives an empty recent pull');
+
+  // An admin corrects the clock-in by two hours; same shift, new instant.
+  installFbtimeFake({ shifts: [shift('s1', P1, at(1, 12), 7.4)] });
+  const res = await syncOrgHours(connection, { windowDays: 7 });
+  assert.strictEqual(res.deleted, 0, 'no delete+insert — the row moved in place');
+  const rows = await FbTimeShift.find({ organizationId: org._id }).lean();
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].clockIn.getUTCHours(), 12);
+  assert.strictEqual(rows[0].adjustedHours, 7.4);
+});
+
+test('shifts outside the pulled window are never touched', { skip }, async () => {
+  const connection = await makeConnection(org._id);
+  // A shift 30 days back, beyond the 7-day window.
+  await FbTimeShift.create({
+    organizationId: org._id, shiftId: 'old1', fbtimePersonId: P1, userId: null,
+    clockIn: at(30), grossHours: 2, adjustedHours: 2, workedHours: 2,
+  });
+  installFbtimeFake({ shifts: [] });
+  await syncOrgHours(connection, { windowDays: 7 });
+  assert.strictEqual(await FbTimeShift.countDocuments({ organizationId: org._id }), 1, 'old shift survives an empty recent pull');
 });
 
 test('a FATAL code marks the connection errored with exactly ONE audit event across repeated runs', { skip }, async () => {
@@ -171,13 +188,13 @@ test('a TRANSIENT error records itself but keeps the connection live; other orgs
 
   // First org's pull 500s; second org's succeeds — keyed per apiKey.
   installFbtimeFake({
-    hours: ({ apiKey }) => {
+    shifts: ({ apiKey }) => {
       if (apiKey === 'fbt_test_synckey') {
         const err = new Error('FbTime HTTP 500: upstream');
         err.name = 'FbtimeApiError';
         throw Object.assign(err, { code: null, status: 500 });
       }
-      return { people: [personDays(P1, [day(dayStr(0), 2)])] };
+      return [shift('s9', P1, at(0), 2)];
     },
   });
 
@@ -190,12 +207,12 @@ test('a TRANSIENT error records itself but keeps the connection live; other orgs
   assert.ok(failed.lastSyncError, 'but the status card can say why');
   assert.strictEqual(await IntegrationEvent.countDocuments({ organizationId: org._id }), 0, 'no audit event for a blip');
   assert.strictEqual(String((await FbTimeConnection.findById(conn2._id)).lastSyncAt) !== 'null', true);
-  assert.strictEqual(await FbTimeDailyHours.countDocuments({ organizationId: org2._id }), 1, 'the healthy org synced');
+  assert.strictEqual(await FbTimeShift.countDocuments({ organizationId: org2._id }), 1, 'the healthy org synced');
 });
 
 test('the deep job self-heals an errored connection and audits the recovery', { skip }, async () => {
   await makeConnection(org._id, { status: 'errored', lastSyncError: 'KEY_REVOKED: revoked' });
-  installFbtimeFake({ hours: { people: [personDays(P1, [day(dayStr(0), 6)])] } });
+  installFbtimeFake({ shifts: [shift('s1', P1, at(0), 6)] });
 
   const run = await runFbtimeSync({ windowDays: 120, recoverErrored: true });
   assert.strictEqual(run.recovered, 1);
@@ -219,17 +236,94 @@ test('sync is dormant without CREDENTIAL_SEAL_KEY — a no-op, not a crash', { s
   }
 });
 
-test('stale flag lands only on the open day of a person with a stale shift', { skip }, async () => {
+// ── read-time bucketing: what the shift cache exists for ────────────────────
+
+test('ONE cache serves ANY anchor zone — the Nebraska regression', { skip }, async () => {
   const connection = await makeConnection(org._id);
+  await FbTimePersonLink.create({
+    organizationId: org._id, userId: user1._id, fbtimePersonId: P1, source: 'manual',
+  });
+  // 14:00 UTC = 10:00 EDT = 09:00 CDT — the same local day everywhere.
+  installFbtimeFake({ shifts: [shift('s1', P1, at(3, 14), 5.5)] });
+  await syncOrgHours(connection, { windowDays: 7 });
+
+  for (const tz of ['America/New_York', 'America/Chicago']) {
+    const day = zonedDayStr(at(3, 14), tz);
+    const measured = await loadMeasuredHours({ organizationId: org._id, from: day, to: day, tz });
+    assert.strictEqual(measured.enabled, true);
+    assert.strictEqual(
+      measured.byUserDay.get(`${user1._id}|${day}`)?.hours, 5.5,
+      `the same cached shift measures under ${tz} — no zone is a second-class campaign`
+    );
+  }
+});
+
+test('a cross-midnight shift belongs to the day it STARTED — in each zone’s own calendar', { skip }, async () => {
+  const connection = await makeConnection(org._id);
+  await FbTimePersonLink.create({
+    organizationId: org._id, userId: user1._id, fbtimePersonId: P1, source: 'manual',
+  });
+  // 00:30 New York = 23:30 Chicago the previous local day, in EVERY season
+  // (the zones sit exactly one hour apart year-round, so a UTC-anchored
+  // fixture would flake across DST — build the instant from a LOCAL spec).
+  // The SAME instant is one calendar day in Chicago and the next in New York —
+  // and both must agree with how knocks at that instant would bucket, which
+  // zonedDayStr defines.
+  const [y, m, d] = zonedDayStr(at(3), 'America/New_York').split('-').map(Number);
+  const clockIn = zonedTimeToUtc(y, m, d, 0, 30, 0, 'America/New_York');
+  installFbtimeFake({ shifts: [shift('s1', P1, clockIn, 4.2)] });
+  await syncOrgHours(connection, { windowDays: 7 });
+
+  const cdtDay = zonedDayStr(clockIn, 'America/Chicago');
+  const edtDay = zonedDayStr(clockIn, 'America/New_York');
+  assert.notStrictEqual(cdtDay, edtDay, 'the fixture instant really straddles midnight');
+
+  const central = await loadMeasuredHours({ organizationId: org._id, from: cdtDay, to: cdtDay, tz: 'America/Chicago' });
+  assert.strictEqual(central.byUserDay.get(`${user1._id}|${cdtDay}`)?.hours, 4.2);
+
+  const eastern = await loadMeasuredHours({ organizationId: org._id, from: edtDay, to: edtDay, tz: 'America/New_York' });
+  assert.strictEqual(eastern.byUserDay.get(`${user1._id}|${edtDay}`)?.hours, 4.2);
+  assert.ok(!eastern.byUserDay.has(`${user1._id}|${cdtDay}`), 'never double-bucketed');
+});
+
+test('day totals reproduce the provider’s own /hours math: 2dp per shift, summed already-rounded', { skip }, async () => {
+  const connection = await makeConnection(org._id);
+  await FbTimePersonLink.create({
+    organizationId: org._id, userId: user1._id, fbtimePersonId: P1, source: 'manual',
+  });
+  // Three shifts in one local day, figures already 2dp as the contract sends
+  // them. The provider's /hours would report round2(1.13 + 2.87 + 0.1) = 4.1.
   installFbtimeFake({
-    hours: {
-      people: [
-        personDays(P1, [day(dayStr(2), 8), day(dayStr(1), 3.1, { hasOpenShift: true })], { hasStaleShift: true }),
-      ],
-    },
+    shifts: [
+      shift('s1', P1, at(2, 12), 1.13),
+      shift('s2', P1, at(2, 15), 2.87),
+      shift('s3', P1, at(2, 18), 0.1),
+    ],
   });
   await syncOrgHours(connection, { windowDays: 7 });
-  const rows = await FbTimeDailyHours.find({ organizationId: org._id }).lean();
-  assert.strictEqual(rows.find((r) => r.day === dayStr(1)).isStale, true, 'the open old day is the stale one');
-  assert.strictEqual(rows.find((r) => r.day === dayStr(2)).isStale, false, 'the closed day is not');
+
+  const day = zonedDayStr(at(2, 12), TZ);
+  const measured = await loadMeasuredHours({ organizationId: org._id, from: day, to: day, tz: TZ });
+  assert.strictEqual(measured.byUserDay.get(`${user1._id}|${day}`)?.hours, 4.1, 'no float noise reaches the wire');
+});
+
+test('staleness is derived at read: yesterday’s open shift falls back, today’s measures', { skip }, async () => {
+  const connection = await makeConnection(org._id);
+  await FbTimePersonLink.create({
+    organizationId: org._id, userId: user1._id, fbtimePersonId: P1, source: 'manual',
+  });
+  // A forgotten clock-out from an earlier day and a healthy open shift right
+  // now. Two days back at 13:00 UTC is strictly before NY-today at any wall
+  // clock; clockIn = the present instant is NY-today by definition.
+  const staleOpen = shift('s1', P1, at(2, 13), 26.4, { isOpen: true });
+  const todayOpen = shift('s2', P1, new Date(), 1.0, { isOpen: true });
+  installFbtimeFake({ shifts: [staleOpen, todayOpen] });
+  await syncOrgHours(connection, { windowDays: 7 });
+
+  const measured = await loadMeasuredHours({ organizationId: org._id, from: null, to: null, tz: TZ });
+  const yDay = zonedDayStr(at(2, 13), TZ);
+  const tDay = zonedDayStr(new Date(), TZ);
+  assert.strictEqual(measured.byUserDay.get(`${user1._id}|${yDay}`)?.isStale, true, 'the ghost day is disqualified');
+  assert.strictEqual(measured.byUserDay.get(`${user1._id}|${tDay}`)?.isStale, false, "today's open shift is just open");
+  assert.strictEqual(measured.byUserDay.get(`${user1._id}|${tDay}`)?.isOpen, true, 'and labeled as running');
 });

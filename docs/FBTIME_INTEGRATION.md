@@ -96,9 +96,11 @@ looking:
 - Hours an admin typed into FbTime by hand count, and the report notes the range includes manual
   entries — hover the marker beside doors-per-hour on the canvasser tables, or read the sub-line
   under **Hours on doors** on a canvasser's detail screen in the mobile app.
-- **Someone can work several shifts in one day, and that is handled** — FbTime returns a day's
-  shifts already added together, so a 9–12 and a 2–6 arrive as one day of 7 hours (with a shift
-  count). Doorline never sees or stores individual shifts.
+- **Someone can work several shifts in one day, and that is handled** — a 9–12 and a 2–6 read as
+  one day of 7 hours, added together the same way FbTime's own timesheet adds them.
+- **Campaigns in different timezones all measure.** Hours follow each campaign's own calendar
+  automatically — an organization running an Eastern campaign and a Central one sees measured
+  hours on both, each bucketed into its own local days.
 - A day that carries a shift someone is **still clocked into** is marked as such, because that
   day's number keeps moving until they clock out.
 - A day someone was clocked in but knocked no doors still counts its hours — that is exactly the
@@ -119,7 +121,7 @@ kept, so reconnecting later finds the roster already mapped.
 | Piece | Where |
 |---|---|
 | Sealed key storage (AES-256-GCM, env master key) | [`server/src/utils/sealedSecret.js`](../server/src/utils/sealedSecret.js) |
-| Connection / links / hours cache / audit models | [`FbTimeConnection`](../server/src/models/FbTimeConnection.js) · [`FbTimePersonLink`](../server/src/models/FbTimePersonLink.js) · [`FbTimeDailyHours`](../server/src/models/FbTimeDailyHours.js) · [`IntegrationEvent`](../server/src/models/IntegrationEvent.js) |
+| Connection / links / shift cache / audit models | [`FbTimeConnection`](../server/src/models/FbTimeConnection.js) · [`FbTimePersonLink`](../server/src/models/FbTimePersonLink.js) · [`FbTimeShift`](../server/src/models/FbTimeShift.js) · [`IntegrationEvent`](../server/src/models/IntegrationEvent.js) |
 | HTTP client + test seam (`fbt_test_` → in-process fake) | [`server/src/services/fbtime/client.js`](../server/src/services/fbtime/client.js) |
 | Sync jobs (replace-range re-pulls) | [`server/src/services/fbtime/sync.js`](../server/src/services/fbtime/sync.js), registered in [`services/retention/scheduler.js`](../server/src/services/retention/scheduler.js) |
 | The hours resolver (merge + labels) | [`server/src/services/reports/hoursSource.js`](../server/src/services/reports/hoursSource.js) |
@@ -138,13 +140,17 @@ kept, so reconnecting later finds the roster already mapped.
 - `FBTIME_API_BASE` (defaults to the production URL from the provider contract),
   `FBTIME_TIMEOUT_MS`, `FBTIME_RECENT_CRON` / `FBTIME_DEEP_CRON`,
   `FBTIME_RECENT_WINDOW_DAYS` (7) / `FBTIME_DEEP_WINDOW_DAYS` (120).
-- New indexes ship on three models — run `npm run migrate:build-indexes -- --apply` on deploy
-  (prod runs `autoIndex: false`); the worker also `syncIndexes()`es the hours cache at boot.
+- Run `npm run migrate:build-indexes -- --apply` after a deploy that adds indexes (prod runs
+  `autoIndex: false`); the worker also `syncIndexes()`es the shift cache at boot.
+- **Cutover from the day-total cache (2026-08):** `npm run migrate:fbtime-shifts -- --apply`
+  deep-resyncs every connected org into the shift cache immediately (instead of waiting for the
+  nightly deep job); a later `-- --apply --drop-legacy` drops the retired `fbtimedailyhours`
+  collection once the numbers are confirmed. Dashboard Run console, repo root — both proxied.
 
-### The sync model — and the four provider traps it honors
+### The sync model — and the provider traps it honors
 
-Two maintenance jobs re-pull **date ranges** and make the cache equal the response over that range
-(upsert what the provider has, delete what it no longer has):
+Two maintenance jobs re-pull **date ranges of shifts** (`GET /shifts`) and make the cache equal
+the response over that range (upsert by the provider's shift id, delete what it no longer has):
 
 - `fbtime-hours-recent` — every 15 min (off the quarter-hour), trailing 7 days, `connected` orgs.
 - `fbtime-hours-deep` — nightly 06:29, trailing 120 days; also re-pings `errored` connections and
@@ -154,14 +160,22 @@ Two maintenance jobs re-pull **date ranges** and make the cache equal the respon
 The traps, from the provider's contract, all deliberate here:
 
 1. **Never an `updatedSince` cursor for shifts.** FbTime hard-deletes time entries; a deleted row
-   is never "updated". Replace-range propagates deletions for free.
+   is never "updated". Replace-range propagates deletions for free. The delete scan uses the SAME
+   UTC bounds the provider derives from `[startDate, endDate]` in the pull zone (its inclusive
+   `23:59:59.999` end and our exclusive next-midnight are the same set at integer-millisecond
+   resolution), so "inside the window" can never disagree between the two systems.
 2. **No reconciliation machinery.** Every poll re-reads from scratch; live surfaces are
-   self-healing by construction.
-3. **Absence ≠ zero.** A person missing from `/hours` (or a day with no cache row) falls back to
+   self-healing by construction. One bounded exception: `/shifts` paginates on `clockIn` — a
+   mutable sort key — so `getShifts` re-pulls ONCE if `pagination.total` moves between pages of a
+   single pull (a mid-pull edit shuffled the pages); a second drift is accepted and the next
+   15-minute tick heals it.
+3. **Absence ≠ zero.** A person missing from `/shifts` (or a day with no shifts) falls back to
    the span estimate, labeled — never a 0 that would read as an infinite rate.
-4. **One timezone per pull.** `?timeZone=` is always the org's zone and is stamped on every cached
-   row; a report anchored to a different zone (campaign tz ≠ org tz) sees no measured rows and
-   stays honestly estimated rather than joining mismatched day buckets.
+4. **The timezone parameter only shapes the pull window.** Shifts are cached as INSTANTS and
+   bucketed into local days at read time, in each report's own anchor zone — so one pull serves
+   every campaign the org runs, whatever zone each anchors to. (The previous day-total cache was
+   stamped with the org's zone, and any campaign anchored elsewhere silently read zero measured
+   rows — the failure the shift cache exists to make unrepresentable.)
 
 Fatal provider codes (`KEY_REVOKED`, `KEY_EXPIRED`, `KEY_INVALID`, `ORG_INACTIVE`) mark the
 connection `errored` with exactly **one** `sync-failed` event per transition; transient errors
@@ -169,31 +183,30 @@ mark-and-continue and never change status.
 
 ### The merge rules (`services/reports/hoursSource.js`)
 
-- **The day is the atom, and the provider defines it.** `GET /hours` returns `person.days[]`
-  already summed across every shift that day (`shiftCount` rides along) — Doorline never sees a
-  shift. Multi-shift days therefore need no handling here and get none. The consequence to know:
-  a day is usable or not *as a whole*, so a day holding one clean shift **and** one runaway open
-  one falls back to the span estimate entirely rather than salvaging the clean half. Conservative
-  and honest; separating them would require shift-level data the contract does not offer and
-  `FbTimeDailyHours` deliberately does not store.
-- Per **user-day**: the measured row wins when present AND usable — `hours > 0` and not `isStale`
+- **The day is built HERE, in the report's own anchor timezone.** The cache holds shifts
+  (instants); each belongs entirely to the local day its `clockIn` falls on in the request's
+  anchor tz — the provider's own bucketing rule (`localDateOf`), applied to the same instants in
+  the report's zone instead of one stamped at sync time. Hours-days and knock-days therefore
+  share a bucketing **by construction**: the same request resolves one anchor tz and feeds it to
+  both. Day totals sum the per-shift figures **already-rounded** (each arrives 2dp per the
+  contract), which is literally how the provider's own `/hours` computes its totals — so a day
+  here equals the timesheet, always.
+- Multi-shift days are summed here (a 9–12 and a 2–6 make one 7-hour day). A day is still usable
+  or not *as a whole*: one runaway open shift spoils its day even beside a clean one — falling
+  back to the span entirely rather than salvaging the half is conservative and honest, and it is
+  the same whole-day rule the day-total cache had.
+- Per **user-day**: the measured hours win when present AND usable — `hours > 0` and not stale
   (a forgotten clock-out falls back to the span and keeps its flag). `isOpen` days count ("so
   far"); `isManualEntry` days count, flag rolled up.
-- **Staleness only reaches BACKWARD, and the narrowing is at read time.** `sync.js` writes
-  `isStale` broad — `person.hasStaleShift && d.hasOpenShift`, a **person**-level provider flag
-  ANDed with a **day**-level one, because the provider says *that this person has a stale shift*
-  and never *which*. Left alone that flags today's healthy open shift for anyone carrying an old
-  forgotten clock-out, estimating them every working day until someone closes it. `staleDay(m,
-  day, today)` narrows it: **only a day strictly before today can be stale.** Safe because a
-  shift belongs entirely to the day it *started*, so a runaway shift's hours never reach another
-  day's row — and "stale" *means* open since an earlier day, so today's open shift is just open.
-  The runaway shift's own day still falls back and still raises `hasStaleShift`.
-  **Read time, not sync time**, deliberately: a "today" baked into a cached row is wrong from the
-  next midnight and frozen wrong for any org whose sync is erroring. `loadMeasuredHours` resolves
-  `today` per request via `zonedDayStr(new Date(), tz)` — the row's own stamped zone, so the
-  comparison is against the same calendar the day buckets were built in. An overlay with no
-  `today` (a legacy caller or fixture) keeps the old broad behavior: never narrow without having
-  looked at the calendar. The provider contract is untouched — same request, same fields read.
+- **Staleness is derived, exactly, per request** — a day is stale when it holds an open shift AND
+  lies strictly before today-in-anchor-tz ("stale" *means* open since an earlier day, so today's
+  open shift is just open). Never cached: a "today" baked into a row is wrong from the next
+  midnight and frozen wrong for any org whose sync is erroring, which is why sync deliberately
+  ignores the provider's per-shift `isStale` field. With shift-level data the old broad-write /
+  read-narrow dance is gone — only the forgotten clock-out's own day falls back (and still
+  raises `hasStaleShift`); the same person's other days, today included, measure normally.
+  `staleDay()` survives as a guard for hand-built overlays: a stale flag with no calendar keeps
+  the conservative broad reading.
 - A user's day set is the **union** of knock-days and measured days — clocked-but-not-knocking
   lowers the rate. `daysActive` keeps its knock-day meaning.
 - Per-canvasser rows: `hoursSource` = `measured` | `estimated` | `mixed` (mixed exists ONLY at this
@@ -233,15 +246,20 @@ never re-deriving. The canvasser's own pace lane (`mobile/lib/rates.js` `formatP
 
 `FbTimePersonLink`, one-to-one per org in both directions (DB-unique). Auto-match by lowercase
 email is an explicit, audited **action** (at connect + a button) — never a background sweep, so an
-admin's unlink is never silently undone. Link/unlink backfills `FbTimeDailyHours.userId`
-immediately. Links **survive disconnect**; the hours cache does not.
+admin's unlink is never silently undone. Link/unlink backfills `FbTimeShift.userId`
+immediately. Links **survive disconnect**; the shift cache does not.
 
 ### Privacy
 
 The org's own admin connects it — that act is the consent. What Doorline stores: the sealed key,
-FbTime person ids/names/emails for the mapping, and per-person **daily hour totals** (never GPS,
-never pay rates — the provider doesn't offer them and the client never asks). All four collections
-are org-scoped and in the org-delete sweep.
+FbTime person ids/names/emails for the mapping, and per-person **shift-level hours records** —
+each shift's start instant, its three hour figures, and its open/manual flags. Deliberately NOT
+stored, by data minimization: clock-outs (`isOpen` carries the only fact reports need), the
+breaks array, and every break-minutes figure — and never GPS, never pay rates (the provider
+doesn't offer them and the client never asks). The start instant is held because it is what a
+shift's local day is derived from; it is the one granularity increase over the retired day-total
+cache, stamped in PRIVACY_VERIFICATION.md (v5 entry). All four collections are org-scoped and in
+the org-delete sweep.
 
 **Who sees what.** Everything that *configures* the integration — the key, the hours figure, the
 mapping table, the event history — is admin-only, and leads deliberately cannot reach any of it.

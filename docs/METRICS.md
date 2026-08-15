@@ -1156,8 +1156,12 @@ never read the connection or the hours cache directly (the `billRestricted.js`
 resolver-not-direct-read pattern). The rules, in full in
 [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md):
 
-- Per user-day: the measured row wins when usable (`hours > 0`, not a stale forgotten-clock-out);
+- Per user-day: the measured hours win when usable (`hours > 0`, not a stale forgotten-clock-out);
   otherwise the span. Absence is never zero.
+- The cache holds **shifts (instants), bucketed into local days at read time in the report's own
+  anchor timezone** — so hours-days and knock-days share a bucketing by construction, and a
+  campaign in any timezone measures. (Formerly day totals stamped with the org's zone, which
+  silently estimated every campaign anchored elsewhere.)
 - Every figure carries `hoursSource`: `measured` | `estimated` | `mixed` — mixed only at the
   labeled per-person grain.
 - **Aggregates are all-or-nothing**: a team/campaign rate is measured only when EVERY contributor

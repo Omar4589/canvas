@@ -197,20 +197,20 @@ clients; no OTA/app release is needed to fix help copy.
 ## House rules
 
 - **Plain JavaScript only** — no TypeScript.
-- **Use `grep -a` on the four NUL-bearing files.** Composite map keys are built as
+- **Use `grep -a` on the three NUL-bearing files.** Composite map keys are built as
   `` `${a}\0${b}` `` — a deliberate separator no id can contain, so two-part keys can't collide.
   Plain macOS `grep` treats those files as binary and **skips them silently**, so an audit
-  concludes the code isn't there. Verified list (2026-08-14):
+  concludes the code isn't there. Verified list (2026-08-15; `fbtime/sync.js` left the list that
+  day — the shift-cache rewrite keys on single shift ids, no composite keys left):
 
   | File | NULs |
   |---|---|
   | `server/src/services/person/resolvePerson.js` | 6 |
-  | `server/src/services/fbtime/sync.js` | 3 |
   | `server/src/services/dnc/recomputeDoNotKnock.js` | 3 |
   | `server/src/services/person/mergePersons.js` | 2 |
 
-  It has already misled two audits — the Person layer once, and `sync.js` again on 2026-08-14
-  (a grep for `FbTimeDailyHours` in it returned nothing while the file imports and writes it).
+  It has already misled two audits — the Person layer once, and fbtime `sync.js` (then a list
+  member) again on 2026-08-14, where a grep for a model it imported and wrote returned nothing.
   Two follow-on traps: `git diff` renders these files as **`Binary files … differ`**, so a diff
   review shows you nothing — use `git diff --text`. And a NUL prints as a blank in terminal
   output, so `` `${id}\0${day}` `` reads as `` `${id} ${day}` `` when you cat it. Re-scan with the

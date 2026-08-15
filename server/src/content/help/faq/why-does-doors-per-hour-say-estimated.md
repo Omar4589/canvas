@@ -51,9 +51,8 @@ updates as Doorline re-checks FbTime every few minutes. When that's what's happe
 explanation on the marker says so — *"includes a shift still running"* — along with a note if any
 of the hours were typed into FbTime by hand rather than clocked.
 
-**What if someone works two shifts in one day?** That's handled and needs nothing from you. FbTime
-sends each day's shifts already added together, so a morning and an evening shift arrive as one
-day's hours.
+**What if someone works two shifts in one day?** That's handled and needs nothing from you. A
+morning and an evening shift are added together into one day's hours automatically.
 
 ## Downloading the detail
 

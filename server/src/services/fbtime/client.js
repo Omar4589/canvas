@@ -129,14 +129,38 @@ export const listAllPeople = async ({ apiKey, includeInactive = true } = {}) => 
 };
 
 /**
- * Hours per person and per person-day for [startDate, endDate], bucketed in
- * `timeZone`. ALWAYS pass the org's zone — the provider defaults to
- * America/Chicago, and mismatched buckets produce a day with hours and no
- * doors beside a day with doors and no hours.
+ * Every shift in [startDate, endDate], individually, paged to exhaustion.
+ * `timeZone` only DEFINES THE WINDOW (the provider collapses the range to a
+ * pair of UTC instants on clockIn) — day bucketing happens on OUR side, at
+ * read time, in each report's own anchor zone. That is why this integration
+ * pulls /shifts and not /hours: a pre-bucketed day total can only ever be
+ * right for one zone, and an org can run campaigns in several.
+ *
+ * The provider sorts by clockIn — a MUTABLE field, unlike /people's by-_id
+ * ordering — so a mid-pull edit can shuffle rows between pages. The response's
+ * pagination.total is the tell: if it moves between pages of one pull, the set
+ * changed under us, so re-pull once from the top. A second drift is accepted
+ * as-is — the next 15-minute sync heals it, and looping until quiescence would
+ * let an actively-edited org starve its own sync.
  */
-export const getHours = ({ apiKey, startDate, endDate, timeZone }) =>
-  request({
-    apiKey,
-    path: '/hours',
-    params: { startDate, endDate, timeZone, includeDays: 'true' },
-  });
+export const getShifts = async ({ apiKey, startDate, endDate, timeZone }, { retried = false } = {}) => {
+  const shifts = [];
+  const limit = 1000;
+  let expectedTotal = null;
+  for (let page = 1; ; page += 1) {
+    const body = await request({
+      apiKey,
+      path: '/shifts',
+      params: { startDate, endDate, timeZone, page, limit },
+    });
+    const total = body.pagination?.total ?? null;
+    if (expectedTotal === null) expectedTotal = total;
+    else if (total !== expectedTotal && !retried) {
+      return getShifts({ apiKey, startDate, endDate, timeZone }, { retried: true });
+    }
+    shifts.push(...(body.shifts || []));
+    const totalPages = body.pagination?.totalPages || 1;
+    if (page >= totalPages) break;
+  }
+  return shifts;
+};

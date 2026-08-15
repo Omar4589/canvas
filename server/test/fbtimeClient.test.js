@@ -3,7 +3,7 @@ import assert from 'node:assert';
 
 // The FbTime client's test seam and error surface — no network, no DB.
 //   node --test test/fbtimeClient.test.js
-const { ping, getHours, listAllPeople, setFbtimeFake, FbtimeApiError, FATAL_CODES } = await import(
+const { ping, getShifts, listAllPeople, setFbtimeFake, FbtimeApiError, FATAL_CODES } = await import(
   '../src/services/fbtime/client.js'
 );
 const { installFbtimeFake, uninstallFbtimeFake, fbtimeCalls } = await import(
@@ -34,7 +34,7 @@ test('a missing key is refused before anything else, with KEY_MALFORMED', async 
 test('provider machine codes surface as FbtimeApiError.code', async () => {
   installFbtimeFake({ error: { code: 'KEY_REVOKED', status: 401 } });
   await assert.rejects(
-    () => getHours({ apiKey: 'fbt_test_x', startDate: '2026-08-01', endDate: '2026-08-02', timeZone: 'America/New_York' }),
+    () => getShifts({ apiKey: 'fbt_test_x', startDate: '2026-08-01', endDate: '2026-08-02', timeZone: 'America/New_York' }),
     (err) => err instanceof FbtimeApiError && err.code === 'KEY_REVOKED' && err.status === 401
   );
   // The codes sync treats as fatal-for-the-connection are exactly these four.
@@ -44,17 +44,43 @@ test('provider machine codes surface as FbtimeApiError.code', async () => {
   );
 });
 
-test('getHours forwards the range and timezone — the bucket-alignment contract', async () => {
-  installFbtimeFake({ hours: ({ params }) => ({ people: [], range: params }) });
-  const res = await getHours({
+test('getShifts forwards the range and timezone (the window edge), pages at 1000', async () => {
+  installFbtimeFake({ shifts: [{ id: 's1', userId: 'p1', clockIn: '2026-08-01T14:00:00Z' }] });
+  const res = await getShifts({
     apiKey: 'fbt_test_tz',
     startDate: '2026-08-01',
     endDate: '2026-08-07',
     timeZone: 'America/Chicago',
   });
-  assert.strictEqual(res.range.timeZone, 'America/Chicago');
-  assert.strictEqual(res.range.startDate, '2026-08-01');
-  assert.strictEqual(res.range.includeDays, 'true');
+  assert.strictEqual(res.length, 1);
+  const { params } = fbtimeCalls()[0];
+  assert.strictEqual(params.timeZone, 'America/Chicago');
+  assert.strictEqual(params.startDate, '2026-08-01');
+  assert.strictEqual(params.limit, 1000);
+});
+
+test('getShifts drains pagination, and a total that MOVES between pages triggers ONE re-pull', async () => {
+  // Page-scripted fake: two pages of a pull whose total drifts (a shift was
+  // edited mid-pull, shuffling the clockIn-sorted pages), then a stable
+  // two-page pull. The client must restart once and return the stable set.
+  let call = 0;
+  installFbtimeFake({
+    shifts: ({ params }) => {
+      call += 1;
+      const page = Number(params.page);
+      const paged = (ids, total) => ({
+        shifts: ids.map((id) => ({ id, userId: 'p1', clockIn: '2026-08-01T14:00:00Z' })),
+        pagination: { page, limit: 1000, total, totalPages: 2 },
+      });
+      if (call <= 2) return page === 1 ? paged(['a', 'b'], 4) : paged(['c'], 3); // drift: 4 → 3
+      return page === 1 ? paged(['a', 'b'], 3) : paged(['d'], 3); // stable re-pull
+    },
+  });
+  const shifts = await getShifts({
+    apiKey: 'fbt_test_drift', startDate: '2026-08-01', endDate: '2026-08-07', timeZone: 'America/Chicago',
+  });
+  assert.deepStrictEqual(shifts.map((s) => s.id), ['a', 'b', 'd'], 'the re-pulled set, not the torn one');
+  assert.strictEqual(fbtimeCalls().length, 4, 'exactly one restart — never a loop');
 });
 
 test('listAllPeople drains pagination to exhaustion', async () => {

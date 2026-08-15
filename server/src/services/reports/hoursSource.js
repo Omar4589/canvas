@@ -1,29 +1,37 @@
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
-import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
+import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
-import { zonedDayStr } from '../../utils/timezone.js';
+import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 
 // Where an hours denominator comes from: measured (FbTime) or estimated (the
 // first-to-last knock span). THE resolver, in the billRestricted.js sense —
 // report routes ask this module and never read FbTimeConnection or
-// FbTimeDailyHours directly, so the rules below hold everywhere or nowhere.
+// FbTimeShift directly, so the rules below hold everywhere or nowhere.
 //
 // THE RULES (owner-ruled + provider contract; see docs/FBTIME_INTEGRATION.md):
 //
-//  · Per user-day: use the measured row where one exists AND is usable —
+//  · THE DAY IS BUILT HERE, in the report's own anchor timezone. The cache
+//    holds SHIFTS (instants), and each one belongs entirely to the local day
+//    its clockIn falls on in `tz` — the provider's own bucketing rule
+//    (localDateOf), applied to the same instants in the report's zone instead
+//    of one stamped at sync time. So hours-days and knock-days share a
+//    bucketing BY CONSTRUCTION: the same request resolves one anchor tz and
+//    feeds it to both. (The previous day-total cache was stamped with the
+//    org's zone, and any campaign anchored elsewhere silently read zero
+//    measured rows — the failure this shape makes unrepresentable.)
+//  · Per user-day: use the measured hours where they exist AND are usable —
 //    hours > 0 (a zero denominator reads as an infinite rate) and not stale
 //    (an open shift from an earlier day is a forgotten clock-out, not a
 //    30-hour shift; that day falls back to the span and keeps its flag).
-//    Absence of a row is NEVER zero hours — it means "not measured, estimate".
-//  · STALENESS ONLY REACHES BACKWARD: sync writes isStale broad
-//    (person.hasStaleShift && day.hasOpenShift — the provider names the person,
-//    never the shift), so someone with an old forgotten clock-out who is on the
-//    clock right now gets TODAY's healthy row flagged too. Narrowed here at
-//    read time, not at sync: shifts belong entirely to the day they started
-//    (FbTimeDailyHours.day), so a runaway shift can never contaminate another
-//    day's row — and "stale" MEANS open since an earlier day, so today's open
-//    shift is just open. Read time, because a "today" baked into a cached row
-//    goes wrong at midnight and freezes wrong when sync errors.
+//    Absence of hours is NEVER zero hours — it means "not measured, estimate".
+//  · STALENESS IS DERIVED, EXACTLY, PER REQUEST: a day is stale when it holds
+//    an open shift AND lies strictly before today-in-tz. Never cached — a
+//    "today" baked into a row is wrong from the next midnight and frozen
+//    wrong when sync errors. With shift-level data this is precise: today's
+//    healthy open shift never flags, and only the forgotten clock-out's own
+//    day falls back. (The old day-total cache knew only that the PERSON had a
+//    stale shift somewhere, so it wrote the flag broad and narrowed here;
+//    both halves of that dance are gone.)
 //  · A user's day set is the UNION of knock-days and measured days: a day
 //    with clocked hours and no knocks still spends hours, and hiding it would
 //    flatter the rate. That is the mismatch that actually bites — "clocked in
@@ -40,9 +48,12 @@ import { zonedDayStr } from '../../utils/timezone.js';
 //    clock out. Only the middle two are somebody's to fix, so `hoursReason`
 //    names which one it is rather than making an admin guess from an absence.
 //
-// Which of the three wire figures a measured row contributes is the
-// connection's hourFigure setting, resolved here at read time — changing the
-// setting re-labels every report on the next request, no re-sync.
+// Which of the three wire figures a shift contributes is the connection's
+// hourFigure setting, resolved here at read time — changing the setting
+// re-labels every report on the next request, no re-sync. Per-shift figures
+// arrive already rounded to 2dp (the provider's contract) and are summed
+// already-rounded, because that is literally how the provider's own /hours
+// computes its day totals — so a day here equals the timesheet, always.
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -51,11 +62,14 @@ export const spanHours = (first, last) =>
   first && last ? Math.max(0, (new Date(last) - new Date(first)) / 3600000) : 0;
 
 /**
- * Does this row's stale flag actually disqualify THIS day? Only a day strictly
- * before today can be stale (see the STALENESS ONLY REACHES BACKWARD rule
- * above). No `today` (a legacy caller or fixture) keeps the old broad
- * behavior — never narrow without having looked at the calendar. Plain string
- * comparison is correct: both sides are 'YYYY-MM-DD'.
+ * Does this day's stale flag actually disqualify it? Only a day strictly
+ * before today can be stale ("stale" MEANS open since an earlier day).
+ * loadMeasuredHours already derives the flag exactly, so for overlay-built
+ * entries this guard is redundant by construction — it stays for hand-built
+ * fixtures and any caller composing its own overlay, where a flag without a
+ * calendar keeps the conservative broad behavior: never narrow without having
+ * looked at the calendar. Plain string comparison is correct: both sides are
+ * 'YYYY-MM-DD'.
  */
 export const staleDay = (m, day, today) =>
   Boolean(m?.isStale) && (!today || !day || day < today);
@@ -66,17 +80,14 @@ export const usableMeasuredDay = (m, day, today) =>
 
 /**
  * The measured-hours overlay for an org and date range (inclusive
- * 'YYYY-MM-DD' bounds; null = unbounded on that side).
+ * 'YYYY-MM-DD' bounds; null = unbounded on that side), day-bucketed in `tz` —
+ * the report's anchor zone, whatever it is. A shift is in range exactly when
+ * its clockIn falls inside [from..to]'s UTC window in `tz`, because a shift
+ * belongs entirely to the local day it started — so the range query and the
+ * bucketing agree by definition, for ANY zone.
  *
  * enabled:false — org never connected, or connection errored/disconnected:
  * every caller then behaves exactly as before this feature existed.
- *
- * The tz filter is the bucket-alignment guard: rows are stamped with the zone
- * they were pulled under (the org's), and a report anchored to a DIFFERENT
- * zone (a campaign whose timeZone differs from the org's) must not join
- * hours-days against knock-days bucketed differently — those requests simply
- * see no measured rows and stay estimated, which is honest. Documented in
- * docs/FBTIME_INTEGRATION.md.
  */
 export async function loadMeasuredHours({ organizationId, from = null, to = null, tz }) {
   const none = {
@@ -94,38 +105,57 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     .lean();
   if (!connection) return none;
 
-  const q = { organizationId, userId: { $ne: null }, timeZone: tz };
+  const q = { organizationId, userId: { $ne: null } };
   if (from || to) {
-    q.day = {};
-    if (from) q.day.$gte = from;
-    if (to) q.day.$lte = to;
+    const window = zonedDayRange(from, to, tz);
+    if (window.$gte || window.$lt) {
+      q.clockIn = {};
+      if (window.$gte) q.clockIn.$gte = window.$gte;
+      if (window.$lt) q.clockIn.$lt = window.$lt;
+    }
   }
 
   // The link set rides along with the hours because the two answer ONE question
   // between them ("why is this person estimated?") and a caller that had to load
   // links separately would be the caller that forgets to. Covered by the unique
   // {organizationId, userId} index, and it is a roster-sized read — one small
-  // document per linked canvasser, not per day.
+  // document per linked canvasser, not per shift.
   const [rows, links] = await Promise.all([
-    FbTimeDailyHours.find(q)
-      .select('userId day grossHours adjustedHours workedHours isOpen isStale isManualEntry')
+    FbTimeShift.find(q)
+      .select('userId clockIn grossHours adjustedHours workedHours isOpen isManualEntry')
       .lean(),
     FbTimePersonLink.find({ organizationId }).select('userId').lean(),
   ]);
+
+  // The calendar anchor, evaluated per request so it can never itself go
+  // stale — and in the SAME zone the buckets below are built in.
+  const today = zonedDayStr(new Date(), tz);
 
   const byUserDay = new Map();
   const daysByUser = new Map();
   for (const r of rows) {
     const uid = String(r.userId);
-    byUserDay.set(`${uid}|${r.day}`, {
-      hours: r[connection.hourFigure] ?? 0,
-      isOpen: Boolean(r.isOpen),
-      isStale: Boolean(r.isStale),
-      isManualEntry: Boolean(r.isManualEntry),
-    });
-    if (!daysByUser.has(uid)) daysByUser.set(uid, new Set());
-    daysByUser.get(uid).add(r.day);
+    const day = zonedDayStr(r.clockIn, tz);
+    const key = `${uid}|${day}`;
+    let entry = byUserDay.get(key);
+    if (!entry) {
+      entry = { hours: 0, isOpen: false, isStale: false, isManualEntry: false };
+      byUserDay.set(key, entry);
+      if (!daysByUser.has(uid)) daysByUser.set(uid, new Set());
+      daysByUser.get(uid).add(day);
+    }
+    entry.hours += r[connection.hourFigure] ?? 0;
+    entry.isOpen ||= Boolean(r.isOpen);
+    entry.isManualEntry ||= Boolean(r.isManualEntry);
+    // Exact staleness: THIS shift is open and started on an earlier local day
+    // — a forgotten clock-out, so the whole day's denominator is untrusted.
+    // (One runaway shift spoils its day even beside a clean one: a day is
+    // usable or not as a whole, same rule as always.)
+    if (r.isOpen && day < today) entry.isStale = true;
   }
+  // Per-shift figures are 2dp; re-round each day's sum so float noise from the
+  // addition never reaches a wire figure (the provider rounds its sums too).
+  for (const entry of byUserDay.values()) entry.hours = round2(entry.hours);
 
   return {
     enabled: true,
@@ -133,9 +163,7 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     byUserDay,
     daysByUser,
     linkedUserIds: new Set(links.map((l) => String(l.userId))),
-    // The calendar anchor for staleDay, in the SAME zone the rows were bucketed
-    // under — evaluated per request, so it can never itself go stale.
-    today: zonedDayStr(new Date(), tz),
+    today,
   };
 }
 

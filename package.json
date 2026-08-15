@@ -31,6 +31,7 @@
     "migrate:build-indexes": "npm --prefix server run migrate:build-indexes --",
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
     "migrate:timezones": "npm --prefix server run migrate:timezones --",
+    "migrate:fbtime-shifts": "npm --prefix server run migrate:fbtime-shifts --",
     "migrate:survey-dedup": "npm --prefix server run migrate:survey-dedup --",
     "migrate:survey-option-ids": "npm --prefix server run migrate:survey-option-ids --",
     "migrate:org-tags": "npm --prefix server run migrate:org-tags --",

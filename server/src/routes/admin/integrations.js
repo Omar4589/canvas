@@ -5,7 +5,7 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
-import { FbTimeDailyHours } from '../../models/FbTimeDailyHours.js';
+import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
@@ -64,7 +64,7 @@ router.get('/fbtime', async (req, res, next) => {
 
     const [linkCount, unmatchedWithHours] = await Promise.all([
       FbTimePersonLink.countDocuments({ organizationId }),
-      FbTimeDailyHours.distinct('fbtimePersonId', { organizationId, userId: null }),
+      FbTimeShift.distinct('fbtimePersonId', { organizationId, userId: null }),
     ]);
 
     res.json({
@@ -251,7 +251,7 @@ router.delete('/fbtime', async (req, res, next) => {
     connection.keyCiphertext = null;
     connection.lastSyncError = null;
     await connection.save();
-    await FbTimeDailyHours.deleteMany({ organizationId });
+    await FbTimeShift.deleteMany({ organizationId });
     await audit(organizationId, req.user._id, 'disconnected', { keyPrefix: connection.keyPrefix });
 
     res.json({ connected: false });
@@ -274,7 +274,7 @@ router.get('/fbtime/people', async (req, res, next) => {
     const [people, links, unmatchedIds] = await Promise.all([
       listAllPeople({ apiKey: openSecret(connection.keyCiphertext), includeInactive: true }),
       FbTimePersonLink.find({ organizationId }).lean(),
-      FbTimeDailyHours.distinct('fbtimePersonId', { organizationId, userId: null }),
+      FbTimeShift.distinct('fbtimePersonId', { organizationId, userId: null }),
     ]);
     const linkByPerson = new Map(links.map((l) => [l.fbtimePersonId, l]));
     const hasHours = new Set(unmatchedIds);
@@ -350,7 +350,7 @@ router.post('/fbtime/links', async (req, res, next) => {
     );
 
     // Backfill the cache immediately — the join must not wait for a poll.
-    await FbTimeDailyHours.updateMany(
+    await FbTimeShift.updateMany(
       { organizationId, fbtimePersonId },
       { $set: { userId: new mongoose.Types.ObjectId(userId) } }
     );
@@ -381,7 +381,7 @@ router.delete('/fbtime/links/:userId', async (req, res, next) => {
     const link = await FbTimePersonLink.findOneAndDelete({ organizationId, userId });
     if (!link) return res.status(404).json({ error: 'No link for that user.' });
 
-    await FbTimeDailyHours.updateMany(
+    await FbTimeShift.updateMany(
       { organizationId, fbtimePersonId: link.fbtimePersonId },
       { $set: { userId: null } }
     );
@@ -482,7 +482,7 @@ async function autoMatchByEmail(organizationId, apiKey, byUserId) {
       throw err;
     }
     userByEmail.delete(String(p.email).toLowerCase());
-    await FbTimeDailyHours.updateMany(
+    await FbTimeShift.updateMany(
       { organizationId, fbtimePersonId: pid },
       { $set: { userId: match._id } }
     );

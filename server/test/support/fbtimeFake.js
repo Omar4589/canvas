@@ -9,12 +9,15 @@ import { setFbtimeFake, FbtimeApiError } from '../../src/services/fbtime/client.
 //   installFbtimeFake({
 //     ping: { ok: true, organization: { id: 'org1', name: 'Fox Bryant' }, ... },
 //     people: [{ id: 'p1', firstName: 'Maria', ... }],   // served in one page
-//     hours: ({ params }) => ({ people: [...], range: {...} }),  // or a plain object
+//     shifts: [{ id: 's1', userId: 'p1', clockIn: ..., ... }],  // array → one page
 //     error: { code: 'KEY_REVOKED', status: 401 },       // every call throws this
 //   })
 //
 // Handlers can be values or functions of ({ apiKey, path, params }); functions
-// let a test vary the response per call (e.g. second pull drops a day).
+// let a test vary the response per call (e.g. second pull drops a shift).
+// A `shifts` handler may also return a FULL response object ({ shifts,
+// pagination, ... }) to script pagination — the total-drift re-pull test needs
+// to lie about pagination.total between pages, which an array cannot.
 
 let calls = [];
 
@@ -50,8 +53,15 @@ export const installFbtimeFake = (config = {}) => {
         pagination: { page: 1, limit: 500, total: people.length, totalPages: 1 },
       };
     }
-    if (path === '/hours') {
-      return resolve(config.hours) ?? { people: [], totals: {}, range: params };
+    if (path === '/shifts') {
+      const v = resolve(config.shifts) ?? [];
+      if (!Array.isArray(v)) return v; // full response object — scripted pagination
+      return {
+        shifts: v,
+        range: { startDate: params.startDate, endDate: params.endDate, timeZone: params.timeZone },
+        pagination: { page: 1, limit: Number(params.limit) || 500, total: v.length, totalPages: 1 },
+        generatedAt: new Date().toISOString(),
+      };
     }
     throw new FbtimeApiError('test fake: unknown path ' + path, { code: 'NOT_FOUND', status: 404 });
   });

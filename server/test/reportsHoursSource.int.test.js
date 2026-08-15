@@ -22,7 +22,7 @@ const { Membership } = await import('../src/models/Membership.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { FbTimeConnection } = await import('../src/models/FbTimeConnection.js');
-const { FbTimeDailyHours } = await import('../src/models/FbTimeDailyHours.js');
+const { FbTimeShift } = await import('../src/models/FbTimeShift.js');
 const { FbTimePersonLink } = await import('../src/models/FbTimePersonLink.js');
 const { zonedDayStr } = await import('../src/utils/timezone.js');
 
@@ -57,7 +57,7 @@ async function knock(userId, day, hourLocal, actionType = 'not_home') {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CanvassActivity, FbTimeConnection, FbTimeDailyHours, FbTimePersonLink]) {
+  for (const M of [Organization, User, Membership, Campaign, CanvassActivity, FbTimeConnection, FbTimeShift, FbTimePersonLink]) {
     await M.deleteMany({});
   }
 
@@ -72,7 +72,7 @@ before(async () => {
 
   Object.assign(ctx, { org, campaign, u1, u2, admin: { token: signUserToken(admin), orgId: org._id } });
 
-  // DAY_A: u1 knocks 10:00→14:00 local (span 4h), and has a MEASURED row of 5.5h.
+  // DAY_A: u1 knocks 10:00→14:00 local (span 4h), and has a MEASURED 5.5h shift.
   await knock(u1._id, DAY_A, 10);
   await knock(u1._id, DAY_A, 12, 'lit_dropped');
   await knock(u1._id, DAY_A, 14);
@@ -91,9 +91,13 @@ before(async () => {
     organizationId: org._id, userId: u1._id, fbtimePersonId: P1,
     fbtimeEmail: 'm@rep.co', fbtimeName: 'Maria M', source: 'auto-email',
   });
-  await FbTimeDailyHours.create({
-    organizationId: org._id, fbtimePersonId: P1, userId: u1._id, day: DAY_A, timeZone: TZ,
-    grossHours: 6, adjustedHours: 5.5, workedHours: 5.25, shiftCount: 1,
+  // One shift, clocked in at 09:00 local — its day is derived at read time in
+  // whatever zone the report anchors to (09:00 EDT is 08:00 CDT, the same
+  // local day in both, which is what lets the Central-campaign test below
+  // read this same cache).
+  await FbTimeShift.create({
+    organizationId: org._id, shiftId: 'shA', fbtimePersonId: P1, userId: u1._id,
+    clockIn: at(DAY_A, 9), grossHours: 6, adjustedHours: 5.5, workedHours: 5.25,
   });
 
   const app = createApp();
@@ -264,20 +268,19 @@ test('canvassers.csv honors ?coordinatorId and stamps the crew it exported', { s
 
 // ── staleness only reaches backward, over the real app ──────────────────────
 // The unit tests pin the rule; this pins the WIRING — that loadMeasuredHours
-// resolves "today" in the row's own zone and threads it to the fold. Appended
-// last, and it cleans up after itself: the fixtures are shared, and every test
-// above pins an explicit [DAY_A..DAY_B] window that today can never fall in.
+// derives staleness per request against today-in-anchor-tz. Appended last, and
+// it cleans up after itself: the fixtures are shared, and every test above
+// pins an explicit [DAY_A..DAY_B] window that today can never fall in.
 
-test("a stale row dated TODAY still measures — an old clock-out must not estimate today", { skip }, async () => {
+test("an OPEN shift clocked in TODAY still measures — an old clock-out must not estimate today", { skip }, async () => {
   const today = zonedDayStr(new Date(), TZ);
-  // u1 on the clock right now: sync would write isStale here too, because u1
-  // has SOME stale shift and today has an open one.
+  // u1 on the clock right now: an open shift whose clockIn is the present
+  // instant, so its derived day is today in every season.
   await knock(ctx.u1._id, today, 9);
   await knock(ctx.u1._id, today, 11);
-  await FbTimeDailyHours.create({
-    organizationId: ctx.org._id, fbtimePersonId: P1, userId: ctx.u1._id, day: today, timeZone: TZ,
-    grossHours: 5, adjustedHours: 4.5, workedHours: 4.25, shiftCount: 1,
-    isOpen: true, isStale: true,
+  await FbTimeShift.create({
+    organizationId: ctx.org._id, shiftId: 'shToday', fbtimePersonId: P1, userId: ctx.u1._id,
+    clockIn: new Date(), grossHours: 5, adjustedHours: 4.5, workedHours: 4.25, isOpen: true,
   });
 
   const { body } = await get(`/admin/reports/canvassers?from=${today}&to=${today}`);
@@ -289,6 +292,41 @@ test("a stale row dated TODAY still measures — an old clock-out must not estim
   assert.strictEqual(r1.hoursFlags.hasOpenShift, true, 'still labeled as running');
   assert.strictEqual(r1.hoursFlags.hasStaleShift, false);
 
-  await FbTimeDailyHours.deleteMany({ organizationId: ctx.org._id, day: today });
+  await FbTimeShift.deleteMany({ organizationId: ctx.org._id, shiftId: 'shToday' });
   await CanvassActivity.deleteMany({ organizationId: ctx.org._id, timestamp: { $gte: at(today, 0) } });
+});
+
+// ── the Nebraska regression, over the real app ──────────────────────────────
+// A campaign whose timeZone differs from the org's used to read ZERO measured
+// rows — the cache was stamped with the org's zone and the campaign-anchored
+// request filtered on its own, so every canvasser fell back to the span with a
+// misleading 'no-hours'. The shift cache buckets at read time in the request's
+// anchor zone, so the SAME cache must now measure under a Central campaign.
+
+test('a campaign in a DIFFERENT timezone than the org still reads measured hours', { skip }, async () => {
+  const central = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Nebraska', type: 'lit_drop', state: 'NE',
+    timeZone: 'America/Chicago',
+  });
+  // u1 knocks DAY_A on the Central campaign. 10:00/14:00 EDT are 09:00/13:00
+  // CDT — the same local day under both anchors, so the [DAY_A..DAY_A] window
+  // means the same day the shared 09:00-EDT shift buckets to.
+  await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: central._id, householdId: new mongoose.Types.ObjectId(),
+    userId: ctx.u1._id, actionType: 'not_home', location: { lat: 41.2, lng: -96.0 }, timestamp: at(DAY_A, 10),
+  });
+  await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: central._id, householdId: new mongoose.Types.ObjectId(),
+    userId: ctx.u1._id, actionType: 'lit_dropped', location: { lat: 41.2, lng: -96.0 }, timestamp: at(DAY_A, 14),
+  });
+
+  const { body } = await get(`/admin/reports/canvassers?campaignId=${central._id}&from=${DAY_A}&to=${DAY_A}`);
+  const r1 = body.find((c) => c.userId === String(ctx.u1._id));
+  assert.ok(r1, 'u1 knocked the Central campaign');
+  assert.strictEqual(r1.hoursSource, 'measured', 'the org-level shift cache serves a Central-anchored report');
+  assert.strictEqual(r1.hoursOnDoors, 5.5, "the same shift, bucketed in the campaign's own zone");
+  assert.strictEqual(r1.hoursReason, null, "and no false 'no-hours' accusation");
+
+  await CanvassActivity.deleteMany({ campaignId: central._id });
+  await Campaign.deleteOne({ _id: central._id });
 });
