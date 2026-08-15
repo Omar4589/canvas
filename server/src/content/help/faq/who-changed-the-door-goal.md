@@ -9,7 +9,7 @@ summary: Open the campaign's History — it records every settings change with w
 tags: history, audit, who changed, door goal, changed, log, tracking, accountability
 ---
 
-Open the campaign's **⋮ menu → History**. If it's the door goal you're wondering about, there's also a **History** link on the door-goal card on the campaign's Home page.
+Open the campaign's **⋮ menu → History**. If it's the door goal you're wondering about, there's also a **History** link on the door-goal line at the top of the campaign's Home page.
 
 **On your phone:** open the campaign and tap **Quick actions → History**. If the campaign has a door goal, there's a **History** row in the Door goal section too. It's the same feed, read-only.
 

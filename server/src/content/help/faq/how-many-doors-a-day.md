@@ -13,21 +13,21 @@ Set a **door goal** on the campaign and the app does the arithmetic for you.
 
 Open **Campaigns**, use a campaign's **⋮ menu → Edit**, and fill in the **Door goal** (how many doors you're aiming for — say 10,000) and the **Goal date**. Leave the goal date blank and Election Day is used. Org admins can set this, and so can a **team lead** on a campaign they run.
 
-Now the campaign's **Home** page carries a Door goal card above Activity:
+Now the campaign's **Home** page carries a thin goal line at the very top, right under the campaign type and beside the Election Day pill:
 
-- **3,412 of 10,000 doors · 34%**, with a bar.
-- **16 days left · by Oct 28**.
-- **Needed: 412 a day, 2,884 a week.**
-- **Current pace: 305 a day** (what the crew has actually averaged over the last 14 days).
-- **Behind** — and, when there's enough history to say it, *"At this pace you finish Nov 8 — 11 days past the goal date."*
+> **Goal** ▓▓▓▓░░░░ **34%** · 3,412 / 10,000 · 6,588 left · **need 412/day** · doing 305/day · **Behind** · finishing 6d late
 
-The same numbers are on the mobile admin campaign screen, and a small bar shows on every row of the Campaigns list so you can spot a campaign slipping without opening it.
+Reading left to right: how far along you are, how many doors are left, how many a day it takes from here, what the crew has actually averaged over the last 14 days, and whether that adds up. Hover the **(i)** for the full definition.
+
+It sits in the header rather than down with the other numbers on purpose — see "doesn't move when you change the filters" below. The same numbers are on the mobile admin campaign screen, and a small bar shows on every row of the Campaigns list so you can spot a campaign slipping without opening it.
 
 ## Things worth knowing
 
-**The goal card doesn't move when you change the filters.** Everything else on Home follows the date range, the walk list, and the crew picker. The goal is always the campaign's all-time, campaign-wide total — otherwise "3,412 of 10,000" would quietly turn into "3,412 this week" the moment you looked at a range.
+**The goal line doesn't move when you change the filters.** Everything else on Home follows the date range, the walk list, and the crew picker. The goal is always the campaign's all-time, campaign-wide total — otherwise "3,412 of 10,000" would quietly turn into "3,412 this week" the moment you looked at a range. That's why it lives up in the header with the dates instead of down among the numbers that do move.
 
-**"412 a day" counts every day, including days off.** It's the doors left divided by the calendar days remaining. Your current pace is measured the same way — a crew that doesn't work Sundays sees that in both numbers, not just one — so you can compare them directly. If you only canvass three days a week, the honest daily target for those days is roughly the number shown times seven over three.
+**Today doesn't count toward "a day".** It's the doors left divided by the days remaining *after* today. By the time you're reading the number, today is already planned or half-knocked — treating it as a fresh available day would flatter every figure that follows. So on Aug 14 with a goal date of Aug 18, it divides by 4, not 5. On the goal date itself it just says what's left: all of it, today.
+
+**Days off still count.** It's calendar days, not canvassing days. Your current pace is measured the same way — a crew that doesn't work Sundays sees that in both numbers, not just one — so the two compare directly, and working at exactly the needed rate lands you exactly on the goal date. If you only canvass three days a week, the honest target for those days is roughly the number shown times seven over three.
 
 **Ahead / Behind won't appear straight away.** It takes about 5 days of canvassing before there's enough to judge. Until then you still get the goal, the doors left, and the daily target — just no verdict, because a campaign two days old would otherwise be called "behind" for no good reason. The same thing happens if two full weeks pass with nobody knocking.
 

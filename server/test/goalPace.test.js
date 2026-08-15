@@ -56,27 +56,41 @@ test('deadline falls back from goalDate to electionDay, then to nothing', () => 
   assert.deepStrictEqual(deadlineFor({}), { deadline: null, deadlineSource: null });
 });
 
-test('required rate divides by CALENDAR days and counts today', () => {
+test('required rate divides by CALENDAR days, and TODAY DOES NOT COUNT', () => {
   const b = pace({ recentDoors: 14 * 305 });
   assert.strictEqual(b.remaining, 6588);
   assert.strictEqual(b.daysLeft, 16);
-  // 6588 / 17 usable days (16 left + today).
-  assert.strictEqual(b.requiredPerDay, 388);
-  assert.strictEqual(b.requiredPerWeek, Math.ceil(6588 / (17 / 7)));
+  // 6588 / the 16 days AFTER today — not 17. Today's canvassing is already in motion by the time
+  // anyone reads the number, so counting it as an available day understates every other day.
+  assert.strictEqual(b.requiredPerDay, 412);
+  assert.strictEqual(b.requiredPerWeek, Math.ceil(6588 / (16 / 7)));
 
-  // A deadline of today leaves exactly one day, never zero.
+  // The clamp: on the deadline day there are no days after today, and "all of it, today" is the
+  // only truthful framing left — a divisor of 1, never 0.
   const last = pace({ deadline: TODAY, target: 100, done: 40, recentDoors: 14 * 5 });
   assert.strictEqual(last.daysLeft, 0);
-  assert.strictEqual(last.requiredPerDay, 60);
+  assert.strictEqual(last.requiredPerDay, 60, 'all 60 remaining doors, today');
   assert.strictEqual(last.requiredPerWeek, null, 'a weekly rate inside the last week is noise');
 });
 
 test('verdict ladder: ahead / on_track / behind against the trailing rate', () => {
-  // required is 388/day.
-  assert.strictEqual(pace({ recentDoors: 14 * 305 }).verdict, 'behind');
-  assert.strictEqual(pace({ recentDoors: 14 * 380 }).verdict, 'on_track', '0.98x is on track');
-  assert.strictEqual(pace({ recentDoors: 14 * 400 }).verdict, 'on_track', '1.03x is on track');
+  // required is 412/day.
+  assert.strictEqual(pace({ recentDoors: 14 * 305 }).verdict, 'behind', '0.74x');
+  assert.strictEqual(pace({ recentDoors: 14 * 400 }).verdict, 'on_track', '0.97x is on track');
+  assert.strictEqual(pace({ recentDoors: 14 * 425 }).verdict, 'on_track', '1.03x is on track');
   assert.strictEqual(pace({ recentDoors: 14 * 900 }).verdict, 'ahead');
+});
+
+// The regression that earned this test. The shipped card once read "On track" directly beside
+// "finish Aug 20 — 2 days past the goal date", because requiredPerDay counted today while
+// projectedFinish never did. Working at exactly the required rate must land exactly on the
+// deadline; if these two ever disagree again, one of them started counting today.
+test('a crew doing EXACTLY the required rate finishes exactly on the deadline', () => {
+  const required = pace({ recentDoors: 0 }).requiredPerDay; // 412
+  const exact = pace({ recentDoors: 14 * required, windowDays: 14 });
+  assert.strictEqual(exact.verdict, 'on_track');
+  assert.strictEqual(exact.projectedFinish, IN_16, 'the projection lands ON the goal date');
+  assert.strictEqual(exact.projectedDaysLate, null, 'and is therefore not late');
 });
 
 test('verdict is SUPPRESSED until there is enough canvassing to judge', () => {

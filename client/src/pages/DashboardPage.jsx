@@ -11,7 +11,7 @@ import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import SetupProgress from '../components/SetupProgress.jsx';
-import GoalProgressCard from '../components/GoalProgressCard.jsx';
+import GoalStrip from '../components/GoalStrip.jsx';
 import CampaignHistoryDrawer from '../components/CampaignHistoryDrawer.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import ArchiveNudge from '../components/ArchiveNudge.jsx';
@@ -462,6 +462,15 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+          {/* Door goal — in the header beside the key dates on purpose: it is the one number on
+              this page that ignores the range/walk-list/crew pickers below, and campaign-identity
+              space is where a filter-immune number belongs. Hidden until there are doors, so it
+              never competes with the setup checklist on a campaign that hasn't started. */}
+          {selectedCampaign && hasDoors && (
+            <div className="mt-2">
+              <GoalStrip goal={rollupRow?.goal} onShowHistory={() => setShowHistory(true)} />
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {efforts.length > 1 && (
@@ -542,16 +551,6 @@ export default function DashboardPage() {
       {current && current.isActive !== false && (
         <div className="mb-6">
           <SetupProgress campaignId={campaignId} />
-        </div>
-      )}
-
-      {/* Door goal. Sits above Activity because it's the all-time frame everything below
-          narrows — and unlike everything below, it ignores the range/walk-list/crew filters
-          (the card says so). Hidden entirely until there are doors: a goal bar over an empty
-          campaign is noise on top of the setup checklist. */}
-      {hasDoors && (
-        <div className="mb-6">
-          <GoalProgressCard goal={rollupRow?.goal} onShowHistory={() => setShowHistory(true)} />
         </div>
       )}
 

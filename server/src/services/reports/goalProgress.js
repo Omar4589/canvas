@@ -84,8 +84,22 @@ export function computeGoalPace({
   const percent = goalPercent(done, target);
   const daysLeft = deadline ? daysBetween(todayStr, deadline) : null;
 
-  // +1 because a deadline of today still leaves today to knock.
-  const daysUsable = daysLeft == null ? null : Math.max(1, daysLeft + 1);
+  // TODAY DOES NOT COUNT (owner ruling 2026-08-14). The divisor is the whole days remaining
+  // AFTER today — the same number the card shows as "N days left" — not that plus today.
+  //
+  // Two reasons, one practical and one internal. Practical: by the time anyone reads this card,
+  // today's canvassing is already planned, underway, or done; you cannot re-plan it, so counting
+  // it as a fully available day quietly understates what every remaining day has to carry.
+  // Internal: `projectedFinish` below has ALWAYS excluded today (it adds a whole day-count to
+  // today's date, so its first working day is tomorrow), and the two halves disagreeing produced
+  // a card that read "On track" while projecting a finish two days past the deadline. They now
+  // divide by the same days.
+  //
+  // Clamped at 1 rather than allowed to hit 0: on the deadline day itself there are no days after
+  // today, and the only truthful framing left is "all of it, today" — which is what a divisor of 1
+  // says. That is not the optimism this ruling removes; it is the last day genuinely being the
+  // last day.
+  const daysUsable = daysLeft == null ? null : Math.max(1, daysLeft);
   const requiredPerDay =
     remaining > 0 && daysUsable != null && daysLeft >= 0 ? Math.ceil(remaining / daysUsable) : null;
   // Null inside the last week: "2,713 a week" with three days left is arithmetic nobody can act

@@ -19,9 +19,9 @@ While you're still setting up, Home shows the **Setup progress** card: an ordere
 
 After the first pass is activated and knocks start coming in, Home becomes a **monitoring dashboard**: households, houses knocked, knocks, active canvassers, and a coverage bar — filterable by date range, by walk list, and by **crew**. On a **survey** campaign you'll also see surveys and a connection rate; on a **lit-drop** campaign, lit drops and a lit rate instead.
 
-## The door-goal card
+## The door-goal line
 
-If the campaign has a **door goal** set, a card sits above Activity: progress toward the goal, the doors left, how many a day and a week it takes from here, what the crew is actually averaging, and an **Ahead / On track / Behind** badge. It's the one thing on this page that **ignores the filters** — always the campaign's all-time, campaign-wide total, so it doesn't quietly become "this week" when you change the range. The card says so underneath. No goal set? You'll see a one-line prompt instead. See [How many doors a day do we need?](how-many-doors-a-day).
+If the campaign has a **door goal** set, a thin line sits at the very top of the page, under the campaign type and beside the Election Day pill: progress toward the goal, the doors left, how many a day it takes from here, what the crew is actually averaging, and an **Ahead / On track / Behind** badge. It's the one thing on this page that **ignores the filters** — always the campaign's all-time, campaign-wide total, so it doesn't quietly become "this week" when you change the range. That's why it's up there with the dates rather than down with the numbers that do move. No goal set? You'll see a one-line prompt instead. See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## Filter by crew
 

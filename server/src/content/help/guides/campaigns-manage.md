@@ -47,15 +47,16 @@ Both fields sit in the same create/edit drawer as the key dates, and unlike the 
 
 Three things that trip people up:
 
-- **The goal card ignores the filters above it.** Change the date range, pick a walk list, filter by crew — the rest of the page moves, the goal doesn't. It's always the campaign's all-time total, and the card says so underneath.
-- **Days off count.** "412 a day" divides the doors left by every remaining day on the calendar, including the ones nobody knocks. Your current pace is measured the same way, so the two numbers are fair to compare.
+- **The goal line ignores the page's filters.** Change the date range, pick a walk list, filter by crew — the rest of the page moves, the goal doesn't. It's always the campaign's all-time total, which is why it sits up in the header with the dates instead of down among the filtered numbers.
+- **Today doesn't count.** The daily target divides by the days left *after* today — by the time you're looking, today is already planned or underway. On Aug 14 with a goal date of Aug 18, that's 4 days, not 5.
+- **Days off do count.** It's calendar days, so the ones nobody knocks are in there. Your current pace is measured the same way, so the two numbers are fair to compare — hit the needed rate exactly and you finish exactly on the date.
 - **No verdict for the first few days.** You need about 5 days of canvassing before Ahead/Behind appears. Judging a campaign that started Tuesday would just be guessing, so we show you the target and stay quiet about the rest.
 
 See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## History — who changed what
 
-A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal card when a number looks off.
+A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
 
 On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
 

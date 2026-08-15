@@ -106,11 +106,11 @@ This is **off** unless you turn it on, and it has no effect on what Doorline cha
 
 ## Door goal and pace
 
-If a campaign has a **door goal**, its Home page shows progress toward it and what it takes to get there. Two words of warning about vocabulary: **"pace" means two different things** in this app. On the Timeline it's **doors per hour** — how productive a canvasser is. On the goal card it's **doors per calendar day** against a deadline. Same word, unrelated numbers.
+If a campaign has a **door goal**, a thin line at the top of its Home page shows progress toward it and what it takes to get there. Two words of warning about vocabulary: **"pace" means two different things** in this app. On the Timeline it's **doors per hour** — how productive a canvasser is. On the goal line it's **doors per calendar day** against a deadline. Same word, unrelated numbers.
 
 Goal progress is counted in **billable doors**, so the goal and your invoice speak the same unit, and it's always the campaign's **all-time** total — the date range, walk-list and crew filters don't change it.
 
-**Needed** is the doors left divided by the calendar days remaining, counting today and counting days nobody knocks. **Current pace** is the last 14 days measured exactly the same way, which is what makes the two comparable: if you take Sundays off, both numbers absorb it.
+**Needed** is the doors left divided by the calendar days remaining **after today** — today's knocking is already planned or underway by the time you're reading, so counting it as an available day would flatter every day that follows. (On the goal date itself it's simply everything left, today.) Days nobody knocks still count. **Current pace** is the last 14 days measured exactly the same way, which is what makes the two comparable: if you take Sundays off, both numbers absorb it, and hitting the needed rate exactly puts your finish exactly on the date.
 
 **Ahead / On track / Behind** compares those two (on track is within 5% either way). It doesn't appear until the campaign has about **5 days of canvassing** behind it, or if the last two weeks hold no doors at all. That silence is deliberate — calling a two-day-old campaign "behind" because it hasn't done two weeks of work would be wrong, and a wrong warning costs more than a missing one. See [How many doors a day do we need?](how-many-doors-a-day).
 

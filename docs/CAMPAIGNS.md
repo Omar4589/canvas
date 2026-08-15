@@ -114,21 +114,29 @@ lead can set a campaign's goal**: a lead running a campaign owns its target.
   campaign that only ever filled in an Election Day still gets a countdown and a pace. Setting it
   explicitly is for the common case of wanting the turf walked *before* Election Day.
 
-Once a goal is set, the campaign's **Home** page grows a card above Activity showing progress, the
-doors left, how many a day and a week it takes to get there, what the crew is *actually* averaging,
-and a plain verdict — **Ahead / On track / Behind** — with a projected finish date. The Campaigns
-list carries a compact version (a bar and `3.4k / 10k`) on both the cards and the table, and the
-mobile admin campaign screen shows the full card.
+Once a goal is set, the campaign's **Home** page grows a thin **goal strip** in the header, right
+under the campaign type and beside the key-date pills: a progress bar, the percentage, done/target,
+doors left, how many a day it takes, what the crew is *actually* averaging, a plain verdict —
+**Ahead / On track / Behind** — and how late the current pace lands. It sits there rather than in
+the body deliberately: it is the only number on the page the filters below don't touch, and
+campaign-identity space is where a filter-immune number belongs. The strip names its own **goal
+date** only when one was set explicitly; when the deadline fell back to Election Day, the countdown
+pill beside it already says so. The Campaigns list carries a compact version (a bar and
+`3.4k / 10k`) on both the cards and the table, and the mobile admin campaign screen shows a fuller
+version in its own group.
 
 Three things worth knowing about how the numbers behave:
 
-- **The goal card ignores the page's filters.** Everything else on Home honors the date range, the
-  walk list, and the crew picker. The goal is always the campaign's all-time, campaign-wide total —
-  the card says so under it. Without that, "3,412 / 10,000" would silently mean "3,412 this week"
-  the moment someone changed the range.
-- **Days are calendar days**, including days nobody knocks. The pace you're *doing* is measured the
-  same way (the last 14 days on the same calendar basis), so the two numbers are directly
-  comparable — a crew that takes Sundays off sees that reflected on both sides, not just one.
+- **The goal strip ignores the page's filters.** Everything else on Home honors the date range, the
+  walk list, and the crew picker. The goal is always the campaign's all-time, campaign-wide total.
+  That is why it lives in the header rather than among the filtered numbers — the placement is the
+  explanation, and the full sentence is behind its (i).
+- **Days are calendar days, and today is not one of them.** The daily target divides by the days
+  remaining *after* today: by the time you're looking at the number, today is already planned or
+  underway, so counting it would understate every day that follows. (On the goal date itself it
+  clamps to one day — all of it, today.) Days nobody knocks are still counted. The pace you're
+  *doing* is measured the same way, so the two are directly comparable — and working at exactly
+  the needed rate projects finishing exactly on the goal date.
 - **No verdict appears until there's something to judge.** A campaign needs at least 5 days of
   canvassing since its first round went active; before that you still get the required rate, just
   no Ahead/Behind claim and no projection. A campaign two days old would otherwise divide two days
@@ -143,7 +151,7 @@ report, but only as an explicit per-report tick (see [CLIENT_PORTAL.md](CLIENT_P
 A door goal is a contract number, and a lead can change one. **History** records who changed what
 and when: the goal and its date, the key dates and note, the billable-doors policy, archiving and
 reactivating, and the campaign's name, type and state. Open it from a campaign's **⋮ menu →
-History**, or from the **History** link on the door-goal card when a number looks wrong.
+History**, or from the **History** link on the door-goal strip when a number looks wrong.
 
 The feed also folds in **team reassignments**, which is the other way a number moves without anyone
 knocking a door: changing someone's coordinator re-stamps all of their past work onto the new team,
@@ -520,7 +528,7 @@ The cold-start readiness chain is a pure derivation in
   `['admin','campaign-history',campaignId]`.
 - **Change history:** [CampaignHistoryDrawer.jsx](../client/src/components/CampaignHistoryDrawer.jsx),
   mounted on both [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (⋮ → History) and
-  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) (the goal card's History link) — one
+  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) (the goal strip's History link) — one
   component, one query key `['admin','campaign-history',campaignId]`, two entry points. Labels and
   value formatting live in [campaignHistory.js](../client/src/lib/campaignHistory.js), never on the
   server, so re-wording a field label is not a data migration and an old row renders with today's
@@ -534,10 +542,15 @@ The cold-start readiness chain is a pure derivation in
   ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
   and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin
   [mobile/lib/goalPace.js](../mobile/lib/goalPace.js) (the metricHelp rule: reword one, reword both).
-  Rendered by [GoalProgressCard.jsx](../client/src/components/GoalProgressCard.jsx) on
-  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) — placed **above** the Activity section
-  and captioned *"Campaign-wide, all time — not affected by the filters above"*, which is
-  load-bearing: it is the only number on that page that ignores the range/walk-list/crew pickers.
+  Rendered by [GoalStrip.jsx](../client/src/components/GoalStrip.jsx) on
+  [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) — one thin flex-wrap line **inside the
+  header block**, under the type/state line and beneath the key-date pills, gated on `hasDoors`.
+  The placement replaced a taller body card *and* its caption: this is the only number on the page
+  that ignores the range/walk-list/crew pickers, and putting it in campaign-identity space — beside
+  Election Day and early voting, which are equally filter-immune — makes that legible without a
+  sentence apologising for it. The sentence still exists in `metricHelp.doorGoal` behind the (i).
+  The strip prints its own deadline **only** when `deadlineSource === 'goalDate'`; on the Election
+  Day fallback the countdown pill directly above is already saying it.
   Compact `GoalCell` / `GoalBlock` are exported from
   [CampaignCard.jsx](../client/src/components/campaigns/CampaignCard.jsx) and reused by
   [CampaignsTable.jsx](../client/src/components/campaigns/CampaignsTable.jsx), the same way

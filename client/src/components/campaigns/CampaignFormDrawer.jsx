@@ -68,8 +68,13 @@ export default function CampaignFormDrawer({
     const days = daysUntil(deadline, timeZone || initial?.timeZone);
     if (days == null || days < 0) return `${parsedGoal.toLocaleString()} doors by ${formatDateLabel(deadline)} — that date has passed.`;
     if (!remaining) return `${parsedGoal.toLocaleString()} doors by ${formatDateLabel(deadline)} — already there.`;
-    const perDay = Math.ceil(remaining / Math.max(1, days + 1));
-    return `${remaining.toLocaleString()} doors left over ${days + 1} ${days === 0 ? 'day' : 'days'} — about ${perDay.toLocaleString()} a day.`;
+    // Today does NOT count — the same divisor the server uses (services/reports/goalProgress.js).
+    // A deadline of today clamps to 1: there are no days after today, so it is all of it, today.
+    const perDay = Math.ceil(remaining / Math.max(1, days));
+    if (days === 0) {
+      return `${remaining.toLocaleString()} doors left and the goal date is today — all of it, today.`;
+    }
+    return `${remaining.toLocaleString()} doors left over the next ${days} ${days === 1 ? 'day' : 'days'} — about ${perDay.toLocaleString()} a day.`;
   })();
 
   function submit(e) {
