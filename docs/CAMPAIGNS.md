@@ -115,7 +115,7 @@ lead can set a campaign's goal**: a lead running a campaign owns its target.
   explicitly is for the common case of wanting the turf walked *before* Election Day.
 
 Once a goal is set, the campaign's **Home** page grows a thin **goal strip** in the header, right
-under the campaign type and beside the key-date pills: a progress bar, the percentage, done/target,
+under the campaign type and **on the same row as the key dates**: a progress bar, the percentage, done/target,
 doors left, and how many a day it takes from here. It sits there rather than in
 the body deliberately: it is the only number on the page the filters below don't touch, and
 campaign-identity space is where a filter-immune number belongs. The strip names its own **goal
@@ -542,7 +542,10 @@ The cold-start readiness chain is a pure derivation in
   [mobile/lib/goalPace.js](../mobile/lib/goalPace.js) (the metricHelp rule: reword one, reword both).
   Rendered by [GoalStrip.jsx](../client/src/components/GoalStrip.jsx) on
   [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) — one thin flex-wrap line **inside the
-  header block**, under the type/state line and beneath the key-date pills, gated on `hasDoors`.
+  header block**, under the type/state line and sharing ONE wrapping row with the key-date pills
+  (`hasKeyDates || hasDoors` gates the row; a thin `w-px` divider separates the two halves only
+  when both are present). They were stacked rows until 2026-08-15 — two lines of vertical space
+  for two sets of the same kind of fact.
   The placement replaced a taller body card *and* its caption: this is the only number on the page
   that ignores the range/walk-list/crew pickers, and putting it in campaign-identity space — beside
   Election Day and early voting, which are equally filter-immune — makes that legible without a

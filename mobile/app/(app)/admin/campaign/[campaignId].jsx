@@ -544,9 +544,14 @@ export default function CampaignDetail() {
                   </Text>
                 </View>
                 {(() => {
+                  // Same fragments in the same order as the web strip (client GoalStrip.jsx) —
+                  // the two read as one feature, so they say the same things in the same
+                  // sequence. Only the line count differs: a phone is too narrow to wrap the
+                  // whole run cleanly, so the bar and headline numbers keep their own band above.
                   const bits = [
-                    goalOwnDate,
+                    goal.remaining > 0 ? `${goal.remaining.toLocaleString()} left` : null,
                     goal.requiredPerDay != null ? `need ${goal.requiredPerDay.toLocaleString()}/day` : null,
+                    goalOwnDate,
                   ].filter(Boolean);
                   return bits.length ? (
                     <Text style={styles.goalMuted} numberOfLines={1}>
@@ -916,10 +921,14 @@ function makeStyles(t) {
   // reads as chrome beside the Election Day chip rather than as a metric card of its own.
   goalLine: { marginTop: spacing.sm, gap: 2 },
   goalTop: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
-  goalLead: { ...type.caption, color: colors.text, fontWeight: '700' },
+  // textPrimary, NOT `text` — there is no `colors.text`. Spreading type.caption brings a real
+  // color along, and a nonexistent token does not fall back to it, it OVERWRITES it with
+  // undefined and React Native renders default black: plausible-looking on the light background,
+  // invisible on the dark one.
+  goalLead: { ...type.caption, color: colors.textPrimary, fontWeight: '700' },
   // Fixed width: the bar must not collapse to nothing beside a long door count.
   goalBar: { width: 84 },
-  goalPct: { ...type.caption, color: colors.text, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  goalPct: { ...type.caption, color: colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
   goalMuted: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
 
   banner: {

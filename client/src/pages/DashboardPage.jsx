@@ -338,6 +338,14 @@ export default function DashboardPage() {
   // list. The count is campaign-wide over the audit window, independent of the
   // dashboard's selected date range.
   const rollupRow = (rollupQ.data?.campaigns || []).find((r) => String(r.id) === String(campaignId));
+  // Drives the header's one identity row, shared with the door goal so the two can't disagree
+  // about whether that row exists at all.
+  const hasKeyDates = !!(
+    selectedCampaign?.electionDay ||
+    selectedCampaign?.earlyVotingStart ||
+    selectedCampaign?.earlyVotingEnd ||
+    selectedCampaign?.datesNote
+  );
   const openMockFlags = rollupRow?.openMockFlags ?? current?.openMockFlags ?? 0;
 
   // Billing hint for the header: setup is free until the first knock. Derived from
@@ -424,51 +432,56 @@ export default function DashboardPage() {
               Not billing yet — setup is free until the first knock
             </div>
           )}
-          {/* Key dates — rendered only when the campaign payload carries them (fields ship with the server update). */}
-          {selectedCampaign &&
-            (selectedCampaign.electionDay ||
-              selectedCampaign.earlyVotingStart ||
-              selectedCampaign.earlyVotingEnd ||
-              selectedCampaign.datesNote) && (
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                {selectedCampaign.electionDay && (
-                  <span className="flex items-center gap-1.5 text-fg-muted">
-                    Election Day{' '}
-                    <span className="font-medium text-fg">
-                      {formatDateLabel(selectedCampaign.electionDay)}
-                    </span>
-                    <CountdownChip
-                      days={daysUntil(selectedCampaign.electionDay, selectedCampaign.timeZone)}
-                    />
+          {/* Key dates AND the door goal on ONE wrapping row. They were two stacked rows and are
+              the same kind of thing — campaign-identity facts that none of the filters below
+              touch — so stacking them spent a line of vertical space to say nothing. The row
+              wraps, so on a narrow viewport the goal drops to its own line by itself rather than
+              by construction.
+
+              The goal belongs up here for the same reason it is not in the body: it is the only
+              number on the page the range/walk-list/crew pickers do not move. Hidden until there
+              are doors, so it never competes with the setup checklist on a campaign that has not
+              started. */}
+          {selectedCampaign && (hasKeyDates || hasDoors) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {selectedCampaign.electionDay && (
+                <span className="flex items-center gap-1.5 text-fg-muted">
+                  Election Day{' '}
+                  <span className="font-medium text-fg">
+                    {formatDateLabel(selectedCampaign.electionDay)}
                   </span>
-                )}
-                {(() => {
-                  const ev = earlyVotingState(
-                    selectedCampaign.earlyVotingStart,
-                    selectedCampaign.earlyVotingEnd,
-                    selectedCampaign.timeZone
-                  );
-                  if (!ev) return null;
-                  return ev.state === 'open' ? (
-                    <span className="rounded-full bg-success-tint px-2 py-0.5 font-medium text-success-fg">
-                      Early voting · {ev.label}
-                    </span>
-                  ) : (
-                    <span className="text-fg-muted">Early voting · {ev.label}</span>
-                  );
-                })()}
-                {selectedCampaign.datesNote && (
-                  <span className="text-fg-muted">{selectedCampaign.datesNote}</span>
-                )}
-              </div>
-            )}
-          {/* Door goal — in the header beside the key dates on purpose: it is the one number on
-              this page that ignores the range/walk-list/crew pickers below, and campaign-identity
-              space is where a filter-immune number belongs. Hidden until there are doors, so it
-              never competes with the setup checklist on a campaign that hasn't started. */}
-          {selectedCampaign && hasDoors && (
-            <div className="mt-2">
-              <GoalStrip goal={rollupRow?.goal} onShowHistory={() => setShowHistory(true)} />
+                  <CountdownChip
+                    days={daysUntil(selectedCampaign.electionDay, selectedCampaign.timeZone)}
+                  />
+                </span>
+              )}
+              {(() => {
+                const ev = earlyVotingState(
+                  selectedCampaign.earlyVotingStart,
+                  selectedCampaign.earlyVotingEnd,
+                  selectedCampaign.timeZone
+                );
+                if (!ev) return null;
+                return ev.state === 'open' ? (
+                  <span className="rounded-full bg-success-tint px-2 py-0.5 font-medium text-success-fg">
+                    Early voting · {ev.label}
+                  </span>
+                ) : (
+                  <span className="text-fg-muted">Early voting · {ev.label}</span>
+                );
+              })()}
+              {/* Only when both halves are present: whitespace alone reads as one continuous run
+                  once the dense goal numbers sit next to the dates. */}
+              {hasKeyDates && hasDoors && (
+                <span aria-hidden className="h-3 w-px shrink-0 bg-border" />
+              )}
+              {hasDoors && (
+                <GoalStrip goal={rollupRow?.goal} onShowHistory={() => setShowHistory(true)} />
+              )}
+              {/* Last: it is free text of any length, so it absorbs the wrap. */}
+              {selectedCampaign.datesNote && (
+                <span className="text-fg-muted">{selectedCampaign.datesNote}</span>
+              )}
             </div>
           )}
         </div>
