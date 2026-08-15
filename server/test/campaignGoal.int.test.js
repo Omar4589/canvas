@@ -8,8 +8,10 @@ import mongoose from 'mongoose';
 // Proves: the fields round-trip and validate; a TEAM LEAD may set them while still being
 // blocked from the key dates (the deliberate departure — owner ruling 2026-08-14); `done` is
 // billable doors and moves with billRestrictedDoors; the deadline falls back to electionDay;
-// the verdict stays suppressed on a young campaign; and — the regression most likely to bite —
+// a campaign with no dates still reports progress; and — the regression most likely to bite —
 // a WINDOWED rollup still reports an ALL-TIME goal.done.
+//
+// The block is PROGRESS ONLY since 2026-08-15: no verdict, no trailing rate, no projection.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-campaign-goal';
 
 const { createApp } = await import('../src/app.js');
@@ -32,7 +34,7 @@ const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongo
 const TZ = 'America/Chicago';
 const DAY = 86400000;
 // Knocks spread over the last 10 days so the trailing pace window has real days in it, and the
-// round activated 40 days ago so the campaign is comfortably past the 5-day verdict floor.
+// round activated 40 days ago, which is also what a realistic campaign looks like here.
 const now = Date.now();
 const ACTIVATED_AT = new Date(now - 40 * DAY);
 
@@ -101,7 +103,7 @@ before(async () => {
   await Household.updateOne({ _id: doors[9]._id }, { status: 'restricted' });
   await recomputeCampaignStats(campaign._id);
 
-  // A second campaign that has NEVER activated a round — the verdict-suppression case.
+  // A second campaign that has NEVER been canvassed — progress must still report cleanly.
   const young = await Campaign.create({
     organizationId: org._id, name: 'Young', type: 'lit_drop', state: 'TX', timeZone: TZ,
     doorGoal: 5000, goalDate: shift(todayIn(TZ), 30),
@@ -292,8 +294,8 @@ test('a WINDOWED rollup still reports an ALL-TIME goal.done', { skip }, async ()
 test('the deadline falls back to Election Day and says so', { skip }, async () => {
   await call('PATCH', `/admin/campaigns/${ctx.campaign._id}`, { ...auth(), body: { goalDate: null } });
   const noDate = await rollupRow();
-  assert.strictEqual(noDate.goal.verdict, 'no_deadline');
   assert.strictEqual(noDate.goal.deadline, null);
+  assert.strictEqual(noDate.goal.deadlineSource, null);
   assert.strictEqual(noDate.goal.requiredPerDay, null, 'no date, no pace');
 
   const eday = shift(todayIn(TZ), 20);
@@ -311,22 +313,25 @@ test('the deadline falls back to Election Day and says so', { skip }, async () =
   assert.strictEqual(won.goal.deadlineSource, 'goalDate');
 });
 
-test('a real pace verdict appears once there is history to judge', { skip }, async () => {
+test('the block is PROGRESS ONLY — no verdict, trailing rate or projection', { skip }, async () => {
   const row = await rollupRow();
-  assert.ok(['ahead', 'on_track', 'behind'].includes(row.goal.verdict), `got ${row.goal.verdict}`);
-  assert.strictEqual(row.goal.paceWindowDays, 14, 'the round activated 40 days ago — full window');
-  assert.ok(row.goal.recentPerDay >= 0);
   assert.ok(row.goal.requiredPerDay > 0);
+  // Removed 2026-08-15 along with the server-side computation that fed them. If any of these
+  // come back, the queries behind them (a Pass lookup + a knocksPipeline per timezone, on every
+  // rollup and campaigns-list load) come back too — that is the cost this asserts is gone.
+  for (const gone of ['verdict', 'recentPerDay', 'paceWindowDays', 'projectedFinish', 'projectedDaysLate']) {
+    assert.ok(!(gone in row.goal), `${gone} must not be in the goal block`);
+  }
 });
 
-test('a campaign that never activated a round gets no verdict, only the target', { skip }, async () => {
+test('a campaign that has never been canvassed still reports its target', { skip }, async () => {
   const p = new URLSearchParams({ campaignId: String(ctx.young._id) });
   const r = await call('GET', `/admin/reports/campaign-rollup?${p}`, auth());
   const goal = r.json.campaigns[0].goal;
-  assert.strictEqual(goal.verdict, 'no_pace', 'nothing has been canvassed — no verdict is honest');
-  assert.strictEqual(goal.paceWindowDays, 0);
-  assert.strictEqual(goal.projectedFinish, null);
-  assert.ok(goal.requiredPerDay > 0, 'the required rate is still reported');
+  assert.strictEqual(goal.done, 0);
+  assert.strictEqual(goal.percent, 0);
+  assert.strictEqual(goal.remaining, 5000);
+  assert.ok(goal.requiredPerDay > 0, 'the required rate is reported from day one');
 });
 
 test('a lead sees the goal on their own campaign and 403s on one they do not manage', { skip }, async () => {

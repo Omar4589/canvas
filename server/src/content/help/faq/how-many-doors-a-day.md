@@ -5,7 +5,7 @@ audience: lead
 kind: faq
 order: 31
 sourceDoc: CAMPAIGNS.md
-summary: Set a door goal and a goal date on the campaign, and Home works out the daily and weekly pace, plus whether you're ahead or behind.
+summary: Set a door goal and a goal date on the campaign, and Home works out how many doors a day it takes from here.
 tags: door goal, goal, pace, target, doors per day, behind, on track, deadline, quota
 ---
 
@@ -15,9 +15,9 @@ Open **Campaigns**, use a campaign's **⋮ menu → Edit**, and fill in the **Do
 
 Now the campaign's **Home** page carries a thin goal line at the very top, right under the campaign type and beside the Election Day pill:
 
-> **Goal** ▓▓▓▓░░░░ **34%** · 3,412 / 10,000 · 6,588 left · **need 412/day** · doing 305/day · **Behind** · finishing 6d late
+> **Goal** ▓▓▓▓░░░░ **34%** · 3,412 / 10,000 · 6,588 left · **need 412/day**
 
-Reading left to right: how far along you are, how many doors are left, how many a day it takes from here, what the crew has actually averaged over the last 14 days, and whether that adds up. Hover the **(i)** for the full definition.
+Reading left to right: how far along you are, how many doors are left, and how many a day it takes from here. Hover the **(i)** for the full definition.
 
 It sits in the header rather than down with the other numbers on purpose — see "doesn't move when you change the filters" below. **On your phone** the same line sits with the Election Day chip, above the date range and the walk-list and crew filters; tap it for the full definition. A small bar also shows on every row of the Campaigns list, so you can spot a campaign slipping without opening it.
 
@@ -27,9 +27,9 @@ It sits in the header rather than down with the other numbers on purpose — see
 
 **Today doesn't count toward "a day".** It's the doors left divided by the days remaining *after* today. By the time you're reading the number, today is already planned or half-knocked — treating it as a fresh available day would flatter every figure that follows. So on Aug 14 with a goal date of Aug 18, it divides by 4, not 5. On the goal date itself it just says what's left: all of it, today.
 
-**Days off still count.** It's calendar days, not canvassing days. Your current pace is measured the same way — a crew that doesn't work Sundays sees that in both numbers, not just one — so the two compare directly, and working at exactly the needed rate lands you exactly on the goal date. If you only canvass three days a week, the honest target for those days is roughly the number shown times seven over three.
+**Days off still count.** It's calendar days, not canvassing days. If you only canvass three days a week, the honest target for those days is roughly the number shown times seven over three.
 
-**Ahead / Behind won't appear straight away.** It takes about 5 days of canvassing before there's enough to judge. Until then you still get the goal, the doors left, and the daily target — just no verdict, because a campaign two days old would otherwise be called "behind" for no good reason. The same thing happens if two full weeks pass with nobody knocking.
+**It reports, it doesn't grade.** You get where you are and what each remaining day has to carry — no Ahead/Behind badge, and no predicted finish date. Whether 412 a day is achievable is a judgement about your crew, your turf and your week, and the app is not in a position to make it.
 
 **Doors are counted the way your invoice counts them.** A house counts once per round, so going back for a second round adds to the total. If your organization counts restricted (inaccessible) doors on invoices, those count here too — see [Understanding the numbers](metrics).
 

@@ -31,7 +31,7 @@ import MetricSheet from '../../../components/MetricSheet';
 import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
 import { metricHelp } from '../../../lib/metricHelp';
-import { verdictOf, shortCount } from '../../../lib/goalPace';
+import { shortCount } from '../../../lib/goalPace';
 import { rateFromPct, makeRateColors, tierWord } from '../../../lib/rates';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -75,16 +75,8 @@ function campaignRowProps(c, isLitDrop) {
 // The goal line is ALL-TIME and campaign-wide while everything else on the row honors the range
 // picker — hence the explicit "all time" tag, which is the only thing keeping the two bars from
 // being read as the same kind of number.
-function RowAccessory({ campaign, colors, styles }) {
+function RowAccessory({ campaign, styles }) {
   const goal = campaign.goal || null;
-  const v = verdictOf(goal);
-  const tone = {
-    success: colors.successFg,
-    danger: colors.dangerFg,
-    warning: colors.warnFg,
-    brand: colors.brand,
-    muted: colors.textMuted,
-  }[v.tone];
   return (
     <View>
       <CoverageBar canvass={campaign.coverage} compact />
@@ -92,8 +84,6 @@ function RowAccessory({ campaign, colors, styles }) {
         <View style={styles.goalRow}>
           <Text style={styles.goalLabel}>
             Goal {shortCount(goal.done)} / {shortCount(goal.target)} · all time
-            {v.label ? ' · ' : ''}
-            {v.label ? <Text style={{ color: tone }}>{v.label}</Text> : null}
           </Text>
           <RowBar pct={goal.percent} />
         </View>
@@ -348,7 +338,7 @@ export default function AdminOverview() {
                     key={c.id}
                     {...rowProps}
                     accentColor={rate ? rateColors[rate.level].deep : null}
-                    accessory={<RowAccessory campaign={c} colors={colors} styles={styles} />}
+                    accessory={<RowAccessory campaign={c} styles={styles} />}
                     hint="Opens this campaign"
                     onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
                   />

@@ -41,7 +41,7 @@ An admin can set an Election Day, an early-voting window, and a short note. Elec
 
 ## Door goal
 
-Give a campaign a **door goal** — say 10,000 doors — and an optional **goal date**, and the campaign's Home page tells you whether you're going to make it. You'll see how many doors are done, how many are left, **how many a day and a week it takes** from here, what your crew is actually averaging, and a plain **Ahead / On track / Behind**. Leave the goal date blank and Election Day is used instead.
+Give a campaign a **door goal** — say 10,000 doors — and an optional **goal date**, and the campaign's Home page does the arithmetic: how many doors are done, how many are left, and **how many a day it takes** from here. Leave the goal date blank and Election Day is used instead.
 
 Both fields sit in the same create/edit drawer as the key dates, and unlike the dates, **a team lead can set them** on a campaign they run. The Campaigns list shows a small progress bar on every campaign so you can see which ones are falling behind without opening each. Canvassers never see any of it.
 
@@ -49,8 +49,8 @@ Three things that trip people up:
 
 - **The goal line ignores the page's filters.** Change the date range, pick a walk list, filter by crew — the rest of the page moves, the goal doesn't. It's always the campaign's all-time total, which is why it sits up in the header with the dates instead of down among the filtered numbers.
 - **Today doesn't count.** The daily target divides by the days left *after* today — by the time you're looking, today is already planned or underway. On Aug 14 with a goal date of Aug 18, that's 4 days, not 5.
-- **Days off do count.** It's calendar days, so the ones nobody knocks are in there. Your current pace is measured the same way, so the two numbers are fair to compare — hit the needed rate exactly and you finish exactly on the date.
-- **No verdict for the first few days.** You need about 5 days of canvassing before Ahead/Behind appears. Judging a campaign that started Tuesday would just be guessing, so we show you the target and stay quiet about the rest.
+- **Days off do count.** It's calendar days, so the ones nobody knocks are in there. If you canvass three days a week, the honest target for those days is roughly the number shown times seven over three.
+- **It reports, it doesn't grade.** There's no Ahead/Behind badge and no predicted finish date — just where you are and what each remaining day has to carry.
 
 See [How many doors a day do we need?](how-many-doors-a-day).
 

@@ -110,9 +110,9 @@ If a campaign has a **door goal**, a thin line at the top of its Home page shows
 
 Goal progress is counted in **billable doors**, so the goal and your invoice speak the same unit, and it's always the campaign's **all-time** total — the date range, walk-list and crew filters don't change it.
 
-**Needed** is the doors left divided by the calendar days remaining **after today** — today's knocking is already planned or underway by the time you're reading, so counting it as an available day would flatter every day that follows. (On the goal date itself it's simply everything left, today.) Days nobody knocks still count. **Current pace** is the last 14 days measured exactly the same way, which is what makes the two comparable: if you take Sundays off, both numbers absorb it, and hitting the needed rate exactly puts your finish exactly on the date.
+**Needed** is the doors left divided by the calendar days remaining **after today** — today's knocking is already planned or underway by the time you're reading, so counting it as an available day would flatter every day that follows. (On the goal date itself it's simply everything left, today.) Days nobody knocks still count, so if you canvass three days a week the honest target for those days is roughly the number shown times seven over three.
 
-**Ahead / On track / Behind** compares those two (on track is within 5% either way). It doesn't appear until the campaign has about **5 days of canvassing** behind it, or if the last two weeks hold no doors at all. That silence is deliberate — calling a two-day-old campaign "behind" because it hasn't done two weeks of work would be wrong, and a wrong warning costs more than a missing one. See [How many doors a day do we need?](how-many-doors-a-day).
+The goal reports where you are and what each remaining day has to carry. It doesn't grade you: there's no Ahead/Behind badge and no predicted finish date. See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## Team numbers
 

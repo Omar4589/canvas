@@ -33,7 +33,7 @@ import ElectionCountdownChip from '../../../../components/ElectionCountdownChip'
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
 import { rateFromPct, makeRateColors, tierWord } from '../../../../lib/rates';
 import { metricHelp } from '../../../../lib/metricHelp';
-import { verdictOf, daysLeftLabel } from '../../../../lib/goalPace';
+import { daysLeftLabel } from '../../../../lib/goalPace';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
@@ -178,18 +178,10 @@ export default function CampaignDetail() {
   const loadingActivity = rollupQ.isLoading;
 
   // Door goal. ALL-TIME and campaign-wide even though it rides the same rollup row as the
-  // range-scoped numbers above (server/src/services/reports/goalProgress.js) — the group's
-  // footer is what tells the reader that. Deep -Fg tones, never the raw hues: a verdict word
-  // is small text, and the raw success/danger colors sit around 3:1 on card.
+  // range-scoped numbers above (server/src/services/reports/goalProgress.js) — which is why it
+  // renders above the filters rather than among them. Progress and the daily target only: no
+  // ahead/behind verdict, no trailing rate, no projection (owner ruling 2026-08-15).
   const goal = rangeStats.goal || null;
-  const goalVerdict = verdictOf(goal);
-  const goalVerdictColor = {
-    success: colors.successFg,
-    danger: colors.dangerFg,
-    warning: colors.warnFg,
-    brand: colors.brand,
-    muted: colors.textMuted,
-  }[goalVerdict.tone];
   // Only when the deadline came from an explicit goalDate. On the Election Day fallback the
   // countdown chip immediately above is already saying it, to the day — same rule as the web
   // strip, so neither platform prints the date twice.
@@ -550,18 +542,11 @@ export default function CampaignDetail() {
                   <Text style={styles.goalMuted} numberOfLines={1}>
                     {(goal.done || 0).toLocaleString()} / {goal.target.toLocaleString()}
                   </Text>
-                  {goalVerdict.label ? (
-                    <Text style={[styles.goalVerdict, { color: goalVerdictColor }]}>
-                      {goalVerdict.label}
-                    </Text>
-                  ) : null}
                 </View>
                 {(() => {
                   const bits = [
                     goalOwnDate,
                     goal.requiredPerDay != null ? `need ${goal.requiredPerDay.toLocaleString()}/day` : null,
-                    goal.recentPerDay != null ? `doing ${goal.recentPerDay.toLocaleString()}/day` : null,
-                    goal.projectedDaysLate ? `finishing ${goal.projectedDaysLate}d late` : null,
                   ].filter(Boolean);
                   return bits.length ? (
                     <Text style={styles.goalMuted} numberOfLines={1}>
@@ -936,7 +921,6 @@ function makeStyles(t) {
   goalBar: { width: 84 },
   goalPct: { ...type.caption, color: colors.text, fontWeight: '700', fontVariant: ['tabular-nums'] },
   goalMuted: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
-  goalVerdict: { ...type.caption, fontWeight: '700' },
 
   banner: {
     backgroundColor: colors.warnBg,

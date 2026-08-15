@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Badge } from './ui/index.js';
 import InfoHint from './InfoHint.jsx';
 import { metricHelp } from '../lib/metricHelp.js';
-import { verdictOf, daysLeftLabel, projectionLabel } from '../lib/goalPace.js';
+import { daysLeftLabel } from '../lib/goalPace.js';
 
 // Door goal + pace as one thin line in the campaign header, beside the key-date pills.
 //
@@ -13,7 +12,11 @@ import { verdictOf, daysLeftLabel, projectionLabel } from '../lib/goalPace.js';
 // The sentence itself still exists, in metricHelp.doorGoal behind the (i).
 //
 // `goal` is the block from services/reports/goalProgress.js. Every number here was computed there;
-// this component picks words, colors and what to leave out.
+// this component picks words and what to leave out.
+//
+// Progress and the daily target only (owner ruling 2026-08-15). There is deliberately no
+// ahead/behind verdict, no trailing actual rate and no projected finish — the server stopped
+// computing all three, so there is nothing here to render even if someone wanted it back.
 
 // One muted "· fragment" in the run of numbers. Nothing renders for a null child, so each caller
 // can pass a value straight through without guarding.
@@ -34,10 +37,10 @@ export default function GoalStrip({ goal, onShowHistory }) {
     );
   }
 
-  const v = verdictOf(goal);
   const pct = Math.min(100, Math.max(0, goal.percent || 0));
-  const done = goal.verdict === 'complete';
-  const projection = projectionLabel(goal);
+  // "Done" is derived, not reported: the server no longer sends a verdict, and no doors remaining
+  // is the whole of what complete means.
+  const done = (goal.remaining || 0) === 0;
 
   // The deadline appears here ONLY when it came from an explicit goalDate. When it fell back to
   // Election Day, the countdown pill directly above already says it, to the day — repeating it
@@ -73,12 +76,6 @@ export default function GoalStrip({ goal, onShowHistory }) {
               </span>
             </>
           )}
-          {goal.recentPerDay != null && (
-            <>
-              <Bit>·</Bit>
-              <Bit>doing {goal.recentPerDay.toLocaleString()}/day</Bit>
-            </>
-          )}
         </>
       )}
 
@@ -88,10 +85,6 @@ export default function GoalStrip({ goal, onShowHistory }) {
           <Bit>{ownDate}</Bit>
         </>
       )}
-
-      {v.label && <Badge variant={v.variant} dot>{v.label}</Badge>}
-
-      {projection && <Bit title={projection}>{shortProjection(goal)}</Bit>}
 
       <InfoHint label="How the door goal is counted">{metricHelp.doorGoal}</InfoHint>
 
@@ -108,8 +101,3 @@ export default function GoalStrip({ goal, onShowHistory }) {
   );
 }
 
-// The projection as numbers, not a sentence — the full sentence rides the title attribute.
-function shortProjection(goal) {
-  const d = goal.projectedDaysLate;
-  return d ? `finishing ${d.toLocaleString()}d late` : 'finishing on time';
-}

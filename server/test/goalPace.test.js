@@ -1,17 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 
-// Pure door-goal pace math — no DB, no server:
+// Pure door-goal math — no DB, no server:
 //   node --test test/goalPace.test.js
-// The verdict ladder is the thing worth pinning: a wrong "behind" on a healthy campaign is
-// worse than no verdict at all, so the suppression rules get as much coverage as the happy path.
+// The divisor is the thing worth pinning: today does not count, and the deadline day clamps to
+// one rather than dividing by zero.
+//
+// The verdict ladder, the trailing-rate window and the projected finish were removed from every
+// surface (owner ruling 2026-08-15) and with them the tests that pinned them. What that history
+// is worth remembering: the required rate once counted today while the projection never did, and
+// the two disagreed on screen — "On track" printed beside "finish 2 days past the goal date".
+// Anything reintroducing a projection has to divide by the same days this file asserts.
 
 const { computeGoalPace, goalPercent, deadlineFor, daysBetween, addDays } = await import(
   '../src/services/reports/goalProgress.js'
 );
 
 const TODAY = '2026-08-14';
-// 16 days out (today + 16), so 17 usable days counting today.
+// 16 days out (today + 16).
 const IN_16 = '2026-08-30';
 
 const pace = (over) =>
@@ -21,8 +27,6 @@ const pace = (over) =>
     deadline: IN_16,
     deadlineSource: 'goalDate',
     todayStr: TODAY,
-    recentDoors: 0,
-    windowDays: 14,
     ...over,
   });
 
@@ -57,100 +61,58 @@ test('deadline falls back from goalDate to electionDay, then to nothing', () => 
 });
 
 test('required rate divides by CALENDAR days, and TODAY DOES NOT COUNT', () => {
-  const b = pace({ recentDoors: 14 * 305 });
+  const b = pace({});
   assert.strictEqual(b.remaining, 6588);
   assert.strictEqual(b.daysLeft, 16);
   // 6588 / the 16 days AFTER today — not 17. Today's canvassing is already in motion by the time
   // anyone reads the number, so counting it as an available day understates every other day.
   assert.strictEqual(b.requiredPerDay, 412);
   assert.strictEqual(b.requiredPerWeek, Math.ceil(6588 / (16 / 7)));
+});
 
-  // The clamp: on the deadline day there are no days after today, and "all of it, today" is the
-  // only truthful framing left — a divisor of 1, never 0.
-  const last = pace({ deadline: TODAY, target: 100, done: 40, recentDoors: 14 * 5 });
+test('the deadline day clamps to one day, never divides by zero', () => {
+  const last = pace({ deadline: TODAY, target: 100, done: 40 });
   assert.strictEqual(last.daysLeft, 0);
   assert.strictEqual(last.requiredPerDay, 60, 'all 60 remaining doors, today');
   assert.strictEqual(last.requiredPerWeek, null, 'a weekly rate inside the last week is noise');
 });
 
-test('verdict ladder: ahead / on_track / behind against the trailing rate', () => {
-  // required is 412/day.
-  assert.strictEqual(pace({ recentDoors: 14 * 305 }).verdict, 'behind', '0.74x');
-  assert.strictEqual(pace({ recentDoors: 14 * 400 }).verdict, 'on_track', '0.97x is on track');
-  assert.strictEqual(pace({ recentDoors: 14 * 425 }).verdict, 'on_track', '1.03x is on track');
-  assert.strictEqual(pace({ recentDoors: 14 * 900 }).verdict, 'ahead');
+test('a weekly rate appears only once a full week remains', () => {
+  assert.strictEqual(pace({ deadline: addDays(TODAY, 6) }).requiredPerWeek, null);
+  assert.ok(pace({ deadline: addDays(TODAY, 7) }).requiredPerWeek > 0);
 });
 
-// The regression that earned this test. The shipped card once read "On track" directly beside
-// "finish Aug 20 — 2 days past the goal date", because requiredPerDay counted today while
-// projectedFinish never did. Working at exactly the required rate must land exactly on the
-// deadline; if these two ever disagree again, one of them started counting today.
-test('a crew doing EXACTLY the required rate finishes exactly on the deadline', () => {
-  const required = pace({ recentDoors: 0 }).requiredPerDay; // 412
-  const exact = pace({ recentDoors: 14 * required, windowDays: 14 });
-  assert.strictEqual(exact.verdict, 'on_track');
-  assert.strictEqual(exact.projectedFinish, IN_16, 'the projection lands ON the goal date');
-  assert.strictEqual(exact.projectedDaysLate, null, 'and is therefore not late');
+test('no doors left, or no date, means no daily rate to report', () => {
+  const met = pace({ done: 10000 });
+  assert.strictEqual(met.remaining, 0);
+  assert.strictEqual(met.percent, 100);
+  assert.strictEqual(met.requiredPerDay, null, 'nothing left to require');
+
+  const overshot = pace({ done: 12000 });
+  assert.strictEqual(overshot.remaining, 0, 'never negative');
+  assert.strictEqual(overshot.percent, 100);
+
+  const undated = pace({ deadline: null, deadlineSource: null });
+  assert.strictEqual(undated.daysLeft, null);
+  assert.strictEqual(undated.requiredPerDay, null);
+  assert.strictEqual(undated.requiredPerWeek, null);
+  assert.strictEqual(undated.remaining, 6588, 'progress still reports without a date');
+
+  const passed = pace({ deadline: '2026-08-01' });
+  assert.strictEqual(passed.daysLeft, -13);
+  assert.strictEqual(passed.requiredPerDay, null, 'a passed date has no daily rate');
 });
 
-test('verdict is SUPPRESSED until there is enough canvassing to judge', () => {
-  // Two days of history: the campaign may be doing fine, and 600 doors ÷ 14 would call it behind.
-  const young = pace({ done: 600, recentDoors: 600, windowDays: 2 });
-  assert.strictEqual(young.verdict, 'no_pace');
-  assert.strictEqual(young.projectedFinish, null, 'no projection off two days');
-  assert.ok(young.requiredPerDay > 0, 'the required rate is still reported');
-  assert.strictEqual(young.recentPerDay, 300, 'and so is what they are actually doing');
-
-  // The floor is 5 days.
-  assert.strictEqual(pace({ recentDoors: 4 * 100, windowDays: 4 }).verdict, 'no_pace');
-  assert.notStrictEqual(pace({ recentDoors: 5 * 100, windowDays: 5 }).verdict, 'no_pace');
-
-  // A campaign with history but a dead window gets no verdict either — zero doors over two
-  // weeks is a stopped campaign, and "behind" understates that.
-  assert.strictEqual(pace({ recentDoors: 0, windowDays: 14 }).verdict, 'no_pace');
-});
-
-test('terminal states short-circuit the ladder', () => {
-  assert.strictEqual(pace({ done: 10000, recentDoors: 14 * 10 }).verdict, 'complete');
-  assert.strictEqual(pace({ done: 12000, recentDoors: 14 * 10 }).verdict, 'complete');
-  assert.strictEqual(pace({ deadline: null, deadlineSource: null }).verdict, 'no_deadline');
-  assert.strictEqual(pace({ deadline: '2026-08-01', recentDoors: 14 * 10 }).verdict, 'past_due');
-
-  // Complete wins over a passed date: hitting the goal late is still hitting the goal.
-  assert.strictEqual(pace({ done: 10000, deadline: '2026-08-01' }).verdict, 'complete');
-
-  const none = pace({ deadline: null, deadlineSource: null });
-  assert.strictEqual(none.requiredPerDay, null);
-  assert.strictEqual(none.daysLeft, null);
-});
-
-test('projection is dated, bounded, and honest about being late', () => {
-  const behind = pace({ recentDoors: 14 * 305 });
-  // 6588 / 305 = 22 days out.
-  assert.strictEqual(behind.projectedFinish, addDays(TODAY, 22));
-  assert.strictEqual(behind.projectedDaysLate, daysBetween(IN_16, behind.projectedFinish));
-  assert.ok(behind.projectedDaysLate > 0);
-
-  const ahead = pace({ recentDoors: 14 * 900 });
-  assert.ok(ahead.projectedFinish < IN_16);
-  assert.strictEqual(ahead.projectedDaysLate, null, 'on time carries no lateness');
-
-  // A crawl would project into the 2030s — better to say nothing than to print that.
-  const crawl = pace({ deadline: IN_16, recentDoors: 14, windowDays: 14 });
-  assert.strictEqual(crawl.verdict, 'behind');
-  assert.strictEqual(crawl.projectedFinish, null, 'beyond a year, no projection');
-});
-
-test('recentPerDay is rounded for display but the verdict uses the raw rate', () => {
-  // 0.4/day: displays as 0, but must still be judged (and judged as behind, not as no data).
-  const trickle = computeGoalPace({
-    target: 100,
-    done: 10,
-    deadline: IN_16,
-    todayStr: TODAY,
-    recentDoors: 6,
-    windowDays: 14,
-  });
-  assert.strictEqual(trickle.recentPerDay, 0, 'rounds to 0 — we do not inflate it to 1');
-  assert.strictEqual(trickle.verdict, 'behind', 'but 0.43/day still gets judged');
+test('the block carries progress only — no verdict, rate or projection', () => {
+  assert.deepStrictEqual(Object.keys(pace({})).sort(), [
+    'daysLeft',
+    'deadline',
+    'deadlineSource',
+    'done',
+    'percent',
+    'remaining',
+    'requiredPerDay',
+    'requiredPerWeek',
+    'target',
+  ]);
 });

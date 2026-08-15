@@ -116,8 +116,7 @@ lead can set a campaign's goal**: a lead running a campaign owns its target.
 
 Once a goal is set, the campaign's **Home** page grows a thin **goal strip** in the header, right
 under the campaign type and beside the key-date pills: a progress bar, the percentage, done/target,
-doors left, how many a day it takes, what the crew is *actually* averaging, a plain verdict —
-**Ahead / On track / Behind** — and how late the current pace lands. It sits there rather than in
+doors left, and how many a day it takes from here. It sits there rather than in
 the body deliberately: it is the only number on the page the filters below don't touch, and
 campaign-identity space is where a filter-immune number belongs. The strip names its own **goal
 date** only when one was set explicitly; when the deadline fell back to Election Day, the countdown
@@ -137,10 +136,9 @@ Three things worth knowing about how the numbers behave:
   clamps to one day — all of it, today.) Days nobody knocks are still counted. The pace you're
   *doing* is measured the same way, so the two are directly comparable — and working at exactly
   the needed rate projects finishing exactly on the goal date.
-- **No verdict appears until there's something to judge.** A campaign needs at least 5 days of
-  canvassing since its first round went active; before that you still get the required rate, just
-  no Ahead/Behind claim and no projection. A campaign two days old would otherwise divide two days
-  of doors by fourteen and read "Behind" while doing fine.
+- **It reports, it does not grade.** The goal shows where you are and what each remaining day has
+  to carry. It deliberately makes no Ahead/Behind judgement and offers no projected finish date —
+  those existed briefly and were removed in August 2026, server side included.
 
 **Canvassers never see the goal** — not on the campaign picker, not in Books, nowhere in the
 canvasser app. It's a management number. It *can* be shown to a client on a published weekly

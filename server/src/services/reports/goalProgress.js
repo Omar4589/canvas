@@ -1,12 +1,11 @@
 import { Organization } from '../../models/Organization.js';
-import { Pass } from '../../models/Pass.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { knocksPipeline, billableDoorsOf } from './aggregations.js';
 import { resolveBillRestricted } from './billRestricted.js';
-import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
+import { zonedDayStr } from '../../utils/timezone.js';
 
-// Door-goal progress and pace — the ONE owner of this math. Every surface (the campaigns list,
-// the campaign rollup that feeds both dashboards, the client report) reads a block from here;
+// Door-goal progress — the ONE owner of this math. Every surface (the campaigns list, the
+// campaign rollup that feeds both dashboards, the client report) reads a block from here;
 // nothing re-derives "how many a day do we need" locally, because three copies of that
 // arithmetic is three chances to disagree about what a door is.
 //
@@ -19,23 +18,21 @@ import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 //   1. `done` is ALL-TIME and campaign-wide, always. The rollup row this rides on honors
 //      from/to/effortId/coordinatorId; this block must not, or "3,412 / 10,000" silently
 //      becomes "3,412 this week" the moment someone touches the date picker.
-//   2. Days are CALENDAR days on BOTH sides of the comparison (owner ruling 2026-08-14 — no
-//      canvass-weekday pattern). That is what makes it honest: if the crew takes Sundays off,
-//      the required rate and the actual rate absorb the day off equally.
-
-// Trailing window for the "what are we actually doing" rate.
-export const PACE_WINDOW_DAYS = 14;
-// Below this many days of canvassing history we report the required rate but NO verdict. A
-// campaign that activated its first round on Tuesday would otherwise divide two days of doors
-// by fourteen and read "behind" — a false alarm about a campaign that is doing fine, which is
-// the failure mode that makes people stop trusting a number.
-export const MIN_PACE_DAYS = 5;
-// Past this, a projection is noise dressed up as a date.
-const MAX_PROJECTION_DAYS = 365;
+//   2. Days are CALENDAR days, and TODAY IS NOT ONE OF THEM (owner ruling 2026-08-14 — no
+//      canvass-weekday pattern either). See the divisor comment in computeGoalPace.
+//
+// WHAT THIS DELIBERATELY NO LONGER DOES (owner ruling 2026-08-15). It used to also report a
+// trailing 14-day actual rate, an ahead/on-track/behind verdict and a projected finish date.
+// All three were removed from every surface, so computing them here was pure cost: a
+// Pass.activatedAt lookup plus one knocksPipeline per distinct campaign timezone on every
+// rollup and every campaigns-list load, feeding fields nobody rendered. The goal reports
+// progress and what it takes from here; it no longer grades anyone. If a verdict is ever wanted
+// back, it is a rebuild, not an uncomment — and it needs the suppression rules that made it
+// honest (a floor of canvassing history before judging, and a projection cap) rebuilt with it.
 
 // 'YYYY-MM-DD' civil-date arithmetic, matching client/src/lib/electionDates.js. Anchored at
-// UTC noon-free Date.UTC deltas so it never touches a real timezone — these are civil dates,
-// and the zone they mean is already baked into the strings by the caller.
+// UTC Date.UTC deltas so it never touches a real timezone — these are civil dates, and the zone
+// they mean is already baked into the strings by the caller.
 const civilParts = (dayStr) => String(dayStr).split('-').map(Number);
 
 // Whole days from `a` to `b`. Negative when b is before a.
@@ -51,8 +48,8 @@ export function addDays(dayStr, n) {
 }
 
 // The date the goal is measured against. A campaign that only ever set an Election Day still
-// gets a countdown and a pace — the explicit goalDate exists for the common case of wanting the
-// universe walked BEFORE election day (GOTV), not to make people type the date twice.
+// gets a countdown and a daily target — the explicit goalDate exists for the common case of
+// wanting the universe walked BEFORE election day (GOTV), not to make people type it twice.
 export function deadlineFor(campaign) {
   if (campaign?.goalDate) return { deadline: campaign.goalDate, deadlineSource: 'goalDate' };
   if (campaign?.electionDay) return { deadline: campaign.electionDay, deadlineSource: 'electionDay' };
@@ -61,7 +58,7 @@ export function deadlineFor(campaign) {
 
 // Whole-percent progress. Never rounds UP to 100 while doors remain — a bar reading 100% on an
 // unfinished goal is the one lie a progress bar can tell. Exported so the frozen client-report
-// snapshot computes it the same way the live card does.
+// snapshot computes it the same way the live surfaces do.
 export function goalPercent(done, target) {
   if (!(target > 0)) return 0;
   if (done >= target) return 100;
@@ -69,36 +66,19 @@ export function goalPercent(done, target) {
 }
 
 // PURE. Everything the clients render, computed from numbers the caller already has.
-// `recentDoors` / `windowDays` describe the trailing window; pass windowDays 0 when the
-// campaign has not started canvassing.
-export function computeGoalPace({
-  target,
-  done = 0,
-  deadline = null,
-  deadlineSource = null,
-  todayStr,
-  recentDoors = 0,
-  windowDays = 0,
-}) {
+export function computeGoalPace({ target, done = 0, deadline = null, deadlineSource = null, todayStr }) {
   const remaining = Math.max(0, target - done);
   const percent = goalPercent(done, target);
   const daysLeft = deadline ? daysBetween(todayStr, deadline) : null;
 
-  // TODAY DOES NOT COUNT (owner ruling 2026-08-14). The divisor is the whole days remaining
-  // AFTER today — the same number the card shows as "N days left" — not that plus today.
-  //
-  // Two reasons, one practical and one internal. Practical: by the time anyone reads this card,
-  // today's canvassing is already planned, underway, or done; you cannot re-plan it, so counting
-  // it as a fully available day quietly understates what every remaining day has to carry.
-  // Internal: `projectedFinish` below has ALWAYS excluded today (it adds a whole day-count to
-  // today's date, so its first working day is tomorrow), and the two halves disagreeing produced
-  // a card that read "On track" while projecting a finish two days past the deadline. They now
-  // divide by the same days.
+  // TODAY DOES NOT COUNT. The divisor is the whole days remaining AFTER today — the same number
+  // the UI shows as "N days left" — not that plus today. By the time anyone reads this, today's
+  // canvassing is already planned, underway or done; you cannot re-plan it, so counting it as a
+  // fully available day quietly understates what every remaining day has to carry.
   //
   // Clamped at 1 rather than allowed to hit 0: on the deadline day itself there are no days after
   // today, and the only truthful framing left is "all of it, today" — which is what a divisor of 1
-  // says. That is not the optimism this ruling removes; it is the last day genuinely being the
-  // last day.
+  // says. That is not the optimism this rule removes; it is the last day genuinely being the last.
   const daysUsable = daysLeft == null ? null : Math.max(1, daysLeft);
   const requiredPerDay =
     remaining > 0 && daysUsable != null && daysLeft >= 0 ? Math.ceil(remaining / daysUsable) : null;
@@ -108,32 +88,6 @@ export function computeGoalPace({
     remaining > 0 && daysUsable != null && daysLeft >= 0 && daysUsable >= 7
       ? Math.ceil(remaining / (daysUsable / 7))
       : null;
-
-  const rawRecentPerDay = windowDays > 0 ? recentDoors / windowDays : 0;
-
-  let verdict;
-  if (done >= target) verdict = 'complete';
-  else if (!deadline) verdict = 'no_deadline';
-  else if (daysLeft < 0) verdict = 'past_due';
-  else if (windowDays < MIN_PACE_DAYS || recentDoors <= 0) verdict = 'no_pace';
-  else {
-    const ratio = rawRecentPerDay / requiredPerDay;
-    if (ratio >= 1.05) verdict = 'ahead';
-    else if (ratio >= 0.95) verdict = 'on_track';
-    else verdict = 'behind';
-  }
-
-  const judged = verdict === 'ahead' || verdict === 'on_track' || verdict === 'behind';
-  let projectedFinish = null;
-  let projectedDaysLate = null;
-  if (judged && rawRecentPerDay > 0) {
-    const daysToFinish = Math.ceil(remaining / rawRecentPerDay);
-    if (daysToFinish <= MAX_PROJECTION_DAYS) {
-      projectedFinish = addDays(todayStr, daysToFinish);
-      const late = daysBetween(deadline, projectedFinish);
-      if (late > 0) projectedDaysLate = late;
-    }
-  }
 
   return {
     target,
@@ -145,13 +99,6 @@ export function computeGoalPace({
     daysLeft,
     requiredPerDay,
     requiredPerWeek,
-    // Integer for display. The verdict above compares the UNROUNDED rate, so a campaign doing
-    // 0.4/day is judged on 0.4 even though the card reads 0.
-    recentPerDay: judged || verdict === 'no_pace' ? Math.round(rawRecentPerDay) : null,
-    paceWindowDays: windowDays || 0,
-    verdict,
-    projectedFinish,
-    projectedDaysLate,
   };
 }
 
@@ -172,15 +119,13 @@ export async function goalProgressFor({ organizationId, campaigns = [], orgDefau
       ? orgDefaults
       : await Organization.findById(organizationId, { billRestrictedDoors: 1 }).lean();
 
-  const policyOf = new Map(
-    withGoal.map((c) => [String(c._id), resolveBillRestricted(c, org)])
-  );
-  const ids = withGoal.map((c) => c._id);
+  const policyOf = new Map(withGoal.map((c) => [String(c._id), resolveBillRestricted(c, org)]));
 
   // ── Doors done, all-time ────────────────────────────────────────────────────────────────
-  // Seeded campaigns read straight off the denormalized counters. Legacy docs whose stats were
-  // never reconciled (stats.reconciledAt null) fall back to the live pipeline, for those docs
-  // only — the counters are exact or unused, never approximate.
+  // Seeded campaigns read straight off the denormalized counters — no query at all. Legacy docs
+  // whose stats were never reconciled (stats.reconciledAt null) fall back to the live pipeline,
+  // for those docs only: the counters are exact or unused, never approximate. On a fully seeded
+  // org this function now issues ZERO aggregations.
   const done = new Map();
   const unseeded = [];
   for (const c of withGoal) {
@@ -207,83 +152,24 @@ export async function goalProgressFor({ organizationId, campaigns = [], orgDefau
     }
   }
 
-  // ── How long this campaign has actually been canvassing ─────────────────────────────────
-  // The earliest activated round. Bounded and tiny (a handful of rounds per campaign), and
-  // more honest than "first knock" anyway: pace starts when the round goes live.
-  const firstActivated = new Map();
-  const passes = await Pass.find(
-    { campaignId: { $in: ids }, activatedAt: { $ne: null } },
-    { campaignId: 1, activatedAt: 1 }
-  ).lean();
-  for (const p of passes) {
-    const key = String(p.campaignId);
-    const prev = firstActivated.get(key);
-    if (!prev || p.activatedAt < prev) firstActivated.set(key, p.activatedAt);
-  }
-
-  // ── Trailing-window doors ───────────────────────────────────────────────────────────────
-  // One pipeline per distinct timezone (normally one). Day boundaries have to be the
-  // campaign's own — a rollup can span zones, which is why the rollup itself carries a
-  // crossZoneDaySeam warning.
-  const byZone = new Map();
+  // ── The block ───────────────────────────────────────────────────────────────────────────
+  // `todayStr` is resolved per campaign timezone (a rollup can legitimately span zones — the
+  // same reason it carries a crossZoneDaySeam warning). Pure Intl formatting, no queries.
+  const blocks = new Map();
   for (const c of withGoal) {
     const tz = c.timeZone || 'America/New_York';
-    if (!byZone.has(tz)) byZone.set(tz, []);
-    byZone.get(tz).push(c);
+    const { deadline, deadlineSource } = deadlineFor(c);
+    blocks.set(
+      String(c._id),
+      computeGoalPace({
+        target: c.doorGoal,
+        done: done.get(String(c._id)) || 0,
+        deadline,
+        deadlineSource,
+        todayStr: zonedDayStr(now, tz),
+      })
+    );
   }
-
-  const blocks = new Map();
-  await Promise.all(
-    [...byZone.entries()].map(async ([tz, zoneCampaigns]) => {
-      const todayStr = zonedDayStr(now, tz);
-      const windowFrom = addDays(todayStr, -(PACE_WINDOW_DAYS - 1));
-      const zoneIds = zoneCampaigns.map((c) => c._id);
-      const rows = await CanvassActivity.aggregate(
-        knocksPipeline(
-          {
-            organizationId,
-            campaignId: { $in: zoneIds },
-            timestamp: zonedDayRange(windowFrom, todayStr, tz),
-          },
-          { byCampaign: true, includeRestricted: true }
-        )
-      );
-      const recent = new Map(rows.map((r) => [String(r._id), r]));
-
-      for (const c of zoneCampaigns) {
-        const key = String(c._id);
-        const row = recent.get(key);
-        const recentDoors = row ? billableDoorsOf(row, policyOf.get(key)) : 0;
-
-        // The window is the trailing 14 days, CLIPPED to when this campaign started canvassing,
-        // so a young campaign divides its doors by the days it has actually had.
-        const startedAt = firstActivated.get(key);
-        let windowDays = 0;
-        if (startedAt) {
-          const startedDay = zonedDayStr(startedAt, tz);
-          const windowStart = startedDay > windowFrom ? startedDay : windowFrom;
-          windowDays = Math.min(
-            PACE_WINDOW_DAYS,
-            Math.max(0, daysBetween(windowStart, todayStr) + 1)
-          );
-        }
-
-        const { deadline, deadlineSource } = deadlineFor(c);
-        blocks.set(
-          key,
-          computeGoalPace({
-            target: c.doorGoal,
-            done: done.get(key) || 0,
-            deadline,
-            deadlineSource,
-            todayStr,
-            recentDoors,
-            windowDays,
-          })
-        );
-      }
-    })
-  );
 
   return blocks;
 }

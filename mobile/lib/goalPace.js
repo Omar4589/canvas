@@ -1,12 +1,16 @@
 // Presentation for the door-goal block the server sends on campaign rows
-// (server/src/services/reports/goalProgress.js). The MATH all happens server-side — this file
-// only decides words and which theme color a verdict wears.
+// (server/src/services/reports/goalProgress.js). The MATH all happens server-side — this file only
+// decides the words.
 //
 // Mirrored BY HAND from client/src/lib/goalPace.js, the same rule metricHelp.js follows:
 // reword one, reword both.
+//
+// The verdict vocabulary, the trailing actual rate and the projected finish were removed from
+// every surface (owner ruling 2026-08-15), so the words for them are gone from both mirrors.
 
 // 'YYYY-MM-DD' → 'Oct 28'. Parts parsed by hand and formatted in UTC so the label can never
-// shift a day in a behind-UTC zone (new Date('YYYY-MM-DD') is UTC midnight).
+// shift a day in a behind-UTC zone (new Date('YYYY-MM-DD') is UTC midnight). Also imported by
+// lib/campaignHistory.js, which needs the same treatment for the audited date fields.
 export function formatGoalDate(dayStr) {
   if (!dayStr) return '';
   const [y, m, d] = String(dayStr).split('-').map(Number);
@@ -17,21 +21,6 @@ export function formatGoalDate(dayStr) {
     timeZone: 'UTC',
   });
 }
-
-// `tone` names a key on the theme's colors — resolved by the caller, since colors come from
-// useTheme() and this module has no hook to call.
-export const GOAL_VERDICT = {
-  complete: { label: 'Goal met', tone: 'success' },
-  ahead: { label: 'Ahead', tone: 'success' },
-  on_track: { label: 'On track', tone: 'brand' },
-  behind: { label: 'Behind', tone: 'danger' },
-  past_due: { label: 'Date passed', tone: 'warning' },
-  // Deliberately unlabeled: there is a goal, but no honest verdict to give yet.
-  no_pace: { label: null, tone: 'muted' },
-  no_deadline: { label: 'No date', tone: 'muted' },
-};
-
-export const verdictOf = (goal) => GOAL_VERDICT[goal?.verdict] || GOAL_VERDICT.no_deadline;
 
 export function shortCount(n) {
   const v = Number(n) || 0;
@@ -55,17 +44,3 @@ export function daysLeftLabel(goal) {
   if (d === 0) return 'Last day';
   return `${d.toLocaleString()} ${d === 1 ? 'day' : 'days'} left`;
 }
-
-export function projectionLabel(goal) {
-  if (!goal?.projectedFinish) return null;
-  const when = formatGoalDate(goal.projectedFinish);
-  if (goal.projectedDaysLate) {
-    const d = goal.projectedDaysLate;
-    return `At this pace you finish ${when} — ${d.toLocaleString()} ${d === 1 ? 'day' : 'days'} past the goal date.`;
-  }
-  return `At this pace you finish ${when}, on time.`;
-}
-
-// The caption under the group. Load-bearing: every other number on the campaign screen honors
-// the range and walk-list filters, and this one does not.
-export const GOAL_FOOTER = 'Campaign-wide, all time — the range and walk-list filters do not change it.';
