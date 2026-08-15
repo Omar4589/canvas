@@ -33,13 +33,7 @@ import ElectionCountdownChip from '../../../../components/ElectionCountdownChip'
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
 import { rateFromPct, makeRateColors, tierWord } from '../../../../lib/rates';
 import { metricHelp } from '../../../../lib/metricHelp';
-import {
-  verdictOf,
-  deadlineLabel,
-  daysLeftLabel,
-  projectionLabel,
-  GOAL_FOOTER,
-} from '../../../../lib/goalPace';
+import { verdictOf, daysLeftLabel } from '../../../../lib/goalPace';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
@@ -196,9 +190,10 @@ export default function CampaignDetail() {
     brand: colors.brand,
     muted: colors.textMuted,
   }[goalVerdict.tone];
-  const goalDeadline = deadlineLabel(goal);
-  const goalDaysLeft = daysLeftLabel(goal);
-  const goalProjection = projectionLabel(goal);
+  // Only when the deadline came from an explicit goalDate. On the Election Day fallback the
+  // countdown chip immediately above is already saying it, to the day — same rule as the web
+  // strip, so neither platform prints the date twice.
+  const goalOwnDate = goal?.deadlineSource === 'goalDate' ? daysLeftLabel(goal) : null;
 
   // ONE description of the Activity numbers: the rows render from it and the sheet explains
   // from it, so a label can never end up next to a different metric's definition (they used
@@ -520,6 +515,62 @@ export default function CampaignDetail() {
               datesNote={campaign.datesNote}
               showNote
             />
+            {/* Door goal, one line, in the key-dates block and ABOVE the filters below it. The
+                placement is the point: this is the only number on the screen that ignores the
+                date range, the walk-list switcher and the crew switcher, and it used to sit
+                underneath all three inside a tall group that had to caption its way out of the
+                confusion. Beside Election Day — equally filter-immune — it explains itself.
+                Tapping opens the same MetricSheet the other metrics use, which is where the
+                all-time sentence now lives. */}
+            {goal?.target ? (
+              <Pressable
+                onPress={() =>
+                  setSheet({
+                    title: 'Door goal',
+                    items: [
+                      {
+                        key: 'doorGoal',
+                        label: 'Door goal',
+                        value: `${(goal.done || 0).toLocaleString()} / ${goal.target.toLocaleString()}`,
+                        help: metricHelp.doorGoal,
+                      },
+                    ],
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Door goal, ${goal.percent} percent, ${goal.done} of ${goal.target} doors`}
+                style={styles.goalLine}
+              >
+                <View style={styles.goalTop}>
+                  <Text style={styles.goalLead}>Goal</Text>
+                  <View style={styles.goalBar}>
+                    <RowBar pct={goal.percent} />
+                  </View>
+                  <Text style={styles.goalPct}>{goal.percent}%</Text>
+                  <Text style={styles.goalMuted} numberOfLines={1}>
+                    {(goal.done || 0).toLocaleString()} / {goal.target.toLocaleString()}
+                  </Text>
+                  {goalVerdict.label ? (
+                    <Text style={[styles.goalVerdict, { color: goalVerdictColor }]}>
+                      {goalVerdict.label}
+                    </Text>
+                  ) : null}
+                </View>
+                {(() => {
+                  const bits = [
+                    goalOwnDate,
+                    goal.requiredPerDay != null ? `need ${goal.requiredPerDay.toLocaleString()}/day` : null,
+                    goal.recentPerDay != null ? `doing ${goal.recentPerDay.toLocaleString()}/day` : null,
+                    goal.projectedDaysLate ? `finishing ${goal.projectedDaysLate}d late` : null,
+                  ].filter(Boolean);
+                  return bits.length ? (
+                    <Text style={styles.goalMuted} numberOfLines={1}>
+                      {bits.join(' · ')}
+                    </Text>
+                  ) : null;
+                })()}
+              </Pressable>
+            ) : null}
           </View>
         )}
 
@@ -567,76 +618,6 @@ export default function CampaignDetail() {
         ) : null}
 
         <View style={{ paddingHorizontal: spacing.lg }}>
-          {/* Door goal. Sits ABOVE Activity because it's the all-time frame everything below
-              narrows — and unlike everything below, it ignores the range and walk-list filters.
-              The footer says so; without that line "3,412 / 10,000" reads as "this week" the
-              moment someone changes the range. */}
-          {goal?.target ? (
-            <>
-              <SectionHeader title="Door goal" subtitle={goalDeadline || 'No goal date'} />
-              <InsetGroup>
-                <InsetHeroRow
-                  label={`of ${goal.target.toLocaleString()} doors`}
-                  value={(goal.done || 0).toLocaleString()}
-                  sub={goalDaysLeft}
-                  subAccent={goalVerdict.label ? `${goalDaysLeft ? ' · ' : ''}${goalVerdict.label}` : null}
-                  accentColor={goalVerdictColor}
-                />
-                <InsetBlockRow>
-                  <RowBar pct={goal.percent} />
-                </InsetBlockRow>
-                {goal.verdict !== 'complete' ? (
-                  <InsetRow label="Doors left" value={(goal.remaining || 0).toLocaleString()} />
-                ) : null}
-                {goal.requiredPerDay != null ? (
-                  <InsetRow
-                    label="Needed"
-                    unit="per day"
-                    value={goal.requiredPerDay.toLocaleString()}
-                    sub={goal.requiredPerWeek != null ? `${goal.requiredPerWeek.toLocaleString()} per week` : null}
-                  />
-                ) : null}
-                {goal.recentPerDay != null ? (
-                  <InsetRow
-                    label="Current pace"
-                    unit="per day"
-                    value={goal.recentPerDay.toLocaleString()}
-                    sub={`last ${goal.paceWindowDays} ${goal.paceWindowDays === 1 ? 'day' : 'days'}`}
-                  />
-                ) : null}
-                <InsetNavRow
-                  label="History"
-                  sub="Who changed this goal, and when"
-                  hint="Opens this campaign's change history"
-                  onPress={goHistory}
-                />
-                <InsetActionRow
-                  label="How this is counted"
-                  onPress={() =>
-                    setSheet({
-                      title: 'Door goal',
-                      items: [
-                        {
-                          key: 'doorGoal',
-                          label: 'Door goal',
-                          value: `${(goal.done || 0).toLocaleString()} / ${goal.target.toLocaleString()}`,
-                          help: metricHelp.doorGoal,
-                        },
-                      ],
-                    })
-                  }
-                />
-              </InsetGroup>
-              <GroupFooter>
-                {goalProjection ? `${goalProjection} ` : ''}
-                {goal.verdict === 'no_pace'
-                  ? 'Not enough canvassing yet to judge the pace — the target above is still what it takes. '
-                  : ''}
-                {GOAL_FOOTER}
-              </GroupFooter>
-            </>
-          ) : null}
-
           {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
               count and the knock count, so leading with the denominator lets the fraction read
               straight down the group. Loading renders the group with em-dashes rather than
@@ -945,6 +926,17 @@ function makeStyles(t) {
   back: { ...type.caption, color: colors.brand, fontWeight: '600', alignSelf: 'flex-start' },
   headerTitle: { ...type.title, marginTop: 2 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // The compact door-goal line in the key-dates block. Two rows of text at caption weight, so it
+  // reads as chrome beside the Election Day chip rather than as a metric card of its own.
+  goalLine: { marginTop: spacing.sm, gap: 2 },
+  goalTop: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
+  goalLead: { ...type.caption, color: colors.text, fontWeight: '700' },
+  // Fixed width: the bar must not collapse to nothing beside a long door count.
+  goalBar: { width: 84 },
+  goalPct: { ...type.caption, color: colors.text, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  goalMuted: { ...type.caption, color: colors.textMuted, fontVariant: ['tabular-nums'] },
+  goalVerdict: { ...type.caption, fontWeight: '700' },
 
   banner: {
     backgroundColor: colors.warnBg,

@@ -19,7 +19,7 @@ Now the campaign's **Home** page carries a thin goal line at the very top, right
 
 Reading left to right: how far along you are, how many doors are left, how many a day it takes from here, what the crew has actually averaged over the last 14 days, and whether that adds up. Hover the **(i)** for the full definition.
 
-It sits in the header rather than down with the other numbers on purpose — see "doesn't move when you change the filters" below. The same numbers are on the mobile admin campaign screen, and a small bar shows on every row of the Campaigns list so you can spot a campaign slipping without opening it.
+It sits in the header rather than down with the other numbers on purpose — see "doesn't move when you change the filters" below. **On your phone** the same line sits with the Election Day chip, above the date range and the walk-list and crew filters; tap it for the full definition. A small bar also shows on every row of the Campaigns list, so you can spot a campaign slipping without opening it.
 
 ## Things worth knowing
 

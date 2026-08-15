@@ -167,9 +167,9 @@ silent change could mislead someone about money, a deadline, or what was promise
 Leads see the history of campaigns they run, and no others — the same scoping as every other
 campaign screen.
 
-**On the phone**, open the campaign and tap **Quick actions → History**; when the campaign has a
-door goal, the Door goal group carries a **History** row too, mirroring the web card's link. Same
-feed, same scoping, read-only on both.
+**On the phone**, open the campaign and tap **Quick actions → History**. (The door-goal line has
+no History link of its own — tapping it explains the numbers instead; the tile is always there and
+does not depend on a goal being set.) Same feed, same scoping, read-only on both.
 
 > **This is not the Audit page.** Three different things in this product are called "audit," and
 > they answer different questions. **History** (here) = who changed the campaign's *settings*.
@@ -523,8 +523,8 @@ The cold-start readiness chain is a pure derivation in
   [mobile/lib/campaignHistory.js](../mobile/lib/campaignHistory.js), hand-mirrored from the web
   copy with **one divergence**: it formats dates through `formatGoalDate` (goalPace.js) because
   mobile's `electionDates.js` has no `formatDateLabel`. Reached from the Quick-actions
-  `NavTileGrid` tile (always present) and an `InsetNavRow` in the Door goal group (only when a goal
-  exists — hence the tile is primary). Uses the same react-query key as web,
+  `NavTileGrid` tile — the only mobile entry point since the Door goal group it also lived on was
+  replaced by a compact line whose tap opens the metric sheet. Uses the same react-query key as web,
   `['admin','campaign-history',campaignId]`.
 - **Change history:** [CampaignHistoryDrawer.jsx](../client/src/components/CampaignHistoryDrawer.jsx),
   mounted on both [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (⋮ → History) and
@@ -554,9 +554,13 @@ The cold-start readiness chain is a pure derivation in
   Compact `GoalCell` / `GoalBlock` are exported from
   [CampaignCard.jsx](../client/src/components/campaigns/CampaignCard.jsx) and reused by
   [CampaignsTable.jsx](../client/src/components/campaigns/CampaignsTable.jsx), the same way
-  `CountdownChip` already is. Mobile: the Door goal `InsetGroup` on
-  `admin/campaign/[campaignId].jsx` and the goal bar in `RowAccessory` on `admin/index.jsx`. Mobile
-  has **no goal editor** — it is read-only for campaign fields, exactly like the key dates.
+  `CountdownChip` already is. Mobile mirrors the web placement rather than the web markup: a two-line pressable in the
+  key-dates block of `admin/campaign/[campaignId].jsx`, beside `ElectionCountdownChip` and above
+  `DateRangeBar`, which replaced a tall `InsetGroup` that sat *below* all three filter controls it
+  ignores. It opens the shared `MetricSheet` (the screen's convention for explaining a metric)
+  rather than carrying a caption. The compact goal bar in `RowAccessory` on `admin/index.jsx` is
+  unchanged. Mobile has **no goal editor** — it is read-only for campaign fields, exactly like the
+  key dates.
 - Management UI: [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) — the KPI `StatCard`
   strip (client-side sums over active campaigns), search/sort, the Cards | Table `Segmented` toggle
   (persisted to localStorage `campaignsView`), the collapsible archived section, skeleton loading,

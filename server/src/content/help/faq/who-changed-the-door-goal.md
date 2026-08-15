@@ -11,7 +11,7 @@ tags: history, audit, who changed, door goal, changed, log, tracking, accountabi
 
 Open the campaign's **⋮ menu → History**. If it's the door goal you're wondering about, there's also a **History** link on the door-goal line at the top of the campaign's Home page.
 
-**On your phone:** open the campaign and tap **Quick actions → History**. If the campaign has a door goal, there's a **History** row in the Door goal section too. It's the same feed, read-only.
+**On your phone:** open the campaign and tap **Quick actions → History**. It's the same feed, read-only. (Tapping the goal line itself explains the numbers rather than opening History.)
 
 You'll see a list, newest first:
 
