@@ -360,6 +360,18 @@ export function IconPhoneToggle({ size = 22 }) {
   );
 }
 
+// Two arrows trading places — the Door Outcomes page turns one recorded outcome into another.
+export function IconSwap({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <path d="M4 8h13" />
+      <path d="m14 5 3 3-3 3" />
+      <path d="M20 16H7" />
+      <path d="m10 13-3 3 3 3" />
+    </svg>
+  );
+}
+
 export const NAV_ICONS = {
   '/admin': IconDashboard,
   '/map': IconPin,
@@ -370,6 +382,7 @@ export const NAV_ICONS = {
   '/import': IconUpload,
   '/exports': IconDownload,
   '/customize': IconPhoneToggle,
+  '/outcomes': IconSwap,
   '/packets': IconPrinter,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,

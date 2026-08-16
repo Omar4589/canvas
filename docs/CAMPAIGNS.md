@@ -181,7 +181,7 @@ does not depend on a goal being set.) Same feed, same scoping, read-only on both
 from the org-level items to **that campaign's tabs**, grouped by what you're doing (added
 2026-08, once the flat list passed 18 items): **Home** sits ungrouped at the top, then
 **Setup** (Survey, App Customization, Voter Import, Walk Lists, Saved Searches, Turf Cutting),
-**Field** (Team, Timeline, Map), **Quality** (Audit, Overlaps, Notes), **Results**
+**Field** (Team, Timeline, Map), **Quality** (Audit, Door Outcomes, Overlaps, Notes), **Results**
 (**Survey Explorer** — drill into any survey answer: who gave it, who recorded it, and where;
 see [SURVEYS.md](SURVEYS.md) — and Early Voting), and **Deliverables** (Client Reports, Exports,
 Print Packets). Item order inside each group kept the old flat order on purpose, so the grouping
@@ -264,8 +264,8 @@ screen in the mobile admin app) lets you turn individual ones off — say a camp
 wants **No soliciting** used. The web page renders a **live phone mockup** of the door screen
 beside the toggles — flip one and its button slides out of the preview, so you see exactly what
 your canvassers will. (The page is named for what it will grow into — every "what does the field
-app offer" setting belongs here; the **Door Outcomes** name is reserved for the reclassify tool
-that lives on this page.) What's toggleable is deliberately narrow:
+app offer" setting belongs here. Changing what ALREADY-recorded entries say is a different job,
+on the **Door Outcomes** page below.) What's toggleable is deliberately narrow:
 
 - **Can be turned off:** Wrong address, Refused, No soliciting, Restricted access (a lit-drop
   campaign only shows the last two — the first two don't exist in its door UI).
@@ -285,32 +285,47 @@ all on → Refused off"), highlighted the same way invoice-policy changes are. T
 **bulk-restrict** tool on Books keeps working even while Restricted is toggled off — it's a desk
 action owned by the same people who own the toggle.
 
-### Reclassifying a retired outcome's old entries (added 2026-08)
+### Door Outcomes — correcting what was recorded (added 2026-08)
 
-Turning an outcome off leaves its history alone, which is usually what you want. When it isn't —
-"we've stopped using No soliciting, make those old entries read as Not home" — an **org admin**
-can fold one outcome's past entries into another from the same screen.
+**Door Outcomes** (`/campaigns/:id/outcomes`, in the sidebar's **Quality** group beside Audit) is
+where an **org admin** changes what a recorded entry says. Two different jobs share it:
 
-Deliberately narrow, because this is the only place in the product that rewrites what a canvasser
-recorded:
+- **Correcting a mistake** — the canvasser hit the wrong button and this door was really Refused.
+  Here moving the numbers is the *point*: they were wrong before.
+- **Folding a retired outcome** — "we've stopped using No soliciting, make its history read Not
+  home." Here the entries were *true*, so moving a reported number would be fabrication.
 
-- **Only three outcomes can be folded, as the source or the target: Not home, Wrong address, and
-  No soliciting.** They're interchangeable arithmetic — each counts as one knock and none counts
-  as reaching a person — so your door counts, contact rate, connection rate and every invoice
-  figure are identical before and after. **Refused and Restricted can never be converted**, in
-  either direction: refused means someone answered (it would move your contact rate) and
-  restricted can be billed (it would move an invoice).
-- **The outcome has to be switched off first.** The tool is for retiring something, not for
-  editing live history.
-- **Org admins only** — a lead can turn outcomes on and off for their campaign, but rewriting
-  recorded history sits one level up.
-- **Everything else about each entry is kept**: the time, the GPS location, who knocked it, and
-  which round and turf it belonged to. Only the label changes, and door colors follow it.
-- **One-click revert, any time.** Each run is listed with its counts and can be undone exactly;
-  both the run and the revert appear in the campaign's change history, highlighted.
+The page doesn't ask which you meant. **It prices every change before it runs**, and that is the
+whole safety model:
 
-You'll see a confirmation with the real numbers ("Change 412 entries across 388 doors from No
-soliciting to Not home?") before anything is written.
+- A conversion that can't move anything says so plainly — *"No reported numbers change."* That's
+  the case for any mix of **Not home, Wrong address and No soliciting**: each counts as one knock
+  and none counts as reaching a person, so knocks, contact rate, survey rate, coverage and billable
+  doors are identical before and after.
+- A conversion that *does* move something shows your campaign's own before-and-after — knocks,
+  billable doors, contact rate, survey rate, restricted doors — with the changed figures in red and
+  a red confirm button. **Refused** moves the contact rate (someone answered) and **Restricted**
+  moves billable doors (it can be invoiced), so those are always priced. They are still allowed:
+  a wrong button deserves a real fix.
+- **Surveyed and Lit dropped can never be converted**, in either direction, by anyone. A surveyed
+  entry owns real survey answers — converting into it would fabricate answers that were never
+  given, and out of it would orphan answers that were. That's a data rule, not a setting.
+
+Working the page: filter by outcome, canvasser or round, tick the entries you want (one row to fix
+one door, or **Select all N matching** to fold a whole outcome), pick what they should become, and
+review. **Everything else about each entry is kept** — the time, the GPS location, who knocked it,
+and which round and turf it belonged to. Only the label changes; door colors follow, and phones
+pick the new colors up on their next sync. Every change is listed with a **one-click Revert** that
+undoes it exactly — including a selection that spanned several outcomes, since each entry remembers
+its own original. Runs and reverts both appear in the campaign's change history, highlighted.
+
+Two things the page deliberately won't show you: entries an admin created with **bulk restrict**
+(desk marks, not field observations — they have their own undo on Turf Cutting), and entries a
+previous run already changed, until that run is reverted.
+
+The **App Customization** page keeps a small **Reclassification** card for the common follow-up
+right after you switch an outcome off; it is the same machinery, limited to the never-moves-a-number
+folds.
 
 ### Archive vs. delete
 
@@ -484,14 +499,38 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   [reclassifyOutcomes.js](../server/src/services/canvass/reclassifyOutcomes.js) behind
   GET/POST `/admin/campaigns/:id/reclassify-outcomes` and POST `…/revert`, **org admins only**
   (`isOrgAdmin`, not `canManageCampaign` — a lead owns what their canvassers see, not what the
-  ledger says). `RECLASSIFIABLE_OUTCOMES = ['not_home','wrong_address','no_soliciting']` bounds
-  both source and target, and that set IS the safety argument: all three are in `KNOCK_ACTIONS`
-  and none is a contact, so knocks, `contactRate`, `connectionRate`, `billableDoorsOf` and every
-  `Campaign.stats` counter are unmoved by any conversion within it (no counter keys on the three
-  individually — `knockCount`/`activityCount` cover them, the rest count surveys/lit/refused/
-  restricted). `refused` and `restricted` are excluded permanently for the mirror-image reason.
-  A source must currently be in `disabledOutcomes` (`SOURCE_NOT_DISABLED`) and the target must
-  not be (`TARGET_DISABLED`). Converted rows keep GPS/timestamp/user/pass/turf/effort and gain a
+  ledger says), plus GET `…/outcome-entries` for the Door Outcomes page's filtered table.
+  `RECLASSIFIABLE_OUTCOMES` is all five DOOR outcomes; the completion actions are absent and must
+  stay absent — a `survey_submitted` row owns a real `SurveyResponse`, so converting into it
+  fabricates answers and out of it orphans them. **`RATE_NEUTRAL_OUTCOMES =
+  ['not_home','wrong_address','no_soliciting']` is the set that carries the old safety argument**:
+  all three are in `KNOCK_ACTIONS` and none is a contact, so knocks, `contactRate`,
+  `connectionRate`, `billableDoorsOf` and every `Campaign.stats` counter are unmoved by any
+  conversion within it (no counter keys on the three individually — `knockCount`/`activityCount`
+  cover them, the rest count surveys/lit/refused/restricted). A pair touching `refused` or
+  `restricted` DOES move a reported figure, so it is allowed but **priced** — see `computeImpact`
+  below — and it triggers `recomputeCampaignStats` afterwards, which the rate-neutral path
+  deliberately skips. The target must not be a retired outcome (`TARGET_DISABLED`); the old
+  "source must be switched off first" rule was **dropped** (owner ruling 2026-08-16) because it
+  made correcting a live campaign's mistyped entry impossible.
+- **`computeImpact` is a simulation, not a formula.** The "after" figures come from the SAME
+  `knocksPipeline` that produces "before", with a `$set` ahead of it rewriting `actionType` for
+  exactly the selected ids — so a preview cannot drift from what the run actually does. The int
+  test asserts previewed-after equals the real totals once the run lands. It is skipped entirely
+  for a rate-neutral pair (provably nothing moves) which is also what keeps the whole-outcome fold
+  unbounded; a money-moving selection is capped at `RECLASSIFY_MAX_IMPACT_ENTRIES` (25k,
+  `SELECTION_TOO_LARGE`) since it scans the ledger.
+- **Selection.** A scoped run sends `scope` (outcomes/userId/passId/effortId/dateFrom/dateTo — the
+  date bounds are `dateFrom`/`dateTo` because `from`/`to` already name the outcomes) and may send
+  `actionIds`, which only **narrows** it, the flag-bulk-review rule, so a stale checkbox can never
+  reach a row the current filter doesn't show. A selection may span outcomes: the run records
+  `from: 'mixed'` and each row's own origin is stamped, so revert is still exact. Omitting both
+  is the whole-outcome fold the App Customization card uses (id-free, so unbounded).
+- **Door status** is re-resolved by `recomputeHouseholdStatusesBatched` — one read plus one
+  `bulkWrite` per 500-door chunk instead of two round trips per door, which is what lets a
+  several-thousand-door run finish inside a web request. Its `timestamps: true` is load-bearing:
+  `/mobile/changes` finds changed doors by `updatedAt`, so a status write that doesn't bump it
+  never reaches the phones (asserted in the int test). Converted rows keep GPS/timestamp/user/pass/turf/effort and gain a
   `CanvassActivity.reclassified { from, at, byUserId, runId }` stamp; **a stamped row is excluded
   from later runs**, so provenance stays exactly one level deep and revert never guesses. Rows
   are stamped BEFORE the [`ReclassifyRun`](../server/src/models/ReclassifyRun.js) row is written

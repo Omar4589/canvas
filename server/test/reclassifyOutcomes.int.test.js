@@ -188,13 +188,15 @@ test('org admins only — a lead may toggle outcomes but never rewrite history',
   );
 });
 
-test('only the rate-neutral trio converts — refused, restricted and completions are refused', { skip }, async () => {
+test('completion actions can NEVER be converted, in either direction', { skip }, async () => {
+  // The one rule no page, role or setting can relax: a surveyed entry owns real SurveyResponse
+  // answers, so converting into it fabricates answers and out of it orphans them. Enforced by
+  // the enum, hence a 400 whichever side it appears on.
   for (const pair of [
-    { from: 'refused', to: 'not_home' },
-    { from: 'restricted', to: 'not_home' },
-    { from: 'no_soliciting', to: 'refused' },
     { from: 'survey_submitted', to: 'not_home' },
     { from: 'no_soliciting', to: 'survey_submitted' },
+    { from: 'lit_dropped', to: 'not_home' },
+    { from: 'not_home', to: 'lit_dropped' },
   ]) {
     const r = await call('POST', url(), { ...asAdmin(), body: pair });
     assert.equal(r.status, 400, `${pair.from} → ${pair.to} must be refused`);
@@ -203,13 +205,47 @@ test('only the rate-neutral trio converts — refused, restricted and completion
   assert.equal(same.status, 400);
 });
 
-test('the source must be switched OFF, and the target must still be ON', { skip }, async () => {
-  // wrong_address is rate-neutral but still enabled → not a legal source.
-  const live = await call('POST', url(), { ...asAdmin(), body: { from: 'wrong_address', to: 'not_home' } });
-  assert.equal(live.status, 400);
-  assert.equal(live.json.code, 'SOURCE_NOT_DISABLED');
+test('money-moving pairs are ALLOWED but priced — refused/restricted report their impact', { skip }, async () => {
+  // Owner ruling 2026-08-16: any door outcome may be corrected, because a wrong button deserves
+  // a real fix. The safety is that the effect is computed and shown first, never that the
+  // conversion is forbidden. Dry runs here — nothing may be written yet.
+  const r = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['refused'] }, dryRun: true },
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.rateNeutral, false, 'refused → not_home moves the contact rate');
+  assert.ok(r.json.impact, 'a money-moving pair must carry an impact preview');
+  assert.equal(r.json.impact.moves, true);
+  // 5 knocked doors, 2 of them contacts (1 survey + 1 refusal) = 40%. Folding the refusal away
+  // leaves the survey alone as a contact = 20%. Exact numbers, so a preview that merely moved in
+  // the right direction would still fail.
+  assert.equal(r.json.impact.before.contactRate, 40);
+  assert.equal(r.json.impact.after.contactRate, 20);
+  // ...and it stays a knock either way, so knocks must NOT move.
+  assert.equal(r.json.impact.before.knocks, r.json.impact.after.knocks);
 
-  // And a target that is itself switched off is refused.
+  // A rate-neutral pair skips the simulation entirely and says so.
+  const neutral = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['no_soliciting'] }, dryRun: true },
+  });
+  assert.equal(neutral.json.rateNeutral, true);
+  assert.equal(neutral.json.impact, null, 'no simulation is run when nothing can move');
+
+  assert.equal(await ReclassifyRun.countDocuments({}), 0, 'dry runs write nothing');
+});
+
+test('a live outcome is a legal source; a switched-OFF outcome is never a target', { skip }, async () => {
+  // The old "source must be retired first" rule is gone (owner ruling 2026-08-16) — it made
+  // correcting a live campaign's mistyped entry impossible.
+  const live = await call('POST', url(), {
+    ...asAdmin(), body: { from: 'wrong_address', to: 'not_home', dryRun: true },
+  });
+  assert.equal(live.status, 200, 'a still-enabled outcome may be corrected');
+
+  // A target that is itself switched off is still refused — moving history INTO something the
+  // campaign retired contradicts the retirement.
   await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { disabledOutcomes: ['no_soliciting', 'wrong_address'] } });
   const offTarget = await call('POST', url(), { ...asAdmin(), body: { from: 'no_soliciting', to: 'wrong_address' } });
   assert.equal(offTarget.status, 400);
@@ -339,6 +375,136 @@ test('a run id from another campaign reads as missing, never as something to und
   assert.equal(r.status, 404);
   await Campaign.deleteOne({ _id: other._id });
   await ReclassifyRun.deleteOne({ _id: foreign._id });
+});
+
+// ── The Door Outcomes page: browsing entries and converting a SELECTION ─────────────────────
+// Everything above drives the whole-outcome fold (the App Customization card). These drive the
+// page: a filtered table, checkbox selections that may span outcomes, and pairs that move money.
+
+const entriesUrl = (qs = '') => `/admin/campaigns/${ctx.campaign._id}/outcome-entries${qs}`;
+
+test('the entries browser lists convertible rows with door, canvasser and round, plus facets', { skip }, async () => {
+  const all = await call('GET', entriesUrl(), asAdmin());
+  assert.equal(all.status, 200);
+  // 3 no_soliciting + 1 refused = 4 convertible; the SURVEY is not a door outcome and must not
+  // appear at all — you cannot select what you may not convert.
+  assert.equal(all.json.total, 4);
+  assert.ok(!all.json.entries.some((e) => e.actionType === 'survey_submitted'));
+  assert.deepEqual(all.json.facets, { no_soliciting: 3, refused: 1 });
+
+  const row = all.json.entries[0];
+  assert.match(row.address, /Reclass Rd$/);
+  assert.equal(row.canvasser, 'Cara Canvasser');
+  assert.equal(row.round, 'R1');
+
+  const filtered = await call('GET', entriesUrl('?outcomes=refused'), asAdmin());
+  assert.equal(filtered.json.total, 1);
+  // Facets ignore the outcome chips on purpose — you need to see what else is selectable.
+  assert.deepEqual(filtered.json.facets, { no_soliciting: 3, refused: 1 });
+
+  assert.equal((await call('GET', entriesUrl(), asLead())).status, 403);
+});
+
+test('a SELECTION converts exactly the chosen rows, and bumps updatedAt so phones resync', { skip }, async () => {
+  const list = await call('GET', entriesUrl('?outcomes=no_soliciting'), asAdmin());
+  const picked = list.json.entries.slice(0, 2);
+  const untouched = list.json.entries[2];
+  const doorBefore = await Household.findById(picked[0].householdId).lean();
+
+  const r = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['no_soliciting'] }, actionIds: picked.map((e) => e.id) },
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.equal(r.json.run.count, 2, 'only the two selected rows');
+  assert.equal(r.json.run.from, 'no_soliciting');
+
+  const rows = await CanvassActivity.find({ _id: { $in: [...picked.map((e) => e.id), untouched.id] } }).lean();
+  const byId = new Map(rows.map((x) => [String(x._id), x]));
+  for (const p of picked) assert.equal(byId.get(p.id).actionType, 'not_home');
+  assert.equal(byId.get(untouched.id).actionType, 'no_soliciting', 'the unselected row is untouched');
+
+  // The delta poll finds changed doors with `updatedAt: { $gt: since }` — a status write that
+  // doesn't move it never reaches the phones. This is the batched bulkWrite's timestamps: true.
+  const doorAfter = await Household.findById(picked[0].householdId).lean();
+  assert.equal(doorAfter.status, 'not_home');
+  assert.ok(doorAfter.updatedAt > doorBefore.updatedAt, 'updatedAt must move or phones never resync');
+
+  await call('POST', url('/revert'), { ...asAdmin(), body: { runId: r.json.run.id } });
+});
+
+test('ids outside the filter are dropped, never written', { skip }, async () => {
+  // The stale-checkbox case: an id the admin's CURRENT filter doesn't show may not ride along.
+  const refusedRow = (await call('GET', entriesUrl('?outcomes=refused'), asAdmin())).json.entries[0];
+  const r = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['no_soliciting'] }, actionIds: [refusedRow.id], dryRun: true },
+  });
+  // The refused id is not in the no_soliciting filter, so the selection resolves to nothing.
+  assert.equal(r.status, 400);
+  assert.equal(r.json.code, 'EMPTY_SELECTION');
+  assert.equal(
+    (await CanvassActivity.findById(refusedRow.id).lean()).actionType,
+    'refused',
+    'and nothing was written'
+  );
+});
+
+test('a MIXED selection is one run, and revert restores each row to its own original', { skip }, async () => {
+  const all = await call('GET', entriesUrl(), asAdmin());
+  const one = all.json.entries.find((e) => e.actionType === 'no_soliciting');
+  const other = all.json.entries.find((e) => e.actionType === 'refused');
+
+  const r = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'wrong_address', actionIds: [one.id, other.id] },
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.equal(r.json.run.from, 'mixed', 'a selection spanning outcomes records itself as mixed');
+  assert.equal(r.json.run.count, 2);
+
+  const converted = await CanvassActivity.find({ _id: { $in: [one.id, other.id] } }).lean();
+  assert.deepEqual(converted.map((c) => c.actionType), ['wrong_address', 'wrong_address']);
+  // Each row remembers ITS OWN origin — that is what makes a mixed revert exact.
+  const stamps = Object.fromEntries(converted.map((c) => [String(c._id), c.reclassified.from]));
+  assert.equal(stamps[one.id], 'no_soliciting');
+  assert.equal(stamps[other.id], 'refused');
+
+  await call('POST', url('/revert'), { ...asAdmin(), body: { runId: r.json.run.id } });
+  const restored = await CanvassActivity.find({ _id: { $in: [one.id, other.id] } }).lean();
+  const back = Object.fromEntries(restored.map((c) => [String(c._id), c.actionType]));
+  assert.equal(back[one.id], 'no_soliciting');
+  assert.equal(back[other.id], 'refused');
+  assert.ok(restored.every((c) => !c.reclassified), 'the stamp is dropped on revert');
+});
+
+test('the previewed impact is what actually happens, and counters follow', { skip }, async () => {
+  // The drift guard. A preview that merely looked plausible would be worse than none — an admin
+  // approves a number, so the number has to be the one they get.
+  const preview = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['refused'] }, dryRun: true },
+  });
+  const predicted = preview.json.impact.after;
+
+  const run = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { outcomes: ['refused'] } },
+  });
+  assert.equal(run.status, 201);
+
+  const actual = await moneyShot();
+  assert.equal(actual.contactRate, predicted.contactRate, 'previewed contact rate must be the real one');
+  assert.equal(actual.knocks, predicted.knocks);
+  assert.equal(actual.billableDoors, predicted.billableDoors);
+  // A money-moving pair recomputes the denormalized counters; the rate-neutral path skips it
+  // because it provably cannot move one.
+  assert.equal(actual.stats.refusedKnockCount, 0, 'the refusal is gone from the counters too');
+
+  await call('POST', url('/revert'), { ...asAdmin(), body: { runId: run.json.run.id } });
+  const restored = await moneyShot();
+  assert.equal(restored.contactRate, 40, 'revert puts the contact rate back');
+  assert.equal(restored.stats.refusedKnockCount, 1);
 });
 
 test('the campaign delete cascade takes ReclassifyRun with it', { skip }, async () => {

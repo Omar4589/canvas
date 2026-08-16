@@ -47,13 +47,23 @@ Turning one off hides the button on canvassers' phones and blocks new recordings
 
 **Nothing about the past changes.** Doors already recorded keep their status and keep counting in every number, report, and export. Each flip is recorded in the campaign's [History](#history--who-changed-what) with your name — "Door outcomes: all on → Refused off."
 
-### Reclassifying old entries
+## Door Outcomes — fixing what was recorded
 
-Sometimes you want the old entries folded in too — "we've stopped using **No soliciting**, make those read as **Not home**." An **org admin** can do that from the same page, on any outcome that's already switched off.
+Sometimes an entry is simply wrong — a canvasser hit **Not home** when someone actually answered — or you've retired an outcome and want its old entries folded into another one. The **Door Outcomes** page (in the sidebar's **Quality** group, next to Audit) does both. It's **org admins only**: leads decide what canvassers can record going forward, but changing what the record *says* sits one level up.
 
-It's deliberately limited to three outcomes, as either the source or the target: **Not home**, **Wrong address** and **No soliciting**. Those three are interchangeable arithmetic — each is one knock, and none means you reached a person — so your door counts, contact rate and invoices come out identical. **Refused** and **Restricted** can never be converted: refused means someone answered the door, and restricted doors can be billed, so moving either would change a number you report to a client.
+Filter by outcome, canvasser or round, tick the entries you want — one row to fix one door, or **Select all N matching** to fold a whole outcome — pick what they should become, and review.
 
-You'll see the real counts before anything happens ("Change 412 entries across 388 doors?"), each entry keeps its time, location and canvasser, and door colors update to match. Every run is listed with a **Revert** button that undoes it exactly, and both the change and the revert show up in the campaign's [History](#history--who-changed-what).
+**The review step is the important part: it tells you what the change does to your numbers.**
+
+- If the change can't move anything, it says so: *"No reported numbers change."* That's true for any mix of **Not home**, **Wrong address** and **No soliciting** — each is one knock and none means you reached a person.
+- If it *can*, you see your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate — with the changed figures in red. **Refused** moves your contact rate (someone answered) and **Restricted** moves billable doors (those can be invoiced). You can still make the change; you just can't make it by accident.
+- **Surveyed** and **Lit dropped** entries can never be converted. They carry real survey answers, so there's nothing safe to convert them into.
+
+Each entry keeps its time, location, canvasser and round — only the label changes, and door colors follow on canvassers' next sync. Every change is listed with a **Revert** button that undoes it exactly (even a selection that spanned several outcomes), and both the change and the revert appear in the campaign's [History](#history--who-changed-what).
+
+Two things you won't see there: doors an admin marked with **bulk restrict** (those are desk marks and have their own undo on Turf Cutting), and entries an earlier change already converted, until you revert that one.
+
+The App Customization page keeps a small **Reclassification** shortcut for the common case right after you switch an outcome off.
 
 ## Key dates
 

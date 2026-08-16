@@ -64,6 +64,9 @@ export const CAMPAIGN_NAV = [
   { slug: 'timeline', label: 'Timeline', icon: '/timeline', group: 'field' },
   { slug: 'map', label: 'Map', icon: '/map', group: 'field' },
   { slug: 'audit', label: 'Audit', icon: '/audit', group: 'quality' },
+  // Data repair, so it sits with the other inspect-and-fix surfaces rather than with the
+  // canvasser-app settings. Org-admin-only server-side; the page itself walls a lead.
+  { slug: 'outcomes', label: 'Door Outcomes', icon: '/outcomes', group: 'quality' },
   { slug: 'overlaps', label: 'Overlaps', icon: '/overlaps', group: 'quality' },
   { slug: 'notes', label: 'Notes', icon: '/notes', group: 'quality' },
   { slug: 'explorer', label: 'Survey Explorer', icon: '/surveys', group: 'results' },

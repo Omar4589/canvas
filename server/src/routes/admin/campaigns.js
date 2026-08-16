@@ -25,13 +25,19 @@ import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
+  RECLASSIFY_MAX_IMPACT_ENTRIES,
+  isRateNeutralPair,
   countConvertible,
   eligibleSources,
   eligibleTargets,
   validatePair,
+  listEntries,
+  resolveSelection,
+  computeImpact,
   runReclassify,
   revertReclassify,
 } from '../../services/canvass/reclassifyOutcomes.js';
+import { Pass } from '../../models/Pass.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
 import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
@@ -719,10 +725,28 @@ router.delete('/:campaignId', async (req, res, next) => {
 // is an org-admin act. The safety argument for why this can't move a number lives in
 // services/canvass/reclassifyOutcomes.js.
 
+// Date bounds are `dateFrom`/`dateTo`, NOT from/to — those two already name the OUTCOMES being
+// converted, and one body carries both.
+const objectIdish = z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid id');
+const entryScopeSchema = z.object({
+  outcomes: z.array(z.enum(RECLASSIFIABLE_OUTCOMES)).optional(),
+  userId: objectIdish.optional(),
+  effortId: objectIdish.optional(),
+  passId: objectIdish.optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+});
+
 const reclassifySchema = z.object({
-  from: z.enum(RECLASSIFIABLE_OUTCOMES),
+  // Optional on a SCOPED run: the selection can span several outcomes, and each row's own origin
+  // is what gets stamped. Required on a whole-outcome fold (the card), which has no selection.
+  from: z.enum(RECLASSIFIABLE_OUTCOMES).optional(),
   to: z.enum(RECLASSIFIABLE_OUTCOMES),
   dryRun: z.boolean().optional(),
+  scope: entryScopeSchema.optional(),
+  // Narrows `scope` only — ids outside the filter are dropped, never written (the flag
+  // bulk-review rule), so a stale checkbox can't reach a row the current filter doesn't show.
+  actionIds: z.array(objectIdish).max(RECLASSIFY_MAX_IMPACT_ENTRIES).optional(),
 });
 
 const revertSchema = z.object({
@@ -786,13 +810,133 @@ router.get('/:campaignId/reclassify-outcomes', async (req, res, next) => {
   }
 });
 
-// dryRun: the numbers the confirm step shows, nothing written. Otherwise: convert, stamp, audit.
+// The Door Outcomes page's table: one filtered page of convertible entries, plus per-outcome
+// totals for the whole filtered set (so the chips can show what else is in there).
+router.get('/:campaignId/outcome-entries', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+
+    const q = {
+      outcomes: req.query.outcomes ? String(req.query.outcomes).split(',').filter(Boolean) : [],
+      userId: mongoose.isValidObjectId(req.query.userId) ? req.query.userId : null,
+      effortId: mongoose.isValidObjectId(req.query.effortId) ? req.query.effortId : null,
+      passId: mongoose.isValidObjectId(req.query.passId) ? req.query.passId : null,
+      from: req.query.dateFrom || null,
+      to: req.query.dateTo || null,
+    };
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
+
+    const { entries, total, facets } = await listEntries(campaign._id, q, { skip, limit });
+    const [people, passes] = await Promise.all([
+      hydrateCanvassers(entries.map((e) => e.userId).filter(Boolean), activeOrgId(req)),
+      Pass.find({ campaignId: campaign._id }, { name: 1, roundNumber: 1 }).lean(),
+    ]);
+    const passById = new Map(passes.map((p) => [String(p._id), p]));
+
+    res.json({
+      entries: entries.map((e) => {
+        const p = e.userId ? people.get(String(e.userId)) : null;
+        const pass = e.passId ? passById.get(e.passId) : null;
+        return {
+          ...e,
+          canvasser: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : 'Unknown user',
+          round: pass ? pass.name || `Round ${pass.roundNumber}` : null,
+        };
+      }),
+      total,
+      facets,
+      limit,
+      skip,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// dryRun: the numbers (and the price) the confirm step shows, nothing written. Otherwise:
+// convert, stamp, audit. Two shapes share this route — a SCOPED run from the Door Outcomes page
+// (`scope`/`actionIds`, possibly spanning outcomes) and a whole-outcome fold from the App
+// Customization card (`from` alone, deliberately id-free so it stays unbounded).
 router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
   try {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
-    const { from, to, dryRun } = reclassifySchema.parse(req.body);
+    const { from, to, dryRun, scope, actionIds } = reclassifySchema.parse(req.body);
+    const scoped = !!(scope || actionIds);
 
+    if (scoped) {
+      const q = scope
+        ? { ...scope, from: scope.dateFrom, to: scope.dateTo }
+        : {};
+      const sel = await resolveSelection(campaign._id, q, actionIds);
+      if (!sel.entries) {
+        return res.status(400).json({ error: 'Nothing matches that selection.', code: 'EMPTY_SELECTION' });
+      }
+      // Every source in the selection must be legal against the target, one at a time — a mixed
+      // selection is only as legal as its least legal row.
+      for (const src of sel.sources) {
+        const bad = validatePair(campaign, src, to);
+        if (bad) return res.status(bad.status).json(bad.body);
+      }
+
+      const neutral = sel.sources.every((s) => isRateNeutralPair(s, to));
+      if (!neutral && sel.entries > RECLASSIFY_MAX_IMPACT_ENTRIES) {
+        return res.status(409).json({
+          error: `That selection changes reported numbers and is too large to price in one pass (${sel.entries.toLocaleString()} entries, limit ${RECLASSIFY_MAX_IMPACT_ENTRIES.toLocaleString()}). Narrow it with the filters.`,
+          code: 'SELECTION_TOO_LARGE',
+        });
+      }
+
+      // Only a money-moving pair is simulated: a rate-neutral one provably moves nothing, and
+      // scanning the ledger to rediscover that would put a delay in front of the common case.
+      let impact = null;
+      if (!neutral) {
+        const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
+        impact = await computeImpact({
+          campaign,
+          ids: sel.ids,
+          to,
+          billRestricted: resolveBillRestricted(campaign, org),
+        });
+      }
+
+      if (dryRun) {
+        return res.json({
+          dryRun: true,
+          to,
+          sources: sel.sources,
+          entries: sel.entries,
+          doors: sel.doors,
+          rateNeutral: neutral,
+          impact,
+        });
+      }
+
+      const run = await runReclassify({
+        campaign,
+        from: sel.sources.length === 1 ? sel.sources[0] : 'mixed',
+        to,
+        ids: sel.ids,
+        byUserId: req.user._id,
+      });
+      return res.status(201).json({
+        run: {
+          id: String(run._id),
+          from: run.from,
+          to: run.to,
+          count: run.count,
+          doorCount: run.doorCount,
+          createdAt: run.createdAt,
+          revertedAt: null,
+        },
+      });
+    }
+
+    if (!from) {
+      return res.status(400).json({ error: 'Pick which outcome to convert.', code: 'OUTCOME_MISSING' });
+    }
     const invalid = validatePair(campaign, from, to);
     if (invalid) return res.status(invalid.status).json(invalid.body);
 

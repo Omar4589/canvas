@@ -5,10 +5,12 @@ import mongoose from 'mongoose';
 // LISTABLE — the converted CanvassActivity rows each carry a `reclassified` stamp pointing back
 // here, and Revert restores them from it.
 //
-// Only the rate-neutral trio (not_home / wrong_address / no_soliciting) can appear in `from` or
-// `to`: all three are KNOCK_ACTIONS and none is a contact, so a conversion cannot move knocks,
-// contactRate, connectionRate, billable doors, or any invoice figure. `refused` and `restricted`
-// are deliberately not convertible — see services/canvass/reclassifyOutcomes.js.
+// `from`/`to` are door outcomes (never a completion action — a surveyed entry owns real survey
+// answers). `from` is `'mixed'` when one run converted a selection spanning several outcomes,
+// which the Door Outcomes page allows; the per-row `reclassified.from` stamp is what Revert
+// actually restores from, so a mixed run undoes exactly as precisely as a uniform one.
+// A pair outside the rate-neutral trio moves reported numbers and is priced before it runs —
+// see services/canvass/reclassifyOutcomes.js.
 //
 // `count` is entries (CanvassActivity rows) and `doorCount` is distinct households, because the
 // two answer different questions an admin asks before pressing the button ("how much history am
