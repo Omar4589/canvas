@@ -348,6 +348,16 @@ function tzOf(req) {
   return req.anchorTz || 'UTC';
 }
 
+// The campaign scope for measured-hours attribution (hoursSource.js header
+// rule): campaign-scoped requests charge a canvasser's clocked-but-no-knocks
+// days here only inside their stint and never on days knocked elsewhere.
+// Same validation as baseFilter; null (org-wide) = every clocked day counts.
+function scopedCampaignId(req) {
+  return req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
+    ? req.query.campaignId
+    : null;
+}
+
 function dayBucketExpr(field, tz) {
   return { $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone: tz } };
 }
@@ -1037,6 +1047,7 @@ router.get('/canvassers', async (req, res, next) => {
       from: req.query.from ? String(req.query.from).slice(0, 10) : null,
       to: req.query.to ? String(req.query.to).slice(0, 10) : null,
       tz: tzOf(req),
+      campaignId: scopedCampaignId(req),
     });
 
     const dayRowsByUser = new Map();
@@ -2519,6 +2530,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       from: totalsMode ? null : from,
       to: totalsMode ? null : to,
       tz,
+      campaignId: scopedCampaignId(req),
     });
     const foldByUser = new Map();
     for (const [uid, perDayRows] of dayRowsByUser) {
@@ -3078,6 +3090,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       from: req.query.from ? String(req.query.from).slice(0, 10) : null,
       to: req.query.to ? String(req.query.to).slice(0, 10) : null,
       tz,
+      campaignId: scopedCampaignId(req),
     });
 
     const byUser = new Map();
@@ -3418,6 +3431,7 @@ router.get('/team-averages', async (req, res, next) => {
       from: req.query.from ? String(req.query.from).slice(0, 10) : null,
       to: req.query.to ? String(req.query.to).slice(0, 10) : null,
       tz,
+      campaignId: scopedCampaignId(req),
     });
 
     const blank = () => ({ homesKnocked: 0, completionKnocks: 0, surveysSubmitted: 0, hoursOnDoors: 0, daysActive: 0 });
@@ -3607,6 +3621,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
       from: req.query.from ? String(req.query.from).slice(0, 10) : null,
       to: req.query.to ? String(req.query.to).slice(0, 10) : null,
       tz,
+      campaignId: scopedCampaignId(req),
     });
     const fold = foldUserHours({
       userId,
@@ -3862,6 +3877,9 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
 
     // The measured overlay — each day takes exactly one source ('mixed' exists
     // only at range grain; a single day is measured or it is not).
+    // No campaignId on purpose: this route's rows are knock-days only (byDay
+    // comes from the activity aggregation), and knock-days always measure —
+    // the attribution rule only decides union days, which never appear here.
     const measured = await loadMeasuredHours({
       organizationId: activeOrgId(req),
       from: req.query.from ? String(req.query.from).slice(0, 10) : null,

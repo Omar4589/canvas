@@ -1167,6 +1167,9 @@ resolver-not-direct-read pattern). The rules, in full in
   anchor timezone** — so hours-days and knock-days share a bucketing by construction, and a
   campaign in any timezone measures. (Formerly day totals stamped with the org's zone, which
   silently estimated every campaign anchored elsewhere.)
+- **Campaign-scoped attribution follows the knock ledger** (never FbTime locations): a clocked
+  day with no knocks on the scoped campaign counts only inside that canvasser's knock stint there,
+  and never on a day they knocked a different campaign. Org-wide reports keep the full union.
 - Every figure carries `hoursSource`: `measured` | `estimated` | `mixed` — mixed only at the
   labeled per-person grain.
 - **Aggregates are all-or-nothing**: a team/campaign rate is measured only when EVERY contributor

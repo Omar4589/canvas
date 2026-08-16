@@ -105,6 +105,11 @@ looking:
   day's number keeps moving until they clock out.
 - A day someone was clocked in but knocked no doors still counts its hours — that is exactly the
   time the estimate could never see.
+- **Hours follow the knocks.** A canvasser who splits time across campaigns is only charged, on
+  each campaign's screens, for the days they actually worked it: a day they knocked a *different*
+  campaign counts there instead, and clocked days before their first knock (or after their last)
+  on this campaign never count here. A clocked day with no doors *anywhere* still counts toward
+  the campaign they were working at the time — that is the idle day the previous note is about.
 
 ### Disconnecting
 
@@ -209,6 +214,18 @@ mark-and-continue and never change status.
   the conservative broad reading.
 - A user's day set is the **union** of knock-days and measured days — clocked-but-not-knocking
   lowers the rate. `daysActive` keeps its knock-day meaning.
+- **CAMPAIGN-SCOPED ATTRIBUTION, by the knock ledger** (owner-ruled 2026-08-16 — **never** by
+  FbTime location, an honor-system dropdown; knocks carry GPS, a timestamp, and a campaign id
+  recorded at the moment of work). On a campaign-scoped report, a clocked day with **no knocks on
+  that campaign** joins the union only when it sits inside the canvasser's all-time knock stint
+  there (first knock-day … last knock-day) AND the org-wide ledger shows no knocks on any other
+  campaign that day. Knocked elsewhere = the hours visibly belong there; clocked and knocked
+  nowhere = the idle day, still charged. One owner: `unionDayAllowed()` — the fold and any
+  union-day surface ask it, never re-derive. Org-wide reports are untouched: every clocked day
+  counts, as always. The case that forced it: a canvasser's spring hours on another project sat
+  inside a fall campaign's all-time denominator, reading 9.2 doors/hr against a true ~19. Honest
+  limits, both accepted: a day knocked on two campaigns charges its full hours to both rates, and
+  an idle day inside two overlapping stints does the same — the day is the atom.
 - Per-canvasser rows: `hoursSource` = `measured` | `estimated` | `mixed` (mixed exists ONLY at this
   labeled per-person grain).
 - **Aggregates are all-or-nothing**: a campaign/team figure is measured only when every

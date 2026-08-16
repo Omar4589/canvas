@@ -5,7 +5,7 @@ import assert from 'node:assert';
 // fixtures hand-computed against the provider contract's own worked example
 // (a 6h shift with one 45-minute break: gross 6.00, adjusted 5.50, worked 5.25).
 //   node --test test/hoursSourceFold.test.js
-const { foldUserHours, aggregateSource, usableMeasuredDay, staleDay, spanHours } = await import(
+const { foldUserHours, aggregateSource, usableMeasuredDay, staleDay, spanHours, unionDayAllowed } = await import(
   '../src/services/reports/hoursSource.js'
 );
 
@@ -314,4 +314,72 @@ test('staleDay truth table', () => {
   assert.strictEqual(staleDay(s, undefined, '2026-08-14'), true, 'no day → broad');
   assert.strictEqual(staleDay(clean, '2026-08-13', '2026-08-14'), false, 'never invents staleness');
   assert.strictEqual(staleDay(null, '2026-08-13', '2026-08-14'), false, 'absent row');
+});
+
+// ── campaign-scoped attribution ─────────────────────────────────────────────
+// The union rule's campaign edition (owner-ruled 2026-08-16, NEVER by FbTime
+// location): a clocked-but-no-knocks-here day charges the scoped campaign only
+// inside the canvasser's knock stint there, and never on a day the ledger
+// shows knocks on another campaign. Knock-days here always count.
+
+const scopedWith = (entries, { stint = null, anyKnockDays = [] } = {}) => ({
+  ...measuredWith(entries),
+  campaignScoped: true,
+  stintByUser: new Map(stint ? [['u1', stint]] : []),
+  anyKnockDaysByUser: new Map([['u1', new Set(anyKnockDays)]]),
+});
+
+test('unionDayAllowed truth table', () => {
+  const stint = { first: '2026-07-20', last: '2026-07-23' };
+  const scoped = scopedWith([], { stint, anyKnockDays: ['2026-07-21'] });
+  assert.strictEqual(unionDayAllowed({ campaignScoped: false }, 'u1', '2026-07-21'), true, 'unscoped: everything counts');
+  assert.strictEqual(unionDayAllowed(scoped, 'u1', '2026-07-22'), true, 'idle day inside stint');
+  assert.strictEqual(unionDayAllowed(scoped, 'u1', '2026-07-21'), false, 'knocked another campaign that day');
+  assert.strictEqual(unionDayAllowed(scoped, 'u1', '2026-07-15'), false, 'before first knock here');
+  assert.strictEqual(unionDayAllowed(scoped, 'u1', '2026-07-30'), false, 'after last knock here');
+  assert.strictEqual(unionDayAllowed(scoped, 'u1', '2026-07-20'), true, 'stint bounds are inclusive');
+  assert.strictEqual(unionDayAllowed(scoped, 'u2', '2026-07-22'), false, 'no stint = never knocked here = nothing to charge');
+});
+
+test('the Denny case: another project’s clocked days stop inflating this campaign’s denominator', () => {
+  // Knocked here 7/20 and 7/23 (measured 5h + 6h). Also clocked: 7/15 (other
+  // project, pre-stint), 7/21 (knocked the OTHER campaign that day), 7/22
+  // (idle — clocked, knocked nowhere). Only the idle day joins.
+  const measured = scopedWith(
+    [
+      ['u1', '2026-07-15', { hours: 3.0, ...noFlags }],
+      ['u1', '2026-07-20', { hours: 5.0, ...noFlags }],
+      ['u1', '2026-07-21', { hours: 4.0, ...noFlags }],
+      ['u1', '2026-07-22', { hours: 2.0, ...noFlags }],
+      ['u1', '2026-07-23', { hours: 6.0, ...noFlags }],
+    ],
+    { stint: { first: '2026-07-20', last: '2026-07-23' }, anyKnockDays: ['2026-07-20', '2026-07-21', '2026-07-23'] }
+  );
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [
+      { day: '2026-07-20', spanHours: 4.0 },
+      { day: '2026-07-23', spanHours: 5.0 },
+    ],
+    measured,
+  });
+  assert.strictEqual(fold.hoursOnDoors, 13.0, '5 + 6 knock-days + 2 idle — never the 3 pre-stint or the 4 knocked-elsewhere');
+  assert.strictEqual(fold.hoursSource, 'measured');
+  assert.strictEqual(fold.extraMeasuredDays, 1, 'only the idle day joined');
+});
+
+test('a knock-day here still measures even though it appears in anyKnockDays', () => {
+  // anyKnockDays includes knocks on THIS campaign too — the first branch
+  // (knocked here) must win before the elsewhere-check is ever consulted.
+  const measured = scopedWith(
+    [['u1', '2026-07-20', { hours: 5.0, ...noFlags }]],
+    { stint: { first: '2026-07-20', last: '2026-07-20' }, anyKnockDays: ['2026-07-20'] }
+  );
+  const fold = foldUserHours({
+    userId: 'u1',
+    perDayRows: [{ day: '2026-07-20', spanHours: 4.0 }],
+    measured,
+  });
+  assert.strictEqual(fold.hoursOnDoors, 5.0);
+  assert.strictEqual(fold.hoursSource, 'measured');
 });

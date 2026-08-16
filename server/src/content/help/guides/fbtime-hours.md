@@ -66,6 +66,10 @@ leads can see that too, even though they can't open the Integrations page themse
   day's hours — nothing to configure.
 - **Campaigns in different timezones all measure.** Hours follow each campaign's own calendar
   automatically, so an Eastern campaign and a Central one both show measured hours.
+- **Hours follow the knocks.** If a canvasser splits time across campaigns, each campaign's
+  doors-per-hour only counts the days they actually worked it — a day spent knocking a different
+  campaign counts there instead, and hours from before they joined a campaign never count
+  against it.
 - Hours an admin typed into FbTime by hand still count, and the reports note it.
 - A shift someone forgot to close is ignored for that day (it would read as a 30-hour day) and the
   day falls back to the estimate.

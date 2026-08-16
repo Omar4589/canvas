@@ -330,3 +330,74 @@ test('a campaign in a DIFFERENT timezone than the org still reads measured hours
   await CanvassActivity.deleteMany({ campaignId: central._id });
   await Campaign.deleteOne({ _id: central._id });
 });
+
+// ── campaign-scoped attribution, over the real app ──────────────────────────
+// The Denny case end-to-end: a canvasser who worked another project must not
+// have those clocked days inflate THIS campaign's denominator. The week under
+// test (u1, all shifts unique to this test, cleaned up at the end):
+//   7/15  clocked 3h, knocked nothing — BEFORE their first knock here
+//   7/20  knocked A, clocked 5h
+//   7/21  knocked B (the other campaign), clocked 4h
+//   7/22  clocked 2h, knocked nowhere — the idle day the union rule keeps
+//   7/23  knocked A, clocked 6h
+// A-scoped hours = 5+6+2 = 13 · B-scoped = 4 · org-wide (unscoped) = 20.
+
+test('campaign-scoped reports attribute clocked days by the knock ledger', { skip }, async () => {
+  const campB = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Other Project', type: 'lit_drop', state: 'FL',
+  });
+  const D0 = '2026-07-15', D1 = '2026-07-20', D2 = '2026-07-21', D3 = '2026-07-22', D4 = '2026-07-23';
+  const knockOn = (campaignId, day, hour) =>
+    CanvassActivity.create({
+      organizationId: ctx.org._id, campaignId, householdId: new mongoose.Types.ObjectId(),
+      userId: ctx.u1._id, actionType: 'not_home', location: { lat: 26.1, lng: -81.8 },
+      timestamp: at(day, hour),
+    });
+  await knockOn(ctx.campaign._id, D1, 10);
+  await knockOn(ctx.campaign._id, D1, 13);
+  await knockOn(campB._id, D2, 10);
+  await knockOn(campB._id, D2, 13);
+  await knockOn(ctx.campaign._id, D4, 10);
+  await knockOn(ctx.campaign._id, D4, 13);
+  const mkShift = (id, day, hours) =>
+    FbTimeShift.create({
+      organizationId: ctx.org._id, shiftId: id, fbtimePersonId: P1, userId: ctx.u1._id,
+      clockIn: at(day, 9), grossHours: hours, adjustedHours: hours, workedHours: hours,
+    });
+  await mkShift('scopePre', D0, 3);
+  await mkShift('scopeA1', D1, 5);
+  await mkShift('scopeB1', D2, 4);
+  await mkShift('scopeIdle', D3, 2);
+  await mkShift('scopeA2', D4, 6);
+
+  try {
+    const scopedA = await get(`/admin/reports/canvassers?campaignId=${ctx.campaign._id}&from=${D0}&to=${D4}`);
+    const rowA = scopedA.body.find((c) => c.userId === String(ctx.u1._id));
+    assert.strictEqual(rowA.hoursOnDoors, 13, 'knock-days (5+6) + the idle day (2); pre-stint and knocked-elsewhere excluded');
+    assert.strictEqual(rowA.hoursSource, 'measured');
+    assert.strictEqual(rowA.doorsPerHour, Math.round((rowA.knocks / 13) * 100) / 100);
+
+    const scopedB = await get(`/admin/reports/canvassers?campaignId=${campB._id}&from=${D0}&to=${D4}`);
+    const rowB = scopedB.body.find((c) => c.userId === String(ctx.u1._id));
+    assert.strictEqual(rowB.hoursOnDoors, 4, "B charges exactly B's day — the idle day is outside B's one-day stint");
+
+    // Org-wide stays the union of everything: nobody's hours vanish from the
+    // org rollup just because campaigns split them.
+    // all=1: the route's multi-campaign guard requires saying "org-wide" out
+    // loud once a second campaign exists.
+    const orgWide = await get(`/admin/reports/canvassers?from=${D0}&to=${D4}&all=1`);
+    assert.strictEqual(orgWide.status, 200, `org-wide /canvassers failed: ${JSON.stringify(orgWide.body)}`);
+    const rowOrg = orgWide.body.find((c) => c.userId === String(ctx.u1._id));
+    assert.strictEqual(rowOrg.hoursOnDoors, 20, '3+5+4+2+6 — the unscoped union, unchanged');
+  } finally {
+    await FbTimeShift.deleteMany({
+      organizationId: ctx.org._id,
+      shiftId: { $in: ['scopePre', 'scopeA1', 'scopeB1', 'scopeIdle', 'scopeA2'] },
+    });
+    await CanvassActivity.deleteMany({
+      organizationId: ctx.org._id,
+      timestamp: { $gte: at(D0, 0), $lt: at('2026-07-24', 0) },
+    });
+    await Campaign.deleteOne({ _id: campB._id });
+  }
+});

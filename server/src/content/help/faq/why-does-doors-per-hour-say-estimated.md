@@ -54,6 +54,11 @@ of the hours were typed into FbTime by hand rather than clocked.
 **What if someone works two shifts in one day?** That's handled and needs nothing from you. A
 morning and an evening shift are added together into one day's hours automatically.
 
+**What if a canvasser works on more than one campaign?** Each campaign's doors-per-hour only
+counts the days they worked that campaign. Days they knocked a different campaign count there
+instead, and a day on the clock with no doors anywhere counts toward the campaign they were
+working at the time.
+
 ## Downloading the detail
 
 Both the web Timeline and the mobile Timeline have an **Export CSV** button that gives you one row

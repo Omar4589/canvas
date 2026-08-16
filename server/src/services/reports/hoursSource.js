@@ -1,3 +1,5 @@
+import mongoose from 'mongoose';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
@@ -36,6 +38,21 @@ import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 //    with clocked hours and no knocks still spends hours, and hiding it would
 //    flatter the rate. That is the mismatch that actually bites — "clocked in
 //    but not knocking". (daysActive keeps its existing knock-day meaning.)
+//  · CAMPAIGN-SCOPED ATTRIBUTION, ledger-first (owner-ruled 2026-08-16 —
+//    NEVER by FbTime location, which is an honor-system dropdown someone
+//    forgets): when a report is scoped to a campaign, a clocked day with no
+//    knocks on it charges that campaign ONLY inside the canvasser's stint
+//    there (first knock-day .. last knock-day, all-time) AND only when the
+//    org-wide ledger shows no knocks on any OTHER campaign that day. Knocked
+//    elsewhere = the hours visibly belong there; knocked nowhere while
+//    clocked = the idle day the union rule exists to surface, still charged.
+//    (The real case: a canvasser's spring hours on another project doubled a
+//    fall campaign's all-time denominator — 9.2 doors/hr against 19 real.)
+//    Days with knocks on the scoped campaign always count, unchanged. Known
+//    honest limits: a day knocked on TWO campaigns charges its full hours to
+//    both rates, and an idle day inside two overlapping stints does the same
+//    — the day is the atom, and splitting it would need per-shift
+//    attribution deliberately not stored.
 //  · Per-canvasser rows may be 'measured', 'estimated', or 'mixed' — mixed is
 //    legal ONLY at this labeled per-person grain.
 //  · AGGREGATES ARE ALL-OR-NOTHING: a campaign/team rate is 'measured' only
@@ -88,8 +105,17 @@ export const usableMeasuredDay = (m, day, today) =>
  *
  * enabled:false — org never connected, or connection errored/disconnected:
  * every caller then behaves exactly as before this feature existed.
+ *
+ * `campaignId` (optional) turns on CAMPAIGN-SCOPED ATTRIBUTION (the header
+ * rule): the overlay also carries, per user with shifts in range, their
+ * all-time knock stint on that campaign and their org-wide knock-days over
+ * the shifts' own day span — the two facts `unionDayAllowed` needs. Both
+ * lookups are bounded (users limited to those holding shifts; the knock-day
+ * scan limited to the cache's own ≤120-day reach) and ride existing indexes
+ * ({campaignId, timestamp} / {userId, timestamp}). Omitted = org-wide report
+ * = every clocked day counts, exactly as before.
  */
-export async function loadMeasuredHours({ organizationId, from = null, to = null, tz }) {
+export async function loadMeasuredHours({ organizationId, from = null, to = null, tz, campaignId = null }) {
   const none = {
     enabled: false,
     hourFigure: null,
@@ -97,6 +123,7 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     daysByUser: new Map(),
     linkedUserIds: new Set(),
     today: null,
+    campaignScoped: false,
   };
   if (!organizationId || !tz) return none;
 
@@ -157,6 +184,74 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
   // addition never reaches a wire figure (the provider rounds its sums too).
   for (const entry of byUserDay.values()) entry.hours = round2(entry.hours);
 
+  // Campaign-scoped attribution facts (header rule). Two bounded aggregations,
+  // only for the users who actually hold shifts in this window.
+  const stintByUser = new Map();
+  const anyKnockDaysByUser = new Map();
+  const campaignScoped = Boolean(campaignId) && rows.length > 0;
+  if (campaignScoped) {
+    const orgOid = new mongoose.Types.ObjectId(String(organizationId));
+    const campaignOid = new mongoose.Types.ObjectId(String(campaignId));
+    const userOids = [];
+    const seenUsers = new Set();
+    let minClockIn = null;
+    let maxClockIn = null;
+    for (const r of rows) {
+      const uid = String(r.userId);
+      if (!seenUsers.has(uid)) {
+        seenUsers.add(uid);
+        userOids.push(r.userId);
+      }
+      if (!minClockIn || r.clockIn < minClockIn) minClockIn = r.clockIn;
+      if (!maxClockIn || r.clockIn > maxClockIn) maxClockIn = r.clockIn;
+    }
+
+    // The stint is ALL-TIME on purpose (not clipped to the requested range):
+    // a day's attribution must not flip with the picker — an idle Monday
+    // inside an ongoing stint counts under "This week" and under "All time"
+    // alike. The knock-day scan, by contrast, only needs to cover days that
+    // can appear as union days — the shifts' own day span.
+    const knockWindow = zonedDayRange(
+      zonedDayStr(minClockIn, tz),
+      zonedDayStr(maxClockIn, tz),
+      tz
+    );
+    const [stints, anyKnocks] = await Promise.all([
+      CanvassActivity.aggregate([
+        { $match: { organizationId: orgOid, campaignId: campaignOid, userId: { $in: userOids } } },
+        { $group: { _id: '$userId', first: { $min: '$timestamp' }, last: { $max: '$timestamp' } } },
+      ]),
+      CanvassActivity.aggregate([
+        {
+          $match: {
+            organizationId: orgOid,
+            userId: { $in: userOids },
+            timestamp: { $gte: knockWindow.$gte, $lt: knockWindow.$lt },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              userId: '$userId',
+              day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: tz } },
+            },
+          },
+        },
+      ]),
+    ]);
+    for (const s of stints) {
+      stintByUser.set(String(s._id), {
+        first: zonedDayStr(s.first, tz),
+        last: zonedDayStr(s.last, tz),
+      });
+    }
+    for (const k of anyKnocks) {
+      const uid = String(k._id.userId);
+      if (!anyKnockDaysByUser.has(uid)) anyKnockDaysByUser.set(uid, new Set());
+      anyKnockDaysByUser.get(uid).add(k._id.day);
+    }
+  }
+
   return {
     enabled: true,
     hourFigure: connection.hourFigure,
@@ -164,8 +259,30 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     daysByUser,
     linkedUserIds: new Set(links.map((l) => String(l.userId))),
     today,
+    campaignScoped,
+    stintByUser,
+    anyKnockDaysByUser,
   };
 }
+
+/**
+ * May this clocked-but-no-knocks-here day charge the scoped campaign? THE
+ * owner of the attribution rule — the fold and any surface enumerating union
+ * days ask here, never re-derive. Unscoped overlays (org-wide reports, legacy
+ * fixtures) always allow: every clocked day counts, the original union rule.
+ *
+ * Scoped: the day must sit inside the canvasser's all-time knock stint on the
+ * campaign (no stint = they never knocked it = nothing to charge), and the
+ * org-wide ledger must show no knocks that day — knocks anywhere mean the
+ * hours belong where the knocks are. Callers only consult this for days
+ * WITHOUT in-scope knocks, so "any knocks that day" can only mean elsewhere.
+ */
+export const unionDayAllowed = (measured, uid, day) => {
+  if (!measured.campaignScoped) return true;
+  const stint = measured.stintByUser?.get(uid);
+  if (!stint || day < stint.first || day > stint.last) return false;
+  return !measured.anyKnockDaysByUser?.get(uid)?.has(day);
+};
 
 /**
  * WHY a row is not fully measured — null when it is (nothing to explain).
@@ -225,10 +342,14 @@ export function foldUserHours({ userId, perDayRows, measured }) {
   }
 
   // Measured days with no knocks: the clocked-but-not-knocking case. Hours in,
-  // day NOT counted toward daysActive (that stays a knock-day count).
+  // day NOT counted toward daysActive (that stays a knock-day count). On a
+  // campaign-scoped overlay, unionDayAllowed decides whether the day's hours
+  // belong HERE at all (inside this canvasser's stint, no knocks on another
+  // campaign that day) — the attribution rule in this module's header.
   if (measured.enabled) {
     for (const day of measured.daysByUser.get(uid) || []) {
       if (knockDays.has(day)) continue;
+      if (!unionDayAllowed(measured, uid, day)) continue;
       const m = measured.byUserDay.get(`${uid}|${day}`);
       if (!usableMeasuredDay(m, day, measured.today)) continue;
       hours += m.hours;
