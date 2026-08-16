@@ -180,7 +180,7 @@ does not depend on a goal being set.) Same feed, same scoping, read-only on both
 **Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
 from the org-level items to **that campaign's tabs**, grouped by what you're doing (added
 2026-08, once the flat list passed 18 items): **Home** sits ungrouped at the top, then
-**Setup** (Survey, App Customization, Voter Import, Walk Lists, Saved Searches, Turf Cutting),
+**Setup** (Survey, Voter Import, Walk Lists, Saved Searches, Turf Cutting, App Customization),
 **Field** (Team, Timeline, Map), **Quality** (Audit, Door Outcomes, Overlaps, Notes), **Results**
 (**Survey Explorer** — drill into any survey answer: who gave it, who recorded it, and where;
 see [SURVEYS.md](SURVEYS.md) — and Early Voting), and **Deliverables** (Client Reports, Exports,
