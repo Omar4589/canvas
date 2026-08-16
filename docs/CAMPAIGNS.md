@@ -178,11 +178,17 @@ does not depend on a goal being set.) Same feed, same scoping, read-only on both
 ## Navigating a campaign (the drill-in)
 
 **Click a campaign** (its name, or Open dashboard) to *drill in*: the left sidebar swaps
-from the org-level items to **that campaign's tabs** — Home, Survey, Voter Import, Walk Lists,
-Saved Searches, Turf Cutting, Team, Timeline, Map, Audit, **Survey Explorer** (drill into any
-survey answer — who gave it, who recorded it, and where; see [SURVEYS.md](SURVEYS.md)), Notes,
-Early Voting, Client Reports — with a
-**"‹ Campaigns"** link to exit and a **campaign switcher** dropdown to hop to another campaign
+from the org-level items to **that campaign's tabs**, grouped by what you're doing (added
+2026-08, once the flat list passed 18 items): **Home** sits ungrouped at the top, then
+**Setup** (Survey, App Customization, Voter Import, Walk Lists, Saved Searches, Turf Cutting),
+**Field** (Team, Timeline, Map), **Quality** (Audit, Overlaps, Notes), **Results**
+(**Survey Explorer** — drill into any survey answer: who gave it, who recorded it, and where;
+see [SURVEYS.md](SURVEYS.md) — and Early Voting), and **Deliverables** (Client Reports, Exports,
+Print Packets). Item order inside each group kept the old flat order on purpose, so the grouping
+added structure without moving muscle memory; the collapsed icon rail shows thin dividers where
+the expanded sidebar shows the group labels (the same treatment the super-admin Platform section
+already used), and the mobile-web More sheet mirrors the same groups. A
+**"‹ Campaigns"** link exits, and a **campaign switcher** dropdown hops to another campaign
 without leaving the page you're on. (Passes aren't a top-level tab — they live inside each walk
 list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
 `/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
@@ -247,14 +253,19 @@ in the drawer). The rules protect your data once canvassing has started:
   has responses (new answers report alongside the old ones). To change questions, duplicate the
   survey on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
 - **Door outcomes** — always editable, **by org admins AND team leads** (same reasoning as the door
-  goal: whoever runs the campaign owns what canvassers can record). See the section below.
+  goal: whoever runs the campaign owns what canvassers can record). Lives on the **App
+  Customization** page — see the section below.
 
 ### Door outcomes — which buttons canvassers see (added 2026-08)
 
-Every campaign starts with the full set of outcome buttons in the field app. The **Door Outcomes**
-page in the campaign drill-in (`/campaigns/:id/outcomes`, and the matching screen in the mobile
-admin app) lets you turn individual ones off — say a campaign that never wants **No soliciting**
-used. What's toggleable is deliberately narrow:
+Every campaign starts with the full set of outcome buttons in the field app. The **App
+Customization** page in the campaign drill-in (`/campaigns/:id/customize`, and the matching
+screen in the mobile admin app) lets you turn individual ones off — say a campaign that never
+wants **No soliciting** used. The web page renders a **live phone mockup** of the door screen
+beside the toggles — flip one and its button slides out of the preview, so you see exactly what
+your canvassers will. (The page is named for what it will grow into — every "what does the field
+app offer" setting belongs here; the **Door Outcomes** name is reserved for the reclassify tool
+that lives on this page.) What's toggleable is deliberately narrow:
 
 - **Can be turned off:** Wrong address, Refused, No soliciting, Restricted access (a lit-drop
   campaign only shows the last two — the first two don't exist in its door UI).
@@ -273,6 +284,33 @@ every count, rate, export, and invoice. This is a recording policy, not a report
 all on → Refused off"), highlighted the same way invoice-policy changes are. The admin
 **bulk-restrict** tool on Books keeps working even while Restricted is toggled off — it's a desk
 action owned by the same people who own the toggle.
+
+### Reclassifying a retired outcome's old entries (added 2026-08)
+
+Turning an outcome off leaves its history alone, which is usually what you want. When it isn't —
+"we've stopped using No soliciting, make those old entries read as Not home" — an **org admin**
+can fold one outcome's past entries into another from the same screen.
+
+Deliberately narrow, because this is the only place in the product that rewrites what a canvasser
+recorded:
+
+- **Only three outcomes can be folded, as the source or the target: Not home, Wrong address, and
+  No soliciting.** They're interchangeable arithmetic — each counts as one knock and none counts
+  as reaching a person — so your door counts, contact rate, connection rate and every invoice
+  figure are identical before and after. **Refused and Restricted can never be converted**, in
+  either direction: refused means someone answered (it would move your contact rate) and
+  restricted can be billed (it would move an invoice).
+- **The outcome has to be switched off first.** The tool is for retiring something, not for
+  editing live history.
+- **Org admins only** — a lead can turn outcomes on and off for their campaign, but rewriting
+  recorded history sits one level up.
+- **Everything else about each entry is kept**: the time, the GPS location, who knocked it, and
+  which round and turf it belonged to. Only the label changes, and door colors follow it.
+- **One-click revert, any time.** Each run is listed with its counts and can be undone exactly;
+  both the run and the revert appear in the campaign's change history, highlighted.
+
+You'll see a confirmation with the real numbers ("Change 412 entries across 388 doors from No
+soliciting to Not home?") before anything is written.
 
 ### Archive vs. delete
 
@@ -441,6 +479,30 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   wires, audit join, bulk-restrict carve-out) by
   [disabledOutcomes.int.test.js](../server/test/disabledOutcomes.int.test.js); the
   server/client/mobile constant mirrors by [outcomeToggles.test.js](../server/test/outcomeToggles.test.js).
+- **Outcome RECLASSIFICATION** — folding a retired outcome's recorded history into another —
+  is a separate, stricter tool:
+  [reclassifyOutcomes.js](../server/src/services/canvass/reclassifyOutcomes.js) behind
+  GET/POST `/admin/campaigns/:id/reclassify-outcomes` and POST `…/revert`, **org admins only**
+  (`isOrgAdmin`, not `canManageCampaign` — a lead owns what their canvassers see, not what the
+  ledger says). `RECLASSIFIABLE_OUTCOMES = ['not_home','wrong_address','no_soliciting']` bounds
+  both source and target, and that set IS the safety argument: all three are in `KNOCK_ACTIONS`
+  and none is a contact, so knocks, `contactRate`, `connectionRate`, `billableDoorsOf` and every
+  `Campaign.stats` counter are unmoved by any conversion within it (no counter keys on the three
+  individually — `knockCount`/`activityCount` cover them, the rest count surveys/lit/refused/
+  restricted). `refused` and `restricted` are excluded permanently for the mirror-image reason.
+  A source must currently be in `disabledOutcomes` (`SOURCE_NOT_DISABLED`) and the target must
+  not be (`TARGET_DISABLED`). Converted rows keep GPS/timestamp/user/pass/turf/effort and gain a
+  `CanvassActivity.reclassified { from, at, byUserId, runId }` stamp; **a stamped row is excluded
+  from later runs**, so provenance stays exactly one level deep and revert never guesses. Rows
+  are stamped BEFORE the [`ReclassifyRun`](../server/src/models/ReclassifyRun.js) row is written
+  (same "a row must mean this landed" ordering as `CampaignChange`), then door status is
+  re-resolved in bounded chunks. Both the run and its revert write a `CampaignChange` with
+  `field: 'outcomeReclassify'` and `source: 'outcome_reclassify'` — a **new enum value**, per that
+  model's own note that a bulk/repair path must declare itself rather than masquerade as a human
+  field edit; `source` is never shipped to clients, so it is not a client change. `ReclassifyRun`
+  is in **both** delete cascades. Pinned by
+  [reclassifyOutcomes.int.test.js](../server/test/reclassifyOutcomes.int.test.js), whose central
+  assertion is the money invariant, compared field-by-field before and after.
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),

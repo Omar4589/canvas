@@ -4,6 +4,8 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import Section from '../components/Section.jsx';
+import PhonePreview from '../components/outcomes/PhonePreview.jsx';
+import ReclassifyCard from '../components/outcomes/ReclassifyCard.jsx';
 import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
 import { OUTCOME_HINTS } from '../lib/outcomeToggles.js';
 
@@ -51,12 +53,15 @@ const Toggle = ({ id, label, hint, dot, checked, disabled, onChange }) => (
   </label>
 );
 
-// Per-campaign door-outcome toggles (Campaign.disabledOutcomes). Checked = the button is
-// AVAILABLE in the canvasser app, so the default state reads as everything-on. Turning one
-// off hides its button and makes the server refuse fresh submissions (OUTCOME_DISABLED);
-// doors already recorded keep their status and keep counting on every report. Leads reach
-// this page too — the field is deliberately lead-editable, like the door goal.
-export default function CampaignOutcomesPage() {
+// App Customization: what the canvasser app offers at this campaign's doors. Today that is the
+// door-outcome toggles (Campaign.disabledOutcomes) with a live phone preview; the Door Outcomes
+// reclassify tool mounts below the toggles once its server half lands, and future field-app
+// settings belong on this page too. Checked = the button is AVAILABLE, so the default state
+// reads as everything-on. Turning one off hides its button and makes the server refuse fresh
+// submissions (OUTCOME_DISABLED); doors already recorded keep their status and keep counting on
+// every report. Leads reach this page too — the field is deliberately lead-editable, like the
+// door goal.
+export default function AppCustomizationPage() {
   const { campaignId } = useParams();
   const { homePath } = useAuth();
   const qc = useQueryClient();
@@ -72,7 +77,7 @@ export default function CampaignOutcomesPage() {
   // Optimistic display while a save is in flight: show the array we just sent, then hand
   // back to server truth once the invalidate refetches (onSuccess returns the promise, so
   // onSettled doesn't clear the override until the fresh list is in the cache). On error
-  // the clear snaps the checkbox back to what the server still has.
+  // the clear snaps the checkbox — and the phone preview — back to what the server still has.
   const [pendingNext, setPendingNext] = useState(null);
   const save = useMutation({
     mutationFn: (next) => api(`/admin/campaigns/${campaignId}`, { method: 'PATCH', body: { disabledOutcomes: next } }),
@@ -102,49 +107,62 @@ export default function CampaignOutcomesPage() {
   };
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <div className="mb-4">
         <h1 className="text-2xl font-semibold text-fg">{current.name}</h1>
-        <div className="mt-1 text-sm text-fg-muted">Door outcomes — which buttons canvassers see in the field app</div>
+        <div className="mt-1 text-sm text-fg-muted">App Customization — what canvassers see and record at the door</div>
       </div>
 
-      <Section title="Door outcomes">
-        <p className="mb-2 text-sm text-fg-muted">
-          Turning an outcome off hides its button in the field app and blocks new submissions. Doors already
-          recorded keep their status and keep counting in every report — this changes what can be recorded from
-          now on, nothing about the past.
-        </p>
-        {TOGGLE_ORDER[type].map((key) => (
-          <Toggle
-            key={key}
-            id={`outcome-${key}`}
-            label={ACTION_LABELS[key]}
-            hint={OUTCOME_HINTS[key]}
-            dot={STATUS_COLORS[key]}
-            checked={!disabled.includes(key)}
-            disabled={save.isPending}
-            onChange={(available) => setAvailable(key, available)}
-          />
-        ))}
-        {save.isError && (
-          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-            {save.error?.message || 'Could not save. Try again.'}
-          </div>
-        )}
-      </Section>
+      <div className="flex flex-col-reverse gap-8 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
+          <Section title="Door outcomes">
+            <p className="mb-2 text-sm text-fg-muted">
+              Turning an outcome off hides its button in the field app and blocks new submissions. Doors already
+              recorded keep their status and keep counting in every report — this changes what can be recorded from
+              now on, nothing about the past.
+            </p>
+            {TOGGLE_ORDER[type].map((key) => (
+              <Toggle
+                key={key}
+                id={`outcome-${key}`}
+                label={ACTION_LABELS[key]}
+                hint={OUTCOME_HINTS[key]}
+                dot={STATUS_COLORS[key]}
+                checked={!disabled.includes(key)}
+                disabled={save.isPending}
+                onChange={(available) => setAvailable(key, available)}
+              />
+            ))}
+            {save.isError && (
+              <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                {save.error?.message || 'Could not save. Try again.'}
+              </div>
+            )}
+          </Section>
 
-      <Section title="Always available">
-        <p className="mb-2 text-sm text-fg-muted">These can't be turned off — without them a walk can't be recorded at all.</p>
-        {ALWAYS_ON_ROWS[type].map((row) => (
-          <div key={row.key} className="flex items-start gap-2.5 border-b border-border py-2.5 last:border-0">
-            <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLORS[row.dot] }} aria-hidden />
-            <span className="min-w-0">
-              <span className="block text-sm text-fg">{ACTION_LABELS[row.key]}</span>
-              <span className="mt-0.5 block text-xs text-fg-muted">{row.hint}</span>
-            </span>
-          </div>
-        ))}
-      </Section>
+          <Section title="Always available">
+            <p className="mb-2 text-sm text-fg-muted">These can't be turned off — without them a walk can't be recorded at all.</p>
+            {ALWAYS_ON_ROWS[type].map((row) => (
+              <div key={row.key} className="flex items-start gap-2.5 border-b border-border py-2.5 last:border-0">
+                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLORS[row.dot] }} aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm text-fg">{ACTION_LABELS[row.key]}</span>
+                  <span className="mt-0.5 block text-xs text-fg-muted">{row.hint}</span>
+                </span>
+              </div>
+            ))}
+          </Section>
+
+          {/* The Door Outcomes reclassify tool — org-admin-only cleanup of a toggled-off
+              outcome's history. Null for everyone else; keyed on disabledOutcomes so a toggle
+              flip above refreshes its eligible list. */}
+          <ReclassifyCard campaignId={campaignId} disabledOutcomes={current.disabledOutcomes || []} />
+        </div>
+
+        <div className="flex shrink-0 justify-center lg:sticky lg:top-4">
+          <PhonePreview campaignType={current.type} disabledOutcomes={disabled} />
+        </div>
+      </div>
     </div>
   );
 }

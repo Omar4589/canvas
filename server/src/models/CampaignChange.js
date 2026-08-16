@@ -23,7 +23,11 @@ const campaignChangeSchema = new mongoose.Schema(
     campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true, index: true },
     // The schema path that changed — the key, not a label. Labels live on the clients
     // (client/src/lib/campaignHistory.js), so re-wording one is never a data migration.
-    // Constrained to AUDITED_FIELDS in routes/admin/campaigns.js; an unlisted field is not logged.
+    // Config edits are constrained to AUDITED_FIELDS in routes/admin/campaigns.js; an unlisted
+    // field is not logged. ONE key is not a schema path: 'outcomeReclassify', written by the
+    // outcome-reclassification tool, where fromValue/toValue are the two outcome keys the run
+    // folded together (swapped on a revert). It rides this collection rather than growing its own
+    // feed because "who rewrote 412 doors' history" belongs beside "who lowered the door goal".
     field: { type: String, required: true },
     // Mixed because the audited fields are a String, a Number, a Boolean and a tri-state Boolean.
     // `null` is a REAL value on both sides for most of them ("no goal", "no date", "inherit the
@@ -32,9 +36,12 @@ const campaignChangeSchema = new mongoose.Schema(
     fromValue: { type: mongoose.Schema.Types.Mixed, default: null },
     toValue: { type: mongoose.Schema.Types.Mixed, default: null },
     byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // the actor
-    // How the edit arrived. One value today; an enum so a future bulk/repair path has to declare
-    // itself rather than masquerading as a human edit in the feed.
-    source: { type: String, enum: ['admin_campaigns'], required: true },
+    // How the edit arrived. An enum so a bulk/repair path has to declare itself rather than
+    // masquerading as a human field edit in the feed: 'admin_campaigns' is the PATCH,
+    // 'outcome_reclassify' is the outcome-reclassification tool (and its revert). Server-side
+    // only — the history route deliberately does not ship `source` to the clients, so adding a
+    // value here is never a client change.
+    source: { type: String, enum: ['admin_campaigns', 'outcome_reclassify'], required: true },
   },
   { timestamps: true }
 );

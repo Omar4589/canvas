@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useMatch } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
+import { ORG_NAV, CAMPAIGN_NAV, CAMPAIGN_NAV_GROUPS, SUPER_NAV } from './navItems.js';
 import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -74,6 +74,7 @@ export default function BottomNav() {
       label: n.label,
       icon: n.icon,
       end: !n.slug,
+      group: n.group,
     });
     const all = CAMPAIGN_NAV.map(toItem);
     tabs = CAMPAIGN_NAV.filter((n) => CAMPAIGN_PRIMARY.includes(n.slug)).map(toItem);
@@ -144,8 +145,8 @@ export default function BottomNav() {
               </NavLink>
             )}
 
-            <div className="space-y-1">
-              {moreItems.map((it) => (
+            {(() => {
+              const sheetItem = (it) => (
                 <NavLink key={it.key} to={it.to} end={it.end} className={sheetLinkClass} onClick={close}>
                   {it.key === 'audit' && openMockFlags > 0 ? (
                     <span className="flex items-center">
@@ -158,8 +159,26 @@ export default function BottomNav() {
                     it.label
                   )}
                 </NavLink>
-              ))}
-            </div>
+              );
+              // Campaign sheet mirrors the sidebar's groups (same header style as Platform
+              // below); the org sheet stays a flat list — it's short enough.
+              return inCampaign ? (
+                CAMPAIGN_NAV_GROUPS.map((g) => {
+                  const items = moreItems.filter((it) => it.group === g.key);
+                  if (!items.length) return null;
+                  return (
+                    <div key={g.key}>
+                      <div className="mt-3 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
+                        {g.label}
+                      </div>
+                      <div className="space-y-1">{items.map(sheetItem)}</div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="space-y-1">{moreItems.map(sheetItem)}</div>
+              );
+            })()}
 
             {isSuperAdmin && (
               <>

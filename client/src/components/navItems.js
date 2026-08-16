@@ -34,26 +34,43 @@ export const ORG_NAV = [
   { to: '/billing', label: 'Billing' },
 ];
 
+// The campaign nav grew to 18 items, past what one flat list can carry — grouped by what the
+// admin is DOING: configuring the campaign (Setup), running the field operation (Field),
+// checking the work's integrity (Quality), reading what came back (Results), and producing
+// things that leave the app (Deliverables). `group` keys into CAMPAIGN_NAV_GROUPS below;
+// Home carries none and renders ungrouped at the top. Item order INSIDE each group preserves
+// the old flat order on purpose — the grouping adds structure without moving muscle memory.
+// BottomNav ignores `group` (its tab bar + More sheet stay flat by design).
+export const CAMPAIGN_NAV_GROUPS = [
+  { key: 'setup', label: 'Setup' },
+  { key: 'field', label: 'Field' },
+  { key: 'quality', label: 'Quality' },
+  { key: 'results', label: 'Results' },
+  { key: 'deliverables', label: 'Deliverables' },
+];
+
 export const CAMPAIGN_NAV = [
   { slug: '', label: 'Home', icon: '/admin' },
-  { slug: 'survey', label: 'Survey', icon: '/surveys' },
-  // Next to Survey, not down with the outputs: both configure what canvassers see at the door.
-  { slug: 'outcomes', label: 'Door Outcomes', icon: '/outcomes' },
-  { slug: 'import', label: 'Voter Import', icon: '/import' },
-  { slug: 'efforts', label: 'Walk Lists', icon: '/efforts' },
-  { slug: 'walklists', label: 'Saved Searches', icon: '/walklists' },
-  { slug: 'turfs', label: 'Turf Cutting', icon: '/turfs' },
-  { slug: 'team', label: 'Team', icon: '/users' },
-  { slug: 'timeline', label: 'Timeline', icon: '/timeline' },
-  { slug: 'map', label: 'Map', icon: '/map' },
-  { slug: 'audit', label: 'Audit', icon: '/audit' },
-  { slug: 'overlaps', label: 'Overlaps', icon: '/overlaps' },
-  { slug: 'explorer', label: 'Survey Explorer', icon: '/surveys' },
-  { slug: 'notes', label: 'Notes', icon: '/notes' },
-  { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting' },
-  { slug: 'reports', label: 'Client Reports', icon: '/admin/client-reports' },
-  { slug: 'exports', label: 'Exports', icon: '/exports' },
+  { slug: 'survey', label: 'Survey', icon: '/surveys', group: 'setup' },
+  // What the canvasser app offers at the door (outcome toggles today, more later). The page
+  // also hosts the Door Outcomes reclassify tool — the PAGE is App Customization, the TOOL
+  // keeps the Door Outcomes name (owner ruling 2026-08-16).
+  { slug: 'customize', label: 'App Customization', icon: '/customize', group: 'setup' },
+  { slug: 'import', label: 'Voter Import', icon: '/import', group: 'setup' },
+  { slug: 'efforts', label: 'Walk Lists', icon: '/efforts', group: 'setup' },
+  { slug: 'walklists', label: 'Saved Searches', icon: '/walklists', group: 'setup' },
+  { slug: 'turfs', label: 'Turf Cutting', icon: '/turfs', group: 'setup' },
+  { slug: 'team', label: 'Team', icon: '/users', group: 'field' },
+  { slug: 'timeline', label: 'Timeline', icon: '/timeline', group: 'field' },
+  { slug: 'map', label: 'Map', icon: '/map', group: 'field' },
+  { slug: 'audit', label: 'Audit', icon: '/audit', group: 'quality' },
+  { slug: 'overlaps', label: 'Overlaps', icon: '/overlaps', group: 'quality' },
+  { slug: 'notes', label: 'Notes', icon: '/notes', group: 'quality' },
+  { slug: 'explorer', label: 'Survey Explorer', icon: '/surveys', group: 'results' },
+  { slug: 'early-voting', label: 'Early Voting', icon: '/early-voting', group: 'results' },
+  { slug: 'reports', label: 'Client Reports', icon: '/admin/client-reports', group: 'deliverables' },
+  { slug: 'exports', label: 'Exports', icon: '/exports', group: 'deliverables' },
   // Down here with the other occasional outputs rather than next to Turf Cutting: printing paper
   // packets is a rare fallback, not a step in the normal cut-and-walk flow (owner call).
-  { slug: 'packets', label: 'Print Packets', icon: '/packets' },
+  { slug: 'packets', label: 'Print Packets', icon: '/packets', group: 'deliverables' },
 ];

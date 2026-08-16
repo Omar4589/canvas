@@ -22,6 +22,16 @@ import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
 import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
+import { ReclassifyRun } from '../../models/ReclassifyRun.js';
+import {
+  RECLASSIFIABLE_OUTCOMES,
+  countConvertible,
+  eligibleSources,
+  eligibleTargets,
+  validatePair,
+  runReclassify,
+  revertReclassify,
+} from '../../services/canvass/reclassifyOutcomes.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
 import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
@@ -698,6 +708,136 @@ router.delete('/:campaignId', async (req, res, next) => {
 
     res.status(202).json({ queued: true });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ── Reclassifying a retired outcome's history ───────────────────────────────
+// Turning an outcome off stops FUTURE recording; these three fold what was already recorded into
+// another outcome. ORG ADMINS ONLY, deliberately stricter than the toggle itself (which a lead
+// owns): a lead decides what their canvassers see going forward, but rewriting recorded history
+// is an org-admin act. The safety argument for why this can't move a number lives in
+// services/canvass/reclassifyOutcomes.js.
+
+const reclassifySchema = z.object({
+  from: z.enum(RECLASSIFIABLE_OUTCOMES),
+  to: z.enum(RECLASSIFIABLE_OUTCOMES),
+  dryRun: z.boolean().optional(),
+});
+
+const revertSchema = z.object({
+  runId: z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid run id'),
+});
+
+/** Shared preamble: org-admin gate, campaign lookup, mid-delete quarantine. */
+async function loadForReclassify(req, res) {
+  if (!ensureOrgScoped(req, res)) return null;
+  if (!isOrgAdmin(req)) {
+    res.status(403).json({ error: "Only an org admin can reclassify a campaign's recorded outcomes." });
+    return null;
+  }
+  const campaign = await Campaign.findOne({
+    _id: req.params.campaignId,
+    organizationId: activeOrgId(req),
+  });
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return null;
+  }
+  if (isDeleting(campaign)) {
+    res.status(409).json({ error: 'This campaign is being deleted.', code: 'campaign-deleting' });
+    return null;
+  }
+  return campaign;
+}
+
+// What could be folded right now, and what already was. Feeds the outcomes card in one call.
+router.get('/:campaignId/reclassify-outcomes', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+
+    const [counts, runs] = await Promise.all([
+      eligibleSources(campaign),
+      ReclassifyRun.find({ campaignId: campaign._id }).sort({ createdAt: -1 }).limit(50).lean(),
+    ]);
+    // Same identity treatment as the history feed: an actor since deleted still gets named.
+    const people = await hydrateCanvassers(runs.map((r) => r.byUserId).filter(Boolean), activeOrgId(req));
+
+    res.json({
+      counts,
+      targets: eligibleTargets(campaign),
+      runs: runs.map((r) => {
+        const p = r.byUserId ? people.get(String(r.byUserId)) : null;
+        return {
+          id: String(r._id),
+          from: r.from,
+          to: r.to,
+          count: r.count,
+          doorCount: r.doorCount,
+          createdAt: r.createdAt,
+          revertedAt: r.revertedAt,
+          by: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null,
+        };
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// dryRun: the numbers the confirm step shows, nothing written. Otherwise: convert, stamp, audit.
+router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const { from, to, dryRun } = reclassifySchema.parse(req.body);
+
+    const invalid = validatePair(campaign, from, to);
+    if (invalid) return res.status(invalid.status).json(invalid.body);
+
+    if (dryRun) return res.json({ dryRun: true, from, to, ...(await countConvertible(campaign._id, from)) });
+
+    const run = await runReclassify({ campaign, from, to, byUserId: req.user._id });
+    res.status(201).json({
+      run: {
+        id: String(run._id),
+        from: run.from,
+        to: run.to,
+        count: run.count,
+        doorCount: run.doorCount,
+        createdAt: run.createdAt,
+        revertedAt: null,
+      },
+    });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/:campaignId/reclassify-outcomes/revert', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const { runId } = revertSchema.parse(req.body);
+
+    // Scoped to this campaign AND org: a run id from elsewhere reads as missing, never as
+    // something to undo here.
+    const run = await ReclassifyRun.findOne({
+      _id: runId,
+      campaignId: campaign._id,
+      organizationId: activeOrgId(req),
+    });
+    if (!run) return res.status(404).json({ error: 'Reclassification not found' });
+    if (run.revertedAt) {
+      return res.status(409).json({ error: 'That reclassification was already reverted.', code: 'ALREADY_REVERTED' });
+    }
+
+    await revertReclassify({ campaign, run, byUserId: req.user._id });
+    res.json({ reverted: true, runId: String(run._id), revertedAt: run.revertedAt });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
   }
 });

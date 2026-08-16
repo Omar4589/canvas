@@ -458,12 +458,12 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/history');
   }
 
-  // Door outcomes reads the raw ['admin','campaigns'] row via ?campaignId=, but seat the
+  // App customization reads the raw ['admin','campaigns'] row via ?campaignId=, but seat the
   // campaign anyway so screens it hands back to stay scoped like every other tile.
-  async function goDoorOutcomes() {
+  async function goAppCustomization() {
     if (!campaign) return;
     await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
-    router.push(`/(app)/admin/door-outcomes?campaignId=${cId}`);
+    router.push(`/(app)/admin/app-customization?campaignId=${cId}`);
   }
 
   if (campaignsQ.data && !campaign) {
@@ -894,7 +894,7 @@ export default function CampaignDetail() {
                 // server-side, so it is safe for every console role).
                 { label: 'Team', subtitle: 'Crew & assignments', onPress: goTeam },
               { label: 'History', subtitle: 'Who changed what', onPress: goHistory },
-              { label: 'Door outcomes', subtitle: 'Which buttons canvassers see', onPress: goDoorOutcomes },
+              { label: 'App customization', subtitle: 'Which buttons canvassers see', onPress: goAppCustomization },
               ]}
             />
           </View>

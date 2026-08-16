@@ -28,6 +28,7 @@ import { DncPendingId } from '../../models/DncPendingId.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
+import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { captureCampaignBeforeDelete } from '../platform/platformStats.js';
 
 const CHUNK = 5000;
@@ -158,7 +159,7 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
-    CampaignManager, CoordinatorChange, CampaignChange, ClientReport, ClientReportMapPoint, ReportShareLink,
+    CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, ClientReport, ClientReportMapPoint, ReportShareLink,
     CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
     ExportJob,
   ];

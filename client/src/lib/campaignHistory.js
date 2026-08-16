@@ -21,6 +21,7 @@ const FIELD_LABELS = {
   type: 'Campaign type',
   state: 'State',
   disabledOutcomes: 'Door outcomes',
+  outcomeReclassify: 'Reclassified entries',
 };
 
 const DATE_FIELDS = new Set(['goalDate', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd']);
@@ -49,6 +50,9 @@ export function formatValue(field, value) {
     if (!value) return 'all on';
     return `${String(value).split(',').map((k) => ACTION_LABELS[k] || k).join(', ')} off`;
   }
+  // Not a schema path: the outcome-reclassification tool writes the two outcome KEYS it folded
+  // together, so the row reads "No soliciting → Not home" (and the reverse on a revert).
+  if (field === 'outcomeReclassify') return ACTION_LABELS[value] || String(value ?? '');
   if (value === null || value === undefined || value === '') {
     return field === 'datesNote' ? 'empty' : 'not set';
   }
@@ -69,6 +73,8 @@ export function isNotable(item) {
   if (item.kind === 'team') return !!item.restampError;
   if (item.field === 'billRestrictedDoors') return true;
   if (item.field === 'disabledOutcomes') return true;
+  // Rewriting recorded history always deserves the eye, in either direction.
+  if (item.field === 'outcomeReclassify') return true;
   if (item.field === 'doorGoal') {
     const from = Number(item.fromValue);
     const to = Number(item.toValue);

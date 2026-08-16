@@ -77,6 +77,25 @@ const canvassActivitySchema = new mongoose.Schema(
     // audit and every per-canvasser surface (NOT_BULK in reports/aggregations).
     via: { type: String, enum: [null, 'bulk'], default: null },
 
+    // Set when an admin FOLDED this row's outcome into another one (a retired outcome's history
+    // being reclassified — services/canvass/reclassifyOutcomes.js). `from` is the actionType this
+    // row carried before, which is what Revert restores; `runId` points at the ReclassifyRun that
+    // did it. Absent on every row recorded in the field, which is also the flag the tool reads:
+    // a stamped row is EXCLUDED from later runs, so provenance stays exactly one level deep and a
+    // revert can never land on a guess about what the original outcome was.
+    reclassified: {
+      type: new mongoose.Schema(
+        {
+          from: { type: String, required: true },
+          at: { type: Date, required: true },
+          byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          runId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReclassifyRun', required: true },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
+
     // Pass/turf/effort tags — metadata only (null = pre-turf history).
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
     turfId: { type: mongoose.Schema.Types.ObjectId, ref: 'Turf', default: null },

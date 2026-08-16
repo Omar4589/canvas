@@ -11,12 +11,13 @@ import { useThemedStyles } from '../../../lib/useThemedStyles';
 import SectionHeader from '../../../components/SectionHeader';
 import InsetGroup, { InsetRow, InsetSwitchRow, GroupFooter } from '../../../components/InsetGroup';
 
-// Which door-outcome buttons this campaign's canvassers see (Campaign.disabledOutcomes) —
-// the mobile twin of the web Door Outcomes page. Switch ON = the button is available, so the
-// default state reads as everything-on. Turning one off hides its button in the field app and
-// makes the server refuse fresh submissions (OUTCOME_DISABLED); doors already recorded keep
-// their status and keep counting. Reads the RAW ['admin','campaigns'] row — useAdminCampaign's
-// shape() strips everything but id/name/type/state/timeZone, so it can't carry this field.
+// App customization: which door-outcome buttons this campaign's canvassers see
+// (Campaign.disabledOutcomes) — the mobile twin of the web App Customization page. Switch ON =
+// the button is available, so the default state reads as everything-on. Turning one off hides
+// its button in the field app and makes the server refuse fresh submissions (OUTCOME_DISABLED);
+// doors already recorded keep their status and keep counting. Reads the RAW
+// ['admin','campaigns'] row — useAdminCampaign's shape() strips everything but
+// id/name/type/state/timeZone, so it can't carry this field.
 
 // Door-screen order, and type-aware: wrong-address and refused don't exist in the lit-drop
 // door UI (their routes are survey-gated), so a lit-drop campaign only gets the two
@@ -35,7 +36,7 @@ const ALWAYS_ON_ROWS = {
   ],
 };
 
-export default function AdminDoorOutcomes() {
+export default function AdminAppCustomization() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
@@ -72,7 +73,7 @@ export default function AdminDoorOutcomes() {
     mutationFn: (next) => api(`/admin/campaigns/${cId}`, { method: 'PATCH', body: { disabledOutcomes: next } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
-      flash('success', 'Door outcomes updated.');
+      flash('success', 'Outcome buttons updated.');
     },
     onError: (err) => {
       // Snap back to server truth (read from the cache, not this render's closure).
@@ -96,7 +97,7 @@ export default function AdminDoorOutcomes() {
           <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
             <Text style={styles.back}>‹ Back</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>Door outcomes</Text>
+          <Text style={styles.headerTitle}>App customization</Text>
           <View style={{ width: 80 }} />
         </View>
         <View style={styles.centered}>

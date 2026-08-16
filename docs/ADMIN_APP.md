@@ -531,10 +531,10 @@ where relevant a grey line of explanation.
   ([CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*); it is reached from the campaign screen's
   Quick actions rather than the More hub, since it answers a question you have while looking at a
   campaign's numbers;
-  **Door outcomes** — which outcome buttons this campaign's canvassers see, a stack of switches
-  (the inset grammar's `InsetSwitchRow`, its first use) with an always-available list below;
-  reached from the campaign screen's Quick actions like History, edits save on flip, and every
-  flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*);
+  **App customization** — which outcome buttons this campaign's canvassers see, a stack of
+  switches (the inset grammar's `InsetSwitchRow`, its first use) with an always-available list
+  below; reached from the campaign screen's Quick actions like History, edits save on flip, and
+  every flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*);
   **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";

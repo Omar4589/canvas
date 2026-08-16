@@ -177,7 +177,7 @@ Any door button recolors the pin and drops you back on the map the instant you t
 waiting on the network.
 
 **Some buttons may be missing on purpose.** Your campaign can turn individual outcomes off (say,
-No soliciting) from its Door Outcomes settings — if a button you expect isn't there, that's a
+No soliciting) from its App Customization settings — if a button you expect isn't there, that's a
 campaign choice, not a bug. **Not home** and the completion action (**Surveyed** / **Lit dropped**)
 are always available. In the rare race where the setting changes right as you tap a
 just-disabled button, the app tells you it's turned off, nothing is recorded, and the button
@@ -553,7 +553,7 @@ branch the action area:
   type. The two look alike and count oppositely: `no_soliciting` is in `KNOCK_ACTIONS`, `restricted`
   is not (see [METRICS.md](METRICS.md)).
 - The four toggleable buttons (Wrong address, Refused, No soliciting, Restricted) are each gated on
-  `outcomeOn(key)` — `bootstrap.campaign.disabledOutcomes` (per-campaign Door Outcomes settings,
+  `outcomeOn(key)` — `bootstrap.campaign.disabledOutcomes` (per-campaign App Customization settings,
   [CAMPAIGNS.md](CAMPAIGNS.md)); a missing field (older server) means all on. Not home and the
   completion actions never gate. A stale bootstrap can still show a just-disabled button — the
   server refuses it with `OUTCOME_DISABLED`, and `recordAction`'s hard-fail path alerts ("Outcome

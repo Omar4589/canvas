@@ -348,12 +348,14 @@ export function IconPlug({ size = 22 }) {
   );
 }
 
-// A switch with its knob to the on side — the Door Outcomes page is a stack of exactly these.
-export function IconToggle({ size = 22 }) {
+// A phone with a switch inside — App Customization configures what the canvasser app shows,
+// and the page previews it in a phone mockup.
+export function IconPhoneToggle({ size = 22 }) {
   return (
     <svg width={size} height={size} {...baseProps}>
-      <rect x="2.5" y="7" width="19" height="10" rx="5" />
-      <circle cx="15.5" cy="12" r="2.5" />
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+      <rect x="9.5" y="10" width="5" height="3" rx="1.5" />
+      <path d="M11 18.5h2" />
     </svg>
   );
 }
@@ -367,7 +369,7 @@ export const NAV_ICONS = {
   '/campaigns': IconFlag,
   '/import': IconUpload,
   '/exports': IconDownload,
-  '/outcomes': IconToggle,
+  '/customize': IconPhoneToggle,
   '/packets': IconPrinter,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,

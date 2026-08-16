@@ -5,7 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import Logo, { LogoMark } from './Logo.jsx';
-import { ORG_NAV, CAMPAIGN_NAV, SUPER_NAV } from './navItems.js';
+import { ORG_NAV, CAMPAIGN_NAV, CAMPAIGN_NAV_GROUPS, SUPER_NAV } from './navItems.js';
 import { navIcon, IconChevron } from './navIcons.jsx';
 import { IconSun, IconMoon } from './ui/icons.jsx';
 import { Tooltip } from './ui/Popover.jsx';
@@ -123,6 +123,49 @@ export default function Layout() {
     location.pathname.endsWith('/packets') ||
     location.pathname === '/queues';
 
+  // One campaign nav item, shared by the ungrouped Home row and every grouped section below —
+  // extracted so the grouping can't fork the badge/tooltip behavior per section.
+  const renderCampaignItem = (n) => {
+    const Icon = navIcon(n.icon);
+    const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
+    // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
+    const mockBadge = n.slug === 'audit' && openMockFlags > 0;
+    const flagNote = mockBadge
+      ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
+      : '';
+    return (
+      <RailTip
+        key={n.slug || 'home'}
+        // Collapsed, the red dot on Audit is the only sign of the flag count — so the
+        // tip carries it, or the badge is unreadable on the rail.
+        label={mockBadge ? `${n.label} · ${flagNote}` : n.label}
+        enabled={collapsed}
+      >
+        <NavLink
+          to={to}
+          end={!n.slug}
+          aria-label={collapsed ? n.label : undefined}
+          title={!collapsed && mockBadge ? flagNote : undefined}
+          className={(s) => navClass(collapsed)(s) + (mockBadge ? ' relative' : '')}
+        >
+          <Icon size={20} />
+          {!collapsed && <span>{n.label}</span>}
+          {mockBadge && !collapsed && (
+            <span
+              aria-label={`${openMockFlags} open mock-GPS flags`}
+              className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60"
+            >
+              {openMockFlags}
+            </span>
+          )}
+          {mockBadge && collapsed && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
+          )}
+        </NavLink>
+      </RailTip>
+    );
+  };
+
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem('sidebarCollapsed') === '1';
@@ -231,44 +274,22 @@ export default function Layout() {
                   </select>
                 </div>
               )}
-              {CAMPAIGN_NAV.map((n) => {
-                const Icon = navIcon(n.icon);
-                const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
-                // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
-                const mockBadge = n.slug === 'audit' && openMockFlags > 0;
-                const flagNote = mockBadge
-                  ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
-                  : '';
+              {/* Home rides ungrouped at the top; the rest render in CAMPAIGN_NAV_GROUPS order —
+                  same header-when-expanded / divider-when-collapsed treatment as the
+                  super-admin Platform section below. */}
+              {CAMPAIGN_NAV.filter((n) => !n.group).map(renderCampaignItem)}
+              {CAMPAIGN_NAV_GROUPS.map((g) => {
+                const items = CAMPAIGN_NAV.filter((n) => n.group === g.key);
+                if (!items.length) return null;
                 return (
-                  <RailTip
-                    key={n.slug || 'home'}
-                    // Collapsed, the red dot on Audit is the only sign of the flag count — so the
-                    // tip carries it, or the badge is unreadable on the rail.
-                    label={mockBadge ? `${n.label} · ${flagNote}` : n.label}
-                    enabled={collapsed}
-                  >
-                  <NavLink
-                    to={to}
-                    end={!n.slug}
-                    aria-label={collapsed ? n.label : undefined}
-                    title={!collapsed && mockBadge ? flagNote : undefined}
-                    className={(s) => navClass(collapsed)(s) + (mockBadge ? ' relative' : '')}
-                  >
-                    <Icon size={20} />
-                    {!collapsed && <span>{n.label}</span>}
-                    {mockBadge && !collapsed && (
-                      <span
-                        aria-label={`${openMockFlags} open mock-GPS flags`}
-                        className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60"
-                      >
-                        {openMockFlags}
-                      </span>
+                  <div key={g.key} className="space-y-1">
+                    {collapsed ? (
+                      <div className="my-2 border-t border-border" />
+                    ) : (
+                      <div className={GROUP_HEADER}>{g.label}</div>
                     )}
-                    {mockBadge && collapsed && (
-                      <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
-                    )}
-                  </NavLink>
-                  </RailTip>
+                    {items.map(renderCampaignItem)}
+                  </div>
                 );
               })}
             </>
