@@ -25,10 +25,9 @@ import { timeAgo } from '../../../lib/datetime';
 import { radius, spacing, withAlpha } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
-import DateRangeBar from '../../../components/DateRangeBar';
+import FilterBar from '../../../components/FilterBar';
 import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
-import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import CanvasserCard from '../../../components/CanvasserCard';
 import SectionHeader from '../../../components/SectionHeader';
@@ -606,7 +605,55 @@ export default function AdminTimeline() {
       </View>
       <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={TIMELINE_PRESETS} requireFrom />
+      {/* One row of value-showing chips — was a DateRangeBar plus two TabSwitchers on three
+          separate rows. All three live in the FIXED header, ABOVE the loading/error/invalid-range
+          branch: a control that can empty the screen must never live inside the thing it empties,
+          or there is no way back. (Same reason and placement as audit.jsx's.)
+
+          The crew gate deliberately has NO `rows` term: `rows` IS the ?coordinatorId-filtered
+          response, so gating on it unmounted the only control that could clear the filter — pick a
+          crew with no activity in range (or "No coordinator") and the screen was a trap with no
+          escape but switching campaigns. The web console never had the bug
+          (client/src/pages/TimelinePage.jsx). `|| coordinatorId` keeps an escape even for a
+          coordinator who has since left BOTH the ledger and the roster, the one case
+          coordinatorOptions cannot cover. */}
+      <FilterBar
+        filters={[
+          {
+            key: 'range',
+            kind: 'dateRange',
+            title: 'Date range',
+            value: range,
+            onChange: onRangeChange,
+            tz,
+            presets: TIMELINE_PRESETS,
+            requireFrom: true,
+          },
+          {
+            key: 'effort',
+            title: 'Walk list',
+            hidden: efforts.length <= 1,
+            options: [
+              { key: '', label: 'All walk lists' },
+              ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+            ],
+            selected: effortId,
+            onSelect: setEffortId,
+          },
+          {
+            key: 'crew',
+            title: 'Crew',
+            hidden: !(coordinatorOptions.length > 0 || coordinatorId),
+            options: [
+              { key: '', label: 'All crews' },
+              ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
+              { key: 'none', label: 'No coordinator' },
+            ],
+            selected: coordinatorId,
+            onSelect: setCoordinatorId,
+          },
+        ]}
+      />
 
       {/* Stepper (single-day) + metric toggle. One flat row — the live pill moved up to the
           title band, which is what lets this fit on a single line again (~324pt of 343). */}
@@ -671,38 +718,6 @@ export default function AdminTimeline() {
           secondary, and their 42pt row was the one band whose every control could move behind a
           single affordance. They live in the sort button's sheet ("View options") below; compare
           mode's EXIT lives on the compare bar itself, which the mode puts on screen. */}
-
-      {/* Both filters live in the FIXED header, ABOVE the loading/error/invalid-range branch — a
-          control that can empty the screen must never live inside the thing it empties, or there is
-          no way back. (Same reason and same placement as audit.jsx's walk-list strip.)
-
-          The coordinator gate deliberately has NO `rows` term: `rows` IS the ?coordinatorId-filtered
-          response, so gating on it unmounted the only pill that could clear the filter — pick a crew
-          with no activity in range (or "No coordinator") and the screen was a trap with no escape but
-          switching campaigns. The web console never had the bug (client/src/pages/TimelinePage.jsx).
-          `|| coordinatorId` keeps an escape even for a coordinator who has since left BOTH the ledger
-          and the roster, which is the one case coordinatorOptions can't cover. */}
-      {efforts.length > 1 ? (
-        <TabSwitcher
-          tabs={[
-            { key: '', label: 'All walk lists' },
-            ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
-          ]}
-          activeKey={effortId}
-          onChange={setEffortId}
-        />
-      ) : null}
-      {coordinatorOptions.length > 0 || coordinatorId ? (
-        <TabSwitcher
-          tabs={[
-            { key: '', label: 'All' },
-            ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
-            { key: 'none', label: 'No coordinator' },
-          ]}
-          activeKey={coordinatorId}
-          onChange={setCoordinatorId}
-        />
-      ) : null}
 
       {rangeInvalid ? (
         <View style={styles.groupWrap}>

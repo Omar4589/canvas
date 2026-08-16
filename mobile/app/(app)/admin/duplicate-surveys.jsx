@@ -24,11 +24,10 @@ import {
   buildDeletePrompt,
   deleteErrorMessage,
 } from '../../../lib/duplicateSurveys';
-import DateRangeBar from '../../../components/DateRangeBar';
+import FilterBar from '../../../components/FilterBar';
 import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import { useCampaignArchived } from '../../../lib/useCampaignArchived';
-import TabSwitcher from '../../../components/TabSwitcher';
 import DuplicateVoterCard from '../../../components/DuplicateVoterCard';
 import InsetGroup, {
   InsetActionRow,
@@ -241,19 +240,28 @@ export default function AdminDuplicateSurveys() {
         the same day is usually a mistake; a later-round canvasser is usually a legitimate revisit.
       </Text>
 
-      <DateRangeBar value={range} onChange={setRange} tz={tz} presets={PRESETS} />
       {head.tzAbbrev ? <Text style={styles.tzLine}>Dates &amp; times in {head.tzAbbrev}</Text> : null}
 
-      {/* Filters live in the FIXED area above the scroller — a control that can empty the screen is
-          never inside it. The canvasser strip is gated on the ROSTER, never on the report payload,
-          so picking someone can't unmount the strip that clears them. */}
-      <TabSwitcher tabs={KIND_TABS} activeKey={kind} onChange={setKind} />
-      {canvasserTabs.length > 1 ? (
-        <TabSwitcher tabs={canvasserTabs} activeKey={userId} onChange={setUserId} />
-      ) : null}
+      {/* All three filters in ONE row, in the FIXED area above the scroller — a control that can
+          empty the screen is never inside it. The canvasser filter is gated on the ROSTER, never
+          on the report payload, so picking someone can't unmount the control that clears them. */}
+      <FilterBar
+        filters={[
+          { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: setRange, tz, presets: PRESETS },
+          { key: 'kind', title: 'Kind', options: KIND_TABS, selected: kind, onSelect: setKind },
+          {
+            key: 'canvasser',
+            title: 'Canvasser',
+            hidden: canvasserTabs.length <= 1,
+            options: canvasserTabs,
+            selected: userId,
+            onSelect: setUserId,
+          },
+        ]}
+      />
 
-      {/* flex:1 is MANDATORY: two TabSwitcher strips are flex siblings of this scroller, and
-          without it Yoga crushes their 42pt pills to ~13pt the moment data arrives. */}
+      {/* flex:1 is MANDATORY: FilterBar's chip row is a flex sibling of this scroller, and
+          without it Yoga crushes the chips to a sliver the moment data arrives. */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}

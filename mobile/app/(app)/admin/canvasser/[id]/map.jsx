@@ -21,8 +21,7 @@ import { radius, spacing, ACTION_LABELS } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../../lib/mapStyles';
-import DateRangeBar from '../../../../../components/DateRangeBar';
-import TabSwitcher from '../../../../../components/TabSwitcher';
+import FilterBar from '../../../../../components/FilterBar';
 import PinIcon from '../../../../../components/PinIcon';
 
 initMapbox();
@@ -145,8 +144,12 @@ export default function MapScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <Header onBack={() => router.back()} />
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
-      <TabSwitcher tabs={ACTION_TABS} activeKey={actionFilter} onChange={setActionFilter} />
+      <FilterBar
+        filters={[
+          { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
+          { key: 'action', title: 'Action', options: ACTION_TABS, selected: actionFilter, onSelect: setActionFilter },
+        ]}
+      />
 
       <View style={{ flex: 1 }}>
         {q.isFetching && !q.isLoading ? (

@@ -176,6 +176,14 @@ porch. It's still on the voter's full profile under **Voters**.)
 Any door button recolors the pin and drops you back on the map the instant you tap — you're never
 waiting on the network.
 
+**Some buttons may be missing on purpose.** Your campaign can turn individual outcomes off (say,
+No soliciting) from its Door Outcomes settings — if a button you expect isn't there, that's a
+campaign choice, not a bug. **Not home** and the completion action (**Surveyed** / **Lit dropped**)
+are always available. In the rare race where the setting changes right as you tap a
+just-disabled button, the app tells you it's turned off, nothing is recorded, and the button
+disappears; a knock you recorded **while offline before the change** still syncs normally — your
+work is never thrown away.
+
 ### Location is required (no location = no knock)
 
 Every door you record carries a GPS stamp — it's how your work is verified — so **the app won't
@@ -544,6 +552,15 @@ branch the action area:
   `colors.status.restricted`, slate) *outside* the type branch — both are offered on every campaign
   type. The two look alike and count oppositely: `no_soliciting` is in `KNOCK_ACTIONS`, `restricted`
   is not (see [METRICS.md](METRICS.md)).
+- The four toggleable buttons (Wrong address, Refused, No soliciting, Restricted) are each gated on
+  `outcomeOn(key)` — `bootstrap.campaign.disabledOutcomes` (per-campaign Door Outcomes settings,
+  [CAMPAIGNS.md](CAMPAIGNS.md)); a missing field (older server) means all on. Not home and the
+  completion actions never gate. A stale bootstrap can still show a just-disabled button — the
+  server refuses it with `OUTCOME_DISABLED`, and `recordAction`'s hard-fail path alerts ("Outcome
+  turned off"), clears the optimistic pin, and invalidates `['bootstrap']` so the button
+  disappears; a queued offline replay (`wasOfflineSubmission`) is accepted instead, so no real
+  knock is dropped by a settings flip. The map's filter chips and legend hide a disabled outcome
+  only once no loaded door still carries its status.
 
 All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` —
 `firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is

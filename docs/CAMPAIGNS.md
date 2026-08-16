@@ -246,6 +246,33 @@ in the drawer). The rules protect your data once canvassing has started:
   change, or preview the survey. Repointing a survey campaign warns you if the chosen survey already
   has responses (new answers report alongside the old ones). To change questions, duplicate the
   survey on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
+- **Door outcomes** — always editable, **by org admins AND team leads** (same reasoning as the door
+  goal: whoever runs the campaign owns what canvassers can record). See the section below.
+
+### Door outcomes — which buttons canvassers see (added 2026-08)
+
+Every campaign starts with the full set of outcome buttons in the field app. The **Door Outcomes**
+page in the campaign drill-in (`/campaigns/:id/outcomes`, and the matching screen in the mobile
+admin app) lets you turn individual ones off — say a campaign that never wants **No soliciting**
+used. What's toggleable is deliberately narrow:
+
+- **Can be turned off:** Wrong address, Refused, No soliciting, Restricted access (a lit-drop
+  campaign only shows the last two — the first two don't exist in its door UI).
+- **Never toggleable:** Not home and the completion action (Surveyed / Lit dropped). Without those,
+  a walk can't be recorded at all.
+
+Turning an outcome **off** does two things: the button disappears from the door screen, and the
+server refuses fresh submissions of it (so a phone with a stale view can't sneak one in — the
+canvasser gets a clear "turned off" message and the app refreshes its buttons). One deliberate
+exception: a knock a canvasser recorded **while offline, before you flipped the toggle**, is still
+accepted when their phone reconnects — a settings change never destroys real door data.
+
+**Nothing about the past changes.** Doors already recorded keep their status, color, and place in
+every count, rate, export, and invoice. This is a recording policy, not a reporting one — see
+[METRICS.md](METRICS.md). Each flip is logged to the campaign's change history ("Door outcomes:
+all on → Refused off"), highlighted the same way invoice-policy changes are. The admin
+**bulk-restrict** tool on Books keeps working even while Restricted is toggled off — it's a desk
+action owned by the same people who own the toggle.
 
 ### Archive vs. delete
 
@@ -340,7 +367,16 @@ BILLABLE doors) and `goalDate` (same `'YYYY-MM-DD'` civil-date convention as the
 falls back to `electionDay`), and `billRestrictedDoors` (**tri-state Boolean, default `null`** — `null`
 = inherit `Organization.billRestrictedDoors`, `true`/`false` = explicit override; always resolve via
 [billRestricted.js](../server/src/services/reports/billRestricted.js), since reading the field raw
-collapses "inherit" into "off"). ISO date strings order chronologically as plain strings, so all
+collapses "inherit" into "off"), and `disabledOutcomes` (**String array, default `[]`** — door
+outcomes turned off in the canvasser app; element-enum'd to `TOGGLEABLE_OUTCOMES` from
+[outcomeToggles.js](../server/src/services/canvass/outcomeToggles.js) so `not_home` and the
+completion actions can never appear; a flat array on purpose — the PATCH assigns it wholesale,
+which is atomic, dodging the partial-subdoc trap the goal fields' comment documents. Enforced at
+recording time in [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js): a fresh
+submission of a disabled outcome is `400 { code: 'OUTCOME_DISABLED' }`, while a replay carrying
+`wasOfflineSubmission: true` is accepted — same client-asserted trust posture as
+`supersededByNewer`, because rejecting it would silently destroy a real knock recorded before the
+toggle flipped). ISO date strings order chronologically as plain strings, so all
 window checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
 campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
 is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
@@ -350,7 +386,10 @@ is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archiv
 per edit, written from the campaigns PATCH handler against an explicit `AUDITED_FIELDS` list
 (`timeZone` and `surveyTemplateId` are deliberately absent — see Part 1). `fromValue`/`toValue` are
 `Mixed` because the audited fields span String, Number and tri-state Boolean, and `null` is a real
-value on both sides for most of them. Written **after** `campaign.save()` on purpose so a row can
+value on both sides for most of them. `disabledOutcomes` stores as a **sorted comma-join**
+(`'refused,restricted'`; empty ≡ never-set ≡ `null`) via an array branch in `normalizeAudited`, so
+a reordered no-op PATCH can't log a phantom change; both clients' `campaignHistory.js` split it
+back into labels ("Refused, Restricted off" / "all on"). Written **after** `campaign.save()` on purpose so a row can
 never describe a change that didn't land, and `await`ed rather than fire-and-forget — the narrow
 window where the save commits and the insert throws (one unlogged edit, a 500) is the accepted cost
 of that ordering, and it is the cheaper mistake than logging a change a failed save never made.
@@ -395,7 +434,13 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   stored), so PATCHing one bound still validates against the other. **`doorGoal`/`goalDate` are
   deliberately NOT in that org-admin-only list** (owner ruling 2026-08-14) — a lead may set their
   own campaign's target. The goal pair gets the same merged-value treatment, so clearing the goal
-  while a date is stored is the same `400` as setting a date with no goal.
+  while a date is stored is the same `400` as setting a date with no goal. **`disabledOutcomes` is
+  also deliberately NOT in the org-admin-only list** (owner ruling 2026-08-16, same reasoning):
+  zod-validated as `z.array(z.enum(TOGGLEABLE_OUTCOMES))`, deduped and assigned wholesale, audited.
+  Pinned end-to-end (lead edit, enum rejection, `OUTCOME_DISABLED`, offline tolerance, both mobile
+  wires, audit join, bulk-restrict carve-out) by
+  [disabledOutcomes.int.test.js](../server/test/disabledOutcomes.int.test.js); the
+  server/client/mobile constant mirrors by [outcomeToggles.test.js](../server/test/outcomeToggles.test.js).
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),

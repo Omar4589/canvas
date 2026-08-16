@@ -23,7 +23,7 @@ import { makeRateColors } from '../../../lib/rates';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
-import DateRangeBar from '../../../components/DateRangeBar';
+import FilterBar from '../../../components/FilterBar';
 import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import InsetGroup, {
@@ -33,7 +33,6 @@ import InsetGroup, {
   InsetActionRow,
   GroupFooter,
 } from '../../../components/InsetGroup';
-import TabSwitcher from '../../../components/TabSwitcher';
 import LiveStatus from '../../../components/LiveStatus';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
@@ -392,40 +391,62 @@ export default function AdminAudit() {
       </View>
       <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={AUDIT_PRESETS} requireFrom />
+      {/* Four filters in ONE row — was a DateRangeBar plus three TabSwitchers on four separate
+          rows, the densest filter stack in the app. All of them live in the FIXED area above the
+          loading/error/invalid-range branch, so picking a walk list or a canvasser with nothing
+          in it is never a dead end: a control that can empty the screen must never live inside
+          the thing it empties. LiveStatus rides the same row as `trailing`, pinned right.
 
-      <View style={styles.controls}>
-        <TabSwitcher tabs={STATUS_TABS} activeKey={reviewStatus} onChange={setReviewStatus} />
-        {includesToday ? (
-          <LiveStatus
-            live={live}
-            onToggle={() => setLive((v) => !v)}
-            isFetching={q.isFetching}
-            updatedAt={q.dataUpdatedAt}
-            onRefresh={() => q.refetch()}
-          />
-        ) : null}
-      </View>
-
-      {/* Walk-list filter (server-side effortId, like Timeline's) — scopes the KPI totals,
-          the by-canvasser tabs, and the entries list alike. Lives in the fixed filter area
-          so picking an empty walk list is never a dead end. */}
-      {efforts.length > 1 ? (
-        <TabSwitcher
-          tabs={[
-            { key: '', label: 'All walk lists' },
-            ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
-          ]}
-          activeKey={effortId}
-          onChange={setEffortId}
-        />
-      ) : null}
-      {/* Canvasser filter — fixed area for the same reason, and gated on the tab list rather than
-          on `byCanvasser`: the payload it comes from is already ?userId-filtered, so gating on it
-          hid the pill that could clear it. `canvasserTabs` always carries the picked person. */}
-      {canvasserTabs.length > 1 ? (
-        <TabSwitcher tabs={canvasserTabs} activeKey={userId} onChange={onCanvasserChange} />
-      ) : null}
+          The walk-list filter is server-side (effortId, like Timeline's) and scopes the KPI
+          totals, the by-canvasser options and the entries list alike. The canvasser filter is
+          gated on the OPTION list rather than on `byCanvasser`: the payload that comes from is
+          already ?userId-filtered, so gating on it hid the only control that could clear it.
+          `canvasserTabs` always carries the picked person. */}
+      <FilterBar
+        filters={[
+          {
+            key: 'range',
+            kind: 'dateRange',
+            title: 'Date range',
+            value: range,
+            onChange: onRangeChange,
+            tz,
+            presets: AUDIT_PRESETS,
+            requireFrom: true,
+          },
+          { key: 'status', title: 'Review status', options: STATUS_TABS, selected: reviewStatus, onSelect: setReviewStatus },
+          {
+            key: 'effort',
+            title: 'Walk list',
+            hidden: efforts.length <= 1,
+            options: [
+              { key: '', label: 'All walk lists' },
+              ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+            ],
+            selected: effortId,
+            onSelect: setEffortId,
+          },
+          {
+            key: 'canvasser',
+            title: 'Canvasser',
+            hidden: canvasserTabs.length <= 1,
+            options: canvasserTabs,
+            selected: userId,
+            onSelect: onCanvasserChange,
+          },
+        ]}
+        trailing={
+          includesToday ? (
+            <LiveStatus
+              live={live}
+              onToggle={() => setLive((v) => !v)}
+              isFetching={q.isFetching}
+              updatedAt={q.dataUpdatedAt}
+              onRefresh={() => q.refetch()}
+            />
+          ) : null
+        }
+      />
 
       {rangeInvalid ? (
         <View style={styles.groupWrap}>
@@ -626,15 +647,6 @@ function makeStyles(t) {
     headerTitle: { ...type.h3, flex: 1, textAlign: 'center' },
     chipWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
     bannerWrap: { marginHorizontal: spacing.lg },
-    controls: {
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.sm,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: spacing.sm,
-      flexWrap: 'wrap',
-    },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.xs },
     groupWrap: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
     listWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.sm },

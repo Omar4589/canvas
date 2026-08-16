@@ -6,7 +6,7 @@ kind: guide
 order: 10
 sourceDoc: CAMPAIGNS.md
 summary: How to create a campaign, work the Campaigns page, edit safely, and archive or delete.
-tags: campaigns, create, edit, archive, delete, key dates
+tags: campaigns, create, edit, archive, delete, key dates, door outcomes
 ---
 
 A campaign is the container for one canvassing project — its voters, walk lists, passes, surveys, and reports all live inside it.
@@ -34,6 +34,18 @@ The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archi
 - **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target. Every change is recorded with your name in the campaign's [History](#history--who-changed-what).
 - **Name, survey, timezone** — admins and leads. As a lead you open the same edit drawer; the admin-only fields show but are greyed out.
 - **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back. See [Can I bill for restricted doors?](bill-restricted-doors).
+- **Door outcomes** — admins **and leads**, from the campaign's **Door Outcomes** page (see below).
+
+## Door outcomes — which buttons canvassers see
+
+Every campaign starts with the full set of outcome buttons in the field app. On the campaign's **Door Outcomes** page (in the campaign's sidebar on the web; **Quick actions → Door outcomes** on your phone) you can turn individual ones off — say your campaign never wants **No soliciting** used.
+
+- **You can turn off:** Wrong address, Refused, No soliciting, Restricted access. (A lit-drop campaign shows only the last two — the first two don't exist at its doors.)
+- **Always on:** Not home and the goal outcome (Survey / Lit dropped). Without those, a walk can't be recorded.
+
+Turning one off hides the button on canvassers' phones and blocks new recordings of it — even from a phone that hasn't refreshed yet, which instead gets a clear "turned off" message. A knock a canvasser recorded **while offline before the change** still syncs when they reconnect: a settings change never throws away work that already happened.
+
+**Nothing about the past changes.** Doors already recorded keep their status and keep counting in every number, report, and export. Each flip is recorded in the campaign's [History](#history--who-changed-what) with your name — "Door outcomes: all on → Refused off."
 
 ## Key dates
 
@@ -56,7 +68,7 @@ See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## History — who changed what
 
-A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
+A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, the door-outcome toggles, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
 
 On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
 

@@ -176,6 +176,11 @@ export default function HouseholdDetail() {
   // the optimistic recolor (the blue→grey→blue flicker).
   const { data: bootstrap } = useQuery({ queryKey: ['bootstrap'], refetchOnMount: false });
   const campaignType = bootstrap?.campaign?.type || 'survey';
+  // Per-campaign door-outcome toggles: a disabled outcome's button is hidden. A stale
+  // bootstrap can still show one — the server then refuses with OUTCOME_DISABLED and
+  // recordAction's hard-fail path re-pulls the config (missing field = older server = all on).
+  const disabledOutcomes = bootstrap?.campaign?.disabledOutcomes || [];
+  const outcomeOn = (k) => !disabledOutcomes.includes(k);
   // Billing entitlement: when the org is paused, new dispositions are disabled
   // (the server 402s them anyway — this is the courteous version). Missing
   // entitlement (older cache / super admin) fails open.
@@ -428,57 +433,65 @@ export default function HouseholdDetail() {
                 <Text style={styles.actionButtonText}>Not home</Text>
               </Pressable>
 
-              <Pressable
-                onPress={() => submitAction('wrong_address')}
-                disabled={isSubmitting || !canCanvass}
-                style={({ pressed }) => [
-                  styles.actionButton,
-                  styles.actionWrongAddress,
-                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
-                ]}
-              >
-                <Text style={styles.actionButtonText}>Wrong address</Text>
-              </Pressable>
+              {outcomeOn('wrong_address') && (
+                <Pressable
+                  onPress={() => submitAction('wrong_address')}
+                  disabled={isSubmitting || !canCanvass}
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.actionWrongAddress,
+                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                  ]}
+                >
+                  <Text style={styles.actionButtonText}>Wrong address</Text>
+                </Pressable>
+              )}
 
-              <Pressable
-                onPress={() => submitAction('refused')}
-                disabled={isSubmitting || !canCanvass}
-                style={({ pressed }) => [
-                  styles.actionButton,
-                  styles.actionRefused,
-                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
-                ]}
-              >
-                <Text style={styles.actionButtonText}>Refused</Text>
-              </Pressable>
+              {outcomeOn('refused') && (
+                <Pressable
+                  onPress={() => submitAction('refused')}
+                  disabled={isSubmitting || !canCanvass}
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.actionRefused,
+                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                  ]}
+                >
+                  <Text style={styles.actionButtonText}>Refused</Text>
+                </Pressable>
+              )}
             </>
           )}
 
           {/* No Soliciting — a posted sign ended the visit. All campaign types; IS a knock. */}
-          <Pressable
-            onPress={() => submitAction('no_soliciting')}
-            disabled={isSubmitting || !canCanvass}
-            style={({ pressed }) => [
-              styles.actionButton,
-              styles.actionNoSoliciting,
-              { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
-            ]}
-          >
-            <Text style={styles.actionButtonText}>No soliciting</Text>
-          </Pressable>
+          {outcomeOn('no_soliciting') && (
+            <Pressable
+              onPress={() => submitAction('no_soliciting')}
+              disabled={isSubmitting || !canCanvass}
+              style={({ pressed }) => [
+                styles.actionButton,
+                styles.actionNoSoliciting,
+                { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+              ]}
+            >
+              <Text style={styles.actionButtonText}>No soliciting</Text>
+            </Pressable>
+          )}
 
           {/* Restricted Access — inaccessible home. All campaign types; not a knock. */}
-          <Pressable
-            onPress={() => submitAction('restricted')}
-            disabled={isSubmitting || !canCanvass}
-            style={({ pressed }) => [
-              styles.actionButton,
-              styles.actionRestricted,
-              { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
-            ]}
-          >
-            <Text style={styles.actionButtonText}>Restricted access</Text>
-          </Pressable>
+          {outcomeOn('restricted') && (
+            <Pressable
+              onPress={() => submitAction('restricted')}
+              disabled={isSubmitting || !canCanvass}
+              style={({ pressed }) => [
+                styles.actionButton,
+                styles.actionRestricted,
+                { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+              ]}
+            >
+              <Text style={styles.actionButtonText}>Restricted access</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
       </KeyboardAvoidingView>

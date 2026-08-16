@@ -25,6 +25,10 @@ Every door you record carries a GPS stamp — it's how your work gets verified �
 - **No soliciting** — the door had a posted no-soliciting sign and you honored it. You still reached the door, so this counts as a knock.
 - **Restricted access** — you physically couldn't get to the door: a gated community, a locked building, no way in.
 
+## If a button is missing
+
+Your campaign can turn some outcomes off — if you don't see, say, **No soliciting**, that's a choice your organizer made, not a bug. **Not home** and the goal outcome (Survey / Lit dropped) are always there. In the rare case the setting changes right as you tap, the app tells you the outcome is turned off, nothing is recorded, and the button disappears. Anything you recorded while offline before the change still syncs normally — your work is never thrown away.
+
 ## Refused vs. No soliciting vs. Restricted
 
 Three outcomes, no conversation, and they mean different things — the question is **how far you got**.

@@ -138,6 +138,22 @@ const DO_NOT_CONTACT = {
   code: 'DO_NOT_CONTACT',
   message: 'This voter has asked not to be contacted. The survey was not saved.',
 };
+// A per-campaign disabled outcome (Campaign.disabledOutcomes — services/canvass/outcomeToggles.js).
+// The client hides the button, but a phone whose bootstrap predates the toggle flip still shows
+// it; this is the backstop. Message is shown VERBATIM by the mobile hard-failure alert
+// (lib/recordAction.js maps the code to its own title), so it names the outcome in the
+// canvasser's words, not the key.
+const OUTCOME_DISABLED_LABELS = {
+  restricted: 'Restricted access',
+  refused: 'Refused',
+  wrong_address: 'Wrong address',
+  no_soliciting: 'No soliciting',
+};
+const outcomeDisabled = (actionType) => ({
+  status: 400,
+  code: 'OUTCOME_DISABLED',
+  message: `"${OUTCOME_DISABLED_LABELS[actionType] || actionType}" is turned off for this campaign, so this door was not recorded. Pick a different outcome.`,
+});
 
 function sendRouteError(res, error) {
   const body = { error: error.message };
@@ -274,6 +290,15 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   if (!campaign || campaign.deletion?.requestedAt) return { error: { status: 404, message: 'Campaign not found' } };
   if (requireCampaignType && campaign.type !== requireCampaignType) {
     return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
+  }
+  // Per-campaign disabled outcome: FRESH submissions are refused; offline replays are accepted.
+  // `wasOfflineSubmission` is stamped at ENQUEUE time (mobile/lib/offlineQueue.js), so it marks
+  // exactly the population recorded before the phone could learn the toggle flipped — rejecting
+  // those would silently destroy real door data. Client-asserted, same documented trust
+  // posture as supersededByNewer: this is policy, not security. Read off the raw body (like
+  // missingLocation) — zod hasn't parsed yet.
+  if (campaign.disabledOutcomes?.includes(actionType) && body?.wasOfflineSubmission !== true) {
+    return { error: outcomeDisabled(actionType) };
   }
 
   if (missingLocation(body)) return { error: LOCATION_REQUIRED };

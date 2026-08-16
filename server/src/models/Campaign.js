@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { TOGGLEABLE_OUTCOMES } from '../services/canvass/outcomeToggles.js';
 
 const campaignSchema = new mongoose.Schema(
   {
@@ -33,6 +34,14 @@ const campaignSchema = new mongoose.Schema(
     // services/billing/statement.js). Not locked by hasCanvassed: it's a reporting policy and
     // every read is live, so flipping it mid-campaign is legitimate and fully reversible.
     billRestrictedDoors: { type: Boolean, default: null },
+    // Door outcomes this campaign has turned OFF in the canvasser app (subset of
+    // TOGGLEABLE_OUTCOMES — services/canvass/outcomeToggles.js; not_home and the completion
+    // actions can never appear here). Empty/missing = everything on, so legacy docs need no
+    // migration. A flat ARRAY on purpose: the PATCH handler assigns it wholesale, which is
+    // atomic — no partial-subdoc clearing trap. Enforcement lives in routes/mobile/canvass.js
+    // (OUTCOME_DISABLED, with offline-replay tolerance); this is a recording policy only —
+    // no aggregation reads it, and rows recorded before a toggle flip keep counting.
+    disabledOutcomes: { type: [{ type: String, enum: TOGGLEABLE_OUTCOMES }], default: [] },
     // What DOORLINE charges for this campaign per month, in cents. TRI-STATE like the flag above:
     // null = inherit Subscription.pricePerCampaignCents, a number = negotiated override. This is
     // how a firm running a governor's race and a school-board race prices them differently inside

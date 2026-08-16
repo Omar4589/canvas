@@ -17,8 +17,7 @@ import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../../lib/useThemedStyles';
-import DateRangeBar from '../../../../../components/DateRangeBar';
-import TabSwitcher from '../../../../../components/TabSwitcher';
+import FilterBar from '../../../../../components/FilterBar';
 import ActivityRow from '../../../../../components/ActivityRow';
 import { downloadCsv } from '../../../../../lib/csv';
 
@@ -141,8 +140,12 @@ export default function ActivityFeed() {
         </Pressable>
       </View>
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
-      <TabSwitcher tabs={ACTION_TABS} activeKey={actionTab} onChange={onTabChange} />
+      <FilterBar
+        filters={[
+          { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
+          { key: 'action', title: 'Action', options: ACTION_TABS, selected: actionTab, onSelect: onTabChange },
+        ]}
+      />
 
       <View style={styles.toggleRow}>
         <Switch

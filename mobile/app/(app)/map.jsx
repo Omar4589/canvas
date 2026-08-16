@@ -264,24 +264,10 @@ export default function MapScreen() {
     };
   }, [router]);
 
-  const filterOptions =
+  // Type-picked chip list; narrowed to `filterOptions` below once the bootstrap is in
+  // (per-campaign outcome toggles can hide chips, and that needs `data`).
+  const baseFilterOptions =
     activeCampaign?.type === 'lit_drop' ? LIT_DROP_FILTER_OPTIONS : SURVEY_FILTER_OPTIONS;
-  // Campaign-type switch can strand keys the other type doesn't offer — prune.
-  useEffect(() => {
-    setActiveFilters((prev) => {
-      const valid = new Set(filterOptions.map((o) => o.key));
-      const next = new Set([...prev].filter((k) => valid.has(k)));
-      return next.size === prev.size ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCampaign?.type]);
-  const filterCount = activeFilters.size;
-  const filterLabel =
-    filterCount === 0
-      ? filterOptions[0].label // 'All houses'
-      : filterCount === 1
-        ? filterOptions.find((o) => activeFilters.has(o.key))?.label || '1 status'
-        : `${filterCount} statuses`;
 
   const layerFilter = useMemo(
     () =>
@@ -323,6 +309,44 @@ export default function MapScreen() {
     if (!selectedBookSet) return all;
     return all.filter((h) => h.turfId && selectedBookSet.has(String(h.turfId)));
   }, [data, selectedBookSet]);
+
+  // Per-campaign outcome toggles: a disabled outcome loses its filter chip (and its legend
+  // entry, via ProgressSheetContent) — but only while no door in view still carries that
+  // status. History must stay filterable: doors recorded before the toggle flipped keep
+  // their color, so the chip stays until they leave the loaded set. Read from the live
+  // bootstrap campaign, never the AsyncStorage activeCampaign cache (its shape is frozen).
+  const disabledSet = useMemo(
+    () => new Set(data?.campaign?.disabledOutcomes || []),
+    [data?.campaign?.disabledOutcomes]
+  );
+  const presentStatuses = useMemo(() => {
+    const s = new Set();
+    for (const h of scopedHouseholds) s.add(h.status || 'unknocked');
+    return s;
+  }, [scopedHouseholds]);
+  const hiddenStatuses = useMemo(
+    () => new Set([...disabledSet].filter((k) => !presentStatuses.has(k))),
+    [disabledSet, presentStatuses]
+  );
+  const filterOptions = useMemo(
+    () => baseFilterOptions.filter((o) => !hiddenStatuses.has(o.key)),
+    [baseFilterOptions, hiddenStatuses]
+  );
+  // Campaign-type switch or a newly hidden chip can strand keys — prune.
+  useEffect(() => {
+    setActiveFilters((prev) => {
+      const valid = new Set(filterOptions.map((o) => o.key));
+      const next = new Set([...prev].filter((k) => valid.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filterOptions]);
+  const filterCount = activeFilters.size;
+  const filterLabel =
+    filterCount === 0
+      ? filterOptions[0].label // 'All houses'
+      : filterCount === 1
+        ? filterOptions.find((o) => activeFilters.has(o.key))?.label || '1 status'
+        : `${filterCount} statuses`;
 
   // Header-strip summary for the book the canvasser is in: effort + book name,
   // houses done / total, and progress. Null when no specific book is selected
@@ -1250,6 +1274,7 @@ export default function MapScreen() {
               <ProgressSheetContent
                 today={today}
                 isLitDrop={isLitDrop}
+                hiddenStatuses={hiddenStatuses}
                 onViewHistory={() => guardedPush(router, '/(app)/stats')}
               />
             )}
@@ -1318,12 +1343,16 @@ function ShiftStat({ label, value }) {
   );
 }
 
-function ProgressSheetContent({ today, isLitDrop, onViewHistory }) {
+function ProgressSheetContent({ today, isLitDrop, hiddenStatuses, onViewHistory }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const RATE_COLORS = makeRateColors(colors);
-  const legend = isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND;
+  // Same rule as the filter chips: a disabled outcome leaves the legend only once no
+  // loaded door still wears its color.
+  const legend = (isLitDrop ? LIT_DROP_LEGEND : SURVEY_LEGEND).filter(
+    (s) => !hiddenStatuses?.has(s)
+  );
   const breakdown = today.answerBreakdown || [];
   const showAnswers = !isLitDrop && breakdown.length > 0;
   const connectionRate = isLitDrop

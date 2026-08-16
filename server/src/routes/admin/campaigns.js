@@ -21,6 +21,7 @@ import { CampaignChange } from '../../models/CampaignChange.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
+import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
 import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
@@ -54,6 +55,9 @@ const createSchema = z.object({
   // TRI-STATE: null = inherit the org default, true/false = explicit override. `.nullable()`
   // is the whole point — a plain boolean would make "inherit" unexpressible from the UI.
   billRestrictedDoors: z.boolean().nullable().optional(),
+  // Door outcomes turned OFF in the canvasser app. The enum is the whole gate: not_home and
+  // the completion actions are not in TOGGLEABLE_OUTCOMES, so they can never be disabled.
+  disabledOutcomes: z.array(z.enum(TOGGLEABLE_OUTCOMES)).optional(),
 });
 
 // A goal date with no goal is a dead field: nothing to count down to a target that doesn't
@@ -81,14 +85,21 @@ const AUDITED_FIELDS = [
   'name',
   'type',
   'state',
+  // Which door outcomes canvassers can record — a silent flip changes what a client
+  // report can ever show going forward, the same class of promise as the fields above.
+  'disabledOutcomes',
 ];
 
 // Compare-and-store form. Mongoose hands back a String object for enum/String paths and `undefined`
 // for a path never set; both must compare equal to their plain/null counterparts or a no-op PATCH
 // would log a phantom change. Numbers and Booleans pass through so the feed can format them.
+// Arrays (disabledOutcomes) store as a SORTED comma-join: sorted so a reorder is a no-op, and
+// empty ≡ never-set ≡ null so legacy docs don't log phantom rows either. Must branch before the
+// String fallback — String([an, array]) would join UNsorted and log those phantoms.
 function normalizeAudited(v) {
   if (v === undefined || v === null) return null;
   if (typeof v === 'number' || typeof v === 'boolean') return v;
+  if (Array.isArray(v)) return v.length ? [...v].sort().join(',') : null;
   const s = String(v);
   return s === '' ? null : s;
 }
@@ -369,6 +380,9 @@ router.post('/', async (req, res, next) => {
       goalDate: data.goalDate ?? null,
       // Undefined → null → inherit the org default. New campaigns never hard-code a value.
       billRestrictedDoors: data.billRestrictedDoors ?? null,
+      // Must be wired here explicitly — Campaign.create builds from named fields, so a key
+      // that only exists in createSchema would be silently dropped.
+      disabledOutcomes: data.disabledOutcomes ? [...new Set(data.disabledOutcomes)] : [],
       createdBy: req.user._id,
     });
     // Lifetime marketing counter. req.subscription is attached by the entitlement middleware, so the
@@ -397,6 +411,9 @@ router.patch('/:campaignId', async (req, res, next) => {
     // doorGoal/goalDate are absent from this list on purpose (owner ruling 2026-08-14): a lead
     // running a campaign owns its target, even though every other date here is admin-only.
     // Do not "tidy" them in — campaignGoal.int.test.js asserts a lead can set them.
+    // disabledOutcomes is absent for the same reason (owner ruling 2026-08-16): a lead running
+    // a campaign owns which outcome buttons its canvassers see. disabledOutcomes.int.test.js
+    // asserts a lead can set it.
     if (!isOrgAdmin(req)) {
       for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote', 'billRestrictedDoors']) {
         if (data[field] !== undefined) {
@@ -468,6 +485,10 @@ router.patch('/:campaignId', async (req, res, next) => {
       restrictedDoorsChanged = campaign.billRestrictedDoors !== data.billRestrictedDoors;
       campaign.billRestrictedDoors = data.billRestrictedDoors;
     }
+    // Wholesale array assignment — atomic, and a NEW array so the beforeAudit snapshot
+    // (which holds the old array by reference) can't alias the after value. Recording
+    // policy only: no counter recompute — rows already recorded keep counting.
+    if (data.disabledOutcomes !== undefined) campaign.disabledOutcomes = [...new Set(data.disabledOutcomes)];
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not

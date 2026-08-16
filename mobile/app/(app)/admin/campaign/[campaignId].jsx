@@ -13,9 +13,8 @@ import { api } from '../../../../lib/api';
 import { saveActiveCampaign, clearBootstrap } from '../../../../lib/cache';
 import CoverageBar from '../../../../components/CoverageBar';
 import SectionHeader from '../../../../components/SectionHeader';
-import TabSwitcher from '../../../../components/TabSwitcher';
 import NavTileGrid from '../../../../components/NavTileGrid';
-import DateRangeBar from '../../../../components/DateRangeBar';
+import FilterBar from '../../../../components/FilterBar';
 import CanvasserCard from '../../../../components/CanvasserCard';
 import InsetGroup, {
   InsetHeroRow,
@@ -459,6 +458,14 @@ export default function CampaignDetail() {
     router.push('/(app)/admin/history');
   }
 
+  // Door outcomes reads the raw ['admin','campaigns'] row via ?campaignId=, but seat the
+  // campaign anyway so screens it hands back to stay scoped like every other tile.
+  async function goDoorOutcomes() {
+    if (!campaign) return;
+    await saveActiveCampaign({ id: String(campaign._id), name: campaign.name, type: campaign.type, state: campaign.state, timeZone: campaign.timeZone });
+    router.push(`/(app)/admin/door-outcomes?campaignId=${cId}`);
+  }
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -564,48 +571,55 @@ export default function CampaignDetail() {
           </View>
         )}
 
-        <DateRangeBar value={range} onChange={onRangeChange} tz={tz} />
-
-        {/* Walk-list filter (Timeline's pattern) — only worth showing once a campaign HAS a
-            second walk list. Switching lists also clears any picked survey pass: the pass
-            chips below draw from the (now filtered) By-pass rows, so a pass from another
-            walk list would keep scoping the survey numbers with no visible chip saying so. */}
-        {efforts.length > 1 && (
-          <TabSwitcher
-            tabs={[
-              { key: '', label: 'All walk lists' },
-              ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
-            ]}
-            activeKey={effortId}
-            onChange={(k) => {
-              setEffortId(k);
-              setSurveyPassId('');
-            }}
-          />
-        )}
-        {/* Crew filter (Timeline's pattern, gate included: `|| coordinatorId` keeps an escape
-            even when the picked coordinator has left both the ledger and the roster — a
-            control that can empty the screen must never depend on what it filtered). */}
-        {coordinatorOptions.length > 0 || coordinatorId ? (
-          <TabSwitcher
-            tabs={[
-              { key: '', label: 'All' },
-              ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
-              { key: 'none', label: 'No coordinator' },
-            ]}
-            activeKey={coordinatorId}
-            onChange={(k) => {
-              setCoordinatorId(k);
-              // The 'Legacy / no pass' chip is gated on the (crew-filtered) By-pass rows, and
-              // legacy knocks are mostly unstamped — so a crew pick can remove the chip while a
-              // stale 'legacy' selection keeps scoping the survey numbers with nothing on screen
-              // saying so (the hidden-scope trap the walk-list switcher above clears too). Real
-              // Pass chips always survive (the row set keeps every Pass doc), so only the
-              // legacy sentinel needs clearing.
-              if (surveyPassId === 'legacy') setSurveyPassId('');
-            }}
-          />
-        ) : null}
+        {/* One row of value-showing chips. This was a DateRangeBar plus two TabSwitchers —
+            three scrolling pill rows, ~125pt of chrome above the first number on a phone, with
+            the active pill often scrolled out of sight. */}
+        <FilterBar
+          filters={[
+            { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
+            // Only worth offering once a campaign HAS a second walk list. Switching lists also
+            // clears any picked survey pass: the pass chips below draw from the (now filtered)
+            // By-pass rows, so a pass from another walk list would keep scoping the survey
+            // numbers with no visible chip saying so.
+            {
+              key: 'effort',
+              title: 'Walk list',
+              hidden: efforts.length <= 1,
+              options: [
+                { key: '', label: 'All walk lists' },
+                ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+              ],
+              selected: effortId,
+              onSelect: (k) => {
+                setEffortId(k);
+                setSurveyPassId('');
+              },
+            },
+            // `|| coordinatorId` in the gate keeps an escape even when the picked coordinator has
+            // left both the ledger and the roster — a control that can empty the screen must
+            // never depend on what it filtered.
+            {
+              key: 'crew',
+              title: 'Crew',
+              hidden: !(coordinatorOptions.length > 0 || coordinatorId),
+              options: [
+                { key: '', label: 'All crews' },
+                ...coordinatorOptions.map((c) => ({ key: c.id, label: c.name })),
+                { key: 'none', label: 'No coordinator' },
+              ],
+              selected: coordinatorId,
+              onSelect: (k) => {
+                setCoordinatorId(k);
+                // The 'Legacy / no pass' chip is gated on the (crew-filtered) By-pass rows, and
+                // legacy knocks are mostly unstamped — so a crew pick can remove the chip while
+                // a stale 'legacy' selection keeps scoping the survey numbers with nothing on
+                // screen saying so (the same hidden-scope trap the walk-list switcher clears).
+                // Real Pass chips always survive, so only the legacy sentinel needs clearing.
+                if (surveyPassId === 'legacy') setSurveyPassId('');
+              },
+            },
+          ]}
+        />
 
         <View style={{ paddingHorizontal: spacing.lg }}>
           {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
@@ -880,6 +894,7 @@ export default function CampaignDetail() {
                 // server-side, so it is safe for every console role).
                 { label: 'Team', subtitle: 'Crew & assignments', onPress: goTeam },
               { label: 'History', subtitle: 'Who changed what', onPress: goHistory },
+              { label: 'Door outcomes', subtitle: 'Which buttons canvassers see', onPress: goDoorOutcomes },
               ]}
             />
           </View>
@@ -941,9 +956,9 @@ function makeStyles(t) {
   },
   bannerText: { ...type.caption, color: colors.warnFg, fontWeight: '600' },
 
-  // Chips deliberately mirror DateRangeBar's pills — same paddings, same active treatment.
-  // Two pill rows on one screen that don't match each other is worse than either shape.
-  // (DateRangeBar itself has 16 importers and is not touched.)
+  // Round chips for the Survey results section — the one pill row left on this screen now that
+  // the header filters are FilterBar chips. Left as pills on purpose: they scope one section
+  // from inside it, where a header chip would read as scoping the whole page.
   roundChips: { gap: spacing.sm, paddingBottom: spacing.sm },
   roundChip: {
     paddingHorizontal: spacing.md,

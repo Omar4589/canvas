@@ -25,7 +25,7 @@ If the campaign has a **door goal** set, a thin line sits at the very top of the
 
 ## Filter by crew
 
-Once your campaign has coordinators, a **coordinator filter** appears next to the walk-list one (a dropdown on the web, a pill row in the app — the same control the Timeline has). Leave it on **All coordinators** for everyone's numbers, pick a coordinator to see just their crew's, or pick **No coordinator** for people who aren't on any crew. A coordinator's own door-knocking counts toward their crew.
+Once your campaign has coordinators, a **coordinator filter** appears next to the walk-list one — a dropdown on the web, and in the app a chip in the filter row showing whichever crew you're on, the same control the Timeline has. Leave it on **All coordinators** for everyone's numbers, pick a coordinator to see just their crew's, or pick **No coordinator** for people who aren't on any crew. A coordinator's own door-knocking counts toward their crew.
 
 Everything activity-based follows it — the activity numbers, the By pass table and its CSV export, the survey results (the Tags panel included) and their drill-ins, and the canvasser list. The one exception is **Coverage**: doors don't belong to a crew, so coverage always shows the whole campaign's progress, and its caption says so while a crew is selected.
 

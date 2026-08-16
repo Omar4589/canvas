@@ -345,6 +345,14 @@ export function optimisticSubmit(qc, opts) {
           'Do not contact',
           'This voter has asked not to be contacted, so this survey was not saved. The voter is now marked on your list.'
         );
+      } else if (result.error?.data?.code === 'OUTCOME_DISABLED') {
+        // The campaign turned this outcome off after this phone's bootstrap — the
+        // invalidate above pulls the new config down, so the button disappears from
+        // here on. The server message names the outcome; give it a proper title.
+        Alert.alert(
+          'Outcome turned off',
+          result.error?.message || 'This outcome is turned off for this campaign, so nothing was recorded.'
+        );
       } else {
         Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
       }

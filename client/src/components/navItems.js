@@ -37,6 +37,8 @@ export const ORG_NAV = [
 export const CAMPAIGN_NAV = [
   { slug: '', label: 'Home', icon: '/admin' },
   { slug: 'survey', label: 'Survey', icon: '/surveys' },
+  // Next to Survey, not down with the outputs: both configure what canvassers see at the door.
+  { slug: 'outcomes', label: 'Door Outcomes', icon: '/outcomes' },
   { slug: 'import', label: 'Voter Import', icon: '/import' },
   { slug: 'efforts', label: 'Walk Lists', icon: '/efforts' },
   { slug: 'walklists', label: 'Saved Searches', icon: '/walklists' },

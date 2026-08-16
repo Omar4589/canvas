@@ -1,4 +1,5 @@
 import { formatDateLabel } from './electionDates.js';
+import { ACTION_LABELS } from './statusColors.js';
 
 // Words for the campaign change feed. The SERVER stores field keys and raw before/after values
 // (models/CampaignChange.js); everything human lives here, so re-wording a label is never a data
@@ -19,6 +20,7 @@ const FIELD_LABELS = {
   name: 'Campaign name',
   type: 'Campaign type',
   state: 'State',
+  disabledOutcomes: 'Door outcomes',
 };
 
 const DATE_FIELDS = new Set(['goalDate', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd']);
@@ -41,6 +43,12 @@ export function formatValue(field, value) {
   }
   if (field === 'isActive') return value === false ? 'Archived' : 'Active';
   if (field === 'type') return value === 'lit_drop' ? 'Lit drop' : 'Survey';
+  // Before the null fallback: here null means "nothing is off", not "not set". The server
+  // stores a sorted comma-join of action keys ('refused,restricted').
+  if (field === 'disabledOutcomes') {
+    if (!value) return 'all on';
+    return `${String(value).split(',').map((k) => ACTION_LABELS[k] || k).join(', ')} off`;
+  }
   if (value === null || value === undefined || value === '') {
     return field === 'datesNote' ? 'empty' : 'not set';
   }
@@ -54,11 +62,13 @@ export function formatValue(field, value) {
 }
 
 // Which changes deserve to catch the eye. Deliberately short: if everything is highlighted,
-// nothing is. A door goal moving DOWN and the invoice policy changing are the two edits someone
-// might want to explain later — the rest are ordinary campaign upkeep.
+// nothing is. A door goal moving DOWN, the invoice policy changing, and an outcome being
+// switched off are the edits someone might want to explain later — the rest are ordinary
+// campaign upkeep.
 export function isNotable(item) {
   if (item.kind === 'team') return !!item.restampError;
   if (item.field === 'billRestrictedDoors') return true;
+  if (item.field === 'disabledOutcomes') return true;
   if (item.field === 'doorGoal') {
     const from = Number(item.fromValue);
     const to = Number(item.toValue);

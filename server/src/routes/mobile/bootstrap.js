@@ -200,7 +200,7 @@ router.get('/campaigns', async (req, res, next) => {
     }
     const campaigns = await Campaign.find(campaignFilter)
       .sort({ createdAt: -1 })
-      .select('name type state surveyTemplateId timeZone electionDay earlyVotingStart earlyVotingEnd datesNote')
+      .select('name type state surveyTemplateId timeZone electionDay earlyVotingStart earlyVotingEnd datesNote disabledOutcomes')
       .lean();
     // `efforts` is additive — older clients ignore it; the picker uses it to let a
     // multi-effort canvasser pick their effort up front and jump straight into the
@@ -217,6 +217,7 @@ router.get('/campaigns', async (req, res, next) => {
         earlyVotingStart: c.earlyVotingStart ?? null,
         earlyVotingEnd: c.earlyVotingEnd ?? null,
         datesNote: c.datesNote ?? '',
+        disabledOutcomes: c.disabledOutcomes ?? [],
         efforts: await canvasserEffortsForCampaign(req, c),
       }))
     );
@@ -369,6 +370,9 @@ router.get('/bootstrap', async (req, res, next) => {
         earlyVotingStart: campaign.earlyVotingStart ?? null,
         earlyVotingEnd: campaign.earlyVotingEnd ?? null,
         datesNote: campaign.datesNote ?? '',
+        // Door outcomes turned off for this campaign — additive; older clients ignore it and
+        // keep showing every button (the OUTCOME_DISABLED backstop in canvass.js covers them).
+        disabledOutcomes: campaign.disabledOutcomes || [],
       },
       activeSurvey: survey,
       surveys,

@@ -254,11 +254,40 @@ headline — a footer under the group now says so — and knocks recorded before
 a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
 
-### Scoping a campaign to one walk list (the pill row)
+### One filter row: value-showing chips (2026-08)
 
-Once a campaign has **two or more walk lists**, a pill row — **All walk lists · North · South …** —
-appears in the filter area of several admin screens (a single-list campaign shows nothing; a
-"Main ·" prefix everywhere would be noise). Where it lives and what it scopes:
+The admin screens used to stack their filters as separate scrolling **pill rows** — a
+`DateRangeBar` plus one to three `TabSwitcher`s, roughly 40pt each. On the GPS audit that was four
+rows, ~165pt of chrome above the first number on a phone. They are now a single row of chips, one
+per filter, each labelled with **its current value** and opening a dropdown:
+
+```
+[Today ▾] [All walk lists ▾] [All crews ▾]
+```
+
+Three things this fixed beyond the height. A chip states what is filtered **at rest** — with pill
+rows the active pill could be scrolled off the right edge, so the only way to learn the state was
+to swipe. A chip tints (brand tint, not a solid fill — several can be applied at once and three
+solid red pills read as an alarm) whenever its selection is not the first, neutral "All …" option.
+And it matches the **web console**, which has always used dropdowns in one header row; mobile was
+the outlier. The accepted cost is two taps to change a filter instead of one.
+
+One component, [components/FilterBar.jsx](../mobile/components/FilterBar.jsx), owns all of it,
+including the custom-range modal (six screens needed identical wiring, and six copies is six
+chances to drift). Its open menu renders **below the whole row at full width**, not anchored under
+its chip: the row is a horizontal ScrollView and a menu inside it would be clipped, reliably so on
+Android. An optional `trailing` slot holds a non-filter control that should share the row — the
+audit's `LiveStatus` pill, pinned right outside the scroller so it stays reachable.
+
+Converted: the campaign screen, Timeline, GPS audit, Notes, Duplicate surveys, and a canvasser's
+activity + territory-map sub-screens. `DateRangeBar` and `TabSwitcher` both remain for their other
+callers (date-only canvasser sub-screens, the Map's control row, Help, Overlaps, answer-voters).
+
+### Scoping a campaign to one walk list
+
+Once a campaign has **two or more walk lists**, a **walk-list chip** — *All walk lists* until you
+pick one — appears in the filter row of several admin screens (a single-list campaign shows
+nothing; a "Main ·" prefix everywhere would be noise). Where it lives and what it scopes:
 
 - **The campaign screen** — picking a walk list scopes **Activity**, the **By pass** group,
   **Coverage** (its subtitle flips to *All-time walk-list progress*), and **Top canvassers**
@@ -266,14 +295,14 @@ appears in the filter area of several admin screens (a single-list campaign show
   list also clears any selected survey **pass chip**: those chips draw from the (now filtered)
   By-pass rows, so a pass from another walk list would otherwise keep scoping the survey numbers
   with no visible chip saying so.
-- **Timeline → a canvasser's profile.** Timeline's own pill row (pre-existing) now **follows you
-  into the drill-in**: open a canvasser from a filtered Timeline and the profile, every sub-screen
+- **Timeline → a canvasser's profile.** Timeline's own walk-list filter (pre-existing) now
+  **follows you into the drill-in**: open a canvasser from a filtered Timeline and the profile, every sub-screen
   (days, single-day detail, activity feed, answers, quality, households, surveys taken, notes, the
   territory map), the CSV export, and **Compare** all stay inside that walk list. The profile's
   "Showing:" line appends *· walk list: North*, Compare appends *· one walk list* to its range line
   — and the **vs-team deltas** on both then compare against the walk list's canvassers, not the
   whole campaign's.
-- **GPS audit** — the same pill row scopes the KPI totals, the per-canvasser table, and the entries
+- **GPS audit** — the same chip scopes the KPI totals, the per-canvasser table, and the entries
   list alike ([AUDIT.md](AUDIT.md)).
 - **The Map tab** — a **walk-list chip** in the filter row opens a picker. Picking a walk list
   clears any pass/import deep-link scope (a pass belongs to ONE walk list, so a stale pass scope
@@ -293,7 +322,7 @@ The only ways out were switching campaigns or force-quitting the app. And the me
 blamed the wrong control: it talked about the walk list and the date range, never mentioning the crew
 filter that had actually emptied the screen.
 
-Both filter rows now sit in the **fixed header**, above everything that can change. They stay put
+The filters now sit — as one chip row — in the **fixed header**, above everything that can change. They stay put
 through an empty result, a first-load error, an invalid date range, and the loading spinner. When a
 crew filter is what emptied the screen, the message says so **and names the way out by its on-screen
 label** — *"Tap 'All' in the crew row above to see everyone, or pick another range."* The same fix is
@@ -325,8 +354,8 @@ selected.
 Both strips (walk list *and* crew) also moved **out of the `ScrollView`** and above the
 `rangeInvalid` / error / loading branches, so no state of the screen can take them away.
 
-**The layout rule that move demands** (it has now bitten three screens — Help center, Books,
-Timeline): React Native puts `flexGrow: 1, flexShrink: 1` on *every* `ScrollView`, and a vertical
+**The layout rule that move demands** (it has now bitten four screens — Help center, Books,
+Timeline, and Notes when its filters moved up into the header): React Native puts `flexGrow: 1, flexShrink: 1` on *every* `ScrollView`, and a vertical
 scroller with no `style` prop keeps `flexBasis: auto` — so its **content height enters the column's
 flex base sum**, and once the column overflows, Yoga shares the deficit out *scaled by flexBasis*
 across every shrinkable sibling. The 42pt pill strips (also ScrollViews, also shrinkable) got crushed
@@ -337,6 +366,9 @@ never enters the base sum → no deficit exists). `TabSwitcher` itself deliberat
 `flexShrink: 0`: flexShrink is main-axis only, and in row contexts (the canvasser map's control row)
 shrinking is load-bearing — the full reasoning lives at the top of
 [components/TabSwitcher.jsx](../mobile/components/TabSwitcher.jsx).
+**`FilterBar` inherits this contract exactly** — its chip row is a horizontal ScrollView in the same
+position, so every screen converted to it carries the same `flex: 1` on its vertical sibling, and
+the warning is repeated at the top of that file rather than cross-referenced.
 
 The crew empty-state was **unreachable dead code** for the same reason: it tested
 `coordRows.length === 0`, and `const coordRows = rows` — so the generic `rows.length === 0` branch
@@ -499,6 +531,10 @@ where relevant a grey line of explanation.
   ([CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*); it is reached from the campaign screen's
   Quick actions rather than the More hub, since it answers a question you have while looking at a
   campaign's numbers;
+  **Door outcomes** — which outcome buttons this campaign's canvassers see, a stack of switches
+  (the inset grammar's `InsetSwitchRow`, its first use) with an always-available list below;
+  reached from the campaign screen's Quick actions like History, edits save on flip, and every
+  flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*);
   **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";
@@ -706,7 +742,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list pill row** (Timeline's `TabSwitcher` pattern, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew pill row** (Timeline's pattern verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |

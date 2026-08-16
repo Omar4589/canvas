@@ -348,6 +348,16 @@ export function IconPlug({ size = 22 }) {
   );
 }
 
+// A switch with its knob to the on side — the Door Outcomes page is a stack of exactly these.
+export function IconToggle({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <rect x="2.5" y="7" width="19" height="10" rx="5" />
+      <circle cx="15.5" cy="12" r="2.5" />
+    </svg>
+  );
+}
+
 export const NAV_ICONS = {
   '/admin': IconDashboard,
   '/map': IconPin,
@@ -357,6 +367,7 @@ export const NAV_ICONS = {
   '/campaigns': IconFlag,
   '/import': IconUpload,
   '/exports': IconDownload,
+  '/outcomes': IconToggle,
   '/packets': IconPrinter,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,

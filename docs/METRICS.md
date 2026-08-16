@@ -41,6 +41,11 @@ They can disagree (Knocks can exceed Houses once you do a second pass) — that'
 
 ## Metric definitions
 
+> **Door-outcome toggles don't touch any number here.** A campaign can turn individual outcome
+> buttons off in the field app ([CAMPAIGNS.md](CAMPAIGNS.md) → Door outcomes) — that's a
+> *recording* policy. Every definition below keys off recorded rows, so doors recorded before a
+> toggle flip keep counting in every metric, rate, export, and invoice, forever.
+
 ### Houses knocked
 Distinct households that have been knocked at least once — **status outside
 `NON_KNOCKED_STATUSES` (`unknocked`, `restricted`)**, and at bucket level also outside the

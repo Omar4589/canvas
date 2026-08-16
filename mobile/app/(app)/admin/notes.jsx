@@ -20,11 +20,10 @@ import { formatInTz } from '../../../lib/datetime';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
-import DateRangeBar from '../../../components/DateRangeBar';
+import FilterBar from '../../../components/FilterBar';
 import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import SourceChips from '../../../components/SourceChips';
-import TabSwitcher from '../../../components/TabSwitcher';
 import InsetGroup, {
   InsetRow,
   InsetNavRow,
@@ -36,7 +35,7 @@ import InsetGroup, {
 // Mobile Notes hub — the port of the web client/src/pages/NotesPage.jsx. Reuses the
 // same GET /admin/reports/notes endpoint (no server changes). Structure mirrors the
 // GPS-audit screen (audit.jsx): campaign-scoped hidden Tabs screen, CampaignChip +
-// DateRangeBar, filter chips, and a paginated ("Load more") list — the list itself is
+// FilterBar, source chips, and a paginated ("Load more") list — the list itself is
 // ONE InsetGroup (see components/InsetGroup.jsx for the row grammar).
 const LIMIT = 30;
 // The three note-source colors — the ONLY definition of these hexes, matching the web
@@ -273,9 +272,37 @@ export default function AdminNotes() {
       </View>
       <ArchivedCampaignBanner campaignId={cId} style={styles.bannerWrap} />
 
-      <DateRangeBar value={range} onChange={onRangeChange} tz={tz} presets={PRESETS} />
+      {/* Date, author and walk list in ONE row. The author and walk-list strips used to sit
+          inside the scroller below; up here they join the date filter and stop competing with
+          the notes themselves for the first screenful. SourceChips stays where it is — it is a
+          MULTI-select toggle, which this single-choice control cannot express. */}
+      <FilterBar
+        filters={[
+          { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz, presets: PRESETS },
+          {
+            key: 'author',
+            title: 'Author',
+            hidden: authorTabs.length <= 1,
+            options: authorTabs,
+            selected: authorId,
+            onSelect: setAuthorId,
+          },
+          {
+            key: 'effort',
+            title: 'Walk list',
+            hidden: efforts.length <= 1,
+            options: effortTabs,
+            selected: effortId,
+            onSelect: setEffortId,
+          },
+        ]}
+      />
 
+      {/* flex:1 is MANDATORY: FilterBar's chip row is a flex sibling of this scroller, and
+          without it Yoga crushes the chips to a sliver the moment notes arrive (the mechanism
+          documented in TabSwitcher.jsx, which has now bitten four screens). */}
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -302,14 +329,6 @@ export default function AdminNotes() {
         </View>
 
         <SourceChips sources={sourcesWithCounts} selected={types} onToggle={toggleType} />
-
-        {authorTabs.length > 1 ? (
-          <TabSwitcher tabs={authorTabs} activeKey={authorId} onChange={setAuthorId} />
-        ) : null}
-
-        {efforts.length > 1 ? (
-          <TabSwitcher tabs={effortTabs} activeKey={effortId} onChange={setEffortId} />
-        ) : null}
         <View style={styles.listWrap}>
           <InsetGroup>
             {!cId ? <InsetNoteRow>Pick a campaign to see its notes.</InsetNoteRow> : null}
