@@ -104,7 +104,7 @@ export default function ReclassifyCard({ campaignId, disabledOutcomes = [] }) {
   return (
     <Card>
       <div className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-fg">Door Outcomes</h2>
+        <h2 className="text-sm font-semibold text-fg">Reclassification</h2>
         <p className="mt-1 text-xs text-fg-muted">
           Fold a switched-off outcome&rsquo;s past entries into one canvassers still use. Only
           outcomes that carry no rate or billing meaning can be folded, so your door counts,

@@ -52,9 +52,9 @@ export const CAMPAIGN_NAV_GROUPS = [
 export const CAMPAIGN_NAV = [
   { slug: '', label: 'Home', icon: '/admin' },
   { slug: 'survey', label: 'Survey', icon: '/surveys', group: 'setup' },
-  // What the canvasser app offers at the door (outcome toggles today, more later). The page
-  // also hosts the Door Outcomes reclassify tool — the PAGE is App Customization, the TOOL
-  // keeps the Door Outcomes name (owner ruling 2026-08-16).
+  // What the canvasser app offers at the door (outcome toggles today, more later). It also
+  // carries a small Reclassification card as a shortcut; the full entry-editing surface is the
+  // Door Outcomes page in the Quality group.
   { slug: 'customize', label: 'App Customization', icon: '/customize', group: 'setup' },
   { slug: 'import', label: 'Voter Import', icon: '/import', group: 'setup' },
   { slug: 'efforts', label: 'Walk Lists', icon: '/efforts', group: 'setup' },

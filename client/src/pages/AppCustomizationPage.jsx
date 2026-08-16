@@ -54,9 +54,10 @@ const Toggle = ({ id, label, hint, dot, checked, disabled, onChange }) => (
 );
 
 // App Customization: what the canvasser app offers at this campaign's doors. Today that is the
-// door-outcome toggles (Campaign.disabledOutcomes) with a live phone preview; the Door Outcomes
-// reclassify tool mounts below the toggles once its server half lands, and future field-app
-// settings belong on this page too. Checked = the button is AVAILABLE, so the default state
+// door-outcome toggles (Campaign.disabledOutcomes) with a live phone preview, plus a small
+// Reclassification card for the common "I turned this off, fold its history in" follow-up —
+// the full entry-editing surface is the Door Outcomes page. Future field-app settings belong
+// on this page too. Checked = the button is AVAILABLE, so the default state
 // reads as everything-on. Turning one off hides its button and makes the server refuse fresh
 // submissions (OUTCOME_DISABLED); doors already recorded keep their status and keep counting on
 // every report. Leads reach this page too — the field is deliberately lead-editable, like the
@@ -153,9 +154,9 @@ export default function AppCustomizationPage() {
             ))}
           </Section>
 
-          {/* The Door Outcomes reclassify tool — org-admin-only cleanup of a toggled-off
-              outcome's history. Null for everyone else; keyed on disabledOutcomes so a toggle
-              flip above refreshes its eligible list. */}
+          {/* Shortcut for the fold that follows a toggle-off — org-admin-only, null for
+              everyone else, keyed on disabledOutcomes so a flip above refreshes its eligible
+              list. The full browser lives on the Door Outcomes page. */}
           <ReclassifyCard campaignId={campaignId} disabledOutcomes={current.disabledOutcomes || []} />
         </div>
 
