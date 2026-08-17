@@ -249,7 +249,8 @@ doors (every door-pool query already filters `isActive`).
 
 `Household.effortId` defaults to `null` and the upsert never writes it, so **new-address doors are in
 Intake by construction** — no import-processor change was needed. They become canvassable only once an
-effort claims them (`POST .../efforts/:id/claim`, then a supplemental cut). See [EFFORTS.md](EFFORTS.md) §B.
+effort claims them (`POST .../efforts/:id/claim` — a queued background job since the 2026-08 hardening —
+then a supplemental cut, also queued). See [EFFORTS.md](EFFORTS.md) §B.
 
 Separately, an uploaded **Voter-ID CSV** can be turned directly into a walk list (matched by
 `stateVoterId`, no universe re-import) and used to seed/claim an effort — handy when you already have an

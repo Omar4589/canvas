@@ -4,7 +4,9 @@ import { balancedKMeans } from './balancedKMeans.js';
 // capacity-balanced k-means (balancedKMeans.js) — every house lands in its
 // nearest book that still has room, so books come out tight and walkable rather
 // than merely count-balanced. Coordinate-less households go in a trailing chunk.
-export function geometricChunks(households, maxDoors, opts = {}) {
+// Async because the clusterer yields the event loop (worker jobs must keep their
+// BullMQ lock alive — see the header in balancedKMeans.js).
+export async function geometricChunks(households, maxDoors, opts = {}) {
   const withCoords = households.filter((h) => h.location?.coordinates?.length === 2);
   const noCoords = households.filter((h) => !(h.location?.coordinates?.length === 2));
   if (!withCoords.length) return noCoords.length ? [noCoords] : [];
@@ -15,7 +17,7 @@ export function geometricChunks(households, maxDoors, opts = {}) {
     lat: h.location.coordinates[1],
   }));
 
-  const chunks = balancedKMeans(items, maxDoors, opts);
+  const chunks = await balancedKMeans(items, maxDoors, opts);
 
   if (noCoords.length) chunks.push(noCoords);
   return chunks;
@@ -24,14 +26,14 @@ export function geometricChunks(households, maxDoors, opts = {}) {
 // NOTE the rest-spread: this used to rebuild `{ tolerance }` by hand, which silently
 // swallowed every other option, so a caller passing anything else got no error and no
 // effect. Forward opts whole.
-export function geometricCut(households, { maxDoors = 65, ...opts } = {}) {
-  return geometricChunks(households, maxDoors, opts).map((members, i) => ({
+export async function geometricCut(households, { maxDoors = 65, ...opts } = {}) {
+  return (await geometricChunks(households, maxDoors, opts)).map((members, i) => ({
     name: `Book ${i + 1}`,
     households: members,
   }));
 }
 
 // Subdivide one attribute group into compact contiguous sub-books <= capN (soft).
-export function geometricSubdivide(households, capN, opts = {}) {
+export async function geometricSubdivide(households, capN, opts = {}) {
   return geometricChunks(households, capN, opts);
 }

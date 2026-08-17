@@ -116,7 +116,8 @@ people leave when you unassign their book on the Turf page).
 2. **Walk Lists** page → **New walk list** → enter a name; if it's a survey campaign, optionally
    pick a **survey override** (else it uses the campaign's survey); pick the saved search under **Seed
    door-set**.
-3. Click **Create walk list**. It now owns that saved search's unclaimed (Intake) doors.
+3. Click **Create walk list**. It claims that saved search's unclaimed (Intake) doors in the
+   background — a progress line under the form shows the claim landing (moments for small lists).
 
 ### Run a pass (canvass a walk list)
 1. **Walk Lists** page → open the walk list (**Manage**) → the **Passes** panel. Pass 1 already exists
@@ -187,7 +188,9 @@ their doors to another crew later, add them back to the campaign first. See
 # Part 2 — Technical reference
 
 Server: [routes/admin/efforts.js](../server/src/routes/admin/efforts.js) (walk-list CRUD + roster +
-claim/intake — also auto-creates **Pass 1** on create via `createNextPass`),
+claim/intake — also auto-creates **Pass 1** on create via `createNextPass`; create-time seeding
+enqueues the same claim job as `/claim`, so `POST /` returns `{effort, pass, claimJobId, claimError}` —
+on enqueue failure the list exists **unseeded**, never half-created),
 [routes/admin/passes.js](../server/src/routes/admin/passes.js) (passes, walk-list-scoped),
 [services/passes/createPass.js](../server/src/services/passes/createPass.js) (the shared
 `createNextPass` allocator), [services/passes/activePasses.js](../server/src/services/passes/activePasses.js).
@@ -212,9 +215,23 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 - **Claim** (`POST .../efforts/:id/claim`, body `{walkListId? | all? , force?}`): sets
   `Household.effortId`. **`all:true` ("Claim all Intake") targets only unowned doors (`effortId: null`)** —
   it claims every Intake door and **never conflicts**, even in a multi-walk-list campaign. A **`walkListId`**
-  claim takes that saved search's Intake doors; any door in the saved search already owned by **another** walk list returns a
-  `409 doors-owned` unless `force:true` (the re-carve path), which also clears their `turfId`/`walkOrder`
-  and pulls them from their old book (`recomputeTurf`). Disjointness can never be violated silently.
+  claim takes that saved search's Intake doors; any door in the saved search already owned by **another**
+  walk list returns a **`409 doors-owned` with a per-donor breakdown** —
+  `{conflicts, claimable, breakdown:[{effortId, effortName, doors, booksAffected, booksEmptied}],
+  totalBooksAffected, totalBooksEmptied}` — which the web console renders as a real confirm modal
+  before anything moves. With `force:true` (or no conflicts) the route **ENQUEUES** the move on the
+  TURF queue and returns `202 {jobId, claimable, conflicts}` (poll `GET .../turfs/jobs/:jobId`;
+  `503 queue-unavailable` when Redis is down; `{jobId: null}` when nothing would move). The old
+  inline move outlived Heroku's 30s router timeout at 24k doors and took no lock (2026-08 incident).
+  The job (`executeClaim` in [claimDoors.js](../server/src/services/walklist/claimDoors.js)):
+  **snapshots every donor pass BEFORE mutating** (`TurfSnapshot` `reason:'move'`, deduped on the
+  job id so a stall-redelivery can't double-capture), holds + renews the per-pass `recutLock` on
+  each donor pass, moves the doors (clearing `turfId`/`walkOrder`), rebuilds the shrunk books in
+  bulk (ownership-keyed sweep, so a re-run is a no-op), and re-clips only their territories.
+  Emptied donor books **persist at 0 doors** (badged on the Turf page) — moving doors back later
+  never rebuilds books. The full **undo** is: force-claim the doors back → Discard the donor pass's
+  gutted books → Restore the `'move'` snapshot (books, memberships, and assignments return).
+  Disjointness can never be violated silently.
 - **Saved searches are source-agnostic here.** A saved search from the filter builder and one from an uploaded
   Voter-ID CSV are both just frozen `householdIds` (`SavedSearch.source` = `'filter' | 'csv'`), so
   seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).
@@ -224,6 +241,17 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   (the importer never re-owns a door). To move such doors into a new walk list, claim them with a
   **re-carve** — precisely targetable by uploading that voter list as a saved search
   ([WALKLISTS.md](WALKLISTS.md)).
+- **Deleting is ledger-guarded.** `DELETE /efforts/:id` refuses (400 `has-history`) while any
+  `CanvassActivity` or `SurveyResponse` references the walk list or its rounds — draft-rounds-only is
+  NOT proof of no history, because knocks stamp the door's owner at write time
+  (`resolveAttribution`, [mobile/canvass.js](../server/src/routes/mobile/canvass.js)); deleting the
+  doc would orphan those rows into the by-pass report's **"Legacy / no pass"** bucket (the 2026-08
+  incident). Archive instead — it keeps the name resolvable in reports forever. Orphans created
+  before this guard are repaired with **`npm run repair:orphan-attribution`** (dashboard Run console;
+  dry-run by default, `-- --apply` to write): it re-stamps rows whose walk list/round was deleted to
+  the door's *current* list + round, and lists ambiguous rows (door back in Intake, several rounds
+  none active) for manual review instead of guessing
+  ([repairOrphanAttribution.js](../server/src/migrations/repairOrphanAttribution.js)).
 
 ## C. Passes & "active"
 

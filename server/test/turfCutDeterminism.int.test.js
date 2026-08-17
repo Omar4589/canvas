@@ -131,11 +131,35 @@ test('books match the cut of the SAME doors ordered by _id — load order never 
   const actual = bookShape(await Turf.find({ passId: ctx.pass._id }, { householdIds: 1 }).lean());
 
   const sorted = ctx.docs.slice().sort((a, b) => (String(a._id) < String(b._id) ? -1 : 1));
-  const expected = geometricCut(sorted, { maxDoors: MAX_DOORS, tolerance: 0.4 })
+  const expected = (await geometricCut(sorted, { maxDoors: MAX_DOORS, tolerance: 0.4 }))
     .map((b) => computeWalkOrder(b.households, { optimize: true }).map(String).join(','))
     .sort();
 
   assert.deepEqual(actual, expected);
+});
+
+test('the chunked path is reproducible through the real generateTurf', { skip }, async () => {
+  // Force the 250k-scale pre-split (balancedKMeans.js) on this small fixture via the env
+  // override, prove the cut still re-runs byte-identical, then restore the default path.
+  process.env.TURF_KMEANS_CHUNK_THRESHOLD = '40';
+  try {
+    const run = async () => {
+      await generateTurf({
+        campaignId: ctx.camp._id, passId: ctx.pass._id, mode: 'geometric', params: { maxDoors: MAX_DOORS, tolerance: 0.4 },
+      });
+      return bookShape(await Turf.find({ passId: ctx.pass._id }, { householdIds: 1 }).lean());
+    };
+    const first = await run();
+    const second = await run();
+    assert.ok(first.length > 1, 'chunked fixture should still produce several books');
+    assert.deepEqual(second, first);
+    // Every door still lands in exactly one book across the chunk seams.
+    const all = first.flatMap((s) => s.split(','));
+    assert.equal(all.length, ctx.docs.length);
+    assert.equal(new Set(all).size, ctx.docs.length);
+  } finally {
+    delete process.env.TURF_KMEANS_CHUNK_THRESHOLD;
+  }
 });
 
 test('the household mirror agrees with the books it was written from', { skip }, async () => {

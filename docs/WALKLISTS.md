@@ -255,12 +255,13 @@ Voting page uses.
 A saved search is just `householdIds`. Both seed and claim live in
 [efforts.js](../server/src/routes/admin/efforts.js) and treat a CSV saved search identically to a filter saved search:
 
-- **Seed at create** (`POST /efforts`, `seedWalkListId`) — `updateMany({ _id: {$in: householdIds},
-  effortId: null }, { effortId })`: Intake-only.
+- **Seed at create** (`POST /efforts`, `seedWalkListId`) — enqueues an Intake-only claim job (the
+  same `claim` job the claim endpoint uses; response carries `claimJobId`).
 - **Claim** (`POST /efforts/:id/claim`, `{ walkListId }`) — Intake doors claimed outright; doors owned
-  by another walk list return `409 doors-owned` unless `force:true` (re-carve, which also clears
-  `turfId`/`walkOrder` and pulls them from their old book). **Disjointness is preserved by
-  construction** — see [EFFORTS.md §B](EFFORTS.md).
+  by another walk list return `409 doors-owned` **with a per-donor breakdown** (doors lost, books
+  affected/emptied) unless `force:true` (the re-carve), which **enqueues** the move as a background
+  job — donor passes are snapshotted first (`reason:'move'`), locked while it runs, and the shrunk
+  books rebuilt in bulk. **Disjointness is preserved by construction** — see [EFFORTS.md §B](EFFORTS.md).
 
 ## E. Deliberate decisions / gotchas
 

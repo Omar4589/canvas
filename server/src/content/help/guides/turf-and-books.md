@@ -31,13 +31,13 @@ New books start as **drafts** — canvassers see nothing yet. Re-cut freely; whe
 
 Once canvassers have started, the same map shows you how the round is going: houses colored by what happened at them **in the round picked in the Pass dropdown**, a book-colored ring on each so you can still tell books apart, `23/65` counts in the book labels, and books that shade in as they fill up. Click a house for who knocked it, when, and any answers taken there. See [The Turf Cutting page](page-turf-cutting) for the details.
 
-## Recutting is all-or-nothing
+## Recutting
 
-Don't like the layout, or the voter list changed? If the books are still drafts, just generate again. If they're published, you must **Discard** first — see [Recut books mid-pass](recut-books-mid-pass) for how that's guarded and how it keeps knocks while clearing assignments.
+Don't like the layout, or the voter list changed? If the books are still drafts, just generate again. If they're published, you must **Discard** first — see [Recut books mid-pass](recut-books-mid-pass) for how that's guarded and how it keeps knocks while clearing assignments. When a pass has accepted books *and* drafts (say, an "Add as new book" you regret), the Discard dialog offers **Drafts only** — it removes just the unaccepted drafts and leaves your live books, assignments, and knocks alone. You can also select individual draft books in the list and delete just those.
 
 ## Smaller fixes
 
-- Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime.
+- Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime. Big adds run in the background with the same progress bar as Generate; it's safe to leave the page and come back.
 - Reshape a book or two with **move**, **merge**, or **split**.
 - A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. See [The Turf Cutting page](page-turf-cutting).
 

@@ -102,6 +102,17 @@ async function main() {
     new Worker(QUEUE_NAMES.TURF, processTurfJob, {
       connection: createRedis(),
       concurrency: TURF_CONCURRENCY,
+      // Belt-and-braces for the 2026-08 stall incident: the cut/claim pipeline now
+      // yields (balancedKMeans + computeTerritories + per-book loops), so the lock
+      // renewal timer can always fire — but one sync block remains (turf.voronoi
+      // over a whole pass, seconds at 250k doors). 90s covers a pathological block
+      // with margin while still detecting a genuinely dead worker in ~1.5 min.
+      lockDuration: 90_000,
+      // Exactly one legitimate stall redelivery (dyno restart mid-job) is allowed —
+      // safe because all three processors are idempotent (generate wipes prior
+      // drafts, claim sweeps by ownership, supplemental re-reads ownBooks). A job
+      // that stalls twice fails loudly instead of thrashing.
+      maxStalledCount: 2,
     }),
     new Worker(QUEUE_NAMES.MAINTENANCE, processMaintenanceJob, {
       connection: createRedis(),

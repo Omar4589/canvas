@@ -22,6 +22,7 @@ import { buildingKeyForCoords } from '../lib/buildings.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { useJobPoll } from '../lib/useJobPoll.js';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
 
@@ -575,17 +576,43 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
   );
 }
 
-function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks, setClearKnocks, pending, error, onCancel, onConfirm }) {
-  const worked = knockCount > 0;
+function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLabel, knockCount, clearKnocks, setClearKnocks, scope, setScope, pending, error, onCancel, onConfirm }) {
+  // Drafts-only scope: offered only when BOTH kinds exist (all-drafts or
+  // all-accepted needs no choice). It skips the snapshot, the type-to-confirm,
+  // and the clear-knocks option — drafts carry no assignments or history.
+  const scopeChoice = draftCount > 0 && publishedCount > 0;
+  const draftsOnly = scope === 'drafts';
+  const shownCount = draftsOnly ? draftCount : bookCount;
+  const worked = !draftsOnly && knockCount > 0;
   const [confirmText, setConfirmText] = useState('');
   const typedOk = !worked || confirmText.trim().toLowerCase() === 'discard';
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-fg">
-          Discard {bookCount} book{bookCount === 1 ? '' : 's'}{passLabel ? ` — ${passLabel}` : ''}?
+          Discard {shownCount} {draftsOnly ? 'draft ' : ''}book{shownCount === 1 ? '' : 's'}{passLabel ? ` — ${passLabel}` : ''}?
         </h3>
-        {worked ? (
+        {scopeChoice && (
+          <div className="mt-3 space-y-1.5 text-sm">
+            <label className="flex items-start gap-2">
+              <input type="radio" name="discard-scope" checked={draftsOnly} onChange={() => setScope('drafts')} className="mt-0.5" />
+              <span>
+                <strong>Drafts only</strong> — remove the {draftCount} unaccepted draft{draftCount === 1 ? '' : 's'} (e.g. an
+                unwanted “Add as new book”). Accepted books and assignments untouched.
+              </span>
+            </label>
+            <label className="flex items-start gap-2">
+              <input type="radio" name="discard-scope" checked={!draftsOnly} onChange={() => setScope('all')} className="mt-0.5" />
+              <span><strong>Everything</strong> — drafts and accepted books both, so the pass can be re-cut from scratch.</span>
+            </label>
+          </div>
+        )}
+        {draftsOnly ? (
+          <p className="mt-2 text-sm text-fg-muted">
+            Draft books never reached canvassers, so this is safe: no assignments or knock history are touched, and the
+            drafts' doors go back to “not in any book”.
+          </p>
+        ) : worked ? (
           <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
             ⚠️ <strong>{knockCount.toLocaleString()} knock{knockCount === 1 ? '' : 's'} already recorded</strong> in this
             pass{isActive ? ' — and it is LIVE' : ''}. Discarding removes its books and{' '}
@@ -606,13 +633,15 @@ function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks,
             if you change your mind.
           </p>
         )}
-        <label className="mt-3 flex items-start gap-2 text-sm text-fg-muted">
-          <input type="checkbox" checked={clearKnocks} onChange={(e) => setClearKnocks(e.target.checked)} className="mt-0.5" />
-          <span>
-            Also clear all knock history for this pass — resets door progress.{' '}
-            <span className="text-fg-subtle">(Snapshotted; undoable.)</span>
-          </span>
-        </label>
+        {!draftsOnly && (
+          <label className="mt-3 flex items-start gap-2 text-sm text-fg-muted">
+            <input type="checkbox" checked={clearKnocks} onChange={(e) => setClearKnocks(e.target.checked)} className="mt-0.5" />
+            <span>
+              Also clear all knock history for this pass — resets door progress.{' '}
+              <span className="text-fg-subtle">(Snapshotted; undoable.)</span>
+            </span>
+          </label>
+        )}
         {worked && (
           <label className="mt-3 block text-sm">
             <span className="mb-1 block text-xs font-medium text-fg-muted">
@@ -638,7 +667,7 @@ function DiscardModal({ isActive, bookCount, passLabel, knockCount, clearKnocks,
             disabled={pending || !typedOk}
             className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
           >
-            {pending ? 'Discarding…' : clearKnocks ? 'Discard + clear knocks' : 'Discard books'}
+            {pending ? 'Discarding…' : draftsOnly ? 'Discard drafts' : clearKnocks ? 'Discard + clear knocks' : 'Discard books'}
           </button>
         </div>
       </div>
@@ -868,6 +897,9 @@ export default function TurfsPage() {
   const [excludeNoSoliciting, setExcludeNoSoliciting] = useState(true);
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
+  // Which flow started the polled job — the done/failed message differs
+  // ('N books' for a generate vs 'added N doors' for a supplemental add).
+  const [jobKind, setJobKind] = useState('generate');
 
   const [editMode, setEditMode] = useState(false);
   const [bookSearchQuery, setBookSearchQuery] = useState('');
@@ -885,6 +917,7 @@ export default function TurfsPage() {
   const [manualSplit, setManualSplit] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [showDiscard, setShowDiscard] = useState(false);
+  const [discardScope, setDiscardScope] = useState('all'); // 'all' | 'drafts' (drafts offered only when both exist)
   const [showRestrict, setShowRestrict] = useState(null); // 'mark' | 'unmark' | null
   const [restrictResult, setRestrictResult] = useState(null);
   const [clearKnocks, setClearKnocks] = useState(false);
@@ -920,9 +953,11 @@ export default function TurfsPage() {
   const [culledBuildings, setCulledBuildings] = useState(0); // >0 → too many in view for DOM markers
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
+  // slim=1: the response drops each book's householdIds — this page never reads
+  // them, and at big campaigns they are a multi-MB payload (server strips them).
   const turfsQ = useQuery({
     queryKey: ['turfs', campaignId, passId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${passId}`),
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${passId}&slim=1`),
     enabled: !!campaignId && !!passId,
   });
   // Doors load for the whole pass so every household shows on the map as a dot
@@ -1229,21 +1264,13 @@ export default function TurfsPage() {
     enabled: !!campaignId && !!popupHouseholdId,
   });
 
-  const jobQ = useQuery({
-    queryKey: ['turf-job', campaignId, jobId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/jobs/${jobId}`),
-    enabled: !!jobId && !!campaignId,
-    refetchInterval: (q) => {
-      const s = q.state.data?.status;
-      return s === 'completed' || s === 'failed' ? false : 1200;
-    },
-  });
+  const job = useJobPoll({ campaignId, jobId });
   useEffect(() => {
-    if (jobQ.data?.status === 'completed') {
+    if (job.status === 'completed') {
       qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
       qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
     }
-  }, [jobQ.data?.status]);
+  }, [job.status]);
 
   const invalidateTurfs = () => {
     qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
@@ -1263,6 +1290,7 @@ export default function TurfsPage() {
     },
     onSuccess: (res) => {
       setJobId(res.jobId);
+      setJobKind('generate');
       if (drawRef.current) drawRef.current.deleteAll();
       setDrawnAreas([]);
     },
@@ -1279,17 +1307,34 @@ export default function TurfsPage() {
     mutationFn: (opts = {}) =>
       api(`/admin/campaigns/${campaignId}/turfs/discard`, {
         method: 'POST',
-        body: { passId, confirmActive: !!opts.confirmActive, clearKnocks: !!opts.clearKnocks },
+        body: { passId, confirmActive: !!opts.confirmActive, clearKnocks: !!opts.clearKnocks, scope: opts.scope || 'all' },
       }),
     onSuccess: (res) => {
       setShowDiscard(false);
       setClearKnocks(false);
+      setDiscardScope('all');
       setSelectedBooks(new Set());
       setEditMode(false);
+      // Drafts-only discards write no snapshot — don't offer an undo that isn't there.
       setLastSnapshotId(res?.snapshotId || null);
       invalidateTurfs();
       qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
       qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+    },
+  });
+  // Surgical draft cleanup: delete the selected DRAFT books (the server 409s
+  // anything accepted). Sequential on purpose — each delete briefly takes the
+  // pass's recut lock, so parallel fires would trip the lock's own 409.
+  const deleteDrafts = useMutation({
+    mutationFn: async (turfIds) => {
+      for (const id of turfIds) {
+        await api(`/admin/campaigns/${campaignId}/turfs/${id}`, { method: 'DELETE' });
+      }
+      return { deleted: turfIds.length };
+    },
+    onSuccess: () => {
+      setSelectedBooks(new Set());
+      invalidateTurfs();
     },
   });
   // Bulk restricted — whole gated communities in one action (docs/PASSES_AND_TURF.md).
@@ -1354,13 +1399,18 @@ export default function TurfsPage() {
   // Fold voters imported after this pass was cut (currently unassigned to any
   // book) into the pass as new draft book(s) — no recut, no archive. Carries the
   // restricted checkbox so the button books exactly what the nag counted.
+  // Queued: the 202's jobId feeds the same progress bar as Generate (the turfs
+  // invalidation happens on job completion, not here).
   const addSupplemental = useMutation({
     mutationFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, {
         method: 'POST',
         body: { passId, excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
       }),
-    onSuccess: invalidateTurfs,
+    onSuccess: (res) => {
+      setJobId(res.jobId);
+      setJobKind('supplemental');
+    },
   });
 
   // A book is selected by clicking it in the list OR on the map; clicking again
@@ -1677,9 +1727,8 @@ export default function TurfsPage() {
     setDrawnAreas((areas) => areas.filter((a) => a.id !== id));
   }
 
-  const jobBusy = jobId && jobQ.data && jobQ.data.status !== 'completed' && jobQ.data.status !== 'failed';
-  const progress = jobQ.data?.progress;
-  const pct = typeof progress === 'object' ? progress?.pct : progress;
+  const jobBusy = job.busy;
+  const pct = job.pct;
   const canGenerate =
     passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnAreas.length > 0);
 
@@ -2139,13 +2188,23 @@ export default function TurfsPage() {
 
           {jobId && (
             <div className="mt-3 text-xs text-fg-muted">
-              {jobQ.data?.status === 'failed' ? (
-                <span className="text-danger">Failed: {jobQ.data.error || 'unknown error'}</span>
-              ) : jobQ.data?.status === 'completed' ? (
-                <span className="text-success">Done — {jobQ.data?.result?.bookCount ?? draftCount} books.</span>
+              {job.status === 'failed' ? (
+                <span className="text-danger">Failed: {job.error || 'unknown error'}</span>
+              ) : job.status === 'completed' ? (
+                jobKind === 'supplemental' ? (
+                  job.result?.added === 0 ? (
+                    <span>No eligible doors to add (saved-search passes only include their saved list).</span>
+                  ) : (
+                    <span className="text-success">
+                      Added {(job.result?.added ?? 0).toLocaleString()} doors in {job.result?.bookCount ?? 0} new book{(job.result?.bookCount ?? 0) === 1 ? '' : 's'}.
+                    </span>
+                  )
+                ) : (
+                  <span className="text-success">Done — {job.result?.bookCount ?? draftCount} books.</span>
+                )
               ) : (
                 <>
-                  <div className="mb-1">{progress?.phase || 'queued'}… {pct != null ? `${pct}%` : ''}</div>
+                  <div className="mb-1">{job.phase || 'queued'}… {pct != null ? `${pct}%` : ''}</div>
                   <div className="h-1.5 w-full overflow-hidden rounded bg-sunken"><div className="h-full bg-brand-500 transition-all" style={{ width: `${pct || 5}%` }} /></div>
                 </>
               )}
@@ -2181,16 +2240,13 @@ export default function TurfsPage() {
               </p>
               <button
                 onClick={() => addSupplemental.mutate()}
-                disabled={addSupplemental.isPending}
+                disabled={addSupplemental.isPending || jobBusy}
                 className="mt-2 rounded bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
               >
-                {addSupplemental.isPending ? 'Adding…' : 'Add as new book'}
+                {addSupplemental.isPending || (jobBusy && jobKind === 'supplemental') ? 'Adding…' : 'Add as new book'}
               </button>
               {addSupplemental.error && (
                 <div className="mt-1 text-danger">{addSupplemental.error.message}</div>
-              )}
-              {addSupplemental.data?.added === 0 && (
-                <div className="mt-1 text-info-fg">No eligible doors to add (saved-search passes only include their saved list).</div>
               )}
             </div>
           )}
@@ -2208,6 +2264,20 @@ export default function TurfsPage() {
                       {accept.isPending ? 'Accepting…' : 'Accept'}
                     </button>
                   )}
+                  {selectedTurfs.length > 0 && selectedTurfs.every((t) => t.status === 'draft') && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Delete ${selectedTurfs.length} draft book${selectedTurfs.length === 1 ? '' : 's'}? Their doors go back to "not in any book" (re-cut or add them again anytime).`)) {
+                          deleteDrafts.mutate(selectedTurfs.map((t) => String(t._id)));
+                        }
+                      }}
+                      disabled={deleteDrafts.isPending}
+                      title="Delete only the selected draft books — accepted books are untouched"
+                      className="rounded px-2 py-1 text-xs font-medium text-danger hover:bg-danger-tint disabled:opacity-60"
+                    >
+                      {deleteDrafts.isPending ? 'Deleting…' : `Delete draft${selectedTurfs.length === 1 ? '' : 's'} (${selectedTurfs.length})`}
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowDiscard(true)}
                     disabled={discard.isPending}
@@ -2217,6 +2287,17 @@ export default function TurfsPage() {
                   </button>
                 </div>
               </div>
+              {deleteDrafts.error && <div className="mb-2 text-[11px] text-danger">{deleteDrafts.error.message}</div>}
+              {(() => {
+                const zeroCount = turfs.filter((t) => (t.doorCount || 0) === 0).length;
+                if (!zeroCount) return null;
+                return (
+                  <div className="mb-2 rounded bg-warning-tint px-2 py-1.5 text-[11px] text-warning-fg">
+                    {zeroCount} book{zeroCount === 1 ? '' : 's'} hold 0 doors — usually from moving doors to another walk
+                    list. Restore the “before move” snapshot below, or discard/delete them.
+                  </div>
+                );
+              })()}
 
               <div className="mb-2 flex items-center gap-3 text-xs">
                 <button onClick={() => setSelectedBooks(new Set(turfs.filter(bookShown).map((t) => String(t._id))))} className="font-medium text-brand-accent hover:underline">Select all{listFiltered ? ' shown' : ''}</button>
@@ -2270,6 +2351,14 @@ export default function TurfsPage() {
                       ) : (
                         <span className="truncate">{t.name}</span>
                       )}
+                      {(t.doorCount || 0) === 0 && (
+                        <span
+                          title="This book holds no doors — usually a door move emptied it. Restore the snapshot, or discard/delete it."
+                          className="shrink-0 rounded bg-warning-tint px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-warning-fg"
+                        >
+                          0 doors
+                        </span>
+                      )}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       {(() => {
@@ -2312,6 +2401,7 @@ export default function TurfsPage() {
                   <li key={s._id} className="flex items-center justify-between gap-2 rounded px-1 py-1">
                     <span className="min-w-0 truncate text-fg-muted">
                       {formatInTz(s.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)} · {s.bookCount} books
+                      {s.reason === 'move' ? ' · before move' : ''}
                       {s.clearedKnocks ? ` · ${s.knockCount} knocks` : ''}
                       {s.restoredAt ? ' · restored' : ''}
                     </span>
@@ -2533,14 +2623,24 @@ export default function TurfsPage() {
         <DiscardModal
           isActive={isActivePass}
           bookCount={turfs.length}
+          draftCount={draftCount}
+          publishedCount={publishedCount}
           passLabel={passLabel}
           knockCount={knockCount}
           clearKnocks={clearKnocks}
           setClearKnocks={setClearKnocks}
+          scope={discardScope}
+          setScope={setDiscardScope}
           pending={discard.isPending}
           error={discard.error}
-          onCancel={() => { setShowDiscard(false); setClearKnocks(false); }}
-          onConfirm={() => discard.mutate({ confirmActive: isActivePass || knockCount > 0, clearKnocks })}
+          onCancel={() => { setShowDiscard(false); setClearKnocks(false); setDiscardScope('all'); }}
+          onConfirm={() =>
+            discard.mutate(
+              discardScope === 'drafts'
+                ? { scope: 'drafts' }
+                : { confirmActive: isActivePass || knockCount > 0, clearKnocks }
+            )
+          }
         />
       )}
     </div>

@@ -71,10 +71,10 @@ test('degenerate books keep their existing fallbacks', () => {
 
 // ---------- computeTerritories: containment AND disjointness, simultaneously ----------
 
-test('a door SURROUNDED by another book is contained via a pocket island', () => {
+test('a door SURROUNDED by another book is contained via a pocket island', async () => {
   const a = [...cluster(), hh(-76.8785, 38.9308)]; // stray sits inside B's grid
   const b = cluster(-76.879);
-  const [ta, tb] = computeTerritories(asBooks(a, b));
+  const [ta, tb] = await computeTerritories(asBooks(a, b));
 
   assert.strictEqual(outsideCount(a, ta), 0, "A's doors (incl. the surrounded stray) all inside A");
   assert.strictEqual(outsideCount(b, tb), 0, "B's doors all inside B");
@@ -83,57 +83,57 @@ test('a door SURROUNDED by another book is contained via a pocket island', () =>
   assert.strictEqual(ta.type, 'MultiPolygon', "the surrounded stray's book grows a pocket island");
 });
 
-test('the dense street that used to lose 7/24 doors now keeps them all', () => {
+test('the dense street that used to lose 7/24 doors now keeps them all', async () => {
   const a = [];
   for (let i = 0; i < 24; i++) a.push(hh(-76.9 + i * 0.001, 38.93 + (i % 2) * 0.0004));
   const b = [];
   for (let i = 0; i < 9; i++) b.push(hh(-76.879 + (i % 3) * 0.0008, 38.9315 + Math.floor(i / 3) * 0.0008));
-  const [ta, tb] = computeTerritories(asBooks(a, b));
+  const [ta, tb] = await computeTerritories(asBooks(a, b));
 
   assert.strictEqual(outsideCount(a, ta), 0, 'no far-end door clipped out of its own book');
   assert.strictEqual(outsideCount(b, tb), 0);
   assert.ok(overlapArea(ta, tb) < 1, 'still non-overlapping');
 });
 
-test('a stray inside its own frontier (far neighbor) stays contained', () => {
+test('a stray inside its own frontier (far neighbor) stays contained', async () => {
   const b = cluster(-76.7); // neighbor far east — the stray is on A's side of every seam
   for (const strayLng of [-76.893, -76.89, -76.885, -76.88]) {
     const a = [...cluster(), hh(strayLng, 38.929)];
-    const [ta] = computeTerritories(asBooks(a, b));
+    const [ta] = await computeTerritories(asBooks(a, b));
     assert.strictEqual(outsideCount(a, ta), 0, `stray at lng ${strayLng} fell outside its territory`);
   }
 });
 
-test('an identical coordinate split across two books does not crash; the owner contains it', () => {
+test('an identical coordinate split across two books does not crash; the owner contains it', async () => {
   const shared = hh(-76.8788, 38.9304);
   const a = [...cluster(), shared]; // A seen first → A owns the shared coordinate's cell
   const b = [...cluster(-76.879), hh(-76.8788, 38.9304)];
-  const [ta, tb] = computeTerritories(asBooks(a, b));
+  const [ta, tb] = await computeTerritories(asBooks(a, b));
   assert.ok(ta && tb, 'both territories computed');
   assert.strictEqual(inside(shared, ta), true, "first-seen book's shape contains the shared coordinate");
 });
 
-test('single-book passes fall back to the plain hull', () => {
+test('single-book passes fall back to the plain hull', async () => {
   const a = cluster();
-  const [ta] = computeTerritories(asBooks(a));
+  const [ta] = await computeTerritories(asBooks(a));
   assert.deepStrictEqual(ta, computeBoundary(a));
 });
 
-test('onlyIndices computes just the requested books and matches the full run exactly', () => {
+test('onlyIndices computes just the requested books and matches the full run exactly', async () => {
   const books = asBooks([...cluster(), hh(-76.8785, 38.9308)], cluster(-76.879), cluster(-76.87, 38.94));
-  const full = computeTerritories(books);
-  const partial = computeTerritories(books, { onlyIndices: new Set([0]) });
+  const full = await computeTerritories(books);
+  const partial = await computeTerritories(books, { onlyIndices: new Set([0]) });
   assert.deepStrictEqual(partial[0], full[0], 'selective run reproduces the full-run shape byte-for-byte');
   assert.strictEqual(partial[1], undefined, 'unrequested books come back undefined (stored shapes kept)');
   assert.strictEqual(partial[2], undefined);
 });
 
-test('deterministic: two runs on the same input are identical (worker re-runs must reproduce)', () => {
+test('deterministic: two runs on the same input are identical (worker re-runs must reproduce)', async () => {
   const books = asBooks([...cluster(), hh(-76.8785, 38.9308)], cluster(-76.879));
-  assert.deepStrictEqual(computeTerritories(books), computeTerritories(books));
+  assert.deepStrictEqual(await computeTerritories(books), await computeTerritories(books));
 });
 
-test('scale smoke: ~2k doors / 16 books — full containment, disjoint, fast', () => {
+test('scale smoke: ~2k doors / 16 books — full containment, disjoint, fast', async () => {
   // Deterministic LCG; grid-cluster into books, then swap strays across neighbors.
   let seed = 42;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -150,7 +150,7 @@ test('scale smoke: ~2k doors / 16 books — full containment, disjoint, fast', (
   }
   books.forEach((b) => { b.centroid = computeCentroid(b.households); });
 
-  const territories = computeTerritories(books);
+  const territories = await computeTerritories(books);
   let out = 0;
   books.forEach((b, i) => { out += outsideCount(b.households, territories[i]); });
   assert.strictEqual(out, 0, `${out} door(s) outside their book's shape`);

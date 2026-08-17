@@ -57,6 +57,24 @@ export function cutStatusExclusion({ excludeRestricted, excludeNoSoliciting } = 
   return drop.length ? { status: { $nin: drop } } : {};
 }
 
+// Wipe a pass's DRAFT books cleanly: drop their assignments and clear the
+// household mirror for their members before deleting, so no orphaned assignments
+// or stale Household.turfId are left behind. Published books untouched. Two
+// callers: every re-generate (drafts are wiped before a fresh cut) and the
+// drafts-only Discard scope (routes/admin/turfs.js) — one implementation so the
+// endpoint can never drift from what the cut itself does. Draft books cannot
+// carry assignments (both assign routes 409 `not-accepted` on drafts), so the
+// TurfAssignment sweep is belt-and-braces, not a data path.
+export const wipeDraftBooks = async (passId) => {
+  const priorDrafts = await Turf.find({ passId, status: 'draft' }, { _id: 1 }).lean();
+  if (!priorDrafts.length) return 0;
+  const draftIds = priorDrafts.map((d) => d._id);
+  await TurfAssignment.deleteMany({ turfId: { $in: draftIds } });
+  await Household.updateMany({ turfId: { $in: draftIds } }, { $set: { turfId: null, walkOrder: null } });
+  await Turf.deleteMany({ _id: { $in: draftIds } });
+  return draftIds.length;
+};
+
 // a re-run / worker restart is clean). Mirrors turfId/walkOrder onto households.
 export async function generateTurf({ campaignId, passId, mode, params = {}, generationJobId, generatedBy, onProgress }) {
   const campaign = await Campaign.findById(campaignId).lean();
@@ -129,7 +147,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       idx += 1;
       if (!hh.length) continue;
       if (subCutN > 0 && hh.length > subCutN) {
-        const chunks = geometricCut(hh, { maxDoors: subCutN });
+        const chunks = await geometricCut(hh, { maxDoors: subCutN });
         chunks.forEach((c, j) => books.push({ name: `Area ${idx} · ${j + 1}`, households: c.households }));
       } else {
         books.push({ name: `Area ${idx}`, households: hh, boundary: polygon });
@@ -140,9 +158,17 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
     await onProgress?.({ phase: 'clustering', pct: 25 });
     if (mode === 'attribute') {
-      books = attributeCut(households, { attribute: params.attribute, capN: params.capN || null });
+      books = await attributeCut(households, { attribute: params.attribute, capN: params.capN || null });
     } else if (mode === 'geometric') {
-      books = geometricCut(households, { maxDoors: params.maxDoors || 65, tolerance: params.tolerance });
+      // Chunked clustering reports per-chunk completion; map it onto pct 25→55 so a
+      // 250k-door cut shows movement instead of sitting at 25 for minutes.
+      books = await geometricCut(households, {
+        maxDoors: params.maxDoors || 65,
+        tolerance: params.tolerance,
+        onProgress: async ({ chunk, chunks }) => {
+          await onProgress?.({ phase: 'clustering', pct: 25 + Math.round((chunk / chunks) * 30) });
+        },
+      });
     } else {
       throw new Error(`Unknown mode: ${mode}`);
     }
@@ -150,17 +176,10 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'boundaries', pct: 55, booksTotal: books.length });
 
-  // Wipe prior drafts for this pass CLEANLY: drop their assignments and clear the
-  // household mirror for their members before deleting, so a re-cut leaves no
-  // orphaned assignments or stale Household.turfId behind. (The published guard on
-  // /generate means only draft books can exist on the pass at this point.)
-  const priorDrafts = await Turf.find({ passId, status: 'draft' }, { _id: 1 }).lean();
-  if (priorDrafts.length) {
-    const draftIds = priorDrafts.map((d) => d._id);
-    await TurfAssignment.deleteMany({ turfId: { $in: draftIds } });
-    await Household.updateMany({ turfId: { $in: draftIds } }, { $set: { turfId: null, walkOrder: null } });
-    await Turf.deleteMany({ _id: { $in: draftIds } });
-  }
+  // Wipe prior drafts for this pass CLEANLY (shared helper — the drafts-only
+  // Discard scope is the same operation, exposed as an endpoint). The published
+  // guard on /generate means only draft books can exist on the pass at this point.
+  await wipeDraftBooks(passId);
 
   const turfDocs = [];
   const bookData = [];
@@ -205,7 +224,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   // Non-overlapping territory outlines: each book's hull clipped to its Voronoi
   // cell. Manual mode supplies its own drawn polygon — leave those untouched.
-  const territories = computeTerritories(bookData);
+  const territories = await computeTerritories(bookData);
   turfDocs.forEach((d, i) => { if (!d.boundary) d.boundary = territories[i] || null; });
 
   await onProgress?.({ phase: 'saving', pct: 90 });
@@ -232,13 +251,15 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // through the normal Accept → Assign steps) and the whole pass is re-tessellated
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
-export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false }) {
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false, onProgress }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
   // Same mid-delete guard as generateTurf above.
   if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
+
+  await onProgress?.({ phase: 'loading', pct: 5 });
 
   // Supplemental books come from the effort's OWNED doors not yet in one of THIS
   // PASS's books — judged against the pass's own Turf.householdIds, never the
@@ -280,7 +301,13 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
   if (!households.length) return { added: 0, bookCount: 0, bookIds: [] };
 
-  const books = geometricCut(households, { maxDoors });
+  await onProgress?.({ phase: 'clustering', pct: 25 });
+  const books = await geometricCut(households, {
+    maxDoors,
+    onProgress: async ({ chunk, chunks }) => {
+      await onProgress?.({ phase: 'clustering', pct: 25 + Math.round((chunk / chunks) * 30) });
+    },
+  });
   const turfDocs = books.map((book, i) => {
     const ordered = computeWalkOrder(book.households, { optimize: true });
     return {
@@ -298,6 +325,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     };
   });
 
+  await onProgress?.({ phase: 'saving', pct: 65 });
   const inserted = await Turf.insertMany(turfDocs);
 
   const mirrorOps = [];
@@ -312,8 +340,10 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
 
   // Re-tessellate the whole pass (new drafts + existing live books) so the new
   // territories slot in without overlapping the existing ones.
+  await onProgress?.({ phase: 'territories', pct: 85 });
   await recomputePassTerritories(passId);
 
+  await onProgress?.({ phase: 'done', pct: 100, booksTotal: inserted.length });
   return { added: households.length, bookCount: inserted.length, bookIds: inserted.map((t) => String(t._id)) };
 }
 
@@ -371,7 +401,7 @@ export async function recomputePassTerritories(passId, { onlyTurfIds = null } = 
   const onlyIndices = only
     ? new Set(turfs.map((t, i) => (only.has(String(t._id)) ? i : -1)).filter((i) => i >= 0))
     : null;
-  const territories = computeTerritories(books, { onlyIndices });
+  const territories = await computeTerritories(books, { onlyIndices });
   const bulk = [];
   turfs.forEach((t, i) => {
     if (onlyIndices && !onlyIndices.has(i)) return; // untouched book — keep its stored shape

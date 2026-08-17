@@ -16,12 +16,12 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories, addSupplementalBooks, cutStatusExclusion } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutStatusExclusion } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
-import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
+import { acquireRecutLock, releaseRecutLock, isRecutLocked } from '../../services/turf/recutLock.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
@@ -42,6 +42,29 @@ router.param('householdId', (req, res, next, householdId) => {
 function activeOrgId(req) {
   return req.activeOrg?._id;
 }
+
+// Queue calls are time-bounded: ioredis buffers commands while disconnected, so without
+// this a wedged/absent Redis would HANG the request rather than failing it — the 503 path
+// below would be unreachable exactly when it matters (the campaigns-delete enqueue pattern).
+const queueOp = (promise, ms = Number(process.env.TURF_ENQUEUE_TIMEOUT_MS || 5000)) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('queue timeout')), ms).unref?.()),
+  ]);
+
+// Chunked "which of these doors are knockable" set — one $in per 100k ids so the
+// query document stays bounded on 250k-door campaigns. Shared by GET / and /progress.
+const eligibleSetOf = async (allHhIds) => {
+  const eligible = new Set();
+  for (let i = 0; i < allHhIds.length; i += 100000) {
+    const docs = await Household.find(
+      { _id: { $in: allHhIds.slice(i, i + 100000) }, ...KNOCKABLE_DOOR_FILTER },
+      { _id: 1 }
+    ).lean();
+    for (const d of docs) eligible.add(String(d._id));
+  }
+  return eligible;
+};
 
 async function loadCampaign(req, res, next) {
   try {
@@ -222,14 +245,21 @@ router.post('/generate', async (req, res, next) => {
       });
     }
 
-    const job = await getQueue(QUEUE_NAMES.TURF).add('generate', {
-      campaignId: String(req.campaign._id),
-      passId: String(passId),
-      mode,
-      params: params || {},
-      generatedBy: String(req.user._id),
-    });
-    res.status(202).json({ jobId: String(job.id) });
+    try {
+      const job = await queueOp(
+        getQueue(QUEUE_NAMES.TURF).add('generate', {
+          campaignId: String(req.campaign._id),
+          passId: String(passId),
+          mode,
+          params: params || {},
+          generatedBy: String(req.user._id),
+        })
+      );
+      res.status(202).json({ jobId: String(job.id) });
+    } catch (err) {
+      console.error('[turfs] generate enqueue failed:', err?.message || err);
+      res.status(503).json({ error: 'Could not queue the cut — try again in a moment.', code: 'queue-unavailable' });
+    }
   } catch (err) {
     next(err);
   }
@@ -278,6 +308,11 @@ router.post('/accept', async (req, res, next) => {
 // (voters imported after the pass was cut) WITHOUT a recut or archive. New books
 // come in as drafts → use the normal Accept + Assign flow. Non-destructive, so it
 // works on an active pass with published books (unlike /generate, which 409s).
+// ENQUEUED, not inline: at 26.5k bookless doors the inline cut outlived Heroku's
+// 30s router timeout — the client saw a bare 503 while the server kept going and
+// ~300 draft books appeared anyway (2026-08 incident). The job holds the recut
+// lock (turfProcessor) and reports progress on GET /jobs/:jobId; the result
+// (added/bookCount, including added: 0) lands in the job's returnvalue.
 router.post('/add-supplemental', async (req, res, next) => {
   try {
     const { passId, name, maxDoors, excludeRestricted, excludeNoSoliciting } = req.body || {};
@@ -288,22 +323,29 @@ router.post('/add-supplemental', async (req, res, next) => {
       return res.status(400).json({ error: 'Cannot add books to an archived pass' });
     }
 
-    const locked = await acquireRecutLock(pass._id, req.user._id);
-    if (!locked) {
+    // Advisory pre-check only — the BINDING lock acquire lives in the job: a
+    // route-held lock could go stale while the job waits behind a long generate.
+    // This just gives the admin an immediate 409 instead of a job that fails later.
+    if (await isRecutLocked(pass._id)) {
       return res.status(409).json({ error: 'A re-cut or restore is in progress on this pass. Try again shortly.' });
     }
+
     try {
-      const result = await addSupplementalBooks({
-        campaignId: req.campaign._id,
-        passId,
-        name: (name && String(name).trim()) || 'New voters',
-        maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
-        excludeRestricted: !!excludeRestricted,
-        excludeNoSoliciting: !!excludeNoSoliciting,
-      });
-      return res.status(result.added ? 201 : 200).json(result);
-    } finally {
-      await releaseRecutLock(pass._id);
+      const job = await queueOp(
+        getQueue(QUEUE_NAMES.TURF).add('supplemental', {
+          campaignId: String(req.campaign._id),
+          passId: String(passId),
+          name: (name && String(name).trim()) || 'New voters',
+          maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
+          excludeRestricted: !!excludeRestricted,
+          excludeNoSoliciting: !!excludeNoSoliciting,
+          requestedBy: String(req.user._id),
+        })
+      );
+      return res.status(202).json({ jobId: String(job.id) });
+    } catch (err) {
+      console.error('[turfs] supplemental enqueue failed:', err?.message || err);
+      return res.status(503).json({ error: 'Could not queue the books — try again in a moment.', code: 'queue-unavailable' });
     }
   } catch (err) {
     next(err);
@@ -316,14 +358,33 @@ router.post('/add-supplemental', async (req, res, next) => {
 // confirmActive and reverts the pass to draft when it empties, so a campaign is
 // never left "active with zero books". Optionally also clears the pass's knock
 // history (also snapshotted for undo). Serialized per-pass by an advisory lock.
+//
+// scope: 'all' (default) | 'drafts'. Drafts-only undoes a bad supplemental add (or
+// any unaccepted cut) without touching the accepted books — no snapshot and no
+// confirmActive gate, because drafts by construction carry no assignments (both
+// assign routes 409 `not-accepted`) and no history keyed to them; it is the exact
+// wipe every re-generate already performs (wipeDraftBooks in generateTurf.js).
 router.post('/discard', async (req, res, next) => {
-  const { passId, confirmActive, clearKnocks } = req.body || {};
+  const { passId, confirmActive, clearKnocks, scope } = req.body || {};
   let locked = false;
   try {
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const draftsOnly = scope === 'drafts';
+    if (draftsOnly && clearKnocks) {
+      return res.status(400).json({ error: 'Knock history belongs to the pass, not its draft books — clear knocks with a full discard.' });
+    }
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id });
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status === 'archived') return res.status(409).json({ error: 'Pass is archived; create a new pass instead' });
+
+    if (draftsOnly) {
+      if (!(await acquireRecutLock(passId, req.user._id))) {
+        return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
+      }
+      locked = true;
+      const discarded = await wipeDraftBooks(passId);
+      return res.json({ discarded, scope: 'drafts' });
+    }
 
     // Guard: a LIVE pass — or any pass that's already been WORKED (knocks
     // recorded) — needs explicit confirmation; report the stakes either way.
@@ -499,16 +560,7 @@ router.get('/', async (req, res, next) => {
     // Live "eligible" door count per book — active & not-fully-voted — mirroring what the
     // mobile bootstrap serves canvassers, so admin counts don't drift after early voting.
     const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
-    const eligible = new Set(
-      allHhIds.length
-        ? (
-            await Household.find(
-              { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
-              { _id: 1 }
-            ).lean()
-          ).map((h) => String(h._id))
-        : []
-    );
+    const eligible = await eligibleSetOf(allHhIds);
     // Bulk-restricted marks per book — drives the "Unmark restricted (N)" affordance.
     const bulkAgg = turfs.length
       ? await CanvassActivity.aggregate([
@@ -523,11 +575,18 @@ router.get('/', async (req, res, next) => {
         ])
       : [];
     const bulkByTurf = new Map(bulkAgg.map((r) => [String(r._id), r.n]));
-    const withCounts = turfs.map((t) => ({
-      ...t,
-      eligibleDoorCount: (t.householdIds || []).filter((id) => eligible.has(String(id))).length,
-      bulkRestrictedCount: bulkByTurf.get(String(t._id)) || 0,
-    }));
+    // slim=1 (the web cut page sends it): drop householdIds from the response — the
+    // page never reads them, and at 250k doors they are a multi-MB payload. Additive:
+    // without the param the shape is unchanged (mobile books.jsx doesn't send it).
+    const slim = req.query.slim === '1';
+    const withCounts = turfs.map((t) => {
+      const { householdIds, ...rest } = t;
+      return {
+        ...(slim ? rest : t),
+        eligibleDoorCount: (householdIds || []).filter((id) => eligible.has(String(id))).length,
+        bulkRestrictedCount: bulkByTurf.get(String(t._id)) || 0,
+      };
+    });
     // Owned doors this pass's cut skipped, by reason — surfaced on the page as
     // "N door(s) already voted — skipped" / "N do-not-contact" so a smaller book total makes
     // sense. A door that is BOTH fully-voted and fully-DNC counts once, as DNC (matching the
@@ -1181,16 +1240,7 @@ router.get('/progress', async (req, res, next) => {
       { householdIds: 1 }
     ).lean();
     const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
-    const eligible = new Set(
-      allHhIds.length
-        ? (
-            await Household.find(
-              { _id: { $in: allHhIds }, ...KNOCKABLE_DOOR_FILTER },
-              { _id: 1 }
-            ).lean()
-          ).map((h) => String(h._id))
-        : []
-    );
+    const eligible = await eligibleSetOf(allHhIds);
     const statusMap = await getPassStatusMap(passId, allHhIds, req.campaign.type);
     const progress = turfs.map((t) => {
       const ids = (t.householdIds || []).map(String).filter((id) => eligible.has(id));
@@ -1379,6 +1429,39 @@ router.patch('/:turfId', async (req, res, next) => {
     res.json({ turf });
   } catch (err) {
     next(err);
+  }
+});
+
+// Delete a single DRAFT book — surgical cleanup (e.g. one unwanted supplemental
+// book). Accepted books can only be removed via Discard (snapshot + type-confirm);
+// a draft carries no assignments (both assign routes 409 `not-accepted`) and no
+// history keyed to it, so this only has to clear the household mirror. NO
+// re-tessellation: removing a book's doors only GROWS the neighbors' Voronoi
+// entitlement, so every other stored shape stays disjoint and containing (same
+// invariant the onlyTurfIds notes in generateTurf.js rely on). Lock-guarded so a
+// supplemental/claim job re-tessellating this pass can't race the delete.
+router.delete('/:turfId', async (req, res, next) => {
+  const { turfId } = req.params;
+  let lockPassId = null;
+  try {
+    if (!mongoose.isValidObjectId(turfId)) return res.status(400).json({ error: 'invalid turfId' });
+    const turf = await Turf.findOne({ _id: turfId, campaignId: req.campaign._id }, { status: 1, passId: 1 }).lean();
+    if (!turf) return res.status(404).json({ error: 'Book not found' });
+    if (turf.status !== 'draft') {
+      return res.status(409).json({ error: 'Accepted books can only be removed with Discard.', code: 'not-draft' });
+    }
+    if (!(await acquireRecutLock(turf.passId, req.user._id))) {
+      return res.status(409).json({ error: 'A re-cut or restore is in progress on this pass. Try again shortly.' });
+    }
+    lockPassId = turf.passId;
+    await TurfAssignment.deleteMany({ turfId: turf._id }); // belt-and-braces; drafts can't be assigned
+    await Household.updateMany({ turfId: turf._id }, { $set: { turfId: null, walkOrder: null } });
+    await Turf.deleteOne({ _id: turf._id });
+    res.json({ deleted: 1 });
+  } catch (err) {
+    next(err);
+  } finally {
+    if (lockPassId) await releaseRecutLock(lockPassId);
   }
 });
 

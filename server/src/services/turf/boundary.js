@@ -83,9 +83,21 @@ function padBbox([minX, minY, maxX, maxY], frac) {
 // doesn't change the diagram (only cell ownership flips → untouched books' shapes stay exactly
 // right), and a door REMOVAL only grows the remaining cells (untouched books' stored shapes
 // stay strictly inside their new entitlement → still disjoint, still containing).
-export function computeTerritories(books, { onlyIndices = null } = {}) {
+//
+// ASYNC: yields the event loop between per-book geometry passes so a worker job's
+// BullMQ lock-renewal timer can fire (~1.6s at 16k doors extrapolates to minutes at
+// 250k — same stall class as the balancedKMeans header). The one remaining sync
+// block is the single turf.voronoi call over the whole pass — O(n log n), seconds
+// even at 250k, covered by the TURF worker's 90s lockDuration (worker.js).
+export async function computeTerritories(books, { onlyIndices = null } = {}) {
   const need = (i) => !onlyIndices || onlyIndices.has(i);
-  const hulls = books.map((b, i) => (need(i) ? computeBoundary(b.households) : null));
+  const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
+  const hulls = new Array(books.length).fill(null);
+  for (let i = 0; i < books.length; i++) {
+    if (!need(i)) continue;
+    hulls[i] = computeBoundary(books[i].households);
+    await yieldLoop();
+  }
   if (books.length < 2) return hulls;
 
   // All booked doors, deduped by exact coordinate (apartment stacks share a geocode; a
@@ -122,24 +134,36 @@ export function computeTerritories(books, { onlyIndices = null } = {}) {
     if (cell && need(ownerOf[i])) cellsByBook[ownerOf[i]].push(cell);
   });
 
-  return books.map((b, i) => {
-    if (!need(i)) return undefined; // caller must not overwrite this book's stored shape
+  const territories = new Array(books.length);
+  for (let i = 0; i < books.length; i++) {
+    if (!need(i)) {
+      territories[i] = undefined; // caller must not overwrite this book's stored shape
+      continue;
+    }
+    await yieldLoop();
     const hull = hulls[i];
-    if (!hull || !cellsByBook[i].length) return hull;
+    if (!hull || !cellsByBook[i].length) {
+      territories[i] = hull;
+      continue;
+    }
     try {
       const cellUnion =
         cellsByBook[i].length === 1
           ? cellsByBook[i][0]
           : turf.union(turf.featureCollection(cellsByBook[i]));
-      if (!cellUnion) return hull;
+      if (!cellUnion) {
+        territories[i] = hull;
+        continue;
+      }
       const territory = turf.intersect(turf.featureCollection([turf.feature(hull), cellUnion]));
       // Keep the WHOLE geometry — reducing a MultiPolygon to its largest polygon would
       // drop exactly the pocket islands this construction exists to draw.
-      return territory?.geometry || hull;
+      territories[i] = territory?.geometry || hull;
     } catch {
-      return hull; // containment over disjointness in the failure path
+      territories[i] = hull; // containment over disjointness in the failure path
     }
-  });
+  }
+  return territories;
 }
 
 function safeContains(boundary, pt) {

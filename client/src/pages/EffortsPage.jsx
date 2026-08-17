@@ -11,6 +11,7 @@ import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { useJobPoll } from '../lib/useJobPoll.js';
 
 const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
 // Compact token field for the tiny in-row / in-panel controls.
@@ -87,18 +88,105 @@ function RosterPanel({ campaignId, effort }) {
   );
 }
 
+// The force-confirm for a door MOVE (re-carve): states the real stakes per donor
+// list — how many doors it loses, how many books that guts — plus the snapshot
+// promise and the one thing people learn the hard way: moving doors back later
+// does NOT rebuild their old books. `data` is the claim 409 body (doors-owned).
+function MoveConfirmModal({ effortName, data, pending, onCancel, onConfirm }) {
+  return (
+    <Modal
+      size="md"
+      onClose={onCancel}
+      title={`Move ${data.conflicts.toLocaleString()} door${data.conflicts === 1 ? '' : 's'} into ${effortName}?`}
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="danger" size="sm" loading={pending} onClick={onConfirm}>
+            Move {data.conflicts.toLocaleString()} door{data.conflicts === 1 ? '' : 's'} (re-carve)
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2 text-sm text-fg-muted">
+        <p>These doors already belong to other walk lists. Moving them here pulls them out of those lists' books:</p>
+        <ul className="space-y-1">
+          {(data.breakdown || []).map((d) => (
+            <li key={d.effortId} className="rounded bg-warning-tint px-2 py-1.5 text-xs text-warning-fg">
+              <strong>{d.effortName}</strong> loses {d.doors.toLocaleString()} door{d.doors === 1 ? '' : 's'}
+              {d.booksAffected > 0 && (
+                <> — {d.booksAffected} book{d.booksAffected === 1 ? '' : 's'} affected{d.booksEmptied > 0 ? `, ${d.booksEmptied} emptied` : ''}</>
+              )}
+            </li>
+          ))}
+        </ul>
+        {data.claimable > 0 && (
+          <p className="text-xs">{data.claimable.toLocaleString()} unowned (Intake) door{data.claimable === 1 ? '' : 's'} come along too.</p>
+        )}
+        <p className="text-xs">
+          Each affected list's books are <strong>snapshotted first</strong> — restorable from its Turf page under
+          Undo / snapshots. The move runs in the background; progress shows here.
+        </p>
+        <p className="text-xs font-medium text-danger">
+          Moving doors back later will NOT rebuild their old books — they return bookless until you re-cut or restore
+          the snapshot.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+// Shared claim-job progress/result line: the claim runs on the worker; this polls
+// it and reports "Claimed N (M moved)" when it lands. onDone fires once on completion.
+function ClaimJobStatus({ campaignId, jobId, doneLink, onDone }) {
+  const job = useJobPoll({ campaignId, jobId });
+  const doneRef = useRef(null);
+  useEffect(() => {
+    if (job.status === 'completed' && doneRef.current !== jobId) {
+      doneRef.current = jobId;
+      onDone?.();
+    }
+  }, [job.status, jobId]);
+  if (!jobId) return null;
+  if (job.status === 'failed') return <p className="mt-2 text-xs text-danger">Move failed: {job.error || 'unknown error'}</p>;
+  if (job.status === 'completed') {
+    const r = job.result || {};
+    return (
+      <p className="mt-2 text-xs text-success-fg">
+        Claimed {(r.claimed ?? 0).toLocaleString()} door(s)
+        {r.reassigned ? ` (${r.reassigned.toLocaleString()} moved from other walk lists)` : ''}.{' '}
+        {doneLink}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 text-xs text-fg-muted">
+      <div className="mb-1">Moving doors — {job.phase || 'queued'}… {job.pct != null ? `${job.pct}%` : ''}</div>
+      <div className="h-1.5 w-full overflow-hidden rounded bg-sunken"><div className="h-full bg-brand-500 transition-all" style={{ width: `${job.pct || 5}%` }} /></div>
+    </div>
+  );
+}
+
 function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
   const qc = useQueryClient();
   const [walkListId, setWalkListId] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
+  const [moveConfirm, setMoveConfirm] = useState(null); // the 409 doors-owned body
+  const [claimJobId, setClaimJobId] = useState(null);
+  const [nothingToClaim, setNothingToClaim] = useState(false);
   const claim = useMutation({
     mutationFn: ({ body }) => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/claim`, { method: 'POST', body }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
-      qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+    onSuccess: (res) => {
+      setMoveConfirm(null);
+      setNothingToClaim(!res.jobId);
+      if (res.jobId) setClaimJobId(res.jobId);
+    },
+    onError: (err) => {
+      // The 409 IS the flow, not a failure: it carries the per-donor breakdown
+      // the confirm modal renders before anything moves.
+      if (err?.data?.code === 'doors-owned') setMoveConfirm(err.data);
     },
   });
-  const owned = claim.error?.data?.code === 'doors-owned' ? claim.error.data : null;
+  const owned = claim.error?.data?.code === 'doors-owned';
 
   return (
     <div className="rounded-lg border border-border bg-sunken p-3">
@@ -146,19 +234,33 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
           </p>
         </Modal>
       )}
-      {claim.data && (
-        <p className="mt-2 text-xs text-success-fg">
-          Claimed {claim.data.claimed} door(s){claim.data.reassigned ? ` (${claim.data.reassigned} moved from other walk lists)` : ''}.{' '}
+      {moveConfirm && (
+        <MoveConfirmModal
+          effortName={effort.name}
+          data={moveConfirm}
+          pending={claim.isPending}
+          onCancel={() => setMoveConfirm(null)}
+          onConfirm={() => claim.mutate({ body: { walkListId: walkListId || undefined, all: walkListId ? undefined : true, force: true } })}
+        />
+      )}
+      <ClaimJobStatus
+        campaignId={campaignId}
+        jobId={claimJobId}
+        doneLink={
           <Link to={`/campaigns/${campaignId}/efforts/${effort._id}/passes`} className="font-semibold underline">
             Manage passes →
           </Link>
-        </p>
-      )}
-      {owned && (
-        <div className="mt-2 text-xs text-warning-fg">
-          {owned.conflicts} door(s) belong to another walk list.{' '}
-          <button onClick={() => claim.mutate({ body: { walkListId: walkListId || undefined, all: walkListId ? undefined : true, force: true } })} className="font-semibold underline">Move them here (re-carve)</button>
-        </div>
+        }
+        onDone={() => {
+          qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+          qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+          // Donor lists' books changed shape (or emptied) — refresh any open cut page.
+          qc.invalidateQueries({ queryKey: ['turfs', campaignId] });
+          qc.invalidateQueries({ queryKey: ['turf-doors', campaignId] });
+        }}
+      />
+      {nothingToClaim && !claimJobId && (
+        <p className="mt-2 text-xs text-fg-muted">Nothing to claim — those doors are already in this walk list.</p>
       )}
       {claim.error && !owned && <p className="mt-2 text-xs text-danger">{claim.error.message}</p>}
     </div>
@@ -316,11 +418,32 @@ export default function EffortsPage() {
   const effectiveSource = doorSource === '__intake__' && intakeCount === 0 ? '' : doorSource;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+  // Create-flow claim state: the seeding claim is a background job now (the server
+  // enqueues it), and a REVISIT seed needs the same move-confirm modal as the
+  // per-row Claim panel — those doors belong to another list.
+  const [createClaimJobId, setCreateClaimJobId] = useState(null);
+  const [createMove, setCreateMove] = useState(null); // { effortId, effortName, walkListId, data }
+  const revisitClaim = useMutation({
+    mutationFn: ({ effortId, walkListId, force }) =>
+      api(`/admin/campaigns/${campaignId}/efforts/${effortId}/claim`, { method: 'POST', body: { walkListId, force } }),
+    onSuccess: (res) => {
+      setCreateMove(null);
+      if (res.jobId) setCreateClaimJobId(res.jobId);
+    },
+    onError: (err, vars) => {
+      // The 409 carries the per-donor breakdown; the modal turns it into a real
+      // decision instead of the old silent force (which is how 24k doors moved
+      // with a one-line confirm).
+      if (err?.data?.code === 'doors-owned') {
+        setCreateMove({ effortId: vars.effortId, effortName: vars.effortName, walkListId: vars.walkListId, data: err.data });
+      }
+    },
+  });
   const create = useMutation({
     mutationFn: async () => {
       // A revisit list (source:'import') is homes that are ALREADY owned/booked, so the
       // create-time seed (which only claims Intake) would grab none. Create the walk list
-      // empty, then force-claim (re-carve) those owned homes into it.
+      // empty, then claim those owned homes into it — via the move-confirm modal.
       const seedList = walkLists.find((w) => String(w._id) === String(effectiveSource));
       const isRevisitSeed = seedList?.source === 'import';
       const doors =
@@ -331,21 +454,24 @@ export default function EffortsPage() {
         method: 'POST',
         body: { name, surveyTemplateId: surveyTemplateId || undefined, ...doors },
       });
-      if (isRevisitSeed && res?.effort?._id) {
-        const claim = await api(`/admin/campaigns/${campaignId}/efforts/${res.effort._id}/claim`, {
-          method: 'POST',
-          body: { walkListId: effectiveSource, force: true },
-        });
-        return { ...res, claimed: claim?.claimed ?? 0 };
-      }
-      return res;
+      return { ...res, revisitWalkListId: isRevisitSeed ? effectiveSource : null };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       setName('');
       setSurveyTemplateId('');
       setDoorSource('__intake__');
       invalidate();
       qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] });
+      setCreateClaimJobId(res.claimJobId || null);
+      if (res.revisitWalkListId && res.effort?._id) {
+        // No force: the expected 409 opens the move-confirm modal with the stakes.
+        revisitClaim.mutate({
+          effortId: res.effort._id,
+          effortName: res.effort.name,
+          walkListId: res.revisitWalkListId,
+          force: false,
+        });
+      }
     },
   });
   const update = useMutation({ mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }), onSuccess: invalidate });
@@ -418,7 +544,6 @@ export default function EffortsPage() {
         {create.data?.effort && (
           <p className="mt-2 text-xs text-success-fg">
             Created <strong>{create.data.effort.name}</strong>
-            {create.data.claimed ? ` with ${create.data.claimed.toLocaleString()} door${create.data.claimed === 1 ? '' : 's'}` : ''}
             {create.data.pass ? ' — Pass 1 is ready.' : '.'}{' '}
             {create.data.pass ? (
               <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
@@ -426,6 +551,38 @@ export default function EffortsPage() {
               <Link to={`/campaigns/${campaignId}/efforts/${create.data.effort._id}/passes`} className="font-semibold underline">Manage passes →</Link>
             )}
           </p>
+        )}
+        {create.data?.claimError && (
+          <p className="mt-1 text-xs text-warning-fg">
+            The door claim couldn't be queued — open the new list below and use <strong>Claim doors</strong>.
+          </p>
+        )}
+        <ClaimJobStatus
+          campaignId={campaignId}
+          jobId={createClaimJobId}
+          doneLink={
+            create.data?.pass ? (
+              <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
+            ) : null
+          }
+          onDone={() => {
+            invalidate();
+            qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+            qc.invalidateQueries({ queryKey: ['turfs', campaignId] });
+            qc.invalidateQueries({ queryKey: ['turf-doors', campaignId] });
+          }}
+        />
+        {revisitClaim.error && revisitClaim.error?.data?.code !== 'doors-owned' && (
+          <p className="mt-1 text-xs text-danger">{revisitClaim.error.message}</p>
+        )}
+        {createMove && (
+          <MoveConfirmModal
+            effortName={createMove.effortName}
+            data={createMove.data}
+            pending={revisitClaim.isPending}
+            onCancel={() => setCreateMove(null)}
+            onConfirm={() => revisitClaim.mutate({ ...createMove, force: true })}
+          />
         )}
         <p className="mt-2 text-xs text-fg-muted"><strong>All remaining doors (Intake)</strong> claims every unassigned door in the campaign — the usual whole-district list. Pick a <strong>saved search</strong> to seed only that list's <em>unowned</em> doors, or <strong>None</strong> to create an empty list and claim doors later (open the list → Claim). Saved searches are built from filters or a Voter-ID CSV on the Saved Searches page.</p>
       </Card>

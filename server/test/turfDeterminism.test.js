@@ -71,16 +71,63 @@ test('doors sharing a Hilbert cell order by x/y, not by arrival', () => {
   assert.deepEqual(hilbertSort(cell()).map((p) => p.id), hilbertSort(cell().reverse()).map((p) => p.id));
 });
 
-test('balancedKMeans books are identical under a reordered load', () => {
+test('balancedKMeans books are identical under a reordered load', async () => {
   const doors = [...grid(500), ...stacked(60, -81.71, 25.96)];
-  const cut = (arr) =>
-    balancedKMeans(canonical(arr).map((d) => ({ doc: d.id, lng: d.lng, lat: d.lat })), 65, { tolerance: 0.4 })
+  const cut = async (arr) =>
+    (await balancedKMeans(canonical(arr).map((d) => ({ doc: d.id, lng: d.lng, lat: d.lat })), 65, { tolerance: 0.4 }))
       .map((book) => book.slice().sort().join(','))
       .sort();
-  const base = cut(doors);
-  assert.deepEqual(cut(shuffled(doors, 3)), base);
-  assert.deepEqual(cut(shuffled(doors, 99)), base);
-  assert.deepEqual(cut(doors.slice().reverse()), base);
+  const base = await cut(doors);
+  assert.deepEqual(await cut(shuffled(doors, 3)), base);
+  assert.deepEqual(await cut(shuffled(doors, 99)), base);
+  assert.deepEqual(await cut(doors.slice().reverse()), base);
+});
+
+// ---------- the chunked pre-split (250k-scale path) ----------
+//
+// Above chunkThreshold the clusterer splits the Hilbert order into contiguous runs
+// and cuts each independently (balancedKMeans.js header). Its determinism claim is
+// that chunk boundaries are a pure function of (n, threshold) over a deterministic
+// sort — so a shuffled arrival order must still yield IDENTICAL books through the
+// chunked path, and a sub-threshold input must be untouched by the threshold knob.
+
+test('chunked path: books identical under a reordered load', async () => {
+  const doors = [...grid(900), ...stacked(60, -81.71, 25.96)];
+  // threshold far below n forces the pre-split (multiple runs) without a huge fixture
+  const cut = async (arr) =>
+    (await balancedKMeans(
+      canonical(arr).map((d) => ({ doc: d.id, lng: d.lng, lat: d.lat })),
+      65,
+      { tolerance: 0.4, chunkThreshold: 300 }
+    ))
+      .map((book) => book.slice().sort().join(','))
+      .sort();
+  const base = await cut(doors);
+  assert.deepEqual(await cut(shuffled(doors, 3)), base);
+  assert.deepEqual(await cut(doors.slice().reverse()), base);
+});
+
+test('chunked path: every door lands in exactly one book, none over the hard cap', async () => {
+  const doors = grid(900);
+  const books = await balancedKMeans(
+    canonical(doors).map((d) => ({ doc: d.id, lng: d.lng, lat: d.lat })),
+    65,
+    { tolerance: 0.4, chunkThreshold: 300 }
+  );
+  const all = books.flat();
+  assert.strictEqual(all.length, doors.length, 'no door dropped or duplicated across chunk seams');
+  assert.strictEqual(new Set(all).size, doors.length);
+  const hardMax = Math.ceil(65 * (1 + 0.4 * 1.5));
+  for (const book of books) assert.ok(book.length <= hardMax, `book of ${book.length} exceeds hardMax ${hardMax}`);
+});
+
+test('sub-threshold inputs are untouched by the threshold knob (small cuts stay identical)', async () => {
+  const doors = grid(400);
+  const items = canonical(doors).map((d) => ({ doc: d.id, lng: d.lng, lat: d.lat }));
+  const norm = (books) => books.map((b) => b.slice().sort().join(',')).sort();
+  const withDefault = norm(await balancedKMeans(items, 65, { tolerance: 0.4 }));
+  const withHugeThreshold = norm(await balancedKMeans(items, 65, { tolerance: 0.4, chunkThreshold: 1e9 }));
+  assert.deepEqual(withDefault, withHugeThreshold);
 });
 
 test('walk order is identical under a reordered load', () => {

@@ -2035,6 +2035,8 @@ The `Person` layer **is** now org-scoped: `organizationId` is required and index
 
 **Honest severity bounds:** this exposes **derived operational metadata** — book counts, doors-added counts, Turf ObjectIds, generic error strings. It does **not** expose voter identity, addresses, survey answers, canvass records, or reports. `job.data` (which holds the campaignId/orgId) is **not** returned, so the leaked rows are **unattributed** — the caller cannot tell which customer a job belongs to. The leaked `bookIds` are not dereferenceable cross-org. **Engineering should fix it; it does not by itself falsify a tenant-isolation statement about personal data.**
 
+*[2026-08-17: **FIXED in code.** The poll route now refuses any job whose `job.data.campaignId` is not the caller's gate-checked campaign — `routes/admin/turfs.js` `/jobs/:jobId` 404s on mismatch, with a comment naming this exact enumeration risk. The check governs every job kind on the queue: the 2026-08 turf batch added `claim` (walk-list door moves) and `supplemental` (add-books) jobs alongside `generate`, all carrying `campaignId` in `job.data` and all polled through this one ownership-checked endpoint. That batch collects no new personal data and sends nothing to any new party — its writes rearrange existing per-org Household/Turf rows and its one new ops script (`repair:orphan-attribution`) re-stamps existing per-org ledger rows in place.]*
+
 ---
 
 # G — THIRD PARTIES

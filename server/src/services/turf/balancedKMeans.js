@@ -9,19 +9,55 @@ import { hilbertSort } from './spatial.js';
 // pass moves any house to a strictly-nearer book that has room (no reciprocal
 // partner needed). Net: nobody drives across the area for one door.
 //
-// Deterministic — projection + seeds come from the Hilbert curve, never Math.random.
-// That alone is NOT enough: seeds are picked by POSITION in `items` and ties break by
-// index, so the caller must hand doors over in a canonical order (generateTurf sorts
-// every cut-feeding load by _id). Given that, a worker re-run reproduces the same books.
+// ASYNC, and chunked above a threshold — both for the same incident. One
+// balancedAssign pass is n×k distance work; at 26.5k doors (k=409) that is ~11M
+// distance calcs plus n sorts of k entries, repeated for up to MAX_ITERS
+// iterations and every polish sweep — minutes of unbroken synchronous CPU. BullMQ
+// renews a job's lock on a TIMER, and a timer cannot fire while the event loop is
+// blocked, so the lock lapsed, the job was redelivered mid-run, and the cut ran
+// twice then reported "job stalled more than allowable limit" (2026-08 incident;
+// same failure class as the per-book yield note in generateTurf.js). Two fixes:
+//   - an awaited setImmediate between every iteration and every polish sweep, so
+//     the lock renewal timer can always fire;
+//   - above CHUNK_THRESHOLD doors, pre-split the Hilbert-sorted array into
+//     contiguous runs of ~CHUNK_TARGET and cluster each run independently. Cost
+//     per iteration drops from n×k to Σ(run×k_run) — ~40× less at 250k doors —
+//     and books simply can't span a run boundary, which is the same class of
+//     compromise the soft cap already accepts (Hilbert runs are spatially
+//     contiguous, so the seam falls along a natural geographic break).
+// Sub-threshold inputs take the exact single-run path they always did — a 10k cut
+// produces byte-identical books to the pre-chunking code.
+//
+// Deterministic — projection + seeds come from the Hilbert curve, never
+// Math.random. That alone is NOT enough: seeds are picked by POSITION in `items`
+// and ties break by index, so the caller must hand doors over in a canonical
+// order (generateTurf sorts every cut-feeding load by _id). Chunking preserves
+// this: hilbertSort is a total order over deterministic input (spatial.js), and
+// chunk boundaries are a pure function of (n, threshold) over that sorted array —
+// so a worker re-run still reproduces the same books.
 //
 // items: [{ doc, lng, lat }] (all must have coords). maxDoors: target/book.
 // opts.tolerance (default 0.4): how far book sizes may flex from maxDoors.
+// opts.chunkThreshold: override the pre-split trigger (tests force the chunked
+//   path with a tiny value; TURF_KMEANS_CHUNK_THRESHOLD env works too).
+// opts.onProgress: async ({ chunk, chunks }) called after each chunk completes.
 // Returns: array of clusters, each an array of the original `doc`s.
 
 const MAX_ITERS = 40;
 const RELOCATE_SWEEPS = 12;
 const POLISH_SWEEPS = 6;
 const EPS = 1e-6;
+
+// Pre-split trigger / run size. 8000 keeps every historical cut on the legacy
+// single-run path (the largest pre-incident cut was ~16k and DID stall — but 8k
+// runs finish an assign pass in well under a second, which is all the yields
+// need); 6000 keeps k_run ≈ 90 at the default 65 doors/book.
+const CHUNK_THRESHOLD = 8000;
+const CHUNK_TARGET = 6000;
+
+// The event-loop yield. setImmediate (not setTimeout 0) so we re-enter ahead of
+// timers-phase backlog while still letting the BullMQ lock-renewal timer fire.
+const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
 
 const dist2 = (p, c) => {
   const dx = p.x - c.x;
@@ -90,8 +126,10 @@ function balancedAssign(pts, centroids, softMax) {
 // still under the soft cap. Unlike a mutual swap this needs no reciprocal partner,
 // so it relocates lone strays. Strict improvement ⇒ total distance-to-center
 // decreases monotonically ⇒ it terminates (the sweep cap is just a backstop).
-function relocatePolish(pts, labels, k, softMax, sweeps) {
+// Async purely for the per-sweep yield — the math is unchanged.
+async function relocatePolish(pts, labels, k, softMax, sweeps) {
   for (let s = 0; s < sweeps; s++) {
+    await yieldLoop();
     const centroids = computeCentroids(pts, labels, k);
     const counts = new Array(k).fill(0);
     for (let i = 0; i < pts.length; i++) counts[labels[i]] += 1;
@@ -180,8 +218,10 @@ function mergeSmall(pts, labels, k, softMin, softMax) {
 // swap keeps both books' counts identical (so the soft cap is never breached) and
 // strictly lowers total distance-to-center. This fixes the case relocation can't —
 // a house at the boundary of a FULL book trading with one that wants to leave it.
-function swapPolish(pts, labels, k, sweeps) {
+// Async purely for the per-sweep yield — the math is unchanged.
+async function swapPolish(pts, labels, k, sweeps) {
   for (let s = 0; s < sweeps; s++) {
+    await yieldLoop();
     const centroids = computeCentroids(pts, labels, k);
     const wants = [];
     for (let i = 0; i < pts.length; i++) {
@@ -230,17 +270,12 @@ function labelsEqual(a, b) {
   return true;
 }
 
-export function balancedKMeans(items, maxDoors, opts = {}) {
-  const tolerance = opts.tolerance != null ? opts.tolerance : 0.4;
-  const n = items.length;
-  if (!n) return [];
+// One clustering run over an already-projected, already-Hilbert-ordered slice.
+// This is the whole pre-chunking algorithm, verbatim except for the yields.
+async function clusterRun(pts, maxDoors, tolerance) {
+  const n = pts.length;
   const k = Math.max(1, Math.ceil(n / Math.max(1, maxDoors)));
-  if (k === 1) return [items.map((it) => it.doc)];
-
-  // Project + Hilbert-order once (deterministic). hilbertSort returns each point
-  // with projected x/y in meters — reuse those for all distance math.
-  const sorted = hilbertSort(items.map((it) => ({ lng: it.lng, lat: it.lat, doc: it.doc })));
-  const pts = sorted.map((p) => ({ x: p.x, y: p.y, doc: p.doc }));
+  if (k === 1) return [pts.map((p) => p.doc)];
 
   // Seed k centroids evenly along the Hilbert order — well-spread + deterministic.
   let centroids = [];
@@ -259,6 +294,9 @@ export function balancedKMeans(items, maxDoors, opts = {}) {
 
   let labels = null;
   for (let iter = 0; iter < MAX_ITERS; iter++) {
+    // Yield BEFORE each n×k assign pass — this is the block that starved the
+    // BullMQ lock-renewal timer.
+    await yieldLoop();
     const next = balancedAssign(pts, centroids, softMax);
     const cents = computeCentroids(pts, next, k);
     centroids = cents.map((c, i) => c || centroids[i]); // keep a vacated seed in place
@@ -274,17 +312,59 @@ export function balancedKMeans(items, maxDoors, opts = {}) {
   // folds in scraps. Then a final rescue at `hardMax` lets any house still stuck far
   // from its cluster join its NEAREST book even slightly over target — compactness
   // beats hitting the count, so nobody drives across the area for one door.
-  relocatePolish(pts, labels, k, softMax, RELOCATE_SWEEPS);
-  swapPolish(pts, labels, k, POLISH_SWEEPS);
+  await relocatePolish(pts, labels, k, softMax, RELOCATE_SWEEPS);
+  await swapPolish(pts, labels, k, POLISH_SWEEPS);
   mergeSmall(pts, labels, k, softMin, softMax);
-  relocatePolish(pts, labels, k, softMax, 3);
-  swapPolish(pts, labels, k, POLISH_SWEEPS);
-  relocatePolish(pts, labels, k, hardMax, RELOCATE_SWEEPS);
-  swapPolish(pts, labels, k, POLISH_SWEEPS);
+  await relocatePolish(pts, labels, k, softMax, 3);
+  await swapPolish(pts, labels, k, POLISH_SWEEPS);
+  await relocatePolish(pts, labels, k, hardMax, RELOCATE_SWEEPS);
+  await swapPolish(pts, labels, k, POLISH_SWEEPS);
 
   // Cluster index order ≈ Hilbert order (seeds were spread along the curve), so
   // Book numbering stays spatially sensible.
   const clusters = Array.from({ length: k }, () => []);
   for (let i = 0; i < pts.length; i++) clusters[labels[i]].push(pts[i].doc);
   return clusters.filter((c) => c.length);
+}
+
+export async function balancedKMeans(items, maxDoors, opts = {}) {
+  const tolerance = opts.tolerance != null ? opts.tolerance : 0.4;
+  const n = items.length;
+  if (!n) return [];
+  if (Math.max(1, Math.ceil(n / Math.max(1, maxDoors))) === 1) {
+    return [items.map((it) => it.doc)];
+  }
+
+  // Project + Hilbert-order once, over the WHOLE set (deterministic). Chunks are
+  // sliced AFTER this, so every run shares one projection plane and the boundaries
+  // fall along the curve, not along projection artifacts.
+  const sorted = hilbertSort(items.map((it) => ({ lng: it.lng, lat: it.lat, doc: it.doc })));
+  const pts = sorted.map((p) => ({ x: p.x, y: p.y, doc: p.doc }));
+
+  const chunkThreshold =
+    opts.chunkThreshold != null
+      ? Number(opts.chunkThreshold)
+      : Number(process.env.TURF_KMEANS_CHUNK_THRESHOLD) || CHUNK_THRESHOLD;
+
+  if (n <= chunkThreshold) {
+    const clusters = await clusterRun(pts, maxDoors, tolerance);
+    await opts.onProgress?.({ chunk: 1, chunks: 1 });
+    return clusters;
+  }
+
+  // Pre-split: contiguous, near-equal runs of the Hilbert order. Boundaries are a
+  // pure function of (n, chunkCount) — no data-dependent balancing — which is what
+  // keeps the chunked cut reproducible on a worker re-run.
+  const chunkCount = Math.ceil(n / CHUNK_TARGET);
+  const out = [];
+  for (let ci = 0; ci < chunkCount; ci++) {
+    const start = Math.floor((ci * n) / chunkCount);
+    const end = Math.floor(((ci + 1) * n) / chunkCount);
+    const run = pts.slice(start, end);
+    if (!run.length) continue;
+    const clusters = await clusterRun(run, maxDoors, tolerance);
+    out.push(...clusters);
+    await opts.onProgress?.({ chunk: ci + 1, chunks: chunkCount });
+  }
+  return out;
 }

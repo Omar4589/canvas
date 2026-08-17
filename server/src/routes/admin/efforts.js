@@ -11,16 +11,47 @@ import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { Household } from '../../models/Household.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { canManageSurvey } from '../../services/authz/campaignManagement.js';
-import { recomputeTurf, recomputePassTerritories } from '../../services/turf/generateTurf.js';
+import { resolveClaimTargets, previewClaimConflicts } from '../../services/walklist/claimDoors.js';
+import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
 import { partitionAssignable } from '../../services/campaignRoster.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
+
+// Queue calls are time-bounded: ioredis buffers commands while disconnected, so without
+// this a wedged/absent Redis would HANG the request rather than failing it — the 503 path
+// below would be unreachable exactly when it matters (the campaigns-delete enqueue pattern).
+const queueOp = (promise, ms = Number(process.env.TURF_ENQUEUE_TIMEOUT_MS || 5000)) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('queue timeout')), ms).unref?.()),
+  ]);
+
+// Enqueue a claim job on the TURF queue (shared by the claim endpoint and effort-create
+// seeding). attempts: 1 — a claim that genuinely fails mid-move must surface to the admin
+// rather than silently re-run; the pre-mutation 'move' snapshot is the recovery, and the
+// one stall-redelivery BullMQ still allows is safe (executeClaim is ownership-keyed).
+const enqueueClaim = ({ campaignId, effortId, walkListId, all, force, requestedBy }) =>
+  queueOp(
+    getQueue(QUEUE_NAMES.TURF).add(
+      'claim',
+      {
+        campaignId: String(campaignId),
+        effortId: String(effortId),
+        walkListId: walkListId ? String(walkListId) : null,
+        all: !!all,
+        force: !!force,
+        requestedBy: String(requestedBy),
+      },
+      { attempts: 1 }
+    )
+  );
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -211,6 +242,11 @@ router.post('/', async (req, res, next) => {
     // The creator picks ONE door source. "All remaining (Intake)" wins over a saved-search
     // seed if both somehow arrive, so we never both claim-all and seed.
     const seedId = !claimAllIntake && seedWalkListId && mongoose.isValidObjectId(seedWalkListId) ? seedWalkListId : null;
+    // Validate the seed BEFORE creating anything — enqueueing a doomed claim job would
+    // leave a confusing failed job where a plain 400 says what's wrong.
+    if (seedId && !(await SavedSearch.exists({ _id: seedId, campaignId: req.campaign._id }))) {
+      return res.status(400).json({ error: 'Saved search not found in this campaign.' });
+    }
     const effort = await Effort.create({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
@@ -220,26 +256,6 @@ router.post('/', async (req, res, next) => {
       status: 'active',
       createdBy: req.user._id,
     });
-    // Give the new walk list its doors immediately, from the chosen source.
-    let claimed = 0;
-    if (claimAllIntake) {
-      // All unowned (Intake) doors — identical to the claim endpoint's { all: true } path.
-      const r = await Household.updateMany(
-        { campaignId: req.campaign._id, isActive: true, effortId: null },
-        { $set: { effortId: effort._id } }
-      );
-      claimed = r.modifiedCount || 0;
-    } else if (effort.seededFromWalkListId) {
-      // Intake-only claim of a saved search's doors.
-      const wl = await SavedSearch.findOne({ _id: effort.seededFromWalkListId, campaignId: req.campaign._id }, { householdIds: 1 }).lean();
-      if (wl?.householdIds?.length) {
-        const r = await Household.updateMany(
-          { _id: { $in: wl.householdIds }, campaignId: req.campaign._id, effortId: null },
-          { $set: { effortId: effort._id } }
-        );
-        claimed = r.modifiedCount || 0;
-      }
-    }
     // Every walk list starts its first pass automatically, so the common path skips the
     // create-and-name-a-pass step. Best-effort — a hiccup here must not fail effort creation
     // (the admin can add Pass 1 from the walk list's Passes panel).
@@ -252,7 +268,31 @@ router.post('/', async (req, res, next) => {
         userId: req.user._id,
       });
     } catch { /* non-fatal: Pass 1 can be created manually */ }
-    res.status(201).json({ effort, claimed, pass });
+    // Seed the new walk list's doors via the same queued claim job the claim endpoint
+    // uses — the old inline Intake-claim here was a second copy of that logic that could
+    // drift (and at 25k doors, outlive the request). force:false — create-time seeding
+    // claims Intake only and never moves another list's doors (executeClaim skips owned).
+    // On enqueue failure the list is merely UNSEEDED, never half-created: return 201 with
+    // claimError and let the admin claim from the walk list's Claim panel.
+    let claimJobId = null;
+    let claimError = null;
+    if (claimAllIntake || seedId) {
+      try {
+        const job = await enqueueClaim({
+          campaignId: req.campaign._id,
+          effortId: effort._id,
+          walkListId: seedId,
+          all: !!claimAllIntake,
+          force: false,
+          requestedBy: req.user._id,
+        });
+        claimJobId = String(job.id);
+      } catch (err) {
+        console.error('[efforts] create-seed enqueue failed:', err?.message || err);
+        claimError = 'queue-unavailable';
+      }
+    }
+    res.status(201).json({ effort, pass, claimJobId, claimError });
   } catch (err) {
     next(err);
   }
@@ -277,85 +317,67 @@ router.patch('/:id', loadEffort, async (req, res, next) => {
 // Claim households into this effort (materialize Household.effortId).
 //   body: { walkListId?, all?: true, force?: false }
 // Targets = a walk list's households, or (all:true) every Intake (unowned) door.
-// A walk-list claim may include doors owned by ANOTHER effort — those are returned as
-// `conflicts` unless force:true (the re-carve path), which also pulls them out of their
-// old effort's books so they re-cut cleanly here. "Claim all Intake" only ever touches
-// unowned doors, so it never conflicts.
+// A walk-list claim may include doors owned by ANOTHER effort — without force those
+// come back as a 409 with a per-donor-list breakdown (doors lost, books affected,
+// books emptied) so the confirm modal can state the real stakes. With force, the
+// move is ENQUEUED on the TURF queue and this returns 202 {jobId} — at 24k doors
+// the old inline re-carve outlived Heroku's 30s router timeout (the client saw a
+// 503 while the server kept moving doors) and took no lock against a concurrent
+// cut. The job snapshots every donor pass before mutating (one-click undo), holds
+// the per-pass recut lock, and reports progress on GET /turfs/jobs/:jobId.
+// "Claim all Intake" only ever touches unowned doors, so it never conflicts.
 router.post('/:id/claim', loadEffort, async (req, res, next) => {
   try {
     const { walkListId, all, force } = req.body || {};
-    const cId = req.campaign._id;
-
-    let idFilter;
-    if (walkListId) {
-      if (!mongoose.isValidObjectId(walkListId)) return res.status(400).json({ error: 'Invalid walkListId' });
-      const wl = await SavedSearch.findOne({ _id: walkListId, campaignId: cId }, { householdIds: 1 }).lean();
-      if (!wl) return res.status(404).json({ error: 'Saved search not found' });
-      idFilter = { _id: { $in: wl.householdIds || [] } };
-    } else if (all) {
-      idFilter = { effortId: null }; // Intake (unowned) doors only — never another effort's doors
-    } else {
-      return res.status(400).json({ error: 'Provide walkListId or all:true' });
+    if (walkListId && !mongoose.isValidObjectId(walkListId)) {
+      return res.status(400).json({ error: 'Invalid walkListId' });
     }
 
-    const targets = await Household.find(
-      { campaignId: cId, isActive: true, ...idFilter },
-      { _id: 1, effortId: 1, turfId: 1 }
-    ).lean();
-
-    const intake = targets.filter((h) => !h.effortId);
-    const owned = targets.filter((h) => h.effortId && String(h.effortId) !== String(req.effort._id));
+    let targets;
+    try {
+      targets = await resolveClaimTargets({
+        campaignId: req.campaign._id,
+        effortId: req.effort._id,
+        walkListId,
+        all,
+      });
+    } catch (err) {
+      if (err.code === 'walklist-not-found') return res.status(404).json({ error: 'Saved search not found' });
+      if (err.code === 'bad-claim-request') return res.status(400).json({ error: 'Provide walkListId or all:true' });
+      throw err;
+    }
+    const { intake, owned } = targets;
 
     if (owned.length && !force) {
+      const preview = await previewClaimConflicts({ owned });
       return res.status(409).json({
         error: `${owned.length} door(s) are already in another effort. Re-send with force:true to move them here.`,
         code: 'doors-owned',
         conflicts: owned.length,
         claimable: intake.length,
+        ...preview,
       });
     }
 
-    // Claim Intake doors outright.
-    if (intake.length) {
-      await Household.updateMany(
-        { _id: { $in: intake.map((h) => h._id) } },
-        { $set: { effortId: req.effort._id } }
-      );
+    // Nothing would move — answer now instead of parking a no-op job on the queue.
+    if (!intake.length && !(force && owned.length)) {
+      return res.json({ jobId: null, claimable: 0, conflicts: 0 });
     }
 
-    // Re-carve: move owned doors here and pull them from their old books.
-    let recutBooks = 0;
-    if (owned.length && force) {
-      const ownedIds = owned.map((h) => h._id);
-      await Household.updateMany(
-        { _id: { $in: ownedIds } },
-        { $set: { effortId: req.effort._id, turfId: null, walkOrder: null } }
-      );
-      const affectedTurfIds = [...new Set(owned.filter((h) => h.turfId).map((h) => String(h.turfId)))];
-      const ownedSet = new Set(ownedIds.map(String));
-      const touchedByPass = new Map(); // passId -> turfIds that lost doors
-      for (const tid of affectedTurfIds) {
-        const turf = await Turf.findById(tid);
-        if (!turf) continue;
-        turf.householdIds = turf.householdIds.filter((id) => !ownedSet.has(String(id)));
-        await recomputeTurf(turf);
-        if (turf.passId) {
-          const pid = String(turf.passId);
-          if (!touchedByPass.has(pid)) touchedByPass.set(pid, []);
-          touchedByPass.get(pid).push(String(turf._id));
-        }
-        recutBooks += 1;
-      }
-      // recomputeTurf leaves an UNCLIPPED hull; every other caller (move-door, move-doors,
-      // merge, split) immediately re-tessellates so books stay non-overlapping. Only the
-      // shrunken books rebuild: removing doors only GROWS the remaining Voronoi cells, so
-      // untouched books' stored shapes stay inside their entitlement — disjoint and containing.
-      for (const [pid, turfIds] of touchedByPass) {
-        await recomputePassTerritories(pid, { onlyTurfIds: turfIds });
-      }
+    try {
+      const job = await enqueueClaim({
+        campaignId: req.campaign._id,
+        effortId: req.effort._id,
+        walkListId,
+        all,
+        force,
+        requestedBy: req.user._id,
+      });
+      return res.status(202).json({ jobId: String(job.id), claimable: intake.length, conflicts: owned.length });
+    } catch (err) {
+      console.error('[efforts] claim enqueue failed:', err?.message || err);
+      return res.status(503).json({ error: 'Could not queue the move — try again in a moment.', code: 'queue-unavailable' });
     }
-
-    res.json({ claimed: intake.length + (force ? owned.length : 0), reassigned: force ? owned.length : 0, recutBooks });
   } catch (err) {
     next(err);
   }
@@ -474,9 +496,30 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
     if (liveRounds) {
       return res.status(400).json({ error: 'Walk list has active/archived passes; archive it instead of deleting.' });
     }
+    const passIds = (await Pass.find({ effortId: req.effort._id }, { _id: 1 }).lean()).map((p) => p._id);
+    // Draft-rounds-only is NOT proof of no history — the ledger is the authority
+    // (2026-08 incident): knocks recorded while doors sat in this list carry its
+    // effortId (resolveAttribution stamps the owner at write time, mobile/canvass.js),
+    // and deleting the doc orphans those rows into the by-pass report's
+    // "Legacy / no pass" bucket. Archiving keeps the name resolvable forever.
+    const ledgerRef = {
+      $or: [
+        { effortId: req.effort._id },
+        ...(passIds.length ? [{ passId: { $in: passIds } }] : []),
+      ],
+    };
+    const [hasKnocks, hasResponses] = await Promise.all([
+      CanvassActivity.exists(ledgerRef),
+      SurveyResponse.exists(ledgerRef),
+    ]);
+    if (hasKnocks || hasResponses) {
+      return res.status(400).json({
+        error: 'Walk list has recorded door history (knocks or survey answers reference it); archive it instead of deleting.',
+        code: 'has-history',
+      });
+    }
     await Household.updateMany({ campaignId: req.campaign._id, effortId: req.effort._id }, { $set: { effortId: null, turfId: null, walkOrder: null } });
     // Remove the effort's (draft) rounds AND their books + assignments so nothing dangles.
-    const passIds = (await Pass.find({ effortId: req.effort._id }, { _id: 1 }).lean()).map((p) => p._id);
     if (passIds.length) {
       await Turf.deleteMany({ passId: { $in: passIds } });
       await TurfAssignment.deleteMany({ passId: { $in: passIds } });

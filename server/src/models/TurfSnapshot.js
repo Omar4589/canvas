@@ -34,7 +34,13 @@ const turfSnapshotSchema = new mongoose.Schema(
     organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
     campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true, index: true },
     passId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', required: true, index: true },
-    reason: { type: String, enum: ['discard', 'recut'], default: 'discard' },
+    // 'move' = auto-snapshot taken by a claim job before a force re-carve pulls this
+    // pass's doors into another walk list (services/walklist/claimDoors.js).
+    reason: { type: String, enum: ['discard', 'recut', 'move'], default: 'discard' },
+    // The claim job that took a 'move' snapshot. Lets a stall-redelivered job skip
+    // re-snapshotting a pass it already captured (idempotency), and ties the snapshot
+    // to its run for support archaeology. null for web-initiated snapshots.
+    jobId: { type: String, default: null },
 
     books: { type: [snapBookSchema], default: [] },
     assignments: { type: [snapAssignmentSchema], default: [] },

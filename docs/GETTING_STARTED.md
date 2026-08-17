@@ -107,8 +107,8 @@ Where each step is enforced (all admin routes require an org **admin** role):
   once set. It only silences the go-live confirmation — an incomplete campaign still shows the full
   checklist.
 - **Auto Pass 1.** `POST /admin/campaigns/:id/efforts` ([efforts.js](../server/src/routes/admin/efforts.js))
-  calls `createNextPass` ([createPass.js](../server/src/services/passes/createPass.js)) best-effort
-  after claiming doors, and returns `{ effort, claimed, pass }`.
+  calls `createNextPass` ([createPass.js](../server/src/services/passes/createPass.js)) best-effort,
+  enqueues the door-claim as a background job, and returns `{ effort, pass, claimJobId, claimError }`.
 - **Books.** `POST …/turfs/generate` enqueues a job that writes `Turf`s with `status:'draft'`;
   `POST …/turfs/accept` flips them to `status:'published'` ([turfs.js](../server/src/routes/admin/turfs.js)).
 - **Activation gate.** `POST …/passes/:id/activate` ([passes.js](../server/src/routes/admin/passes.js))

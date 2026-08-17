@@ -46,10 +46,14 @@ const passSchema = new mongoose.Schema(
     activatedAt: { type: Date, default: null },
     archivedAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // Advisory lock so concurrent discard/restore re-cuts can't interleave.
+    // Advisory lock so concurrent destructive book operations can't interleave
+    // (web discard/restore AND worker claim/supplemental jobs — see recutLock.js).
+    // token: opaque holder id (a BullMQ jobId for jobs) so a long-running holder can
+    // RENEW its own lock past STALE_MS without being able to renew anyone else's.
     recutLock: {
       lockedAt: { type: Date, default: null },
       lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      token: { type: String, default: null },
     },
   },
   { timestamps: true }

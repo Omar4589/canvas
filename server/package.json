@@ -48,6 +48,7 @@
     "audit:orphaned-reviews": "node src/migrations/auditOrphanedReviews.js",
     "repair:import-pins": "node src/migrations/repairImportPins.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
+    "repair:orphan-attribution": "node src/migrations/repairOrphanAttribution.js",
     "migrate:activity-coordinator": "node src/migrations/migrateActivityCoordinator.js",
     "migrate:campaign-coordinators": "node src/migrations/migrateCampaignCoordinators.js",
     "audit:team-counts": "node src/migrations/auditTeamCounts.js",

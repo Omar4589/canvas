@@ -12,7 +12,9 @@ import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 // Capture a pass's current book set (+ assignments, + optionally the knock
 // history about to be cleared) into a TurfSnapshot for undo. Call this BEFORE
 // any deletion so a failed/partial discard is still recoverable.
-export async function snapshotPass({ campaign, passId, reason, includeKnocks, userId }) {
+// jobId: the claim job that took a reason:'move' snapshot (claimDoors.js dedupes
+// stall-redelivered re-runs on it); null for web-initiated snapshots.
+export async function snapshotPass({ campaign, passId, reason, includeKnocks, userId, jobId = null }) {
   const books = await Turf.find({
     campaignId: campaign._id,
     passId,
@@ -46,6 +48,7 @@ export async function snapshotPass({ campaign, passId, reason, includeKnocks, us
     campaignId: campaign._id,
     passId,
     reason: reason || 'discard',
+    jobId,
     books: books.map((b) => ({
       name: b.name,
       mode: b.mode,

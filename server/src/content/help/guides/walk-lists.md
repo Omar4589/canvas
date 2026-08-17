@@ -32,6 +32,6 @@ You claim doors two ways:
 
 ## Re-carving an existing campaign
 
-Your campaign starts as one default walk list ("Main") owning every door. To split it up, build a saved search for each new area and seed a new walk list from it. Because those doors belong to "Main," the app asks you to confirm a **move (re-carve)** — the doors cleanly leave Main and join the new list. Rename or delete the empty leftover when you're done.
+Your campaign starts as one default walk list ("Main") owning every door. To split it up, build a saved search for each new area and seed a new walk list from it. Because those doors belong to "Main," the app asks you to confirm a **move (re-carve)** — and the confirm spells out the stakes: how many doors each list loses, and how many of its books that guts or empties. Before anything moves, each affected list's books are **snapshotted** (restorable from its Turf page under Undo / snapshots), then the move runs in the background with a progress bar. One thing to know: **moving doors back later does not rebuild their old books** — they come back bookless until you re-cut or restore the snapshot. Rename or archive the emptied leftover when you're done (a list with recorded knocks can be archived but not deleted — its history stays readable in reports).
 
 > Tip: The crew count fills itself in — assign a book to someone on the [Turf & Books](turf-and-books) page and they join the crew automatically.

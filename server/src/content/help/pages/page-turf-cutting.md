@@ -9,7 +9,7 @@ summary: Cut a pass's doors into books, accept them, assign them, and watch a ro
 tags: turf, books, cutting, assign, progress, status, page
 ---
 
-**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book, and move, merge, or split books.
+**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), and move, merge, or split books.
 
 ## Watching a round's progress here
 

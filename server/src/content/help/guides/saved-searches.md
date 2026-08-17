@@ -35,6 +35,6 @@ A saved search doesn't assign work on its own — it feeds a [walk list](walk-li
 1. **Seed at creation** — create a new walk list and pick your saved search under **Doors**.
 2. **Claim later** — open a walk list, choose Claim, and pick the saved search.
 
-Either way, claiming only takes the saved search's unowned doors (those sitting in [Intake](what-is-intake)). If some already belong to another walk list, the app offers to re-carve them over cleanly.
+Either way, claiming only takes the saved search's unowned doors (those sitting in [Intake](what-is-intake)). If some already belong to another walk list, the app shows you exactly what moving them would do to each list's books — and snapshots those books before the move, so it's undoable.
 
 > Tip: Every saved search has a **Download CSV** action that exports its frozen voters — great for handing a phone bank the numbers or a mail house the addresses.

@@ -54,6 +54,6 @@ While an import runs you'll see its stage:
 - A **new voter at a door you've already knocked or surveyed** is different: the door reads "done," so nobody is sent back and the new voter would be missed. Tick **"Revisit already-worked homes that gain a new voter"** on the import review screen — the import collects those homes into a [saved search](saved-searches) named after your file ("New voters — …"), and the summary shows **Create revisit walk list →**, which starts a new walk list from exactly those doors so you can cut a fresh round and go back. Because it's a new round, the revisit **counts as a knock**.
 - A **new address** lands in **Intake** and is **not** canvassed until you assign it to a walk list.
 
-> Heads up: Claiming a door into a walk list is only step one — a claimed door isn't visible to canvassers until it's cut into a book and assigned. To add a second file's new doors to the field, Claim them, then on **Turf Cutting** use **Add new doors** to cut a supplemental book, Accept, and Assign.
+> Heads up: Claiming a door into a walk list is only step one — a claimed door isn't visible to canvassers until it's cut into a book and assigned. To add a second file's new doors to the field, Claim them, then on **Turf Cutting** use **Add as new book** to cut a supplemental book, Accept, and Assign.
 
 More on that flow in [I uploaded a second voter file — now what?](add-a-second-voter-file).

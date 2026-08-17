@@ -263,6 +263,12 @@ If you don't like the books, or the underlying voter list changed, you **recut**
   was active — drops it back to **draft** (a live campaign can't be left with an active pass that
   has no books). Then you cut fresh and re-accept.
 
+**Drafts-only discard.** When a pass has *both* accepted books and drafts (an "Add as new book" you
+regret, say), the Discard dialog offers **Drafts only**: it removes just the unaccepted drafts and
+leaves the accepted books, assignments, and knock history completely untouched — no confirmation
+typing, because drafts never reached anyone. You can also select individual **draft** books in the
+list and delete just those.
+
 **Discarding a worked round is guarded.** If the round already has knocks recorded, the Discard dialog
 names the **effort · round** in its title, shows how many knocks exist, and requires **typing
 `discard`** to confirm (the server refuses without the explicit confirmation too) — so you can't wipe
@@ -452,7 +458,9 @@ to the walk list that should work them (or make a new one). Then get them into b
 1. **Add them to the live pass as a supplemental book (recommended).** On the Turf page, when there
    are doors "not in any book," click **Add as new book** — the walk list's unassigned households
    are cut into new draft book(s) on the *current* pass without touching the existing books or
-   knocks. Then **Accept** and **assign** them like any other book. No recut, no archive; canvassers
+   knocks. The cut runs in the background with the same progress bar as Generate (a big add can take
+   a few minutes — safe to leave the page and come back). Then **Accept** and **assign** them like
+   any other book. No recut, no archive; canvassers
    see the new doors on their next refresh. → keeps the round running. On a **targeted** round, both
    the "not in any book" count and the supplemental cut respect the pass's own target filter —
    doors the target skipped or the **Exclude doors** panel removed are bookless *on purpose*, so
@@ -509,7 +517,7 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list whose owned doors are the round's universe), `roundNumber` (unique **per walk list**, never reused), `name`, `targetFilter` (optional walk-list-shaped filter for a targeted follow-up round; may carry an `exclude` NOT-branch — see [WALKLISTS.md](WALKLISTS.md) §B), `walkListId` (**deprecated** — null on new rounds; the door-set comes from the effort), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy}`. Unique index `{effortId, roundNumber}` ([Pass.js:58](../server/src/models/Pass.js#L58)). |
+| `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list whose owned doors are the round's universe), `roundNumber` (unique **per walk list**, never reused), `name`, `targetFilter` (optional walk-list-shaped filter for a targeted follow-up round; may carry an `exclude` NOT-branch — see [WALKLISTS.md](WALKLISTS.md) §B), `walkListId` (**deprecated** — null on new rounds; the door-set comes from the effort), `status` (`draft`/`active`/`archived`), `activatedAt` (set on activation; knock attribution is now door→book→walk-list, not this timestamp — see the banner), `archivedAt`, `recutLock{lockedAt,lockedBy,token}` (`token` = the holding job's id, letting a long claim/supplemental job RENEW its own lock past the 5-min staleness window — [recutLock.js](../server/src/services/turf/recutLock.js)). Unique index `{effortId, roundNumber}` ([Pass.js:58](../server/src/models/Pass.js#L58)). |
 | `Turf` (= "book") | [models/Turf.js](../server/src/models/Turf.js) | `passId` (required), `campaignId`, `name`, `mode` (`attribute`/`geometric`/`manual`), `params`, `householdIds[]` (**ordered** = walk sequence), `doorCount`, `boundary`/`centroid` (GeoJSON, **display-only**, not geo-indexed), `status` (`draft`/`published`/`archived`), `generationJobId`, `generatedBy`. |
 | Active passes (derived) | [services/passes/activePasses.js](../server/src/services/passes/activePasses.js) | `activePassIds(campaignId)` derives the live passes from `Pass.status==='active'` — **one per active walk list** (a campaign can have several at once). There is **no** `Campaign.activePassId` field. |
 | `Household.turfId` / `walkOrder` | [models/Household.js](../server/src/models/Household.js) | Denormalized mirror of "which book + position" for the household; `null` until assigned by a cut. |
@@ -537,15 +545,24 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
    → `balancedKMeans` ([balancedKMeans.js](../server/src/services/turf/balancedKMeans.js)) —
    **compactness-first** clustering with `maxDoors` as a soft target (§B.1); `manual` — households
    within `params.polygon`.
-3. **Wipe prior drafts** ([:72-78](../server/src/services/turf/generateTurf.js#L72-L78)) — delete the
-   pass's existing `draft` Turfs + their `TurfAssignment`s and clear the household mirror, so a
-   re-run is idempotent. (Published books are *not* touched here — the `/generate` route blocks when
-   published books exist; see §C.)
+3. **Wipe prior drafts** (`wipeDraftBooks` in
+   [generateTurf.js](../server/src/services/turf/generateTurf.js)) — delete the pass's existing
+   `draft` Turfs + their `TurfAssignment`s and clear the household mirror, so a re-run is idempotent.
+   (Published books are *not* touched here — the `/generate` route blocks when published books exist;
+   see §C.) The same helper backs the **drafts-only Discard scope** (§C), so the endpoint can never
+   drift from what the cut itself does.
 4. **Per book**: compute walk order, centroid, boundary (concave hull → Voronoi-clipped territory),
    insert as `status: 'draft'`, and **mirror** `turfId`/`walkOrder` back onto each household.
 
 The route enqueues this as an async job and returns a `jobId` to poll
-([turfs.js `/generate`:45](../server/src/routes/admin/turfs.js#L45), poll at `/jobs/:jobId`).
+([turfs.js `/generate`](../server/src/routes/admin/turfs.js), poll at `/jobs/:jobId`). The TURF queue
+carries **three job kinds**, dispatched on `job.name` in
+[turfProcessor.js](../server/src/services/turf/turfProcessor.js): `generate` (this cut — and the
+default for unrecognized names, so pre-deploy jobs drain), `supplemental` (the add-books flow), and
+`claim` (walk-list door moves — [EFFORTS.md](EFFORTS.md) §B). Worker concurrency 1 serializes all
+three against each other; the per-pass `recutLock` (with a job `token` + periodic renewal —
+[recutLock.js](../server/src/services/turf/recutLock.js)) fences the web-side discard/restore off
+from a running job. `/jobs/:jobId` polls any of the three.
 
 ## B.1 The geometric cut (compactness-first)
 
@@ -553,10 +570,27 @@ The route enqueues this as an async job and returns a `jobId` to poll
 ([balancedKMeans.js](../server/src/services/turf/balancedKMeans.js)) makes books as **tight and walkable**
 as possible, treating `maxDoors` as an **approximate target**, not a hard equal cap. (The old
 capacity-balanced cut forced near-equal sizes, which exiled boundary houses into far books — a canvasser
-driving across the area for one door.) Everything runs on Hilbert-projected meters and is fully
+driving across the area for one door.)
+
+It is **async and chunked at scale** (2026-08 stall incident): one assign pass is n×k distance work,
+and at 26.5k doors that ran for minutes of unbroken synchronous CPU — the BullMQ lock-renewal timer
+never fired, the job stalled, re-ran, and reported *"job stalled more than allowable limit"* while
+both runs' writes landed. Two mechanisms fix it: an awaited `setImmediate` between every k-means
+iteration and polish sweep (so the lock timer can always fire), and — above `CHUNK_THRESHOLD`
+(default 8 000 doors; env `TURF_KMEANS_CHUNK_THRESHOLD`) — a **pre-split of the Hilbert-sorted array
+into contiguous ~6 000-door runs**, each clustered independently and concatenated in chunk order
+(~40× less work per iteration at 250k doors; a book simply can't span a run boundary, the same class
+of compromise the soft cap already accepts). Sub-threshold cuts take the exact single-run path they
+always did. `computeTerritories` yields per book for the same reason; the single `turf.voronoi` call
+stays sync (seconds even at 250k, covered by the TURF worker's 90s `lockDuration` —
+[worker.js](../server/src/worker.js)).
+
+Everything runs on Hilbert-projected meters and is fully
 **deterministic** — but the absence of `Math.random` is only half of why. Seeds are chosen by
 **position** in the Hilbert-sorted array and equally-placed doors break ties by **index**, so the
-order the doors arrive in reaches book membership. Mongo guarantees no document order, so
+order the doors arrive in reaches book membership. Chunk boundaries are a pure function of
+`(n, threshold)` over that deterministic order, so the chunked path re-runs identically too. Mongo
+guarantees no document order, so
 `generateTurf` sorts every cut-feeding load by `_id` (the `byId` helper) before anything touches it,
 and `hilbertSort`'s comparator is a total order (`h`, then `x`, then `y`). Both are load-bearing:
 without them a re-run or a retried worker job could produce different books:
@@ -651,8 +685,9 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/exclude-apartments` `{ passId, threshold }` | Group the effort's doors by rounded geocode; set `Household.excludedFromTurf:true` on members of clusters ≥ threshold → they skip cutting/book-counts/packets/canvasser everywhere via `KNOCKABLE_DOOR_FILTER` (mirrors `fullyVoted`), but **stay on the admin map**, which surfaces them as a count + Show/Dim/Hide toggle ([MAPS.md](MAPS.md) §I). The read is UNSCOPED, so exclusion is campaign-wide and provenance-free — the stamp records no effort/pass/actor. `POST .../turfs/include-apartments` clears it, but only for the doors the **named effort currently owns**: a door returned to Intake (`effortId: null`) can't be reached by any endpoint, since `Pass.effortId` is required. |
 | `POST .../turfs/generate` ([:45](../server/src/routes/admin/turfs.js#L45)) | Enqueue generation; **409 `has-published-books`** if the pass already has published books ([:59-65](../server/src/routes/admin/turfs.js#L59-L65)) — Discard is the path to re-cut. Skips fully-voted doors. Passes `params` straight through, so **`params.excludeRestricted`** reaches `generateTurf` and skips `status:'restricted'` doors for that cut (the "Exclude restricted-access homes" toggle; default on when any exist). |
 | `POST .../turfs/accept` ([:99](../server/src/routes/admin/turfs.js#L99)) | Draft → published for the pass. |
-| `POST .../turfs/add-supplemental` | **Non-destructive add.** Cut the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirror `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`); serialized by `Pass.recutLock`. New books then use Accept + Assign. Body `{ passId, name?, maxDoors?, excludeRestricted? }` (`excludeRestricted` adds `status: { $ne: 'restricted' }` to the base filter) → `{ added, bookCount, bookIds }`. **Target-aware:** when `Pass.targetFilter` is active, the candidate set is constrained to `resolveWalkList(campaign, pass.targetFilter)` — exclude branch included — so a supplemental book can never re-introduce doors the target skipped or the exclusion removed. The `GET /turfs?passId=` rollup returns the matching `supplementalDoorCount`/`supplementalRestrictedCount`, which is what the web console's "not in any book" nag renders. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
-| `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft` ([turfs.js:366-372](../server/src/routes/admin/turfs.js#L366-L372)); optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
+| `POST .../turfs/add-supplemental` | **Non-destructive add, ENQUEUED** (`202 { jobId }`; poll `/jobs/:jobId`; **503 `queue-unavailable`** when Redis is unreachable). The old inline run outlived Heroku's 30s router timeout at 26.5k doors (client saw a bare 503 while the books appeared anyway — 2026-08 incident). The job cuts the pass's currently-unassigned households (`turfId:null`, same base filter as generation) into new **draft** book(s) via `geometricCut`, mirrors `turfId`/`walkOrder`, `recomputePassTerritories`. Works on an active/published pass (unlike `/generate`). Body `{ passId, name?, maxDoors?, excludeRestricted? }` (`excludeRestricted` adds `status: { $ne: 'restricted' }` to the base filter); the result `{ added, bookCount, bookIds }` — including `added: 0` — lands in the job's `returnvalue`. The route does an advisory `recutLock` pre-check (immediate 409); the **binding** acquire/renew/release happens inside the job ([turfProcessor.js](../server/src/services/turf/turfProcessor.js)). **Target-aware:** when `Pass.targetFilter` is active, the candidate set is constrained to `resolveWalkList(campaign, pass.targetFilter)` — exclude branch included — so a supplemental book can never re-introduce doors the target skipped or the exclusion removed. The `GET /turfs?passId=` rollup returns the matching `supplementalDoorCount`/`supplementalRestrictedCount`, which is what the web console's "not in any book" nag renders. Service: `addSupplementalBooks` in [generateTurf.js](../server/src/services/turf/generateTurf.js). |
+| `POST .../turfs/discard` | **409 `active-pass-confirm-required`** (with `knockCount`/`assignmentCount`/`isActive`) when the pass is active **or has recorded knocks** and `confirmActive` isn't set — the client's typed-confirm dialog supplies it. Then: snapshot (for undo) → delete the pass's books + assignments + clear household mirror; if the pass was active, revert it to `draft`; optional `clearKnocks` wipes that pass's `CanvassActivity`/`SurveyResponse` (captured in the snapshot). Serialized by `Pass.recutLock`. **`scope: 'drafts'`** wipes ONLY the pass's draft books (`wipeDraftBooks` — the undo for a bad supplemental add): no snapshot, no confirm gate (drafts carry no assignments — both assign routes 409 `not-accepted` — and no history), never reverts a live pass, and `clearKnocks` with it is a 400. The turfs `GET /` also returns `knockCount` for the selected pass (drives the dialog's warning). |
+| `DELETE .../turfs/:turfId` | Delete a **single DRAFT book** (surgical cleanup — e.g. one unwanted supplemental book): clears the household mirror and deletes the doc. **409 `not-draft`** for accepted books (Discard is their only removal path). Brief `recutLock` hold so a supplemental/claim job can't race the delete. **No re-tessellation** — removing a book's doors only grows the neighbors' Voronoi entitlement, so every stored shape stays disjoint and containing. |
 | `POST .../turfs/restore-snapshot` | Re-create books + assignments from a snapshot (blocked if live books exist; does not auto-reactivate the pass). |
 | `POST .../turfs/move-door` `{ householdId, fromTurfId?, toTurfId }` ([:851](../server/src/routes/admin/turfs.js#L851)) | Move one door between books in the same pass. Pulls it from its current book, pushes into `toTurfId`, `recomputeTurf` on both (re-mirrors `Household.turfId`/`walkOrder`) + `recomputePassTerritories`. **409** if the door's `effortId` ≠ the target book's effort (disjointness). Does **not** touch `CanvassActivity`. |
 | `POST .../turfs/move-doors` `{ householdIds[], toTurfId }` ([:892](../server/src/routes/admin/turfs.js#L892)) | Bulk move (e.g. every unit of a building) — pulls the ids out of every other book in the pass, adds to `toTurfId`, one `recomputeTurf`/`recomputePassTerritories`. Same effort guard. |
