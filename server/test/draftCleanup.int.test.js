@@ -288,3 +288,45 @@ test('repair:orphan-attribution (real child process): dry-run reports, --apply r
   const stillHealthy = await CanvassActivity.findById(healthy._id).lean();
   assert.strictEqual(String(stillHealthy.passId), String(pass._id));
 });
+
+test('repair --passless: campaign-gated, re-homes round-less rows, refuses duplicate-answer folds', { skip }, async () => {
+  const { org, camp, canv, effort, pass } = ctx;
+  // The incident's SECOND class: knocks recorded while the door sat in a valid walk
+  // list with no active book over it — effortId fine, passId null. Plus a survey
+  // answer whose voter ALREADY answered in the target round (must stay manual —
+  // {voterId, passId} is unique, and the voter genuinely answered twice).
+  const [dC] = await Household.insertMany([hh(org._id, camp._id, effort._id, 301)]);
+  const passless = await CanvassActivity.create(knock(dC, canv._id, { effortId: effort._id, passId: null }));
+  const voterId = new mongoose.Types.ObjectId();
+  const [lng, lat] = dC.location.coordinates;
+  const mkAnswer = (passId) => SurveyResponse.create({
+    organizationId: org._id, campaignId: camp._id, effortId: effort._id, passId,
+    voterId, householdId: dC._id, userId: canv._id,
+    surveyTemplateId: new mongoose.Types.ObjectId(), surveyTemplateVersion: 1,
+    answers: [], location: { lat, lng, accuracy: 8 }, submittedAt: new Date('2026-08-11T15:00:00Z'),
+  });
+  const inRound = await mkAnswer(pass._id); // the voter's real round-1 answer
+  const passlessAnswer = await mkAnswer(null); // the round-less duplicate — must NOT fold onto it
+
+  const script = path.join(serverRoot, 'src/migrations/repairOrphanAttribution.js');
+  const env = { ...process.env, MONGODB_URI: URI };
+  const run = (args) => execFileP('node', [script, ...args], { cwd: serverRoot, env });
+
+  // Guard: --passless without --campaign refuses (platform-wide it would rewrite
+  // genuinely pre-rounds-era history).
+  await assert.rejects(run(['--passless']), (err) => /requires --campaign/.test(err.stderr || ''));
+
+  // WITHOUT --passless these rows are invisible (nothing dangles on them).
+  const plain = await run(['--campaign', String(camp._id)]);
+  assert.ok(!plain.stdout.includes(String(passless._id)), 'round-less knock untouched without --passless');
+
+  // WITH it: the knock re-homes; the duplicate answer stays manual.
+  const applied = await run(['--campaign', String(camp._id), '--passless', '--apply']);
+  assert.match(applied.stdout, /voter already has an answer in the target round/);
+  const knockAfter = await CanvassActivity.findById(passless._id).lean();
+  assert.strictEqual(String(knockAfter.passId), String(pass._id), 'round-less knock re-homed to the round');
+  const dupAfter = await SurveyResponse.findById(passlessAnswer._id).lean();
+  assert.strictEqual(dupAfter.passId, null, 'duplicate answer left for manual review');
+  const realAfter = await SurveyResponse.findById(inRound._id).lean();
+  assert.strictEqual(String(realAfter.passId), String(pass._id), 'the real in-round answer untouched');
+});

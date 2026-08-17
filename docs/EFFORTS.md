@@ -252,6 +252,12 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   the door's *current* list + round, and lists ambiguous rows (door back in Intake, several rounds
   none active) for manual review instead of guessing
   ([repairOrphanAttribution.js](../server/src/migrations/repairOrphanAttribution.js)).
+  **`--passless`** (requires `--campaign`) additionally re-homes rows that dangle on nothing but carry
+  `passId: null` — knocks recorded while a door sat in a valid list with no active book over it (the
+  incident's second class; their totals were always right, only the round attribution was missing).
+  Campaign-gated on purpose: platform-wide, `passId: null` deliberately marks pre-rounds-era history.
+  A round-less survey answer whose voter already answered in the target round is never folded
+  (`{voterId, passId}` is unique — the voter genuinely answered twice); it's listed for manual review.
 
 ## C. Passes & "active"
 
