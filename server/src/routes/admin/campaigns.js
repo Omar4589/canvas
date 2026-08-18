@@ -10,6 +10,7 @@ import { Organization } from '../../models/Organization.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
@@ -773,6 +774,38 @@ const revertSchema = z.object({
   runId: z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid run id'),
 });
 
+/**
+ * Address / canvasser / round hydration for a page of stamped activity rows — the outcome-entries
+ * treatment, shared by the run-detail endpoints so all three lists read identically.
+ */
+async function hydrateRunEntries(req, campaign, rows) {
+  const doorIds = [...new Set(rows.map((r) => String(r.householdId)))];
+  const [doors, people, passes] = await Promise.all([
+    Household.find({ _id: { $in: doorIds } }, { addressLine1: 1, unit: 1, city: 1 }).lean(),
+    hydrateCanvassers(rows.map((r) => r.userId).filter(Boolean), activeOrgId(req)),
+    Pass.find({ campaignId: campaign._id }, { name: 1, roundNumber: 1 }).lean(),
+  ]);
+  const doorById = new Map(doors.map((d) => [String(d._id), d]));
+  const passById = new Map(passes.map((p) => [String(p._id), p]));
+  return {
+    entries: rows.map((r) => {
+      const d = doorById.get(String(r.householdId));
+      const p = r.userId ? people.get(String(r.userId)) : null;
+      const pass = r.passId ? passById.get(String(r.passId)) : null;
+      return {
+        id: String(r._id),
+        address: d ? [d.addressLine1, d.unit ? `#${d.unit}` : null].filter(Boolean).join(' ') : '(door removed)',
+        city: d?.city || '',
+        from: r.reclassified?.from || null,
+        to: r.actionType,
+        canvasser: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : 'Unknown user',
+        round: pass ? pass.name || `Round ${pass.roundNumber}` : null,
+        timestamp: r.timestamp,
+      };
+    }),
+  };
+}
+
 /** Shared preamble: org-admin gate, campaign lookup, mid-delete quarantine. */
 async function loadForReclassify(req, res) {
   if (!ensureOrgScoped(req, res)) return null;
@@ -1009,6 +1042,52 @@ router.post('/:campaignId/reclassify-outcomes/revert', async (req, res, next) =>
     res.json({ reverted: true, runId: String(run._id), revertedAt: run.revertedAt });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// The exact rows one reclassify run changed — read off the stamps, which are the run's own
+// record. Honest limitation, stated to the client rather than papered over: REVERT REMOVES THE
+// STAMPS (that is what makes provenance single-level and revert exact), so a reverted run has no
+// per-row detail left. The summary row survives; the itemization does not.
+router.get('/:campaignId/reclassify-outcomes/:runId/entries', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    if (!mongoose.isValidObjectId(req.params.runId)) {
+      return res.status(404).json({ error: 'Reclassification not found' });
+    }
+    const run = await ReclassifyRun.findOne({
+      _id: req.params.runId,
+      campaignId: campaign._id,
+      organizationId: activeOrgId(req),
+    }).lean();
+    if (!run) return res.status(404).json({ error: 'Reclassification not found' });
+    if (run.revertedAt) {
+      return res.json({ reverted: true, to: run.to, entries: [], total: 0, limit: 0, skip: 0 });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
+    // kind-scoped for legibility (run ids can't collide across collections, but the intent should
+    // read) — the same guard revertReclassify uses.
+    const filter = {
+      campaignId: campaign._id,
+      'reclassified.runId': run._id,
+      'reclassified.kind': { $in: [null, 'outcome'] },
+    };
+    const [rows, total] = await Promise.all([
+      CanvassActivity.find(filter, {
+        householdId: 1, actionType: 1, userId: 1, passId: 1, timestamp: 1, 'reclassified.from': 1,
+      })
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      CanvassActivity.countDocuments(filter),
+    ]);
+    res.json({ reverted: false, to: run.to, ...(await hydrateRunEntries(req, campaign, rows)), total, limit, skip });
+  } catch (err) {
     next(err);
   }
 });
@@ -1483,6 +1562,90 @@ router.get('/:campaignId/survey-conversions', async (req, res, next) => {
         const p = r.byUserId ? people.get(String(r.byUserId)) : null;
         return runWire(r, p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null);
       }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The exact changes one conversion run made. Two kinds, because it writes two ledgers:
+//   ?kind=doors    — the activity rows it flipped (was → now), off the reclassified stamp
+//   ?kind=answers  — the survey responses it created (to_survey, off deskEntry.runId) or
+//                    archived (from_survey, off conversionRunId), with the answers themselves
+// Same honest limitation as the reclassify detail: revert consumes the stamps, so an undone run
+// keeps its summary but loses the itemization — EXCEPT reverse-run archives a revert could not
+// restore (a newer field answer took the slot), which remain and are exactly what an admin
+// investigating needs to find.
+router.get('/:campaignId/survey-conversions/:runId/entries', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
+    const kind = req.query.kind === 'answers' ? 'answers' : 'doors';
+    const reverted = !!run.revertedAt;
+
+    if (kind === 'doors') {
+      const filter = { campaignId: campaign._id, 'reclassified.runId': run._id };
+      const [rows, total] = await Promise.all([
+        CanvassActivity.find(filter, {
+          householdId: 1, actionType: 1, userId: 1, passId: 1, timestamp: 1, 'reclassified.from': 1,
+        })
+          .sort({ timestamp: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        CanvassActivity.countDocuments(filter),
+      ]);
+      return res.json({ reverted, kind, ...(await hydrateRunEntries(req, campaign, rows)), total, limit, skip });
+    }
+
+    // kind === 'answers' — voter-unit rows, so the shape differs: who, what they answered, where.
+    const isForward = run.direction === 'to_survey';
+    const Model = isForward ? SurveyResponse : SurveyResponseArchive;
+    const filter = isForward
+      ? { 'deskEntry.runId': run._id }
+      : { conversionRunId: run._id };
+    const [rows, total] = await Promise.all([
+      Model.find(filter, { voterId: 1, householdId: 1, answers: 1, submittedAt: 1, userId: 1 })
+        .sort({ submittedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('voterId', 'fullName')
+        .lean(),
+      Model.countDocuments(filter),
+    ]);
+    const doorIds = [...new Set(rows.map((r) => String(r.householdId)))];
+    const [doors, people] = await Promise.all([
+      Household.find({ _id: { $in: doorIds } }, { addressLine1: 1, unit: 1 }).lean(),
+      hydrateCanvassers(rows.map((r) => r.userId).filter(Boolean), activeOrgId(req)),
+    ]);
+    const doorById = new Map(doors.map((d) => [String(d._id), d]));
+    res.json({
+      reverted,
+      kind,
+      entries: rows.map((r) => {
+        const d = doorById.get(String(r.householdId));
+        const p = r.userId ? people.get(String(r.userId)) : null;
+        return {
+          id: String(r._id),
+          voterName: r.voterId?.fullName || 'Unknown voter',
+          address: d ? [d.addressLine1, d.unit ? `#${d.unit}` : null].filter(Boolean).join(' ') : '(door removed)',
+          canvasser: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : 'Unknown user',
+          submittedAt: r.submittedAt,
+          answers: (r.answers || []).map((a) => ({
+            questionLabel: a.questionLabel,
+            answer: a.answer,
+            otherText: a.otherText ?? null,
+          })),
+        };
+      }),
+      total,
+      limit,
+      skip,
     });
   } catch (err) {
     next(err);

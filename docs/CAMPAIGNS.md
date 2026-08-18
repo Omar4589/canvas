@@ -374,6 +374,14 @@ Only the **entry's own canvasser** is affected. If a second canvasser genuinely 
 door in the same round, their answers survive untouched — which is the whole point when the reason
 for the cleanup is that one person's work is suspect.
 
+Every run row — plain reclassifications and survey conversions alike — carries a **Details** view:
+the itemized list of doors changed (was → now, canvasser, round, when) and, for conversions, the
+answers recorded or removed per voter. Served from the stamps themselves
+(`GET …/reclassify-outcomes/:runId/entries`, `GET …/survey-conversions/:runId/entries?kind=doors|answers`,
+paginated, org-admin only), which carries one honest consequence: **revert consumes the stamps, so
+an undone run keeps its summary but loses its itemization** — except reverse-run archives a revert
+could not restore, which persist and are listed as such.
+
 Both directions are priced like everything else on this page, always in red (recording or removing
 answers always moves the survey rate at minimum), and both are **undoable in one click** — a
 door-by-door session undoes as a single unit. A large run happens in the background with a progress

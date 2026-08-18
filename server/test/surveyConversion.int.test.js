@@ -865,6 +865,48 @@ test('desk entries are disclosed to the OPERATOR and never to the client', { ski
   await call('POST', url(`/${runId}/revert`), asAdmin());
 });
 
+test('run detail itemizes both ledgers, and says so honestly once undone', { skip }, async () => {
+  // A fresh, self-contained run: one not_home door converted with an answer.
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: ctx.doors[2]._id,
+    userId: ctx.canv._id, actionType: 'not_home', effortId: ctx.effort._id, passId: ctx.pass2._id,
+    location: GPS, timestamp: new Date('2026-07-07T15:00:00Z'), coordinatorId: ctx.boss._id,
+  });
+  const runId = await bulkRun({ direction: 'to_survey', to: 'survey_submitted', actionIds: [String(row._id)], answers: YES });
+
+  // ?kind=doors — the flipped activity rows, was → now, with the door/canvasser/round treatment.
+  const doors = await call('GET', url(`/${runId}/entries?kind=doors`), asAdmin());
+  assert.equal(doors.status, 200);
+  assert.equal(doors.json.total, 1);
+  assert.equal(doors.json.entries[0].from, 'not_home');
+  assert.equal(doors.json.entries[0].to, 'survey_submitted');
+  assert.match(doors.json.entries[0].address, /Convert Ct/);
+  assert.equal(doors.json.entries[0].canvasser, 'Cara Canvasser');
+  assert.equal(doors.json.entries[0].round, 'R2');
+
+  // ?kind=answers — who got an answer and what it says.
+  const answers = await call('GET', url(`/${runId}/entries?kind=answers`), asAdmin());
+  assert.equal(answers.json.total, 1);
+  assert.equal(answers.json.entries[0].voterName, 'V4 Test');
+  assert.deepEqual(answers.json.entries[0].answers[0], {
+    questionLabel: 'Support?', answer: 'Yes', otherText: null,
+  });
+
+  // Leads never see the itemization (it is the same org-admin gate as everything here).
+  assert.equal((await call('GET', url(`/${runId}/entries?kind=doors`), asLead())).status, 403);
+
+  // Undone: the stamps are consumed — that is what makes revert exact — so the itemization is
+  // honestly gone, flagged as reverted rather than rendered as a mysteriously empty list.
+  await call('POST', url(`/${runId}/revert`), asAdmin());
+  const after = await call('GET', url(`/${runId}/entries?kind=doors`), asAdmin());
+  assert.equal(after.json.reverted, true);
+  assert.equal(after.json.total, 0);
+  const afterAnswers = await call('GET', url(`/${runId}/entries?kind=answers`), asAdmin());
+  assert.equal(afterAnswers.json.reverted, true);
+  assert.equal(afterAnswers.json.total, 0, 'forward-run responses were deleted by the revert');
+  await CanvassActivity.deleteOne({ _id: row._id });
+});
+
 test('the campaign delete cascade takes SurveyConversionRun with it', { skip }, async () => {
   const doomed = await Campaign.create({
     organizationId: ctx.org._id, name: 'Doomed', type: 'survey', state: 'TX', isActive: true,

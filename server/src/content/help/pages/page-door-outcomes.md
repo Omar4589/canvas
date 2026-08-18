@@ -45,6 +45,19 @@ The review step lists **exactly whose answers are about to be removed, by name**
 
 Only that entry's own canvasser is affected. If a second canvasser genuinely surveyed the same door in the same round, their answers survive untouched.
 
+## Seeing exactly what a change did
+
+Every row under **Past changes** and **Survey answer changes** has a **Details** button. It opens
+the itemized history: each door that changed (what it said before, what it says now, who knocked
+it, which round, when) and — for survey conversions — each answer that was recorded or removed,
+voter by voter, with the answers themselves. Big changes are paged; skipped voters are listed with
+their reasons.
+
+One honest limit: **undoing a change also removes the markers this detail is built from** — that's
+what makes the undo exact — so an undone change keeps its summary line but not its door-by-door
+itemization. The exception is answers an undo couldn't put back (a newer field answer had taken
+the spot); those stay listed, since they're exactly what you'd need to find.
+
 ## Undoing
 
 Every change is listed with an undo that reverses it exactly — including a selection that spanned several outcomes, and a door-by-door session, which undoes as one unit. Changes and undos both appear in the campaign's History.

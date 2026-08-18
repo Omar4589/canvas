@@ -536,3 +536,37 @@ test('the campaign delete cascade takes ReclassifyRun with it', { skip }, async 
   assert.equal(await ReclassifyRun.countDocuments({ campaignId: doomed._id }), 0, 'no orphan run survives');
   await Campaign.deleteOne({ _id: doomed._id });
 });
+
+test('run detail itemizes the exact rows, and honestly loses them on revert', { skip }, async () => {
+  // Self-contained: a fresh row so earlier tests' conversions can't skew the expectation.
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: ctx.doors[0]._id,
+    userId: ctx.canv._id, actionType: 'refused', effortId: ctx.effort._id, passId: ctx.pass._id,
+    location: { lat: 30.26, lng: -97.74, accuracy: 5 }, timestamp: new Date('2026-08-02T15:00:00Z'),
+  });
+  const made = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'wrong_address', actionIds: [String(row._id)] },
+  });
+  assert.equal(made.status, 201);
+  const runId = made.json.run.id;
+
+  const detail = await call('GET', url(`/${runId}/entries`), asAdmin());
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.total, 1);
+  assert.equal(detail.json.entries[0].from, 'refused');
+  assert.equal(detail.json.entries[0].to, 'wrong_address');
+  assert.match(detail.json.entries[0].address, /Reclass Rd/);
+  assert.equal(detail.json.entries[0].canvasser, 'Cara Canvasser');
+  assert.equal(detail.json.entries[0].round, 'R1');
+  assert.equal((await call('GET', url(`/${runId}/entries`), asLead())).status, 403);
+
+  // Revert consumes the stamps — the summary row survives, the itemization does not, and the
+  // response says WHICH of those happened rather than serving an unexplained empty list.
+  await call('POST', url('/revert'), { ...asAdmin(), body: { runId } });
+  const after = await call('GET', url(`/${runId}/entries`), asAdmin());
+  assert.equal(after.json.reverted, true);
+  assert.equal(after.json.total, 0);
+  await CanvassActivity.deleteOne({ _id: row._id });
+});
+

@@ -14,6 +14,7 @@ import SurveyConvertModal from '../components/outcomes/SurveyConvertModal.jsx';
 import RemoveAnswersModal from '../components/outcomes/RemoveAnswersModal.jsx';
 import QueueWalkthrough from '../components/outcomes/QueueWalkthrough.jsx';
 import ConversionRunCard from '../components/outcomes/ConversionRunCard.jsx';
+import RunDetailModal from '../components/outcomes/RunDetailModal.jsx';
 
 // Door Outcomes — reviewing and correcting what canvassers recorded.
 //
@@ -89,6 +90,7 @@ export default function DoorOutcomesPage() {
   const [activeRunId, setActiveRunId] = useState(null);
   const [walking, setWalking] = useState(null);
   const [queueTemplate, setQueueTemplate] = useState(null);
+  const [detailRun, setDetailRun] = useState(null); // the run whose itemized history is open
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -526,6 +528,29 @@ export default function DoorOutcomesPage() {
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setDetailRun({
+                      type: 'conversion',
+                      id: r.id,
+                      direction: r.direction,
+                      title:
+                        r.direction === 'to_survey'
+                          ? `${(r.sources || []).map((x) => ACTION_LABELS[x] || x).join(', ') || 'Door entries'} → Surveyed`
+                          : `Surveyed → ${ACTION_LABELS[r.to] || r.to}`,
+                      by: r.by,
+                      createdAt: r.createdAt,
+                      samples: r.samples,
+                      samplesTotal: r.samplesTotal,
+                      samplesTruncated: r.samplesTruncated,
+                    })
+                  }
+                >
+                  Details
+                </Button>
                 {r.revertedAt ? (
                   <Badge variant="neutral">Undone</Badge>
                 ) : r.status === 'open' ? (
@@ -560,6 +585,7 @@ export default function DoorOutcomesPage() {
                     Undo
                   </Button>
                 )}
+                </div>
               </li>
             ))}
           </ul>
@@ -583,13 +609,30 @@ export default function DoorOutcomesPage() {
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
                   </div>
                 </div>
-                {r.revertedAt ? (
-                  <Badge variant="neutral">Reverted</Badge>
-                ) : (
-                  <Button variant="secondary" size="sm" disabled={revert.isPending} onClick={() => { setError(null); revert.mutate(r.id); }}>
-                    {revert.isPending ? 'Reverting…' : 'Revert'}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setDetailRun({
+                        type: 'reclassify',
+                        id: r.id,
+                        title: `${r.from === 'mixed' ? 'Several outcomes' : ACTION_LABELS[r.from]} → ${ACTION_LABELS[r.to]}`,
+                        by: r.by,
+                        createdAt: r.createdAt,
+                      })
+                    }
+                  >
+                    Details
                   </Button>
-                )}
+                  {r.revertedAt ? (
+                    <Badge variant="neutral">Reverted</Badge>
+                  ) : (
+                    <Button variant="secondary" size="sm" disabled={revert.isPending} onClick={() => { setError(null); revert.mutate(r.id); }}>
+                      {revert.isPending ? 'Reverting…' : 'Revert'}
+                    </Button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -656,6 +699,10 @@ export default function DoorOutcomesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {detailRun && (
+        <RunDetailModal campaignId={campaignId} run={detailRun} tz={tz} onClose={() => setDetailRun(null)} />
       )}
 
       {/* A run in flight, or the result of the last one. */}
