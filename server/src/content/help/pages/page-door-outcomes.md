@@ -27,7 +27,7 @@ Entries keep their time, GPS location, canvasser, round and turf. Only the label
 A canvasser who tapped the wrong button can't always fix it themselves: doing it away from the door flags their GPS. Select those entries, choose **Surveyed**, and enter the answers.
 
 - **Enter answers** — one answer set for everyone at every selected door. Right for "that whole batch was really *Undecided*."
-- **Door by door** — steps through the selection one address at a time so each household gets its own answers. Leave part-way with **Finish later**; the session shows under **Survey answer changes** as *Unfinished — 3 of 40 done*, with **Resume** to carry on and **Stop here** to keep what you've done and close it. Closing the tab is the same as Finish later.
+- **Door by door** — steps through the selection one address at a time so each household gets its own answers — and at a multi-voter door, tick **Different answers for each person** to record each voter separately. Leave part-way with **Finish later**; the session shows under **Survey answer changes** as *Unfinished — 3 of 40 done*, with **Resume** to carry on and **Stop here** to keep what you've done and close it. Closing the tab is the same as Finish later.
 
 You can leave questions blank. Record only what you actually know.
 

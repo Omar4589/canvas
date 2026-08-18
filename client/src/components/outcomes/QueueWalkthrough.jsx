@@ -17,18 +17,41 @@ import { buildAnswers, dropEmptyAnswers } from '../../lib/surveyAnswerForm.js';
 // same fix, and re-picking an identical answer 40 times is how people start rubber-stamping. The
 // carry is visible and every door is still confirmed individually.
 export default function QueueWalkthrough({ campaignId, run, template, onDone, onCancel }) {
-  const [remaining, setRemaining] = useState(run.doorsRemaining || []);
+  // null = NOT LOADED YET, [] = genuinely nothing left. Collapsing the two is what made a fresh
+  // session close itself on first render: the creating call returned doorsRemaining: null, the
+  // walkthrough read that as an empty queue, and the "all done" effect below fired immediately.
+  const [remaining, setRemaining] = useState(run.doorsRemaining ?? null);
   const [vals, setVals] = useState({});
   const [otherTexts, setOtherTexts] = useState({});
+  // "Different answers per person": one entry per voter instead of one per door. The shared set
+  // stays the default because consecutive corrections are usually identical — but a household
+  // where two people genuinely answered differently must be recordable in ONE pass, because the
+  // door stamps on save and a skipped voter has no second chance through this tool.
+  const [perVoter, setPerVoter] = useState(false);
+  const [voterEntries, setVoterEntries] = useState({}); // { voterId: { vals, otherTexts } }
+  const [activeVoterId, setActiveVoterId] = useState(null);
   const [skipped, setSkipped] = useState(() => new Set());
   const [carried, setCarried] = useState(false);
   const [door, setDoor] = useState(null);
   const [voters, setVoters] = useState(null);
   const [error, setError] = useState(null);
 
-  const actionId = remaining[0] || null;
+  const actionId = remaining?.[0] || null;
   const total = run.progress?.doorsTotal || run.counts?.doorsTargeted || 0;
-  const done = total - remaining.length;
+  const done = remaining === null ? 0 : total - remaining.length;
+
+  // Belt-and-braces: if we were handed a run without its queue (an older client, a shape change),
+  // fetch it rather than assuming either answer.
+  useEffect(() => {
+    if (remaining !== null) return undefined;
+    const ac = new AbortController();
+    api(`/admin/campaigns/${campaignId}/survey-conversions/${run.id}`, { signal: ac.signal })
+      .then((d) => setRemaining(d.run?.doorsRemaining || []))
+      .catch((e) => {
+        if (e.name !== 'AbortError') setError(e.message);
+      });
+    return () => ac.abort();
+  }, [remaining, campaignId, run.id]);
 
   // The door and its people, as the RUN sees them — one fetch per door, aborted on move so a slow
   // response can never paint the previous address's people over the current one.
@@ -44,6 +67,10 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
         // Anyone who already answered this round starts unticked: the run would skip them anyway,
         // and offering to record over a real field answer is a promise the write won't keep.
         setSkipped(new Set((d.voters || []).filter((v) => v.alreadyAnswered).map((v) => v.id)));
+        // Per-voter entries are per-DOOR state; the shared set is what carries over.
+        setPerVoter(false);
+        setVoterEntries({});
+        setActiveVoterId(null);
       })
       .catch((e) => {
         if (e.name !== 'AbortError') setError(e.message);
@@ -56,13 +83,36 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
     [template]
   );
 
+  const eligibleVoters = (voters || []).filter((v) => !skipped.has(v.id) && !v.dnc);
+  // The tab actually shown: the chosen one while it stays eligible, else the first eligible — so
+  // un-ticking whoever is active can never leave the composer editing a voter who won't be saved.
+  const shownVoterId = eligibleVoters.some((v) => v.id === activeVoterId)
+    ? activeVoterId
+    : eligibleVoters[0]?.id || null;
+
+  // Turning per-voter ON seeds every eligible voter from the shared answers, so switching modes
+  // half-typed loses nothing and each person starts from the common case.
+  const enablePerVoter = () => {
+    const seeded = {};
+    for (const v of eligibleVoters) {
+      seeded[v.id] = voterEntries[v.id] || { vals: { ...vals }, otherTexts: { ...otherTexts } };
+    }
+    setVoterEntries(seeded);
+    setActiveVoterId(eligibleVoters[0]?.id || null);
+    setPerVoter(true);
+  };
+
   const apply = useMutation({
     mutationFn: () => {
-      const answers = dropEmptyAnswers(buildAnswers(questions, vals, otherTexts));
       const voterPlans = {};
-      for (const v of voters || []) {
-        if (skipped.has(v.id) || v.dnc) continue;
-        voterPlans[v.id] = { answers };
+      if (perVoter) {
+        for (const v of eligibleVoters) {
+          const e = voterEntries[v.id] || { vals: {}, otherTexts: {} };
+          voterPlans[v.id] = { answers: dropEmptyAnswers(buildAnswers(questions, e.vals, e.otherTexts)) };
+        }
+      } else {
+        const answers = dropEmptyAnswers(buildAnswers(questions, vals, otherTexts));
+        for (const v of eligibleVoters) voterPlans[v.id] = { answers };
       }
       return api(`/admin/campaigns/${campaignId}/survey-conversions/${run.id}/door`, {
         method: 'POST',
@@ -84,10 +134,32 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
   });
 
   useEffect(() => {
-    if (!remaining.length && !finish.isPending && !finish.isSuccess) finish.mutate();
+    // `remaining === null` means we don't know yet — closing on that is the bug this guards.
+    if (remaining !== null && !remaining.length && !finish.isPending && !finish.isSuccess) finish.mutate();
     // finish.mutate is stable; re-running on every render would fire the close repeatedly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remaining.length]);
+  }, [remaining]);
+
+  if (remaining === null) {
+    return (
+      <Modal onClose={onCancel} title="Opening desk entry…" size="md">
+        <Skeleton className="h-24 w-full" />
+      </Modal>
+    );
+  }
+
+  // A session without its survey can't compose answers — say so instead of rendering a dead page.
+  // (Reachable only if the template was deleted between creating and resuming the session.)
+  if (!template) {
+    return (
+      <Modal onClose={onCancel} title="Can't open this session" size="md" footer={<Button onClick={onCancel}>Close</Button>}>
+        <p className="text-sm text-fg">
+          The survey this session was recording against is no longer available. You can undo the
+          session from the run card, or restore the survey and resume.
+        </p>
+      </Modal>
+    );
+  }
 
   if (!remaining.length) {
     return (
@@ -163,19 +235,68 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
         )}
       </Card>
 
-      {carried && (
+      {eligibleVoters.length > 1 && (
+        <label className="mb-3 flex items-center gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            className="accent-brand-accent"
+            checked={perVoter}
+            onChange={() => (perVoter ? setPerVoter(false) : enablePerVoter())}
+          />
+          Different answers for each person
+        </label>
+      )}
+
+      {carried && !perVoter && (
         <p className="mb-2 text-xs text-fg-muted">
           Answers carried over from the previous door — change anything that&rsquo;s different.
         </p>
       )}
-      <SurveyAnswerComposer
-        template={template}
-        vals={vals}
-        otherTexts={otherTexts}
-        onChange={setVals}
-        onOtherChange={setOtherTexts}
-        idPrefix={`queue-${actionId}`}
-      />
+
+      {perVoter ? (
+        <>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {eligibleVoters.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setActiveVoterId(v.id)}
+                className={[
+                  'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                  v.id === shownVoterId
+                    ? 'border-brand-accent bg-brand-tint text-brand-tint-fg'
+                    : 'border-border bg-card text-fg-muted hover:bg-sunken',
+                ].join(' ')}
+              >
+                {v.fullName}
+              </button>
+            ))}
+          </div>
+          {shownVoterId && (
+            <SurveyAnswerComposer
+              template={template}
+              vals={(voterEntries[shownVoterId] || {}).vals || {}}
+              otherTexts={(voterEntries[shownVoterId] || {}).otherTexts || {}}
+              onChange={(next) =>
+                setVoterEntries((e) => ({ ...e, [shownVoterId]: { otherTexts: {}, ...e[shownVoterId], vals: next } }))
+              }
+              onOtherChange={(next) =>
+                setVoterEntries((e) => ({ ...e, [shownVoterId]: { vals: {}, ...e[shownVoterId], otherTexts: next } }))
+              }
+              idPrefix={`queue-${actionId}-${shownVoterId}`}
+            />
+          )}
+        </>
+      ) : (
+        <SurveyAnswerComposer
+          template={template}
+          vals={vals}
+          otherTexts={otherTexts}
+          onChange={setVals}
+          onOtherChange={setOtherTexts}
+          idPrefix={`queue-${actionId}`}
+        />
+      )}
     </Modal>
   );
 }

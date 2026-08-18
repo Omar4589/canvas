@@ -815,8 +815,14 @@ export async function applyDoorToRun({ run, campaign, actionId, voterPlans = {} 
 /** Close a queue session: settle the platform counter and write the one history row. */
 export async function closeConversionRun({ run, campaign }) {
   if (run.status === 'open') {
-    await bumpPlatformOnce(run, campaign);
-    await historyRow(run, campaign);
+    // A session that recorded nothing gets no history row and no counter bump — "opened a
+    // walkthrough and changed your mind" is not a campaign event.
+    const didAnything =
+      run.counts.entriesConverted || run.counts.responsesCreated || run.counts.responsesArchived;
+    if (didAnything) {
+      await bumpPlatformOnce(run, campaign);
+      await historyRow(run, campaign);
+    }
     run.status = 'completed';
     run.completedAt = new Date();
     run.progress = {

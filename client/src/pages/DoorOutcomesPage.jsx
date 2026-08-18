@@ -241,23 +241,19 @@ export default function DoorOutcomesPage() {
     },
   });
 
-  // Door-by-door needs the template BEFORE the session opens, or the walkthrough renders with
-  // nothing to answer. One mutation does both halves so the two can't get out of order.
+  // ONE call: the creating POST resolves the template itself (refusing a mixed-template selection)
+  // and returns the session ready to walk — doorsRemaining and the survey together. A separate
+  // /template call here would also be subtly wrong: it resolves from the SELECTION, while the run
+  // freezes its own, and the two must never diverge mid-session.
   const startQueue = useMutation({
-    mutationFn: async () => {
-      const t = await api(`/admin/campaigns/${campaignId}/survey-conversions/template`, {
-        method: 'POST',
-        body: { scope, ...(allMatching ? {} : { actionIds: [...selected] }) },
-      });
-      const d = await api(`/admin/campaigns/${campaignId}/survey-conversions`, {
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
         method: 'POST',
         body: convBody({ mode: 'queue' }),
-      });
-      return { template: t.template, run: d.run };
-    },
-    onSuccess: ({ template, run }) => {
-      setQueueTemplate(template);
-      setWalking(run);
+      }),
+    onSuccess: (d) => {
+      setQueueTemplate(d.run.template || null);
+      setWalking(d.run);
       resetSelection();
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
     },
@@ -732,7 +728,7 @@ export default function DoorOutcomesPage() {
       )}
 
       {/* Door-by-door desk entry. */}
-      {walking && queueTemplate && (
+      {walking && (
         <QueueWalkthrough
           campaignId={campaignId}
           run={walking}

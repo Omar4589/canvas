@@ -638,6 +638,61 @@ test('a door-by-door queue session applies per-door answers and reverts as one',
   assert.equal(await SurveyResponse.countDocuments({ 'deskEntry.runId': runId }), 0, 'the whole session undoes at once');
 });
 
+test('a queue session is USABLE from the response that creates it', { skip }, async () => {
+  // The shipped bug this pins: the creating POST returned doorsRemaining: null (the runWire
+  // default), the walkthrough read null as an empty queue, and its "all done" effect closed the
+  // session on first render — a modal flashing for half a second, then a junk
+  // "0 answers · 0 entries" run row. One response must carry everything: the doors AND the survey.
+  const ids = await idsFor({
+    actionType: 'not_home',
+    effortId: ctx.effort._id,
+    householdId: { $in: [ctx.doors[1]._id, ctx.doors[2]._id] },
+  });
+  assert.equal(ids.length, 2);
+
+  const opened = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'to_survey', to: 'survey_submitted', mode: 'queue', actionIds: ids },
+  });
+  assert.equal(opened.status, 201);
+  assert.equal(opened.json.run.status, 'open');
+  assert.ok(Array.isArray(opened.json.run.doorsRemaining), 'the queue itself, not null');
+  assert.equal(opened.json.run.doorsRemaining.length, 2, 'every selected door, none done yet');
+  assert.deepEqual([...opened.json.run.doorsRemaining].sort(), ids.map(String).sort());
+  assert.ok(opened.json.run.template, 'and the survey to answer them with');
+  assert.equal(opened.json.run.template.name, 'Support Survey');
+  assert.ok(opened.json.run.template.questions.length);
+
+  // Close it untouched: an abandoned session is not a campaign event. It must leave no history
+  // row, and must NOT appear in the runs list as "0 answers · 0 entries" with a dead Undo.
+  const historyBefore = await CampaignChange.countDocuments({
+    campaignId: ctx.campaign._id, source: 'survey_conversion',
+  });
+  await call('POST', url(`/${opened.json.run.id}/close`), asAdmin());
+  const run = await SurveyConversionRun.findById(opened.json.run.id).lean();
+  assert.equal(run.status, 'completed');
+  assert.equal(run.counts.responsesCreated, 0);
+  assert.equal(run.counts.entriesConverted, 0);
+  assert.equal(
+    await CampaignChange.countDocuments({ campaignId: ctx.campaign._id, source: 'survey_conversion' }),
+    historyBefore,
+    'an empty session writes no history row'
+  );
+  const list = await call('GET', url(), asAdmin());
+  assert.ok(
+    !list.json.runs.some((r) => r.id === opened.json.run.id),
+    'an empty completed run is hidden from the list'
+  );
+  // ...while an OPEN empty session stays listed — it is resumable, which is the difference.
+  const opened2 = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'to_survey', to: 'survey_submitted', mode: 'queue', actionIds: ids },
+  });
+  const list2 = await call('GET', url(), asAdmin());
+  assert.ok(list2.json.runs.some((r) => r.id === opened2.json.run.id && r.status === 'open'));
+  await call('POST', url(`/${opened2.json.run.id}/close`), asAdmin());
+});
+
 test('an abandoned door-by-door session can be resumed from a cold load', { skip }, async () => {
   // The failure this pins is a real one that shipped: the server derived the remaining doors
   // correctly all along, but a session closed mid-way was strandable because the poll response
@@ -686,6 +741,46 @@ test('an abandoned door-by-door session can be resumed from a cold load', { skip
   await call('POST', url(`/${runId}/revert`), asAdmin());
 });
 
+test('one door, two voters, DIFFERENT answers each — recorded in one pass', { skip }, async () => {
+  // The per-voter mode's wire contract: voterPlans keyed by voter, each with its own answers.
+  // One pass matters because the door stamps on save — a voter skipped "for now" has no second
+  // chance through this tool.
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: ctx.doors[0]._id,
+    userId: ctx.canv._id, actionType: 'not_home', effortId: ctx.effort._id, passId: ctx.pass2._id,
+    location: GPS, timestamp: new Date('2026-07-06T15:00:00Z'), coordinatorId: ctx.boss._id,
+  });
+  const opened = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'to_survey', to: 'survey_submitted', mode: 'queue', actionIds: [String(row._id)] },
+  });
+  const runId = opened.json.run.id;
+  const [v1, v2] = [ctx.voters[0]._id, ctx.voters[1]._id]; // the two voters at door 1
+
+  const step = await call('POST', url(`/${runId}/door`), {
+    ...asAdmin(),
+    body: {
+      actionId: String(row._id),
+      voterPlans: {
+        [String(v1)]: { answers: YES },
+        [String(v2)]: { answers: UNDECIDED },
+      },
+    },
+  });
+  assert.equal(step.status, 200);
+  assert.equal(step.json.applied, true);
+
+  const a1 = await SurveyResponse.findOne({ voterId: v1, passId: ctx.pass2._id }).lean();
+  const a2 = await SurveyResponse.findOne({ voterId: v2, passId: ctx.pass2._id }).lean();
+  assert.deepEqual(a1.answers[0].optionIds, ['yes'], 'first voter keeps their own answer');
+  assert.deepEqual(a2.answers[0].optionIds, ['undecided'], 'second voter keeps theirs');
+  assert.equal(String(a1.userId), String(ctx.canv._id), 'both credited to the knocking canvasser');
+  assert.equal(String(a2.userId), String(ctx.canv._id));
+
+  await call('POST', url(`/${runId}/close`), asAdmin());
+  await call('POST', url(`/${runId}/revert`), asAdmin());
+});
+
 test('partial answers are allowed — an empty set records a response with no answers', { skip }, async () => {
   const row = await CanvassActivity.findOne({ householdId: ctx.doors[2]._id, actionType: 'not_home' }).lean();
   const partialRunId = await bulkRun({ direction: 'to_survey', to: 'survey_submitted', actionIds: [String(row._id)], answers: [] });
@@ -721,6 +816,53 @@ test('the run and its revert both land in the campaign history feed', { skip }, 
   assert.ok(rows.some((r) => r.toValue === 'survey_submitted'), 'a forward run reads left-to-right');
   assert.ok(rows.some((r) => r.fromValue === 'survey_submitted'), 'a revert reads back the other way');
   assert.ok(rows.every((r) => String(r.byUserId) === String(ctx.admin._id)));
+});
+
+test('desk entries are disclosed to the OPERATOR and never to the client', { skip }, async () => {
+  // The asymmetry is the point: a desk-entered answer is a real answer and counts identically, so
+  // annotating the published figures would misrepresent them the other way — but whoever signs off
+  // on a report should not find out afterwards that part of it was typed at a desk.
+  const { computeWindowStats } = await import('../src/services/reports/computeReport.js');
+  const { shapeReportForClient } = await import('../src/services/reports/clientReportView.js');
+
+  const row = await CanvassActivity.findOne({
+    campaignId: ctx.campaign._id, actionType: 'not_home', effortId: ctx.effort._id,
+  }).lean();
+  const runId = await bulkRun({ direction: 'to_survey', to: 'survey_submitted', actionIds: [String(row._id)], answers: YES });
+
+  const stats = await computeWindowStats({
+    orgId: ctx.org._id,
+    campaignId: ctx.campaign._id,
+    effortId: null,
+    range: { $lt: new Date('2030-01-01') },
+    campaignType: 'survey',
+    template: ctx.template,
+  });
+
+  assert.ok(stats.provenance, 'the internal figure exists');
+  assert.ok(stats.provenance.deskEnteredResponses > 0, 'and counts the desk entries');
+  assert.ok(
+    stats.provenance.totalResponses >= stats.provenance.deskEnteredResponses,
+    'as a fraction of all responses'
+  );
+
+  // ...and the client-facing shaper is a strict whitelist, so it cannot escape.
+  const shaped = shapeReportForClient({
+    _id: new mongoose.Types.ObjectId(),
+    campaignId: ctx.campaign._id,
+    stats: { cumulative: stats, period: stats },
+    visibility: {},
+  });
+  assert.ok(
+    !JSON.stringify(shaped).includes('provenance'),
+    'provenance must never reach the published page'
+  );
+  assert.ok(
+    !JSON.stringify(shaped).includes('deskEntered'),
+    'nor any desk-entry figure under another name'
+  );
+
+  await call('POST', url(`/${runId}/revert`), asAdmin());
 });
 
 test('the campaign delete cascade takes SurveyConversionRun with it', { skip }, async () => {

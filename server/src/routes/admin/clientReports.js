@@ -625,7 +625,18 @@ router.get('/:id/preview', async (req, res, next) => {
     const report = await ClientReport.findOne({ _id: req.params.id, organizationId: activeOrgId(req) });
     if (!report) return res.status(404).json({ error: 'Report not found' });
     if (!(await manages(req, res, report.campaignId))) return;
-    res.json({ report: shapeReportForClient(report), survey: mapFilterSurvey(report) });
+    // `provenance` rides the INTERNAL response only. shapeReportForClient/shapeWindow are strict
+    // whitelists, so it structurally cannot reach the published page — which is the intent: the
+    // client sees numbers that are honestly what they say they are, and the operator signing off
+    // sees how many of the responses behind them were entered at a desk.
+    res.json({
+      report: shapeReportForClient(report),
+      survey: mapFilterSurvey(report),
+      provenance: {
+        cumulative: report.stats?.cumulative?.provenance || null,
+        period: report.stats?.period?.provenance || null,
+      },
+    });
   } catch (err) {
     next(err);
   }

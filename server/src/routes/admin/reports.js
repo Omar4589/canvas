@@ -1581,6 +1581,11 @@ router.get('/voters-by-answer', async (req, res, next) => {
             }
           : null,
         note: r.note || null,
+        // Desk-entered: an admin typed this answer when converting the door to Surveyed. The
+        // per-ROW flag matters here specifically — this is the surface where someone reads "12
+        // people said Yes" and acts on it, and without it they cannot tell that 5 of those 12 were
+        // entered at a desk rather than collected at the door.
+        deskEntered: !!r.deskEntry,
         // What this voter actually answered on the drilled question. Without it, drilling the
         // write-in bucket listed 12 voters and none of what any of them typed — the one bucket
         // where the answer IS the free text, so the list was unreadable without opening each row.
@@ -1765,7 +1770,18 @@ router.get('/answer-canvassers', async (req, res, next) => {
         { $match: match },
         ...choiceKeyStages(questionKey),
         { $match: { _answerKeys: { $in: keys } } },
-        { $group: { _id: '$userId', count: { $sum: 1 }, lastAt: { $max: '$submittedAt' } } },
+        {
+          $group: {
+            _id: '$userId',
+            count: { $sum: 1 },
+            // How many of this canvasser's counted answers an ADMIN typed on their behalf (an
+            // outcome→Surveyed conversion credits the knocking canvasser). This is an audit
+            // surface — "did this canvasser really record 40 Yeses?" is exactly the question it
+            // exists to answer, and without this the desk entries are indistinguishable.
+            deskEntered: { $sum: { $cond: [{ $ifNull: ['$deskEntry', false] }, 1, 0] } },
+            lastAt: { $max: '$submittedAt' },
+          },
+        },
         { $sort: { count: -1 } },
       ]),
       SurveyResponse.aggregate([
@@ -1792,6 +1808,7 @@ router.get('/answer-canvassers', async (req, res, next) => {
           lastName: info.lastName || '',
           status: info.status || 'deleted',
           count: r.count,
+          deskEntered: r.deskEntered || 0,
           share: total > 0 ? Math.round((r.count / total) * 1000) / 10 : 0,
           questionTotal,
           pctOfOwnAnswers: questionTotal > 0 ? Math.round((r.count / questionTotal) * 1000) / 10 : 0,

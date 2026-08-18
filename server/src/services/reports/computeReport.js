@@ -195,7 +195,27 @@ export async function computeWindowStats({
   });
   const tagBreakdowns = await computeTagBreakdowns({ surveyScopeMatch, template });
 
-  return { totals, contactBreakdown: events, coverage: {}, surveyBreakdowns, tagBreakdowns };
+  // INTERNAL-ONLY disclosure: how many of the responses behind these figures were entered at a
+  // desk by an admin (an outcome→Surveyed conversion) rather than collected at a door.
+  //
+  // Deliberately NOT rendered on the client-facing report — a desk-entered answer is a real answer
+  // and counts identically, so annotating the published numbers would misrepresent them the other
+  // way. It is surfaced in the BUILDER so an operator cannot deliver a report without having seen
+  // it. That asymmetry is the whole point: the person signing off should know; the client is being
+  // shown a number that is honestly what it says it is.
+  const [deskEnteredResponses, totalResponses] = await Promise.all([
+    SurveyResponse.countDocuments({ ...surveyScopeMatch, deskEntry: { $exists: true } }),
+    SurveyResponse.countDocuments(surveyScopeMatch),
+  ]);
+
+  return {
+    totals,
+    contactBreakdown: events,
+    coverage: {},
+    surveyBreakdowns,
+    tagBreakdowns,
+    provenance: { deskEnteredResponses, totalResponses },
+  };
 }
 
 // A public map point may carry the CHOICE VALUE only — never anything a canvasser typed. A

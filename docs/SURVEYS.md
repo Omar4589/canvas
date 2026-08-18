@@ -1290,8 +1290,25 @@ synchronous per-door path.
 ### Where the marker surfaces
 
 `voterProfile.surveys[].deskEntry` and `overwrittenSurveys[].deskEntry`; `/admin/reports/responses/:id`;
-`/admin/households/:id/surveys`; `/admin/activities/:id`; and two export columns (**Desk entered**,
-**Desk entered by**) on `survey-results` plus **Desk entered** on `survey-answers`. All additive.
+`/admin/households/:id/surveys`; `/admin/activities/:id`; per-row **`deskEntered`** on
+`/admin/reports/voters-by-answer` and a per-canvasser **`deskEntered` count** on
+`/admin/reports/answer-canvassers`; and two export columns (**Desk entered**, **Desk entered by**)
+on `survey-results` plus **Desk entered** on `survey-answers`. All additive.
+
+The answer-drill pair matters most and is the easiest to skip: `/voters-by-answer` is where someone
+reads *"12 people said Yes"* and acts on it, and `/answer-canvassers` is an audit surface answering
+*"did this canvasser really record 40 Yeses?"* — a desk entry credits the knocking canvasser, so
+without the count their total silently includes answers an admin typed.
+
+**Client reports: the disclosure is asymmetric on purpose.** `computeWindowStats` returns
+`provenance: { deskEnteredResponses, totalResponses }`, the `/preview` route ships it on the
+**internal** response, and the builder renders it as *"Internal note — not shown to the client."*
+It **cannot** reach the published page: `shapeReportForClient` → `shapeWindow` are strict field
+whitelists, and `surveyConversion.int.test.js` asserts neither `provenance` nor `deskEntered`
+survives the shaper. The reasoning both ways: a desk-entered answer is a real answer and counts
+identically, so annotating the client's figures would misrepresent them in the other direction —
+but the operator signing off should not learn afterwards that part of the report was typed at a
+desk.
 
 Two things that were **wrong, not merely missing**, and are fixed: the overwritten-response copy on
 web and mobile said *"Overwritten … was X's"*, which for an `outcome_convert` row reads as an

@@ -1089,7 +1089,9 @@ const runWire = (r, by = null) => ({
   samplesTruncated: r.samplesTruncated,
   samplesTotal: r.samplesTotal,
   surveyTemplateId: r.surveyTemplateId ? String(r.surveyTemplateId) : null,
-  doorsRemaining: null, // filled by the poll route for an open queue
+  // null means NOT LOADED, never "none left" — the walkthrough distinguishes the two, because
+  // treating null as an empty queue is what made a fresh session close itself instantly.
+  doorsRemaining: null,
   error: r.error,
   createdAt: r.createdAt,
   completedAt: r.completedAt,
@@ -1231,6 +1233,18 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       counts: { entriesTargeted: sel.entries, doorsTargeted: sel.doors },
     });
 
+    // ...and with the survey attached, for the same reason.
+    // A queue session must come back USABLE from the call that creates it. At creation nothing is
+    // stamped yet, so the remaining set IS the whole selection — no extra query, and no dependence
+    // on the client making a second call before it can render the first door.
+    const created = runWire(run);
+    if (body.mode === 'queue') {
+      created.doorsRemaining = sel.ids.map(String);
+      created.template = template
+        ? { id: String(template._id), name: template.name, version: template.version, intro: template.intro, questions: template.questions }
+        : null;
+    }
+
     if (body.mode === 'bulk') {
       // Time-bounded like every other enqueue in this file: ioredis buffers commands while
       // disconnected, so an unbounded .add() would HANG the request against a wedged Redis. The run
@@ -1250,12 +1264,12 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
         return res.status(503).json({
           error: run.error,
           code: 'QUEUE_UNAVAILABLE',
-          run: runWire(run),
+          run: created,
         });
       }
     }
 
-    res.status(201).json({ run: runWire(run) });
+    res.status(201).json({ run: created });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -1445,7 +1459,21 @@ router.get('/:campaignId/survey-conversions', async (req, res, next) => {
   try {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
-    const runs = await SurveyConversionRun.find({ campaignId: campaign._id })
+    // A COMPLETED run that touched nothing is not a change — it is the residue of an opened-and-
+    // abandoned session, and listing it as "Survey answer changes · 0 entries" with an Undo that
+    // has nothing to undo is noise at best and alarming at worst. Open and failed runs stay listed
+    // whatever their counts (one is resumable, the other needs attention).
+    const runs = await SurveyConversionRun.find({
+      campaignId: campaign._id,
+      $nor: [
+        {
+          status: { $in: ['completed', 'reverted'] },
+          'counts.entriesConverted': 0,
+          'counts.responsesCreated': 0,
+          'counts.responsesArchived': 0,
+        },
+      ],
+    })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();

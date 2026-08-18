@@ -544,6 +544,23 @@ export default function ClientReportBuilderPage() {
                   ⤓ Download PDF
                 </Button>
               </div>
+              {/* INTERNAL, and only when there is something to disclose. The client never sees this
+                  — a desk-entered answer is a real answer and counts identically, so annotating the
+                  published figures would misrepresent them the other way. But the person about to
+                  send this report should not learn afterwards that some of it was typed at a desk. */}
+              {previewQ.data.provenance?.cumulative?.deskEnteredResponses > 0 && (
+                <div className="rounded-card border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning-fg">
+                  <span className="font-medium">Internal note — not shown to the client.</span>{' '}
+                  {previewQ.data.provenance.cumulative.deskEnteredResponses.toLocaleString()} of{' '}
+                  {previewQ.data.provenance.cumulative.totalResponses.toLocaleString()} survey
+                  responses behind these figures were entered by an admin on Door Outcomes rather
+                  than collected at a door
+                  {previewQ.data.provenance.period?.deskEnteredResponses > 0 &&
+                    ` (${previewQ.data.provenance.period.deskEnteredResponses.toLocaleString()} of them in this report's own week)`}
+                  . They count the same as any other answer — this is here so you know before you
+                  send it.
+                </div>
+              )}
               <ClientReportView report={previewQ.data.report} />
               {previewQ.data.report.visibility?.showMap && (
                 <section>
