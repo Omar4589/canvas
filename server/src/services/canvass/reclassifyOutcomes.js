@@ -23,10 +23,19 @@ import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 // are all preserved — this is a re-labelling, never a re-recording. Every run is stamped,
 // listed, and revertible.
 
-// The five DOOR outcomes. Completion actions (`survey_submitted`, `lit_dropped`) are absent and
-// must stay absent: a surveyed entry owns a real SurveyResponse, so converting INTO it fabricates
-// answers that were never given and converting OUT of it orphans answers that were. That is a
-// data-integrity rule, not a policy choice — it is not togglable by anyone.
+// The five DOOR outcomes — everything THIS module may convert, in either direction.
+//
+// Completion actions (`survey_submitted`, `lit_dropped`) are absent and must stay absent HERE, and
+// the reason is still true: a surveyed entry owns a real SurveyResponse, so a bare actionType flip
+// INTO it fabricates answers that were never given, and a bare flip OUT of it orphans answers that
+// were. This module has no answer composer and no archive, so it cannot honestly do either — its
+// refusal (validatePair) is precise, not squeamish.
+//
+// The Surveyed direction IS possible, but only with machinery that pays for what the flip alone
+// would destroy: an admin supplying real answers against the door's own template, a `deskEntry`
+// stamp on every created row, and archive-not-delete on the way out. That lives in the sibling
+// services/canvass/surveyConversion.js. Do not "simplify" it back into here — see that file's
+// header for why its write ORDER is the mirror image of runReclassify's.
 export const RECLASSIFIABLE_OUTCOMES = Object.freeze([
   'not_home',
   'wrong_address',
@@ -34,6 +43,10 @@ export const RECLASSIFIABLE_OUTCOMES = Object.freeze([
   'no_soliciting',
   'restricted',
 ]);
+
+// Everything the Door Outcomes page's ENTRIES TABLE may list. Wider than what this module
+// converts: surveyed rows are selectable so they can be handed to surveyConversion.js.
+export const CONVERTIBLE_SOURCES = Object.freeze([...RECLASSIFIABLE_OUTCOMES, 'survey_submitted']);
 
 // The three that are interchangeable ARITHMETIC: each is exactly one knock and none is a contact,
 // so any conversion among them provably moves nothing — not knocks, not contactRate (numerator is
@@ -58,10 +71,17 @@ export const isRateNeutralPair = (from, to) =>
 // that would threaten the request budget. Rate-neutral folds are deliberately uncapped.
 export const RECLASSIFY_MAX_IMPACT_ENTRIES = 25000;
 
-/** Rows this tool may still touch: never a bulk desk mark, never an already-stamped row. */
-const convertibleMatch = (campaignId, actionType) => ({
+/**
+ * Rows a conversion may still touch: never a bulk desk mark, never an already-stamped row.
+ *
+ * Exported because services/canvass/surveyConversion.js needs the IDENTICAL two provenance rules
+ * and must not retype them — a second copy that drifts is how a desk-surveyed row would become
+ * eligible for a plain reclassify on top of itself. `outcomes` widens the default set for that
+ * caller (it selects surveyed rows); every existing caller omits it and is unchanged.
+ */
+export const convertibleMatch = (campaignId, actionType, outcomes = RECLASSIFIABLE_OUTCOMES) => ({
   campaignId,
-  ...(actionType ? { actionType } : { actionType: { $in: RECLASSIFIABLE_OUTCOMES } }),
+  ...(actionType ? { actionType } : { actionType: { $in: outcomes } }),
   // Desk-authored restricted marks are not field observations: converting one into a knock would
   // invent a walk that never happened, attributed to the admin who ran the bulk tool. They have
   // their own undo already (unrestrict-bulk on Turf Cutting).
@@ -146,9 +166,9 @@ export function validatePair(campaign, from, to) {
  * Mongo filter for the page's table and for a filter-scoped run. Every field is optional; the
  * campaign scope and the two provenance rules are not.
  */
-export function buildEntryFilter(campaignId, q = {}) {
-  const filter = convertibleMatch(campaignId, null);
-  if (q.outcomes?.length) filter.actionType = { $in: q.outcomes.filter((o) => RECLASSIFIABLE_OUTCOMES.includes(o)) };
+export function buildEntryFilter(campaignId, q = {}, outcomes = RECLASSIFIABLE_OUTCOMES) {
+  const filter = convertibleMatch(campaignId, null, outcomes);
+  if (q.outcomes?.length) filter.actionType = { $in: q.outcomes.filter((o) => outcomes.includes(o)) };
   if (q.userId) filter.userId = new mongoose.Types.ObjectId(q.userId);
   if (q.passId) filter.passId = new mongoose.Types.ObjectId(q.passId);
   if (q.effortId) filter.effortId = new mongoose.Types.ObjectId(q.effortId);
@@ -161,8 +181,8 @@ export function buildEntryFilter(campaignId, q = {}) {
 }
 
 /** One page of entries plus the per-outcome totals for the whole filtered set. */
-export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50 } = {}) {
-  const filter = buildEntryFilter(campaignId, q);
+export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, outcomes = RECLASSIFIABLE_OUTCOMES } = {}) {
+  const filter = buildEntryFilter(campaignId, q, outcomes);
   const [rows, total, facets] = await Promise.all([
     CanvassActivity.find(filter, {
       householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, distanceFromHouseMeters: 1,
@@ -175,7 +195,7 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50 } =
     CanvassActivity.aggregate([
       // Facet counts ignore the outcome chips (you need to see what ELSE is there to pick it),
       // but honor every other filter.
-      { $match: buildEntryFilter(campaignId, { ...q, outcomes: [] }) },
+      { $match: buildEntryFilter(campaignId, { ...q, outcomes: [] }, outcomes) },
       { $group: { _id: '$actionType', n: { $sum: 1 } } },
     ]),
   ]);
@@ -213,8 +233,8 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50 } =
  * same rule the flag bulk-review uses, so a stale checkbox can never reach a row the admin's
  * current filter doesn't show.
  */
-export async function resolveSelection(campaignId, q = {}, actionIds = null) {
-  const filter = buildEntryFilter(campaignId, q);
+export async function resolveSelection(campaignId, q = {}, actionIds = null, outcomes = RECLASSIFIABLE_OUTCOMES) {
+  const filter = buildEntryFilter(campaignId, q, outcomes);
   if (actionIds?.length) {
     filter._id = { $in: actionIds.map((id) => new mongoose.Types.ObjectId(String(id))) };
   }
@@ -274,10 +294,19 @@ export async function computeImpact({ campaign, ids, to, billRestricted }) {
 // Running and reverting
 // ---------------------------------------------------------------------------
 
+// Stamps THIS module owns. Survey conversions stamp the same field with kind 'to_survey' /
+// 'from_survey' and are undone by their own module, which also has to put the answers back — so
+// both the sweep and the revert below say so explicitly. Run ids can't collide (they're
+// ObjectIds), so this is legibility, not a live bug being fixed.
+const OUTCOME_RUN_MATCH = (runId) => ({
+  'reclassified.runId': runId,
+  'reclassified.kind': { $in: [null, 'outcome'] },
+});
+
 /** Households touched by a run, read off the stamp (the run's own record of what it changed). */
 async function householdsOfRun(runId) {
   const rows = await CanvassActivity.aggregate([
-    { $match: { 'reclassified.runId': runId } },
+    { $match: OUTCOME_RUN_MATCH(runId) },
     { $group: { _id: '$householdId' } },
   ]);
   return rows.map((r) => r._id);
@@ -314,7 +343,15 @@ export async function runReclassify({ campaign, from, to, ids = null, byUserId }
   await CanvassActivity.updateMany(match, [
     {
       $set: {
-        reclassified: { from: '$actionType', at: new Date(), byUserId: byUserId || null, runId },
+        // `kind` is written explicitly: an aggregation-pipeline $set bypasses Mongoose defaults,
+        // so relying on the schema's default 'outcome' would store no field at all.
+        reclassified: {
+          from: '$actionType',
+          at: new Date(),
+          byUserId: byUserId || null,
+          runId,
+          kind: 'outcome',
+        },
         actionType: to,
       },
     },
@@ -361,7 +398,7 @@ export async function runReclassify({ campaign, from, to, ids = null, byUserId }
 export async function revertReclassify({ campaign, run, byUserId }) {
   const householdIds = await householdsOfRun(run._id);
 
-  await CanvassActivity.updateMany({ 'reclassified.runId': run._id }, [
+  await CanvassActivity.updateMany(OUTCOME_RUN_MATCH(run._id), [
     { $set: { actionType: '$reclassified.from' } },
     { $unset: 'reclassified' },
   ]);

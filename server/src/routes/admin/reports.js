@@ -1883,6 +1883,11 @@ router.get('/responses/:responseId', async (req, res, next) => {
         editedBy: r.editedBy
           ? { id: String(r.editedBy._id), firstName: r.editedBy.firstName, lastName: r.editedBy.lastName }
           : null,
+        // Desk-entered: an admin typed these answers when converting the door to Surveyed. Absent
+        // on every field submission, so nothing that already exists changes shape.
+        deskEntry: r.deskEntry
+          ? { at: r.deskEntry.at, fromOutcome: r.deskEntry.fromOutcome || null }
+          : null,
         replacedEarlier,
         ...(archived
           ? {
@@ -2781,7 +2786,10 @@ router.get('/duplicate-surveys', async (req, res, next) => {
         $unionWith: {
           coll: SurveyResponseArchive.collection.name,
           pipeline: [
-            { $match: { ...cFilter, ...dateRange } },
+            // Fraud-cleanup archives are excluded: a response removed because an admin converted
+            // its door AWAY from Surveyed is not evidence that "somebody was surveyed twice", and
+            // leaving them in dumps every reverted door into an operator's duplicate queue.
+            { $match: { ...cFilter, ...dateRange, overwrittenVia: { $ne: 'outcome_convert' } } },
             { $set: { overwritten: true } },
           ],
         },

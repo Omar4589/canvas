@@ -77,6 +77,33 @@ const surveyResponseSchema = new mongoose.Schema(
     // Audit trail for in-place edits from the admin voter profile (null = never edited).
     editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     editedAt: { type: Date, default: null },
+
+    // DESK-ENTERED: this response was typed by an admin converting a door outcome into Surveyed
+    // (services/canvass/surveyConversion.js), NOT submitted from a phone at the door. Every other
+    // field above still describes the ORIGINAL KNOCK — userId, coordinatorId, location, submittedAt
+    // and the pass/turf/effort tags are copied verbatim off the CanvassActivity row being converted,
+    // because the knock really happened; only the answers are the admin's entry.
+    //
+    // ABSENCE is the field-submission marker (the CanvassActivity.reclassified shape), so every
+    // existing reader is unaffected and `{ 'deskEntry': { $exists: true } }` is the exact query.
+    // Distinct from editedBy/editedAt, which mean "a real submission was edited afterwards" — a
+    // desk-entered row was AUTHORED, never edited, and sets both to null.
+    deskEntry: {
+      type: new mongoose.Schema(
+        {
+          runId: { type: mongoose.Schema.Types.ObjectId, ref: 'SurveyConversionRun', required: true },
+          byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // the ADMIN who typed it
+          at: { type: Date, required: true },
+          source: { type: String, enum: ['converted_outcome'], required: true },
+          // The outcome the door entry said before the conversion ('not_home', 'refused', …), so
+          // the profile can say WHICH mistake was being corrected rather than just "entered by an
+          // admin". Mirrors CanvassActivity.reclassified.from on the paired row.
+          fromOutcome: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true }
 );
@@ -92,5 +119,14 @@ surveyResponseSchema.index({ householdId: 1, passId: 1 }); // per-pass survey ex
 surveyResponseSchema.index({ campaignId: 1, submittedAt: -1 });
 // Org-wide, date-ranged reports (no campaignId) — twin of CanvassActivity {organizationId,timestamp}.
 surveyResponseSchema.index({ organizationId: 1, submittedAt: -1 });
+// Reverting a desk-entry run deletes exactly the rows THAT run created. Without this the
+// deleteMany collection-scans every response in the org. Partial so it stays near-empty for orgs
+// that never convert an outcome. DELIBERATE distinct key shape (see the CanvassActivity note):
+// buildIndexes.js diffs by key shape alone, so a partial reusing an existing shape is silently
+// reported as already-present and never built.
+surveyResponseSchema.index(
+  { 'deskEntry.runId': 1 },
+  { partialFilterExpression: { 'deskEntry.runId': { $exists: true } } }
+);
 
 export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);

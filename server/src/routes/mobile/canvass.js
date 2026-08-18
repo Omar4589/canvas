@@ -12,7 +12,6 @@ import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -22,6 +21,7 @@ import { assertCampaignWritable } from '../../middleware/campaignWritable.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
+import { effectiveSurveyTemplateId } from '../../services/surveys/effectiveTemplate.js';
 import { archiveOverwrittenResponse } from '../../services/surveys/archiveOverwrite.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
@@ -669,12 +669,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     });
     if (!template) return res.status(404).json({ error: 'Survey template not found' });
 
-    // Per-effort survey: the door's effort overrides the campaign default.
-    let effectiveSurveyId = campaign.surveyTemplateId;
-    if (household.effortId) {
-      const effort = await Effort.findById(household.effortId).select('surveyTemplateId').lean();
-      if (effort?.surveyTemplateId) effectiveSurveyId = effort.surveyTemplateId;
-    }
+    // Per-effort survey: the door's effort overrides the campaign default. Shared with the admin
+    // conversion tool (services/surveys/effectiveTemplate.js) so the two can't drift — a tool that
+    // resolved this differently would write responses this route itself rejects.
+    const effectiveSurveyId = await effectiveSurveyTemplateId(campaign, household);
     if (effectiveSurveyId && String(effectiveSurveyId) !== String(template._id)) {
       return res
         .status(400)

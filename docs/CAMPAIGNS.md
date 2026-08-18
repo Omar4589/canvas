@@ -307,9 +307,11 @@ whole safety model:
   a red confirm button. **Refused** moves the contact rate (someone answered) and **Restricted**
   moves billable doors (it can be invoiced), so those are always priced. They are still allowed:
   a wrong button deserves a real fix.
-- **Surveyed and Lit dropped can never be converted**, in either direction, by anyone. A surveyed
-  entry owns real survey answers — converting into it would fabricate answers that were never
-  given, and out of it would orphan answers that were. That's a data rule, not a setting.
+- **Lit dropped can never be converted**, in either direction, by anyone — a lit drop has no
+  answers to move either way.
+- **Surveyed CAN be converted, in both directions**, but not as a relabel — see the next section.
+  Converting *into* Surveyed makes you enter the answers first; converting *out of* it removes
+  real answers, so they are archived rather than deleted and you are shown exactly whose.
 
 Working the page: filter by outcome, canvasser or round, tick the entries you want (one row to fix
 one door, or **Select all N matching** to fold a whole outcome), pick what they should become, and
@@ -326,6 +328,55 @@ previous run already changed, until that run is reverted.
 The **App Customization** page keeps a small **Reclassification** card for the common follow-up
 right after you switch an outcome off; it is the same machinery, limited to the never-moves-a-number
 folds.
+
+### Converting to and from Surveyed (added 2026-08)
+
+Sometimes the entry isn't just mislabelled — the conversation actually happened and the app has no
+record of it. A canvasser tapped Not home by mistake and only noticed back at the office, where
+re-doing it would flag their GPS as far from the door. Or a whole week of doors got recorded as
+Refused because that button was left switched on. Both are fixable here, and both go beyond
+relabelling: a Surveyed door has to own real answers, so **you enter them.**
+
+**Recording answers for doors (→ Surveyed).** Select the entries, pick **Surveyed**, then choose
+how much detail you have:
+
+- **Enter answers** applies one answer set to everyone at every selected door. This is the right
+  tool for "that whole batch was really *Undecided*."
+- **Door by door** walks you through the selection one address at a time, so each household gets
+  its own real answers. You can leave part-way through and pick up where you left off; the page
+  remembers how many are done.
+
+Either way you can **leave questions blank** — record only what you actually know. Nothing is
+required.
+
+Who gets an answer recorded: **every voter on file at that address, except anyone marked
+do-not-contact, and except anyone who already answered that round.** That last rule is absolute —
+a real answer a canvasser collected in the field is never overwritten by a desk entry. The confirm
+step names everyone who will be skipped and why.
+
+Every answer you record here is **attributed to the canvasser who knocked** — their knock, their
+time, their GPS, their round and team, so their numbers and their pay reflect the work they did.
+The answers themselves are stamped **"Entered by ‹you› on ‹date›"**, visible on the voter's record
+and in exports, so nobody mistakes a desk entry for a doorstep conversation. They count in your
+contact rate and survey rate exactly like a field answer — the stamp is about where the answer came
+from, not about whether it counts.
+
+**Removing answers (Surveyed → a door outcome).** This is the cleanup direction: a canvasser faked
+a run of surveys and you need those doors back in play. Select the surveyed entries, pick what they
+should become (usually **Not home**, so the doors get re-knocked), and the confirm step lists
+**exactly whose answers are about to be removed, by name.** The answers are **archived, not
+deleted** — they stay on each voter's record, restorable, because in an investigation the answers
+you are removing are the evidence.
+
+Only the **entry's own canvasser** is affected. If a second canvasser genuinely surveyed the same
+door in the same round, their answers survive untouched — which is the whole point when the reason
+for the cleanup is that one person's work is suspect.
+
+Both directions are priced like everything else on this page, always in red (recording or removing
+answers always moves the survey rate at minimum), and both are **undoable in one click** — a
+door-by-door session undoes as a single unit. A large run happens in the background with a progress
+bar; if it stops part-way, everything that landed is correct and you can either undo it or pick up
+where it stopped.
 
 ### Archive vs. delete
 
@@ -500,9 +551,15 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   GET/POST `/admin/campaigns/:id/reclassify-outcomes` and POST `…/revert`, **org admins only**
   (`isOrgAdmin`, not `canManageCampaign` — a lead owns what their canvassers see, not what the
   ledger says), plus GET `…/outcome-entries` for the Door Outcomes page's filtered table.
-  `RECLASSIFIABLE_OUTCOMES` is all five DOOR outcomes; the completion actions are absent and must
-  stay absent — a `survey_submitted` row owns a real `SurveyResponse`, so converting into it
-  fabricates answers and out of it orphans them. **`RATE_NEUTRAL_OUTCOMES =
+  `RECLASSIFIABLE_OUTCOMES` is all five DOOR outcomes; the completion actions are absent from
+  **this module** and must stay absent, because a bare `actionType` flip into `survey_submitted`
+  fabricates answers nobody gave and a bare flip out of it orphans answers somebody did — and this
+  module has neither an answer composer nor an archive, so it cannot honestly do either. **The
+  Surveyed direction is real, and lives in the sibling `services/canvass/surveyConversion.js`**,
+  which pays for both halves: an admin composes real answers against the door's own survey, every
+  created row carries a `deskEntry` stamp, and the reverse direction ARCHIVES rather than deletes.
+  See §Converting to and from Surveyed below. `lit_dropped` remains unconvertible in both
+  directions — a lit drop has no answers to move either way. **`RATE_NEUTRAL_OUTCOMES =
   ['not_home','wrong_address','no_soliciting']` is the set that carries the old safety argument**:
   all three are in `KNOCK_ACTIONS` and none is a contact, so knocks, `contactRate`,
   `connectionRate`, `billableDoorsOf` and every `Campaign.stats` counter are unmoved by any

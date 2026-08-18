@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -7,6 +7,13 @@ import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { formatInTz } from '../lib/datetime.js';
 import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
 import { Badge, Button, Card, DataTable, EmptyState, Modal, Select, Skeleton } from '../components/ui/index.js';
+import { useConversionRunPoll } from '../lib/useConversionRunPoll.js';
+import { buildAnswers, dropEmptyAnswers } from '../lib/surveyAnswerForm.js';
+import SurveyAnswerComposer from '../components/outcomes/SurveyAnswerComposer.jsx';
+import SurveyConvertModal from '../components/outcomes/SurveyConvertModal.jsx';
+import RemoveAnswersModal from '../components/outcomes/RemoveAnswersModal.jsx';
+import QueueWalkthrough from '../components/outcomes/QueueWalkthrough.jsx';
+import ConversionRunCard from '../components/outcomes/ConversionRunCard.jsx';
 
 // Door Outcomes — reviewing and correcting what canvassers recorded.
 //
@@ -20,8 +27,19 @@ import { Badge, Button, Card, DataTable, EmptyState, Modal, Select, Skeleton } f
 // Selection is ONE mechanism at both scales: tick a single row to fix one door, or "select all N"
 // to fold an entire outcome. There is no separate single-entry mode to build or to learn.
 // Org admins only — the server enforces it; a lead never sees the page's nav entry.
+//
+// SURVEYED is the third act, and it is the one that needed real machinery rather than a wider
+// dropdown. Converting INTO Surveyed makes you compose the answers first, against the door's own
+// survey, and records them attributed to the canvasser who knocked but stamped as entered by you.
+// Converting OUT of it ARCHIVES the answers rather than dropping them — that direction exists for
+// fraud cleanup, where the answers being removed are the evidence. Both are priced like any other
+// conversion, and both are undoable. See services/canvass/surveyConversion.js.
 
 const OUTCOMES = ['not_home', 'wrong_address', 'refused', 'no_soliciting', 'restricted'];
+// Surveyed rows are listable and selectable too — they route to the survey-conversion endpoints,
+// which archive their answers, never to the plain reclassify POST, which still refuses them.
+const SOURCES = [...OUTCOMES, 'survey_submitted'];
+const SURVEYED = 'survey_submitted';
 const PAGE = 50;
 
 const Dot = ({ k }) => (
@@ -63,6 +81,14 @@ export default function DoorOutcomesPage() {
   const [target, setTarget] = useState('not_home');
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
+  // Surveyed direction state. `composing` holds the resolved template while the admin picks
+  // answers; `activeRun` is the run being watched (bulk) or walked (queue).
+  const [composing, setComposing] = useState(null);
+  const [vals, setVals] = useState({});
+  const [otherTexts, setOtherTexts] = useState({});
+  const [activeRunId, setActiveRunId] = useState(null);
+  const [walking, setWalking] = useState(null);
+  const [queueTemplate, setQueueTemplate] = useState(null);
 
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -128,6 +154,12 @@ export default function DoorOutcomesPage() {
     qc.invalidateQueries({ queryKey: ['reports'] });
   };
 
+  // The bulk answer set, empty rows dropped — partial entry is legal, but an unanswered question
+  // should not be stored as a blank row on every voter.
+  const composedAnswers = () =>
+    dropEmptyAnswers(buildAnswers((composing?.questions || []).filter((q) => !q.retired), vals, otherTexts));
+  const answeredCount = () => composedAnswers().length;
+
   // `actionIds` is omitted for "select all N" so the server works from the filter — the selection
   // is then whatever currently matches, not a page's worth of stale checkboxes.
   const body = (extra = {}) => ({
@@ -135,6 +167,119 @@ export default function DoorOutcomesPage() {
     scope,
     ...(allMatching ? {} : { actionIds: [...selected] }),
     ...extra,
+  });
+
+  // Conversion runs live beside the reclassify runs in "Past changes".
+  const convRunsQ = useQuery({
+    queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/survey-conversions`),
+    enabled: !!campaignId && isOrgAdmin,
+  });
+  const convRuns = convRunsQ.data?.runs || [];
+  const { run: liveRun } = useConversionRunPoll({ campaignId, runId: activeRunId });
+
+  // A finished (or failed) run invalidates the same things a reclassify does.
+  const prevStatus = liveRun?.status;
+  useEffect(() => {
+    if (prevStatus === 'completed' || prevStatus === 'failed' || prevStatus === 'reverted') afterWrite();
+    // afterWrite only invalidates caches; re-running it on an unchanged status is the bug to avoid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prevStatus]);
+
+  const convBody = (extra = {}) => ({
+    direction,
+    to: direction === 'to_survey' ? SURVEYED : target,
+    scope,
+    ...(allMatching ? {} : { actionIds: [...selected] }),
+    ...extra,
+  });
+
+  // Step 1 of the Surveyed direction: resolve the ONE template these doors use. A selection
+  // spanning two surveys is refused here rather than written under whichever came first.
+  const loadTemplate = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions/template`, {
+        method: 'POST',
+        body: { scope, ...(allMatching ? {} : { actionIds: [...selected] }) },
+      }),
+    onSuccess: (d) => {
+      setComposing(d.template);
+      setVals({});
+      setOtherTexts({});
+    },
+    onError: (e) => setError(e.message),
+  });
+
+  const convDryRun = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
+        method: 'POST',
+        body: convBody({ dryRun: true, ...(composing ? { answers: composedAnswers() } : {}) }),
+      }),
+    onSuccess: setPreview,
+    onError: (e) => setError(e.message),
+  });
+
+  const convRun = useMutation({
+    mutationFn: (mode) =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
+        method: 'POST',
+        body: convBody({ mode, ...(composing && mode === 'bulk' ? { answers: composedAnswers() } : {}) }),
+      }),
+    onSuccess: (d, mode) => {
+      setPreview(null);
+      setComposing(null);
+      resetSelection();
+      if (mode === 'queue') setWalking(d.run);
+      else setActiveRunId(d.run.id);
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    },
+    onError: (e) => {
+      // A 503 still created the run — surface the message and let them Resume from the card.
+      setError(e.message);
+      setPreview(null);
+    },
+  });
+
+  // Door-by-door needs the template BEFORE the session opens, or the walkthrough renders with
+  // nothing to answer. One mutation does both halves so the two can't get out of order.
+  const startQueue = useMutation({
+    mutationFn: async () => {
+      const t = await api(`/admin/campaigns/${campaignId}/survey-conversions/template`, {
+        method: 'POST',
+        body: { scope, ...(allMatching ? {} : { actionIds: [...selected] }) },
+      });
+      const d = await api(`/admin/campaigns/${campaignId}/survey-conversions`, {
+        method: 'POST',
+        body: convBody({ mode: 'queue' }),
+      });
+      return { template: t.template, run: d.run };
+    },
+    onSuccess: ({ template, run }) => {
+      setQueueTemplate(template);
+      setWalking(run);
+      resetSelection();
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    },
+    onError: (e) => setError(e.message),
+  });
+
+  const convRevert = useMutation({
+    mutationFn: (runId) =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/revert`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setActiveRunId(d.run?.id || null);
+      afterWrite();
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    },
+    onError: (e) => setError(e.message),
+  });
+
+  const convResume = useMutation({
+    mutationFn: (runId) =>
+      api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/resume`, { method: 'POST' }),
+    onSuccess: (d) => setActiveRunId(d.run.id),
+    onError: (e) => setError(e.message),
   });
 
   const dryRun = useMutation({
@@ -174,7 +319,16 @@ export default function DoorOutcomesPage() {
     );
   }
 
+  const isSurveyCampaign = current?.type === 'survey';
   const selectionCount = allMatching ? total : selected.size;
+  // Direction is read off the SELECTION and the target, never asked for: picking Surveyed as the
+  // target means "record answers", and having surveyed rows selected means "remove them".
+  const selectedRows = entries.filter((e) => allMatching || selected.has(e.id));
+  const selectionHasSurveyed = allMatching
+    ? outcomes.length === 1 && outcomes[0] === SURVEYED
+    : selectedRows.some((e) => e.actionType === SURVEYED);
+  const direction = selectionHasSurveyed ? 'from_survey' : target === SURVEYED ? 'to_survey' : null;
+  const isSurveyConversion = direction !== null;
   const toggleOutcome = (k) => {
     setPage(0);
     resetSelection();
@@ -193,7 +347,7 @@ export default function DoorOutcomesPage() {
       {/* Filters */}
       <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          {OUTCOMES.map((k) => {
+          {SOURCES.map((k) => {
             const on = outcomes.includes(k);
             const n = facets[k];
             return (
@@ -253,7 +407,7 @@ export default function DoorOutcomesPage() {
       ) : !entries.length ? (
         <EmptyState
           title="No entries match"
-          hint="Nothing recorded here yet, or the filters are too narrow. Surveyed and lit-dropped entries never appear — they carry survey data and can't be converted."
+          hint="Nothing recorded here yet, or the filters are too narrow. Lit-drop entries never appear — a lit drop has no answers to move either way."
         />
       ) : (
         <>
@@ -326,6 +480,52 @@ export default function DoorOutcomesPage() {
         </>
       )}
 
+      {/* Past runs — desk-entry conversions listed beside plain reclassifications, because from an
+          admin's point of view they are the same act at different depths. */}
+      {convRuns.length > 0 && (
+        <Card className="mt-6">
+          <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-fg">Survey answer changes</h2>
+          <ul>
+            {convRuns.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
+                <div className="min-w-0 text-sm text-fg">
+                  <span className="font-medium">
+                    {r.direction === 'to_survey'
+                      ? `${(r.sources || []).map((x) => ACTION_LABELS[x] || x).join(', ') || 'Door entries'} → Surveyed`
+                      : `Surveyed → ${ACTION_LABELS[r.to] || r.to}`}
+                  </span>
+                  <div className="mt-0.5 text-xs text-fg-muted">
+                    {r.direction === 'to_survey'
+                      ? `${(r.counts?.responsesCreated || 0).toLocaleString()} answers recorded`
+                      : `${(r.counts?.responsesArchived || 0).toLocaleString()} answers removed`}
+                    {' · '}
+                    {(r.counts?.entriesConverted || 0).toLocaleString()} entries
+                    {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
+                  </div>
+                </div>
+                {r.revertedAt ? (
+                  <Badge variant="neutral">Undone</Badge>
+                ) : r.status === 'open' ? (
+                  <Badge variant="neutral">
+                    Unfinished — {(r.progress?.doorsDone || 0).toLocaleString()} of{' '}
+                    {(r.progress?.doorsTotal || 0).toLocaleString()} done
+                  </Badge>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={convRevert.isPending}
+                    onClick={() => { setError(null); convRevert.mutate(r.id); }}
+                  >
+                    Undo
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Past runs */}
       {runs.length > 0 && (
         <Card className="mt-6">
@@ -377,17 +577,129 @@ export default function DoorOutcomesPage() {
                 {OUTCOMES.filter((o) => !(current?.disabledOutcomes || []).includes(o)).map((o) => (
                   <option key={o} value={o}>{ACTION_LABELS[o]}</option>
                 ))}
+                {/* Surveyed is only offered as a TARGET when nothing surveyed is selected — you
+                    cannot convert a survey into a survey, and offering it would imply you could. */}
+                {isSurveyCampaign && !selectionHasSurveyed && (
+                  <option value={SURVEYED}>{ACTION_LABELS[SURVEYED]}</option>
+                )}
               </Select>
-              <Button disabled={dryRun.isPending} onClick={() => { setError(null); dryRun.mutate(); }}>
-                {dryRun.isPending ? 'Checking…' : 'Review changes'}
-              </Button>
+              {direction === 'to_survey' ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    disabled={loadTemplate.isPending}
+                    onClick={() => { setError(null); loadTemplate.mutate(); }}
+                  >
+                    {loadTemplate.isPending ? 'Loading survey…' : 'Enter answers'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={startQueue.isPending}
+                    onClick={() => { setError(null); startQueue.mutate(); }}
+                  >
+                    {startQueue.isPending ? 'Starting…' : 'Door by door'}
+                  </Button>
+                </>
+              ) : direction === 'from_survey' ? (
+                <Button
+                  variant="danger"
+                  disabled={convDryRun.isPending}
+                  onClick={() => { setError(null); convDryRun.mutate(); }}
+                >
+                  {convDryRun.isPending ? 'Checking…' : 'Review removal'}
+                </Button>
+              ) : (
+                <Button disabled={dryRun.isPending} onClick={() => { setError(null); dryRun.mutate(); }}>
+                  {dryRun.isPending ? 'Checking…' : 'Review changes'}
+                </Button>
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {/* A run in flight, or the result of the last one. */}
+      {liveRun && !walking && (
+        <ConversionRunCard
+          run={liveRun}
+          busy={convRevert.isPending || convResume.isPending}
+          onRevert={() => { setError(null); convRevert.mutate(liveRun.id); }}
+          onResume={() => { setError(null); convResume.mutate(liveRun.id); }}
+          onDismiss={() => setActiveRunId(null)}
+        />
+      )}
+
+      {/* Step 1 of the Surveyed direction: compose the answers, against the doors' own survey. */}
+      {composing && (
+        <Modal
+          onClose={() => setComposing(null)}
+          title="Record survey answers"
+          subtitle={`These answers will be recorded for every voter at ${selectionCount.toLocaleString()} ${selectionCount === 1 ? 'door' : 'doors'}`}
+          size="lg"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setComposing(null)}>Cancel</Button>
+              <Button
+                disabled={convDryRun.isPending}
+                onClick={() => { setError(null); convDryRun.mutate(); }}
+              >
+                {convDryRun.isPending ? 'Checking…' : 'Review changes'}
+              </Button>
+            </>
+          }
+        >
+          <p className="mb-3 text-sm text-fg-muted">
+            Every voter at these doors gets the same answers, except anyone marked do-not-contact
+            and anyone who already answered this round. If the answers differ door to door, use
+            <span className="font-medium text-fg"> Door by door</span> instead.
+          </p>
+          <SurveyAnswerComposer
+            template={composing}
+            vals={vals}
+            otherTexts={otherTexts}
+            onChange={setVals}
+            onOtherChange={setOtherTexts}
+            idPrefix="bulk"
+          />
+        </Modal>
+      )}
+
+      {/* Step 2 forward: priced, in the campaign's own numbers, before anything is written. */}
+      {preview?.direction === 'to_survey' && (
+        <SurveyConvertModal
+          preview={preview}
+          answeredCount={answeredCount()}
+          busy={convRun.isPending}
+          onCancel={() => setPreview(null)}
+          onConfirm={() => convRun.mutate('bulk')}
+        />
+      )}
+
+      {/* The reverse direction, with the names of everyone losing an answer. */}
+      {preview?.direction === 'from_survey' && (
+        <RemoveAnswersModal
+          preview={preview}
+          target={target}
+          tz={tz}
+          busy={convRun.isPending}
+          onCancel={() => setPreview(null)}
+          onConfirm={() => convRun.mutate('bulk')}
+        />
+      )}
+
+      {/* Door-by-door desk entry. */}
+      {walking && queueTemplate && (
+        <QueueWalkthrough
+          campaignId={campaignId}
+          run={walking}
+          template={queueTemplate}
+          onDone={() => { setWalking(null); setQueueTemplate(null); setActiveRunId(walking.id); afterWrite(); }}
+          onCancel={() => { setWalking(null); setQueueTemplate(null); setActiveRunId(walking.id); afterWrite(); }}
+        />
+      )}
+
       {/* Confirm — the impact preview is the safety mechanism, so it is never skippable. */}
-      {preview && (
+      {preview && !preview.direction && (
         <Modal
           onClose={() => setPreview(null)}
           title={`Change ${preview.entries.toLocaleString()} ${preview.entries === 1 ? 'entry' : 'entries'} across ${preview.doors.toLocaleString()} ${preview.doors === 1 ? 'door' : 'doors'}`}

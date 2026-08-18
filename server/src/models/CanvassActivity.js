@@ -77,19 +77,30 @@ const canvassActivitySchema = new mongoose.Schema(
     // audit and every per-canvasser surface (NOT_BULK in reports/aggregations).
     via: { type: String, enum: [null, 'bulk'], default: null },
 
-    // Set when an admin FOLDED this row's outcome into another one (a retired outcome's history
-    // being reclassified — services/canvass/reclassifyOutcomes.js). `from` is the actionType this
-    // row carried before, which is what Revert restores; `runId` points at the ReclassifyRun that
-    // did it. Absent on every row recorded in the field, which is also the flag the tool reads:
-    // a stamped row is EXCLUDED from later runs, so provenance stays exactly one level deep and a
-    // revert can never land on a guess about what the original outcome was.
+    // Set when an admin REWROTE what this row says happened. `from` is the actionType this row
+    // carried before, which is what Revert restores; `runId` points at the run that did it.
+    // Absent on every row recorded in the field, which is also the flag both tools read: a stamped
+    // row is EXCLUDED from later runs, so provenance stays exactly one level deep and a revert can
+    // never land on a guess about what the original outcome was.
+    //
+    // `kind` decides WHICH collection runId points into, and there is deliberately ONE stamp rather
+    // than two parallel ones: a second field would leave a desk-surveyed row still matching
+    // `reclassified: { $exists: false }` and therefore eligible for a plain reclassify run on top —
+    // exactly the compounding the single-level rule exists to forbid.
+    //   'outcome'     → ReclassifyRun          (door outcome ↔ door outcome; reclassifyOutcomes.js)
+    //   'to_survey'   → SurveyConversionRun    (door outcome → Surveyed;      surveyConversion.js)
+    //   'from_survey' → SurveyConversionRun    (Surveyed → door outcome;      surveyConversion.js)
+    // `voterIdWas` snapshots this row's voterId before a to_survey run overwrote it (a door-outcome
+    // row carries none, but it is stored rather than assumed so revert restores verbatim).
     reclassified: {
       type: new mongoose.Schema(
         {
           from: { type: String, required: true },
           at: { type: Date, required: true },
           byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-          runId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReclassifyRun', required: true },
+          runId: { type: mongoose.Schema.Types.ObjectId, required: true },
+          kind: { type: String, enum: ['outcome', 'to_survey', 'from_survey'], default: 'outcome' },
+          voterIdWas: { type: mongoose.Schema.Types.ObjectId, ref: 'Voter', default: null },
         },
         { _id: false }
       ),
@@ -136,6 +147,13 @@ canvassActivitySchema.index({ organizationId: 1, timestamp: -1 });
 canvassActivitySchema.index(
   { campaignId: 1, 'location.mocked': 1 },
   { partialFilterExpression: { 'location.mocked': true } }
+);
+// Reverting a run finds its rows by stamp — twice (householdsOfRun's aggregate, then the
+// updateMany). Without this both scan the campaign's whole ledger. Partial, and near-empty for
+// orgs that never correct an outcome. Same distinct-key-shape rule as the mock index above.
+canvassActivitySchema.index(
+  { 'reclassified.runId': 1 },
+  { partialFilterExpression: { 'reclassified.runId': { $exists: true } } }
 );
 
 export const CanvassActivity = mongoose.model('CanvassActivity', canvassActivitySchema);

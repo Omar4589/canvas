@@ -8,12 +8,19 @@ import mongoose from 'mongoose';
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/reclassify_test node --test test/reclassifyOutcomes.int.test.js
 //
 // The invariants this file exists to protect:
-//   • THE MONEY INVARIANT — knocks, contactRate, connectionRate, billable doors and every
-//     Campaign.stats counter are IDENTICAL before and after a conversion. This is the entire
-//     safety argument for letting a tool rewrite recorded dispositions at all, so it is asserted
-//     field-by-field rather than described.
-//   • Only the rate-neutral trio converts; refused / restricted / survey_submitted are refused.
-//   • The source must be switched OFF first — this tool is for retired outcomes, not live edits.
+//   • THE MONEY INVARIANT — for a RATE-NEUTRAL pair, knocks, contactRate, connectionRate, billable
+//     doors and every Campaign.stats counter are IDENTICAL before and after. For a money-moving
+//     pair, the PREVIEWED after-figures equal the real ones once the run lands. That pairing is the
+//     entire safety argument for letting a tool rewrite recorded dispositions, so both halves are
+//     asserted field-by-field rather than described.
+//   • Any door outcome may convert to any other, including refused and restricted — but a pair
+//     touching either is priced first. (The old "rate-neutral only" and "the source must be
+//     switched OFF first" rules were dropped by owner ruling 2026-08-16; requiring a toggle first
+//     made correcting a live campaign's mistyped entry impossible.) The TARGET still may not be a
+//     retired outcome.
+//   • survey_submitted / lit_dropped are refused BY THIS MODULE, which has no answer composer and
+//     no archive — a bare flip here would fabricate or orphan answers. The Surveyed direction is
+//     handled by services/canvass/surveyConversion.js and covered by surveyConversion.int.test.js.
 //   • Org admins only: a lead may toggle outcomes but never rewrite history.
 //   • A dry run writes NOTHING.
 //   • A conversion preserves GPS, timestamp, canvasser, pass and effort, stamps provenance, and
@@ -386,13 +393,22 @@ const entriesUrl = (qs = '') => `/admin/campaigns/${ctx.campaign._id}/outcome-en
 test('the entries browser lists convertible rows with door, canvasser and round, plus facets', { skip }, async () => {
   const all = await call('GET', entriesUrl(), asAdmin());
   assert.equal(all.status, 200);
-  // 3 no_soliciting + 1 refused = 4 convertible; the SURVEY is not a door outcome and must not
-  // appear at all — you cannot select what you may not convert.
-  assert.equal(all.json.total, 4);
-  assert.ok(!all.json.entries.some((e) => e.actionType === 'survey_submitted'));
-  assert.deepEqual(all.json.facets, { no_soliciting: 3, refused: 1 });
+  // 3 no_soliciting + 1 refused + 1 survey = 5. The surveyed row IS listed and selectable, but it
+  // routes to the survey-conversion endpoints (which can archive its answers), never to the
+  // reclassify POST below — the table is a selector, not a promise about what each row can become.
+  assert.equal(all.json.total, 5);
+  assert.deepEqual(all.json.facets, { no_soliciting: 3, refused: 1, survey_submitted: 1 });
 
-  const row = all.json.entries[0];
+  // ...and asking THIS tool to convert one resolves to nothing rather than doing a bare flip.
+  const surveyed = all.json.entries.find((e) => e.actionType === 'survey_submitted');
+  const refusal = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', actionIds: [surveyed.id], dryRun: true },
+  });
+  assert.equal(refusal.status, 400);
+  assert.equal(refusal.json.code, 'EMPTY_SELECTION');
+
+  const row = all.json.entries.find((e) => e.actionType !== 'survey_submitted');
   assert.match(row.address, /Reclass Rd$/);
   assert.equal(row.canvasser, 'Cara Canvasser');
   assert.equal(row.round, 'R1');
@@ -400,7 +416,7 @@ test('the entries browser lists convertible rows with door, canvasser and round,
   const filtered = await call('GET', entriesUrl('?outcomes=refused'), asAdmin());
   assert.equal(filtered.json.total, 1);
   // Facets ignore the outcome chips on purpose — you need to see what else is selectable.
-  assert.deepEqual(filtered.json.facets, { no_soliciting: 3, refused: 1 });
+  assert.deepEqual(filtered.json.facets, { no_soliciting: 3, refused: 1, survey_submitted: 1 });
 
   assert.equal((await call('GET', entriesUrl(), asLead())).status, 403);
 });

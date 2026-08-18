@@ -97,8 +97,8 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   add(voter.doNotContact?.byUserId);
   for (const a of activity) add(a.userId);
   for (const n of voterNotesRaw) add(n.userId);
-  for (const s of surveys) { add(s.userId); add(s.editedBy); }
-  for (const o of overwrites) { add(o.userId); add(o.editedBy); add(o.overwrittenBy); }
+  for (const s of surveys) { add(s.userId); add(s.editedBy); add(s.deskEntry?.byUserId); }
+  for (const o of overwrites) { add(o.userId); add(o.editedBy); add(o.overwrittenBy); add(o.deskEntry?.byUserId); }
   for (const n of adminNotes) { add(n.authorId); add(n.editedBy); }
   const users = userIds.size
     ? await User.find({ _id: { $in: [...userIds] } }, 'firstName lastName email').lean()
@@ -248,6 +248,12 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       : { isVoted: false },
     surveys: surveys.map((s) => {
       const tpl = tplMap.get(String(s.surveyTemplateId));
+      // Desk-entered: an admin typed these answers when converting a door outcome to Surveyed,
+      // rather than a canvasser collecting them at the door. Absence means field-collected, so
+      // every pre-existing response reads exactly as it did before.
+      const desk = s.deskEntry
+        ? { by: who(s.deskEntry.byUserId), at: s.deskEntry.at, fromOutcome: s.deskEntry.fromOutcome || null }
+        : null;
       // The latest preserved response this one replaced, if any — keyed by (voter, pass), so
       // the profile UI can say "replaced X's earlier answers" and offer the restore.
       const ow = overwriteByKey.get(`${String(s.voterId)}|${s.passId ? String(s.passId) : ''}`);
@@ -260,6 +266,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
         submittedAt: s.submittedAt,
         editedAt: s.editedAt || null,
         editedBy: who(s.editedBy),
+        deskEntry: desk,
         by: who(s.userId),
         note: s.note || null,
         replacedEarlier: ow
@@ -312,8 +319,14 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
         by: who(o.userId),
         note: o.note || null,
         overwrittenAt: o.overwrittenAt,
+        // 'outcome_convert' means this answer was removed when an admin converted the door away
+        // from Surveyed — the clients MUST word that differently from an overwrite, or it reads as
+        // an accusation against the canvasser for something an admin did.
         overwrittenVia: o.overwrittenVia,
         overwrittenBy: who(o.overwrittenBy),
+        deskEntry: o.deskEntry
+          ? { by: who(o.deskEntry.byUserId), at: o.deskEntry.at }
+          : null,
         answers: (o.answers || []).map((a) => ({
           questionKey: a.questionKey,
           questionLabel: a.questionLabel,

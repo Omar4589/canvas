@@ -38,7 +38,7 @@ router.get('/:activityId', async (req, res, next) => {
         voterId: activity.voterId._id,
         organizationId: orgId,
       })
-        .select('answers note submittedAt surveyTemplateVersion')
+        .select('answers note submittedAt surveyTemplateVersion deskEntry')
         .lean();
     }
 
@@ -84,6 +84,11 @@ router.get('/:activityId', async (req, res, next) => {
             surveyTemplateVersion: surveyResponse.surveyTemplateVersion,
             note: surveyResponse.note || null,
             answers: surveyResponse.answers || [],
+            // Desk-entered = an admin typed these answers when converting the door to Surveyed.
+            // Absent on every field submission, so nothing that already exists changes shape.
+            deskEntry: surveyResponse.deskEntry
+              ? { at: surveyResponse.deskEntry.at, fromOutcome: surveyResponse.deskEntry.fromOutcome || null }
+              : null,
           }
         : null,
     });

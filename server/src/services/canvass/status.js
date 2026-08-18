@@ -8,6 +8,9 @@ import { resolveStatus } from '../../utils/statusPrecedence.js';
 // write path so other callers (e.g. clearing a pass's knocks during a re-cut)
 // recompute the exact same way.
 
+// Chunk size shared by both batched recomputes below.
+const STATUS_BATCH = 500;
+
 // household.status = the "latest across all passes" convenience value, resolved
 // with the sticky-completion precedence rule. Mutates the doc; caller saves.
 export async function recomputeHouseholdStatus(household, campaignType) {
@@ -19,10 +22,34 @@ export async function recomputeHouseholdStatus(household, campaignType) {
 }
 
 // "Ever surveyed" — recomputed from existence so deleting surveys corrects it.
+// One exists + one updateOne PER VOTER: right for a door's worth of voters, far too slow for a
+// bulk sweep — use recomputeSurveyStatusesBatched below for that.
 export async function recomputeSurveyStatus(voterIds) {
   for (const vid of voterIds) {
     const exists = await SurveyResponse.exists({ voterId: vid });
     await Voter.updateOne({ _id: vid }, { $set: { surveyStatus: exists ? 'surveyed' : 'not_surveyed' } });
+  }
+}
+
+// Same answer as the loop above, two round trips per CHUNK instead of two per voter. A
+// survey-conversion run can touch tens of thousands of voters, where the per-voter version is
+// ~100k round trips and becomes the whole job — the same bottleneck
+// recomputeHouseholdStatusesBatched was written to kill one collection over.
+//
+// `updateMany` bumps Voter.updatedAt (the model declares timestamps and Mongoose honors them on
+// updates unless told otherwise), which matters because GET /mobile/changes ships voters whose own
+// updatedAt moved. That is the belt to the door-level braces — surveyConversion.int.test.js
+// asserts it rather than assuming it.
+export async function recomputeSurveyStatusesBatched(voterIds) {
+  const ids = [...new Set(voterIds.map(String))];
+  for (let i = 0; i < ids.length; i += STATUS_BATCH) {
+    const chunk = ids.slice(i, i + STATUS_BATCH);
+    const surveyed = await SurveyResponse.distinct('voterId', { voterId: { $in: chunk } });
+    const surveyedSet = new Set(surveyed.map(String));
+    const yes = chunk.filter((id) => surveyedSet.has(id));
+    const no = chunk.filter((id) => !surveyedSet.has(id));
+    if (yes.length) await Voter.updateMany({ _id: { $in: yes } }, { $set: { surveyStatus: 'surveyed' } });
+    if (no.length) await Voter.updateMany({ _id: { $in: no } }, { $set: { surveyStatus: 'not_surveyed' } });
   }
 }
 
@@ -51,7 +78,6 @@ export async function recomputeHouseholdStatusesByIds(householdIds, campaignType
 //
 // Safe as a bulkWrite because Household declares no pre-save/validate hooks — the per-door
 // version's `save()` had nothing to run beyond the timestamp this replaces.
-const STATUS_BATCH = 500;
 export async function recomputeHouseholdStatusesBatched(householdIds, campaignType) {
   for (let i = 0; i < householdIds.length; i += STATUS_BATCH) {
     const ids = householdIds.slice(i, i + STATUS_BATCH);

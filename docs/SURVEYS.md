@@ -354,6 +354,15 @@ not everything that was typed.
 
 ## Auditing answers — who chose one, who recorded it, and when
 
+> **Some answers were typed at a desk, not collected at a door.** An org admin can convert a door
+> entry into Surveyed and enter the answers — for a canvasser who tapped the wrong button, or a
+> batch recorded under the wrong outcome. Those answers are attributed to the **canvasser who
+> knocked**, keep that knock's time and place, and **count in every rate exactly like a field
+> answer** — but they carry a visible **"Entered by ‹admin› on ‹date›"** line on the voter's record
+> and a **Desk entered** column in exports, so you can always tell the two apart. A canvasser's real
+> field answer is *never* overwritten by one. See
+> [CAMPAIGNS.md → Converting to and from Surveyed](CAMPAIGNS.md).
+
 The survey report tells you *how many* picked "Opposed"; sooner or later you need the **who** behind
 a number — which voters gave it, which **canvasser typed it**, at what time, with what note, and
 where those doors sit. Two places answer that:
@@ -503,9 +512,9 @@ normalization, dual-read aggregation, edit classification), and the `survey-resu
 | `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | `key` (stable per-survey slug, **the join handle** — never reused once retired), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole question), **`visibleIf`** (conditional display, default `null`), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — reserved for a future door-outcome feature; **no UI, not wired**). |
 | `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`. |
 | `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. |
-| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`. Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`. |
+| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`, **`deskEntry`** (`{runId, byUserId, at, source:'converted_outcome', fromOutcome}` — set ONLY by an admin outcome→Surveyed conversion; **absence is the field-submission marker**, so every pre-existing reader is unaffected and `{deskEntry:{$exists:true}}` is the exact query — see §K). Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`; partial index `{'deskEntry.runId'}` (revert sweep). |
 | `SurveyResponse.answers[]` | same (`answerSchema`, `{ _id: false }`) | `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** at submit), **`optionIds[]`** (stable id(s) chosen — the id-native tracking key; single → 1, multi → N, empty for free-text), **`otherText`** (free text typed into the `__other__` option), `answer` (Mixed — string \| string[] \| free text; **kept as a human-readable snapshot AND the legacy reporting fallback** for rows recorded before stable ids existed). |
-| `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (`'submit'` = a different canvasser's field submission; `'restore'` = an admin restore displaced it), `overwrittenAt` — never accepted from a request body. **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. See §F. |
+| `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (`'submit'` = a different canvasser's field submission; `'restore'` = an admin restore displaced it; **`'outcome_convert'`** = an admin converted the door away from Surveyed, §K) and **`conversionRunId`** (set by that third producer only; revert reads it) — never accepted from a request body. **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. **Growth is bounded for `submit`/`restore` only:** an `outcome_convert` run nobody reverts leaves its rows in place indefinitely — that IS the recoverability promise, not a leak, and tenant deletion still reaches them. See §F, §K. |
 
 The `key` is derived in the builder by slugifying the label, with collision suffixes
 (`top_issue`, `top_issue_2`, …); option `id`s are derived the same way within a question. Both are
@@ -687,6 +696,17 @@ Exported API:
 
 ## E. Answer normalization & dropHidden modes
 
+> **Three callers now**, not two: the mobile submit (`dropHidden:true`), the admin in-place edit
+> (`dropHidden:false`, preserving recorded history), and the **outcome→Surveyed conversion**
+> (`dropHidden:true` — the composer IS the field form, and there is no history to preserve).
+> The conversion additionally passes **`rebuildAnswerText:true`**, which runs `snapshotAnswerText`
+> to derive the human-readable `answer` from `optionIds` server-side. That flag exists because the
+> conversion's writer is a **worker** with no client in the loop — until now nothing server-side
+> derived the snapshot; both clients built it before POSTing. It is opt-in rather than always-on so
+> the two existing write paths are byte-identical. Side benefit: on that path an `answer` text can
+> no longer disagree with its own `optionIds`.
+
+
 Both write paths funnel through `normalizeAndFilterAnswers(template, rawAnswers, { dropHidden })`
 ([services/surveys/normalizeAnswers.js](../server/src/services/surveys/normalizeAnswers.js)) so they
 **can't drift**. It **never throws / never 400s**:
@@ -753,10 +773,24 @@ can fix that without guessing, and none is attempted.
 
 ## F. Submission & dedup invariants
 
+> ⚠️ **The invariant "every `SurveyResponse` is a field submission" is FALSE as of 2026-08.**
+> A response may also be **desk-entered** by an admin converting a door outcome into Surveyed
+> ([§K](#k-desk-entered-responses-outcome-conversion)). The discriminator is **`deskEntry`**:
+> absent = collected at the door (every row that existed before this change, and every phone
+> submission since), present = typed by an admin. Everything else on a desk-entered row still
+> describes the ORIGINAL KNOCK — `userId`, `coordinatorId`, `location`, `submittedAt` and the
+> pass/turf/effort tags are copied verbatim off the `CanvassActivity` row being converted.
+> The `{voterId, passId}` unique index is what makes the "never overwrite a field answer" rule
+> enforceable: a desk entry for a voter who already answered that round is SKIPPED, never upserted.
+
 `POST /mobile/voters/:voterId/survey` ([canvass.js](../server/src/routes/mobile/canvass.js)):
 
 - Validates the template exists and matches the campaign (resolving a **per-effort survey override**
-  — the door's effort survey wins over the campaign default; see [EFFORTS.md](EFFORTS.md)); resolves
+  — the door's effort survey wins over the campaign default; see [EFFORTS.md](EFFORTS.md)). That
+  resolution now lives in
+  [services/surveys/effectiveTemplate.js](../server/src/services/surveys/effectiveTemplate.js) and
+  is **shared with the admin conversion tool**, so the two cannot drift — a tool resolving it
+  differently would write responses this very route rejects. Resolves
   `passId`/`turfId`/`effortId` from the submission timestamp (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
 - Runs `normalizeAndFilterAnswers(template, data.answers)` (`dropHidden:true`) before persisting.
 - **One row per `(voterId, passId)`, latest wins — with cross-canvasser preservation.** The write
@@ -1120,3 +1154,146 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 `pctOfOwnAnswers`, multi-choice explode semantics, the tag/param `400`s, both lead-gating `403`
 flavors, the CSV's headers/columns/timezone rendering, and the response detail's
 `editedBy`/`editedAt`/`syncedAt`.
+
+## K. Desk-entered responses (outcome conversion)
+
+**Service:** [services/canvass/surveyConversion.js](../server/src/services/canvass/surveyConversion.js).
+**Run doc:** [models/SurveyConversionRun.js](../server/src/models/SurveyConversionRun.js).
+**Worker:** [services/canvass/conversionProcessor.js](../server/src/services/canvass/conversionProcessor.js)
+on `QUEUE_NAMES.OUTCOME_CONVERT` (concurrency 1). **Routes:** eight, all on
+[routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js) under
+`/:campaignId/survey-conversions`, all behind `loadForReclassify` (**org admins only**).
+**Test:** [surveyConversion.int.test.js](../server/test/surveyConversion.int.test.js) (20 tests).
+
+### Why this is a sibling of `reclassifyOutcomes.js`, not part of it
+
+That module refuses `survey_submitted` in both directions, and its stated reason is correct **for
+itself**: a bare `actionType` flip into Surveyed fabricates answers nobody gave, and out of it
+orphans answers somebody did. The refusal is about missing machinery, not about the act being
+impossible. This module funds it — an admin supplies real answers, every created row is stamped,
+and the reverse direction archives. The plain reclassify path keeps refusing, and that refusal is
+now precise rather than blanket. `lit_dropped` stays unconvertible in both modules.
+
+Structurally it also could not merge: `reclassifyOutcomes` rests on "a conversion is a pure
+`actionType` flip with no second ledger", which is what makes `RATE_NEUTRAL_OUTCOMES` provable, the
+whole-outcome fold unbounded, and revert four lines. What IS shared (exported from that module, not
+re-typed): **`convertibleMatch`** — the two provenance rules (`via: {$ne:'bulk'}`,
+`reclassified: {$exists:false}`) — plus `computeImpact` and `CONVERTIBLE_SOURCES`.
+
+### Provenance: one stamp, three artifacts
+
+- **`CanvassActivity.reclassified`** gains `kind` (`'outcome'` | `'to_survey'` | `'from_survey'`)
+  and `voterIdWas`. Deliberately the SAME field rather than a parallel one: a second stamp would
+  leave a desk-surveyed row still matching `reclassified: {$exists:false}` and therefore eligible
+  for a plain reclassify on top of itself — exactly the compounding the single-level rule forbids.
+  `revertReclassify` is scoped to `kind ∈ {null,'outcome'}`.
+- **`SurveyResponse.deskEntry.runId`** — what a forward revert deletes.
+- **`SurveyResponseArchive.conversionRunId`** — what a reverse revert restores.
+
+No run doc carries an id manifest: 25k entries × ~2 voters ≈ 50k responses. Revert is a **sweep by
+stamp**, which is exact by construction, bounded in memory, and correct for a half-finished job.
+
+### What is copied off the knock, and the two traps
+
+`userId`, `coordinatorId`, `location`, `distanceFromHouseMeters`, `submittedAt` (= the row's
+`timestamp`), `wasOfflineSubmission` and `passId`/`turfId`/`effortId` all come **verbatim off the
+`CanvassActivity` row**. `editedBy`/`editedAt` stay `null` — the response was *authored*, not edited.
+
+1. **Never call `resolveAttribution`.** It resolves against currently-ACTIVE passes, so it would
+   re-home a months-old knock into today's round.
+2. **Never call `coordinatorForWrite`.** It would stamp the door with the ADMIN's crew. Copying the
+   row's already-frozen `coordinatorId` is not the restamp `SurveyResponse.js` forbids — it is the
+   same freeze the field path performs across both ledgers.
+
+### ⚠ Write order is the MIRROR IMAGE of `runReclassify`'s
+
+`runReclassify` stamps rows FIRST so a crash can't offer a Revert for a conversion that never
+happened. Here the stamp is written **LAST**, because here the stamp is also what a resumed job
+reads as "this row is done":
+
+- *responses first, crash* → orphan responses, door still says `not_home`. That is the TRUE state of
+  both ledgers, so the nightly reconcile agrees with it; resume finds the row unstamped, recognises
+  the responses by `deskEntry.runId`, and completes the flip. **Self-healing.**
+- *flip first, crash* → door says Surveyed with zero answers, a state the field also produces (two
+  canvassers overlapping), so nothing detects it — and resume finds the row STAMPED and skips it
+  forever. **Silently wrong.**
+
+Same invariant as `runReclassify` (a stamp must mean the whole unit landed); only which write is
+last differs. **Do not "align" the two.**
+
+### Eligibility, skips and the template rule
+
+- **Eligible voters** = every `Voter` at the door in the campaign, **minus `doNotContact.flagged`**.
+  There is no voter-level targeting field anywhere — walk lists own DOORS (`Household.effortId`) —
+  so this is the honest reading of "who the walk list targeted", and it matches the set the mobile
+  app would have let the canvasser survey.
+- **A voter who already answered that round is SKIPPED**, never overwritten, and listed by name.
+  `doorsNoVoters` counts only doors with nobody on file; a door whose voters are all DNC or
+  already-answered lands in `doorsAllAlreadyAnswered`, because "nobody on file" and "nobody left to
+  record" are different facts and the DNC count already reports the second.
+- **A selection spanning two effective templates is REFUSED** (`MIXED_SURVEY_TEMPLATES`). Using the
+  campaign default instead would write a response whose `surveyTemplateId` the mobile submit route
+  itself 400s for that door — manufacturing data the field path forbids. The fix is one click: the
+  page's walk-list filter narrows to one effort (`buildEntryFilter` already supported `effortId`).
+
+### Reverse direction
+
+Scope is **`{householdId, passId, userId}`** — only the converting row's own canvasser. This mirrors
+the existing field inverse (`recordHouseholdAction` deletes on exactly that triple), and the fraud
+case is precisely where it matters: undoing canvasser A's faked knock must not destroy canvasser B's
+real answers at the same address.
+
+We **archive** where the field path **deletes**, deliberately: there, a canvasser is correcting
+themselves seconds later and the destroyed data is their own, just superseded. Here an admin is
+removing what a canvasser submitted as final, potentially months later, in an investigation where
+the removed content **is the evidence**. (Whether the field path's delete is also wrong is an open
+question, out of scope.) Recovery needs no new UI — `POST /admin/voters/:voterId/surveys/:archiveId/restore`
+works on these rows already; note that restore promotes the answers *without* re-flipping the
+activity row, so a restored response sits under a `not_home` door until the run is reverted.
+
+**Revert refuses to clobber.** Before restoring, it READS whether the `{voterId, passId}` slot is
+free; a slot refilled by a later field submit is left alone and counted in `responsesNotRestored`.
+The read is the guarantee, not the unique index — that index is built by a deploy step
+(`autoIndex` is off in production), so a data-destroying decision must not depend on it existing.
+The `E11000` catch stays as belt-and-braces for the race.
+
+### Idempotency
+
+`convertibleMatch` already excludes stamped rows, so a redelivered or resumed job skips finished
+work for free. Two additions: an `E11000` whose existing row carries **this run's own**
+`deskEntry.runId` is counted as our prior insert, not as somebody else's field answer (without
+that, a redelivery inflates `votersSkippedAlreadyAnswered` with its own work); and **`bumpLive` is
+the one non-idempotent write**, CAS'd exactly once on the run doc's `liveBumped`.
+`recomputeCampaignStats` is used rather than `bumpCampaignStats` — the "rare admin bulk op" tier,
+and idempotent under redelivery.
+
+### Performance
+
+`recomputeSurveyStatus` is a per-voter `exists` + `updateOne` loop — 100k round trips at 50k voters,
+which would become the whole job. **`recomputeSurveyStatusesBatched`**
+([status.js](../server/src/services/canvass/status.js)) is two round trips per 500-voter chunk. Its
+`updateMany` bumps `Voter.updatedAt`, which matters because `/mobile/changes` ships voters whose own
+`updatedAt` moved — asserted, not assumed.
+
+### Caps
+
+`RECLASSIFY_MAX_IMPACT_ENTRIES` (25 000) on the activity selection, both directions;
+`SURVEY_CONVERT_MAX_RESPONSES` (50 000) on responses created; `MAX_VOTERS_PER_DOOR_SYNC` (50) on the
+synchronous per-door path.
+
+### Where the marker surfaces
+
+`voterProfile.surveys[].deskEntry` and `overwrittenSurveys[].deskEntry`; `/admin/reports/responses/:id`;
+`/admin/households/:id/surveys`; `/admin/activities/:id`; and two export columns (**Desk entered**,
+**Desk entered by**) on `survey-results` plus **Desk entered** on `survey-answers`. All additive.
+
+Two things that were **wrong, not merely missing**, and are fixed: the overwritten-response copy on
+web and mobile said *"Overwritten … was X's"*, which for an `outcome_convert` row reads as an
+accusation against a canvasser for something an admin did (now *"Removed … when this door's outcome
+was changed"*); and `/admin/reports/duplicate-surveys` `$unionWith`s the archive, so conversion
+archives are now **excluded** — a fraud-cleanup archive is not evidence somebody was surveyed twice,
+and leaving them in dumped every reverted door into an operator's duplicate queue.
+
+**Reporting rule: a desk-entered response counts identically to a field one** in every rate and
+total. The stamp is provenance, not arithmetic.
+

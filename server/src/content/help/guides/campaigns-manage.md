@@ -57,13 +57,35 @@ Filter by outcome, canvasser or round, tick the entries you want — one row to 
 
 - If the change can't move anything, it says so: *"No reported numbers change."* That's true for any mix of **Not home**, **Wrong address** and **No soliciting** — each is one knock and none means you reached a person.
 - If it *can*, you see your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate — with the changed figures in red. **Refused** moves your contact rate (someone answered) and **Restricted** moves billable doors (those can be invoiced). You can still make the change; you just can't make it by accident.
-- **Surveyed** and **Lit dropped** entries can never be converted. They carry real survey answers, so there's nothing safe to convert them into.
+- **Lit dropped** entries can never be converted — a lit drop has no answers to move either way.
+- **Surveyed** entries can be converted in both directions, but not as a relabel: you enter the answers going in, and removing them shows you exactly whose answers go. See below.
 
 Each entry keeps its time, location, canvasser and round — only the label changes, and door colors follow on canvassers' next sync. Every change is listed with a **Revert** button that undoes it exactly (even a selection that spanned several outcomes), and both the change and the revert appear in the campaign's [History](#history--who-changed-what).
 
 Two things you won't see there: doors an admin marked with **bulk restrict** (those are desk marks and have their own undo on Turf Cutting), and entries an earlier change already converted, until you revert that one.
 
 The App Customization page keeps a small **Reclassification** shortcut for the common case right after you switch an outcome off.
+
+## Recording survey answers after the fact
+
+Sometimes the conversation really happened and the app has no record of it — a canvasser tapped **Not home** by mistake and only noticed back at the office, where redoing it would flag their GPS as far from the door. Or a whole week got recorded as **Refused** because that button was left on. On the same **Door Outcomes** page, select those entries and change them to **Surveyed**. Because a surveyed door has to own real answers, you enter them:
+
+- **Enter answers** applies one answer set to every voter at every selected door — right for "that whole batch was really *Undecided*."
+- **Door by door** walks you through the selection one address at a time, so each household gets its own answers. You can stop part-way and pick up where you left off.
+
+You can leave questions blank — record only what you actually know.
+
+Answers are recorded for **every voter at the address, except anyone marked do-not-contact and anyone who already answered that round.** A canvasser's real field answer is never replaced by one you type; the review step names everyone who'll be skipped and why.
+
+Every answer you enter is **credited to the canvasser who knocked** — their knock, their time, their round and team — so their numbers reflect the work they did. The answers themselves are stamped **"Entered by ‹you› on ‹date›"** on the voter's record and marked in exports, so nobody mistakes a desk entry for a doorstep conversation. They count in your contact and survey rates just like any other answer.
+
+## Removing survey answers (cleanup)
+
+The reverse works too, and it's what you want when a canvasser's surveys turn out to be fake: select the surveyed entries and change them to **Not home** so the doors go back into play. The review step lists **exactly whose answers will be removed, by name**, and the answers are **kept, not destroyed** — they stay on each voter's record and can be restored.
+
+Only that entry's own canvasser is affected. If someone else genuinely surveyed the same door in the same round, their answers are untouched.
+
+Both directions are undoable in one click — a door-by-door session undoes as a single unit — and a large batch runs in the background with a progress bar.
 
 ## Key dates
 

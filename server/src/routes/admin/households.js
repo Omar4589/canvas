@@ -563,7 +563,7 @@ router.get('/:householdId/surveys', async (req, res, next) => {
 
     const surveys = await SurveyResponse.find(
       { householdId: hid, organizationId: orgId, ...(passId ? { passId } : {}) },
-      'submittedAt note answers voterId userId'
+      'submittedAt note answers voterId userId deskEntry'
     )
       .populate('voterId', 'fullName')
       .populate('userId', 'firstName lastName')
@@ -579,6 +579,7 @@ router.get('/:householdId/surveys', async (req, res, next) => {
           : null,
         answers: s.answers || [],
         note: s.note || null,
+        deskEntry: s.deskEntry ? { at: s.deskEntry.at, fromOutcome: s.deskEntry.fromOutcome || null } : null,
       })),
     });
   } catch (err) {

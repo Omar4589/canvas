@@ -18,6 +18,12 @@ export const QUEUE_NAMES = {
   // Campaign hard-delete cascades (services/campaigns/deleteCampaignProcessor.js) — a 100k-door
   // cascade runs for minutes, so it gets its own lane rather than starving imports.
   CAMPAIGN_DELETE: 'campaign-delete-queue',
+  // Desk-entered survey conversions (services/canvass/conversionProcessor.js): a Door Outcomes run
+  // that also writes N SurveyResponse rows per door and then recomputes campaign counters. Its own
+  // lane for two reasons — two concurrent runs on one campaign would race recomputeCampaignStats
+  // (so concurrency stays 1), and putting a multi-minute desk-entry job on TURF (also concurrency
+  // 1) would head-of-line-block a walk-list claim.
+  OUTCOME_CONVERT: 'outcome-convert-queue',
   // Organization hard-delete cascades (services/platform/deleteOrgProcessor.js). All FOUR paths
   // converge here — break-glass and the three retention triggers — so each org is its own job with
   // its own retry, and one org that throws can no longer abort the nightly sweep (which is what

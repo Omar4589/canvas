@@ -10,6 +10,7 @@ import { Organization } from '../../models/Organization.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Household } from '../../models/Household.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
@@ -25,6 +26,7 @@ import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
+  CONVERTIBLE_SOURCES,
   RECLASSIFY_MAX_IMPACT_ENTRIES,
   isRateNeutralPair,
   countConvertible,
@@ -37,6 +39,19 @@ import {
   runReclassify,
   revertReclassify,
 } from '../../services/canvass/reclassifyOutcomes.js';
+import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
+import {
+  SURVEY_CONVERT_MAX_RESPONSES,
+  MAX_VOTERS_PER_DOOR_SYNC,
+  validateConversion,
+  resolveConversion,
+  resolveSelectionTemplate,
+  computeSurveyImpact,
+  executeConversionRun,
+  applyDoorToRun,
+  closeConversionRun,
+  revertConversionRun,
+} from '../../services/canvass/surveyConversion.js';
 import { Pass } from '../../models/Pass.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ExportJob } from '../../models/ExportJob.js';
@@ -729,7 +744,12 @@ router.delete('/:campaignId', async (req, res, next) => {
 // converted, and one body carries both.
 const objectIdish = z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid id');
 const entryScopeSchema = z.object({
-  outcomes: z.array(z.enum(RECLASSIFIABLE_OUTCOMES)).optional(),
+  // CONVERTIBLE_SOURCES, not RECLASSIFIABLE_OUTCOMES: the same scope object drives the entries
+  // TABLE, which lists surveyed rows so they can be handed to the survey-conversion routes below.
+  // The plain reclassify path stays safe without a second schema — buildEntryFilter intersects
+  // these against its own RECLASSIFIABLE_OUTCOMES default, so asking it for surveyed rows resolves
+  // to an empty selection (a 400) rather than to a bare flip.
+  outcomes: z.array(z.enum(CONVERTIBLE_SOURCES)).optional(),
   userId: objectIdish.optional(),
   effortId: objectIdish.optional(),
   passId: objectIdish.optional(),
@@ -828,7 +848,14 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const skip = Math.max(Number(req.query.skip) || 0, 0);
 
-    const { entries, total, facets } = await listEntries(campaign._id, q, { skip, limit });
+    // CONVERTIBLE_SOURCES so surveyed rows are listable and selectable — they route to the
+    // survey-conversion endpoints, which can archive their answers, rather than to the plain
+    // reclassify POST, which still refuses them.
+    const { entries, total, facets } = await listEntries(campaign._id, q, {
+      skip,
+      limit,
+      outcomes: CONVERTIBLE_SOURCES,
+    });
     const [people, passes] = await Promise.all([
       hydrateCanvassers(entries.map((e) => e.userId).filter(Boolean), activeOrgId(req)),
       Pass.find({ campaignId: campaign._id }, { name: 1, roundNumber: 1 }).lean(),
@@ -982,6 +1009,482 @@ router.post('/:campaignId/reclassify-outcomes/revert', async (req, res, next) =>
     res.json({ reverted: true, runId: String(run._id), revertedAt: run.revertedAt });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// ── Converting a door outcome to/from Surveyed ──────────────────────────────
+// The Surveyed direction of the same page. Same org-admin gate (loadForReclassify), same
+// scope+actionIds selection, same price-before-you-run rule — but it also writes real survey
+// answers, so it carries its own service, its own run doc and its own queue. The reason the plain
+// reclassify route above still REFUSES these outcomes is not squeamishness: it has no answer
+// composer and no archive, so a bare flip there would fabricate or orphan answers.
+// See services/canvass/surveyConversion.js.
+
+const answerInputSchema = z.object({
+  questionKey: z.string().min(1),
+  questionLabel: z.string().optional(),
+  answer: z.any().optional(),
+  optionIds: z.array(z.string()).optional(),
+  otherText: z.string().nullable().optional(),
+});
+
+const conversionSchema = z.object({
+  direction: z.enum(['to_survey', 'from_survey']),
+  mode: z.enum(['bulk', 'single', 'queue']).default('bulk'),
+  // 'survey_submitted' going in; a door outcome coming back out. Validated per-direction in
+  // validateConversion, which is also where the retired-target rule lives.
+  to: z.string(),
+  dryRun: z.boolean().optional(),
+  scope: entryScopeSchema.optional(),
+  actionIds: z.array(objectIdish).max(RECLASSIFY_MAX_IMPACT_ENTRIES).optional(),
+  // The one answer set a bulk run replays for every eligible voter. Empty for single/queue, where
+  // each door carries its own.
+  answers: z.array(answerInputSchema).optional(),
+  note: z.string().max(2000).nullable().optional(),
+});
+
+const doorApplySchema = z.object({
+  actionId: objectIdish,
+  // { [voterId]: { answers, note } | null } — absent or null means "leave this voter alone",
+  // which is how the per-voter skip checkboxes work.
+  voterPlans: z
+    .record(
+      z.string(),
+      z
+        .object({ answers: z.array(answerInputSchema).optional(), note: z.string().max(2000).nullable().optional() })
+        .nullable()
+    )
+    .optional(),
+});
+
+/** Load a run scoped to this campaign AND org — a foreign run id reads as 404, never as ours. */
+async function loadRun(req, res, campaign) {
+  if (!mongoose.isValidObjectId(req.params.runId)) {
+    res.status(404).json({ error: 'Conversion not found' });
+    return null;
+  }
+  const run = await SurveyConversionRun.findOne({
+    _id: req.params.runId,
+    campaignId: campaign._id,
+    organizationId: activeOrgId(req),
+  });
+  if (!run) {
+    res.status(404).json({ error: 'Conversion not found' });
+    return null;
+  }
+  return run;
+}
+
+const runWire = (r, by = null) => ({
+  id: String(r._id),
+  direction: r.direction,
+  mode: r.mode,
+  sources: r.sources,
+  to: r.to,
+  status: r.status,
+  progress: r.progress,
+  counts: r.counts,
+  samples: (r.samples || []).map((s) => ({ voterId: String(s.voterId), voterName: s.voterName, reason: s.reason })),
+  samplesTruncated: r.samplesTruncated,
+  samplesTotal: r.samplesTotal,
+  surveyTemplateId: r.surveyTemplateId ? String(r.surveyTemplateId) : null,
+  doorsRemaining: null, // filled by the poll route for an open queue
+  error: r.error,
+  createdAt: r.createdAt,
+  completedAt: r.completedAt,
+  revertedAt: r.revertedAt,
+  by,
+});
+
+// The template the composer must be built against, resolved from the SELECTION rather than from
+// the campaign — per-effort survey overrides mean "the campaign's survey" has no single answer.
+router.post('/:campaignId/survey-conversions/template', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const body = conversionSchema.partial({ direction: true, to: true }).parse(req.body);
+
+    const sel = await resolveConversion({
+      campaign,
+      scope: body.scope || {},
+      actionIds: body.actionIds || null,
+      direction: 'to_survey',
+    });
+    if (!sel.entries) {
+      return res.status(400).json({ error: 'Nothing is selected.', code: 'EMPTY_SELECTION' });
+    }
+    const { template, error } = await resolveSelectionTemplate(campaign, sel.householdIds);
+    if (error) return res.status(error.status).json(error.body);
+
+    res.json({
+      template: {
+        id: String(template._id),
+        name: template.name,
+        version: template.version,
+        intro: template.intro,
+        questions: template.questions,
+      },
+      entries: sel.entries,
+      doors: sel.doors,
+      sources: sel.sources,
+    });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// dryRun: the full price — the campaign's own before/after AND the response-ledger consequences
+// (how many answers get created or archived, and every voter we will NOT touch). Otherwise: create
+// the run and either enqueue it (bulk) or hand it back open for door-by-door entry.
+router.post('/:campaignId/survey-conversions', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const body = conversionSchema.parse(req.body);
+
+    const invalid = validateConversion(campaign, body);
+    if (invalid) return res.status(invalid.status).json(invalid.body);
+
+    const sel = await resolveConversion({
+      campaign,
+      scope: body.scope || {},
+      actionIds: body.actionIds || null,
+      direction: body.direction,
+    });
+    if (!sel.entries) {
+      return res.status(400).json({ error: 'Nothing is selected.', code: 'EMPTY_SELECTION' });
+    }
+    if (sel.entries > RECLASSIFY_MAX_IMPACT_ENTRIES) {
+      return res.status(409).json({
+        error: `That's ${sel.entries.toLocaleString()} entries — narrow the filter to ${RECLASSIFY_MAX_IMPACT_ENTRIES.toLocaleString()} or fewer.`,
+        code: 'SELECTION_TOO_LARGE',
+      });
+    }
+
+    let template = null;
+    if (body.direction === 'to_survey') {
+      const resolved = await resolveSelectionTemplate(campaign, sel.householdIds);
+      if (resolved.error) return res.status(resolved.error.status).json(resolved.error.body);
+      template = resolved.template;
+    }
+
+    const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
+    const billRestricted = resolveBillRestricted(campaign, org);
+    const [impact, survey] = await Promise.all([
+      computeImpact({ campaign, ids: sel.ids, to: body.to, billRestricted }),
+      computeSurveyImpact({ campaign, rows: sel.rows, direction: body.direction }),
+    ]);
+
+    if (body.direction === 'to_survey' && survey.responsesToCreate > SURVEY_CONVERT_MAX_RESPONSES) {
+      return res.status(409).json({
+        error: `That would create ${survey.responsesToCreate.toLocaleString()} survey responses — narrow the selection to ${SURVEY_CONVERT_MAX_RESPONSES.toLocaleString()} or fewer.`,
+        code: 'TOO_MANY_RESPONSES',
+      });
+    }
+    if (body.mode !== 'bulk' && sel.doors === 1) {
+      const perDoor = survey.votersEligible ?? 0;
+      if (perDoor > MAX_VOTERS_PER_DOOR_SYNC) {
+        return res.status(409).json({
+          error: `That door has ${perDoor} voters — more than this tool records in one go.`,
+          code: 'TOO_MANY_VOTERS_AT_DOOR',
+        });
+      }
+    }
+
+    if (body.dryRun) {
+      return res.json({
+        dryRun: true,
+        direction: body.direction,
+        to: body.to,
+        sources: sel.sources,
+        entries: sel.entries,
+        doors: sel.doors,
+        // A conversion touching a completion action is NEVER rate-neutral — it always moves the
+        // survey rate at minimum — so the confirm step always shows the figures in red.
+        rateNeutral: false,
+        impact,
+        survey,
+        template: template
+          ? { id: String(template._id), name: template.name, version: template.version, questions: template.questions }
+          : null,
+      });
+    }
+
+    const run = await SurveyConversionRun.create({
+      organizationId: campaign.organizationId,
+      campaignId: campaign._id,
+      byUserId: req.user._id,
+      direction: body.direction,
+      mode: body.mode,
+      sources: sel.sources,
+      to: body.to,
+      surveyTemplateId: template?._id || null,
+      surveyTemplateVersion: template?.version ?? null,
+      answers: body.mode === 'bulk' && template ? (body.answers || []) : [],
+      note: body.note ?? null,
+      selection: { scope: body.scope || {}, actionIds: sel.ids },
+      // A door-by-door session stays OPEN between steps; a bulk run goes straight to the worker.
+      status: body.mode === 'bulk' ? 'pending' : 'open',
+      progress: { phase: null, pct: 0, doorsDone: 0, doorsTotal: sel.doors },
+      counts: { entriesTargeted: sel.entries, doorsTargeted: sel.doors },
+    });
+
+    if (body.mode === 'bulk') {
+      // Time-bounded like every other enqueue in this file: ioredis buffers commands while
+      // disconnected, so an unbounded .add() would HANG the request against a wedged Redis. The run
+      // doc already exists and is stamped `pending`, so a failed enqueue is recoverable — Resume
+      // re-enqueues it — rather than a lost request.
+      try {
+        const job = await queueOp(
+          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }),
+          Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
+        );
+        run.queueJobId = String(job.id);
+        await run.save();
+      } catch {
+        run.status = 'failed';
+        run.error = 'Could not start the conversion. Nothing has been changed — press Resume to try again.';
+        await run.save();
+        return res.status(503).json({
+          error: run.error,
+          code: 'QUEUE_UNAVAILABLE',
+          run: runWire(run),
+        });
+      }
+    }
+
+    res.status(201).json({ run: runWire(run) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// The next door's people, as the RUN sees them — not a generic voter list. It applies the same
+// eligibility rule the write applies (every voter at the door minus do-not-contact) and flags who
+// already answered this round, so the composer can't offer to record an answer the run would then
+// silently skip.
+router.get('/:campaignId/survey-conversions/:runId/door/:actionId', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+    if (!mongoose.isValidObjectId(req.params.actionId)) {
+      return res.status(404).json({ error: 'Door not found' });
+    }
+
+    const row = await CanvassActivity.findOne(
+      { _id: req.params.actionId, campaignId: campaign._id },
+      'householdId passId userId actionType timestamp'
+    ).lean();
+    if (!row) return res.status(404).json({ error: 'Door not found' });
+
+    const [door, voters, answered] = await Promise.all([
+      Household.findById(row.householdId, 'addressLine1 unit city').lean(),
+      Voter.find({ householdId: row.householdId, campaignId: campaign._id }, 'fullName doNotContact.flagged')
+        .sort({ _id: 1 })
+        .lean(),
+      SurveyResponse.find({ householdId: row.householdId, passId: row.passId ?? null }, 'voterId').lean(),
+    ]);
+    const answeredIds = new Set(answered.map((a) => String(a.voterId)));
+
+    res.json({
+      door: {
+        actionId: String(row._id),
+        householdId: String(row.householdId),
+        address: door
+          ? [door.addressLine1, door.unit ? `#${door.unit}` : null].filter(Boolean).join(' ')
+          : '(door removed)',
+        city: door?.city || '',
+        actionType: row.actionType,
+        timestamp: row.timestamp,
+      },
+      voters: voters.map((v) => ({
+        id: String(v._id),
+        fullName: v.fullName,
+        dnc: !!v.doNotContact?.flagged,
+        alreadyAnswered: answeredIds.has(String(v._id)),
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One door, applied synchronously — the single fix, and every step of the queue walkthrough. Both
+// go through the same service call; a single fix is just a queue of one that closes immediately.
+router.post('/:campaignId/survey-conversions/:runId/door', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+    if (run.status !== 'open') {
+      return res.status(409).json({ error: 'That desk-entry session is already finished.', code: 'RUN_NOT_OPEN' });
+    }
+    const body = doorApplySchema.parse(req.body);
+    if (!run.selection.actionIds.some((id) => String(id) === String(body.actionId))) {
+      return res.status(400).json({ error: 'That door is not part of this session.', code: 'NOT_IN_SELECTION' });
+    }
+    // This path writes inline, so one pathological address must not outlive the request budget.
+    // The composer never sends this many; a hand-rolled call could.
+    if (Object.keys(body.voterPlans || {}).length > MAX_VOTERS_PER_DOOR_SYNC) {
+      return res.status(409).json({
+        error: `That door has more than ${MAX_VOTERS_PER_DOOR_SYNC} voters — more than this tool records in one go.`,
+        code: 'TOO_MANY_VOTERS_AT_DOOR',
+      });
+    }
+
+    const result = await applyDoorToRun({
+      run,
+      campaign,
+      actionId: body.actionId,
+      voterPlans: body.voterPlans || {},
+    });
+    res.json({ ...result, run: runWire(run) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/:campaignId/survey-conversions/:runId/close', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+    await closeConversionRun({ run, campaign });
+    res.json({ run: runWire(run) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Re-enqueue a run that failed part-way. What already landed stays landed — the job re-reads its
+// work set and skips every row it already stamped, so this picks up exactly where it stopped.
+router.post('/:campaignId/survey-conversions/:runId/resume', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+    if (run.status !== 'failed') {
+      return res.status(409).json({ error: 'Only a failed conversion can be resumed.', code: 'NOT_RESUMABLE' });
+    }
+    run.status = 'pending';
+    run.error = null;
+    await run.save();
+    try {
+      const job = await queueOp(
+        getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }),
+        Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
+      );
+      run.queueJobId = String(job.id);
+      await run.save();
+    } catch {
+      run.status = 'failed';
+      run.error = 'Could not restart the conversion. Nothing has been changed — try again shortly.';
+      await run.save();
+      return res.status(503).json({ error: run.error, code: 'QUEUE_UNAVAILABLE', run: runWire(run) });
+    }
+    res.json({ run: runWire(run) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+    if (run.revertedAt) {
+      return res.status(409).json({ error: 'That conversion was already reverted.', code: 'ALREADY_REVERTED' });
+    }
+    if (run.status === 'running' || run.status === 'reverting') {
+      return res.status(409).json({ error: 'That conversion is still running.', code: 'RUN_BUSY' });
+    }
+
+    // A small run is undone inline so the page can show the result immediately; anything large
+    // enough to have been a job going forward is a job coming back.
+    if (run.counts.entriesConverted > 500) {
+      run.status = 'reverting';
+      await run.save();
+      try {
+        const job = await queueOp(
+          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('revert', { runId: String(run._id) }),
+          Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
+        );
+        run.queueJobId = String(job.id);
+        await run.save();
+      } catch {
+        // Put the status back: `reverting` with no job would offer neither Revert nor Resume.
+        run.status = 'completed';
+        await run.save();
+        return res.status(503).json({
+          error: 'Could not start the undo. Nothing has been changed — try again shortly.',
+          code: 'QUEUE_UNAVAILABLE',
+        });
+      }
+      return res.status(202).json({ run: runWire(run) });
+    }
+
+    await revertConversionRun({ run, campaign });
+    res.json({ run: runWire(run) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:campaignId/survey-conversions', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const runs = await SurveyConversionRun.find({ campaignId: campaign._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    const people = await hydrateCanvassers(runs.map((r) => r.byUserId).filter(Boolean), activeOrgId(req));
+    res.json({
+      runs: runs.map((r) => {
+        const p = r.byUserId ? people.get(String(r.byUserId)) : null;
+        return runWire(r, p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null);
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The poll target. Reads the RUN DOC, not BullMQ: scoping by {_id, campaignId, organizationId}
+// makes a cross-org id walk structurally impossible rather than dependent on an ownership check.
+router.get('/:campaignId/survey-conversions/:runId', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const run = await loadRun(req, res, campaign);
+    if (!run) return;
+
+    const wire = runWire(run);
+    if (run.status === 'open') {
+      // DERIVED, never stored: the frozen selection minus the rows this session already stamped.
+      // An abandoned session therefore has no cursor that can go stale or disagree with the data.
+      const done = await CanvassActivity.find(
+        { 'reclassified.runId': run._id },
+        { _id: 1 }
+      ).lean();
+      const doneIds = new Set(done.map((r) => String(r._id)));
+      wire.doorsRemaining = run.selection.actionIds
+        .map(String)
+        .filter((id) => !doneIds.has(id));
+    }
+    res.json({ run: wire });
+  } catch (err) {
     next(err);
   }
 });

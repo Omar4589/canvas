@@ -80,6 +80,14 @@ Total survey responses submitted — one per voter per pass. A **volume** number
 3 voters all surveyed in one visit is **3 surveys but 1 knock**, so Surveys can exceed Knocks.
 Field: `surveysSubmitted`.
 
+> **Desk-entered responses count here too.** An org admin converting a door entry into Surveyed
+> (Door Outcomes → Surveyed) records real answers on the knocking canvasser's behalf; those rows are
+> ordinary `SurveyResponse` documents and move Surveys, Surveyed voters, contact rate and survey
+> rate exactly like a field submission. They carry a `deskEntry` stamp for provenance — **the stamp
+> is not arithmetic**, and no metric here filters on it. Every such conversion is priced in these
+> same figures before it runs, and is revertible. See
+> [SURVEYS.md §K](SURVEYS.md#k-desk-entered-responses-outcome-conversion).
+
 ### Surveyed voters
 Distinct voters who have a survey — i.e. **how many people we actually reached** (not how many
 forms we filed). Field: `surveyedVoters`.

@@ -16,6 +16,7 @@ import { ExportJob } from '../../models/ExportJob.js';
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
+import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
@@ -66,8 +67,8 @@ export const ORG_SCOPED = [
   ExportJob, FbTimeConnection, FbTimePersonLink, FbTimeShift,
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
   Membership, Pass,
-  ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyResponse,
-  SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
+  ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun,
+  SurveyResponse, SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
 ];
 

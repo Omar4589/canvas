@@ -1003,6 +1003,34 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     v5 entry above. The no-transaction cascade and the `PersonMergeLog` back-clean remain open.]*
 11. **The Help Center has zero articles on staff/support access** — end users cannot read in-product
     what the policy now promises. (A transparency gap, not a false sentence.)
+12. **[v6 2026-08-17 — NEW SOURCE OF PERSONAL DATA: admin-authored survey answers.]** Until now
+    every row in `SurveyResponse` — the most sensitive category this system holds, a political
+    opinion attached to a named, identified voter — was *a statement a voter made to a canvasser at
+    their door*. As of the Door Outcomes → Surveyed conversion
+    ([SURVEYS.md §K](SURVEYS.md#k-desk-entered-responses-outcome-conversion)) some rows are
+    **statements an admin typed about that voter, without the voter present.** That is a genuinely
+    new *source* of personal data about an identified person, and it must be stated rather than
+    absorbed.
+    **What bounds it:** org-admin only (the same tier that could already rewrite any answer via
+    `PATCH /admin/voters/:voterId/surveys/:responseId` — so it widens no ACCESS, only authorship);
+    every created row carries a `deskEntry` stamp naming the admin and the date, surfaced on the
+    voter's own record, in the response detail on both clients, and as two export columns; the run
+    is audited in `CampaignChange` (`source: 'survey_conversion'`); the whole thing is revertible;
+    and a **field-collected answer is never overwritten** — a voter who already answered that round
+    is skipped, by rule and by unique index. In the common case the content is the canvasser's own
+    report of a real conversation the app mis-recorded.
+    **Action required before the next policy pass:** any published sentence of the form *"survey
+    answers are recorded by canvassers at the door"* is now **false unless qualified**. Grep the
+    static legal pages and §C9/§C10/§H16 here. The legal pages are the owner's to edit — flagged,
+    not touched.
+    **Retention half:** the reverse direction writes `SurveyResponseArchive` rows that nothing
+    automatically consumes. That model's own comment argues growth is bounded *because restore
+    deletes the row it promotes* — true for `submit`/`restore`, **false for a conversion nobody
+    reverts**. Tenant deletion still reaches them (verified: `deleteCampaign.js`,
+    `deleteOrganization.js` — so §B5 is unaffected), but the retention-timer answer in §B6 changes;
+    see the stamp there.
+    **Not triggered:** no new subprocessor, no new external data flow, no new export destination
+    (the new columns describe data we already hold), no change to who can access customer data.
 
 ---
 
@@ -1360,6 +1388,17 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 ## B6. What automatic retention timers exist? What triggers deletion?
 
 **PARTIAL — one of the three "triggers" is not wired up at all.**
+
+> **[v6 2026-08-17 — one retained category added, no timer.]** A survey answer REMOVED from a door
+> by the Door Outcomes → Surveyed reverse conversion is **archived, not deleted**: it moves to
+> `SurveyResponseArchive` and is kept until its campaign or organization is deleted. There is no
+> timer on it, and that is deliberate — the direction exists for fraud investigation, where the
+> removed answers are the evidence, and the archive is what makes the change reversible and the
+> answers restorable. The honest sentence is therefore: *"an answer removed from a door is kept in
+> the archive until its campaign is deleted."* The `submit`/`restore` producers remain
+> self-consuming (restore deletes the row it promotes); only `overwrittenVia: 'outcome_convert'`
+> accumulates. Tenant deletion reaches it — see §B5 — so nothing here survives an org delete.
+> Full context: gap 12 in the v3 list above.
 
 Two scheduled BullMQ repeatable jobs, both registered on the worker dyno (`server/src/worker.js:46`, `:57`; `server/src/services/retention/scheduler.js:24-31`):
 

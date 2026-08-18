@@ -8,6 +8,7 @@ import { processTurfJob } from './services/turf/turfProcessor.js';
 import { processExportJob } from './services/export/exportProcessor.js';
 import { processCampaignDeleteJob } from './services/campaigns/deleteCampaignProcessor.js';
 import { processOrgDeleteJob } from './services/platform/deleteOrgProcessor.js';
+import { processConversionJob } from './services/canvass/conversionProcessor.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
@@ -15,6 +16,7 @@ import { FbTimeShift } from './models/FbTimeShift.js';
 import { ImportJob } from './models/ImportJob.js';
 import { Campaign } from './models/Campaign.js';
 import { Organization } from './models/Organization.js';
+import { SurveyConversionRun } from './models/SurveyConversionRun.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
@@ -26,6 +28,9 @@ const CAMPAIGN_DELETE_CONCURRENCY = Number(process.env.CAMPAIGN_DELETE_JOB_CONCU
 // Org hard-deletes are the heaviest thing this dyno runs (every campaign's rows at once). 1:
 // two concurrent cascades would each starve the other's heartbeat and look dead to the watchdog.
 const ORG_DELETE_CONCURRENCY = Number(process.env.ORG_DELETE_JOB_CONCURRENCY || 1);
+// Desk-entry conversions: 1, because two runs on the same campaign would race the
+// recomputeCampaignStats each one ends with, and the loser would persist a stale counter set.
+const OUTCOME_CONVERT_CONCURRENCY = Number(process.env.OUTCOME_CONVERT_JOB_CONCURRENCY || 1);
 
 // A long-lived worker must survive transient Redis/Mongo faults instead of
 // exiting. Without these, a stray unhandled rejection — or a Worker 'error'
@@ -57,6 +62,10 @@ async function main() {
   // And for the FbTime shift cache — the sync jobs upsert on its unique
   // {org, shiftId} key, which without the index would quietly allow duplicates.
   await FbTimeShift.syncIndexes().catch((e) => console.error('[worker] FbTimeShift.syncIndexes failed', e?.message || e));
+  // And the desk-entry run collection — another new one this dyno writes and the web polls.
+  await SurveyConversionRun.syncIndexes().catch((e) =>
+    console.error('[worker] SurveyConversionRun.syncIndexes failed', e?.message || e)
+  );
 
   // Bound the boot probe: against an unreachable Redis, ioredis
   // (maxRetriesPerRequest: null) queues the CONFIG GET forever and this await
@@ -129,6 +138,13 @@ async function main() {
     new Worker(QUEUE_NAMES.ORG_DELETE, processOrgDeleteJob, {
       connection: createRedis(),
       concurrency: ORG_DELETE_CONCURRENCY,
+    }),
+    new Worker(QUEUE_NAMES.OUTCOME_CONVERT, processConversionJob, {
+      connection: createRedis(),
+      concurrency: OUTCOME_CONVERT_CONCURRENCY,
+      // One stall redelivery is safe: the processor re-reads its work set and convertibleMatch
+      // excludes rows it already stamped, so a resumed job skips finished doors on its own.
+      maxStalledCount: 2,
     }),
   ];
 
@@ -220,6 +236,25 @@ async function main() {
       );
     } catch (e) {
       console.error('[worker] org-delete reconcile error:', e?.message || e);
+    }
+  });
+  // Same reconcile for desk-entry conversions. What landed STAYS landed — every converted door is
+  // individually correct and individually revertible by the run's own stamp sweep, so a rollback
+  // pass here would be a second destructive operation with its own failure mode. The run card
+  // offers Revert and Resume instead; this listener only makes sure the doc says `failed` rather
+  // than freezing at `running` forever.
+  const convertWorker = workers.find((w) => w.name === QUEUE_NAMES.OUTCOME_CONVERT);
+  convertWorker.on('failed', async (job, err) => {
+    if (!job?.data?.runId) return;
+    const attemptsAllowed = job.opts?.attempts || 1;
+    if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
+    try {
+      await SurveyConversionRun.updateOne(
+        { _id: job.data.runId, status: { $in: ['pending', 'running', 'reverting'] } },
+        { $set: { status: 'failed', error: String(err?.message || err || 'unknown') } }
+      );
+    } catch (e) {
+      console.error('[worker] conversion reconcile error:', e?.message || e);
     }
   });
 

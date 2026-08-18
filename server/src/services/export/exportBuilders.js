@@ -86,6 +86,7 @@ const loadPassEffortMaps = async (ctx) => {
 };
 
 const canvasserCells = (info) => [info?.firstName || '', info?.lastName || '', info?.status || ''];
+const nameOf = (info) => (info ? `${info.firstName || ''} ${info.lastName || ''}`.trim() : '');
 
 // ── the opt-in detail block on the two survey exports (params.includeVoterDetail) ────────
 // Owner decision 2026-08-11: OFF by default. A survey CSV is a record of what a named person
@@ -446,12 +447,18 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
   let processedSoFar = 0;
   const fmts = instantFmts(ctx.anchorTz);
   const { passById, effortNameById } = await loadPassEffortMaps(ctx);
-  const [userIds, coordIds, total] = await Promise.all([
+  const [userIds, coordIds, deskIds, total] = await Promise.all([
     SurveyResponse.distinct('userId', q),
     SurveyResponse.distinct('coordinatorId', q),
+    // The admin who desk-entered is usually NOT on the campaign roster, so they have to be
+    // hydrated explicitly or the "Desk entered by" column silently exports blank.
+    SurveyResponse.distinct('deskEntry.byUserId', q),
     SurveyResponse.countDocuments(q),
   ]);
-  const people = await hydrateCanvassers([...userIds, ...coordIds].filter(Boolean).map(String), ctx.organizationId);
+  const people = await hydrateCanvassers(
+    [...userIds, ...coordIds, ...deskIds].filter(Boolean).map(String),
+    ctx.organizationId
+  );
   ctx.setTotalEstimate(total);
   const files = [];
 
@@ -510,7 +517,10 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
       'Address', 'Address line 2', 'City', 'State', 'Zip',
       ...detail.geoHeaders,
       'Canvasser first name', 'Canvasser last name', 'Canvasser status', 'Team',
-      'Template', 'Template version', 'Offline submission', 'Edited', 'Note',
+      'Template', 'Template version', 'Offline submission', 'Edited',
+      // Desk entered = an admin typed these answers when converting the door to Surveyed. It counts
+      // in every rate exactly like a field answer; the column is provenance, not arithmetic.
+      'Desk entered', 'Desk entered by', 'Note',
       ...cols.map(columnOf),
       'Household DB id', 'Voter DB id', 'Response DB id',
     ]);
@@ -558,6 +568,8 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
           template?.name || '', r.surveyTemplateVersion ?? '',
           r.wasOfflineSubmission ? 'yes' : 'no',
           r.editedAt ? 'yes' : '',
+          r.deskEntry ? 'yes' : '',
+          r.deskEntry ? nameOf(people.get(String(r.deskEntry.byUserId))) : '',
           r.note || '',
           ...cols.map((c) => renderAnswer(c.key, r.answers)),
           String(r.householdId), vid, String(r._id),
@@ -604,7 +616,7 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
     'Canvasser first name', 'Canvasser last name', 'Canvasser status',
     'Walk list', 'Pass', 'Pass name', 'Template', 'Template version',
     'Question', 'Question key', 'Answer', 'Option ids', 'Other text',
-    'Note', 'Offline submission',
+    'Note', 'Offline submission', 'Desk entered',
     'Household DB id', 'Voter DB id', 'Response DB id',
   ]);
 
@@ -651,7 +663,7 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
         p ? p.roundNumber : '', p ? p.name : passLabel(p),
         templateNameById.get(String(r.surveyTemplateId)) || '', r.surveyTemplateVersion ?? '',
       ];
-      const tail = [r.note || '', r.wasOfflineSubmission ? 'yes' : 'no', String(r.householdId), vid, String(r._id)];
+      const tail = [r.note || '', r.wasOfflineSubmission ? 'yes' : 'no', r.deskEntry ? 'yes' : '', String(r.householdId), vid, String(r._id)];
       for (const a of r.answers || []) {
         await writer.writeRow([
           ...shared,

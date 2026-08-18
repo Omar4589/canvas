@@ -38,10 +38,16 @@ const campaignChangeSchema = new mongoose.Schema(
     byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // the actor
     // How the edit arrived. An enum so a bulk/repair path has to declare itself rather than
     // masquerading as a human field edit in the feed: 'admin_campaigns' is the PATCH,
-    // 'outcome_reclassify' is the outcome-reclassification tool (and its revert). Server-side
-    // only — the history route deliberately does not ship `source` to the clients, so adding a
-    // value here is never a client change.
-    source: { type: String, enum: ['admin_campaigns', 'outcome_reclassify'], required: true },
+    // 'outcome_reclassify' is the outcome-reclassification tool (and its revert), and
+    // 'survey_conversion' is its Surveyed-direction sibling (services/canvass/surveyConversion.js),
+    // which additionally creates or archives real survey answers. Server-side only — the history
+    // route deliberately does not ship `source` to the clients, so adding a value here is never a
+    // client change.
+    source: {
+      type: String,
+      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion'],
+      required: true,
+    },
   },
   { timestamps: true }
 );

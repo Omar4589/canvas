@@ -227,14 +227,31 @@ export default function ResponseDetails() {
               ) : null}
               {d.response.archived ? (
                 <InsetRow
-                  label="Overwritten by"
+                  /* An 'outcome_convert' row was removed by an ADMIN changing this door's outcome,
+                     not overwritten by another canvasser — the default wording would read as an
+                     accusation against the canvasser for something they did not do. */
+                  label={d.response.overwrittenVia === 'outcome_convert' ? 'Removed by' : 'Overwritten by'}
                   value={
                     d.response.overwrittenBy
                       ? `${d.response.overwrittenBy.firstName} ${d.response.overwrittenBy.lastName || ''}`.trim()
-                      : 'another canvasser'
+                      : d.response.overwrittenVia === 'outcome_convert'
+                        ? 'an admin'
+                        : 'another canvasser'
                   }
-                  sub={formatExact(d.response.overwrittenAt, tz)}
-                  badge={{ text: 'Overwritten' }}
+                  sub={
+                    d.response.overwrittenVia === 'outcome_convert'
+                      ? `${formatExact(d.response.overwrittenAt, tz)} · the door's outcome was changed`
+                      : formatExact(d.response.overwrittenAt, tz)
+                  }
+                  badge={{ text: d.response.overwrittenVia === 'outcome_convert' ? 'Removed' : 'Overwritten' }}
+                />
+              ) : null}
+              {d.response.deskEntry ? (
+                <InsetRow
+                  label="Entered at a desk"
+                  value={formatExact(d.response.deskEntry.at, tz)}
+                  sub="Typed by an admin correcting this door's outcome, not collected at the door"
+                  badge={{ text: 'Desk entered' }}
                 />
               ) : null}
               {d.response.archived && canRestore ? (

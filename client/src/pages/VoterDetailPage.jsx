@@ -7,6 +7,7 @@ import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
 import { Badge } from '../components/ui/index.js';
 import { choicesFor, OTHER_OPTION_ID } from '../lib/surveyChoices.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
 
 function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
@@ -383,6 +384,17 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
           {survey.editedAt && (
             <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
           )}
+          {/* Desk-entered: typed by an admin correcting the door's outcome, not collected at the
+              door. It counts in every rate exactly like a field answer — this line is provenance,
+              so nobody reads it as a doorstep conversation that never happened. */}
+          {survey.deskEntry && (
+            <p className="mt-2 text-xs text-amber-600">
+              Entered by {survey.deskEntry.by?.name || 'an admin'} on {fmtDate(survey.deskEntry.at, tz)}
+              {survey.deskEntry.fromOutcome
+                ? ` — this door was recorded as ${(ACTION_LABELS[survey.deskEntry.fromOutcome] || survey.deskEntry.fromOutcome).toLowerCase()}`
+                : ''}
+            </p>
+          )}
           {survey.replacedEarlier && (
             <p className="mt-2 text-xs text-warning-fg">
               Replaced {survey.replacedEarlier.by?.name || 'another canvasser'}&apos;s earlier answers
@@ -460,19 +472,35 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
 // lossless swap: these answers become current and the current ones land here the same way, so
 // flipping back and forth destroys nothing.
 function OverwrittenSurveyCard({ survey, onRestore, busy, tz }) {
+  // An 'outcome_convert' row was REMOVED by an admin converting this door away from Surveyed, not
+  // overwritten by another canvasser. The default copy ("was X's · replaced by Y") would read as an
+  // accusation against the canvasser for something an admin did, so this direction says so plainly.
+  const removedByConversion = survey.overwrittenVia === 'outcome_convert';
   return (
     <div className="rounded-lg border border-dashed border-border bg-sunken p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium text-fg-muted">
           {survey.templateName || 'Survey'}{' '}
           <span className="text-xs font-normal text-fg-subtle">
-            · Overwritten {fmtDate(survey.overwrittenAt, tz)}
-            {survey.by ? ` · was ${survey.by.name}'s` : ''}
-            {survey.overwrittenBy ? ` · replaced by ${survey.overwrittenBy.name}` : ''}
+            {removedByConversion ? (
+              <>
+                · Removed {fmtDate(survey.overwrittenAt, tz)} when this door&rsquo;s outcome was changed
+                {survey.by ? ` · recorded by ${survey.by.name}` : ''}
+                {survey.overwrittenBy ? ` · changed by ${survey.overwrittenBy.name}` : ''}
+              </>
+            ) : (
+              <>
+                · Overwritten {fmtDate(survey.overwrittenAt, tz)}
+                {survey.by ? ` · was ${survey.by.name}'s` : ''}
+                {survey.overwrittenBy ? ` · replaced by ${survey.overwrittenBy.name}` : ''}
+              </>
+            )}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="danger">Overwritten</Badge>
+          <Badge variant={removedByConversion ? 'neutral' : 'danger'}>
+            {removedByConversion ? 'Removed' : 'Overwritten'}
+          </Badge>
           <button
             onClick={onRestore}
             disabled={busy}
