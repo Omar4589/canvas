@@ -343,8 +343,10 @@ how much detail you have:
 - **Enter answers** applies one answer set to everyone at every selected door. This is the right
   tool for "that whole batch was really *Undecided*."
 - **Door by door** walks you through the selection one address at a time, so each household gets
-  its own real answers. You can leave part-way through and pick up where you left off; the page
-  remembers how many are done.
+  its own real answers. Leaving part-way (**Finish later**, or just closing the tab) leaves the
+  session listed under **Survey answer changes** as *Unfinished — N of M done*, with **Resume** to
+  carry on and **Stop here** to keep what's done and close it. The remaining doors are recomputed
+  from what actually saved, so there is no cursor to go stale.
 
 Either way you can **leave questions blank** — record only what you actually know. Nothing is
 required.

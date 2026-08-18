@@ -638,6 +638,54 @@ test('a door-by-door queue session applies per-door answers and reverts as one',
   assert.equal(await SurveyResponse.countDocuments({ 'deskEntry.runId': runId }), 0, 'the whole session undoes at once');
 });
 
+test('an abandoned door-by-door session can be resumed from a cold load', { skip }, async () => {
+  // The failure this pins is a real one that shipped: the server derived the remaining doors
+  // correctly all along, but a session closed mid-way was strandable because the poll response
+  // carried no template to re-open the composer with. A resume must need exactly ONE call.
+  const ids = await idsFor({
+    actionType: 'not_home',
+    effortId: ctx.effort._id,
+    householdId: { $in: [ctx.doors[1]._id, ctx.doors[2]._id] },
+  });
+  assert.equal(ids.length, 2);
+
+  const opened = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'to_survey', to: 'survey_submitted', mode: 'queue', actionIds: ids },
+  });
+  const runId = opened.json.run.id;
+  const first = (await CanvassActivity.findOne({ _id: { $in: ids }, householdId: ctx.doors[1]._id }).lean())._id;
+
+  await call('POST', url(`/${runId}/door`), {
+    ...asAdmin(),
+    body: { actionId: String(first), voterPlans: { [String(ctx.voters[2]._id)]: { answers: YES } } },
+  });
+
+  // ...the admin closes the tab. Everything a fresh page load needs comes back in one GET.
+  const cold = await call('GET', url(`/${runId}`), asAdmin());
+  assert.equal(cold.status, 200);
+  assert.equal(cold.json.run.status, 'open', 'the session is still resumable');
+  assert.equal(cold.json.run.doorsRemaining.length, 1, 'exactly the door not yet done');
+  assert.ok(cold.json.run.template, 'the survey comes back too — without it the composer is blank');
+  assert.equal(cold.json.run.template.name, 'Support Survey');
+  assert.ok(cold.json.run.template.questions.length, 'with its questions');
+  // Frozen at creation: re-resolving would let a re-pointed walk list change the questions
+  // half a session in.
+  assert.equal(cold.json.run.template.id, String(ctx.template._id));
+
+  // Finishing from the resumed state works and closes cleanly.
+  const second = cold.json.run.doorsRemaining[0];
+  await call('POST', url(`/${runId}/door`), {
+    ...asAdmin(),
+    body: { actionId: second, voterPlans: { [String(ctx.voters[3]._id)]: { answers: UNDECIDED } } },
+  });
+  const after = await call('GET', url(`/${runId}`), asAdmin());
+  assert.equal(after.json.run.doorsRemaining.length, 0, 'nothing left to walk');
+  await call('POST', url(`/${runId}/close`), asAdmin());
+  assert.equal((await SurveyConversionRun.findById(runId).lean()).status, 'completed');
+  await call('POST', url(`/${runId}/revert`), asAdmin());
+});
+
 test('partial answers are allowed — an empty set records a response with no answers', { skip }, async () => {
   const row = await CanvassActivity.findOne({ householdId: ctx.doors[2]._id, actionType: 'not_home' }).lean();
   const partialRunId = await bulkRun({ direction: 'to_survey', to: 'survey_submitted', actionIds: [String(row._id)], answers: [] });

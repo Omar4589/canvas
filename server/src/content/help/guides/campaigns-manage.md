@@ -71,7 +71,7 @@ The App Customization page keeps a small **Reclassification** shortcut for the c
 Sometimes the conversation really happened and the app has no record of it — a canvasser tapped **Not home** by mistake and only noticed back at the office, where redoing it would flag their GPS as far from the door. Or a whole week got recorded as **Refused** because that button was left on. On the same **Door Outcomes** page, select those entries and change them to **Surveyed**. Because a surveyed door has to own real answers, you enter them:
 
 - **Enter answers** applies one answer set to every voter at every selected door — right for "that whole batch was really *Undecided*."
-- **Door by door** walks you through the selection one address at a time, so each household gets its own answers. You can stop part-way and pick up where you left off.
+- **Door by door** walks you through the selection one address at a time, so each household gets its own answers. You can stop part-way — the unfinished session is listed under **Survey answer changes** with a **Resume** button (and **Stop here** if you'd rather keep what you've done and close it).
 
 You can leave questions blank — record only what you actually know.
 

@@ -1190,6 +1190,12 @@ re-typed): **`convertibleMatch`** — the two provenance rules (`via: {$ne:'bulk
 - **`SurveyResponse.deskEntry.runId`** — what a forward revert deletes.
 - **`SurveyResponseArchive.conversionRunId`** — what a reverse revert restores.
 
+The poll route additionally returns, for an **open** queue session, both `doorsRemaining` (the
+frozen selection minus the rows already stamped) and the run's **frozen template** — one call, so a
+session survives a cold page load. The template is read from `run.surveyTemplateId` rather than
+re-resolved from the selection: re-resolving would let a walk list re-pointed mid-session silently
+change the questions half-way through.
+
 No run doc carries an id manifest: 25k entries × ~2 voters ≈ 50k responses. Revert is a **sweep by
 stamp**, which is exact by construction, bounded in memory, and correct for a half-finished job.
 

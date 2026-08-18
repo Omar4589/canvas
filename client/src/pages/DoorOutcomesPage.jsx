@@ -264,6 +264,33 @@ export default function DoorOutcomesPage() {
     onError: (e) => setError(e.message),
   });
 
+  const closeQueue = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/close`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setActiveRunId(d.run.id);
+      afterWrite();
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    },
+    onError: (e) => setError(e.message),
+  });
+
+  // Re-enter an unfinished door-by-door session. The GET carries both halves — the remaining doors
+  // (derived from what's already saved, so it is right no matter how the session ended) and the
+  // survey the run froze at creation.
+  const resumeQueue = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}`),
+    onSuccess: ({ run }) => {
+      if (!run.doorsRemaining?.length) {
+        // Nothing left — it was finished but never closed. Close it rather than opening an empty
+        // walkthrough the admin would have to dismiss.
+        return closeQueue.mutate(run.id);
+      }
+      setQueueTemplate(run.template || null);
+      setWalking(run);
+    },
+    onError: (e) => setError(e.message),
+  });
+
   const convRevert = useMutation({
     mutationFn: (runId) =>
       api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/revert`, { method: 'POST' }),
@@ -506,10 +533,27 @@ export default function DoorOutcomesPage() {
                 {r.revertedAt ? (
                   <Badge variant="neutral">Undone</Badge>
                 ) : r.status === 'open' ? (
-                  <Badge variant="neutral">
-                    Unfinished — {(r.progress?.doorsDone || 0).toLocaleString()} of{' '}
-                    {(r.progress?.doorsTotal || 0).toLocaleString()} done
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="neutral">
+                      Unfinished — {(r.progress?.doorsDone || 0).toLocaleString()} of{' '}
+                      {(r.progress?.doorsTotal || 0).toLocaleString()} done
+                    </Badge>
+                    <Button
+                      size="sm"
+                      disabled={resumeQueue.isPending}
+                      onClick={() => { setError(null); resumeQueue.mutate(r.id); }}
+                    >
+                      {resumeQueue.isPending ? 'Opening…' : 'Resume'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={closeQueue.isPending}
+                      onClick={() => { setError(null); closeQueue.mutate(r.id); }}
+                    >
+                      Stop here
+                    </Button>
+                  </div>
                 ) : (
                   <Button
                     variant="secondary"

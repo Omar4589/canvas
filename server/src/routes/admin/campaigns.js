@@ -1482,6 +1482,21 @@ router.get('/:campaignId/survey-conversions/:runId', async (req, res, next) => {
       wire.doorsRemaining = run.selection.actionIds
         .map(String)
         .filter((id) => !doneIds.has(id));
+
+      // An open session must be RESUMABLE from a cold page load, so this one call has to carry
+      // everything the walkthrough needs — the remaining doors AND the survey to answer. Resolving
+      // the template from the selection again would be wrong as well as wasteful: the run froze
+      // which survey it is at creation, and a walk list re-pointed since then must not silently
+      // change the questions half a session in.
+      if (run.surveyTemplateId) {
+        const t = await SurveyTemplate.findOne(
+          { _id: run.surveyTemplateId, organizationId: activeOrgId(req) },
+          'name version intro questions'
+        ).lean();
+        wire.template = t
+          ? { id: String(t._id), name: t.name, version: t.version, intro: t.intro, questions: t.questions }
+          : null;
+      }
     }
     res.json({ run: wire });
   } catch (err) {
