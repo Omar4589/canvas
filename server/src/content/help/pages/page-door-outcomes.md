@@ -66,4 +66,4 @@ A large batch runs in the background with a progress bar. If it stops part-way, 
 
 ## What you won't see here
 
-Doors an admin marked with **bulk restrict** (desk marks, with their own undo on Turf Cutting), and entries an earlier change already converted, until you undo that one. **Lit dropped** entries never appear — a lit drop has no answers to move either way.
+Doors an admin marked restricted from the desk — a whole book with **bulk restrict**, or a single home from its popup (desk marks, each with its own undo where it was made), and entries an earlier change already converted, until you undo that one. **Lit dropped** entries never appear — a lit drop has no answers to move either way.

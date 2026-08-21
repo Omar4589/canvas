@@ -1276,8 +1276,13 @@ export default function MapPage() {
               )}
               <HouseholdDetailPanel
                 household={selectedHousehold}
+                campaignId={campaignId}
                 onClose={() => { setSelected(null); setStackIds(null); }}
                 onMovePin={() => { setMoveErr(null); setMoveTarget(selectedHousehold); }}
+                // A desk mark / unmark recolors this door: the panel already invalidates the
+                // map + counts keys; the refetch joins that in-flight fetch (react-query
+                // dedupes) so the open panel's snapshot refreshes as soon as it lands.
+                onRestrictChanged={() => householdsQ.refetch()}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
                 tz={tz}

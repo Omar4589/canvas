@@ -449,6 +449,20 @@ along, mirroring the web map:
 - **An opt-in Overlaps map toggle.** Turn it on and every door worked by 2+ canvassers in the same pass
   gets an **amber ring** beneath its pin — the same pass-wide, day-agnostic set as the web map (it
   catches collisions even across different days). Off by default; **no clustering**, ever.
+- **Marking one home restricted from the desk.** Above the sheet's **Move pin / Close** buttons sits one
+  full-width row for the round the sheet speaks for: an unmarked door offers **Mark restricted** (one
+  plain confirm — the home gets a Restricted Access desk mark, canvassers see it slate, it stays out of
+  every rate and knock count; a door completed this round keeps its result); a desk-marked door reads
+  *Round 2 · Marked from the desk by … · date* with **Unmark restricted**; a door a canvasser restricted
+  at the door reads *Restricted at the door by …* and offers nothing — field marks change only when the
+  door is re-recorded. The caption names the round because the header pill is the door's stored global
+  status, while the mark is per-round: the server picks the door's walk list's **active** round, else its
+  single draft round, else the Alert asks you to open the door from its book and try again; a door still
+  in Intake reads *Not in a walk list — can't be marked* and the button is disabled (an older server that
+  omits `effortId` surfaces the same refusal as the Alert *This door isn't in a walk list yet*). Same mark
+  as the Books screen's book-level one (**Unmark restricted (N)** on the book counts it too); the history
+  list tags desk marks *· desk mark*.
+  See [PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Marking a single home restricted*.
 
 Filtering the mobile admin map to a **single canvasser** also recolors each door by **that canvasser's
 own disposition** (green only where *they* surveyed, etc.), exactly like the web map — see
@@ -500,8 +514,9 @@ admin screen — **GPS audit, Notes, Exports, Overlaps, Duplicate surveys, Timel
   no way forward.
 - **An archived campaign is read-only, and the screen says so.** An **Archived — read-only** banner
   appears and the actions that would change the field come off: assigning books and turf, the
-  Select/bulk bar, the restrict actions, adding or removing people, moving a pin, deleting a
-  duplicate survey, restoring a replaced response. That isn't the app being shy — the server
+  Select/bulk bar, the restrict actions (book-level and the single-home Mark / Unmark restricted
+  row), adding or removing people, moving a pin, deleting a duplicate survey, restoring a replaced
+  response. That isn't the app being shy — the server
   refuses those writes on an archived campaign, on the web dashboard too (see
   [CAMPAIGNS.md](CAMPAIGNS.md) → *Archive vs. delete*).
 - **Exports stay fully enabled**, with a second banner line saying so. An export is a read, and a
@@ -625,25 +640,38 @@ leaderboard, the canvassers CSV, and the canvasser timeline — but it enters **
 
 **Marking a whole book restricted (gated communities).** On the mobile **Books** screen, Map view's
 tapped-book sheet has a **⋯** button beside its ✕ close — opening it shows **Mark book restricted…**
-(or **Unmark restricted (N)** once bulk-marked), kept off the roster's scroll path so it can't be
+and, once the book holds any desk marks, **Unmark restricted (N)** beside it (both items stay available
+— N counts every desk mark on the book's current doors for that round, single-home ones included, so one
+single-home mark must not hide the book-level action), kept off the roster's scroll path so it can't be
 tapped by accident; List view reaches the same action via the **⋯** in the book detail screen's
 header. Either **⋯** menu closes by tapping anywhere off it (or re-tapping the **⋯**), and it never
 carries over to the next book you open. Select mode's action bar has **Restrict…** for several books at
-once — plus **Unmark (N)** when the selection holds bulk marks, clearing them all in one action — and the
+once — plus **Unmark (N)** when the selection holds desk marks, clearing them all in one action — and the
 web Turf Cutting page has the same actions on the selected-books panel. (The bar stacks its
 "N books selected" label above a **wrapping** button row: label + three buttons in one line needed
 ~451pt on a ~370pt screen, which pushed *Assign to…* off the right edge with no way to reach it. With
 **Unassign all** the row is now up to four buttons, so the bar **measures itself** with `onLayout` and
 hands the list its real height — `ACTION_BAR_CLEARANCE` is only the starting estimate. Nothing in
 `mobile/` disables font scaling, so at large accessibility text every button becomes its own row and no
-fixed constant could be right; an under-estimate occludes the last book card.) All three mobile entry points
-share one scope-aware flow (`mobile/lib/restrictBooks.js`): when the crew has already reached doors
+fixed constant could be right; an under-estimate occludes the last book card.) All three mobile **book-level**
+entry points share one scope-aware flow (`mobile/lib/restrictBooks.js`): when the crew has already reached doors
 (not-home / refused / wrong-address) you choose **Only unknocked** (the safe default, listed first) or
 **Every unfinished**, which takes a second confirm before it also marks the reached doors — matching the
 web modal's default and its type-"restrict" gate. Canvassers see the slate doors immediately, doors
 already completed this round keep their result, and **Unmark restricted (N)** reverses it (field-recorded
-marks are never touched). Bulk marks never appear in per-canvasser stats or the GPS audit — see
-[METRICS.md](METRICS.md).
+marks are never touched). Desk marks — book-level or single-home — never appear in per-canvasser stats
+or the GPS audit — see [METRICS.md](METRICS.md).
+
+**Marking a single home restricted (one door).** The same desk mark, one house at a time, from two
+places on the phone: the admin **Map** tab's door sheet (the row above **Move pin** — see *The Map tab's
+door detail* above) and the **house pop-up inside a book** (Books → List view → book → tap a house), which
+shows a caption plus **Mark restricted** / **Unmark restricted** between the status line and the voters.
+One plain confirm, no scope choice, no note. The book pop-up marks the book's own round; the Map sheet
+marks the round the sheet names. A desk-marked house reads *Marked from the desk by … · date* and
+offers Unmark; a house a canvasser restricted at the door offers nothing. Because it is the same row
+as a book-level mark, the book's **Unmark restricted (N)** removes single-home marks too — the Map tab
+recolors on its own after either. Doors a canvasser already completed this round keep their result.
+Full rules (which round, Intake, archived rounds, skips) in [PASSES_AND_TURF.md](PASSES_AND_TURF.md).
 
 ---
 
@@ -733,7 +761,19 @@ book's homes for assignment in context. Hidden route, pushed from the Books list
 
 ### Server (v2 additions in [turfs.js](../server/src/routes/admin/turfs.js), reuse `passStatus.js`)
 - `GET …/turfs/progress?passId=` — per-book eligible total + knocked (one status map, sliced per turf).
-- `GET …/turfs/:turfId/households` — one book's homes (location+status) + boundary/centroid for the map.
+- `GET …/turfs/:turfId/households` — one book's homes (location+status) + boundary/centroid for the map,
+  plus `turf.bulkRestrictedCount` — desk marks (rows) on the book's **current** doors for its round, single-home
+  ones included (keyed by `(passId, householdIds)`, not the stamped `turfId`).
+- `POST …/turfs/restrict-bulk` / `unrestrict-bulk` (book-level) and `POST …/turfs/restrict-doors` /
+  `unrestrict-doors` `{ householdIds[], passId? }` (single-home) — one writer,
+  [services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js). The book pop-up
+  sends `passId: turf.passId`; the Map sheet sends the scope's `passId` when one is set, else lets the
+  server resolve (active round → single draft → `400 PASS_REQUIRED`). Classification on the phone is
+  `doorMarkState(rounds, passId)` in `mobile/lib/restrictBooks.js` over `/activity`'s per-round entries
+  (`via === 'bulk'` ⇒ desk; missing/undefined `via` ⇒ field — the desk never offers an undo it can't
+  honor); prompts/Alert copy + `deskMarkErrorMessage` (`e.data.code === 'PASS_REQUIRED'` → the
+  intake / no-round sentences; a 404 → "Your server doesn't support this yet.") live beside it.
+  Full contract in [PASSES_AND_TURF.md](PASSES_AND_TURF.md) Part 2 §C.
 
 **Prerequisite:** a canvasser sees a book only if assigned to the **campaign** *and* the **book**, so
 book assignment alone is a no-op until they're on the campaign — hence the campaign-assigned roster.
@@ -804,7 +844,17 @@ client-only:
   de-duped server-side to one entry per survey) and `GET /admin/households/:householdId/surveys` (answers
   on open only) — the same two endpoints the web `HouseholdDetailPanel` uses. The inline **⚠ Overlap**
   badge is derived from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in
-  a pass), naming the others.
+  a pass), naming the others. The **Mark / Unmark restricted** row above *Move pin* reads the same
+  payload — `doorMarkState(rounds, scope.passId || currentPassId)` — and is gated `canWrite &&
+  hhActivityQ.isSuccess` (positive form, never flashes); a desk-marked door offers Unmark, a
+  field-restricted door offers nothing, `selected.effortId === null` (the `/map` row's new field) is a
+  disabled hint. Mutations `POST …/turfs/restrict-doors` / `unrestrict-doors` (`{ householdIds:[id],
+  passId? }` — unmark sends the mark's own `passId`), `onSettled` invalidates `['admin','households']`
+  (map + counts), `['admin','household-activity', id]`, `['admin','book-households']`,
+  `['admin','turf-progress']`, `['admin','turfs']`; the tap-time `selected` snapshot re-syncs from
+  `householdsById` after the refetch (never closes the sheet). The history line appends *· desk mark*
+  when `e.via === 'bulk'`. The restricted token is otherwise only ever a text color, a filled background
+  or a map color stop — this row is the one bordered control drawn with it.
 - **Overlaps toggle:** an opt-in query to `GET /admin/reports/overlap-doors` (carrying
   `campaignId` + `effortId`/`passId`), folded into the map's live-poll pill; rings the loaded overlap
   doors beneath the pins (`admin-overlaps` `ShapeSource` + `CircleLayer`).
@@ -828,7 +878,7 @@ map is complete; full server/data depth is in the linked docs, not duplicated.
 | Survey report **Tags** rollup + voters-by-tag drill | [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) renders `<TagResults>` from `surveyResultsQ.data.tags`; `QuestionResults.jsx` `TagResults` | `GET /admin/reports/survey-results` `tags[]` (distinct voters per tag via `answerTagClause`) + `GET /admin/reports/voters-by-answer?tag=&surveyTemplateId=` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [SURVEYS.md](SURVEYS.md) §I |
 | Saved searches: **By tag** filter + status filter incl. **Refused** / **Restricted** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`/`'restricted'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
 | **Refused** door outcome in admin numbers | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) amber `refused` segment; [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) / [OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) coverage; [reportDerive.js](../client/src/lib/reportDerive.js) `CONTACT_LABELS.refused = 'Declined to participate'` | `refused` (coverage + events), `refusedKnocks`, `contactRate` on `/overview` · `/campaign-rollup` · `/canvassers`; `Refused` column in `/admin/reports/canvassers.csv` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [METRICS.md](METRICS.md) |
-| **Restricted access** door outcome (all campaign types; **not** billable) | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) slate `restricted` segment; [statusColors.js](../client/src/lib/statusColors.js) `restricted: '#475569'`; [CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) `dayRestricted` column | `restricted` (coverage + events + per-canvasser tally), excluded from `KNOCK_ACTIONS`/`homesKnocked`/rates; `Restricted` column in `/admin/reports/canvassers.csv`; `dayRestricted` on `/canvasser-timeline`; `excludeRestricted` cut option ([turfs.js](../server/src/routes/admin/turfs.js) → [generateTurf.js](../server/src/services/turf/generateTurf.js)) | [METRICS.md](METRICS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) |
+| **Restricted access** door outcome (all campaign types; **not** billable) — and the **desk marks** (a whole book or a single home) | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) slate `restricted` segment; [statusColors.js](../client/src/lib/statusColors.js) `restricted: '#475569'`; [CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) `dayRestricted` column; single-home mark/unmark in [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) (`RestrictSection` in the house popup, building popup counts) and [HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) (`RestrictedSection`), classifier [lib/restrictMark.js](../client/src/lib/restrictMark.js); mobile: the admin Map door sheet row + the book house pop-up (not web-only — listed here for the file map) | `restricted` (coverage + events + per-canvasser tally), excluded from `KNOCK_ACTIONS`/`homesKnocked`/rates; `Restricted` column in `/admin/reports/canvassers.csv`; `dayRestricted` on `/canvasser-timeline`; `excludeRestricted` cut option ([turfs.js](../server/src/routes/admin/turfs.js) → [generateTurf.js](../server/src/services/turf/generateTurf.js)); desk marks via `restrict-bulk` / `unrestrict-bulk` + `restrict-doors` / `unrestrict-doors` → [services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) (`via:'bulk'`, never billed, never anyone's work) | [METRICS.md](METRICS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) |
 
 > Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**
 > (`question.refusalOption` is reserved and unwired). "Refused" is a **door-level disposition** on

@@ -15,7 +15,7 @@ Billing is simple and predictable, and it never gets in the way of work you've a
 
 You're billed **per campaign, per month**. Your rate is agreed with your account manager, and it can differ from one race to the next — a statewide campaign and a small local one don't have to cost the same. Rates aren't shown in the app; ask your account manager any time.
 
-A campaign starts billing in the month of its **first field visit** — a knock, or a restricted home a canvasser walked to and couldn't get into. Setup months, where you've created the campaign, imported voters, and cut turf but nobody's been out yet, are free. (Marking a book restricted from your desk isn't a field visit and doesn't start anything.) Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
+A campaign starts billing in the month of its **first field visit** — a knock, or a restricted home a canvasser walked to and couldn't get into. Setup months, where you've created the campaign, imported voters, and cut turf but nobody's been out yet, are free. (Marking a book — or a single home — restricted from your desk isn't a field visit and doesn't start anything.) Billing then runs through the month you [archive the campaign](archive-vs-delete-campaign), so archiving is what stops it.
 
 Each campaign on your Billing page shows **Billing started** with the date it began — or *billing not started*, if it hasn't yet.
 

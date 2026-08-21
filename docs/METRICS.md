@@ -219,17 +219,22 @@ when someone logs restricted homes; that's intentional. A restricted mark is **o
 `REPLACEABLE_ACTIONS`, so re-recording any other disposition on the same door/pass supersedes it (fixes
 a mistap).
 
-**Bulk marks are the one exception to the per-canvasser rules above.** An admin can mark a **whole
-book** restricted at once (a gated community — from the web Turf Cutting page or the mobile Books
-screen). Those marks are real activity rows carrying `via: 'bulk'`
-([models/CanvassActivity.js](../server/src/models/CanvassActivity.js)): they drive door status,
-per-round views, coverage, and campaign-scope restricted tallies exactly like field marks — but they
-are **excluded** from every per-canvasser surface (timeline, leaderboards, per-canvasser Restricted
+**Desk marks — a whole book or a single home — are the one exception to the per-canvasser rules
+above.** An admin can mark a **whole book** restricted at once (a gated community — from the web Turf
+Cutting page or the mobile Books screen), or a **single home** (one locked gate — from the Turf Cutting
+map's house popup, the Map page's door panel, or the mobile admin map / book house pop-up; see
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md)). Both write the same real activity row carrying `via: 'bulk'`
+([models/CanvassActivity.js](../server/src/models/CanvassActivity.js), written only by
+[services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js)): they drive door
+status, per-round views, coverage, and campaign-scope restricted tallies exactly like field marks — but
+they are **excluded** from every per-canvasser surface (timeline, leaderboards, per-canvasser Restricted
 columns/CSV, shift windows, travel, activity feeds, active-now) and are **invisible to the GPS
 audit** (`NOT_BULK` in [aggregations.js](../server/src/services/reports/aggregations.js)), because a
 hundred same-second marks by one admin audit nothing a canvasser did. Doors already **completed in
 the round** keep their result (skipped), already-restricted doors are skipped (idempotent), and
-**Unmark restricted** removes only the bulk marks — field marks survive.
+**Unmark restricted** removes only the desk marks — field marks survive (a book's Unmark removes every
+desk mark on its current doors for that round, single-home ones included; a home's own popup removes
+just that door's).
 
 
 ### No soliciting  *(all campaign types)*
@@ -351,9 +356,10 @@ everywhere unless you turn it on). Turn it on and a second number appears — **
 = 145** — on the invoice export, the Timeline, and the dashboard. **Nothing else moves:** Knocks stays
 140, both rates stay 56% and 50%, Houses knocked stays 95, and the coverage bar is unchanged. That's
 deliberate — nobody answered a locked gate, so a restricted home can never sit in a rate's denominator
-without making the rate a lie. Two exclusions worth knowing: a **bulk** restrict (marking a whole book
-from Turf Cutting) is desk work, not a walk, so it never becomes a billable door; and a door that was
-restricted by one canvasser and knocked by another is **one** door, counted as a knock.
+without making the rate a lie. Two exclusions worth knowing: a **desk** mark (an admin marking a whole
+book — or a single home — restricted from Turf Cutting, the Map page or the mobile admin app) is desk
+work, not a walk, so it never becomes a billable door; and a door that was restricted by one canvasser
+and knocked by another is **one** door, counted as a knock.
 
 None of this changes what **Doorline** charges you — that's a flat rate per active campaign per month
 and never reads door counts at all ([BILLING.md](BILLING.md)).
@@ -491,7 +497,7 @@ earlier not-home on the same house-pass, but a survey still wins over any of the
 | `litKnocks` | Knocks with ≥1 `lit_dropped` | `$max` flag in `knocksPipeline` | `/overview`, `/campaign-rollup` | `timestamp` |
 | `refusedKnocks` | Knocks (house-passes) whose outcome was `refused` — a billable contact, **not** a survey. Subset of `knocks` (survey campaigns only; 0 on lit) | `$max` flag (`hasRefused`) in `knocksPipeline` | `/overview`, `/campaign-rollup` (on `/canvassers` the per-canvasser count is the bare `refused` column, which feeds that row's `contactRate`) | `timestamp` |
 | `restricted` | Per-canvasser tally of `restricted` (inaccessible-home) marks — **not** a knock, **never** in `knocks`/`homesKnocked`/any rate; its own coverage segment. All campaign types | count of that user's `restricted` activities | `/canvassers`, `/canvasser-timeline` (`dayRestricted`); coverage `canvass`/`events` on `/overview` · `/campaign-rollup` | `timestamp` |
-| `restrictedDoors` | Distinct `(household, passId)` doors whose ONLY disposition is a **non-bulk** `restricted` mark. Disjoint from `knocks` by construction (a door with any knock is a knock). Reported **always**, billed or not, so the UI can offer the opt-in | `restrictedDoors` in `knocksPipeline` (`includeRestricted`) | `/overview`, `/campaign-rollup`, `/knocks-by-pass`, `/canvasser-timeline`, statement lines | `timestamp` |
+| `restrictedDoors` | Distinct `(household, passId)` doors whose ONLY disposition is a **field** `restricted` mark (`via ≠ 'bulk'` — desk marks, whole-book or single-home, never count). Disjoint from `knocks` by construction (a door with any knock is a knock). Reported **always**, billed or not, so the UI can offer the opt-in | `restrictedDoors` in `knocksPipeline` (`includeRestricted`) | `/overview`, `/campaign-rollup`, `/knocks-by-pass`, `/canvasser-timeline`, statement lines | `timestamp` |
 | `billableDoors` | The org's own invoice figure: `knocks` + (`restrictedDoors` **iff** this campaign bills them). `=== knocks` when the opt-in is off, which is the default. **Never** a rate denominator | `billableDoorsOf(row, billRestricted)` (§C) over `knocksPipeline` | `/overview`, `/campaign-rollup`, `/knocks-by-pass` (+`.csv`), `/canvasser-timeline` | `timestamp` |
 | `connectionRate` | `(surveyedKnocks + litKnocks) / knocks × 100`, integer, ≤100. **Unchanged by Refused** — refusals are not in the numerator | `connectionRate()` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | — |
 | `contactRate` | "Reached a person": `(surveyedKnocks + refusedKnocks) / knocks × 100`, integer, ≤100 | `contactRate()` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | — |
@@ -546,7 +552,7 @@ house-passes whose outcome was Refused (one per billable knock, so a subset of `
 
 **`restricted` never becomes a knock.** By default the opening `$match` filters to `KNOCK_ACTIONS`,
 which excludes it. Callers that need billable-door numbers pass `includeRestricted: true`, which
-widens the `$match` to `BILLABLE_WITH_RESTRICTED`, drops desk-authored bulk restricted rows, and
+widens the `$match` to `BILLABLE_WITH_RESTRICTED`, drops desk-authored restricted rows (`via:'bulk'` — a whole book or a single home), and
 adds a `hasKnock` fold to the inner `$group`. That fold is what keeps the guarantee: `knocks` becomes `$sum: '$hasKnock'`
 instead of `$sum: 1`, which is the **same value** — so restricted marks still touch neither `knocks`
 nor any rate numerator/denominator, in either mode. The wider run additionally yields:
@@ -559,8 +565,8 @@ another knocked is **one** door and lands in `knocks`, and `Σ(byPass rows)` sti
 total by construction for the new columns exactly as it does for `knocks`.
 
 The bulk exclusion is `$nor: [{ actionType: 'restricted', via: 'bulk' }]` — **scoped to restricted
-rows, never a blanket `NOT_BULK`**. A desk-authored bulk restrict is not a walk and must not be
-billed; but a `via:'bulk'` row on a *knock* action is a real billable knock that round totals are
+rows, never a blanket `NOT_BULK`**. A desk mark — a whole book or a single home — is not a walk and must
+not be billed; but a `via:'bulk'` row on a *knock* action is a real billable knock that round totals are
 contractually required to include (only per-CANVASSER surfaces exclude bulk), so a blanket filter
 would silently delete a door from the invoice. That is not hypothetical — it is asserted by
 `knocksByPass.int.test.js`, which caught exactly this mistake. `$nor` rather than a top-level `$or`
@@ -1408,8 +1414,8 @@ marker).
 [services/reports/campaignCounters.js](../server/src/services/reports/campaignCounters.js): the
 mobile write path applies exact per-pair deltas (one indexed pre-read of the pair's replaceable
 rows derives the before/after knock state), and every rare admin bulk op (re-cut clear-knocks,
-snapshot restore, bulk-restrict/unrestrict, admin survey delete, demo staging) triggers a full
-per-campaign recompute. Locked by
+snapshot restore, bulk-restrict/unrestrict, restrict-doors/unrestrict-doors (single-home desk marks),
+admin survey delete, demo staging) triggers a full per-campaign recompute. Locked by
 [test/campaignStats.int.test.js](../server/test/campaignStats.int.test.js) — parity against an
 independent ledger recompute after every operation type.
 

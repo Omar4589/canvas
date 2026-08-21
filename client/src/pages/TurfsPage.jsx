@@ -25,6 +25,7 @@ import { formatInTz } from '../lib/datetime.js';
 import { useJobPoll } from '../lib/useJobPoll.js';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
+import { pickRound, roundMarkFromEntries } from '../lib/restrictMark.js';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
 // to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
@@ -579,7 +580,11 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
 function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLabel, knockCount, clearKnocks, setClearKnocks, scope, setScope, pending, error, onCancel, onConfirm }) {
   // Drafts-only scope: offered only when BOTH kinds exist (all-drafts or
   // all-accepted needs no choice). It skips the snapshot, the type-to-confirm,
-  // and the clear-knocks option — drafts carry no assignments or history.
+  // and the clear-knocks option — drafts carry no assignments and no FIELD history.
+  // Single-home desk marks (restrict-doors) may carry a draft book's id as provenance
+  // only — nothing reads it for counts/undo (those key on the pass + the door's CURRENT
+  // book), so such marks survive the wipe as loose-door marks and count under the
+  // door's next book.
   const scopeChoice = draftCount > 0 && publishedCount > 0;
   const draftsOnly = scope === 'drafts';
   const shownCount = draftsOnly ? draftCount : bookCount;
@@ -675,6 +680,17 @@ function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLab
   );
 }
 
+// "desk" pill next to a history line whose row was written from the desk (`via:'bulk'`) rather
+// than recorded at the door — mirrors the Map page panel's tag so the two read the same.
+const DeskTag = () => (
+  <span
+    className="ml-1 rounded bg-sunken px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-fg-muted"
+    title="Marked from the desk, not at the door"
+  >
+    desk
+  </span>
+);
+
 // What happened at this door THIS round, plus the answers recorded here. Both come from the
 // endpoints the Map page's HouseholdDetailPanel already uses — same roles (admin + a lead who
 // manages the campaign), same per-campaign gate, and the same router.param audit hook, so this
@@ -710,6 +726,9 @@ function RoundActivity({ householdId, passId, status, tz }) {
           {actionLabel(latest.actionType)}
           {latest.canvasser ? ` · ${latest.canvasser}` : ''}
           {latest.at ? ` · ${when(latest.at)}` : ''}
+          {/* A desk mark (via:'bulk' — book-level or single-home) is not the named admin's
+              field work; say so next to their name. */}
+          {latest.via === 'bulk' && <DeskTag />}
         </div>
       ) : (
         <div className="mt-0.5 text-[11px] text-fg-subtle">Not worked this round yet.</div>
@@ -737,7 +756,144 @@ function RoundActivity({ householdId, passId, status, tz }) {
   );
 }
 
-function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound }) {
+// Statuses a canvasser left the door in without completing it — the server's mark ladder
+// marks these (the field knock stays on file and counted); surveyed/lit_dropped are skipped.
+const REACHED_STATUSES = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting']);
+const COMPLETED_STATUSES = new Set(['surveyed', 'lit_dropped']);
+
+// Single-home desk mark: restrict / un-restrict THIS door for THIS round from the popup —
+// the same `via:'bulk'` row class "Mark book restricted…" writes, one door at a time, so
+// it inherits every promise (never billed, never anyone's work, slate on phones, dropped by
+// the "Exclude restricted" cut toggle). Allowed any time the door is on this page — draft
+// or accepted book, or a loose dot (owner ruling; bulk refuses drafts, this does not).
+//
+// Three states, read from /activity (the same key RoundActivity owns — react-query dedupes)
+// and classified by lib/restrictMark.js against THIS page's pass, never from `status` alone:
+//   not restricted → Mark restricted… (disabled when the door is completed this round);
+//   desk-restricted → who/when + Unmark restricted (deletes desk rows only);
+//   field-restricted → who/when, no button — only a canvasser re-knocking changes it.
+function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pending, error }) {
+  const [open, setOpen] = useState(false);
+  const activityQ = useQuery({
+    queryKey: ['household-activity', householdId],
+    queryFn: () => api(`/admin/households/${householdId}/activity`),
+    enabled: !!householdId,
+  });
+  const round = pickRound(activityQ.data?.rounds, passId);
+  const mark = roundMarkFromEntries(round?.entries);
+  const latest = round?.entries?.[0] || null;
+  const completed = COMPLETED_STATUSES.has(status);
+  const reached = REACHED_STATUSES.has(status);
+  const day = (at) => formatInTz(at, tz, { month: 'short', day: 'numeric' }, false);
+  const dot = <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS.restricted }} />;
+
+  let body;
+  if (activityQ.isLoading) {
+    body = (
+      <div className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+        {dot}
+        <span>Loading…</span>
+      </div>
+    );
+  } else if (mark?.kind === 'desk') {
+    body = (
+      <>
+        <div className="flex items-center gap-1.5 text-xs">
+          {dot}
+          <span className="font-medium text-fg">Restricted</span>
+        </div>
+        <div className="mt-0.5 text-[11px] text-fg-muted">
+          Marked from the desk by {mark.byName ?? 'a removed user'}{mark.at ? ` · ${day(mark.at)}` : ''}
+        </div>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            if (window.confirm('Remove the desk mark? This door is knockable again this round.')) { setOpen(false); onUnmark(); }
+          }}
+          className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+        >
+          {pending ? 'Working…' : 'Unmark restricted'}
+        </button>
+      </>
+    );
+  } else if (mark?.kind === 'field') {
+    body = (
+      <>
+        <div className="flex items-center gap-1.5 text-xs">
+          {dot}
+          <span className="font-medium text-fg">Restricted</span>
+        </div>
+        <div className="mt-0.5 text-[11px] text-fg-muted">
+          Recorded at the door by {mark.byName ?? 'a removed user'}{mark.at ? ` · ${day(mark.at)}` : ''}
+        </div>
+        <div className="mt-0.5 text-[11px] text-fg-subtle">Only a canvasser re-knocking this door changes it.</div>
+      </>
+    );
+  } else if (completed) {
+    body = (
+      <>
+        <button
+          type="button"
+          disabled
+          className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted opacity-50"
+        >
+          Mark restricted…
+        </button>
+        <div className="mt-0.5 text-[11px] text-fg-subtle">Surveyed this round — keeps its result.</div>
+      </>
+    );
+  } else if (!open) {
+    body = (
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setOpen(true)}
+        className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+      >
+        Mark restricted…
+      </button>
+    );
+  } else {
+    body = (
+      <>
+        <p className="text-[11px] text-fg-muted">
+          {reached
+            ? `This round's result becomes Restricted; ${latest?.canvasser || 'the canvasser'}'s ${actionLabel(latest?.actionType || status)} knock stays counted.`
+            : 'Canvassers see this door slate and skip it; it stays out of every rate and knock count. Reversible here.'}
+        </p>
+        <div className="mt-1.5 flex gap-1.5">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => { setOpen(false); onMark(); }}
+            className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {pending ? 'Marking…' : 'Mark restricted'}
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => setOpen(false)}
+            className="rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="mt-2 border-t border-border pt-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Restricted access</div>
+      {body}
+      {error && <div className="mt-1 text-[11px] text-danger">{error.message}</div>}
+    </div>
+  );
+}
+
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError }) {
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
@@ -778,6 +934,21 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
           </select>
         </div>
       )}
+      {/* Always rendered (not gated on showRound): a desk mark is allowed any time the door is
+          on this page. Keyed per door+pass so the inline confirm resets when either changes. */}
+      {hh && (
+        <RestrictSection
+          key={`${householdId}|${passId}`}
+          householdId={householdId}
+          passId={passId}
+          status={status}
+          tz={tz}
+          onMark={onRestrict}
+          onUnmark={onUnrestrict}
+          pending={restrictPending}
+          error={restrictError}
+        />
+      )}
       {hh && showRound && <RoundActivity householdId={householdId} passId={passId} status={status} tz={tz} />}
       {hh && (
         <div className="mt-2 border-t border-border pt-2">
@@ -802,9 +973,20 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   );
 }
 
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose }) {
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError }) {
+  // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
+  // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
+  // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
+  // the response toast prints what it did. Unmark removes desk marks only — a field-recorded
+  // Restricted on a unit stays. (A large building gets this same plain confirm; the typed
+  // `restrict` gate is the whole-book flow's.)
+  const [confirmMark, setConfirmMark] = useState(false);
   if (!building) return null;
   const { addressLine1, city, state, zipCode, units, total } = building;
+  const restrictedN = units.filter((u) => u.passStatus === 'restricted').length;
+  const completedN = units.filter((u) => COMPLETED_STATUSES.has(u.passStatus)).length;
+  const markableN = Math.max(0, total - restrictedN - completedN);
+  const unitIds = units.map((u) => u.id);
   return (
     <div className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
       <div className="flex items-start justify-between gap-2">
@@ -834,6 +1016,60 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
       </div>
 
       <div className="mt-2 border-t border-border pt-2">
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Restricted access</div>
+        {!confirmMark ? (
+          <button
+            type="button"
+            disabled={restrictPending || markableN === 0}
+            onClick={() => setConfirmMark(true)}
+            className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Mark building restricted… ({markableN} unit{markableN === 1 ? '' : 's'})
+          </button>
+        ) : (
+          <>
+            <p className="text-[11px] text-fg-muted">
+              Marks every unit not yet done this round ({markableN}) — including units the crew already reached;
+              completed and already-restricted units are skipped.
+            </p>
+            <div className="mt-1.5 flex gap-1.5">
+              <button
+                type="button"
+                disabled={restrictPending}
+                onClick={() => { setConfirmMark(false); onRestrict(unitIds); }}
+                className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {restrictPending ? 'Marking…' : `Mark ${markableN} unit${markableN === 1 ? '' : 's'}`}
+              </button>
+              <button
+                type="button"
+                disabled={restrictPending}
+                onClick={() => setConfirmMark(false)}
+                className="rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+        {restrictedN > 0 && (
+          <button
+            type="button"
+            disabled={restrictPending}
+            onClick={() => {
+              if (window.confirm('Remove desk marks from this building? Marks canvassers recorded at the door are kept.')) {
+                onUnrestrict(unitIds);
+              }
+            }}
+            className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Unmark restricted ({restrictedN} restricted · desk marks only)
+          </button>
+        )}
+        {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
+      </div>
+
+      <div className="mt-2 border-t border-border pt-2">
         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Units</div>
         <ul className="max-h-56 space-y-1 overflow-auto">
           {units.map((u) => {
@@ -842,7 +1078,14 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
             return (
               <li key={u.id} className="rounded border border-border p-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium text-fg">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {/* Slate dot = Restricted this round (desk or field), so the building's
+                        count above can be seen unit by unit. */}
+                    {u.passStatus === 'restricted' && (
+                      <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS.restricted }} title="Restricted this round" />
+                    )}
+                    <span className="truncate text-sm font-medium text-fg">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
+                  </span>
                   <span className="flex shrink-0 items-center gap-1">
                     {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
                     <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
@@ -1032,6 +1275,26 @@ export default function TurfsPage() {
   const invalidateCut = () => {
     qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
     qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
+  };
+  // Every desk-mark write — one door, a building, or whole books — drops the same caches: the cut
+  // (turf-doors → each dot's passStatus + restrictedDoorCount; turfs → bulkRestrictedCount), the
+  // progress oracle (a desk mark is a "worked" door → statusMode, labels, fill tint, the coverage
+  // bar), the per-door /activity the popup and the Map page panel both read (per id when known,
+  // else the prefix), and the dashboards' rollups — BOTH the Overview's ['campaign-rollup'] prefix
+  // AND the Dashboard's ['reports','campaign-rollup',…] key, which the prefix alone never reached
+  // (precedent: lib/bulkReview.js invalidateFlagCaches, MapPage onFlagReviewed).
+  const invalidateRestrictMarks = (householdIds) => {
+    invalidateCut();
+    qc.invalidateQueries({ queryKey: ['turf-progress', campaignId, passId] });
+    if (householdIds?.length) {
+      for (const id of householdIds) qc.invalidateQueries({ queryKey: ['household-activity', String(id)] });
+    } else {
+      qc.invalidateQueries({ queryKey: ['household-activity'] });
+    }
+    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    qc.invalidateQueries({
+      predicate: (q) => q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'campaign-rollup',
+    });
   };
   const excludeApts = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/turfs/exclude-apartments`, { method: 'POST', body: { passId, threshold: aptThreshold } }),
@@ -1351,8 +1614,7 @@ export default function TurfsPage() {
       if (skips.reached) parts.push(`${skips.reached} reached left as-is`);
       const skipNote = parts.length ? ` · ${parts.join(', ')}` : '';
       setRestrictResult(`Marked ${res.marked} door${res.marked === 1 ? '' : 's'} restricted${skipNote}.`);
-      invalidateCut();
-      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      invalidateRestrictMarks();
     },
   });
   const unrestrictBulk = useMutation({
@@ -1360,9 +1622,8 @@ export default function TurfsPage() {
       api(`/admin/campaigns/${campaignId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds } }),
     onSuccess: (res) => {
       setShowRestrict(null);
-      setRestrictResult(`Removed ${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'}.`);
-      invalidateCut();
-      qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+      setRestrictResult(`Removed ${res.unmarked} desk restricted mark${res.unmarked === 1 ? '' : 's'}.`);
+      invalidateRestrictMarks();
     },
   });
 
@@ -1387,6 +1648,45 @@ export default function TurfsPage() {
   const moveDoors = useMutation({
     mutationFn: ({ householdIds, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-doors`, { method: 'POST', body: { householdIds, toTurfId } }),
     onSuccess: invalidateTurfs,
+  });
+  // Single-home desk marks (one door from HousePopup, every unit of a building from
+  // BuildingPopup) — the same `via:'bulk'` row class restrict-bulk writes, so every promise
+  // about bulk marks holds (docs/PASSES_AND_TURF.md). Always sent with THIS page's passId: the
+  // mark lands on the round being cut/walked, draft or active. Toast copy is keyed on how many
+  // doors were sent — one door reads as a sentence, a building as a tally; the server response
+  // is the truth either way (a door can leave the cut between load and click).
+  const restrictDoors = useMutation({
+    mutationFn: ({ householdIds }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-doors`, { method: 'POST', body: { householdIds, passId } }),
+    onSuccess: (res, { householdIds }) => {
+      const n = householdIds.length;
+      const skips = res.skipped || {};
+      if (n === 1) {
+        if (res.marked >= 1) setRestrictResult('Marked restricted.');
+        else if (skips.alreadyRestricted) setRestrictResult('Already restricted this round.');
+        else if (skips.completed) setRestrictResult('Not marked — surveyed this round keeps its result.');
+        else setRestrictResult('Not marked — this door is no longer in the cut.');
+      } else {
+        const parts = [];
+        if (skips.completed) parts.push(`${skips.completed} completed`);
+        if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted} already restricted`);
+        if (skips.ineligible) parts.push(`${skips.ineligible} no longer in the cut`);
+        const skipNote = parts.length ? ` · ${parts.join(', ')}` : '';
+        setRestrictResult(`Marked ${res.marked} of ${n} unit${n === 1 ? '' : 's'} restricted${skipNote}`);
+      }
+      invalidateRestrictMarks(householdIds);
+    },
+  });
+  const unrestrictDoors = useMutation({
+    mutationFn: ({ householdIds }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, { method: 'POST', body: { householdIds, passId } }),
+    onSuccess: (res, { householdIds }) => {
+      const n = res.unmarked || 0;
+      if (n === 0) setRestrictResult('No desk mark to remove — field-recorded marks stay.');
+      else if (n === 1) setRestrictResult('Removed the desk mark.');
+      else setRestrictResult(`Removed ${n} desk marks.`);
+      invalidateRestrictMarks(householdIds);
+    },
   });
   const merge = useMutation({
     mutationFn: (turfIds) => api(`/admin/campaigns/${campaignId}/turfs/merge`, { method: 'POST', body: { turfIds } }),
@@ -1422,8 +1722,11 @@ export default function TurfsPage() {
   editModeRef.current = editMode;
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
   toggleSelectRef.current = toggleBook;
-  openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); };
-  openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); };
+  // Opening a popup drops the previous door's desk-mark outcome (inline error + toast), so a
+  // stale "Already restricted" can't be read against the door now on screen.
+  const resetRestrictDoors = () => { restrictDoors.reset(); unrestrictDoors.reset(); setRestrictResult(null); };
+  openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); resetRestrictDoors(); };
+  openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); resetRestrictDoors(); };
 
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return;
@@ -2553,23 +2856,42 @@ export default function TurfsPage() {
               books={turfs}
               moving={moveDoor.isPending}
               onMove={(toTurfId) => moveDoor.mutate({ householdId: popupHouseholdId, toTurfId })}
-              onClose={() => setPopupHouseholdId(null)}
+              onClose={() => { setPopupHouseholdId(null); resetRestrictDoors(); }}
               householdId={popupHouseholdId}
               passId={passId}
               status={popupDoor?.passStatus || 'unknocked'}
               tz={tz}
               showRound={statusMode}
+              onRestrict={() => {
+                // The door left the cut between load and click (re-cut, exclusion, import
+                // re-housing) — nothing to mark here; close rather than act on a ghost.
+                if (!popupDoor) {
+                  setPopupHouseholdId(null);
+                  setRestrictResult('Not marked — this door is no longer in the cut.');
+                  return;
+                }
+                restrictDoors.mutate({ householdIds: [String(popupHouseholdId)] });
+              }}
+              onUnrestrict={() => unrestrictDoors.mutate({ householdIds: [String(popupHouseholdId)] })}
+              restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
+              restrictError={restrictDoors.error || unrestrictDoors.error}
             />
           )}
+          {/* Keyed per building so the inline mark-confirm resets when another building is clicked. */}
           {popupBuilding && (
             <BuildingPopup
+              key={popupBuilding.key}
               building={popupBuilding}
               books={turfs}
               colorByTurf={colorByTurf}
               moving={moveDoor.isPending || moveDoors.isPending}
               onMove={(householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId })}
               onMoveAll={(toTurfId) => moveDoors.mutate({ householdIds: popupBuilding.units.map((u) => u.id), toTurfId })}
-              onClose={() => setPopupBuildingKey(null)}
+              onClose={() => { setPopupBuildingKey(null); resetRestrictDoors(); }}
+              onRestrict={(householdIds) => restrictDoors.mutate({ householdIds })}
+              onUnrestrict={(householdIds) => unrestrictDoors.mutate({ householdIds })}
+              restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
+              restrictError={restrictDoors.error || unrestrictDoors.error}
             />
           )}
           {restrictResult && (

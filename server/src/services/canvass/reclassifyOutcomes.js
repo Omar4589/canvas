@@ -83,8 +83,8 @@ export const convertibleMatch = (campaignId, actionType, outcomes = RECLASSIFIAB
   campaignId,
   ...(actionType ? { actionType } : { actionType: { $in: outcomes } }),
   // Desk-authored restricted marks are not field observations: converting one into a knock would
-  // invent a walk that never happened, attributed to the admin who ran the bulk tool. They have
-  // their own undo already (unrestrict-bulk on Turf Cutting).
+  // invent a walk that never happened, attributed to the admin who made the desk mark. They have
+  // their own undo already (unrestrict-bulk / unrestrict-doors).
   via: { $ne: 'bulk' },
   // Provenance stays SINGLE-LEVEL so revert is exact: a row already carrying a stamp is out of
   // scope until its run is reverted.

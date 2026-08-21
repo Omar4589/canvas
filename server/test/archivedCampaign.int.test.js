@@ -215,7 +215,7 @@ test('archived: assigning a book is refused, and unassigning one is too', { skip
   assert.equal(await TurfAssignment.countDocuments({ turfId: archived.turf._id }), 1);
 });
 
-test('archived: bulk book assignment and restrict/unrestrict are refused', { skip }, async () => {
+test('archived: bulk book assignment and restrict/unrestrict — whole book and single home — are refused', { skip }, async () => {
   const { org, token, archived, walker } = ctx;
   const cid = archived.campaign._id;
 
@@ -224,10 +224,13 @@ test('archived: bulk book assignment and restrict/unrestrict are refused', { ski
     [`/admin/campaigns/${cid}/turfs/unassign-bulk`, { turfIds: [String(archived.turf._id)], userIds: [String(walker._id)] }],
     [`/admin/campaigns/${cid}/turfs/restrict-bulk`, { turfIds: [String(archived.turf._id)] }],
     [`/admin/campaigns/${cid}/turfs/unrestrict-bulk`, { turfIds: [String(archived.turf._id)] }],
+    [`/admin/campaigns/${cid}/turfs/restrict-doors`, { householdIds: [String(archived.home._id)] }],
+    [`/admin/campaigns/${cid}/turfs/unrestrict-doors`, { householdIds: [String(archived.home._id)] }],
   ]) {
     assertArchivedRefusal(await call('POST', path, { token, orgId: org._id, body }));
   }
   assert.equal(await TurfAssignment.countDocuments({ campaignId: cid, userId: walker._id, turfId: archived.turf._id }), 1);
+  assert.equal(await CanvassActivity.countDocuments({ campaignId: cid, via: 'bulk' }), 0, 'no desk mark was written');
 });
 
 test('archived: BOTH pin doors refuse — the admin one and the mobile one', { skip }, async () => {

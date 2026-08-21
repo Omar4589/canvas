@@ -31,9 +31,10 @@ export function billableDoorsOf(row, billRestricted) {
   return billRestricted ? row.billableDoors || 0 : row.knocks || 0;
 }
 
-// Excludes admin BULK-authored rows (via:'bulk', today only bulk-restrict) from
+// Excludes admin DESK-authored rows (via:'bulk' — today only desk restricted marks,
+// a whole book or a single home, services/canvass/deskRestrict.js) from
 // per-CANVASSER surfaces: timelines, leaderboards, shift windows, travel, the
-// GPS audit, activity feeds, active-now. Bulk rows still drive door status,
+// GPS audit, activity feeds, active-now. Desk rows still drive door status,
 // per-round views, coverage, and campaign-scope tallies. Spread into a $match:
 // `{ ...match, ...NOT_BULK }`. `$ne` matches docs without the field, so legacy
 // rows need no backfill.
@@ -145,9 +146,10 @@ export function knocksPipeline(match, { byCampaign = false, byPass = false, incl
   const actions = includeRestricted ? BILLABLE_WITH_RESTRICTED : KNOCK_ACTIONS;
   return [
     { $match: { ...match, actionType: { $in: actions } } },
-    // Drop DESK-authored bulk RESTRICTED rows: an admin bulk-restricting a gated community from
-    // the Turf Cutting page did no field work, and the whole point of the opt-in is paying for
-    // the walk.
+    // Drop DESK-authored RESTRICTED rows (via:'bulk' — a whole book or a single home,
+    // services/canvass/deskRestrict.js): an admin marking a gated community or one locked gate
+    // from the console did no field work, and the whole point of the opt-in is paying for the
+    // walk.
     //
     // Scoped to `restricted` on purpose — a blanket NOT_BULK here is WRONG and was caught by
     // knocksByPass.int.test.js. A via:'bulk' row on a KNOCK action is a real billable knock that

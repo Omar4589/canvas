@@ -19,14 +19,27 @@ import { loadActiveCampaign, loadCurrentUser } from '../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../lib/config';
 import { initMapbox } from '../../../../lib/mapbox';
 import { radius, spacing } from '../../../../lib/theme';
+import { formatInTz } from '../../../../lib/datetime';
+import { deviceTimezone } from '../../../../lib/dateRanges';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
 import { outlineRing } from '../../../../lib/bookDensity';
-import { restrictCounts } from '../../../../lib/restrictBooks';
+import {
+  restrictCounts,
+  doorMarkState,
+  describeMarkDoorResult,
+  describeUnmarkDoorResult,
+  deskMarkErrorMessage,
+} from '../../../../lib/restrictBooks';
 import { useCampaignArchived } from '../../../../lib/useCampaignArchived';
 import ArchivedCampaignBanner from '../../../../components/ArchivedCampaignBanner';
-import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../../lib/restrictBooksConfirm';
+import {
+  confirmMarkRestricted,
+  confirmUnmarkRestricted,
+  confirmMarkDoor,
+  confirmUnmarkDoor,
+} from '../../../../lib/restrictBooksConfirm';
 
 initMapbox();
 
@@ -265,6 +278,10 @@ export default function AdminBookDetail() {
     qc.invalidateQueries({ queryKey: ['admin', 'turf-doors'] });
     qc.invalidateQueries({ queryKey: ['admin', 'turf-progress'] });
     qc.invalidateQueries({ queryKey: ['admin', 'book-detail', cId, turfId] });
+    // The house pop-up's desk-mark provenance, and the always-mounted Map tab (its pins +
+    // counts live under ['admin','households']) so it recolors on return.
+    qc.invalidateQueries({ queryKey: ['admin', 'household-activity'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'households'] });
   };
   const restrictMut = useMutation({
     // scope is always explicit — an omitted scope falls back to the server's 'incomplete'
@@ -287,29 +304,32 @@ export default function AdminBookDetail() {
     mutationFn: () =>
       api(`/admin/campaigns/${cId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds: [turfId] } }),
     onSuccess: (res) =>
-      Alert.alert('Marks removed', `${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`),
+      Alert.alert('Marks removed', `${res.unmarked} desk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`),
     onError: (e) => Alert.alert('Could not remove marks', e?.message || 'Please try again.'),
     onSettled: invalidateRestrict,
   });
-  function onRestrictAction() {
+  // Two menu items, not a toggle: once a single home in the book carries a desk mark, "Unmark
+  // restricted (N)" appears (N counts every desk mark on the book's doors for this round —
+  // book-level or single-home) AND "Mark book restricted…" stays available for the rest.
+  const bookLabel = `“${turf?.name || 'this book'}”`;
+  function onMarkBook() {
     setMenuOpen(false);
-    const label = `“${turf?.name || 'this book'}”`;
-    if ((turf?.bulkRestrictedCount || 0) > 0) {
-      confirmUnmarkRestricted({
-        label,
-        bulkMarks: turf.bulkRestrictedCount,
-        onConfirm: () => unrestrictMut.mutate(),
-      });
-    } else {
-      // Per-round statuses are already loaded (bookQ households come from getPassStatusMap —
-      // the same source restrict-bulk marks against), so the counts here are exact.
-      confirmMarkRestricted({
-        label,
-        counts: restrictCounts(households.map((h) => h.status || 'unknocked')),
-        totalDoors: total,
-        onScope: (scope) => restrictMut.mutate({ scope }),
-      });
-    }
+    // Per-round statuses are already loaded (bookQ households come from getPassStatusMap —
+    // the same source restrict-bulk marks against), so the counts here are exact.
+    confirmMarkRestricted({
+      label: bookLabel,
+      counts: restrictCounts(households.map((h) => h.status || 'unknocked')),
+      totalDoors: total,
+      onScope: (scope) => restrictMut.mutate({ scope }),
+    });
+  }
+  function onUnmarkBook() {
+    setMenuOpen(false);
+    confirmUnmarkRestricted({
+      label: bookLabel,
+      bulkMarks: turf?.bulkRestrictedCount || 0,
+      onConfirm: () => unrestrictMut.mutate(),
+    });
   }
 
   // House popup detail (address + voters), fetched on tap.
@@ -318,6 +338,54 @@ export default function AdminBookDetail() {
     queryFn: () => api(`/admin/campaigns/${cId}/turfs/household/${selectedId}`),
     enabled: !!cId && !!selectedId,
   });
+  // Desk-mark provenance for a RESTRICTED home only (who marked it, desk or field) — the same
+  // key the admin map's door sheet uses, so the two share one cache entry. Not fetched for an
+  // unrestricted home: the Mark button needs nothing but the per-round status already here.
+  const houseActivityQ = useQuery({
+    queryKey: ['admin', 'household-activity', selectedId],
+    queryFn: () => api(`/admin/households/${selectedId}/activity`),
+    enabled: !!cId && !!selectedId && selectedHome?.status === 'restricted',
+  });
+  // This book's round is the round the pop-up speaks for (the pin color is per-round too).
+  const doorMark = useMemo(
+    () => doorMarkState(houseActivityQ.data?.rounds, turf?.passId),
+    [houseActivityQ.data, turf?.passId]
+  );
+  // Single-home desk mark — same row class as the book-level mark, explicit passId (this
+  // book's round). `selectedHome` is live-derived from bookQ, so the status label and the pin
+  // update on their own once invalidateRestrict's refetch lands.
+  const markDoorMut = useMutation({
+    mutationFn: ({ id }) =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [id], passId: turf?.passId },
+      }),
+    onSuccess: (res) => {
+      const d = describeMarkDoorResult(res);
+      Alert.alert(d.title, d.message);
+    },
+    onError: (e) => Alert.alert('Could not mark restricted', deskMarkErrorMessage(e)),
+    onSettled: invalidateRestrict,
+  });
+  const unmarkDoorMut = useMutation({
+    mutationFn: ({ id }) =>
+      api(`/admin/campaigns/${cId}/turfs/unrestrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [id], passId: turf?.passId },
+      }),
+    onSuccess: (res) => {
+      const d = describeUnmarkDoorResult(res);
+      Alert.alert(d.title, d.message);
+    },
+    onError: (e) => Alert.alert('Could not remove the desk mark', deskMarkErrorMessage(e)),
+    onSettled: invalidateRestrict,
+  });
+  const deskMarkPending = markDoorMut.isPending || unmarkDoorMut.isPending;
+  // Day granularity in the device tz — tz-tolerant on purpose: a day label is the same in any
+  // nearby zone, and this screen has no campaign tz on hand.
+  const deskMarkDate = doorMark.at
+    ? formatInTz(doorMark.at, deviceTimezone(), { month: 'short', day: 'numeric' }, false)
+    : '';
 
   function onPinPress(e) {
     const id = e.features?.[0]?.properties?.id;
@@ -360,15 +428,20 @@ export default function AdminBookDetail() {
         <View style={styles.bookMenu}>
           <Pressable
             disabled={restrictMut.isPending || unrestrictMut.isPending}
-            onPress={onRestrictAction}
+            onPress={onMarkBook}
             style={({ pressed }) => [styles.bookMenuItem, pressed && { opacity: 0.7 }]}
           >
-            <Text style={styles.bookMenuItemText}>
-              {(turf?.bulkRestrictedCount || 0) > 0
-                ? `Unmark restricted (${turf.bulkRestrictedCount})`
-                : `Mark book restricted… (${total} doors)`}
-            </Text>
+            <Text style={styles.bookMenuItemText}>{`Mark book restricted… (${total} doors)`}</Text>
           </Pressable>
+          {(turf?.bulkRestrictedCount || 0) > 0 && (
+            <Pressable
+              disabled={restrictMut.isPending || unrestrictMut.isPending}
+              onPress={onUnmarkBook}
+              style={({ pressed }) => [styles.bookMenuItem, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.bookMenuItemText}>{`Unmark restricted (${turf.bulkRestrictedCount})`}</Text>
+            </Pressable>
+          )}
         </View>
       )}
       <View style={styles.topBar}>
@@ -478,6 +551,56 @@ export default function AdminBookDetail() {
               {[selectedHome?.city, selectedHome?.state].filter(Boolean).join(', ')}
             </Text>
             <Text style={styles.sheetStatus}>{STATUS_LABEL[selectedHome?.status] || 'Unknown'}</Text>
+            {/* Single-home desk mark. Positive-form gating: an unrestricted home offers Mark at
+                once; a restricted one waits for its history (who marked it, desk or field) — so
+                right after a mark the row simply hides until the refetch lands, no flash of the
+                wrong verb. A field mark gets no button. */}
+            {canWrite && selectedHome && selectedHome.status !== 'restricted' && (
+              <View style={styles.deskMarkRow}>
+                <Text style={styles.deskMarkCaption}>
+                  A desk mark makes this door slate for canvassers this round — never anyone's work. Reversible.
+                </Text>
+                <Pressable
+                  disabled={deskMarkPending}
+                  onPress={() =>
+                    confirmMarkDoor({
+                      address: selectedHome.addressLine1 || houseQ.data?.household?.addressLine1 || '',
+                      onConfirm: () => markDoorMut.mutate({ id: selectedHome.id }),
+                    })
+                  }
+                  style={({ pressed }) => [styles.deskMarkButton, (pressed || deskMarkPending) && { opacity: 0.6 }]}
+                >
+                  <Text style={styles.deskMarkButtonText}>Mark restricted</Text>
+                </Pressable>
+              </View>
+            )}
+            {canWrite && selectedHome?.status === 'restricted' && houseActivityQ.isSuccess && (
+              <View style={styles.deskMarkRow}>
+                <Text style={styles.deskMarkCaption}>
+                  {doorMark.kind === 'desk'
+                    ? `Marked from the desk by ${doorMark.by || 'a removed user'}${deskMarkDate ? ` · ${deskMarkDate}` : ''}`
+                    : doorMark.kind === 'field'
+                      ? `Restricted at the door by ${doorMark.by || 'a removed user'} — field marks change only when the door is re-recorded.`
+                      : 'Restricted this round.'}
+                </Text>
+                {doorMark.kind === 'desk' && (
+                  <Pressable
+                    disabled={deskMarkPending}
+                    onPress={() =>
+                      confirmUnmarkDoor({
+                        address: selectedHome.addressLine1 || houseQ.data?.household?.addressLine1 || '',
+                        markedBy: doorMark.by,
+                        markedWhen: deskMarkDate || null,
+                        onConfirm: () => unmarkDoorMut.mutate({ id: selectedHome.id }),
+                      })
+                    }
+                    style={({ pressed }) => [styles.deskMarkButton, (pressed || deskMarkPending) && { opacity: 0.6 }]}
+                  >
+                    <Text style={styles.deskMarkButtonText}>Unmark restricted</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
             {houseQ.isLoading ? (
               <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
             ) : (houseQ.data?.voters || []).length > 0 ? (
@@ -655,6 +778,19 @@ function makeStyles(t) {
     sheetTitle: { ...type.h3 },
     sheetSub: { ...type.caption, marginTop: 2 },
     sheetStatus: { ...type.bodyStrong, color: colors.textSecondary, marginTop: spacing.sm },
+    // Single-home desk-mark row: outlined in the restricted slate (same grammar as the admin
+    // map's door sheet — no other outlined use of the restricted token exists).
+    deskMarkRow: { marginTop: spacing.md },
+    deskMarkCaption: { ...type.caption, marginBottom: spacing.xs },
+    deskMarkButton: {
+      backgroundColor: colors.bg,
+      paddingVertical: spacing.md,
+      borderRadius: radius.md,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.status.restricted,
+    },
+    deskMarkButtonText: { color: colors.status.restricted, fontWeight: '600' },
     voters: { marginTop: spacing.md, gap: 4 },
     voterRow: { ...type.body, fontSize: 14 },
     sheetClose: { marginTop: spacing.lg, alignSelf: 'flex-start' },

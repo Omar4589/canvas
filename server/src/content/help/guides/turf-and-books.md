@@ -39,13 +39,13 @@ Don't like the layout, or the voter list changed? If the books are still drafts,
 
 - Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime. Big adds run in the background with the same progress bar as Generate; it's safe to leave the page and come back.
 - Reshape a book or two with **move**, **merge**, or **split**.
-- A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. See [The Turf Cutting page](page-turf-cutting).
+- A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. Just one house? Click it on the map and **Mark restricted…** in its popup — same mark, one door. See [The Turf Cutting page](page-turf-cutting) and [Can I mark just one house restricted?](mark-one-home-restricted).
 
 > Tip: Knocks follow the *door*, not the book — so moving, merging, or splitting never changes your [coverage or knock counts](coverage-vs-knocks).
 
 ## Assigning from your phone
 
-Cutting books is web work — you're drawing on a map. **Handing them out isn't.** The mobile admin app's **Books** tab works the campaign's active round: switch between **By book** (each book's doors, its knocked/total progress, and who's on it) and **By canvasser** (each person's book count — tap to give or take books). **Select** several books and hand them out in one go: **Distribute** splits them across people, **Everyone** gives all of them to each. A **Map** chip draws the whole round as book outlines so you can see where the unassigned turf actually sits before you hand it out, and tapping a book opens its own map to assign in context.
+Cutting books is web work — you're drawing on a map. **Handing them out isn't.** The mobile admin app's **Books** tab works the campaign's active round: switch between **By book** (each book's doors, its knocked/total progress, and who's on it) and **By canvasser** (each person's book count — tap to give or take books). **Select** several books and hand them out in one go: **Distribute** splits them across people, **Everyone** gives all of them to each. A **Map** chip draws the whole round as book outlines so you can see where the unassigned turf actually sits before you hand it out, and tapping a book opens its own map to assign in context — and to tap a single house and **Mark restricted** (or **Unmark**) it from the desk, the phone's counterpart to the web popup.
 
 Need them back? The same bar has **Unassign all**, which takes every canvasser off the books you've selected in one action — handy when a shift ends or you're reshuffling turf. It only shows up when somebody is actually on one of them, and it asks you to confirm first. On the web Turf Cutting page, the selected-books panel does the same thing with **Unassign all (N)**.
 

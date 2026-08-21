@@ -19,6 +19,7 @@ import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
 import { getPassStatusMap, getUserStatusMap, statusCountsFromMap, emptyStatusCounts } from '../../services/passes/passStatus.js';
 import { setDoNotKnock, clearDoNotKnock } from '../../services/dnc/doNotKnock.js';
+import { currentDeskPassForDoor } from '../../services/canvass/deskRestrict.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 
@@ -471,7 +472,7 @@ router.get('/map', async (req, res, next) => {
 
     let households = await Household.find(
       mapFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock excludedFromTurf'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock excludedFromTurf effortId'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
@@ -528,14 +529,18 @@ router.get('/map', async (req, res, next) => {
             actionType: { $first: '$actionType' },
             timestamp: { $first: '$timestamp' },
             userId: { $first: '$userId' },
+            // Desk marks are NOT excluded here (they are the door's latest action), so the
+            // panel needs the provenance to label one as desk work rather than the admin's
+            // field work.
+            via: { $first: '$via' },
           },
         },
       ]),
       includeActivities
         ? CanvassActivity.find(
-            // Ping trail only — bulk marks would draw N same-second pings at
-            // house coords. The date-narrowing above stays inclusive, so a
-            // Today-filtered map still surfaces just-bulk-marked doors.
+            // Ping trail only — desk marks (bulk or single-home) would draw N same-second
+            // pings at house coords. The date-narrowing above stays inclusive, so a
+            // Today-filtered map still surfaces just-desk-marked doors.
             { ...activityMatch, householdId: { $in: householdIds }, via: { $ne: 'bulk' } },
             'householdId userId actionType timestamp location distanceFromHouseMeters'
           )
@@ -614,11 +619,16 @@ router.get('/map', async (req, res, next) => {
         // "excluded from THIS walk list" — a door can be re-carved into another effort and keep
         // the flag. See docs/MAPS.md §I.
         excludedFromTurf: h.excludedFromTurf === true,
+        // The door's walk list (null = Intake), so a panel can pre-check "can this be desk-
+        // marked at all" and narrow a round picker to the door's own effort.
+        effortId: h.effortId ? String(h.effortId) : null,
         lastActionAt: ((passId || userId) ? last?.timestamp : h.lastActionAt) || last?.timestamp || null,
         lastAction: last
           ? {
               actionType: last.actionType,
               timestamp: last.timestamp,
+              // 'bulk' = a desk mark (deskRestrict.js); null = recorded in the field.
+              via: last.via || null,
               canvasser: lastUser
                 ? {
                     id: String(lastUser._id),
@@ -754,9 +764,11 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const { householdId } = req.params;
     if (!mongoose.isValidObjectId(householdId)) return res.status(400).json({ error: 'Invalid id' });
     const hid = new mongoose.Types.ObjectId(householdId);
+    // Loaded for everyone (campaignId + effortId feed `currentPassId` below); the
+    // existence / management checks stay lead-only, as before.
+    const hh = await Household.findOne({ _id: hid, organizationId: orgId }, { campaignId: 1, effortId: 1 }).lean();
     // A lead may only see activity for a household in a campaign they manage.
     if (!isOrgAdmin(req)) {
-      const hh = await Household.findOne({ _id: hid, organizationId: orgId }, { campaignId: 1 }).lean();
       if (!hh) return res.status(404).json({ error: 'Household not found' });
       if (!(await canManageCampaign(req, hh.campaignId))) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -767,7 +779,7 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const [acts, surveys] = await Promise.all([
       CanvassActivity.find(
         { householdId: hid, organizationId: orgId, actionType: { $ne: 'note_added' } },
-        'actionType timestamp userId passId note'
+        'actionType timestamp userId passId note via'
       )
         .populate('userId', 'firstName lastName')
         .lean(),
@@ -792,12 +804,14 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const entries = [
       ...acts
         .filter((a) => !(a.actionType === 'survey_submitted' && surveyKeys.has(`${a.passId ? String(a.passId) : 'none'}|${String(a.userId?._id || a.userId)}`)))
-        .map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId), canvasserId: idOf(a.userId), note: a.note && a.note.trim() ? a.note : null })),
+        // `via`: 'bulk' = a desk mark (deskRestrict.js), null = recorded in the field. Survey
+        // entries carry none — clients treat undefined as non-desk.
+        .map((a) => ({ kind: 'knock', actionType: a.actionType, at: a.timestamp, passId: a.passId ? String(a.passId) : null, canvasser: name(a.userId), canvasserId: idOf(a.userId), note: a.note && a.note.trim() ? a.note : null, via: a.via || null })),
       ...surveys.map((s) => ({ kind: 'survey', actionType: 'survey_submitted', at: s.submittedAt, passId: s.passId ? String(s.passId) : null, canvasser: name(s.userId), canvasserId: idOf(s.userId), voter: s.voterId?.fullName || null })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
     const passIds = [...new Set(entries.map((e) => e.passId).filter(Boolean))];
-    const passes = passIds.length ? await Pass.find({ _id: { $in: passIds } }, 'roundNumber name').lean() : [];
+    const passes = passIds.length ? await Pass.find({ _id: { $in: passIds } }, 'roundNumber name status').lean() : [];
     const passMap = new Map(passes.map((p) => [String(p._id), p]));
 
     const byPass = new Map();
@@ -813,12 +827,22 @@ router.get('/:householdId/activity', async (req, res, next) => {
           passId: key === 'none' ? null : key,
           roundNumber: p?.roundNumber ?? null,
           name: p?.name || (key === 'none' ? 'Before passes' : 'Pass'),
+          status: p?.status ?? null,
           entries: items,
         };
       })
       .sort((a, b) => (b.roundNumber ?? -1) - (a.roundNumber ?? -1));
 
-    res.json({ rounds });
+    // The round a desk mark with NO explicit passId lands on for THIS door (effort's active
+    // round → its single draft → null; Intake → null) — the same rule restrict-doors applies,
+    // so a client keys its "is this door desk-restricted this round" read on
+    // `scopePassId || currentPassId` rather than guessing newest/active (rounds above list
+    // ONLY rounds with entries).
+    const currentPassId = hh
+      ? await currentDeskPassForDoor({ campaignId: hh.campaignId, effortId: hh.effortId })
+      : null;
+
+    res.json({ rounds, currentPassId: currentPassId ? String(currentPassId) : null });
   } catch (err) {
     next(err);
   }

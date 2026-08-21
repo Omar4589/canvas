@@ -4,6 +4,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
 import { actionLabel } from '../lib/statusColors.js';
+import { pickRound, roundMarkFromEntries, completedInRound } from '../lib/restrictMark.js';
 
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
@@ -150,11 +151,291 @@ function DoNotKnockSection({ household, onChanged }) {
   );
 }
 
+// "desk" pill for a history line whose row was written from the desk (`via:'bulk'` — a
+// book-level bulk mark or a single-home desk mark) rather than recorded at the door. Without
+// it the admin who marked the door reads as that door's field canvasser.
+const DeskTag = () => (
+  <span
+    className="ml-1 rounded bg-sunken px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-fg-muted"
+    title="Marked from the desk, not at the door"
+  >
+    desk
+  </span>
+);
+
+// Single-home desk mark from the Map page: restrict / un-restrict THIS door for ONE round — the
+// same `via:'bulk'` row class "Mark book restricted…" writes (never billed, never anyone's work,
+// slate on phones). Mirrors the Turf Cutting popup's RestrictSection; the strings are shared.
+//
+// Which round it speaks for: `passId` (the ?passId= deep link) when set, else the server's
+// `currentPassId` — the round a mark with no explicit passId lands on for THIS door (its walk
+// list's active round, else its single draft round). Classification (desk / field / completed /
+// reached) comes ONLY from that round's entries via lib/restrictMark.js — never from
+// `household.status`: in global mode that is the stored status across ALL rounds, and under a
+// canvasser filter it is that canvasser's own status, so neither matches the round this mark
+// lives in. The header dot keeps reading `status`; this section reads the round.
+//
+// Pre-checks gate MARK only. The desk-restricted state (who/when + Unmark) always renders, even
+// on a do-not-knock or Not-in-books door: neither flag deletes desk rows and the turf page can't
+// reach those doors, so this panel is the only undo they have.
+function RestrictedSection({ household, campaignId, passId, activity, loading, tz, statusColors, onChanged }) {
+  const h = household;
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState(null);
+  const [note, setNote] = useState(null); // a server skip, phrased
+  // PASS_REQUIRED: the door's walk list has no current round (reason 'no-round') → the admin
+  // picks one; 'intake' (no walk list at all) renders as the disabled hint instead.
+  const [needPass, setNeedPass] = useState(false);
+  const [intake, setIntake] = useState(false);
+  const [pickedPassId, setPickedPassId] = useState('');
+  // The round a mark made from THIS panel actually landed on (the server's `passId`). Only
+  // load-bearing after the picker: a walk list with several draft rounds has no
+  // `currentPassId`, so without this the section would forget the mark it just made.
+  const [markedPassId, setMarkedPassId] = useState(null);
+  const qc = useQueryClient();
+
+  const targetPassId = passId || activity?.currentPassId || markedPassId || null;
+  const round = pickRound(activity?.rounds, targetPassId);
+  const mark = roundMarkFromEntries(round?.entries);
+  const completed = completedInRound(round?.entries);
+  const latest = round?.entries?.[0] || null;
+  // Reached = a canvasser left it incomplete (not_home/refused/…); the field knock stays counted.
+  const reached = !!latest && !completed && !mark;
+  const day = (at) => formatInTz(at, tz, { month: 'short', day: 'numeric' }, false);
+  const dot = (
+    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColors?.restricted }} />
+  );
+
+  // Round picker, fetched on demand and filtered to the door's own walk list — a pass from
+  // another walk list would be skipped as ineligible anyway. `effortId` is a newer /map field;
+  // when absent (older server) every non-archived round is listed.
+  const passesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId && needPass,
+  });
+  const pickablePasses = (passesQ.data?.passes || []).filter(
+    (p) => p.status !== 'archived' && (h.effortId ? String(p.effortId) === String(h.effortId) : true)
+  );
+
+  const invalidate = () => {
+    // Prefix matches — both map keys carry every filter after these two segments. The
+    // cross-page prefixes keep the Turf Cutting page honest if it is open in another tab.
+    qc.invalidateQueries({ queryKey: ['admin', 'households-map'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'households-map-counts'] });
+    qc.invalidateQueries({ queryKey: ['household-activity', h.id] });
+    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    qc.invalidateQueries({
+      predicate: (q) => q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'campaign-rollup',
+    });
+    qc.invalidateQueries({ queryKey: ['turf-doors'] });
+    qc.invalidateQueries({ queryKey: ['turf-progress'] });
+    qc.invalidateQueries({ queryKey: ['turfs'] });
+    onChanged?.();
+  };
+
+  const markMut = useMutation({
+    // With a deep-linked round the mark goes there; otherwise the server resolves the round
+    // (the same rule `currentPassId` reports), unless PASS_REQUIRED made the admin pick one.
+    mutationFn: (chosenPassId) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [h.id], ...(chosenPassId ? { passId: chosenPassId } : {}) },
+      }),
+    onSuccess: (res) => {
+      setOpen(false);
+      setErr(null);
+      setNeedPass(false);
+      setPickedPassId('');
+      if (res?.passId) setMarkedPassId(String(res.passId));
+      const skips = res?.skipped || {};
+      if ((res?.marked || 0) >= 1) setNote(null);
+      else if (skips.alreadyRestricted) setNote('Already restricted this round.');
+      else if (skips.completed) setNote('Not marked — surveyed this round keeps its result.');
+      else setNote("Not a knockable door — fully voted, all residents do-not-contact, or not in this round's walk list.");
+      invalidate();
+    },
+    onError: (e) => {
+      if (e?.code === 'PASS_REQUIRED') {
+        const unresolved = e?.data?.unresolved || [];
+        const mine = unresolved.find((u) => String(u.id) === String(h.id)) || unresolved[0];
+        if (mine?.reason === 'intake') {
+          setIntake(true);
+          setOpen(false);
+        } else {
+          setNeedPass(true);
+        }
+        setErr(null);
+        return;
+      }
+      setErr(e?.message || 'Could not mark this door.');
+    },
+  });
+
+  const unmarkMut = useMutation({
+    // The mark's OWN round, so a mark whose draft round was later deleted can still be removed.
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [h.id], passId: mark?.passId || targetPassId },
+      }),
+    onSuccess: (res) => {
+      setErr(null);
+      setNote((res?.unmarked || 0) === 0 ? 'No desk mark to remove — field-recorded marks stay.' : null);
+      invalidate();
+    },
+    onError: (e) => setErr(e?.message || 'Could not remove the desk mark.'),
+  });
+
+  const busy = markMut.isPending || unmarkMut.isPending;
+  const label = 'Restricted access';
+
+  if (loading) {
+    return (
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-xs text-fg-subtle">
+          {dot}
+          <span>Loading…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (mark?.kind === 'desk') {
+    return (
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-sm font-medium text-fg">
+          {dot}
+          <span>Restricted</span>
+        </div>
+        <p className="mt-1 text-xs text-fg-muted">
+          Marked from the desk by {mark.byName ?? 'a removed user'}{mark.at ? ` · ${day(mark.at)}` : ''}
+        </p>
+        {note && <p className="mt-1 text-xs text-fg-muted">{note}</p>}
+        {err && <p className="mt-2 text-xs text-danger">{err}</p>}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm('Remove the desk mark? This door is knockable again this round.')) unmarkMut.mutate();
+          }}
+          className="mt-2 rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+        >
+          {unmarkMut.isPending ? 'Removing…' : 'Unmark restricted'}
+        </button>
+      </div>
+    );
+  }
+
+  if (mark?.kind === 'field') {
+    return (
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-sm font-medium text-fg">
+          {dot}
+          <span>Restricted</span>
+        </div>
+        <p className="mt-1 text-xs text-fg-muted">
+          Recorded at the door by {mark.byName ?? 'a removed user'}{mark.at ? ` · ${day(mark.at)}` : ''}
+        </p>
+        <p className="mt-1 text-xs text-fg-subtle">Only a canvasser re-knocking this door changes it.</p>
+      </div>
+    );
+  }
+
+  // Not restricted this round. A do-not-knock address gets no Mark at all — the block above
+  // already says nobody visits; a desk mark on top of it would be noise.
+  if (h.doNotKnock) return null;
+
+  // Pre-checks that make the Mark button honest before the server is asked.
+  const blocked = h.excludedFromTurf
+    ? "Not in books — can't be marked."
+    : h.effortId === null || intake
+      ? "Not in a walk list — can't be marked."
+      : completed
+        ? 'Surveyed this round — keeps its result.'
+        : null;
+
+  return (
+    <div className="border-b border-border px-4 py-3">
+      {!open ? (
+        <>
+          <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+          <button
+            type="button"
+            disabled={!!blocked || busy}
+            onClick={() => { setNote(null); setErr(null); setOpen(true); }}
+            className="mt-1 rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Mark restricted…
+          </button>
+          {blocked && <p className="mt-1 text-xs text-fg-subtle">{blocked}</p>}
+          {note && <p className="mt-1 text-xs text-fg-muted">{note}</p>}
+          {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+        </>
+      ) : (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-fg-muted">Mark restricted</div>
+          <p className="mt-1 text-xs text-fg-muted">
+            {reached
+              ? `This round's result becomes Restricted; ${latest?.canvasser || 'the canvasser'}'s ${actionLabel(latest?.actionType)} knock stays counted.`
+              : 'Canvassers see this door slate and skip it; it stays out of every rate and knock count. Reversible here.'}
+          </p>
+          {needPass && (
+            <div className="mt-2">
+              <p className="text-xs text-fg-muted">Pick the round this mark belongs to.</p>
+              <select
+                value={pickedPassId}
+                onChange={(e) => setPickedPassId(e.target.value)}
+                disabled={busy}
+                className="mt-1 w-full rounded-md border border-border-strong bg-card px-2 py-1 text-xs text-fg focus:border-brand-accent focus:outline-none disabled:opacity-60"
+              >
+                <option value="">{passesQ.isLoading ? 'Loading rounds…' : 'Choose a round…'}</option>
+                {pickablePasses.map((p) => (
+                  <option key={p._id} value={p._id}>
+                    Pass {p.roundNumber}{p.name ? ` · ${p.name}` : ''}{p.status === 'active' ? ' · live' : ''}
+                  </option>
+                ))}
+              </select>
+              {passesQ.isSuccess && pickablePasses.length === 0 && (
+                <p className="mt-1 text-xs text-fg-subtle">This walk list has no round yet — create one first.</p>
+              )}
+            </div>
+          )}
+          {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={busy || (needPass && !pickedPassId)}
+              onClick={() => markMut.mutate(needPass ? pickedPassId : passId || null)}
+              className="rounded-md bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              {markMut.isPending ? 'Marking…' : 'Mark restricted'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setOpen(false); setErr(null); setNeedPass(false); setPickedPassId(''); }}
+              className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HouseholdDetailPanel({
   household,
+  campaignId,
   onClose,
   onMovePin,
   onDoNotKnockChanged,
+  onRestrictChanged,
   statusColors,
   statusLabels,
   tz,
@@ -305,6 +586,19 @@ export default function HouseholdDetailPanel({
 
       <DoNotKnockSection household={h} onChanged={onDoNotKnockChanged} />
 
+      {/* Keyed per door + target round so the inline confirm / picker reset with the door. */}
+      <RestrictedSection
+        key={`${h.id}|${passId || activityQ.data?.currentPassId || ''}`}
+        household={h}
+        campaignId={campaignId}
+        passId={passId}
+        activity={activityQ.data}
+        loading={activityQ.isLoading}
+        tz={zone}
+        statusColors={statusColors}
+        onChanged={onRestrictChanged}
+      />
+
       {h.lastAction && (
         <div className="border-b border-border px-4 py-3 text-sm">
           <div className="text-xs uppercase tracking-wide text-fg-muted">Last action</div>
@@ -317,6 +611,9 @@ export default function HouseholdDetailPanel({
                 {h.lastAction.canvasser.firstName} {h.lastAction.canvasser.lastName}
               </>
             )}
+            {/* The lastActivities aggregate does not exclude desk rows, so after a desk mark the
+                named admin would otherwise read as this door's field canvasser. */}
+            {h.lastAction.via === 'bulk' && <DeskTag />}
           </div>
         </div>
       )}
@@ -343,6 +640,7 @@ export default function HouseholdDetailPanel({
                     <li key={i} className="text-xs text-fg-muted">
                       {actionLabel(e.actionType)} · {formatDateTime(e.at, zone)}
                       {e.canvasser ? ` · ${e.canvasser}` : ''}
+                      {e.via === 'bulk' && <DeskTag />}
                       {e.note ? (
                         <div className="mt-0.5 rounded bg-sunken px-2 py-1 italic text-fg-muted">
                           “{e.note}”

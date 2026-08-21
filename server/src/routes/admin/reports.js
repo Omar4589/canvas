@@ -2405,8 +2405,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       CanvassActivity.aggregate([
         // Include 'restricted' so it contributes a separate tally + extends the shift
         // window (first/last), but it is NOT counted in `knocks` (kept billable-only).
-        // Bulk marks excluded: the timeline is a per-CANVASSER grid — an admin's
-        // book-level bulk restrict must not appear as a phantom shift.
+        // Desk marks excluded: the timeline is a per-CANVASSER grid — an admin's
+        // desk mark (a whole book or a single home) must not appear as a phantom shift.
         { $match: { ...scoped, ...NOT_BULK, actionType: { $in: [...KNOCK_ACTIONS, 'restricted'] } } },
         {
           $group: {

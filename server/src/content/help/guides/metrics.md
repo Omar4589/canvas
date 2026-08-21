@@ -100,7 +100,7 @@ An **inaccessible** home — a locked building, a gate, no legal access. It's re
 
 If you invoice your client per door, you may want the restricted homes on the bill anyway — the canvasser still made the walk. Admins can turn that on, and a **Billable doors** number appears alongside Doors on your reports and invoice export: knocked doors **plus** restricted homes.
 
-Everything else stays exactly where it was. Doors, contact rate, survey rate, and the coverage bar don't move — nobody answered a locked gate, so counting it as a contact would make those numbers wrong. Two homes never count: one your team marked restricted in bulk from the office (that's not a walk), and one that a second canvasser later knocked (it's one door, counted once, as a knock).
+Everything else stays exactly where it was. Doors, contact rate, survey rate, and the coverage bar don't move — nobody answered a locked gate, so counting it as a contact would make those numbers wrong. Two homes never count: one your team marked restricted from the office — a whole book or a single home (that's not a walk, and nobody's work), and one that a second canvasser later knocked (it's one door, counted once, as a knock).
 
 This is **off** unless you turn it on, and it has no effect on what Doorline charges you. See [Can I bill for restricted doors?](bill-restricted-doors).
 

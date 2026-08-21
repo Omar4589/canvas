@@ -15,6 +15,7 @@ import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/pas
 import { knocksPipeline, connectionRate, contactRate } from '../../services/reports/aggregations.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { createNextPass } from '../../services/passes/createPass.js';
+import { removeDeskRestrict } from '../../services/canvass/deskRestrict.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -201,6 +202,10 @@ router.delete('/:id', async (req, res, next) => {
       await TurfAssignment.deleteMany({ turfId: { $in: turfIds } });
     }
     await Turf.deleteMany({ passId: pass._id });
+    // Single-home desk marks are allowed on a DRAFT round (restrict-doors); with the round
+    // gone they would orphan — global status stuck at restricted, no book-level undo left —
+    // so sweep them with the round (field rows on a draft can't exist; drafts never ship).
+    await removeDeskRestrict({ campaign: req.campaign, filter: { passId: pass._id } });
     await Pass.deleteOne({ _id: pass._id });
     res.json({ deleted: 1 });
   } catch (err) {

@@ -1,8 +1,9 @@
 // The ONE place the mobile bulk-restrict flow is decided — every entry point (Books map
 // promoted sheet, multi-select bar, book-detail menu) builds its prompts here, so no screen
-// can drift back to its own scope-less flow. Pure data in/out (no react-native imports) so
-// restrictBooks.test.js can pin the rules in plain node; the Alert presentation lives in
-// restrictBooksConfirm.js.
+// can drift back to its own scope-less flow — and the single-home desk-mark prompts /
+// classifier (admin map door sheet, book-detail house pop-up). Pure data in/out (no
+// react-native imports) so restrictBooks.test.js can pin the rules in plain node; the Alert
+// presentation lives in restrictBooksConfirm.js.
 //
 // The rule this file exists to hold (mirrors web's RestrictModal): when the crew has REACHED
 // doors (not-home / wrong-address / refused / no-soliciting), the SAFE scope — 'unknocked', leave reached
@@ -88,11 +89,124 @@ export const buildMarkPrompt = ({ label, counts, totalDoors }) => {
   };
 };
 
-// Unmark prompt descriptor — bulk marks only; field-recorded restricted marks survive.
+// Unmark prompt descriptor — desk marks only (a whole book's or a single home's; the server
+// counts ROWS on the doors currently in the book for its round); field-recorded restricted
+// marks survive.
 export const buildUnmarkPrompt = ({ label, bulkMarks }) => ({
-  title: 'Remove bulk restricted marks?',
+  title: 'Remove desk restricted marks?',
   message:
-    `${bulkMarks.toLocaleString()} bulk mark${bulkMarks === 1 ? '' : 's'} will be removed from ${label}. ` +
+    `${bulkMarks.toLocaleString()} desk mark${bulkMarks === 1 ? '' : 's'} will be removed from ${label}. ` +
     `Restricted marks canvassers recorded at the door are kept.`,
   removeText: 'Remove',
 });
+
+// ── Single-home desk marks ─────────────────────────────────────────────────────────────
+// One door, one round: the same row class as a book-level mark (via:'bulk'), written by
+// POST /turfs/restrict-doors and removed by POST /turfs/unrestrict-doors. No scope choice —
+// a single door is either marked for the round or it isn't.
+
+const NO_MARK = Object.freeze({ kind: 'none', by: null, at: null, passId: null });
+
+// Per-round restricted state of ONE door, from the `rounds` list of
+// GET /admin/households/:id/activity. EXACT round only — callers pass the round the surface
+// speaks for (`scope.passId || currentPassId`); a door untouched in that round has no entry
+// in the list, so a missing round is 'none' (not restricted this round). Deliberately NO
+// newest/active fallback: roundNumber resets per walk list and the list holds only rounds
+// with entries, so "newest" would be a guess. The 'none' pseudo-round (legacy null-pass
+// rows) is skipped. The head entry is the latest (the server sorts newest-first); restricted
+// there → kind by `via === 'bulk'`. THE RULE: a missing/undefined `via` is FIELD — the desk
+// never offers an undo it can't honor (unrestrict-doors deletes via:'bulk' rows only).
+export const doorMarkState = (rounds, passId) => {
+  if (!passId) return NO_MARK;
+  const round = (rounds || []).find((r) => r && r.passId != null && String(r.passId) === String(passId));
+  if (!round) return NO_MARK;
+  const head = (round.entries || [])[0];
+  if (!head || head.actionType !== 'restricted') return NO_MARK;
+  return {
+    kind: head.via === 'bulk' ? 'desk' : 'field',
+    by: head.canvasser || null,
+    at: head.at || null,
+    passId: String(round.passId),
+  };
+};
+
+// Mark prompt — one plain confirm (no scope choice, no second confirm): the server skips a
+// completed / already-restricted door on its own, so there is nothing to choose.
+export const buildMarkDoorPrompt = ({ address }) => ({
+  title: 'Mark this home restricted?',
+  message:
+    `${address || 'This home'} gets a Restricted Access mark — canvassers see it slate and it stays out of ` +
+    `every rate and knock count. If it was completed this round it keeps its result and nothing changes. ` +
+    `A desk mark, not anyone's work. Reversible.`,
+  confirmText: 'Mark restricted',
+});
+
+// Unmark prompt — the desk mark only; field-recorded marks are never in reach here.
+export const buildUnmarkDoorPrompt = ({ address, markedBy, markedWhen }) => ({
+  title: 'Remove the desk mark?',
+  message:
+    `${address || 'This home'} was marked from the desk by ${markedBy || 'a removed user'}` +
+    `${markedWhen ? ` · ${markedWhen}` : ''}. Removing it makes the door knockable again this round. ` +
+    `Marks canvassers recorded at the door are never touched here.`,
+  removeText: 'Remove',
+});
+
+// Alert copy for a restrict-doors response ({ marked, skipped:{ completed, alreadyRestricted,
+// ineligible, reached } }) — one door, so exactly one of these is the story.
+export const describeMarkDoorResult = (res) => {
+  const skips = res?.skipped || {};
+  if ((res?.marked || 0) > 0) {
+    return {
+      title: 'Marked restricted',
+      message: 'Canvassers now see this door slate for the round; it stays out of every rate and knock count. Reversible here.',
+    };
+  }
+  if (skips.alreadyRestricted) {
+    return { title: 'Already restricted', message: 'This door is already restricted this round — nothing changed.' };
+  }
+  if (skips.completed) {
+    return { title: 'Not marked', message: 'Completed this round — it keeps its result. Nothing changed.' };
+  }
+  if (skips.ineligible) {
+    return {
+      title: 'Not marked',
+      message: "Not a knockable door — fully voted, all residents do-not-contact, or not in this round's walk list.",
+    };
+  }
+  return { title: 'Nothing changed', message: 'No door was marked.' };
+};
+
+// Alert copy for an unrestrict-doors response ({ unmarked, households }). `unmarked` counts
+// ROWS (two desk rows on one door are reachable); zero means only field marks were there.
+export const describeUnmarkDoorResult = (res) => {
+  const n = res?.unmarked || 0;
+  if (n > 0) {
+    return {
+      title: 'Desk mark removed',
+      message:
+        `${n === 1 ? 'The desk mark is gone' : `${n} desk marks removed`} — this door is knockable again this round.`,
+    };
+  }
+  return {
+    title: 'Nothing to remove',
+    message: 'No desk mark on this door for this round. Marks canvassers recorded at the door stay.',
+  };
+};
+
+// Error → Alert message. lib/api.js attaches only `status` + `data` to a failed request
+// (`err.code` is reserved for ORG_CONTEXT / FORBIDDEN_ROLE / …), so the server's
+// PASS_REQUIRED code is read from `e.data.code`, never `e.code`.
+export const deskMarkErrorMessage = (e) => {
+  if (e?.data?.code === 'PASS_REQUIRED') {
+    const reason = e.data.unresolved?.[0]?.reason;
+    return reason === 'intake'
+      ? "This door isn't in a walk list yet."
+      : 'This walk list has no current round — open the door from its book and try again.';
+  }
+  // An older server has no restrict-doors route: the request falls through to the /api 404
+  // ({ error:'Not found' }). The route's OWN 404 — { error:'Pass not found' }, an explicit
+  // passId that is not this campaign's (e.g. a deep-link round deleted on the web) — is a
+  // current server telling the truth, so it falls through to its message.
+  if (e?.status === 404 && e?.data?.error !== 'Pass not found') return "Your server doesn't support this yet.";
+  return e?.message || 'Please try again.';
+};

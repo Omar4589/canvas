@@ -81,7 +81,7 @@ The **cover** has a **Walked by** and **Date** line for whoever picks the packet
 
 Doors also drop out if everyone there has already voted, the door was excluded from turf, or it's inactive. The cover doesn't account for any of that — it states the door count once and leaves it there. What was left out, and why, is on screen for you, not on the paper for a volunteer.
 
-**Restricted and no-soliciting doors do print** — those record what happened at a door, not an instruction to stay away. If you don't want volunteers sent back to them, drop them when you cut the round rather than at print time.
+**Restricted and no-soliciting doors do print** — desk marks included — those record what happened at a door, not an instruction to stay away. If you don't want volunteers sent back to them, drop them when you cut the round rather than at print time.
 
 ## If it won't print
 

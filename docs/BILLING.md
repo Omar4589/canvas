@@ -16,7 +16,8 @@ governor's race and a school-board race inside one client can carry different nu
 A campaign starts billing in the calendar month of its **first field visit** — a knock, or a
 restricted home a canvasser walked to and couldn't get into — and keeps billing through the month
 it's **archived**. Setup months — created, imported, turf cut, but nobody in the field yet — are
-free. Marking a book restricted from your desk is not a field visit and doesn't start anything.
+free. Marking a book — or a single home — restricted from your desk is not a field visit and doesn't
+start anything.
 Every billing surface shows **Billing started** per campaign so you can see the date it began (or
 that it hasn't).
 
@@ -328,9 +329,12 @@ Two things this is *not*:
 
 - It is **independent of the `billRestrictedDoors` opt-in** below. That flag decides what appears on
   the org's own invoice totals; when *Doorline* starts charging is not a customer-tunable number.
-- It does **not** extend to bulk marks. An admin bulk-restricting a whole book from the Turf Cutting
-  page ([turfs.js](../server/src/routes/admin/turfs.js), the only `via:'bulk'` writer) is desk work,
-  and must never start an org's billing clock before anyone has walked. Notes still never start it.
+- It does **not** extend to desk marks — a whole book or a single home. An admin marking a book
+  restricted from Turf Cutting or the mobile Books screen, or one home from the Turf Cutting map, the Map
+  page or the mobile admin app ([services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js)
+  is the only `via:'bulk'` writer, behind both route pairs — `restrict-bulk` / `unrestrict-bulk` and
+  `restrict-doors` / `unrestrict-doors` in [turfs.js](../server/src/routes/admin/turfs.js)) is desk
+  work, and must never start an org's billing clock before anyone has walked. Notes still never start it.
 
 ### No periods, no proration, no renewal job
 

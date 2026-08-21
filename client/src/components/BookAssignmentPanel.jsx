@@ -515,7 +515,7 @@ export default function BookAssignmentPanel({
               disabled={restrictPending}
               className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
             >
-              Unmark restricted ({books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0)} bulk marks)
+              Unmark restricted ({books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0)} desk marks)
             </button>
           )}
         </div>

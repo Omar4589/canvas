@@ -311,8 +311,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // billable-knock state BEFORE, and — because the delete below removes exactly THIS canvasser's
   // rows and the create adds one known row — the state AFTER, plus the per-type deleted counts.
   // Must match the deleteMany filter's actionType set (REPLACEABLE_ACTIONS) exactly.
-  // `via` is projected for knockStateOf: a bulk-authored restricted mark must not count as a
-  // billable door (aggregations.js). Omitting it would make every bulk mark look like field work.
+  // `via` is projected for knockStateOf: a desk-authored restricted mark (bulk or single-home)
+  // must not count as a billable door (aggregations.js). Omitting it would make every desk mark
+  // look like field work.
   const pairRows = await CanvassActivity.find(
     { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
     'actionType via userId timestamp location distanceFromHouseMeters replaced'

@@ -51,6 +51,32 @@ untouched ones** (the default when there's reached work — it leaves every door
 like not-homes and refusals, exactly as it is) or **every door not yet done**. Doors already surveyed
 keep their result either way, and you can **Unmark restricted** to undo.
 
+## Marking one home restricted
+
+One locked gate, one building nobody can get into — you don't have to mark the whole book. **Click the
+house** on the map and choose **Mark restricted…** in its popup; it's the same mark as above, for that one
+door: canvassers see it slate, it stays out of your rates and knock counts, and the next cut can leave it
+out. One confirm, no note. It works on a draft cut, an accepted book, or a loose dot not in any book (loose
+dots are hidden after a cut — tick **Not in a book** under **Layers** first). For an apartment building,
+the building's popup has **Mark building restricted…** for every unit at that pin, and **Unmark
+restricted (N)** to take the desk marks back — N counts every unit restricted this round, and marks
+canvassers recorded stay. A door your crew already surveyed this round keeps its result and can't be
+marked; a door they reached but didn't finish (a not-home, say) *is* marked — the knock stays counted.
+
+To undo, open the same popup: a door marked from the desk reads *Marked from the desk by …* and has
+**Unmark restricted**. A door a **canvasser** marked restricted at the door reads *Recorded at the door
+by …* and has no desk undo — only a canvasser re-knocking it changes it. A book's **Unmark restricted (N)**
+takes back every desk mark on the book's doors too, single-home ones included (on a draft cut the book's
+Unmark isn't offered yet, so use the popup until you accept).
+
+Two things you'll notice: the first mark on a draft cut switches the map from book colors to **status
+colors** (uncheck **Door status** under **Layers** to go back), and the **Discard** dialog counts the mark
+among the round's recorded work. Re-cutting or discarding drafts doesn't undo it — the mark follows the
+door into whichever book it lands in next. Marks land on the round you have selected at the top right.
+
+You can do the same on your phone — from the admin **Map** tab's door sheet, or by tapping a house inside a
+book — and from the web [Map page](page-map). See [Can I mark just one house restricted?](mark-one-home-restricted).
+
 ## Every house sits inside its book's shape
 
 Each book's shaded shape **contains all of that book's houses**, and shapes never overlap. So the shape a house sits in, the ring around its dot, and its popup all name the same book.

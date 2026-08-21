@@ -175,10 +175,12 @@ any report's numbers — a confirmed-issue knock still counts everywhere. What a
 warning when open mock-location flags fall inside a report's window (the count at the moment of
 publish is stamped on the report as `openMockFlagsAtPublish`, operator-visible only).
 
-One deliberate blind spot: **admin bulk-restrict marks** (`via: 'bulk'` — marking a whole book
-restricted) are invisible to flag detection. A hundred same-second marks by one admin would flood
-`rapid` flags while auditing nothing a canvasser actually did, so `detectFlags` excludes them at the
-query ([flagDetection.js](../server/src/services/audit/flagDetection.js)).
+One deliberate blind spot: **admin desk marks** (`via: 'bulk'` — marking a whole book, or a single
+home, restricted from the desk; see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)) are invisible to flag
+detection. A hundred same-second marks by one admin would flood `rapid` flags while auditing nothing a
+canvasser actually did — and a single-home mark's "location" is just the house's own pin — so
+`detectFlags` excludes them at the query
+([flagDetection.js](../server/src/services/audit/flagDetection.js)).
 
 ## Who can use it
 

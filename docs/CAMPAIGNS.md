@@ -281,9 +281,10 @@ accepted when their phone reconnects — a settings change never destroys real d
 **Nothing about the past changes.** Doors already recorded keep their status, color, and place in
 every count, rate, export, and invoice. This is a recording policy, not a reporting one — see
 [METRICS.md](METRICS.md). Each flip is logged to the campaign's change history ("Door outcomes:
-all on → Refused off"), highlighted the same way invoice-policy changes are. The admin
-**bulk-restrict** tool on Books keeps working even while Restricted is toggled off — it's a desk
-action owned by the same people who own the toggle.
+all on → Refused off"), highlighted the same way invoice-policy changes are. The admin **desk marks** —
+**bulk restrict** on a book, or **Mark restricted** on a single home from the Turf Cutting map, the Map
+page or the mobile admin app — keep working even while Restricted is toggled off: they're desk actions
+owned by the same people who own the toggle.
 
 ### Door Outcomes — correcting what was recorded (added 2026-08)
 
@@ -321,8 +322,9 @@ pick the new colors up on their next sync. Every change is listed with a **one-c
 undoes it exactly — including a selection that spanned several outcomes, since each entry remembers
 its own original. Runs and reverts both appear in the campaign's change history, highlighted.
 
-Two things the page deliberately won't show you: entries an admin created with **bulk restrict**
-(desk marks, not field observations — they have their own undo on Turf Cutting), and entries a
+Two things the page deliberately won't show you: entries an admin created from the desk — **bulk
+restrict** on a book or **Mark restricted** on a single home (desk marks, not field observations, each
+with its own undo where it was made: the book's Unmark, or the house popup / door panel), and entries a
 previous run already changed, until that run is reverted.
 
 The **App Customization** page keeps a small **Reclassification** card for the common follow-up
@@ -553,7 +555,9 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   zod-validated as `z.array(z.enum(TOGGLEABLE_OUTCOMES))`, deduped and assigned wholesale, audited.
   Pinned end-to-end (lead edit, enum rejection, `OUTCOME_DISABLED`, offline tolerance, both mobile
   wires, audit join, bulk-restrict carve-out) by
-  [disabledOutcomes.int.test.js](../server/test/disabledOutcomes.int.test.js); the
+  [disabledOutcomes.int.test.js](../server/test/disabledOutcomes.int.test.js) — and the single-home
+  desk-mark carve-out (`restrict-doors` still 200 with `disabledOutcomes: ['restricted']`) by
+  [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) case 13; the
   server/client/mobile constant mirrors by [outcomeToggles.test.js](../server/test/outcomeToggles.test.js).
 - **Outcome RECLASSIFICATION** — folding a retired outcome's recorded history into another —
   is a separate, stricter tool:

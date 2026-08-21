@@ -282,3 +282,73 @@ test('unrestrict-bulk removes ONLY bulk marks; field restricted mark survives', 
   assert.strictEqual((await Household.findById(ctx.hhFresh1._id).lean()).status, 'not_home', 'field override kept');
   assert.strictEqual((await Household.findById(ctx.hhPriorSurveyed._id).lean()).status, 'surveyed');
 });
+
+test('Option B: the book-level count and undo follow the DOOR across a move (passId × current membership)', { skip }, async () => {
+  // A second, empty published book in the same round to move a door into.
+  const b2 = await Turf.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: ctx.pass._id, name: 'Book H', mode: 'geometric',
+    status: 'published', householdIds: [], doorCount: 0,
+  });
+  const counts = async () => {
+    const g = await call('GET', `/admin/campaigns/${ctx.camp._id}/turfs?passId=${ctx.pass._id}`, { token: ctx.adminTok, orgId: ctx.org._id });
+    assert.strictEqual(g.status, 200);
+    return Object.fromEntries(g.json.turfs.map((t) => [String(t._id), t.bulkRestrictedCount]));
+  };
+
+  const r = await call('POST', `/admin/campaigns/${ctx.camp._id}/turfs/restrict-bulk`, {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { turfIds: [String(ctx.turf._id)] },
+  });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.json.marked, 4, 'not_home (field override) + prior-pass-surveyed + 2 fresh (one now not_home)');
+  let c = await counts();
+  assert.strictEqual(c[String(ctx.turf._id)], 4);
+  assert.strictEqual(c[String(b2._id)], 0);
+
+  // Move one desk-marked door to the other book: its mark moves with it in the count, even
+  // though the row's stamped turfId still names the old book (provenance only).
+  const mv = await call('POST', `/admin/campaigns/${ctx.camp._id}/turfs/move-door`, {
+    token: ctx.adminTok, orgId: ctx.org._id,
+    body: { householdId: String(ctx.hhFresh2._id), fromTurfId: String(ctx.turf._id), toTurfId: String(b2._id) },
+  });
+  assert.strictEqual(mv.status, 200, JSON.stringify(mv.json));
+  assert.strictEqual(String((await CanvassActivity.findOne({ householdId: ctx.hhFresh2._id, via: 'bulk' }).lean()).turfId), String(ctx.turf._id), 'stamp untouched');
+  c = await counts();
+  assert.strictEqual(c[String(ctx.turf._id)], 3);
+  assert.strictEqual(c[String(b2._id)], 1);
+
+  // A legacy archived merge stub (merge now hard-deletes; a /discard sweeps survivors) keeps its
+  // stale householdIds — all three surfaces must agree it owns NO desk marks: list 0, detail 0,
+  // and its undo removes nothing (the marks belong to the book the doors are in now).
+  const stub = await Turf.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: ctx.pass._id, name: 'Stub', mode: 'geometric',
+    status: 'archived', householdIds: ctx.turf.householdIds, doorCount: ctx.turf.householdIds.length,
+  });
+  const gl = await call('GET', `/admin/campaigns/${ctx.camp._id}/turfs?passId=${ctx.pass._id}&status=archived`, { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(gl.status, 200);
+  assert.strictEqual(gl.json.turfs.find((t) => String(t._id) === String(stub._id))?.bulkRestrictedCount, 0, 'list: archived stub counts 0');
+  const gd = await call('GET', `/admin/campaigns/${ctx.camp._id}/turfs/${stub._id}/households`, { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(gd.status, 200);
+  assert.strictEqual(gd.json.turf.bulkRestrictedCount, 0, 'detail: archived stub counts 0');
+  const us = await call('POST', `/admin/campaigns/${ctx.camp._id}/turfs/unrestrict-bulk`, {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { turfIds: [String(stub._id)] },
+  });
+  assert.strictEqual(us.status, 200);
+  assert.deepStrictEqual(us.json, { unmarked: 0, households: 0 }, 'undo on an archived stub removes nothing');
+  c = await counts();
+  assert.strictEqual(c[String(ctx.turf._id)], 3, 'the live book still owns its marks');
+  assert.strictEqual(c[String(b2._id)], 1);
+
+  // And the undo follows the door the same way: rows, so both books reconcile to the toast.
+  const u2 = await call('POST', `/admin/campaigns/${ctx.camp._id}/turfs/unrestrict-bulk`, {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { turfIds: [String(b2._id)] },
+  });
+  assert.strictEqual(u2.status, 200);
+  assert.deepStrictEqual(u2.json, { unmarked: 1, households: 1 });
+  assert.strictEqual((await Household.findById(ctx.hhFresh2._id).lean()).status, 'unknocked');
+  const u1 = await call('POST', `/admin/campaigns/${ctx.camp._id}/turfs/unrestrict-bulk`, {
+    token: ctx.adminTok, orgId: ctx.org._id, body: { turfIds: [String(ctx.turf._id)] },
+  });
+  assert.strictEqual(u1.status, 200);
+  assert.deepStrictEqual(u1.json, { unmarked: 3, households: 3 });
+  assert.strictEqual(await CanvassActivity.countDocuments({ via: 'bulk' }), 0);
+});

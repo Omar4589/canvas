@@ -417,7 +417,7 @@ export default function AdminBooks() {
       // Mirror restrictMut: a bulk unmark from select mode is done with the selection.
       setSelectMode(false);
       setSelectedBooks(new Set());
-      Alert.alert('Marks removed', `${res.unmarked} bulk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`);
+      Alert.alert('Marks removed', `${res.unmarked} desk restricted mark${res.unmarked === 1 ? '' : 's'} removed.`);
     },
     onError: onAssignError,
   });
@@ -471,7 +471,8 @@ export default function AdminBooks() {
       onScope: (scope) => restrictMut.mutate({ turfIds: ids, scope }),
     });
   }
-  // One book (map sheet / detail) or the whole multi-selection — bulk marks only either way.
+  // One book (map sheet / detail) or the whole multi-selection — desk marks only either way
+  // (the book's whole-book marks AND any single-home marks on its doors, for this round).
   function confirmUnrestrictBooks(bookList) {
     const bulkMarks = bookList.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
     confirmUnmarkRestricted({
@@ -1071,21 +1072,31 @@ export default function AdminBooks() {
               )}
               {sheetMenuOpen && (
                 <View style={styles.sheetMenu}>
+                  {/* Two items, not a toggle: a single-home desk mark in the book makes
+                      "Unmark restricted (N)" appear without taking "Mark book restricted…"
+                      away from the rest of the book (web's panel shows both too). */}
                   <Pressable
                     disabled={restrictPending}
                     onPress={() => {
                       setSheetMenuOpen(false);
-                      if (mapSheetBook.bulkRestrictedCount > 0) confirmUnrestrictBooks([mapSheetBook]);
-                      else confirmRestrictBooks([mapSheetBook]);
+                      confirmRestrictBooks([mapSheetBook]);
                     }}
                     style={({ pressed }) => [styles.sheetMenuItem, (pressed || restrictPending) && { opacity: 0.7 }]}
                   >
-                    <Text style={styles.sheetMenuItemText}>
-                      {mapSheetBook.bulkRestrictedCount > 0
-                        ? `Unmark restricted (${mapSheetBook.bulkRestrictedCount})`
-                        : `Mark book restricted… (${mapSheetBook.doors} doors)`}
-                    </Text>
+                    <Text style={styles.sheetMenuItemText}>{`Mark book restricted… (${mapSheetBook.doors} doors)`}</Text>
                   </Pressable>
+                  {mapSheetBook.bulkRestrictedCount > 0 && (
+                    <Pressable
+                      disabled={restrictPending}
+                      onPress={() => {
+                        setSheetMenuOpen(false);
+                        confirmUnrestrictBooks([mapSheetBook]);
+                      }}
+                      style={({ pressed }) => [styles.sheetMenuItem, (pressed || restrictPending) && { opacity: 0.7 }]}
+                    >
+                      <Text style={styles.sheetMenuItemText}>{`Unmark restricted (${mapSheetBook.bulkRestrictedCount})`}</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
               {(() => {
@@ -1261,7 +1272,7 @@ export default function AdminBooks() {
       {canWrite && selectMode && selectedBooks.size > 0 && (() => {
         const selected = books.filter((b) => selectedBooks.has(b.id));
         // Web can unmark its whole selection in one go — parity: offer it whenever the
-        // selection holds any bulk marks. Bulk marks only; field marks always survive.
+        // selection holds any desk marks. Desk marks only; field marks always survive.
         const selectedBulkMarks = selected.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
         // How many DISTINCT people hold any of these books. Doubles as the Unassign button's
         // visibility rule, which is why loading and error need no branch of their own:

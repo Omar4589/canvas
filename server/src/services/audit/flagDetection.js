@@ -24,9 +24,9 @@ import { FLAG_THRESHOLDS, maxSeverity } from './flagThresholds.js';
 const AUDIT_ROW_CAP = 250000;
 
 export async function detectFlags(match, { organizationId, thresholds = FLAG_THRESHOLDS, rowCap = AUDIT_ROW_CAP } = {}) {
-  // Admin BULK-authored rows (via:'bulk', e.g. book-level bulk-restrict) are invisible to detection
-  // by design: a batch shares one timestamp across many doors and would flood 'rapid' HIGH flags
-  // that audit nothing a canvasser did.
+  // Admin DESK-authored rows (via:'bulk', e.g. desk restricted marks — a whole book or a single
+  // home) are invisible to detection by design: a batch shares one timestamp across many doors
+  // and would flood 'rapid' HIGH flags that audit nothing a canvasser did.
   const scanFilter = { ...match, via: { $ne: 'bulk' } };
 
   const scanCount = await CanvassActivity.countDocuments(scanFilter);

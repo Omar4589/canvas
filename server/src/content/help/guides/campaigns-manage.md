@@ -62,7 +62,7 @@ Filter by outcome, canvasser or round, tick the entries you want — one row to 
 
 Each entry keeps its time, location, canvasser and round — only the label changes, and door colors follow on canvassers' next sync. Every change is listed with a **Revert** button that undoes it exactly (even a selection that spanned several outcomes), and both the change and the revert appear in the campaign's [History](#history--who-changed-what).
 
-Two things you won't see there: doors an admin marked with **bulk restrict** (those are desk marks and have their own undo on Turf Cutting), and entries an earlier change already converted, until you revert that one.
+Two things you won't see there: doors an admin marked restricted from the desk — a whole book with **bulk restrict**, or a single home from its popup (desk marks, each with its own undo where it was made), and entries an earlier change already converted, until you revert that one.
 
 The App Customization page keeps a small **Reclassification** shortcut for the common case right after you switch an outcome off.
 

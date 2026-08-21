@@ -32,11 +32,11 @@ This is the important part. Your **contact rate**, **survey rate**, **houses kno
 
 Two homes are deliberately left out:
 
-- **Bulk-marked homes.** If an admin marked a whole book restricted from the Turf Cutting page, nobody walked it — that's office work, so it isn't billed.
+- **Desk-marked homes.** If an admin marked a whole book — or a single home — restricted from the desk (Turf Cutting, the Map page, or the mobile admin app), nobody walked it — that's office work, so it isn't billed and isn't anyone's work.
 - **Homes someone else reached.** If one canvasser marked a home restricted and another later knocked it, that's **one** door, counted once, as a knock.
 
 ## Does this change my Doorline bill?
 
 No. Doorline charges a flat rate per active campaign per month and never counts your doors at all. This setting only affects the numbers you report to *your* client. See [How billing works](billing).
 
-> One related change: a restricted home **does** start a campaign's billing month, the same as a knock would, because it means someone was out in the field. Marking a book restricted from your desk doesn't.
+> One related change: a restricted home **does** start a campaign's billing month, the same as a knock would, because it means someone was out in the field. Marking a book — or a single home — restricted from your desk doesn't.

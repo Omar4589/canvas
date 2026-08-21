@@ -31,8 +31,9 @@ export function monthDayBounds(month) {
 // "A canvasser was at a door" — the match that both starts the billing clock and answers "did
 // anyone go out this month". Scoped to `restricted`, NOT a blanket NOT_BULK: a via:'bulk' row on a
 // KNOCK action is a real knock and must still count (same reasoning as knocksPipeline), while an
-// admin bulk-restricting a whole book from the Turf Cutting page (routes/admin/turfs.js) is desk
-// work and must never start an org's billing clock before anyone has walked. Notes never count.
+// admin desk-marking a whole book or a single home restricted (services/canvass/deskRestrict.js,
+// behind the Turf Cutting / Map pages) is desk work and must never start an org's billing clock
+// before anyone has walked. Notes never count.
 function fieldVisitMatch(campaignId) {
   return {
     campaignId,
@@ -56,10 +57,10 @@ function fieldVisitMatch(campaignId) {
 // billRestrictedDoors opt-in — that flag only decides whether the door shows up in the org's own
 // invoice totals, and when Doorline starts charging is not a customer-tunable number.
 //
-// The bulk guard is what keeps that honest: an admin bulk-restricting a whole book from the Turf
-// Cutting page (routes/admin/turfs.js) is desk work, and must never start an org's billing clock
-// before anyone has walked. It is scoped to `restricted` rows only — a bulk row on a KNOCK action
-// is a real knock. Notes still never start billing.
+// The desk guard is what keeps that honest: an admin marking a whole book — or a single home —
+// restricted from the console (services/canvass/deskRestrict.js, via:'bulk') is desk work, and
+// must never start an org's billing clock before anyone has walked. It is scoped to `restricted`
+// rows only — a bulk row on a KNOCK action is a real knock. Notes still never start billing.
 //
 // Pricing is untouched by all of this: `amountCents` is a boolean × flat rate, so knock and door
 // volume never multiply anything.

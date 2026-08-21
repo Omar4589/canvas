@@ -32,6 +32,8 @@ import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
 import { primaryReason, reasonColor, FAR_WARN_M } from '../../../lib/flags';
 import { postBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
+import { doorMarkState, describeMarkDoorResult, describeUnmarkDoorResult, deskMarkErrorMessage } from '../../../lib/restrictBooks';
+import { confirmMarkDoor, confirmUnmarkDoor } from '../../../lib/restrictBooksConfirm';
 import { PRESETS, rangeFor, labelForRange, deviceTimezone } from '../../../lib/dateRanges';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../lib/config';
 import { initMapbox } from '../../../lib/mapbox';
@@ -623,6 +625,14 @@ export default function AdminMap() {
     return m;
   }, [households]);
 
+  // `selected` is a tap-time snapshot of one household row. Re-point it at the fresh row
+  // after every refetch (the 20s poll, a desk mark's invalidation) so the sheet's status
+  // pill / last action follow the server; a door that dropped out of the loaded set keeps
+  // its snapshot — this never closes the sheet. Pure functional update: no `selected` dep.
+  useEffect(() => {
+    setSelected((cur) => cur && (householdsById.get(String(cur.id)) || cur));
+  }, [householdsById]);
+
   // Focus a door arriving from a Notes "view on map" link (?household=). The door's
   // note may fall outside the current view — an old date, or a status/canvasser/
   // answer filter or effort scope left on this mounted map — so first clear EVERY
@@ -826,6 +836,24 @@ export default function AdminMap() {
   // knock+survey entries, and names them. `hhSurveyDetailById` merges the lazily-loaded
   // answers onto the survey meta already on the household.
   const hhRounds = hhActivityQ.data?.rounds || [];
+  // Single-home desk mark — the round this sheet speaks for: the deep-link round if set, else
+  // the round the server says a mark with no explicit passId lands on (/activity's
+  // `currentPassId`: the door's own walk list's active round, else its single draft round;
+  // null for an Intake door or an older server). Exact round only (lib/restrictBooks.js) —
+  // in global mode the header pill is the STORED global status, so the caption's round label
+  // is what keeps the per-round button honest.
+  const deskPassId = passId || hhActivityQ.data?.currentPassId || null;
+  const doorMark = useMemo(() => doorMarkState(hhRounds, deskPassId), [hhRounds, deskPassId]);
+  // Name the round: from the door's own history when it has entries there, else from the
+  // walk-list picker's active round (a door untouched in its current round has no history
+  // row to name it), else plainly.
+  const deskRoundLabel = useMemo(() => {
+    if (!deskPassId) return 'This round';
+    const r = hhRounds.find((x) => x.passId && String(x.passId) === String(deskPassId));
+    const ar = r || efforts.map((e) => e.activeRound).find((a) => a && String(a._id) === String(deskPassId));
+    if (ar?.roundNumber != null) return `Round ${ar.roundNumber}`;
+    return ar?.name || 'This round';
+  }, [deskPassId, hhRounds, efforts]);
   const hhSurveyDetailById = useMemo(
     () => new Map((hhSurveysQ.data?.surveys || []).map((s) => [s.id, s])),
     [hhSurveysQ.data]
@@ -952,6 +980,51 @@ export default function AdminMap() {
       qc.invalidateQueries({ queryKey: ['admin', 'households', 'map'] });
     },
   });
+
+  // Single-home desk mark (restrict-doors / unrestrict-doors) — the same row class as a
+  // book-level mark. Settle → refetch every reader of this door's state: the map + counts
+  // (both live under the ['admin','households'] prefix), this sheet's history, and the Books
+  // screens (book homes, round progress, the books list's Unmark (N)). The pins here are
+  // in-memory GeoJSON — no doorEpoch to bump; `turf-doors` deliberately NOT invalidated
+  // (the Books round-wide dots are status-less by design).
+  const invalidateDeskMark = (id) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'households'] });
+    if (id) qc.invalidateQueries({ queryKey: ['admin', 'household-activity', id] });
+    qc.invalidateQueries({ queryKey: ['admin', 'book-households'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turf-progress'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'turfs'] });
+  };
+  const markDoorMut = useMutation({
+    // Explicit passId only under a per-round deep link; otherwise the server resolves the
+    // door's own round (the one /activity's currentPassId names for the caption).
+    mutationFn: ({ id }) =>
+      api(`/admin/campaigns/${cId}/turfs/restrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [id], ...(passId ? { passId } : {}) },
+      }),
+    onSuccess: (res) => {
+      const d = describeMarkDoorResult(res);
+      Alert.alert(d.title, d.message);
+    },
+    onError: (e) => Alert.alert('Could not mark restricted', deskMarkErrorMessage(e)),
+    onSettled: (_res, _err, vars) => invalidateDeskMark(vars?.id),
+  });
+  const unmarkDoorMut = useMutation({
+    // The MARK's own round (from /activity), so a mark whose round was since archived or
+    // whose book was re-cut can always be removed.
+    mutationFn: ({ id, passId: markPassId }) =>
+      api(`/admin/campaigns/${cId}/turfs/unrestrict-doors`, {
+        method: 'POST',
+        body: { householdIds: [id], ...(markPassId ? { passId: markPassId } : {}) },
+      }),
+    onSuccess: (res) => {
+      const d = describeUnmarkDoorResult(res);
+      Alert.alert(d.title, d.message);
+    },
+    onError: (e) => Alert.alert('Could not remove the desk mark', deskMarkErrorMessage(e)),
+    onSettled: (_res, _err, vars) => invalidateDeskMark(vars?.id),
+  });
+  const deskMarkPending = markDoorMut.isPending || unmarkDoorMut.isPending;
 
   // Settled camera move → update the viewport bound. Armed only once the camera has actually
   // shown ≥1 loaded door, so a stray initial viewport (camera mounted before data, or pointed
@@ -1904,6 +1977,7 @@ export default function AdminMap() {
                   {selected.lastAction.canvasser
                     ? ` · ${selected.lastAction.canvasser.firstName} ${selected.lastAction.canvasser.lastName}`
                     : ''}
+                  {selected.lastAction.via === 'bulk' ? ' · desk mark' : ''}
                 </Text>
                 <Text style={styles.detailTimestamp}>
                   {formatExact(selected.lastAction.timestamp, tz)}
@@ -1938,6 +2012,7 @@ export default function AdminMap() {
                           <Text style={styles.historyText}>
                             {actionLabel(e.actionType)}
                             {e.canvasser ? ` · ${e.canvasser}` : ''}
+                            {e.via === 'bulk' ? ' · desk mark' : ''}
                           </Text>
                           <Text style={styles.historyTimestamp}>{formatExact(e.at, tz)}</Text>
                           {e.note ? (
@@ -2028,6 +2103,53 @@ export default function AdminMap() {
               )}
             </View>
           </ScrollView>
+
+          {/* Single-home desk mark — ONE full-width row above [Move pin][Close], never a third
+              button in that row (large-text lesson: a three-up row wraps off-screen). Gated in
+              the positive form (activity loaded) so it never flashes the wrong verb. The
+              caption names the round the button speaks for; a field mark gets no button — only
+              a canvasser re-recording the door changes it. An Intake door (`effortId === null`,
+              a new /map field) has no round to own a mark → disabled hint. */}
+          {canWrite && hhActivityQ.isSuccess && (
+            <View style={styles.deskMarkRow}>
+              <Text style={styles.deskMarkCaption}>
+                {doorMark.kind === 'desk'
+                  ? `${deskRoundLabel} · Marked from the desk by ${doorMark.by || 'a removed user'}` +
+                    (doorMark.at ? ` · ${formatInTz(doorMark.at, tz, { month: 'short', day: 'numeric' }, false)}` : '')
+                  : doorMark.kind === 'field'
+                    ? `${deskRoundLabel} · Restricted at the door by ${doorMark.by || 'a removed user'} — field marks change only when the door is re-recorded.`
+                    : selected.effortId === null
+                      ? "Not in a walk list — can't be marked."
+                      : `${deskRoundLabel} · Not restricted. A desk mark makes this door slate for canvassers — never anyone's work.`}
+              </Text>
+              {doorMark.kind !== 'field' && (
+                <Pressable
+                  disabled={deskMarkPending || (doorMark.kind === 'none' && selected.effortId === null)}
+                  onPress={() => {
+                    const address = `${selected.addressLine1 || ''}${selected.addressLine2 ? `, ${selected.addressLine2}` : ''}`.trim();
+                    if (doorMark.kind === 'desk') {
+                      confirmUnmarkDoor({
+                        address,
+                        markedBy: doorMark.by,
+                        markedWhen: doorMark.at ? formatInTz(doorMark.at, tz, { month: 'short', day: 'numeric' }, false) : null,
+                        onConfirm: () => unmarkDoorMut.mutate({ id: selected.id, passId: doorMark.passId }),
+                      });
+                    } else {
+                      confirmMarkDoor({ address, onConfirm: () => markDoorMut.mutate({ id: selected.id }) });
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.deskMarkButton,
+                    (pressed || deskMarkPending || (doorMark.kind === 'none' && selected.effortId === null)) && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={styles.deskMarkButtonText}>
+                    {doorMark.kind === 'desk' ? 'Unmark restricted' : 'Mark restricted'}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           <View style={styles.sheetButtons}>
             {canWrite && (
@@ -2593,6 +2715,22 @@ function makeStyles(t) {
     borderColor: colors.border,
   },
   closeButtonText: { color: colors.textPrimary, fontWeight: '600' },
+
+  // Single-home desk-mark row (door sheet, above [Move pin][Close]). The Pressable is the
+  // closeButton shape with the restricted slate as its border + label — there is NO existing
+  // sibling for this: the restricted token is only ever a text color, a filled background
+  // (status pill / map dot) or a map color stop today, never an outlined button.
+  deskMarkRow: { marginTop: spacing.md },
+  deskMarkCaption: { ...type.caption, marginBottom: spacing.xs },
+  deskMarkButton: {
+    backgroundColor: colors.bg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.status.restricted,
+  },
+  deskMarkButtonText: { color: colors.status.restricted, fontWeight: '600' },
 
   sheetButtons: {
     flexDirection: 'row',

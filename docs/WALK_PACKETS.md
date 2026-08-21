@@ -220,8 +220,8 @@ apartments could be skipped, because it reported the admin's own choice back as 
 Omission counts and their reasons are the admin's, on screen; a volunteer only needs the doors
 they were handed.
 
-**Restricted doors DO print.** "Restricted" is what happened at a door — a gate, a guard, a
-locked lobby — not an instruction to stay away.
+**Restricted doors DO print** — desk marks (a whole book or a single home) included. "Restricted" is
+what happened at a door — a gate, a guard, a locked lobby — not an instruction to stay away.
 
 ## Printing more than about 1,200 doors
 

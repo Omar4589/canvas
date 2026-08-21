@@ -10,8 +10,9 @@ import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 //     replaceable rows ONCE, derives the pair's billable-knock state before/after from that read
 //     (the delete removes exactly the caller's rows; the create adds one known row — no second
 //     query), and bumps with the deltas via `bumpCampaignStats`.
-//   • RARE ADMIN BULK OPS (re-cut clear-knocks, snapshot restore, bulk-restrict/unrestrict, admin
-//     survey delete, demo staging): call `recomputeCampaignStats` after the mutation — a full
+//   • RARE ADMIN BULK OPS (re-cut clear-knocks, snapshot restore, restrict-bulk/unrestrict-bulk
+//     and restrict-doors/unrestrict-doors, draft-pass delete, admin survey delete, demo staging):
+//     call `recomputeCampaignStats` after the mutation — a full
 //     per-campaign recompute is exactly what the dashboards used to do on EVERY read, so doing it
 //     once per rare admin write is strictly cheaper and immune to bulk-delta math bugs.
 //
@@ -32,9 +33,10 @@ import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 // restricted DOOR only when it has a non-bulk `restricted` mark and NO knock — so knockCount and
 // restrictedDoorCount are disjoint and sum to billableDoors. The moment a real disposition lands
 // on the pair, the door flips out of restricted and into knocks, which is exactly the transition
-// the surveyed/lit/refused flags already model. Bulk marks are skipped for the same reason the
-// pipeline skips them: a desk-authored bulk restrict is not field work (see aggregations.js).
-// Callers MUST project `via` alongside `actionType`, or every bulk mark would look like a walk.
+// the surveyed/lit/refused flags already model. Desk marks are skipped for the same reason the
+// pipeline skips them: a desk-authored restricted mark (a whole book or a single home) is not
+// field work (see aggregations.js). Callers MUST project `via` alongside `actionType`, or every
+// desk mark would look like a walk.
 export function knockStateOf(rows) {
   const state = { knock: false, surveyed: false, lit: false, refused: false, restrictedDoor: false };
   let restricted = false;

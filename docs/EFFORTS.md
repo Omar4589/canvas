@@ -246,7 +246,10 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   NOT proof of no history, because knocks stamp the door's owner at write time
   (`resolveAttribution`, [mobile/canvass.js](../server/src/routes/mobile/canvass.js)); deleting the
   doc would orphan those rows into the by-pass report's **"Legacy / no pass"** bucket (the 2026-08
-  incident). Archive instead — it keeps the name resolvable in reports forever. Orphans created
+  incident). A **desk mark** is such a row too: a single home marked restricted from the Turf Cutting
+  map, the Map page or the mobile admin app on a **draft** round ([PASSES_AND_TURF.md](PASSES_AND_TURF.md))
+  blocks deleting the walk list until it is unmarked. Archive instead — it keeps the name resolvable
+  in reports forever. Orphans created
   before this guard are repaired with **`npm run repair:orphan-attribution`** (dashboard Run console;
   dry-run by default, `-- --apply` to write): it re-stamps rows whose walk list/round was deleted to
   the door's *current* list + round, and lists ambiguous rows (door back in Intake, several rounds

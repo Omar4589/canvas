@@ -15,7 +15,7 @@ They look similar in the field but count very differently. The question that sep
 - **No soliciting** — you reached the door, but a posted sign ended the visit and nobody answered. This **is** a knock — you made the same walk as any other house — but it is **not** a contact, so it doesn't lift your "reached a person" rate.
 - **Restricted access** — you never reached the door at all: a gated community, a locked building, no access. It's fully visible and counted as its own category, but it is **not** counted as a knock (you never actually knocked).
 
-All three stay on the map and in your counts. For **restricted** and **no-soliciting** homes, an admin can choose to **exclude** them from the next round's books so nobody is sent back — while leaving the option to try again later if access opens up or the campaign changes its mind. The two toggles are separate, so you can drop one, both, or neither.
+All three stay on the map and in your counts. An admin can also mark a home restricted **from the desk** — a whole book or a single house ([how](mark-one-home-restricted)) — which looks the same on the map but is nobody's work and is never billed. For **restricted** and **no-soliciting** homes, an admin can choose to **exclude** them from the next round's books so nobody is sent back — while leaving the option to try again later if access opens up or the campaign changes its mind. The two toggles are separate, so you can drop one, both, or neither.
 
 ## Billing
 

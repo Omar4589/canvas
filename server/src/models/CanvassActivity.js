@@ -71,8 +71,9 @@ const canvassActivitySchema = new mongoose.Schema(
 
     timestamp: { type: Date, required: true, index: true },
     wasOfflineSubmission: { type: Boolean, default: false },
-    // Provenance: null = recorded in the field; 'bulk' = an admin book-level
-    // bulk mark (turfs.js restrict-bulk). Bulk rows drive door status and
+    // Provenance: null = recorded in the field; 'bulk' = an admin DESK mark — a
+    // whole book (turfs.js restrict-bulk) or a single home (restrict-doors), both
+    // written by services/canvass/deskRestrict.js. Desk rows drive door status and
     // campaign-scope tallies like any other row, but are EXCLUDED from the GPS
     // audit and every per-canvasser surface (NOT_BULK in reports/aggregations).
     via: { type: String, enum: [null, 'bulk'], default: null },

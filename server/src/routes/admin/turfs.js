@@ -27,6 +27,18 @@ import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
+import {
+  DESK_RESTRICT_MATCH,
+  emptyDeskSkips,
+  planDeskRestrict,
+  commitDeskRestrict,
+  removeDeskRestrict,
+  bookOfDoorsInPass,
+  resolveDeskPassForDoors,
+  deskMarkCountsForPasses,
+  countDeskMarksByBook,
+  deskMarkFilterForBook,
+} from '../../services/canvass/deskRestrict.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -362,8 +374,12 @@ router.post('/add-supplemental', async (req, res, next) => {
 // scope: 'all' (default) | 'drafts'. Drafts-only undoes a bad supplemental add (or
 // any unaccepted cut) without touching the accepted books — no snapshot and no
 // confirmActive gate, because drafts by construction carry no assignments (both
-// assign routes 409 `not-accepted`) and no history keyed to them; it is the exact
-// wipe every re-generate already performs (wipeDraftBooks in generateTurf.js).
+// assign routes 409 `not-accepted`) and no FIELD history keyed to them; it is the
+// exact wipe every re-generate already performs (wipeDraftBooks in generateTurf.js).
+// Single-home desk marks (restrict-doors) may carry a draft book's id as provenance
+// only — nothing reads it for counts/undo (deskRestrict.js keys by passId + current
+// membership); those marks survive the wipe as loose-door marks and count under the
+// door's next book.
 router.post('/discard', async (req, res, next) => {
   const { passId, confirmActive, clearKnocks, scope } = req.body || {};
   let locked = false;
@@ -561,20 +577,14 @@ router.get('/', async (req, res, next) => {
     // mobile bootstrap serves canvassers, so admin counts don't drift after early voting.
     const allHhIds = [...new Set(turfs.flatMap((t) => (t.householdIds || []).map(String)))];
     const eligible = await eligibleSetOf(allHhIds);
-    // Bulk-restricted marks per book — drives the "Unmark restricted (N)" affordance.
-    const bulkAgg = turfs.length
-      ? await CanvassActivity.aggregate([
-          {
-            $match: {
-              turfId: { $in: turfs.map((t) => t._id) },
-              actionType: 'restricted',
-              via: 'bulk',
-            },
-          },
-          { $group: { _id: '$turfId', n: { $sum: 1 } } },
-        ])
-      : [];
-    const bulkByTurf = new Map(bulkAgg.map((r) => [String(r._id), r.n]));
+    // Desk-mark ROWS per book — drives the "Unmark restricted (N)" affordance. Keyed by
+    // (passId, the book's CURRENT doors), not the stamped turfId, so a single-home mark made
+    // while the book was a draft, a moved door's mark, or a restored book's marks all count
+    // under — and fall to — the book the door is in now (deskRestrict.js). Archived
+    // (merge-absorbed) stubs count 0.
+    const deskPassIds = [...new Set(turfs.filter((t) => t.status !== 'archived').map((t) => String(t.passId)))];
+    const deskCounts = await deskMarkCountsForPasses(req.campaign._id, deskPassIds);
+    const bulkByTurf = countDeskMarksByBook(turfs, deskCounts);
     // slim=1 (the web cut page sends it): drop householdIds from the response — the
     // page never reads them, and at 250k doors they are a multi-MB payload. Additive:
     // without the param the shape is unchanged (mobile books.jsx doesn't send it).
@@ -857,14 +867,15 @@ router.get('/attribute-preview', async (req, res, next) => {
   }
 });
 
-// Bulk "the whole book is inaccessible" (gated community): create REAL
-// restricted CanvassActivity rows for every eligible, not-yet-done door in the
-// selected book(s), tagged via:'bulk'. Real rows keep the per-round view right
-// (canvassers see slate doors, not fresh ones); the via tag keeps them OUT of
-// the GPS audit and every per-canvasser surface (NOT_BULK in reports). Field
-// rows are never deleted — latest-wins status recompute flips the door, and a
-// later field re-disposition flips it right back. Idempotent: already-
-// restricted and round-completed doors are skipped. docs/PASSES_AND_TURF.md.
+// Desk marks — "this book is inaccessible" (a gated community) and, below, "this one home
+// is" (one locked gate). Both write REAL restricted CanvassActivity rows tagged via:'bulk'
+// through ONE writer, services/canvass/deskRestrict.js — see its header for the row class,
+// why there is no second `via` value, and the (passId, current membership) keying of the
+// book-level count/undo. Desk marks ignore Campaign.disabledOutcomes on purpose: the toggle
+// governs what CANVASSERS may record, and these rows are never field work.
+//
+// restrict-bulk: every eligible, not-yet-done door in the selected PUBLISHED book(s).
+// Idempotent: already-restricted and round-completed doors are skipped.
 router.post('/restrict-bulk', async (req, res, next) => {
   try {
     const tids = (req.body?.turfIds || []).filter((id) => mongoose.isValidObjectId(id));
@@ -891,123 +902,192 @@ router.post('/restrict-bulk', async (req, res, next) => {
 
     const now = new Date();
     let marked = 0;
-    // `reached` = doors left alone under scope 'unknocked' because the crew already reached them
-    // (not-home / refused / wrong-address). Always 0 under 'incomplete'.
-    const skipped = { completed: 0, alreadyRestricted: 0, ineligible: 0, reached: 0 };
+    const skipped = emptyDeskSkips();
     const perTurf = [];
     const touched = [];
     const rows = [];
     for (const turf of turfs) {
-      const hhIds = turf.householdIds || [];
-      // Same eligibility clause as /:turfId/households, so the marked set equals
-      // what the canvasser actually sees (coords are required by the model anyway).
-      const eligibleDoors = await Household.find(
-        {
-          _id: { $in: hhIds },
-          ...KNOCKABLE_DOOR_FILTER,
-          'location.coordinates': { $exists: true, $ne: null },
-        },
-        { location: 1, effortId: 1, organizationId: 1, campaignId: 1 }
-      ).lean();
-      skipped.ineligible += hhIds.length - eligibleDoors.length;
-      const statusMap = await getPassStatusMap(
-        turf.passId,
-        eligibleDoors.map((h) => h._id),
-        req.campaign.type
-      );
-      let turfMarked = 0;
-      for (const hh of eligibleDoors) {
-        const s = statusMap.get(String(hh._id))?.status || 'unknocked';
-        // scope 'unknocked': leave every door the crew reached exactly as it is (this also
-        // subsumes the completed/restricted skips below, but count them there for a truthful
-        // breakdown rather than lumping them into `reached`).
-        if (scope === 'unknocked' && s !== 'unknocked' && s !== 'surveyed' && s !== 'lit_dropped' && s !== 'restricted') {
-          skipped.reached += 1;
-          continue;
-        }
-        if (s === 'surveyed' || s === 'lit_dropped') {
-          skipped.completed += 1; // a done door keeps its result
-          continue;
-        }
-        if (s === 'restricted') {
-          skipped.alreadyRestricted += 1; // idempotent re-runs
-          continue;
-        }
-        const [lng, lat] = hh.location.coordinates;
-        rows.push({
-          organizationId: hh.organizationId,
-          campaignId: hh.campaignId,
-          householdId: hh._id,
-          voterId: null,
-          userId: req.user._id,
-          actionType: 'restricted',
-          via: 'bulk',
-          note: null,
-          location: { lat, lng, accuracy: null }, // the house's own pin
-          distanceFromHouseMeters: 0,
-          timestamp: now,
-          wasOfflineSubmission: false,
-          passId: turf.passId,
-          turfId: turf._id,
-          effortId: hh.effortId || null,
-          // Explicitly NO team. An admin's own coordinator is not a field-work attribution — the
-          // same reason lastActionBy is deliberately left unset below ("don't attribute a whole
-          // community to the admin"). Bulk rows already sit outside every per-canvasser surface
-          // (NOT_BULK), and they must sit outside every per-TEAM total for the same reason.
-          coordinatorId: null,
-        });
-        touched.push(hh._id);
-        turfMarked += 1;
-      }
-      marked += turfMarked;
-      perTurf.push({ turfId: String(turf._id), name: turf.name, marked: turfMarked });
+      const plan = await planDeskRestrict({
+        campaign: req.campaign,
+        passId: turf.passId,
+        householdIds: turf.householdIds || [],
+        userId: req.user._id,
+        turfIdFor: () => turf._id,
+        scope,
+        now,
+      });
+      for (const k of Object.keys(skipped)) skipped[k] += plan.skipped[k];
+      rows.push(...plan.rows);
+      touched.push(...plan.touched);
+      marked += plan.rows.length;
+      perTurf.push({ turfId: String(turf._id), name: turf.name, marked: plan.rows.length });
     }
-
-    if (rows.length) {
-      await CanvassActivity.insertMany(rows);
-      await recomputeHouseholdStatusesByIds(touched, req.campaign.type);
-      // save() no-ops when the recomputed status is unchanged (e.g. a door
-      // restricted in a PRIOR pass), so bump the docs explicitly — the mobile
-      // delta poll (/changes filters updatedAt > since) must deliver every
-      // touched door. lastActionAt matches the single-door path; lastActionBy
-      // is deliberately NOT set (don't attribute a whole community to the admin).
-      await Household.updateMany({ _id: { $in: touched } }, { $set: { lastActionAt: now } });
-      // Bulk restricted rows change activityCount (campaign tallies include bulk) but never the
-      // knock/canvasser counters (restricted ∉ KNOCK_ACTIONS; via:'bulk' is NOT_BULK-excluded) —
-      // recompute keeps every stats field exact in one move.
-      await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });
-    }
+    await commitDeskRestrict({ campaign: req.campaign, rows, touched, now });
     res.json({ marked, skipped, perTurf });
   } catch (err) {
     next(err);
   }
 });
 
-// Undo — removes ONLY the rows bulk-restrict created (any admin's; it's a
-// book-level action). A canvasser's own field-recorded restricted marks survive
-// and stay reversible per-door in the field, like today.
+// Undo — removes ONLY desk rows (any admin's; it's a book-level action) on the doors
+// CURRENTLY in the selected book(s), for each book's round: bulk marks, single-home marks
+// made before acceptance, marks that followed a moved or restored door. A canvasser's own
+// field-recorded restricted marks survive and stay reversible per-door in the field.
+// `unmarked` = rows removed, `households` = distinct doors.
 router.post('/unrestrict-bulk', async (req, res, next) => {
   try {
     const tids = (req.body?.turfIds || []).filter((id) => mongoose.isValidObjectId(id));
     if (!tids.length) return res.status(400).json({ error: 'turfIds required' });
-    const filter = {
-      campaignId: req.campaign._id,
-      turfId: { $in: tids.map((id) => new mongoose.Types.ObjectId(id)) },
-      actionType: 'restricted',
-      via: 'bulk',
-    };
-    const touched = await CanvassActivity.distinct('householdId', filter);
-    const r = await CanvassActivity.deleteMany(filter);
-    if (touched.length) {
-      await recomputeHouseholdStatusesByIds(touched, req.campaign.type);
-      // Same stale-delta edge in reverse (a prior-pass-restricted door recomputes
-      // to the same status → no save → no updatedAt bump). Nothing "happened to"
-      // the door, so bump updatedAt without touching lastActionAt.
-      await Household.updateMany({ _id: { $in: touched } }, { $currentDate: { updatedAt: true } });
-      // Bulk ledger delete → keep Campaign.stats.activityCount exact (see restrict-bulk above).
-      await recomputeCampaignStats(req.campaign._id, { swallowErrors: true });
+    // Archived (legacy merge-absorbed) stubs are excluded — GET / counts them 0, and their stale
+    // householdIds now name doors that belong to the absorbing book, so the same set is used here.
+    const turfs = await Turf.find(
+      { _id: { $in: tids }, campaignId: req.campaign._id, status: { $ne: 'archived' } },
+      { passId: 1, householdIds: 1 }
+    ).lean();
+    if (!turfs.length) return res.json({ unmarked: 0, households: 0 });
+    // One delete across the books ($or of per-book filters) so a door booked in two rounds is
+    // still ONE household in the count.
+    const filters = turfs.map(deskMarkFilterForBook);
+    const r = await removeDeskRestrict({
+      campaign: req.campaign,
+      filter: filters.length === 1 ? filters[0] : { $or: filters },
+    });
+    res.json({ unmarked: r.unmarked, households: r.households });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 1–1000 deduped ObjectIds from a request body, or null. Shared by the two single-home routes.
+const parseHouseholdIds = (raw) => {
+  const ids = [...new Set((Array.isArray(raw) ? raw : []).map(String))].filter((id) => mongoose.isValidObjectId(id));
+  if (!ids.length || ids.length > 1000) return null;
+  return ids.map((id) => new mongoose.Types.ObjectId(id));
+};
+
+// Plain-English reason the route could not pick a round on its own (PASS_REQUIRED).
+const passRequiredMessage = (unresolved) =>
+  unresolved[0]?.reason === 'intake'
+    ? 'This door is not in a walk list yet — assign it to one first.'
+    : 'Pick a round first — this walk list has no current round.';
+
+// Single-home desk mark: one door (or every unit at one pin) Restricted Access, from the turf
+// page, the Map page or the mobile admin app — allowed any time the house is on the page
+// (draft books, accepted books, loose dots), unlike restrict-bulk's published-only gate.
+//   body { householdIds: string[], passId?: string }
+//   passId: explicit (must be this campaign's → 404; archived round → 409 `pass-archived`)
+//     else each door's own effort's active round, else its single draft round, else
+//     400 PASS_REQUIRED { unresolved:[{ id, reason:'intake'|'no-round' }] } — all-or-nothing.
+//     An Intake door (no walk list) can never be marked: no round can own it.
+//   → { marked, skipped:{ completed, alreadyRestricted, ineligible, reached:0 }, passId, passIds }
+//   ineligible = not in this campaign, not a knockable door (KNOCKABLE_DOOR_FILTER / no pin),
+//   or its effort ≠ the named round's effort. Always scope 'incomplete'.
+router.post('/restrict-doors', async (req, res, next) => {
+  try {
+    const ids = parseHouseholdIds(req.body?.householdIds);
+    if (!ids) return res.status(400).json({ error: 'householdIds required (1–1000)' });
+    const rawPassId = req.body?.passId ? String(req.body.passId) : null;
+    if (rawPassId && !mongoose.isValidObjectId(rawPassId)) return res.status(400).json({ error: 'invalid passId' });
+
+    const households = await Household.find(
+      { _id: { $in: ids }, campaignId: req.campaign._id },
+      { effortId: 1 }
+    ).lean();
+    const skipped = emptyDeskSkips();
+    skipped.ineligible += ids.length - households.length;
+
+    const { byPass, unresolved, ineligible, passProblem } = await resolveDeskPassForDoors({
+      campaign: req.campaign,
+      households,
+      passId: rawPassId,
+      forMark: true,
+    });
+    if (passProblem === 'not-found') return res.status(404).json({ error: 'Pass not found' });
+    if (passProblem === 'archived') {
+      return res.status(409).json({
+        error: 'That round is archived — a desk mark there would never reach a canvasser.',
+        code: 'pass-archived',
+      });
     }
-    res.json({ unmarked: r.deletedCount, households: touched.length });
+    if (unresolved.length) {
+      return res.status(400).json({ error: passRequiredMessage(unresolved), code: 'PASS_REQUIRED', unresolved });
+    }
+    skipped.ineligible += ineligible.length;
+
+    const now = new Date();
+    const rows = [];
+    const touched = [];
+    for (const [pid, hhs] of byPass) {
+      const hhIds = hhs.map((h) => h._id);
+      // Provenance only — the door's book in this round right now (null for a loose door).
+      const book = await bookOfDoorsInPass({ campaignId: req.campaign._id, passId: pid, householdIds: hhIds });
+      const plan = await planDeskRestrict({
+        campaign: req.campaign,
+        passId: new mongoose.Types.ObjectId(pid),
+        householdIds: hhIds,
+        userId: req.user._id,
+        turfIdFor: (hh) => book.get(String(hh._id)) || null,
+        scope: 'incomplete',
+        now,
+      });
+      for (const k of Object.keys(skipped)) skipped[k] += plan.skipped[k];
+      rows.push(...plan.rows);
+      touched.push(...plan.touched);
+    }
+    await commitDeskRestrict({ campaign: req.campaign, rows, touched, now });
+    // Body ids don't trigger the :householdId param hook; tag them for the staff-access log.
+    addAuditSubjects(res, 'household', ids.map(String));
+    const passIds = [...byPass.keys()];
+    res.json({ marked: rows.length, skipped, passId: rawPassId || (passIds.length === 1 ? passIds[0] : null), passIds });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Single-home undo — removes the DESK rows on those doors for one round; field-recorded
+// marks never match (a canvasser re-knocking supersedes those). No knockable filter, no
+// effort / pass-status / pass-existence check: it deletes for whatever passId the client
+// names (the mark's own round from /activity), so a mark whose draft round was since
+// deleted or whose door was re-housed can always be removed. Omitted passId resolves
+// exactly as restrict-doors does.
+//   body { householdIds: string[], passId?: string } → { unmarked, households, passId, passIds }
+router.post('/unrestrict-doors', async (req, res, next) => {
+  try {
+    const ids = parseHouseholdIds(req.body?.householdIds);
+    if (!ids) return res.status(400).json({ error: 'householdIds required (1–1000)' });
+    const rawPassId = req.body?.passId ? String(req.body.passId) : null;
+    if (rawPassId && !mongoose.isValidObjectId(rawPassId)) return res.status(400).json({ error: 'invalid passId' });
+
+    // Map<passIdStr, householdId[]>
+    const groups = new Map();
+    if (rawPassId) {
+      groups.set(rawPassId, ids);
+    } else {
+      const households = await Household.find(
+        { _id: { $in: ids }, campaignId: req.campaign._id },
+        { effortId: 1 }
+      ).lean();
+      const { byPass, unresolved } = await resolveDeskPassForDoors({
+        campaign: req.campaign,
+        households,
+        passId: null,
+        forMark: false,
+      });
+      if (unresolved.length) {
+        return res.status(400).json({ error: passRequiredMessage(unresolved), code: 'PASS_REQUIRED', unresolved });
+      }
+      for (const [pid, hhs] of byPass) groups.set(pid, hhs.map((h) => h._id));
+    }
+    const filters = [...groups].map(([pid, hhIds]) => ({
+      passId: new mongoose.Types.ObjectId(pid),
+      householdId: { $in: hhIds },
+    }));
+    const r = filters.length
+      ? await removeDeskRestrict({ campaign: req.campaign, filter: filters.length === 1 ? filters[0] : { $or: filters } })
+      : { unmarked: 0, households: 0 };
+    addAuditSubjects(res, 'household', ids.map(String));
+    const passIds = [...groups.keys()];
+    res.json({ unmarked: r.unmarked, households: r.households, passId: rawPassId || (passIds.length === 1 ? passIds[0] : null), passIds });
   } catch (err) {
     next(err);
   }
@@ -1170,8 +1250,12 @@ router.get('/:turfId/households', async (req, res, next) => {
       : [];
     const [statusMap, bulkRestrictedCount] = await Promise.all([
       getPassStatusMap(turf.passId, ids, req.campaign.type),
-      // Drives the detail screen's "Unmark restricted (N)" menu item.
-      CanvassActivity.countDocuments({ turfId: turf._id, actionType: 'restricted', via: 'bulk' }),
+      // Drives the detail screen's "Unmark restricted (N)" menu item — desk-mark ROWS on the
+      // doors currently in this book, for its round (same keying as GET / and unrestrict-bulk;
+      // an archived merge-absorbed stub counts 0 there too).
+      turf.status === 'archived'
+        ? 0
+        : CanvassActivity.countDocuments({ campaignId: req.campaign._id, ...deskMarkFilterForBook(turf), ...DESK_RESTRICT_MATCH }),
     ]);
     const out = households
       .filter((h) => h.location?.coordinates?.length === 2)
@@ -1435,7 +1519,10 @@ router.patch('/:turfId', async (req, res, next) => {
 // Delete a single DRAFT book — surgical cleanup (e.g. one unwanted supplemental
 // book). Accepted books can only be removed via Discard (snapshot + type-confirm);
 // a draft carries no assignments (both assign routes 409 `not-accepted`) and no
-// history keyed to it, so this only has to clear the household mirror. NO
+// FIELD history keyed to it, so this only has to clear the household mirror.
+// Single-home desk marks may carry this book's id as provenance only — nothing
+// reads it for counts/undo (deskRestrict.js keys by passId + current membership);
+// they survive as loose-door marks and count under the door's next book. NO
 // re-tessellation: removing a book's doors only GROWS the neighbors' Voronoi
 // entitlement, so every other stored shape stays disjoint and containing (same
 // invariant the onlyTurfIds notes in generateTurf.js rely on). Lock-guarded so a
