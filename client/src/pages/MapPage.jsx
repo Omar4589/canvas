@@ -24,6 +24,8 @@ import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { groupHouseholds, buildingKeyForCoords } from '../lib/buildings.js';
 import { visibleMapDoors, countExcludedDoors } from '../lib/excludedDoors.js';
+import MapDoorCount from '../components/MapDoorCount.jsx';
+import { pluralize } from '../lib/mapCounts.js';
 import {
   householdsToGeoJSON,
   buildingsToGeoJSON,
@@ -146,13 +148,19 @@ export default function MapPage() {
     // drill itself was all-time — defaulting to Today would show a different door set
     // than the list the admin just came from.
     if (searchParams.get('questionKey')) return defaultRange('all', orgTz);
+    // An import's "View on map" / a saved search's map link name a DOOR SET, not a day — on
+    // Today the server intersects that set with today's interactions, and freshly imported
+    // (untouched) doors would vanish. Open on all-time so the set itself is what shows.
+    if (searchParams.get('importId') || searchParams.get('savedSearchId')) return defaultRange('all', orgTz);
     return defaultRange('today', orgTz);
   });
   const rangeTouchedRef = useRef(
     !!searchParams.get('from') ||
       !!searchParams.get('to') ||
       !!searchParams.get('household') ||
-      !!searchParams.get('questionKey')
+      !!searchParams.get('questionKey') ||
+      !!searchParams.get('importId') ||
+      !!searchParams.get('savedSearchId')
   );
   const [statusFilter, setStatusFilter] = useState([]);
   const [canvasserId, setCanvasserId] = useState(searchParams.get('userId') || '');
@@ -369,6 +377,70 @@ export default function MapPage() {
   const canvassers = householdsQ.data?.canvassers || [];
   const activities = householdsQ.data?.activities || [];
   const mapBounds = householdsQ.data?.bounds || null; // date-independent campaign door extent (camera framing)
+
+  // Campaign-wide counts for the header + the sidebar status chips: the map's filters MINUS the
+  // viewport (and minus the render-only pings flag), so panning never refetches it and its
+  // number never depends on what's on screen. Same filter meanings as /map — the server builds
+  // both from one scope (households.js). Polls with Live like every number under the pill.
+  const countsQ = useQuery({
+    queryKey: [
+      'admin',
+      'households-map-counts',
+      campaignId,
+      dateRange.from,
+      dateRange.to,
+      statusFilter.join(','),
+      canvasserId,
+      answerFilter.questionKey,
+      answerFilter.option,
+      answerFilter.optionId,
+      answerTemplateId,
+      scopeEffortId,
+      scopePassId,
+      scopeImportId,
+      scopeSavedSearchId,
+    ],
+    queryFn: () =>
+      api(
+        `/admin/households/map/counts${buildQuery({
+          campaignId,
+          from: dateRange.from,
+          to: dateRange.to,
+          status: statusFilter,
+          userId: canvasserId,
+          questionKey: answerFilter.questionKey,
+          option: answerFilter.option,
+          optionId: answerFilter.optionId,
+          surveyTemplateId: answerTemplateId,
+          effortId: scopeEffortId,
+          passId: scopePassId,
+          importId: scopeImportId,
+          savedSearchId: scopeSavedSearchId,
+        })}`
+      ),
+    enabled: !!campaignId,
+    ...livePollOptions(live),
+    placeholderData: keepPreviousData,
+  });
+  const doorCounts = countsQ.data || null;
+
+  // What the header's ⓘ says "match" means — the filters, as words (lib/mapCounts.js).
+  const scopeEffortName = scopeEffortId
+    ? efforts.find((x) => String(x._id) === scopeEffortId)?.name || 'this walk list'
+    : null;
+  const matchFacts = {
+    preset: dateRange.preset,
+    from: dateRange.from,
+    to: dateRange.to,
+    statusLabels: statusFilter.map((s) => STATUS_LABELS[s] || s),
+    canvasserName: (() => {
+      const c = canvassers.find((x) => x.id === canvasserId);
+      return c ? `${c.firstName} ${c.lastName}` : '';
+    })(),
+    answerOption: answerFilter.option,
+    // The pass / import / saved-search chip; the walk list travels as effortName instead.
+    scopeLabel: scopeEffortId && !showEffortSelect ? '' : scopeLabel || '',
+  };
 
   // GPS-audit flags — a SEPARATE query (only when the layer is on) so toggling flags never
   // refetches households. Server returns the full per-reason summary (for the chip counts)
@@ -970,21 +1042,38 @@ export default function MapPage() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-fg-muted">
-            <span>
-              {householdsQ.isLoading
-                ? 'Loading households…'
-                : `${households.length.toLocaleString()} households shown`}
-            </span>
-            {/* Doors sharing a pin can't each get their own dot, so say how many are
-                folded into building glyphs — otherwise the map looks like it's missing them. */}
+            {/* The primary number is CAMPAIGN-WIDE (from /map/counts), never households.length:
+                the payload is viewport-bounded and capped, so it is "what's loaded", not "what
+                matches". The drawn count appears as "N in view" only when it is smaller. */}
+            <MapDoorCount
+              loading={householdsQ.isLoading}
+              counts={doorCounts}
+              countsState={{
+                pending: countsQ.isPending,
+                error: countsQ.isError,
+                placeholder: countsQ.isPlaceholderData || householdsQ.isPlaceholderData,
+                retry: () => countsQ.refetch(),
+              }}
+              shownCount={shownHouseholds.length}
+              payloadCount={households.length}
+              excludedVis={excludedVis}
+              truncated={!!householdsQ.data?.truncated}
+              cap={householdsQ.data?.cap}
+              effortName={scopeEffortName}
+              isAllTime={!dateRange.from && !dateRange.to}
+              matchFacts={matchFacts}
+            />
+            {/* About what is DRAWN, not what matches: doors sharing a pin can't each get their
+                own dot, so say how many are folded into building glyphs — otherwise the map
+                looks like it's missing them. */}
             {buildings.length > 0 && (
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
                 <span
-                  title={`${stackedIds.size.toLocaleString()} doors share a pin with at least one other door. Each group is drawn as one building glyph — click it to see every door.`}
+                  title={`Drawn on screen right now: ${buildings.length.toLocaleString()} ${pluralize(buildings.length, 'building')} standing for ${stackedIds.size.toLocaleString()} doors that share a pin with at least one other door. Click a building to see every door in it.`}
                   className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted"
                 >
-                  {buildings.length.toLocaleString()} buildings · {stackedIds.size.toLocaleString()} stacked doors
+                  {buildings.length.toLocaleString()} {pluralize(buildings.length, 'building')} · {stackedIds.size.toLocaleString()} stacked {pluralize(stackedIds.size, 'door')}
                 </span>
               </>
             )}
@@ -994,7 +1083,7 @@ export default function MapPage() {
                 answer for them too — not just for households. */}
             <LiveStatus
               {...liveStatusProps(
-                [householdsQ, ...(showFlags ? [flagsQ] : []), ...(showOverlaps ? [overlapDoorsQ] : [])],
+                [householdsQ, countsQ, ...(showFlags ? [flagsQ] : []), ...(showOverlaps ? [overlapDoorsQ] : [])],
                 {
                   live,
                   onToggle: () => setLive((v) => !v),
@@ -1090,6 +1179,9 @@ export default function MapPage() {
             excludedVis={excludedVis}
             onExcludedVisChange={setExcludedVis}
             excludedCount={excludedCount}
+            statusCounts={doorCounts?.byStatus || null}
+            excludedCampaignCount={doorCounts?.matching?.excludedFromTurf ?? null}
+            excludedUniverseCount={doorCounts?.universe?.excludedFromTurf ?? null}
             showFlags={showFlags}
             onShowFlagsChange={setShowFlags}
             flagReasonFilter={flagReasonFilter}

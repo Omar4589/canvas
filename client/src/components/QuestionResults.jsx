@@ -173,6 +173,13 @@ function VoterList({
                     <Badge variant="info">Offline</Badge>
                   </span>
                 )}
+                {/* Typed by an admin converting the door's outcome — this list is where "12 people
+                    said Yes" gets acted on, so provenance has to be visible per row. */}
+                {v.deskEntered && (
+                  <span className="shrink-0">
+                    <Badge variant="warning">Desk</Badge>
+                  </span>
+                )}
               </div>
               {v.household && (
                 <div className="truncate text-xs text-fg-muted">

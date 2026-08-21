@@ -180,6 +180,15 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
               </div>
             )}
 
+            {/* Desk-entered: typed by an admin converting the door's outcome, not collected at the
+                door. Provenance, not arithmetic — it counts like any other answer. */}
+            {r.deskEntry && (
+              <div className="text-xs text-amber-600">
+                Entered at a desk on {formatInTz(r.deskEntry.at, tz, TIME_OPTS, true)}
+                {r.deskEntry.fromOutcome ? ` — this door was recorded as ${String(r.deskEntry.fromOutcome).replace(/_/g, ' ')}` : ''}
+              </div>
+            )}
+
             {r.replacedEarlier && (
               <div className="text-xs text-warning-fg">
                 Replaced {r.replacedEarlier.by ? `${r.replacedEarlier.by.firstName || ''} ${r.replacedEarlier.by.lastName || ''}`.trim() : "another canvasser"}&apos;s
@@ -188,7 +197,16 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
               </div>
             )}
 
-            {r.archived && (
+            {r.archived && r.overwrittenVia === 'outcome_convert' ? (
+              /* Removed by an ADMIN changing the door's outcome — the default wording below would
+                 read as an accusation against a canvasser for something they did not do. */
+              <div className="rounded border border-border bg-sunken p-2 text-xs text-fg-muted">
+                <span className="font-semibold">Removed</span> — these answers were set aside when{' '}
+                {r.overwrittenBy ? `${r.overwrittenBy.firstName || ''} ${r.overwrittenBy.lastName || ''}`.trim() : 'an admin'}{' '}
+                changed this door&apos;s outcome on {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}.
+                Preserved here; restore from the voter profile.
+              </div>
+            ) : r.archived ? (
               <div className="rounded border border-danger/30 bg-danger-tint p-2 text-xs text-danger-fg">
                 <span className="font-semibold">Overwritten</span> — these answers were replaced at
                 the door by{' '}
@@ -196,7 +214,7 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                 on {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)} and preserved here. Restore
                 from the voter profile.
               </div>
-            )}
+            ) : null}
 
             {household?.lng != null && household?.lat != null && (
               <DotMap lng={household.lng} lat={household.lat} />

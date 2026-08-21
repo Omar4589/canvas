@@ -14,6 +14,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
+import { fmtCount, inViewClip, explainCounts, universeLabel, MAP_HOUSEHOLD_CAP } from '../../../lib/mapCounts';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -210,7 +211,9 @@ function FilterChip({ label, active, open, onPress, style }) {
   );
 }
 
-function MenuItem({ label, active, dotColor, onPress }) {
+// `count` (optional) renders right-aligned and muted — the status menu's campaign-wide door
+// counts and the answer menu's response counts. null = no slot, not "0".
+function MenuItem({ label, active, dotColor, onPress, count }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <Pressable onPress={onPress} style={[styles.menuItem, active && styles.menuItemActive]}>
@@ -222,6 +225,7 @@ function MenuItem({ label, active, dotColor, onPress }) {
       <Text style={[styles.menuItemText, active && styles.menuItemTextActive]} numberOfLines={1}>
         {label}
       </Text>
+      {count != null ? <Text style={styles.menuCount}>{fmtCount(count)}</Text> : null}
       {active ? <Text style={styles.menuCheck}>✓</Text> : null}
     </Pressable>
   );
@@ -332,7 +336,7 @@ export default function AdminMap() {
   // '' falls back to the campaign's current template once surveyQ resolves.
   const [answerFilter, setAnswerFilter] = useState({ questionKey: '', optionId: '', option: '', label: '', templateId: '' });
   const [live, setLive] = useState(true);
-  const [openMenu, setOpenMenu] = useState(null); // 'date' | 'canvasser' | 'status' | 'answer' | null
+  const [openMenu, setOpenMenu] = useState(null); // 'date' | 'walklist' | 'canvasser' | 'status' | 'answer' | 'count' | null
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const isFocused = useIsFocused();
   // Viewport bound ("west,south,east,north"): once ARMED (the camera has actually shown some of
@@ -478,6 +482,39 @@ export default function AdminMap() {
     placeholderData: keepPreviousData,
     // Tabs keep this screen mounted forever once visited — pause the live poll
     // (and refresh on return) whenever another screen covers it.
+    ...useFocusedPoll(),
+  });
+
+  // Campaign-wide counts for the count chip + the status menu: the same filters as mapQ MINUS
+  // the viewport (and the render-only pings flag), so panning never refetches it and its number
+  // never depends on what's on screen. Mirrors the web MapPage's countsQ; the server builds both
+  // routes from ONE scope (households.js). Polls with Live like mapQ — the LiveStatus pill below
+  // answers for both.
+  const countsQ = useQuery({
+    queryKey: [
+      'admin', 'households', 'map-counts', cId, range?.from, range?.to, statusFilter.join(','),
+      canvasserId, answerFilter.questionKey, answerFilter.optionId, answerFilter.option, answerTemplateId, effortId, passId, importId,
+    ],
+    queryFn: () => {
+      const p = new URLSearchParams({ campaignId: String(cId) });
+      if (range?.from) p.set('from', range.from);
+      if (range?.to) p.set('to', range.to);
+      if (statusFilter.length) p.set('status', statusFilter.join(','));
+      if (canvasserId) p.set('userId', canvasserId);
+      if (answerFilter.questionKey) {
+        p.set('questionKey', answerFilter.questionKey);
+        if (answerFilter.optionId) p.set('optionId', answerFilter.optionId);
+        if (answerFilter.option) p.set('option', answerFilter.option);
+        if (answerTemplateId) p.set('surveyTemplateId', answerTemplateId);
+      }
+      if (effortId) p.set('effortId', effortId);
+      if (passId) p.set('passId', passId);
+      if (importId) p.set('importId', importId);
+      return api(`/admin/households/map/counts?${p.toString()}`);
+    },
+    enabled: !!cId,
+    refetchInterval: live ? 20 * 1000 : false,
+    placeholderData: keepPreviousData,
     ...useFocusedPoll(),
   });
 
@@ -858,6 +895,46 @@ export default function AdminMap() {
       (q) => (q.type === 'single_choice' || q.type === 'multiple_choice') && Array.isArray(q.options) && q.options.length
     );
   }, [surveyQ.data]);
+
+  // The count chip + its tap-to-explain rows, mirrored from the web MapDoorCount (the wording
+  // and the "in view" rule live in lib/mapCounts.js on both sides).
+  const doorCounts = countsQ.data || null;
+  const statusCounts = doorCounts?.byStatus || null;
+  const mapTruncated = !!mapQ.data?.truncated;
+  const mapCap = mapQ.data?.cap || MAP_HOUSEHOLD_CAP;
+  // No in-view claim while either query is showing a previous key's data (a filter just
+  // changed) — a transiently mismatched pair must never print a false number.
+  const countClip =
+    !doorCounts || mapQ.isPlaceholderData || countsQ.isPlaceholderData
+      ? null
+      : inViewClip({
+          matchingTotal: doorCounts.matching?.total,
+          shownCount: households.length,
+          payloadCount: households.length,
+          excludedVis: 'show',
+          truncated: mapTruncated,
+        });
+  const countEffortName = effortId ? effortLabel : null;
+  const countExplainRows = doorCounts
+    ? explainCounts({
+        counts: doorCounts,
+        clip: countClip,
+        facts: {
+          preset: range?.preset,
+          from: range?.from,
+          to: range?.to,
+          statusLabels: statusFilter.map((k) => STATUS_OPTIONS.find((s) => s.key === k)?.label || k),
+          canvasserName: canvasserId ? canvasserLabel : '',
+          answerOption: answerFilter.option || '',
+          scopeLabel: passId ? 'this pass' : importId ? "this import's homes" : '',
+        },
+        effortName: countEffortName,
+        cap: mapCap,
+      })
+    : [];
+  // The Live pill may promise no more freshness than its STALEST number (web's livePoll rule).
+  const liveStamps = [mapQ.dataUpdatedAt, countsQ.dataUpdatedAt].filter(Boolean);
+  const liveUpdatedAt = liveStamps.length ? Math.min(...liveStamps) : 0;
 
   const toggleMenu = useCallback((m) => setOpenMenu((cur) => (cur === m ? null : m)), []);
   const toggleStatus = useCallback(
@@ -1481,20 +1558,44 @@ export default function AdminMap() {
             </View>
           ) : null}
 
-          {/* Row 3: live status (left) + the house count (right). */}
+          {/* Row 3: live status (left) + the door count (right). The count is CAMPAIGN-WIDE
+              (matching / universe from /map/counts), never households.length — the payload is
+              viewport-bounded and capped, so it is "what's loaded", not "what matches". The drawn
+              count appears beneath as "N in view" only when it is smaller. Tap for the breakdown. */}
           <View style={styles.statusBar}>
             <LiveStatus
               live={live}
               onToggle={() => setLive((v) => !v)}
-              isFetching={mapQ.isFetching}
-              updatedAt={mapQ.dataUpdatedAt}
-              onRefresh={() => mapQ.refetch()}
+              isFetching={mapQ.isFetching || countsQ.isFetching}
+              updatedAt={liveUpdatedAt}
+              onRefresh={() => { mapQ.refetch(); countsQ.refetch(); }}
             />
-            <View style={styles.countChip}>
-              <Text style={styles.countText}>
-                <Text style={styles.countStrong}>{households.length}</Text> houses
-              </Text>
-            </View>
+            <Pressable style={styles.countChip} onPress={() => toggleMenu('count')} hitSlop={4} disabled={!doorCounts}>
+              {doorCounts ? (
+                doorCounts.matching.total === doorCounts.universe.total ? (
+                  <Text style={styles.countText} numberOfLines={1}>
+                    <Text style={styles.countStrong}>{fmtCount(doorCounts.universe.total)}</Text>
+                    {' '}doors {universeLabel(countEffortName)}
+                  </Text>
+                ) : (
+                  <Text style={styles.countText} numberOfLines={1}>
+                    <Text style={styles.countStrong}>{fmtCount(doorCounts.matching.total)}</Text>
+                    {' / '}{fmtCount(doorCounts.universe.total)} doors
+                  </Text>
+                )
+              ) : (
+                <Text style={styles.countText} numberOfLines={1}>
+                  <Text style={styles.countStrong}>{fmtCount(households.length)}</Text> doors in view
+                </Text>
+              )}
+              {countClip || mapTruncated ? (
+                <Text style={[styles.countSub, mapTruncated && styles.countWarn]} numberOfLines={1}>
+                  {countClip ? `${fmtCount(countClip.shown)} in view` : ''}
+                  {countClip && mapTruncated ? ' · ' : ''}
+                  {mapTruncated ? `⚠ capped at ${fmtCount(mapCap)}` : ''}
+                </Text>
+              ) : null}
+            </Pressable>
           </View>
         </View>
 
@@ -1559,16 +1660,43 @@ export default function AdminMap() {
         )}
         {openMenu === 'status' && (
           <View style={styles.menu}>
-            <MenuItem label="All statuses" active={statusFilter.length === 0} onPress={() => setStatusFilter([])} />
+            {/* One status per door, so "All statuses" is the plain sum. Zeros show once the
+                counts exist — "0" says a tap yields nothing; no number means not loaded yet. */}
+            <MenuItem
+              label="All statuses"
+              active={statusFilter.length === 0}
+              count={statusCounts ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : null}
+              onPress={() => setStatusFilter([])}
+            />
             {STATUS_OPTIONS.map((s) => (
-              <MenuItem key={s.key} label={s.label} active={statusFilter.includes(s.key)} dotColor={colors.status[s.key]} onPress={() => toggleStatus(s.key)} />
+              <MenuItem
+                key={s.key}
+                label={s.label}
+                active={statusFilter.includes(s.key)}
+                dotColor={colors.status[s.key]}
+                count={statusCounts ? statusCounts[s.key] ?? 0 : null}
+                onPress={() => toggleStatus(s.key)}
+              />
             ))}
+            {statusCounts ? (
+              <Text style={styles.menuHint}>Counts are campaign-wide under your other filters, not just the area on screen.</Text>
+            ) : null}
           </View>
         )}
+        {openMenu === 'count' && doorCounts ? (
+          <View style={styles.menu}>
+            {countExplainRows.map((t, i) => (
+              <Text key={i} style={styles.menuInfo}>{t}</Text>
+            ))}
+          </View>
+        ) : null}
         {openMenu === 'answer' && (
           <View style={styles.menu}>
             <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
               <MenuItem label="Any answer" active={!answerFilter.questionKey} onPress={() => { setAnswerFilter({ questionKey: '', optionId: '', option: '', label: '', templateId: '' }); setOpenMenu(null); }} />
+              {/* The numbers are RESPONSES (one voter's answer), not doors — a household with
+                  three voters can carry three. Say so, or they look wrong next to the door count. */}
+              <Text style={styles.menuHint}>Counts are survey responses, not doors.</Text>
               {surveyQuestions.map((q) => (
                 <View key={q.key}>
                   <Text style={styles.menuGroup}>{q.label}</Text>
@@ -1576,6 +1704,7 @@ export default function AdminMap() {
                     <MenuItem
                       key={o.id || o.option}
                       label={o.option}
+                      count={o.count}
                       active={
                         answerFilter.questionKey === q.key &&
                         (answerFilter.optionId ? answerFilter.optionId === o.id : answerFilter.option === o.option)
@@ -2284,6 +2413,8 @@ function makeStyles(t) {
   },
   countText: { fontSize: 12, color: colors.textSecondary },
   countStrong: { color: colors.textPrimary, fontWeight: '700' },
+  countSub: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+  countWarn: { color: colors.warnFg },
 
   // The chrome owns ALL the vertical rhythm — one `gap` between every row, so no row can
   // pay for the same space twice (row 1's paddingBottom + row 2's paddingTop used to make
@@ -2348,6 +2479,7 @@ function makeStyles(t) {
   menuItemText: { flex: 1, fontSize: 14, color: colors.textPrimary },
   menuItemTextActive: { color: colors.brand, fontWeight: '700' },
   menuCheck: { color: colors.brand, fontWeight: '700' },
+  menuCount: { fontSize: 12, color: colors.textSecondary, fontVariant: ['tabular-nums'] },
   menuGroup: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
@@ -2358,6 +2490,9 @@ function makeStyles(t) {
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
+  // A plain-prose footnote inside a menu (count hints); `menuInfo` is a full explain row.
+  menuHint: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, paddingBottom: spacing.sm, fontSize: 11, lineHeight: 15, color: colors.textSecondary },
+  menuInfo: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
 
   legend: {
     position: 'absolute',

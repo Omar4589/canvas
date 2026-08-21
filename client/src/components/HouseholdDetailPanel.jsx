@@ -397,7 +397,8 @@ export default function HouseholdDetailPanel({
         {h.surveys?.length ? (
           <div className="space-y-3">
             {h.surveys.map((s) => {
-              const answers = surveyDetailById.get(s.id)?.answers || [];
+              const detail = surveyDetailById.get(s.id);
+              const answers = detail?.answers || [];
               return (
                 <div key={s.id} className="rounded border border-border p-3">
                   <div className="flex items-baseline justify-between gap-2 text-sm">
@@ -412,6 +413,11 @@ export default function HouseholdDetailPanel({
                     <div className="mt-0.5 text-xs text-fg-muted">
                       by {s.canvasser.firstName} {s.canvasser.lastName}
                     </div>
+                  )}
+                  {/* Desk-entered: an admin typed these answers converting the door's outcome —
+                      provenance, so nobody reads it as a doorstep conversation. */}
+                  {detail?.deskEntry && (
+                    <div className="mt-0.5 text-xs text-amber-600">Entered at a desk, not at the door</div>
                   )}
                   {surveysQ.isLoading && (
                     <div className="mt-2 text-xs text-fg-subtle">Loading answers…</div>

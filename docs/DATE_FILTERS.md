@@ -76,8 +76,9 @@ answer) drops the map to **only the houses that were interacted with in that win
 surveyed, or noted. The map is an **audit tool**, so it opens on **Today** — you land on what the
 team did today (and, with the flag overlay on, today's flagged entries; see [AUDIT.md](AUDIT.md)).
 The trade-off is that early in the day, or on a campaign with no activity yet, it can open looking
-nearly empty — switch to **All time** to see the whole universe of doors again. (Details in
-[MAPS.md](MAPS.md).)
+nearly empty — switch to **All time** to see the whole universe of doors again. The count up top now
+says so: on Today it reads "N doors match · of M in campaign" and its ⓘ explains that "match" means
+doors touched today, with M the whole universe. (Details in [MAPS.md](MAPS.md).)
 
 ---
 
@@ -165,7 +166,7 @@ The frontend sends **date-only** `from` / `to` query params. Both parsers turn t
 | Endpoint family | Parser | Applied to |
 |---|---|---|
 | `/admin/reports/*` | `parseDateRange(req, field)` → `zonedDayRange` in `req.anchorTz` ([reports.js](../server/src/routes/admin/reports.js)) | half-open `$gte`/`$lt` on the field — `timestamp` for knocks/activity, `submittedAt` for surveys. Different metrics range on different fields; see [METRICS.md](METRICS.md) §F. |
-| `/admin/households/map` | `resolveMapTz` + `zonedDayRange` ([households.js](../server/src/routes/admin/households.js)) | `$gte`/`$lt` on `CanvassActivity.timestamp` **and** `SurveyResponse.submittedAt`. |
+| `/admin/households/map` + `/map/counts` | `resolveMapTz` + `zonedDayRange` ([households.js](../server/src/routes/admin/households.js) `buildMapScope`, shared by both routes) | `$gte`/`$lt` on `CanvassActivity.timestamp` **and** `SurveyResponse.submittedAt`. |
 
 Both resolve the anchor tz the same way (campaign tz when `campaignId` is present, else the org's), so
 the map narrows to the **same campaign-day window** as the dashboards. The mechanism — `req.anchorTz`

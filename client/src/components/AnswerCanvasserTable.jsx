@@ -58,6 +58,14 @@ export default function AnswerCanvasserTable({ rows = [], selectedUserId = '', o
                 </td>
                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-fg">
                   {(r.count || 0).toLocaleString()}
+                  {/* Of which an admin typed on this canvasser's behalf (an outcome→Surveyed
+                      conversion credits the knocker). This table exists to answer "did they
+                      really record 40 Yeses?" — so desk entries can't hide inside the count. */}
+                  {r.deskEntered > 0 && (
+                    <span className="ml-1 text-xs font-normal text-amber-600" title="Entered at a desk by an admin">
+                      ({r.deskEntered.toLocaleString()} desk)
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-fg-muted">
                   {(r.share ?? 0).toFixed(1)}%

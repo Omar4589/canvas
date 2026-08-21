@@ -161,8 +161,14 @@ Voters ship only for survey campaigns, scoped to those doors
   the refetch entirely while the viewport stays inside the last padded box** — so small pans cost no
   network, only a pan/zoom beyond the buffer refetches (the mobile admin map already pads its box
   ~10%/side + epsilon-gates). A missing/degenerate/near-world bbox falls back to the unbounded pull, still **capped
-  at 50,000 households** (`MAP_HOUSEHOLD_CAP`) with `truncated`+`total`, backed by the
-  `{campaignId,isActive}` index. The **date window is the other guard**: with from/to
+  at 50,000 households** (`MAP_HOUSEHOLD_CAP`) with `truncated`+`total`+`cap`, backed by the
+  `{campaignId,isActive}` index. Its sibling `GET /admin/households/map/counts` (the header's
+  campaign-wide "N match · of M" + the status-chip counts) is **bbox-independent by design** — the
+  clients key it on filters-minus-bbox so a pan never refetches it — and cheap: in the global-status
+  mode two index-backed `$group`s (one over the universe, one by `status` over the matching set); in
+  the per-canvasser / per-pass modes one slim `_id excludedFromTurf doNotKnock` find over the
+  (already bbox-free) scope ids + the same activity aggregate `/map` runs. It polls at 20s with Live
+  like `/map`. The **date window is the other guard**: with from/to
   set, doors narrow to interaction-touched ones
   ([:211-230](../server/src/routes/admin/households.js#L211-L230)), and both the web and mobile
   admin maps default to **Today**. The heavy pull only happens when a user clears/widens the dates:

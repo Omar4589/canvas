@@ -20,11 +20,12 @@ const BULK_ACTIONS = [
   { status: 'open', label: 'Reopen', reopenOnly: true },
 ];
 
-function StatusChip({ status, active, count, onClick, color, label }) {
+function StatusChip({ status, active, count, onClick, color, label, title }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={
         'flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-sm transition-colors ' +
         (active
@@ -39,7 +40,7 @@ function StatusChip({ status, active, count, onClick, color, label }) {
         />
         {label}
       </span>
-      {count != null && <span className="text-xs text-fg-muted">{count}</span>}
+      {count != null && <span className="text-xs tabular-nums text-fg-muted">{Number(count).toLocaleString()}</span>}
     </button>
   );
 }
@@ -77,6 +78,13 @@ export default function MapFilters({
   excludedVis = 'show',
   onExcludedVisChange,
   excludedCount = 0,
+  // Campaign-wide figures from /map/counts (null until loaded; the read-only client map never
+  // passes them). statusCounts feeds each chip: doors per status under every OTHER filter,
+  // across the whole campaign — never the viewport. The two excluded figures sit under the
+  // Layers chip, whose own badge stays "in view" (that is what Dim / Hide act on).
+  statusCounts = null,
+  excludedCampaignCount = null,
+  excludedUniverseCount = null,
   // GPS-audit flags overlay (admin map only).
   showFlags = false,
   onShowFlagsChange,
@@ -183,12 +191,15 @@ export default function MapFilters({
           {/* Only offered when there is something to see. Tri-state, so it uses Segmented
               rather than a checkbox — "dim" is the useful middle setting and a boolean
               can't express it. Never a server filter: see lib/excludedDoors.js. */}
-          {excludedCount > 0 && (
+          {(excludedCount > 0 || excludedUniverseCount > 0) && (
             <div className="mt-3">
               <div className="mb-1 flex items-center gap-2 text-sm">
                 <span className="text-fg">Doors excluded from books</span>
-                <span className="ml-auto rounded-full bg-warning-tint px-1.5 text-xs font-medium text-warning-fg">
-                  {excludedCount.toLocaleString()}
+                <span
+                  title="Excluded doors currently loaded on your screen — what Dim / Hide will act on. The campaign-wide figures are in the note below."
+                  className="ml-auto rounded-full bg-warning-tint px-1.5 text-xs font-medium text-warning-fg"
+                >
+                  {excludedCount.toLocaleString()} in view
                 </span>
               </div>
               <Segmented
@@ -202,6 +213,15 @@ export default function MapFilters({
                 ]}
               />
               <div className="mt-1 text-xs text-fg-muted">
+                {excludedCampaignCount != null && (
+                  <>
+                    {excludedCampaignCount.toLocaleString()} match your current filters across the campaign
+                    {excludedUniverseCount != null
+                      ? `; ${excludedUniverseCount.toLocaleString()} in the campaign overall`
+                      : ''}
+                    .{' '}
+                  </>
+                )}
                 Held back by <strong className="font-medium text-fg-muted">Remove apartments</strong> when
                 turf was cut — not cut into books, not sent to phones, not printed, anywhere in this
                 campaign. They stay on this map because it is the record of what exists and what was
@@ -360,16 +380,29 @@ export default function MapFilters({
               onClick={() => toggleStatus(s)}
               color={statusColors[s]}
               label={statusLabels[s]}
+              count={statusCounts ? statusCounts[s] ?? 0 : null}
+              title={
+                statusCounts
+                  ? `${(statusCounts[s] ?? 0).toLocaleString()} doors with this status under your other filters (dates, canvasser, answer, walk list) — across the whole campaign, not just the area on screen`
+                  : undefined
+              }
             />
           ))}
         </div>
+        {/* Zeros show once the counts exist — "0" says a click yields nothing; no number means
+            "not loaded yet". Same convention as the flag-reason chips above. */}
+        {statusCounts && (
+          <p className="mt-1 text-[11px] text-fg-subtle">
+            Counts are campaign-wide under your other filters — not just the doors on screen.
+          </p>
+        )}
         {/* Not a filter — an explanation. Doors sharing one geocode can't each have
             their own dot, so they're drawn as a building. Without this the map looks
             like it lost them. */}
         {buildingCount > 0 && (
           <p className="mt-2 rounded border border-border bg-sunken px-2 py-1.5 text-[11px] leading-snug text-fg-muted">
             🏢 <strong className="text-fg">{buildingCount.toLocaleString()}</strong> building
-            {buildingCount === 1 ? '' : 's'} hold{' '}
+            {buildingCount === 1 ? '' : 's'} on screen hold{' '}
             <strong className="text-fg">{stackedDoorCount.toLocaleString()}</strong> doors on shared pins. Click one to
             see every door in it.
           </p>
@@ -397,6 +430,10 @@ export default function MapFilters({
       {choiceQuestions.length > 0 && (
         <div>
           <SectionLabel>Survey answer</SectionLabel>
+          {/* The pill numbers are RESPONSES (one voter's answer), not doors — a household with
+              three voters can carry three. Say so, or they look like they disagree with the
+              door counts above. */}
+          <p className="-mt-1 mb-2 text-[11px] text-fg-subtle">Counts are survey responses, not doors.</p>
           <div className="space-y-3">
             {choiceQuestions.map((q) => (
               <div key={q.key}>
@@ -422,7 +459,7 @@ export default function MapFilters({
                             ? 'bg-brand-600 text-white'
                             : 'border border-border bg-card text-fg-muted hover:bg-sunken')
                         }
-                        title={`${opt.count} responses`}
+                        title={`${opt.count} responses (a door can have several)`}
                       >
                         {opt.option}
                         <span className={active ? 'ml-1 opacity-80' : 'ml-1 text-fg-muted'}>

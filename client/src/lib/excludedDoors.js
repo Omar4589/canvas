@@ -21,6 +21,8 @@ export const visibleMapDoors = (households, mode) =>
   mode === 'hide' ? (households || []).filter((h) => !isExcludedDoor(h)) : households || [];
 
 // Counted over the doors in the current payload — which is viewport-bounded and capped at
-// MAP_HOUSEHOLD_CAP. This is "of the doors shown", never a campaign total, and it will not
-// reconcile with Turf Cutting's effort-scoped excludedApartmentCount. Label it accordingly.
+// MAP_HOUSEHOLD_CAP. This is "of the doors in view" (what Dim / Hide will act on), never a
+// campaign total — MapFilters labels it "in view" and sits the campaign-wide figures from
+// /map/counts (matching.excludedFromTurf / universe.excludedFromTurf) beneath it. Neither will
+// reconcile with Turf Cutting's effort-scoped excludedApartmentCount.
 export const countExcludedDoors = (households) => (households || []).filter(isExcludedDoor).length;

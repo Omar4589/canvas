@@ -307,7 +307,10 @@ nothing; a "Main ·" prefix everywhere would be noise). Where it lives and what 
 - **The Map tab** — a **walk-list chip** in the filter row opens a picker. Picking a walk list
   clears any pass/import deep-link scope (a pass belongs to ONE walk list, so a stale pass scope
   would silently zero out the map); with the chip present, the "Scoped to …" row only announces
-  pass/import scopes and its ✕ leaves the picked walk list alone ([MAPS.md](MAPS.md)).
+  pass/import scopes and its ✕ leaves the picked walk list alone ([MAPS.md](MAPS.md)). The count
+  chip reads **3,513 / 10,482 doors** (match / in campaign, from `/map/counts` — never the
+  viewport), with "N in view" beneath when the screen holds fewer; tap it for the breakdown. The
+  Status menu carries each status's campaign-wide count; the answer menu's numbers are responses.
 
 One deletion rides along: Timeline's reconciliation footer claiming the coordinator filter wasn't
 applied to its overlap totals is gone — the crew filter is applied server-side, so the

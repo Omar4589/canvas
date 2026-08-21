@@ -17,7 +17,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Turf } from '../../models/Turf.js';
 import { Pass } from '../../models/Pass.js';
-import { getPassStatusMap, getUserStatusMap } from '../../services/passes/passStatus.js';
+import { getPassStatusMap, getUserStatusMap, statusCountsFromMap, emptyStatusCounts } from '../../services/passes/passStatus.js';
 import { setDoNotKnock, clearDoNotKnock } from '../../services/dnc/doNotKnock.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
@@ -107,53 +107,314 @@ function ensureOrgScoped(req, res) {
   return true;
 }
 
+// Cap the map fetch so an unbounded org-/campaign-wide open can't pull every active household
+// into memory + a multi-MB payload. Pass- and interaction-scoped opens are already bounded by
+// _id:$in; this guards the default campaign/org open. Backed by {campaignId,isActive}. Shipped
+// as `cap` beside `truncated` so the clients can say "first 50,000 only" without hard-coding it.
+const MAP_HOUSEHOLD_CAP = 50000;
+
+const oid = (v) => (v && mongoose.isValidObjectId(v) ? new mongoose.Types.ObjectId(String(v)) : null);
+
+// Every param the map family reads, validated exactly as before. Pure — no IO. Shared by /map
+// (which adds the viewport + the stored-status clause back) and /map/counts (which ignores both),
+// so the two routes can never disagree about what a filter means.
+function parseMapQuery(req) {
+  const rawStatus = Array.isArray(req.query.status)
+    ? req.query.status
+    : req.query.status
+    ? String(req.query.status).split(',').filter(Boolean)
+    : null;
+  // Viewport bound: `bbox=west,south,east,north` → a $geoWithin polygon on the 2dsphere index,
+  // or null. Absent/invalid/near-world boxes fall back to the unbounded (still capped) pull, so a
+  // bad bbox can only widen, never wrongly narrow. Degenerate boxes are rejected, and a
+  // near-whole-world viewport is treated as "no bound" — a full-span GeoJSON polygon risks the
+  // smaller-area (inverted) interpretation.
+  let geo = null;
+  if (req.query.bbox) {
+    const parts = String(req.query.bbox).split(',').map(Number);
+    if (parts.length === 4 && parts.every(Number.isFinite)) {
+      const w = Math.max(parts[0], -180);
+      const s = Math.max(parts[1], -90);
+      const e = Math.min(parts[2], 180);
+      const n = Math.min(parts[3], 90);
+      if (w < e && s < n && e - w < 350 && n - s < 170) {
+        geo = {
+          $geoWithin: {
+            $geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
+          },
+        };
+      }
+    }
+  }
+  return {
+    orgId: activeOrgId(req),
+    campaignId: oid(req.query.campaignId),
+    // Scoped audit: narrow the map to one effort's doors, or one pass's books.
+    effortId: oid(req.query.effortId),
+    passId: oid(req.query.passId),
+    // A single import's net-new doors ("View these homes on the map").
+    importId: oid(req.query.importId),
+    // A saved search's FROZEN householdIds — the door set the list actually holds, not what the
+    // same filter would select today (SavedSearch.js decision 8).
+    savedSearchId: oid(req.query.savedSearchId),
+    userId: oid(req.query.userId),
+    status: rawStatus && rawStatus.length ? rawStatus : null,
+    questionKey: req.query.questionKey || null,
+    answerOption: req.query.option || null,
+    optionId: req.query.optionId || null,
+    // Question keys / option ids are label slugs unique only WITHIN one survey template, so the
+    // answer filter accepts an optional template scope. Optional for back-compat: clients that
+    // don't send it (old mobile builds) keep the legacy cross-template union.
+    surveyTemplateId: oid(req.query.surveyTemplateId),
+    // Date window, date-only days in; resolved in the campaign's tz by buildMapScope.
+    fromDay: req.query.from ? String(req.query.from).slice(0, 10) : null,
+    toDay: req.query.to ? String(req.query.to).slice(0, 10) : null,
+    geo,
+    all: req.query.all === '1',
+  };
+}
+
+// The lead / multi-campaign gate, shared by /map and /map/counts. A team lead may only pull the
+// map for a campaign they manage — and never org-wide (no campaignId). Admins must scope too
+// once the org runs 2+ campaigns (an unscoped pull would merge both campaigns' doors onto one
+// map; every shipping client always sends campaignId) — `all=1` is the explicit org-wide escape
+// hatch, and single-campaign orgs keep the legacy unscoped shape. Mirrors the reports guard.
+// Returns null when allowed, else { status, error } for the route to send.
+async function authorizeMapScope(req, q) {
+  if (!isOrgAdmin(req)) {
+    if (!q.campaignId) {
+      return { status: 403, error: 'A team lead must scope the map to a campaign they manage.' };
+    }
+    if (!(await canManageCampaign(req, q.campaignId))) return { status: 403, error: 'Forbidden' };
+  } else if (!q.campaignId && !q.all) {
+    const campaignCount = await Campaign.countDocuments({ organizationId: q.orgId });
+    if (campaignCount > 1) {
+      return { status: 400, error: 'This organization runs multiple campaigns — pass campaignId, or all=1 for the org-wide map.' };
+    }
+  }
+  return null;
+}
+
+// Resolve the map's door SCOPE from the parsed params — everything /map and /map/counts share.
+//   universeFilter  — every active geocoded door in the campaign (or the selected walk list when
+//                     effortId is set; or the org when neither). Frozen BEFORE any _id narrowing:
+//                     pass / import / saved search / date / canvasser / answer never touch it.
+//                     This is the header's "of N doors" denominator.
+//   householdFilter — universeFilter + the _id narrowing (import, saved search, date-window /
+//                     canvasser / answer interactions, pass books). NO viewport, NO status clause:
+//                     /map adds both back; /map/counts never does.
+//   surveyMatch / activityMatch — the ledger filters /map uses for survey meta + pings.
+//   passHhSet, statusMode ('global' | 'user' | 'pass'), campaignType, dateWindow.
+//   empty — false, or WHY the door set is known-empty ('import' | 'savedSearch' | 'pass' |
+//           'interactions') so /map can send its empty body while counts still answer with a
+//           real universe.
+async function buildMapScope(q) {
+  const { orgId, campaignId, effortId, passId, importId, savedSearchId, userId } = q;
+  // One campaign read serves both the date-window anchor and the status-map flavor.
+  const camp = campaignId
+    ? await Campaign.findOne({ _id: campaignId, organizationId: orgId }, { timeZone: 1, type: 1 }).lean()
+    : null;
+  // Date window in the campaign's (or org's) timezone — date-only days in, half-open
+  // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as the
+  // dashboards. See docs/TIMEZONES.md.
+  const tz = camp?.timeZone || (await resolveMapTz(orgId, null));
+  const dateWindow = zonedDayRange(q.fromDay, q.toDay, tz);
+
+  const universeFilter = {
+    organizationId: orgId,
+    isActive: true,
+    'location.coordinates': { $exists: true, $ne: null },
+  };
+  if (campaignId) universeFilter.campaignId = campaignId;
+  if (effortId) universeFilter.effortId = effortId;
+
+  const householdFilter = { ...universeFilter };
+  // Every _id narrowing INTERSECTS with what is already there — never overwrites. A deep link
+  // carrying an import (or a saved search) AND a date window must show the imported doors touched
+  // in that window, not whichever clause ran last. (The interaction narrowing used to overwrite
+  // the import/saved-search set, so "View these homes on the map" opened on Today showed today's
+  // work instead of the import.)
+  const narrowTo = (ids) => {
+    if (!householdFilter._id) {
+      householdFilter._id = { $in: ids };
+      return;
+    }
+    const keep = new Set(householdFilter._id.$in.map(String));
+    householdFilter._id = { $in: ids.filter((id) => keep.has(String(id))) };
+  };
+
+  const scope = {
+    universeFilter,
+    householdFilter,
+    surveyMatch: null,
+    activityMatch: null,
+    passHhSet: null,
+    // Filtered to one canvasser → THAT canvasser's own status; else scoped to a pass →
+    // per-round status; else the global Household.status. userId wins over passId (and the
+    // per-user map still honors the round when both are set).
+    statusMode: userId ? 'user' : passId ? 'pass' : 'global',
+    campaignType: camp?.type || null,
+    dateWindow,
+    tz,
+    empty: false,
+  };
+
+  if (importId) {
+    const job = await ImportJob.findOne({ _id: importId, organizationId: orgId }, 'insertedHouseholdIds').lean();
+    const ids = job?.insertedHouseholdIds || [];
+    if (!ids.length) return { ...scope, empty: 'import' };
+    narrowTo(ids);
+  }
+  if (savedSearchId) {
+    const ss = await SavedSearch.findOne(
+      { _id: savedSearchId, campaignId, organizationId: orgId },
+      'householdIds'
+    ).lean();
+    const ids = ss?.householdIds || [];
+    if (!ids.length) return { ...scope, empty: 'savedSearch' };
+    narrowTo(ids);
+    if (!householdFilter._id.$in.length) return { ...scope, empty: 'savedSearch' };
+  }
+
+  const surveyMatch = { organizationId: orgId };
+  const activityMatch = { organizationId: orgId };
+  if (dateWindow.$gte || dateWindow.$lt) {
+    surveyMatch.submittedAt = dateWindow;
+    activityMatch.timestamp = dateWindow;
+  }
+  if (userId) {
+    surveyMatch.userId = userId;
+    activityMatch.userId = userId;
+  }
+  if (campaignId) {
+    surveyMatch.campaignId = campaignId;
+    activityMatch.campaignId = campaignId;
+  }
+  // Scope activity/surveys to the selected round so "showing Pass N" reflects that round's
+  // status + activity, not the global latest across all rounds.
+  if (passId) {
+    surveyMatch.passId = passId;
+    activityMatch.passId = passId;
+  }
+  const answerFilter = Boolean(q.questionKey && (q.optionId || q.answerOption));
+  if (answerFilter) {
+    // Dual-read: match by stable option id (id-native) OR legacy answer text, so a renamed
+    // option still selects its earlier responses.
+    Object.assign(surveyMatch, voterAnswerClause(q.questionKey, q.optionId, q.answerOption));
+    if (q.surveyTemplateId) surveyMatch.surveyTemplateId = q.surveyTemplateId;
+  }
+  scope.surveyMatch = surveyMatch;
+  scope.activityMatch = activityMatch;
+
+  // Pass scoping: limit to households that sit in this pass's books (Turf.householdIds).
+  let passHhSet = null;
+  if (passId) {
+    const turfDocs = await Turf.find({ passId }, 'householdIds').lean();
+    passHhSet = new Set();
+    for (const t of turfDocs) for (const id of t.householdIds || []) passHhSet.add(String(id));
+    if (passHhSet.size === 0) return { ...scope, empty: 'pass' };
+    scope.passHhSet = passHhSet;
+  }
+
+  const filteringInteractions = Boolean(q.fromDay || q.toDay || userId || answerFilter);
+  if (filteringInteractions || passHhSet) {
+    let idStrings;
+    if (filteringInteractions) {
+      const [surveyHIds, activityHIds] = await Promise.all([
+        SurveyResponse.distinct('householdId', surveyMatch),
+        answerFilter ? Promise.resolve([]) : CanvassActivity.distinct('householdId', activityMatch),
+      ]);
+      idStrings = [...new Set([...surveyHIds, ...activityHIds].map(String))];
+      // Intersect the interaction set with the pass's households when both apply.
+      if (passHhSet) idStrings = idStrings.filter((id) => passHhSet.has(id));
+    } else {
+      idStrings = [...passHhSet];
+    }
+    if (!idStrings.length) return { ...scope, empty: 'interactions' };
+    narrowTo(idStrings.map((id) => new mongoose.Types.ObjectId(id)));
+  }
+  if (householdFilter._id && !householdFilter._id.$in.length) return { ...scope, empty: 'interactions' };
+  return scope;
+}
+
+// The numbers behind the map header + sidebar chips, over the shared scope and WITHOUT the
+// viewport — see the /map/counts route comment for what each field means.
+async function computeMapCounts(scope, q) {
+  const cond = (field) => ({ $sum: { $cond: [{ $eq: [`$${field}`, true] }, 1, 0] } });
+  // One $group beats three countDocuments here: the coords clause isn't index-covered, so each
+  // count would be its own doc scan; the group is one.
+  const universeP = Household.aggregate([
+    { $match: scope.universeFilter },
+    { $group: { _id: null, total: { $sum: 1 }, excludedFromTurf: cond('excludedFromTurf'), doNotKnock: cond('doNotKnock') } },
+  ]);
+
+  const byStatus = emptyStatusCounts();
+  const excludedBy = emptyStatusCounts();
+  const dnkBy = emptyStatusCounts();
+  let matchingP = Promise.resolve();
+  if (!scope.empty) {
+    if (scope.statusMode === 'global') {
+      // $group by the STORED status — exactly what /map filters on in this mode. Only present
+      // buckets come back, hence the zero-filled shape above.
+      matchingP = Household.aggregate([
+        { $match: scope.householdFilter },
+        { $group: { _id: '$status', n: { $sum: 1 }, excluded: cond('excludedFromTurf'), dnk: cond('doNotKnock') } },
+      ]).then((rows) => {
+        for (const r of rows) {
+          if (!(r._id in byStatus)) continue;
+          byStatus[r._id] = r.n;
+          excludedBy[r._id] = r.excluded;
+          dnkBy[r._id] = r.dnk;
+        }
+      });
+    } else {
+      // Per-user / per-pass: the status is DERIVED, so resolve it for the whole scope through the
+      // same oracle /map uses to color the pins (and to apply its status filter), then tally.
+      matchingP = Household.find(scope.householdFilter, '_id excludedFromTurf doNotKnock')
+        .lean()
+        .then(async (docs) => {
+          const ids = docs.map((d) => d._id);
+          const statusMap =
+            scope.statusMode === 'user'
+              ? await getUserStatusMap(q.userId, ids, scope.campaignType, q.passId)
+              : await getPassStatusMap(q.passId, ids, scope.campaignType);
+          Object.assign(byStatus, statusCountsFromMap(statusMap, ids));
+          for (const d of docs) {
+            // Same fallback as /map: a door untouched in scope reads 'unknocked'.
+            const s = statusMap.get(String(d._id))?.status || 'unknocked';
+            if (d.excludedFromTurf === true) excludedBy[s] = (excludedBy[s] || 0) + 1;
+            if (d.doNotKnock === true) dnkBy[s] = (dnkBy[s] || 0) + 1;
+          }
+        });
+    }
+  }
+  const [uRows] = await Promise.all([universeP, matchingP]);
+  const u = uRows[0];
+
+  // `matching` honors the status filter; `byStatus` deliberately doesn't (it answers "what would
+  // I get if I clicked this chip?"). Statuses are mutually exclusive per door, so matching is a
+  // straight sum over the selected chips — derived HERE so web and mobile print the same number.
+  const selected = q.status ? q.status.filter((s) => s in byStatus) : Object.keys(byStatus);
+  const sum = (o) => selected.reduce((a, s) => a + (o[s] || 0), 0);
+  return {
+    universe: {
+      total: u?.total ?? 0,
+      excludedFromTurf: u?.excludedFromTurf ?? 0,
+      doNotKnock: u?.doNotKnock ?? 0,
+    },
+    matching: { total: sum(byStatus), excludedFromTurf: sum(excludedBy), doNotKnock: sum(dnkBy) },
+    byStatus,
+    statusMode: scope.statusMode,
+  };
+}
+
 router.get('/map', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const orgId = activeOrgId(req);
-    const userId =
-      req.query.userId && mongoose.isValidObjectId(req.query.userId)
-        ? new mongoose.Types.ObjectId(req.query.userId)
-        : null;
-    const status = Array.isArray(req.query.status)
-      ? req.query.status
-      : req.query.status
-      ? String(req.query.status).split(',').filter(Boolean)
-      : null;
-    const questionKey = req.query.questionKey || null;
-    const answerOption = req.query.option || null;
-    const optionId = req.query.optionId || null;
-    // Question keys / option ids are label slugs unique only WITHIN one survey template,
-    // so the answer filter accepts an optional template scope. Optional for back-compat:
-    // clients that don't send it (old mobile builds) keep the legacy cross-template union.
-    const surveyTemplateId =
-      req.query.surveyTemplateId && mongoose.isValidObjectId(req.query.surveyTemplateId)
-        ? new mongoose.Types.ObjectId(req.query.surveyTemplateId)
-        : null;
-
-    const campaignId =
-      req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
-        ? new mongoose.Types.ObjectId(req.query.campaignId)
-        : null;
-
-    // A team lead may only pull the map for a campaign they manage — and never org-wide
-    // (no campaignId). Admins must scope too once the org runs 2+ campaigns (an unscoped
-    // pull would merge both campaigns' doors onto one map; every shipping client always
-    // sends campaignId) — `all=1` is the explicit org-wide escape hatch, and
-    // single-campaign orgs keep the legacy unscoped shape. Mirrors the reports guard.
-    if (!isOrgAdmin(req)) {
-      if (!campaignId) {
-        return res.status(403).json({ error: 'A team lead must scope the map to a campaign they manage.' });
-      }
-      if (!(await canManageCampaign(req, campaignId))) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
-    } else if (!campaignId && req.query.all !== '1') {
-      const campaignCount = await Campaign.countDocuments({ organizationId: orgId });
-      if (campaignCount > 1) {
-        return res.status(400).json({ error: 'This organization runs multiple campaigns — pass campaignId, or all=1 for the org-wide map.' });
-      }
-    }
+    const q = parseMapQuery(req);
+    const deny = await authorizeMapScope(req, q);
+    if (deny) return res.status(deny.status).json({ error: deny.error });
+    const { orgId, campaignId, userId, passId, status } = q;
 
     // Optional: a date-INDEPENDENT bounding box over the campaign's (or org's) geocoded
     // doors, so a client can frame the camera on the real neighborhood even when the
@@ -187,171 +448,36 @@ router.get('/map', async (req, res, next) => {
     }
     // Merge the extent into any response shape (null unless requested).
     const withBounds = (payload) => (includeBounds ? { ...payload, bounds } : payload);
+    const emptyBody = async () =>
+      withBounds({
+        households: [],
+        canvassers: await loadCanvasserRoster(orgId, campaignId),
+        activities: [],
+        total: 0,
+        truncated: false,
+        cap: MAP_HOUSEHOLD_CAP,
+      });
 
-    // Scoped audit: narrow the map to one effort's doors, or one pass's books.
-    const effortId =
-      req.query.effortId && mongoose.isValidObjectId(req.query.effortId)
-        ? new mongoose.Types.ObjectId(req.query.effortId)
-        : null;
-    const passId =
-      req.query.passId && mongoose.isValidObjectId(req.query.passId)
-        ? new mongoose.Types.ObjectId(req.query.passId)
-        : null;
-    // Narrow the map to a single import's net-new doors ("View these homes on the map").
-    const importId =
-      req.query.importId && mongoose.isValidObjectId(req.query.importId)
-        ? new mongoose.Types.ObjectId(req.query.importId)
-        : null;
-    // Same idea for a saved search — its frozen householdIds are already exactly the door set,
-    // so this reads the snapshot rather than re-resolving the filter. That is the point of a
-    // saved search being frozen (SavedSearch.js decision 8): the map must show the doors the
-    // list actually holds, not what the same filter would select today.
-    const savedSearchId =
-      req.query.savedSearchId && mongoose.isValidObjectId(req.query.savedSearchId)
-        ? new mongoose.Types.ObjectId(req.query.savedSearchId)
-        : null;
+    const scope = await buildMapScope(q);
+    if (scope.empty) return res.json(await emptyBody());
 
-    // Date window in the campaign's (or org's) timezone — date-only days in, half-open
-    // [start(fromDay), start(toDay+1)) out — so the map narrows to the same day window as
-    // the dashboards. See docs/TIMEZONES.md.
-    const fromDay = req.query.from ? String(req.query.from).slice(0, 10) : null;
-    const toDay = req.query.to ? String(req.query.to).slice(0, 10) : null;
-    const dateWindow = zonedDayRange(fromDay, toDay, await resolveMapTz(orgId, campaignId));
+    // The two things THIS route adds to the shared scope — and /map/counts deliberately doesn't:
+    // the viewport, and (in the global-status mode only) the stored-status clause. In the
+    // per-user / per-pass modes the status filter is applied against the resolved status below,
+    // so the door set matches the colors shown.
+    const mapFilter = { ...scope.householdFilter };
+    if (q.geo) mapFilter.location = q.geo;
+    if (scope.statusMode === 'global' && status) mapFilter.status = { $in: status };
 
-    const householdFilter = {
-      organizationId: orgId,
-      isActive: true,
-      'location.coordinates': { $exists: true, $ne: null },
-    };
-    // Viewport bound: `bbox=west,south,east,north` narrows the pull to the visible map area via
-    // $geoWithin on the 2dsphere index — both clients send it on pan/zoom so the periodic live
-    // refetch never re-pulls the whole universe. Absent/invalid/near-world boxes fall back to the
-    // unbounded (still capped) pull, so a bad bbox can only widen, never wrongly narrow.
-    if (req.query.bbox) {
-      const parts = String(req.query.bbox).split(',').map(Number);
-      if (parts.length === 4 && parts.every(Number.isFinite)) {
-        const w = Math.max(parts[0], -180);
-        const s = Math.max(parts[1], -90);
-        const e = Math.min(parts[2], 180);
-        const n = Math.min(parts[3], 90);
-        // Reject degenerate boxes, and treat a near-whole-world viewport as "no bound" — a
-        // full-span GeoJSON polygon risks the smaller-area (inverted) interpretation.
-        if (w < e && s < n && e - w < 350 && n - s < 170) {
-          householdFilter.location = {
-            $geoWithin: {
-              $geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
-            },
-          };
-        }
-      }
-    }
-    // When scoped to a round (passId) or a single canvasser (userId) we filter by that
-    // scope's resolved status (below), not the global Household.status — so the door set
-    // matches the colors shown. Only a pure global view filters the stored status here.
-    if (status && status.length && !passId && !userId) householdFilter.status = { $in: status };
-    if (campaignId) householdFilter.campaignId = campaignId;
-    if (effortId) householdFilter.effortId = effortId;
-    if (importId) {
-      const job = await ImportJob.findOne({ _id: importId, organizationId: orgId }, 'insertedHouseholdIds').lean();
-      const ids = job?.insertedHouseholdIds || [];
-      if (!ids.length) {
-        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
-      }
-      householdFilter._id = { $in: ids };
-    }
-    if (savedSearchId) {
-      const ss = await SavedSearch.findOne(
-        { _id: savedSearchId, campaignId, organizationId: orgId },
-        'householdIds'
-      ).lean();
-      const ids = ss?.householdIds || [];
-      if (!ids.length) {
-        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
-      }
-      // Intersect rather than overwrite: importId above may already have narrowed _id, and a
-      // deep link carrying both must show the overlap, not whichever clause ran last.
-      householdFilter._id = householdFilter._id
-        ? { $in: ids.filter((id) => householdFilter._id.$in.some((x) => String(x) === String(id))) }
-        : { $in: ids };
-    }
-
-    const surveyMatch = { organizationId: orgId };
-    const activityMatch = { organizationId: orgId };
-    if (dateWindow.$gte || dateWindow.$lt) {
-      surveyMatch.submittedAt = dateWindow;
-      activityMatch.timestamp = dateWindow;
-    }
-    if (userId) {
-      surveyMatch.userId = userId;
-      activityMatch.userId = userId;
-    }
-    if (campaignId) {
-      surveyMatch.campaignId = campaignId;
-      activityMatch.campaignId = campaignId;
-    }
-    // Scope activity/surveys to the selected round so "showing Pass N" reflects
-    // that round's status + activity, not the global latest across all rounds.
-    if (passId) {
-      surveyMatch.passId = passId;
-      activityMatch.passId = passId;
-    }
-    if (questionKey && (optionId || answerOption)) {
-      // Dual-read: match by stable option id (id-native) OR legacy answer text,
-      // so a renamed option still selects its earlier responses.
-      Object.assign(surveyMatch, voterAnswerClause(questionKey, optionId, answerOption));
-      if (surveyTemplateId) surveyMatch.surveyTemplateId = surveyTemplateId;
-    }
-
-    // Pass scoping: limit to households that sit in this pass's books (Turf.householdIds).
-    let passHhSet = null;
-    if (passId) {
-      const turfDocs = await Turf.find({ passId }, 'householdIds').lean();
-      passHhSet = new Set();
-      for (const t of turfDocs) for (const id of t.householdIds || []) passHhSet.add(String(id));
-      if (passHhSet.size === 0) {
-        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
-      }
-    }
-
-    const filteringInteractions =
-      Boolean(fromDay || toDay || userId || (questionKey && (optionId || answerOption)));
-
-    if (filteringInteractions || passHhSet) {
-      let idStrings;
-      if (filteringInteractions) {
-        const [surveyHIds, activityHIds] = await Promise.all([
-          SurveyResponse.distinct('householdId', surveyMatch),
-          questionKey && (optionId || answerOption)
-            ? Promise.resolve([])
-            : CanvassActivity.distinct('householdId', activityMatch),
-        ]);
-        idStrings = [...new Set([...surveyHIds, ...activityHIds].map(String))];
-        // Intersect the interaction set with the pass's households when both apply.
-        if (passHhSet) idStrings = idStrings.filter((id) => passHhSet.has(id));
-      } else {
-        idStrings = [...passHhSet];
-      }
-      if (!idStrings.length) {
-        return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
-      }
-      householdFilter._id = { $in: idStrings.map((id) => new mongoose.Types.ObjectId(id)) };
-    }
-
-    // Cap the map fetch so an unbounded org-/campaign-wide open can't pull every active household
-    // into memory + a multi-MB payload. Pass- and interaction-scoped opens are already bounded by
-    // _id:$in above; this guards the default campaign/org open. Backed by {campaignId,isActive}.
-    const MAP_HOUSEHOLD_CAP = 50000;
     let households = await Household.find(
-      householdFilter,
+      mapFilter,
       'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock excludedFromTurf'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
     const mapTruncated = households.length === MAP_HOUSEHOLD_CAP;
 
-    if (!households.length) {
-      return res.json(withBounds({ households: [], canvassers: await loadCanvasserRoster(orgId, campaignId), activities: [], total: 0 }));
-    }
+    if (!households.length) return res.json(await emptyBody());
 
     let householdIds = households.map((h) => h._id);
     const includeActivities = req.query.includeActivities === '1';
@@ -361,12 +487,12 @@ router.get('/map', async (req, res, next) => {
     // per-pass status map recolors the house AND re-narrows the status-chip filter so the
     // door set matches the colors shown.
     let statusMap = null;
-    if (userId || passId) {
-      const camp = campaignId ? await Campaign.findById(campaignId, { type: 1 }).lean() : null;
-      statusMap = userId
-        ? await getUserStatusMap(userId, householdIds, camp?.type, passId)
-        : await getPassStatusMap(passId, householdIds, camp?.type);
-      if (status && status.length) {
+    if (scope.statusMode !== 'global') {
+      statusMap =
+        scope.statusMode === 'user'
+          ? await getUserStatusMap(userId, householdIds, scope.campaignType, passId)
+          : await getPassStatusMap(passId, householdIds, scope.campaignType);
+      if (status) {
         const wanted = new Set(status);
         households = households.filter((h) => wanted.has(statusMap.get(String(h._id))?.status || 'unknocked'));
         householdIds = households.map((h) => h._id);
@@ -374,6 +500,7 @@ router.get('/map', async (req, res, next) => {
     }
 
     const canvassers = await loadCanvasserRoster(orgId, campaignId);
+    const { activityMatch } = scope;
 
     const [voters, surveys, lastActivities, activities] = await Promise.all([
       Voter.find(
@@ -529,9 +656,39 @@ router.get('/map', async (req, res, next) => {
             }
           : null,
       })),
-      total: mapTruncated ? await Household.countDocuments(householdFilter) : result.length,
+      // The viewport-bounded count behind this payload. Campaign-wide figures (never bbox'd)
+      // live on /map/counts — that is the header's number.
+      total: mapTruncated ? await Household.countDocuments(mapFilter) : result.length,
       truncated: mapTruncated,
+      cap: MAP_HOUSEHOLD_CAP,
     }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Campaign-wide counts for the map header + sidebar — the SAME scope as /map (shared helpers
+// above) minus the viewport, so the number never moves when the admin pans:
+//   universe — every active geocoded door in the campaign (or the selected walk list): the
+//              filter-independent "of N doors" denominator, with its excluded-from-books and
+//              do-not-knock sub-counts. Pass / import / saved-search / date / canvasser / answer
+//              scopes never move it. Deliberately NOT the knockable set (KNOCKABLE_DOOR_FILTER):
+//              the map is the record of what exists, so the denominator is what the map can show.
+//   matching — doors matching EVERY filter incl. status (no bbox) — the header's primary number.
+//   byStatus — doors per status under every filter EXCEPT status — the sidebar chip counts
+//              ("what you'd get if you clicked this"). Σ byStatus == matching.total with no
+//              status filter; matching == Σ byStatus over the selected statuses otherwise.
+// Per-user / per-pass modes resolve status through the same getUserStatusMap / getPassStatusMap
+// as /map, so the chips agree with the pin colors. Polled at 20s under the Live pill like /map.
+// Lead-gated identically. Registered before the /:householdId routes on purpose.
+router.get('/map/counts', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const q = parseMapQuery(req);
+    const deny = await authorizeMapScope(req, q);
+    if (deny) return res.status(deny.status).json({ error: deny.error });
+    const scope = await buildMapScope(q);
+    res.json(await computeMapCounts(scope, q));
   } catch (err) {
     next(err);
   }

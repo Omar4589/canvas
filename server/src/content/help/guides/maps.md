@@ -15,6 +15,16 @@ There are two maps, and they draw the **same doors** from the **same data**. The
 
 Every house is a pin colored by its current status — gray (unknocked), blue (not home), green (surveyed), amber (refused), red (wrong address), purple (lit dropped), pink (no soliciting), and slate (restricted). If two colors trip you up, see [Restricted vs. refused](restricted-vs-refused). Doors where everyone has already voted drop off the field map on their own.
 
+## What the count up top is counting
+
+The number under the **Map** title reads like **"3,513 doors match · of 10,482 in campaign"**. Three things to know:
+
+- **"3,513 doors match"** is how many doors match your filters across the **whole campaign** — not just the part of the map on your screen. Pan or zoom and it stays put.
+- **"of 10,482 in campaign"** is every door the campaign has on the map, regardless of filters — apartments included, and the doors you excluded from books and the do-not-knock doors included too (the **ⓘ** breaks those two out). Pick a walk list and it becomes that walk list's doors ("of 4,200 in North").
+- On **Today** — the default — "match" means doors with a knock or survey **today**, so the first number starts small and grows through the day. Pick **All time** to see every door.
+
+When your screen holds fewer than match — you're zoomed in, or you've hidden excluded doors — a second figure, **"N in view"**, says so. A very large pull (over 50,000 doors) gets a warning that the map is capped; zoom in to see every door in an area. The **status chips** in the sidebar carry the same campaign-wide count for each status (under your other filters), so you can see how many doors are Surveyed or Unknocked without clicking. The **survey-answer** pills count **responses**, not doors — a house with three voters can carry three.
+
 ## Apartment buildings: one marker, many doors
 
 Every apartment unit is its own door in Doorline. But address files put every unit of a building at the **same spot on the map**, so if each one got its own pin they'd land on top of each other — you'd see one house, click it, and get one of the units with no hint that dozens more were underneath.
@@ -23,7 +33,7 @@ So wherever **two or more doors share a spot**, the map draws a **building icon*
 
 **Click the building to see every door in it** — each with its status and when it was last visited. Pick one to open it like any other door, then use **"← Back to all N doors at this pin"** to return to the list. If you reach one of those doors another way, like address search, the same Back bar is there, so a door inside a big building always tells you it has neighbors.
 
-Up top, next to the door count, you'll see how many buildings there are and how many doors are folded into them — for example **39 buildings · 485 stacked doors**. That's the honest answer to "why don't I see a pin for every door?"
+Up top, next to the door count, you'll see how many buildings there are and how many doors are folded into them — for example **39 buildings · 485 stacked doors**. That pill is about what's drawn on screen right now. It's the honest answer to "why don't I see a pin for every door?"
 
 Two things this is *not*:
 
@@ -45,7 +55,7 @@ Open one and its panel carries a **Not in books** badge. Excluding is campaign-w
 
 Two things worth knowing before you go looking for a number to match:
 
-- **The count is of the doors currently on your screen**, not of the whole campaign. Zoom or filter and it moves. It won't line up with the number on the Turf Cutting page, which counts a different thing.
+- **The Layers count is labeled "in view"** — the excluded doors currently on your screen (so you can un-hide what you hid). The campaign-wide figure under your filters sits right beneath it. Neither is the Turf Cutting page's number, which counts one walk list's cut — a different thing.
 - **A door excluded after a cut is still listed in that book.** Excluding it stops it being *served* — it won't reach a phone or a packet — but the book that was already cut still has its name in it. Re-cut the pass if you want the book itself to change.
 
 ## Canvasser pings and trails
