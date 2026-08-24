@@ -393,6 +393,26 @@ export default function HouseholdDetail() {
           style={styles.noteInput}
         />
 
+        {/* The office marked this home Restricted from the console — a PREDICTION that the door
+            is unreachable (a gate, a locked lobby), not an observation and not a permission.
+            Deliberately a CARD and never the do-not-contact Alert: that Alert exists because the
+            server refuses the write, and this has no such refusal by design. Every outcome button
+            below stays enabled, `canCanvass` stays the only gate, and a canvasser who gets in
+            should record normally — their result is better evidence than the mark and supersedes
+            it (server contract, bulkRestrict.int.test.js). Neutral tokens: this is a fact about a
+            gate, not a flag on anyone. `restrictedFrom` is per-round and absent on an older
+            server, so the card simply never renders there. */}
+        {household.restrictedFrom === 'desk' && (
+          <View style={styles.deskRestrictCard}>
+            <Text style={styles.deskRestrictTitle}>Marked restricted by the office</Text>
+            <Text style={styles.deskRestrictBody}>
+              Someone at the office expects this home to be unreachable — a gate, a locked
+              building, no access. If you can reach it, work it normally; what you record here
+              replaces the mark.
+            </Text>
+          </View>
+        )}
+
         {!canCanvass && (
           <Text style={{ marginTop: spacing.lg, color: '#991B1B', fontSize: 13, fontWeight: '600' }}>
             Canvassing is paused for your organization — recording is disabled. Work you already
@@ -544,6 +564,19 @@ function makeStyles(t) {
     marginTop: 2,
     fontVariant: ['tabular-nums'],
   },
+
+  // Informational, never alarming — surface tokens, not the danger palette. See the card's
+  // comment in the body: red is reserved for things that are wrong, and this is not one.
+  deskRestrictCard: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.sunken,
+  },
+  deskRestrictTitle: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+  deskRestrictBody: { marginTop: 4, fontSize: 12, lineHeight: 17, color: colors.textSecondary },
 
   pill: {
     flexDirection: 'row',

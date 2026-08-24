@@ -5,6 +5,26 @@ import { ACTION_TO_STATUS } from '../../utils/statusPrecedence.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 
+// The completion pair for a campaign type — the action that is STICKY within a round, and the
+// status it resolves to. Shared by every resolver below so the ladder is stated once.
+const completionOf = (campaignType) =>
+  campaignType === 'lit_drop'
+    ? { action: 'lit_dropped', status: 'lit_dropped' }
+    : { action: 'survey_submitted', status: 'surveyed' };
+
+// WHO put the door in its current state, when that state is `restricted`: 'desk' for an admin's
+// desk mark (via:'bulk' — services/canvass/deskRestrict.js, a whole book or a single home),
+// 'field' for a canvasser's own Restricted access at the door, null for every other status.
+// Derived from the SAME newest row the status came from, so the two can never disagree.
+//
+// This is what lets the canvasser's phone tell the office's prediction ("we think this block is
+// gated") from a colleague's observation ("I stood at this gate"). It is deliberately NOT a
+// permission: the door stays knockable and every outcome button stays enabled — a canvasser who
+// gets in is producing better evidence than the mark, and the field row supersedes it by design
+// (bulkRestrict.int.test.js 'field re-disposition overrides a bulk mark').
+const restrictedFromOf = (status, latestVia) =>
+  status === 'restricted' ? (latestVia === 'bulk' ? 'desk' : 'field') : null;
+
 // Per-pass door status, DERIVED (never stored). For each household: the sticky
 // completion (surveyed / lit_dropped) if it happened this pass, else the latest
 // action this pass; absent => unknocked. Used by pass progress, the segment
@@ -23,16 +43,73 @@ export async function getPassStatusMap(passId, householdIds, campaignType) {
         actions: { $addToSet: '$actionType' },
         latestActionType: { $first: '$actionType' },
         latestTimestamp: { $first: '$timestamp' },
+        // Free: the $sort is already paid for, and this reads the SAME newest document
+        // latestActionType does. Powers `restrictedFrom` — see restrictedFromOf above.
+        latestVia: { $first: '$via' },
       },
     },
   ]);
-  const completion = campaignType === 'lit_drop' ? 'lit_dropped' : 'survey_submitted';
-  const completionStatus = campaignType === 'lit_drop' ? 'lit_dropped' : 'surveyed';
+  const completion = completionOf(campaignType);
   for (const a of agg) {
-    const status = a.actions.includes(completion)
-      ? completionStatus
+    const status = a.actions.includes(completion.action)
+      ? completion.status
       : ACTION_TO_STATUS[a.latestActionType] || 'unknocked';
-    map.set(String(a._id), { status, lastActionAt: a.latestTimestamp });
+    map.set(String(a._id), {
+      status,
+      lastActionAt: a.latestTimestamp,
+      restrictedFrom: restrictedFromOf(status, a.latestVia),
+    });
+  }
+  return map;
+}
+
+// getPassStatusMap over SEVERAL rounds at once → Map<"passId|householdId", { status, lastActionAt,
+// restrictedFrom }>. Same aggregate, same completion-sticky ladder, grouped by the (pass, door)
+// PAIR instead of the door — because a door can sit in more than one round at once and each round
+// answers for itself.
+//
+// It exists for one job: deciding whether a desk mark is still LIVE. `deskMarkCountsForPasses`
+// counts rows on disk, which is what the undo deletes; this says whether each of those rounds
+// still READS restricted. The gap between the two is a superseded mark — a desk row a canvasser's
+// later field row out-voted — and reporting them as one number is what made the book chip
+// disagree with its own status chips.
+//
+// Keys are pipe-separated, matching deskMarkCountsForPasses exactly. Deliberately NOT the `\0`
+// composite convention used in services/person and services/dnc: those keys join two ids where
+// either could contain the separator, and the NUL bytes blind plain grep (see CLAUDE.md). Here
+// both halves are ObjectIds, which cannot contain a pipe.
+export async function getPassStatusMapMulti(passIds, householdIds, campaignType) {
+  const map = new Map();
+  if (!passIds?.length || !householdIds?.length) return map;
+  const agg = await CanvassActivity.aggregate([
+    {
+      $match: {
+        passId: { $in: passIds.map(oid) },
+        householdId: { $in: householdIds.map(oid) },
+        actionType: { $ne: 'note_added' },
+      },
+    },
+    { $sort: { timestamp: -1 } },
+    {
+      $group: {
+        _id: { passId: '$passId', householdId: '$householdId' },
+        actions: { $addToSet: '$actionType' },
+        latestActionType: { $first: '$actionType' },
+        latestTimestamp: { $first: '$timestamp' },
+        latestVia: { $first: '$via' },
+      },
+    },
+  ]);
+  const completion = completionOf(campaignType);
+  for (const a of agg) {
+    const status = a.actions.includes(completion.action)
+      ? completion.status
+      : ACTION_TO_STATUS[a.latestActionType] || 'unknocked';
+    map.set(`${a._id.passId}|${a._id.householdId}`, {
+      status,
+      lastActionAt: a.latestTimestamp,
+      restrictedFrom: restrictedFromOf(status, a.latestVia),
+    });
   }
   return map;
 }
@@ -57,16 +134,23 @@ export async function getUserStatusMap(userId, householdIds, campaignType, passI
         actions: { $addToSet: '$actionType' },
         latestActionType: { $first: '$actionType' },
         latestTimestamp: { $first: '$timestamp' },
+        latestVia: { $first: '$via' },
       },
     },
   ]);
-  const completion = campaignType === 'lit_drop' ? 'lit_dropped' : 'survey_submitted';
-  const completionStatus = campaignType === 'lit_drop' ? 'lit_dropped' : 'surveyed';
+  const completion = completionOf(campaignType);
   for (const a of agg) {
-    const status = a.actions.includes(completion)
-      ? completionStatus
+    const status = a.actions.includes(completion.action)
+      ? completion.status
       : ACTION_TO_STATUS[a.latestActionType] || 'unknocked';
-    map.set(String(a._id), { status, lastActionAt: a.latestTimestamp });
+    // Same shape as getPassStatusMap so a caller can swap resolvers without re-shaping. A desk
+    // row is authored by the ADMIN, so it never appears in one canvasser's own rows — a
+    // restricted door here is always 'field', which is exactly the truth this view reports.
+    map.set(String(a._id), {
+      status,
+      lastActionAt: a.latestTimestamp,
+      restrictedFrom: restrictedFromOf(status, a.latestVia),
+    });
   }
   return map;
 }
@@ -95,7 +179,14 @@ export async function doorStateFromDoorPass(doorPass, campaignType) {
     const m = await getPassStatusMap(pid, hids, campaignType);
     for (const hid of hids) {
       const e = m.get(hid);
-      out.set(hid, { status: e?.status || 'unknocked', lastActionAt: e?.lastActionAt || null });
+      // This REBUILDS the entry field by field rather than spreading it, so anything added to
+      // getPassStatusMap's shape must be named here too or it is silently dropped on the way to
+      // every per-round wire (bootstrap, /changes, me.js, the action responses).
+      out.set(hid, {
+        status: e?.status || 'unknocked',
+        lastActionAt: e?.lastActionAt || null,
+        restrictedFrom: e?.restrictedFrom || null,
+      });
     }
   }
   return out;

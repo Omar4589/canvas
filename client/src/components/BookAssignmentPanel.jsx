@@ -37,6 +37,16 @@ export default function BookAssignmentPanel({
   const turfIds = books.map((b) => String(b._id));
   const turfKey = turfIds.join(',');
   const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
+  // Desk-mark ROWS across the selection — the number Unmark actually deletes, which is why the
+  // button prints it and the toast can reconcile with it.
+  const deskMarks = books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+  // …and how many of those a canvasser's later field row out-voted. The server OMITS this field
+  // rather than sending 0 when it skipped the status half, so a book with rows but no field means
+  // "unknown" and suppresses the line for the whole selection — never a guessed zero.
+  const supersededKnown = books.every((b) => !(b.bulkRestrictedCount > 0) || b.bulkRestrictedSupersededCount != null);
+  const supersededMarks = supersededKnown
+    ? books.reduce((s, b) => s + (b.bulkRestrictedSupersededCount || 0), 0)
+    : 0;
 
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState(() => new Set()); // multi-book mode
@@ -514,26 +524,43 @@ export default function BookAssignmentPanel({
         </div>
       )}
 
-      {/* Bulk restricted — a whole gated community in one action. Published
-          books only (same gate as assignment). Skip rules live in the confirm
-          dialog TurfsPage opens. */}
-      {!draftSelected && onRestrict && (
+      {/* Bulk restricted — a whole gated community in one action. MARKING is published-books
+          only (same gate as assignment; POST restrict-bulk 409s on a draft). UNMARKING is not:
+          restrict-doors allows a single-home mark on a draft cut, and unrestrict-bulk has no
+          published-only check, so hiding the undo with the whole block left a draft book's marks
+          reachable only from the door pop-up — and, once a canvasser superseded one, from
+          nowhere on this panel at all. The two halves are gated separately for that reason. */}
+      {onRestrict && (deskMarks > 0 || !draftSelected) && (
         <div className="space-y-1.5 border-t border-border px-4 py-2">
-          <button
-            onClick={onRestrict}
-            disabled={restrictPending}
-            className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
-          >
-            Mark {single ? 'book' : `${books.length} books`} restricted… ({totalDoors.toLocaleString()} doors)
-          </button>
-          {books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0) > 0 && (
+          {!draftSelected && (
             <button
-              onClick={onUnrestrict}
+              onClick={onRestrict}
               disabled={restrictPending}
               className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
             >
-              Unmark restricted ({books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0)} desk marks)
+              Mark {single ? 'book' : `${books.length} books`} restricted… ({totalDoors.toLocaleString()} doors)
             </button>
+          )}
+          {deskMarks > 0 && (
+            <>
+              <button
+                onClick={onUnrestrict}
+                disabled={restrictPending}
+                className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+              >
+                Unmark restricted ({deskMarks} desk {deskMarks === 1 ? 'mark' : 'marks'})
+              </button>
+              {/* The count above is ROWS — what the delete removes, so it reconciles with the
+                  toast's result. This line explains the gap between it and the map's status
+                  colors instead of letting the two silently disagree. Omitted entirely when the
+                  server did not compute it (the field is absent, never a guessed 0). */}
+              {supersededMarks > 0 && (
+                <div className="text-[11px] text-fg-subtle">
+                  {supersededMarks} of {supersededMarks === 1 ? 'them is' : 'them are'} on {supersededMarks === 1 ? 'a door' : 'doors'} your crew
+                  has since worked — no longer in effect, still on file.
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -16,7 +16,7 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutStatusExclusion } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionFilter } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -36,6 +36,7 @@ import {
   bookOfDoorsInPass,
   resolveDeskPassForDoors,
   deskMarkCountsForPasses,
+  deskMarkStateForPasses,
   countDeskMarksByBook,
   deskMarkFilterForBook,
 } from '../../services/canvass/deskRestrict.js';
@@ -583,8 +584,8 @@ router.get('/', async (req, res, next) => {
     // under — and fall to — the book the door is in now (deskRestrict.js). Archived
     // (merge-absorbed) stubs count 0.
     const deskPassIds = [...new Set(turfs.filter((t) => t.status !== 'archived').map((t) => String(t.passId)))];
-    const deskCounts = await deskMarkCountsForPasses(req.campaign._id, deskPassIds);
-    const bulkByTurf = countDeskMarksByBook(turfs, deskCounts);
+    const deskState = await deskMarkStateForPasses(req.campaign._id, deskPassIds, req.campaign.type);
+    const bulkByTurf = countDeskMarksByBook(turfs, deskState);
     // slim=1 (the web cut page sends it): drop householdIds from the response — the
     // page never reads them, and at 250k doors they are a multi-MB payload. Additive:
     // without the param the shape is unchanged (mobile books.jsx doesn't send it).
@@ -594,7 +595,14 @@ router.get('/', async (req, res, next) => {
       return {
         ...(slim ? rest : t),
         eligibleDoorCount: (householdIds || []).filter((id) => eligible.has(String(id))).length,
-        bulkRestrictedCount: bulkByTurf.get(String(t._id)) || 0,
+        // ROWS — unchanged meaning, and what Unmark deletes. Every shipped client reads this.
+        bulkRestrictedCount: bulkByTurf.get(String(t._id))?.rows || 0,
+        // The subset a canvasser's later field row out-voted. ADDITIVE and OMITTED when the
+        // status half was skipped (deskRestrict.js's cap) — an absent field reads as "unknown"
+        // on every client, where a 0 would read as "none superseded".
+        ...(bulkByTurf.get(String(t._id))?.superseded == null
+          ? {}
+          : { bulkRestrictedSupersededCount: bulkByTurf.get(String(t._id)).superseded }),
       };
     });
     // Owned doors this pass's cut skipped, by reason — surfaced on the page as
@@ -791,10 +799,18 @@ router.post('/target-preview', async (req, res, next) => {
       filter || {},
       { effortId: pass.effortId }
     );
-    // The same cuttability the cut itself applies (generateTurf's baseFilter).
+    // The same cuttability the cut itself applies (generateTurf's baseFilter) — including the
+    // per-round restricted exclusion, so the preview's number equals what the cut produces. It
+    // arrives as `$and` and the outer query owns `_id`, so the two cannot collide.
     const cutBase = {
       ...KNOCKABLE_DOOR_FILTER,
-      ...cutStatusExclusion({ excludeRestricted, excludeNoSoliciting }),
+      ...(await cutExclusionFilter({
+        campaignId: req.campaign._id,
+        effortId: pass.effortId,
+        campaignType: req.campaign.type,
+        excludeRestricted,
+        excludeNoSoliciting,
+      })),
     };
     const cuttable = householdIds.length
       ? (
@@ -1162,12 +1178,17 @@ router.get('/doors', async (req, res, next) => {
     // would pay the aggregate + a string per door across a 16k-door effort for nothing.
     // Distinct from `status` below, which is Household.status (latest across ALL passes).
     let passStatusMap = null;
+    let deskRowsByDoor = null;
     if (req.query.withStatus === '1' && placed.length) {
-      passStatusMap = await getPassStatusMap(
-        pass._id,
-        placed.map((h) => String(h._id)),
-        req.campaign.type
-      );
+      // One more aggregate on the SAME opt-in, bounded by the desk rows themselves (a small
+      // minority of any ledger — deskRestrict.js), not by the door count. It carries the desk
+      // ROWS per door so the cut map's building pop-up and its "Select doors" bar can offer
+      // Unmark on a SUPERSEDED mark: both used to gate on passStatus === 'restricted', which
+      // goes false the moment a canvasser works the door and stranded the row with no undo.
+      [passStatusMap, deskRowsByDoor] = await Promise.all([
+        getPassStatusMap(pass._id, placed.map((h) => String(h._id)), req.campaign.type),
+        deskMarkCountsForPasses(req.campaign._id, [String(pass._id)]),
+      ]);
     }
 
     const doors = placed.map((h) => {
@@ -1178,7 +1199,13 @@ router.get('/doors', async (req, res, next) => {
         turfId: bookOf.get(String(h._id)) || null,
         status: h.status || 'unknocked', // so the cut UI can flag/count restricted doors
       };
-      if (passStatusMap) d.passStatus = passStatusMap.get(String(h._id))?.status || 'unknocked';
+      if (passStatusMap) {
+        d.passStatus = passStatusMap.get(String(h._id))?.status || 'unknocked';
+        d.restrictedFrom = passStatusMap.get(String(h._id))?.restrictedFrom || null;
+        // Emitted only where non-zero: an ordinary door's payload is byte-identical.
+        const marks = deskRowsByDoor?.get(`${pass._id}|${h._id}`) || 0;
+        if (marks > 0) d.deskMarks = marks;
+      }
       if (!slim) {
         d.addressLine1 = h.addressLine1 || '';
         d.addressLine2 = h.addressLine2 || '';
@@ -1265,15 +1292,25 @@ router.get('/:turfId/households', async (req, res, next) => {
           { location: 1, addressLine1: 1, city: 1, state: 1 }
         ).lean()
       : [];
-    const [statusMap, bulkRestrictedCount] = await Promise.all([
+    const [statusMap, deskState] = await Promise.all([
       getPassStatusMap(turf.passId, ids, req.campaign.type),
       // Drives the detail screen's "Unmark restricted (N)" menu item — desk-mark ROWS on the
       // doors currently in this book, for its round (same keying as GET / and unrestrict-bulk;
-      // an archived merge-absorbed stub counts 0 there too).
+      // an archived merge-absorbed stub counts 0 there too). Routed through the SAME primitive
+      // GET / uses, so the books list and the book detail can no longer drift: the old
+      // countDocuments here was a second implementation of "same keying as GET /" held only by
+      // a comment, and it could not see superseded marks at all.
       turf.status === 'archived'
-        ? 0
-        : CanvassActivity.countDocuments({ campaignId: req.campaign._id, ...deskMarkFilterForBook(turf), ...DESK_RESTRICT_MATCH }),
+        ? new Map()
+        : deskMarkStateForPasses(req.campaign._id, [String(turf.passId)], req.campaign.type),
     ]);
+    const deskBook = countDeskMarksByBook([turf], deskState).get(String(turf._id));
+    // Per-door desk-mark rows, so the book's house pop-up can offer Unmark on a SUPERSEDED
+    // mark — a door whose status no longer says restricted but whose row is still on file.
+    // Emitted only where non-zero, so the payload is byte-identical for every ordinary door.
+    const deskRowsByDoor = new Map(
+      ids.map((id) => [id, deskState.get(`${turf.passId}|${id}`)?.rows || 0]).filter(([, n]) => n > 0)
+    );
     const out = households
       .filter((h) => h.location?.coordinates?.length === 2)
       .map((h) => ({
@@ -1281,6 +1318,8 @@ router.get('/:turfId/households', async (req, res, next) => {
         lng: h.location.coordinates[0],
         lat: h.location.coordinates[1],
         status: statusMap.get(String(h._id))?.status || 'unknocked',
+        restrictedFrom: statusMap.get(String(h._id))?.restrictedFrom || null,
+        ...(deskRowsByDoor.has(String(h._id)) ? { deskMarks: deskRowsByDoor.get(String(h._id)) } : {}),
         addressLine1: h.addressLine1 || '',
         city: h.city || '',
         state: h.state || '',
@@ -1292,7 +1331,8 @@ router.get('/:turfId/households', async (req, res, next) => {
         boundary: turf.boundary || null,
         centroid: turf.centroid || null,
         passId: String(turf.passId),
-        bulkRestrictedCount,
+        bulkRestrictedCount: deskBook?.rows || 0,
+        ...(deskBook?.superseded == null ? {} : { bulkRestrictedSupersededCount: deskBook.superseded }),
       },
       households: out,
     });

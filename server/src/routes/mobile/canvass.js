@@ -266,11 +266,23 @@ async function resolveAttribution(campaign, household) {
 // PRIVACY_VERIFICATION.md); nothing shipped ever read more than these fields.
 async function toWireHousehold(household, passId, campaignType) {
   if (!passId) {
-    return { _id: String(household._id), status: household.status, lastActionAt: household.lastActionAt };
+    // No round to answer for, so no per-round provenance either — restrictedFrom is null rather
+    // than guessed from the global status, which is completion-sticky across ALL rounds.
+    return {
+      _id: String(household._id),
+      status: household.status,
+      lastActionAt: household.lastActionAt,
+      restrictedFrom: null,
+    };
   }
   const m = await getPassStatusMap(passId, [household._id], campaignType);
   const e = m.get(String(household._id));
-  return { _id: String(household._id), status: e?.status || 'unknocked', lastActionAt: e?.lastActionAt || null };
+  return {
+    _id: String(household._id),
+    status: e?.status || 'unknocked',
+    lastActionAt: e?.lastActionAt || null,
+    restrictedFrom: e?.restrictedFrom || null,
+  };
 }
 
 // recomputeHouseholdStatus / recomputeSurveyStatus now live in

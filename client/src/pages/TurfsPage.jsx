@@ -32,7 +32,7 @@ import { movePinToast } from '../lib/movePin.js';
 import MovePinCard from '../components/MovePinCard.jsx';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
-import { pickRound, roundMarkFromEntries } from '../lib/restrictMark.js';
+import { pickRound, roundMarkFromEntries, unmarkButtonLabel } from '../lib/restrictMark.js';
 import MoveTargetModal from '../components/MoveTargetModal.jsx';
 import {
   moveTargetCandidates,
@@ -494,6 +494,13 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
   const marking = mode === 'mark';
   const totalDoors = books.reduce((s, b) => s + (b.eligibleDoorCount ?? b.doorCount ?? 0), 0);
   const bulkMarks = books.reduce((s, b) => s + (b.bulkRestrictedCount || 0), 0);
+  // Marks a canvasser's later field row out-voted. The server OMITS the field rather than sending
+  // 0 when it skipped the status half, so a book with rows but no field means "unknown" and
+  // suppresses the line for the whole selection — never a guessed zero.
+  const supersededKnown = books.every((b) => !(b.bulkRestrictedCount > 0) || b.bulkRestrictedSupersededCount != null);
+  const supersededMarks = supersededKnown
+    ? books.reduce((s, b) => s + (b.bulkRestrictedSupersededCount || 0), 0)
+    : 0;
 
   // Live per-scope counts from the progress the page already loaded. "Reached" = doors the crew
   // touched but didn't complete (not-home / refused / wrong-address / no-soliciting). When there
@@ -579,10 +586,21 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
             </p>
           )
         ) : (
-          <p className="mt-2 text-sm text-fg-muted">
-            Removes the {bulkMarks.toLocaleString()} bulk mark{bulkMarks === 1 ? '' : 's'} this action created in the
-            selected book{books.length === 1 ? '' : 's'}. Restricted marks canvassers recorded at the door are kept.
-          </p>
+          <>
+            <p className="mt-2 text-sm text-fg-muted">
+              Removes the {bulkMarks.toLocaleString()} bulk mark{bulkMarks === 1 ? '' : 's'} this action created in the
+              selected book{books.length === 1 ? '' : 's'}. Restricted marks canvassers recorded at the door are kept.
+            </p>
+            {/* The count above is ROWS, which is what the delete removes — so it still matches the
+                result toast. This line explains why it can exceed the map's restricted doors. */}
+            {supersededMarks > 0 && (
+              <p className="mt-1 text-xs text-fg-subtle">
+                {supersededMarks.toLocaleString()} of {supersededMarks === 1 ? 'them is' : 'them are'} on{' '}
+                {supersededMarks === 1 ? 'a door' : 'doors'} your crew has since worked — already not in effect, so
+                removing {supersededMarks === 1 ? 'it' : 'them'} only clears the record.
+              </p>
+            )}
+          </>
         )}
         {marking && (
           <label className="mt-3 block text-sm">
@@ -873,11 +891,15 @@ const COMPLETED_STATUSES = new Set(['surveyed', 'lit_dropped']);
 // the "Exclude restricted" cut toggle). Allowed any time the door is on this page — draft
 // or accepted book, or a loose dot (owner ruling; bulk refuses drafts, this does not).
 //
-// Three states, read from /activity (the same key RoundActivity owns — react-query dedupes)
+// Four states, read from /activity (the same key RoundActivity owns — react-query dedupes)
 // and classified by lib/restrictMark.js against THIS page's pass, never from `status` alone:
 //   not restricted → Mark restricted… (disabled when the door is completed this round);
 //   desk-restricted → who/when + Unmark restricted (deletes desk rows only);
-//   field-restricted → who/when, no button — only a canvasser re-knocking changes it.
+//   field-restricted → who/when, no button — only a canvasser re-knocking changes it;
+//   SUPERSEDED → a desk row a canvasser's later field row out-voted. The door is knockable and
+//     shows its new status, but the row is still on file and still counted on the book, so the
+//     undo is offered here too. Before this state existed the row was simply unreachable from
+//     the page it was made on.
 function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pending, error }) {
   const [open, setOpen] = useState(false);
   const activityQ = useQuery({
@@ -919,7 +941,7 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
           }}
           className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
         >
-          {pending ? 'Working…' : 'Unmark restricted'}
+          {pending ? 'Working…' : unmarkButtonLabel(mark)}
         </button>
       </>
     );
@@ -990,10 +1012,37 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
     );
   }
 
+  // Rendered UNDER whichever body applies, not as a branch of its own: a superseded mark can sit
+  // beneath any current state (surveyed, not home, refused…), and each of those still has its own
+  // correct thing to say. Neutral tokens — this is a fact about a gate, never an allegation about
+  // the canvasser who got through it.
+  const superseded = mark?.superseded && !activityQ.isLoading && (
+    <div className="mt-1.5 rounded border border-border bg-sunken px-1.5 py-1">
+      <div className="text-[11px] text-fg-muted">
+        Desk mark by {mark.deskByName ?? 'a removed user'}{mark.deskAt ? ` · ${day(mark.deskAt)}` : ''} — no longer in effect
+        {mark.supersededBy ? ` (${mark.supersededBy.canvasser || 'a canvasser'} recorded ${actionLabel(mark.supersededBy.actionType)})` : ''}.
+      </div>
+      <div className="mt-0.5 text-[11px] text-fg-subtle">
+        Still on file and still counted on this book.
+      </div>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          if (window.confirm('Remove the desk mark? It no longer affects this door — this only clears it from the record.')) { setOpen(false); onUnmark(); }
+        }}
+        className="mt-1 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+      >
+        {pending ? 'Working…' : unmarkButtonLabel(mark)}
+      </button>
+    </div>
+  );
+
   return (
     <div className="mt-2 border-t border-border pt-2">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Restricted access</div>
       {body}
+      {superseded}
       {error && <div className="mt-1 text-[11px] text-danger">{error.message}</div>}
     </div>
   );
@@ -1123,6 +1172,12 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
   const restrictedN = units.filter((u) => u.passStatus === 'restricted').length;
   const completedN = units.filter((u) => COMPLETED_STATUSES.has(u.passStatus)).length;
   const markableN = Math.max(0, total - restrictedN - completedN);
+  // Desk-mark ROWS across the stack (`deskMarks` from /turfs/doors?withStatus=1, emitted only
+  // where non-zero). The Unmark gate reads THIS, never `restrictedN`: a unit whose mark a
+  // canvasser out-voted no longer reads 'restricted', and gating on status made the button —
+  // and with it the only undo this popup offers — vanish while the rows stayed on file.
+  const deskRowsN = units.reduce((s, u) => s + (u.deskMarks || 0), 0);
+  const supersededN = units.filter((u) => (u.deskMarks || 0) > 0 && u.passStatus !== 'restricted').length;
   const unitIds = units.map((u) => u.id);
   return (
     <div className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
@@ -1189,19 +1244,27 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
             </div>
           </>
         )}
-        {restrictedN > 0 && (
-          <button
-            type="button"
-            disabled={restrictPending}
-            onClick={() => {
-              if (window.confirm('Remove desk marks from this building? Marks canvassers recorded at the door are kept.')) {
-                onUnrestrict(unitIds);
-              }
-            }}
-            className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-          >
-            Unmark restricted ({restrictedN} restricted · desk marks only)
-          </button>
+        {deskRowsN > 0 && (
+          <>
+            <button
+              type="button"
+              disabled={restrictPending}
+              onClick={() => {
+                if (window.confirm('Remove desk marks from this building? Marks canvassers recorded at the door are kept.')) {
+                  onUnrestrict(unitIds);
+                }
+              }}
+              className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+            >
+              Unmark restricted ({deskRowsN} desk {deskRowsN === 1 ? 'mark' : 'marks'})
+            </button>
+            {supersededN > 0 && (
+              <div className="mt-1 text-[11px] text-fg-subtle">
+                {supersededN === 1 ? '1 unit was' : `${supersededN} units were`} worked after being marked — those marks
+                no longer apply but are still on file.
+              </div>
+            )}
+          </>
         )}
         {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
       </div>
@@ -1760,10 +1823,17 @@ export default function TurfsPage() {
     [selectedRows]
   );
   const markIdSet = useMemo(() => new Set(selectionPlan.markIds), [selectionPlan]);
-  // Unmark shows only when the selection holds a door that could carry a desk mark — the same
-  // gate BookAssignmentPanel puts on the whole-book Unmark. (A field-recorded Restricted also
-  // reads 'restricted'; the server removes desk rows only and the result says how many.)
-  const canUnmarkSelection = useMemo(() => selectedRows.some((d) => d.passStatus === 'restricted'), [selectedRows]);
+  // Unmark shows when the selection holds a door that actually carries a desk-mark ROW
+  // (`deskMarks` from /turfs/doors?withStatus=1) OR one that currently reads restricted — the
+  // second half keeps a FIELD-restricted door in the selection offering the action, whose result
+  // honestly reports 0 removed. Gating on `passStatus === 'restricted'` alone (what this did
+  // until 2026-08-24) hid the button on exactly the doors whose marks were stranded: a canvasser
+  // who works a desk-marked door flips its status, and the row it leaves behind had no other
+  // undo on this page.
+  const canUnmarkSelection = useMemo(
+    () => selectedRows.some((d) => (d.deskMarks || 0) > 0 || d.passStatus === 'restricted'),
+    [selectedRows]
+  );
   // A live target-filter preview DIMS the doors it doesn't match (0.12 opacity) instead of
   // hiding them, so they stay drawn and a lasso legitimately catches them. Say so rather than
   // quietly counting doors the admin can barely see.

@@ -2118,20 +2118,31 @@ export default function AdminMap() {
                     (doorMark.at ? ` · ${formatInTz(doorMark.at, tz, { month: 'short', day: 'numeric' }, false)}` : '')
                   : doorMark.kind === 'field'
                     ? `${deskRoundLabel} · Restricted at the door by ${doorMark.by || 'a removed user'} — field marks change only when the door is re-recorded.`
-                    : selected.effortId === null
-                      ? "Not in a walk list — can't be marked."
-                      : `${deskRoundLabel} · Not restricted. A desk mark makes this door slate for canvassers — never anyone's work.`}
+                    : doorMark.superseded
+                      ? // The mark lost to a canvasser's later row but is still on file and still
+                        // counted on the book. Saying "Not restricted" here (what this said until
+                        // 2026-08-24) was true of the door and false about the record.
+                        `${deskRoundLabel} · Desk mark by ${doorMark.deskBy || 'a removed user'}` +
+                        (doorMark.deskAt ? ` · ${formatInTz(doorMark.deskAt, tz, { month: 'short', day: 'numeric' }, false)}` : '') +
+                        ` — no longer in effect${doorMark.supersededBy?.canvasser ? ` (${doorMark.supersededBy.canvasser} worked this door)` : ''}. Still on file.`
+                      : selected.effortId === null
+                        ? "Not in a walk list — can't be marked."
+                        : `${deskRoundLabel} · Not restricted. A desk mark makes this door slate for canvassers — never anyone's work.`}
               </Text>
               {doorMark.kind !== 'field' && (
                 <Pressable
-                  disabled={deskMarkPending || (doorMark.kind === 'none' && selected.effortId === null)}
+                  disabled={
+                    deskMarkPending || (doorMark.kind === 'none' && !doorMark.superseded && selected.effortId === null)
+                  }
                   onPress={() => {
                     const address = `${selected.addressLine1 || ''}${selected.addressLine2 ? `, ${selected.addressLine2}` : ''}`.trim();
-                    if (doorMark.kind === 'desk') {
+                    if (doorMark.kind === 'desk' || doorMark.superseded) {
+                      const stamp = doorMark.at || doorMark.deskAt;
                       confirmUnmarkDoor({
                         address,
-                        markedBy: doorMark.by,
-                        markedWhen: doorMark.at ? formatInTz(doorMark.at, tz, { month: 'short', day: 'numeric' }, false) : null,
+                        markedBy: doorMark.kind === 'desk' ? doorMark.by : doorMark.deskBy,
+                        markedWhen: stamp ? formatInTz(stamp, tz, { month: 'short', day: 'numeric' }, false) : null,
+                        superseded: doorMark.superseded,
                         onConfirm: () => unmarkDoorMut.mutate({ id: selected.id, passId: doorMark.passId }),
                       });
                     } else {
@@ -2140,11 +2151,13 @@ export default function AdminMap() {
                   }}
                   style={({ pressed }) => [
                     styles.deskMarkButton,
-                    (pressed || deskMarkPending || (doorMark.kind === 'none' && selected.effortId === null)) && { opacity: 0.6 },
+                    (pressed ||
+                      deskMarkPending ||
+                      (doorMark.kind === 'none' && !doorMark.superseded && selected.effortId === null)) && { opacity: 0.6 },
                   ]}
                 >
                   <Text style={styles.deskMarkButtonText}>
-                    {doorMark.kind === 'desk' ? 'Unmark restricted' : 'Mark restricted'}
+                    {doorMark.kind === 'desk' ? 'Unmark restricted' : doorMark.superseded ? 'Remove desk mark' : 'Mark restricted'}
                   </Text>
                 </Pressable>
               )}

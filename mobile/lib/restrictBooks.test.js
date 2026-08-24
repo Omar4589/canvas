@@ -110,10 +110,22 @@ const E = (actionType, extra = {}) => ({ kind: 'knock', actionType, at: '2026-08
 
 test('doorMarkState: desk vs field by via, with who/when/passId carried', () => {
   const desk = doorMarkState([R('p1', [E('restricted', { via: 'bulk', canvasser: 'Omar Z' })])], 'p1');
-  assert.deepEqual(desk, { kind: 'desk', by: 'Omar Z', at: '2026-08-21T15:00:00.000Z', passId: 'p1' });
+  assert.deepEqual(desk, {
+    kind: 'desk',
+    by: 'Omar Z',
+    at: '2026-08-21T15:00:00.000Z',
+    passId: 'p1',
+    deskRows: 1,
+    superseded: false,
+    deskBy: 'Omar Z',
+    deskAt: '2026-08-21T15:00:00.000Z',
+    supersededBy: null,
+  });
   const field = doorMarkState([R('p1', [E('restricted', { via: null })])], 'p1');
   assert.equal(field.kind, 'field');
   assert.equal(field.by, 'Dana Lee');
+  assert.equal(field.deskRows, 0, 'a FIELD restricted row is not a desk row — the undo cannot honor it');
+  assert.equal(field.superseded, false);
 });
 
 test('doorMarkState: head entry rules — a later knock or an unrelated head is none', () => {
@@ -123,6 +135,56 @@ test('doorMarkState: head entry rules — a later knock or an unrelated head is 
   assert.equal(doorMarkState([R('p1', [])], 'p1').kind, 'none');
   assert.equal(doorMarkState([], 'p1').kind, 'none');
   assert.equal(doorMarkState(undefined, 'p1').kind, 'none');
+});
+
+test('doorMarkState: THE OVERRIDE — the door is no longer restricted but the desk row is still findable', () => {
+  // A canvasser worked a desk-marked door. Their write wins (by design, pinned server-side by
+  // bulkRestrict.int.test.js) but does NOT delete the admin's row, so the phone must still be
+  // able to offer the undo. Before this, `kind:'none'` was all a caller got and the row was
+  // unreachable from the book sheet and the admin map sheet alike.
+  const m = doorMarkState(
+    [
+      R('p1', [
+        E('survey_submitted', { kind: 'survey', canvasser: 'Dana Lee', at: '2026-08-22T18:00:00.000Z' }),
+        E('restricted', { via: 'bulk', canvasser: 'Omar Z' }),
+      ]),
+    ],
+    'p1'
+  );
+  assert.equal(m.kind, 'none');
+  assert.equal(m.deskRows, 1);
+  assert.equal(m.superseded, true);
+  assert.equal(m.deskBy, 'Omar Z');
+  assert.equal(m.deskAt, '2026-08-21T15:00:00.000Z');
+  assert.equal(m.passId, 'p1', 'the unmark call can still name the round');
+  assert.equal(m.supersededBy.actionType, 'survey_submitted');
+  assert.equal(m.supersededBy.canvasser, 'Dana Lee');
+
+  // Same for a non-completion override.
+  const n = doorMarkState([R('p1', [E('not_home'), E('restricted', { via: 'bulk' })])], 'p1');
+  assert.equal(n.superseded, true);
+  assert.equal(n.deskRows, 1);
+  assert.equal(n.supersededBy.actionType, 'not_home');
+});
+
+test('doorMarkState: completion is sticky — a survey beats a NEWER restricted row, same as the web and the server', () => {
+  // getPassStatusMap resolves this door to 'surveyed' whatever the order, so the phone must not
+  // report it as restricted. The desk row is still reported as superseded and removable.
+  const m = doorMarkState(
+    [R('p1', [E('restricted', { via: 'bulk' }), E('survey_submitted', { kind: 'survey' })])],
+    'p1'
+  );
+  assert.equal(m.kind, 'none');
+  assert.equal(m.deskRows, 1);
+  assert.equal(m.superseded, true);
+});
+
+test('doorMarkState: a round with no desk row and no restricted head is the frozen NO_MARK', () => {
+  const m = doorMarkState([R('p1', [E('not_home')])], 'p1');
+  assert.equal(m.kind, 'none');
+  assert.equal(m.deskRows, 0);
+  assert.equal(m.superseded, false);
+  assert.equal(m.passId, null);
 });
 
 test('doorMarkState: EXACT round only — no newest/active fallback; missing round and no passId are none', () => {

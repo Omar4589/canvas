@@ -338,13 +338,16 @@ export default function AdminBookDetail() {
     queryFn: () => api(`/admin/campaigns/${cId}/turfs/household/${selectedId}`),
     enabled: !!cId && !!selectedId,
   });
-  // Desk-mark provenance for a RESTRICTED home only (who marked it, desk or field) — the same
-  // key the admin map's door sheet uses, so the two share one cache entry. Not fetched for an
-  // unrestricted home: the Mark button needs nothing but the per-round status already here.
+  // Desk-mark provenance (who marked it, desk or field) — the same key the admin map's door
+  // sheet uses, so the two share one cache entry. Fetched for a home that reads restricted OR
+  // one that still carries desk-mark ROWS (`deskMarks`, from this book's own households route).
+  // The second half is load-bearing: a canvasser who works a desk-marked door flips its status
+  // without deleting the admin's row, and while this gate read `status === 'restricted'` alone
+  // the query never fired, so no amount of client work could have surfaced the stranded mark.
   const houseActivityQ = useQuery({
     queryKey: ['admin', 'household-activity', selectedId],
     queryFn: () => api(`/admin/households/${selectedId}/activity`),
-    enabled: !!cId && !!selectedId && selectedHome?.status === 'restricted',
+    enabled: !!cId && !!selectedId && (selectedHome?.status === 'restricted' || (selectedHome?.deskMarks || 0) > 0),
   });
   // This book's round is the round the pop-up speaks for (the pin color is per-round too).
   const doorMark = useMemo(
@@ -383,8 +386,11 @@ export default function AdminBookDetail() {
   const deskMarkPending = markDoorMut.isPending || unmarkDoorMut.isPending;
   // Day granularity in the device tz — tz-tolerant on purpose: a day label is the same in any
   // nearby zone, and this screen has no campaign tz on hand.
-  const deskMarkDate = doorMark.at
-    ? formatInTz(doorMark.at, deviceTimezone(), { month: 'short', day: 'numeric' }, false)
+  // `at` is the CURRENT restricted row; `deskAt` is the newest desk row whether or not it still
+  // holds. Falling back keeps the date on a superseded mark, where `at` is deliberately null.
+  const deskMarkStamp = doorMark.at || doorMark.deskAt;
+  const deskMarkDate = deskMarkStamp
+    ? formatInTz(deskMarkStamp, deviceTimezone(), { month: 'short', day: 'numeric' }, false)
     : '';
 
   function onPinPress(e) {
@@ -574,29 +580,37 @@ export default function AdminBookDetail() {
                 </Pressable>
               </View>
             )}
-            {canWrite && selectedHome?.status === 'restricted' && houseActivityQ.isSuccess && (
+            {/* Shown for a restricted home AND for one whose desk mark a canvasser has since
+                out-voted: the row is still on file, still counted in this book's "Unmark
+                restricted (N)", and this is the only place on the phone it can be removed. */}
+            {canWrite && (selectedHome?.status === 'restricted' || doorMark.superseded) && houseActivityQ.isSuccess && (
               <View style={styles.deskMarkRow}>
                 <Text style={styles.deskMarkCaption}>
                   {doorMark.kind === 'desk'
                     ? `Marked from the desk by ${doorMark.by || 'a removed user'}${deskMarkDate ? ` · ${deskMarkDate}` : ''}`
                     : doorMark.kind === 'field'
                       ? `Restricted at the door by ${doorMark.by || 'a removed user'} — field marks change only when the door is re-recorded.`
-                      : 'Restricted this round.'}
+                      : doorMark.superseded
+                        ? `Desk mark by ${doorMark.deskBy || 'a removed user'}${deskMarkDate ? ` · ${deskMarkDate}` : ''} — no longer in effect${doorMark.supersededBy?.canvasser ? ` (${doorMark.supersededBy.canvasser} worked this door)` : ''}. Still on file.`
+                        : 'Restricted this round.'}
                 </Text>
-                {doorMark.kind === 'desk' && (
+                {(doorMark.kind === 'desk' || doorMark.superseded) && (
                   <Pressable
                     disabled={deskMarkPending}
                     onPress={() =>
                       confirmUnmarkDoor({
                         address: selectedHome.addressLine1 || houseQ.data?.household?.addressLine1 || '',
-                        markedBy: doorMark.by,
+                        markedBy: doorMark.kind === 'desk' ? doorMark.by : doorMark.deskBy,
                         markedWhen: deskMarkDate || null,
+                        superseded: doorMark.superseded,
                         onConfirm: () => unmarkDoorMut.mutate({ id: selectedHome.id }),
                       })
                     }
                     style={({ pressed }) => [styles.deskMarkButton, (pressed || deskMarkPending) && { opacity: 0.6 }]}
                   >
-                    <Text style={styles.deskMarkButtonText}>Unmark restricted</Text>
+                    <Text style={styles.deskMarkButtonText}>
+                      {doorMark.superseded ? 'Remove desk mark' : 'Unmark restricted'}
+                    </Text>
                   </Pressable>
                 )}
               </View>

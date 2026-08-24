@@ -4,7 +4,7 @@ import { Household } from '../../models/Household.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { KNOCKABLE_DOOR_FILTER } from './knockableDoorFilter.js';
-import { getPassStatusMap } from '../passes/passStatus.js';
+import { getPassStatusMap, getPassStatusMapMulti } from '../passes/passStatus.js';
 import { activePassIdForEffort } from '../passes/activePasses.js';
 import { recomputeHouseholdStatusesBatched } from './status.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
@@ -33,6 +33,14 @@ import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 // (passId, the book's CURRENT householdIds) — never the stamped turfId, which is provenance only
 // (the door's book in that pass at write time; null for a loose door; a draft book's id dies on
 // re-cut/discard while the mark lives on and counts under the door's next book).
+//
+// SUPERSEDED marks (2026-08-24). Because a field row out-votes a desk mark without deleting it,
+// the rows on disk and the doors that still READ restricted come apart. That gap is reported as
+// its own number (`deskMarkStateForPasses` → `countDeskMarksByBook`'s `superseded`), never by
+// re-defining the row count: the row count is what the undo deletes, so the confirm's "N marks
+// will be removed" must keep equalling the toast's `deletedCount`. A superseded mark is still a
+// real mark — it stays deletable from every surface, and letting one become unreachable was the
+// bug this split was written to close.
 
 export const DESK_RESTRICT_MATCH = Object.freeze({ actionType: 'restricted', via: 'bulk' });
 
@@ -272,16 +280,60 @@ export const deskMarkCountsForPasses = async (campaignId, passIds) => {
   return out;
 };
 
-// Sum those rows per book over its CURRENT householdIds → Map<turfIdStr, n>. Same O(booked
-// doors) walk eligibleSetOf already does. Archived (merge-absorbed) stubs count 0.
-export const countDeskMarksByBook = (turfs, counts) => {
+// Above the cap we skip the status half and report `live: null` — "not computed" — rather than a
+// guessed value. Every consumer must treat null as unknown and print nothing; a wrong zero would
+// read as "no superseded marks", which is the exact lie this whole change exists to stop.
+const DESK_MARK_STATE_MAX = 20000;
+
+// The rows on disk AND whether each one still holds → Map<"passId|householdId", { rows, live }>.
+//
+// `rows` is what the undo deletes; `live` is whether that round still READS restricted. They come
+// apart when a canvasser's later field row out-votes the mark (latest-wins / sticky completion):
+// the row stays on file — deliberately, it is the admin's history and the book-level undo still
+// reaches it — but the door is no longer restricted. A desk mark in that state is SUPERSEDED.
+// Reporting rows alone is what made "Unmark restricted (N desk marks)" count doors the same
+// page's status chips showed as Surveyed.
+//
+// Cost: the door-id `$in` is bounded by the desk rows themselves (restricted + via:'bulk' is a
+// small minority of any ledger — see deskMarkCountsForPasses above), never by the campaign's
+// door count, and it rides the same { campaignId, passId, householdId } prefix. No new index.
+export const deskMarkStateForPasses = async (campaignId, passIds, campaignType) => {
+  const counts = await deskMarkCountsForPasses(campaignId, passIds);
+  const out = new Map();
+  if (!counts.size) return out;
+  if (counts.size > DESK_MARK_STATE_MAX) {
+    for (const [k, rows] of counts) out.set(k, { rows, live: null });
+    return out;
+  }
+  const doorIds = [...new Set([...counts.keys()].map((k) => k.split('|')[1]))];
+  const statuses = await getPassStatusMapMulti(passIds, doorIds, campaignType);
+  for (const [k, rows] of counts) out.set(k, { rows, live: statuses.get(k)?.status === 'restricted' });
+  return out;
+};
+
+// Sum those rows per book over its CURRENT householdIds → Map<turfIdStr, { rows, superseded }>.
+// Same O(booked doors) walk eligibleSetOf already does. Archived (merge-absorbed) stubs count 0.
+//
+// `rows` keeps its exact historical meaning — every desk row on the book's current doors for its
+// round, i.e. what Unmark deletes and what the toast's deletedCount will report. `superseded` is
+// the subset whose round no longer reads restricted. A book with even one uncomputed entry (the
+// cap above) reports `superseded: null`, never a partial sum.
+export const countDeskMarksByBook = (turfs, state) => {
   const out = new Map();
   for (const t of turfs) {
-    let n = 0;
-    if (t.status !== 'archived' && counts.size) {
-      for (const id of t.householdIds || []) n += counts.get(`${t.passId}|${id}`) || 0;
+    let rows = 0;
+    let superseded = 0;
+    let unknown = false;
+    if (t.status !== 'archived' && state.size) {
+      for (const id of t.householdIds || []) {
+        const e = state.get(`${t.passId}|${id}`);
+        if (!e) continue;
+        rows += e.rows;
+        if (e.live === null) unknown = true;
+        else if (e.live === false) superseded += e.rows;
+      }
     }
-    out.set(String(t._id), n);
+    out.set(String(t._id), { rows, superseded: unknown ? null : superseded });
   }
   return out;
 };

@@ -21,7 +21,9 @@ One confirm, no note.
 
 ## What it does
 
-It's the **same desk mark** as marking a whole book: the door turns slate, canvassers see it that way on their next sync and skip it, it never counts as a knock or in any rate, it isn't anyone's work, it's never billed, and the next round's cut can leave it out with **Exclude restricted-access homes**. A door your crew already surveyed this round keeps its result and isn't marked; a door they reached but didn't finish (a not-home, say) is marked and their knock stays counted.
+It's the **same desk mark** as marking a whole book: the door turns slate, canvassers see it that way on their next sync — with a note saying the office marked it — it never counts as a knock or in any rate, it isn't anyone's work, it's never billed, and the next round's cut can leave it out with **Exclude restricted-access homes**. A door your crew already surveyed this round keeps its result and isn't marked; a door they reached but didn't finish (a not-home, say) is marked and their knock stays counted.
+
+**It's a note, not a lock.** The mark says *we expect nobody can get in here* — it doesn't stop anyone. If a canvasser does get through the gate and records a result, their result stands and the mark stops applying to that home. That's deliberate: someone standing at the door knows more than the map does. When it happens, the home's pop-up says so — *Desk mark by … — no longer in effect* — and the book's **Unmark restricted (N)** tells you how many of its marks your crew has since worked past. That's usually worth a look: if one home in a gated block turned out to be reachable, the rest may be too.
 
 Which round it lands on: the Turf Cutting page marks the round you've selected. The Map page and the phone let the server pick — the door's walk list's active round, else the single draft being cut; if there's more than one candidate, the web Map page asks you to pick a round; on the phone, open the door from inside its book instead (that pop-up always marks the book's own round). A door still in Intake can't be marked until it's in a walk list, and an archived round is refused.
 
@@ -35,7 +37,9 @@ Homes still in **Intake**, held out of books by **Remove apartments**, or flagge
 
 ## Undoing it
 
-Open the same popup or panel. A door marked from the desk reads *Marked from the desk by …* and has **Unmark restricted**. A door a **canvasser** marked restricted at the door reads *Recorded at the door by …* and has no desk undo — only a canvasser re-knocking it changes it. A book's **Unmark restricted (N)** takes back every desk mark on the book's doors, single-house ones included (on a draft cut use the popup; the book's Unmark is offered once you accept).
+Open the same popup or panel. A door marked from the desk reads *Marked from the desk by …* and has **Unmark restricted**. A door a **canvasser** marked restricted at the door reads *Recorded at the door by …* and has no desk undo — only a canvasser re-knocking it changes it. A book's **Unmark restricted (N)** takes back every desk mark on the book's doors, single-house ones included.
+
+A mark your crew has **worked past** is still removable in exactly the same places: the pop-up reads *Desk mark by … — no longer in effect* and offers **Remove desk mark**. Removing it doesn't change anything about the door (the canvasser's result already governs) — it just clears the mark from the record and from the book's count. That count is **marks on file**, so it can be higher than the number of slate homes on the map; the line beneath it says how many of them no longer apply.
 
 Two things worth knowing: the first mark on a draft cut switches the Turf Cutting map to status colors (uncheck **Door status** under **Layers** to go back), and a desk mark counts as work on the round — the Discard dialog will mention it, and a walk list whose draft round holds one can't be deleted until you unmark. Re-cutting or discarding drafts never undoes a mark — it follows the door.
 

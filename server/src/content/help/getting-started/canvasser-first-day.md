@@ -26,6 +26,8 @@ Everything you need is right here in the app — the web console is for admins a
 
 At each house you record what happened. On a **survey** campaign that's **Not home**, **Wrong address**, **Refused**, or the survey itself; on a **lit-drop** campaign you tap **Lit dropped**. Either way, two more buttons show on every campaign: **No soliciting** if the door has a posted sign you're honoring, and **Restricted access** if you can't reach the door at all — a locked gate or building. Your pin recolors instantly so you always know what's done. For what each outcome means, see [Marking a door](canvasser-dispositions).
 
+Now and then a home will say **Marked restricted by the office** before you get there. That means someone at the office expects it to be unreachable — a gate, a locked lobby. It's a heads-up, not a rule: every button still works, and if you *can* reach the home, work it normally. What you record replaces the note, because you're the one who's actually there.
+
 > Tip: The map and your book stay in sync. If a pin looks like it's in the wrong spot, tell your team lead — they can move it. Knock the door you actually stood at; a corrected pin sorts the record out afterwards.
 
 ## Working offline

@@ -109,7 +109,19 @@ export const buildUnmarkPrompt = ({ label, bulkMarks }) => ({
 // maps' lassoed multi-door selection, where a selection can hold doors the crew already reached
 // and the choice matters; omitting it here keeps this path byte-for-byte what it always was.
 
-const NO_MARK = Object.freeze({ kind: 'none', by: null, at: null, passId: null });
+const NO_MARK = Object.freeze({
+  kind: 'none',
+  by: null,
+  at: null,
+  passId: null,
+  deskRows: 0,
+  superseded: false,
+  deskBy: null,
+  deskAt: null,
+  supersededBy: null,
+});
+
+const COMPLETION_ACTIONS = new Set(['survey_submitted', 'lit_dropped']);
 
 // Per-round restricted state of ONE door, from the `rounds` list of
 // GET /admin/households/:id/activity. EXACT round only — callers pass the round the surface
@@ -120,17 +132,42 @@ const NO_MARK = Object.freeze({ kind: 'none', by: null, at: null, passId: null }
 // rows) is skipped. The head entry is the latest (the server sorts newest-first); restricted
 // there → kind by `via === 'bulk'`. THE RULE: a missing/undefined `via` is FIELD — the desk
 // never offers an undo it can't honor (unrestrict-doors deletes via:'bulk' rows only).
+//
+// SUPERSEDED marks (2026-08-24). A canvasser who works a desk-marked door wins — by design, and
+// the server does NOT delete the admin's row when they do (its deleteMany is scoped to the
+// recording canvasser's own userId). So `kind` and "is there a row on file" are different
+// questions: `kind` is what the round SAYS now, `deskRows` is what the undo would DELETE, and
+// `superseded` is the gap. Gating the Unmark affordance on `kind` alone stranded those rows.
+//
+// Completion is sticky, matching the server's ladder and the web's restrictMark.js: a survey or
+// lit drop anywhere in the round beats a restricted row even a NEWER one, because
+// getPassStatusMap resolves the door to its completion regardless of order. (Until this rule was
+// added here, that one case classified 'desk' on the phone and 'none' on the web.)
 export const doorMarkState = (rounds, passId) => {
   if (!passId) return NO_MARK;
   const round = (rounds || []).find((r) => r && r.passId != null && String(r.passId) === String(passId));
   if (!round) return NO_MARK;
-  const head = (round.entries || [])[0];
-  if (!head || head.actionType !== 'restricted') return NO_MARK;
+  const entries = round.entries || [];
+  const deskEntries = entries.filter((e) => e && e.actionType === 'restricted' && e.via === 'bulk');
+  const deskHead = deskEntries[0] || null; // newest desk row — the list is newest-first
+  const head = entries[0];
+  const completed = entries.some((e) => COMPLETION_ACTIONS.has(e?.actionType));
+  const restrictedNow = !!head && head.actionType === 'restricted' && !completed;
+  const kind = restrictedNow ? (head.via === 'bulk' ? 'desk' : 'field') : 'none';
+  if (kind === 'none' && !deskEntries.length) return NO_MARK;
   return {
-    kind: head.via === 'bulk' ? 'desk' : 'field',
-    by: head.canvasser || null,
-    at: head.at || null,
+    kind,
+    by: restrictedNow ? head.canvasser || null : null,
+    at: restrictedNow ? head.at || null : null,
     passId: String(round.passId),
+    deskRows: deskEntries.length,
+    superseded: deskEntries.length > 0 && kind !== 'desk',
+    deskBy: deskHead ? deskHead.canvasser || null : null,
+    deskAt: deskHead ? deskHead.at || null : null,
+    supersededBy:
+      deskEntries.length > 0 && kind !== 'desk' && head
+        ? { actionType: head.actionType || null, canvasser: head.canvasser || null, at: head.at || null }
+        : null,
   };
 };
 
@@ -146,11 +183,16 @@ export const buildMarkDoorPrompt = ({ address }) => ({
 });
 
 // Unmark prompt — the desk mark only; field-recorded marks are never in reach here.
-export const buildUnmarkDoorPrompt = ({ address, markedBy, markedWhen }) => ({
+// `superseded` — a canvasser already worked this door, so the mark is not what is keeping anyone
+// out and the copy must not claim removing it changes access. It only clears the record.
+export const buildUnmarkDoorPrompt = ({ address, markedBy, markedWhen, superseded = false }) => ({
   title: 'Remove the desk mark?',
   message:
     `${address || 'This home'} was marked from the desk by ${markedBy || 'a removed user'}` +
-    `${markedWhen ? ` · ${markedWhen}` : ''}. Removing it makes the door knockable again this round. ` +
+    `${markedWhen ? ` · ${markedWhen}` : ''}. ` +
+    (superseded
+      ? 'Your crew has since worked this door, so the mark is no longer in effect — removing it only clears it from the record and from this book’s desk-mark count.'
+      : 'Removing it makes the door knockable again this round. ') +
     `Marks canvassers recorded at the door are never touched here.`,
   removeText: 'Remove',
 });

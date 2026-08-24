@@ -4,7 +4,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
 import { actionLabel } from '../lib/statusColors.js';
-import { pickRound, roundMarkFromEntries, completedInRound } from '../lib/restrictMark.js';
+import { pickRound, roundMarkFromEntries, completedInRound, isRestricted, unmarkButtonLabel } from '../lib/restrictMark.js';
 
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
@@ -200,7 +200,10 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
   const completed = completedInRound(round?.entries);
   const latest = round?.entries?.[0] || null;
   // Reached = a canvasser left it incomplete (not_home/refused/…); the field knock stays counted.
-  const reached = !!latest && !completed && !mark;
+  // `isRestricted(mark)`, never `!mark`: roundMarkFromEntries ALWAYS returns an object now (it has
+  // to, so a superseded desk row can still be reported), and a truthiness test here would pin
+  // `reached` to false forever and silently swap the confirm copy on every reached door.
+  const reached = !!latest && !completed && !isRestricted(mark);
   const day = (at) => formatInTz(at, tz, { month: 'short', day: 'numeric' }, false);
   const dot = (
     <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColors?.restricted }} />
@@ -323,7 +326,7 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
           }}
           className="mt-2 rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
         >
-          {unmarkMut.isPending ? 'Removing…' : 'Unmark restricted'}
+          {unmarkMut.isPending ? 'Removing…' : unmarkButtonLabel(mark)}
         </button>
       </div>
     );
@@ -345,9 +348,51 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
     );
   }
 
+  // A desk mark that a canvasser's later field row out-voted. The door is NOT restricted any
+  // more — that is correct and by design; someone got in and their result is better evidence
+  // than the office's prediction. But the row is still on file (the server's deleteMany is
+  // scoped to the recording canvasser's own userId, so it never touched the admin's row), it is
+  // still counted in the book's "Unmark restricted (N)", and until this block existed there was
+  // no way to remove it from the panel where it was made. Informational, never an accusation:
+  // it names what happened, not who to blame.
+  const supersededNotice = mark.superseded && (
+    <div className="mt-2 rounded-md border border-border bg-sunken px-2 py-1.5">
+      <p className="text-xs text-fg-muted">
+        Marked from the desk by {mark.deskByName ?? 'a removed user'}{mark.deskAt ? ` · ${day(mark.deskAt)}` : ''}
+        {' — '}
+        {mark.supersededBy
+          ? `superseded by ${mark.supersededBy.canvasser || 'a canvasser'}'s ${actionLabel(mark.supersededBy.actionType)}${mark.supersededBy.at ? ` on ${day(mark.supersededBy.at)}` : ''}.`
+          : 'no longer in effect.'}
+      </p>
+      <p className="mt-0.5 text-xs text-fg-subtle">
+        {mark.deskRows > 1 ? `${mark.deskRows} desk marks are` : 'The desk mark is'} still on file and still
+        counted on this book. If the block turns out to be reachable, remove it.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          if (window.confirm('Remove the desk mark? It no longer affects this door — this only clears it from the record.')) unmarkMut.mutate();
+        }}
+        className="mt-1.5 rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+      >
+        {unmarkMut.isPending ? 'Removing…' : unmarkButtonLabel(mark)}
+      </button>
+    </div>
+  );
+
   // Not restricted this round. A do-not-knock address gets no Mark at all — the block above
-  // already says nobody visits; a desk mark on top of it would be noise.
-  if (h.doNotKnock) return null;
+  // already says nobody visits; a desk mark on top of it would be noise. A superseded mark still
+  // gets its notice, though: the row exists and must stay removable wherever it can be seen.
+  if (h.doNotKnock) {
+    return mark.superseded ? (
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
+        {supersededNotice}
+        {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+      </div>
+    ) : null;
+  }
 
   // Pre-checks that make the Mark button honest before the server is asked.
   const blocked = h.excludedFromTurf
@@ -372,6 +417,7 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
             Mark restricted…
           </button>
           {blocked && <p className="mt-1 text-xs text-fg-subtle">{blocked}</p>}
+          {supersededNotice}
           {note && <p className="mt-1 text-xs text-fg-muted">{note}</p>}
           {err && <p className="mt-1 text-xs text-danger">{err}</p>}
         </>

@@ -286,6 +286,11 @@ router.get('/bootstrap', async (req, res, next) => {
       if (s) {
         h.status = s.status;
         h.lastActionAt = s.lastActionAt;
+        // 'desk' | 'field' | null — WHO put a restricted door in that state, for the round the
+        // canvasser is working. Lets the door screen say "the office marked this" instead of
+        // leaving an office prediction indistinguishable from a colleague's observation at the
+        // gate. Additive: an older bundle ignores it.
+        h.restrictedFrom = s.restrictedFrom;
       }
       // turfId/walkOrder rewritten the same way as status above: FROM THE CANVASSER'S OWN
       // ASSIGNED BOOK, never the raw Household mirror. The shipped app filters doors into
@@ -441,6 +446,7 @@ router.get('/changes', async (req, res, next) => {
         if (s) {
           h.status = s.status;
           h.lastActionAt = s.lastActionAt;
+          h.restrictedFrom = s.restrictedFrom; // same per-round provenance as the bootstrap
         }
       }
     }

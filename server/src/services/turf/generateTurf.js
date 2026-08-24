@@ -9,6 +9,8 @@ import { resolveWalkList, isActiveTargetFilter } from '../walklist/resolveWalkLi
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { getPassStatusMapMulti } from '../passes/passStatus.js';
 
 const CUT_COLUMNS = {
   location: 1,
@@ -57,6 +59,74 @@ export function cutStatusExclusion({ excludeRestricted, excludeNoSoliciting } = 
   return drop.length ? { status: { $nin: drop } } : {};
 }
 
+// Doors the effort still considers unreachable — the per-round truth the global-status toggle
+// above cannot see.
+//
+// WHY THIS EXISTS. `Household.status` is resolved across ALL rounds with a STICKY completion
+// (services/canvass/status.js → utils/statusPrecedence.js): one survey, in any round, ever, pins
+// it to 'surveyed' permanently. So a gated home surveyed once in Round 1 and then marked
+// Restricted in Round 2 has a live, counted, console-visible mark and a global status of
+// 'surveyed' — and `cutStatusExclusion` above, which filters on that global value, cut it
+// straight back into Round 3 with "Exclude restricted-access homes" ticked. The published
+// promise that the toggle "picks it up on the next cut" was false in exactly that case.
+//
+// THE ROUND THAT DECIDES is the one holding the door's NEWEST restricted row, not the effort's
+// newest round. Marks normally live on the ACTIVE round while the round being cut is a fresh
+// draft with no rows at all, so judging by "the latest round" would find nothing and re-open the
+// very hole this closes. Each door is therefore judged in its own round: if that round still
+// resolves to `restricted`, the door is excluded; if a later field row out-voted it there, the
+// door is cut back in — the crew got in, so the home is reachable.
+//
+// Bounded by the RESTRICTED ROWS, never by the effort's doors: one aggregate over
+// { campaignId, passId ∈ non-archived rounds, actionType:'restricted' } yields the only doors
+// that could qualify (a small minority of any ledger) with the round to judge each in, and one
+// status resolve covers that set. Desk and field marks both count — the toggle's promise is
+// about doors nobody can reach, not about who said so.
+export async function restrictedDoorIdsForEffort({ campaignId, effortId, campaignType }) {
+  if (!effortId) return [];
+  const passes = await Pass.find({ campaignId, effortId, status: { $ne: 'archived' } }, { _id: 1 }).lean();
+  if (!passes.length) return [];
+  const passIds = passes.map((p) => p._id);
+  const newest = await CanvassActivity.aggregate([
+    { $match: { campaignId, passId: { $in: passIds }, actionType: 'restricted' } },
+    { $sort: { timestamp: -1 } },
+    { $group: { _id: '$householdId', passId: { $first: '$passId' } } },
+  ]);
+  if (!newest.length) return [];
+  const statuses = await getPassStatusMapMulti(
+    passIds,
+    newest.map((r) => r._id),
+    campaignType
+  );
+  return newest
+    .filter((r) => statuses.get(`${r.passId}|${r._id}`)?.status === 'restricted')
+    .map((r) => r._id);
+}
+
+// The cut's status exclusions as $and CLAUSES rather than a spread fragment.
+//
+// It must be `$and` and not a spread: two of the three cut filters already own an `_id` key
+// (`addSupplementalBooks`' `$nin: alreadyBooked`, and the preview route's `$in: householdIds`),
+// so returning `{ _id: { $nin } }` to be spread would silently clobber one of them — the exact
+// failure the `status` comment above warns about, one key over. Neither call site uses `$and`
+// for anything else, and each merges this once.
+export async function cutExclusionFilter({
+  campaignId,
+  effortId,
+  campaignType,
+  excludeRestricted,
+  excludeNoSoliciting,
+} = {}) {
+  const clauses = [];
+  const status = cutStatusExclusion({ excludeRestricted, excludeNoSoliciting });
+  if (status.status) clauses.push(status);
+  if (excludeRestricted) {
+    const ids = await restrictedDoorIdsForEffort({ campaignId, effortId, campaignType });
+    if (ids.length) clauses.push({ _id: { $nin: ids } });
+  }
+  return clauses.length ? { $and: clauses } : {};
+}
+
 // Wipe a pass's DRAFT books cleanly: drop their assignments and clear the
 // household mirror for their members before deleting, so no orphaned assignments
 // or stale Household.turfId are left behind. Published books untouched. Two
@@ -95,7 +165,13 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     effortId: pass.effortId,
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
-    ...cutStatusExclusion(params),
+    ...(await cutExclusionFilter({
+      campaignId,
+      effortId: pass.effortId,
+      campaignType: campaign.type,
+      excludeRestricted: params.excludeRestricted,
+      excludeNoSoliciting: params.excludeNoSoliciting,
+    })),
   };
 
   // Targeted follow-up round: restrict the universe to the effort's doors matching
@@ -278,7 +354,14 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     ...(alreadyBooked.length ? { _id: { $nin: alreadyBooked } } : {}),
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
-    ...cutStatusExclusion({ excludeRestricted, excludeNoSoliciting }),
+    // $and, so the restricted-door exclusion cannot collide with the `_id` above.
+    ...(await cutExclusionFilter({
+      campaignId,
+      effortId: pass.effortId,
+      campaignType: campaign.type,
+      excludeRestricted,
+      excludeNoSoliciting,
+    })),
   };
 
   // A targeted round only ever wants its matching doors: resolve the pass's own
