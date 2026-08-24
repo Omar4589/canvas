@@ -33,6 +33,16 @@ import MovePinCard from '../components/MovePinCard.jsx';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
 import { pickRound, roundMarkFromEntries } from '../lib/restrictMark.js';
+import MoveTargetModal from '../components/MoveTargetModal.jsx';
+import {
+  moveTargetCandidates,
+  planLassoMove,
+  moveSourceLine,
+  pickMergePrimary,
+  moveDoorsToast,
+  moveBooksToast,
+  emptiedDonors,
+} from '../lib/moveTargets.js';
 
 // Geometric book-size flex → tolerance (how much book sizes may vary from the target
 // to stay compact). Default Compact (0.4); consumed by balancedKMeans via params.
@@ -716,6 +726,66 @@ function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLab
   );
 }
 
+// The post-move "these books are now empty" prompt — a bulk move NEVER deletes its emptied
+// donors server-side; this dialog is the ask. One dialog, all-or-nothing: an emptied donor is
+// nearly always leftovers, and a kept empty book stays visible (the zero-door badge + banner)
+// and deletable later. The server allows deleting an ACCEPTED book only at zero doors, and
+// clears its dead-weight assignments with it.
+function EmptiedBooksModal({ books, pending, onKeep, onDelete }) {
+  const many = books.length !== 1;
+  // Esc keeps, and nothing else — capture + stopPropagation for the same reason as the other
+  // map-section modals (the page's own Esc ladder sits underneath).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      onKeep();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onKeep]);
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={onKeep}>
+      <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-fg">
+          {many ? `${books.length} books are now empty` : `“${books[0].name}” is now empty`}
+        </h3>
+        <p className="mt-2 text-sm text-fg-muted">
+          The move took {many ? 'their' : 'its'} last doors. Deleting removes the empty book{many ? 's' : ''} and
+          unassigns anyone still on {many ? 'them' : 'it'} — everyone's recorded work is kept. You can also keep{' '}
+          {many ? 'them' : 'it'} to re-fill or delete later.
+        </p>
+        {many && (
+          <ul className="mt-2 max-h-32 overflow-auto text-sm text-fg">
+            {books.map((b) => (
+              <li key={b.id} className="truncate">
+                “{b.name}”
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onKeep}
+            disabled={pending}
+            className="rounded-md px-3 py-1.5 text-sm font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Keep {many ? 'them' : 'it'}
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={pending}
+            className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {pending ? 'Deleting…' : many ? `Delete ${books.length} empty books` : 'Delete empty book'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // "desk" pill next to a history line whose row was written from the desk (`via:'bulk'`) rather
 // than recorded at the door — mirrors the Map page panel's tag so the two read the same.
 const DeskTag = () => (
@@ -1273,6 +1343,13 @@ export default function TurfsPage() {
   const [spaceHeld, setSpaceHeld] = useState(false); // Space pans without leaving the mode
   const [selectedDoorIds, setSelectedDoorIds] = useState(() => new Set());
   const [overCap, setOverCap] = useState(null); // { wouldBe } from the last REFUSED lasso
+  // Bulk "Move doors" — the shared MoveTargetModal, from either surface. Frozen synchronously
+  // in the click handler (the DoorSelectionBar snapshot rule): live polling must never move
+  // what an open dialog acts on.
+  //   { kind:'doors', ids, plan }  — the lasso selection (plan = planLassoMove)
+  //   { kind:'books', turfIds, names, primaryId, doors } — the book selection
+  const [moveDialog, setMoveDialog] = useState(null);
+  const [emptiedPrompt, setEmptiedPrompt] = useState(null); // [{ id, name }] the last move emptied
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -1806,6 +1883,24 @@ export default function TurfsPage() {
     qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
     qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
   };
+  // Door membership moved between books → per-book counts changed. turf-progress is the single
+  // count oracle (book chips, map labels, fill tint, RestrictModal's scope counts), and
+  // invalidateTurfs alone left it stale after every move. A move writes no ledger rows and
+  // changes no door status, so the restrict set's household-activity / campaign-rollup drops
+  // are deliberately NOT here.
+  const invalidateMoves = () => {
+    invalidateTurfs();
+    qc.invalidateQueries({ queryKey: ['turf-progress', campaignId, passId] });
+  };
+  // A move that creates or deletes whole books, or folds crew (merge, the empty-book delete),
+  // also stales every assignment cache the panel and the assign modals read — the same set
+  // BookAssignmentPanel's own settle() drops after an assign.
+  const invalidateBookSet = () => {
+    invalidateMoves();
+    qc.invalidateQueries({ queryKey: ['turf-pass-assignments', campaignId, passId] });
+    qc.invalidateQueries({ queryKey: ['turf-assignments'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaignId] });
+  };
 
   const generate = useMutation({
     mutationFn: () => {
@@ -1908,13 +2003,17 @@ export default function TurfsPage() {
     mutationFn: (snapshotId) => api(`/admin/campaigns/${campaignId}/turfs/snapshots/${snapshotId}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] }),
   });
+  // The popup moves (one door, one building). A 409 here — effort mismatch, pass gone — used
+  // to vanish: the selects disable while pending but render no error, so surface it as a toast.
   const moveDoor = useMutation({
     mutationFn: ({ householdId, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-door`, { method: 'POST', body: { householdId, toTurfId } }),
-    onSuccess: invalidateTurfs,
+    onSuccess: invalidateMoves,
+    onError: (err) => setMapToast({ text: `Couldn't move — ${err.message}`, tone: 'error' }),
   });
   const moveDoors = useMutation({
     mutationFn: ({ householdIds, toTurfId }) => api(`/admin/campaigns/${campaignId}/turfs/move-doors`, { method: 'POST', body: { householdIds, toTurfId } }),
-    onSuccess: invalidateTurfs,
+    onSuccess: invalidateMoves,
+    onError: (err) => setMapToast({ text: `Couldn't move — ${err.message}`, tone: 'error' }),
   });
   // Single-home desk marks (one door from HousePopup, every unit of a building from
   // BuildingPopup) — the same `via:'bulk'` row class restrict-bulk writes, so every promise
@@ -2000,11 +2099,98 @@ export default function TurfsPage() {
   });
   const merge = useMutation({
     mutationFn: (turfIds) => api(`/admin/campaigns/${campaignId}/turfs/merge`, { method: 'POST', body: { turfIds } }),
-    onSuccess: () => { setSelectedBooks(new Set()); invalidateTurfs(); },
+    // The server folds the absorbed books' assignments onto the survivor, so the assignment
+    // caches go stale with the book list — invalidateBookSet covers both.
+    onSuccess: () => { setSelectedBooks(new Set()); invalidateBookSet(); },
   });
   const rename = useMutation({
     mutationFn: ({ turfId, name }) => api(`/admin/campaigns/${campaignId}/turfs/${turfId}`, { method: 'PATCH', body: { name } }),
     onSuccess: invalidateTurfs,
+  });
+  // The lasso's bulk move — move-doors with either an existing target or a new book made from
+  // the selection (`newBook`; the server decides its status — published once the round has
+  // accepted books, draft during cutting). On success the selection clears but select mode is
+  // KEPT: rebalancing is iterative, and the dots recoloring to the target as the invalidation
+  // lands is the confirmation. Donors the move emptied come back in `from[]` → the delete
+  // prompt (the server never deletes them itself). Errors stay on the mutation and render
+  // inside the open dialog.
+  const moveSelection = useMutation({
+    mutationFn: ({ householdIds, toTurfId, newName }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/move-doors`, {
+        method: 'POST',
+        body: toTurfId ? { householdIds, toTurfId } : { householdIds, newBook: { passId, name: newName } },
+      }),
+    onSuccess: (res, { householdIds }) => {
+      setMoveDialog(null);
+      clearDoorSelection();
+      setMapToast(
+        moveDoorsToast({ moved: householdIds.length, toName: res.to?.name || 'the book', isNew: !!res.to?.created })
+      );
+      invalidateMoves();
+      const emptied = emptiedDonors(res);
+      if (emptied.length) setEmptiedPrompt(emptied);
+    },
+  });
+  // The panel's whole-book move — merge INTO the chosen target (`primaryTurfId` names the
+  // survivor server-side; crew assignments fold onto it and the absorbed books are removed), or
+  // merge the selection into a NEW book: the survivor is pickMergePrimary's (a published one on
+  // a mixed selection, so a mid-round merge stays live), renamed from the returned id. A rename
+  // failure must NOT retry the whole fn — the merge already landed and the absorbed ids are gone.
+  const moveBooks = useMutation({
+    mutationFn: async ({ turfIds, toTurfId, newName, primaryId }) => {
+      const res = await api(`/admin/campaigns/${campaignId}/turfs/merge`, {
+        method: 'POST',
+        body: toTurfId
+          ? { turfIds: [toTurfId, ...turfIds], primaryTurfId: toTurfId }
+          : { turfIds, primaryTurfId: primaryId },
+      });
+      let renameFailed = false;
+      if (newName) {
+        try {
+          await api(`/admin/campaigns/${campaignId}/turfs/${res.turf.id}`, { method: 'PATCH', body: { name: newName } });
+        } catch {
+          renameFailed = true;
+        }
+      }
+      return { ...res, renameFailed };
+    },
+    onSuccess: (res, vars) => {
+      setMoveDialog(null);
+      setSelectedBooks(new Set());
+      setMapToast(
+        res.renameFailed
+          ? { text: 'Books merged into one, but the rename failed — rename it from the book list.', tone: 'error' }
+          : moveBooksToast({ doors: vars.doors, mergedCount: vars.turfIds.length, toName: vars.newName || vars.toName, isNew: !!vars.newName })
+      );
+      invalidateBookSet();
+    },
+  });
+  // The emptied donors, deleted on confirm. Sequential on purpose — each delete briefly takes
+  // the pass's recut lock, so parallel fires would trip the lock's own 409 (the deleteDrafts
+  // rule). A failure mid-list closes the prompt and toasts; the invalidation shows what's left.
+  const deleteEmptyBooks = useMutation({
+    mutationFn: async (turfIds) => {
+      for (const id of turfIds) {
+        await api(`/admin/campaigns/${campaignId}/turfs/${id}`, { method: 'DELETE' });
+      }
+      return { deleted: turfIds.length };
+    },
+    onSuccess: (res, turfIds) => {
+      setEmptiedPrompt(null);
+      // A deleted book must leave the live book selection, or the panel acts on a ghost.
+      setSelectedBooks((sel) => {
+        const next = new Set(sel);
+        for (const id of turfIds) next.delete(String(id));
+        return next;
+      });
+      setMapToast(`Deleted ${res.deleted} empty book${res.deleted === 1 ? '' : 's'}.`);
+      invalidateBookSet();
+    },
+    onError: (err) => {
+      setEmptiedPrompt(null);
+      setMapToast({ text: `Couldn't delete — ${err.message}`, tone: 'error' });
+      invalidateBookSet();
+    },
   });
   // Fold voters imported after this pass was cut (currently unassigned to any
   // book) into the pass as new draft book(s) — no recut, no archive. Carries the
@@ -2453,6 +2639,9 @@ export default function TurfsPage() {
     setPopupBuildingKey(null);
     clearDoorSelection();
     movePin.cancel();
+    // …and so does an open move dialog / emptied-book prompt: their frozen ids belong to it too.
+    setMoveDialog(null);
+    setEmptiedPrompt(null);
   }, [passId, campaignId, clearDoorSelection]);
 
   function startDraw() {
@@ -3407,14 +3596,18 @@ export default function TurfsPage() {
           {mapToast && (
             /* The selection bar spans the bottom of the map, so in select mode this sits ABOVE
                it (bottom-48 clears the bar at its tallest — over-cap banner and error line and
-               all) rather than under it in the bottom-left corner. */
+               all) rather than under it in the bottom-left corner. A string is an info toast;
+               { text, tone:'error' } tints danger (the move mutations' failure surface). */
             <div
               className={
-                'absolute z-20 flex items-center gap-2 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg shadow ' +
+                'absolute z-20 flex items-center gap-2 rounded-md border px-3 py-2 text-xs shadow ' +
+                (typeof mapToast === 'object' && mapToast.tone === 'error'
+                  ? 'border-danger/30 bg-danger-tint text-danger '
+                  : 'border-info/30 bg-info-tint text-info-fg ') +
                 (selectMode ? 'bottom-48 left-1/2 max-w-[90%] -translate-x-1/2' : 'bottom-4 left-4')
               }
             >
-              <span>{mapToast}</span>
+              <span>{typeof mapToast === 'object' ? mapToast.text : mapToast}</span>
               <button onClick={() => setMapToast(null)} className="font-semibold hover:opacity-70">
                 ✕
               </button>
@@ -3443,6 +3636,17 @@ export default function TurfsPage() {
                 setMapToast(null);
                 unrestrictSelection.mutate({ householdIds: ids });
               }}
+              onMove={() => {
+                setMapToast(null);
+                moveSelection.reset();
+                // Snapshot NOW: ids + the donor breakdown, so a poll landing under the open
+                // dialog can't move what the confirm button promises.
+                setMoveDialog({
+                  kind: 'doors',
+                  ids: selectedRows.map((d) => String(d.id)),
+                  plan: planLassoMove(selectedRows, passTurfIds),
+                });
+              }}
               onClear={clearDoorSelection}
               onClose={exitSelectMode}
             />
@@ -3466,6 +3670,73 @@ export default function TurfsPage() {
                 setShowRestrict('unmark');
               }}
               restrictPending={restrictBulk.isPending || unrestrictBulk.isPending}
+              onMoveDoors={() => {
+                setMapToast(null);
+                moveBooks.reset();
+                setMoveDialog({
+                  kind: 'books',
+                  turfIds: [...selectedBooks],
+                  names: selectedTurfs.map((t) => t.name),
+                  primaryId: pickMergePrimary(selectedTurfs),
+                  doors: selectedDoors,
+                });
+              }}
+              movePending={moveBooks.isPending}
+            />
+          )}
+          {/* Both move dialogs render INSIDE the map section — fullscreen is a fixed z-50 box,
+              so anything mounted outside it paints underneath (the DoorSelectionBar rule). */}
+          {moveDialog && (
+            <MoveTargetModal
+              kind={moveDialog.kind}
+              count={moveDialog.kind === 'doors' ? moveDialog.ids.length : moveDialog.doors}
+              sourceLine={
+                moveDialog.kind === 'doors'
+                  ? moveSourceLine(moveDialog.plan, (id) => turfs.find((t) => String(t._id) === id)?.name)
+                  : moveDialog.names.length <= 3
+                  ? `They come from ${moveDialog.names.map((x) => `“${x}”`).join(', ')}`
+                  : `They come from the ${moveDialog.names.length} selected books`
+              }
+              note={
+                moveDialog.kind === 'doors'
+                  ? 'Door statuses and knock history move with them.'
+                  : 'The selected books are merged away: their doors move to the target, anyone assigned to them is assigned there instead, and the emptied books are removed. Knock history is kept.'
+              }
+              candidates={
+                moveDialog.kind === 'doors'
+                  ? moveTargetCandidates(turfs, colorByTurf, {
+                      donorCounts: moveDialog.plan.donors,
+                      selectionSize: moveDialog.ids.length,
+                    })
+                  : moveTargetCandidates(turfs, colorByTurf, { excludeIds: new Set(moveDialog.turfIds) })
+              }
+              allowNew={moveDialog.kind === 'doors' || moveDialog.turfIds.length >= 2}
+              passLabel={passLabel}
+              pending={moveDialog.kind === 'doors' ? moveSelection.isPending : moveBooks.isPending}
+              error={moveDialog.kind === 'doors' ? moveSelection.error : moveBooks.error}
+              onCancel={() => setMoveDialog(null)}
+              onConfirm={({ toTurfId, newName }) => {
+                if (moveDialog.kind === 'doors') {
+                  moveSelection.mutate({ householdIds: moveDialog.ids, toTurfId, newName });
+                } else {
+                  moveBooks.mutate({
+                    turfIds: moveDialog.turfIds,
+                    toTurfId,
+                    newName,
+                    primaryId: moveDialog.primaryId,
+                    doors: moveDialog.doors,
+                    toName: toTurfId ? turfs.find((t) => String(t._id) === String(toTurfId))?.name : null,
+                  });
+                }
+              }}
+            />
+          )}
+          {emptiedPrompt && (
+            <EmptiedBooksModal
+              books={emptiedPrompt}
+              pending={deleteEmptyBooks.isPending}
+              onKeep={() => setEmptiedPrompt(null)}
+              onDelete={() => deleteEmptyBooks.mutate(emptiedPrompt.map((b) => b.id))}
             />
           )}
         </section>

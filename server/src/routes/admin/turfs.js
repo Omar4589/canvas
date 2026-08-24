@@ -1390,6 +1390,8 @@ router.post('/move-door', async (req, res, next) => {
     const movedTurfIds = [String(to._id)];
     if (from && String(from._id) !== String(to._id)) movedTurfIds.push(String(from._id));
     await recomputePassTerritories(to.passId, { onlyTurfIds: movedTurfIds });
+    // Body ids don't trigger the :householdId param hook; tag for the staff-access log.
+    addAuditSubjects(res, 'household', [String(householdId)]);
     res.json({
       from: from && String(from._id) !== String(to._id) ? { id: String(from._id), doorCount: from.doorCount } : null,
       to: { id: String(to._id), doorCount: to.doorCount },
@@ -1399,61 +1401,136 @@ router.post('/move-door', async (req, res, next) => {
   }
 });
 
-// Move many households (e.g. every unit of an apartment building) into one book
-// at once — pull them out of any other book in the pass, then recompute
-// territories a single time. Mirrors /move-door for the bulk case.
+// Move many households (every unit of an apartment building, or a whole lassoed map
+// selection) into one book at once — pull them out of any other book in the pass, then
+// recompute territories a single time. Mirrors /move-door for the bulk case. The target
+// is EITHER an existing book (`toTurfId`) or a brand-new one (`newBook: { passId, name? }`)
+// made from the moved doors themselves — born published when the round already has
+// accepted books (instantly assignable mid-round), draft while the pass is still being
+// cut. `from` reports every donor that lost doors so the client can offer to delete the
+// ones the move emptied; nothing is deleted here.
 router.post('/move-doors', async (req, res, next) => {
   try {
-    const { householdIds, toTurfId } = req.body || {};
-    const ids = (householdIds || []).filter((x) => mongoose.isValidObjectId(x));
-    if (!ids.length || !mongoose.isValidObjectId(toTurfId)) {
-      return res.status(400).json({ error: 'householdIds and toTurfId required' });
+    const { toTurfId, newBook } = req.body || {};
+    const ids = parseHouseholdIds(req.body?.householdIds);
+    if (!ids) return res.status(400).json({ error: 'householdIds required (1–1000)' });
+    if ((toTurfId ? 1 : 0) + (newBook ? 1 : 0) !== 1) {
+      return res.status(400).json({ error: 'exactly one of toTurfId or newBook required' });
     }
-    const to = await Turf.findOne({ _id: toTurfId, campaignId: req.campaign._id });
-    if (!to) return res.status(404).json({ error: 'Target book not found' });
 
-    // Disjointness: a book may only hold doors owned by the book's effort.
-    const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
-    if (!toPass) return res.status(409).json({ error: 'That book’s pass no longer exists.' });
+    let to = null;
+    let passId;
+    if (toTurfId) {
+      if (!mongoose.isValidObjectId(toTurfId)) return res.status(400).json({ error: 'invalid toTurfId' });
+      // A legacy archived merge stub keeps stale householdIds naming doors live books own —
+      // appending into one would corrupt the pass, so a stub is never a target.
+      to = await Turf.findOne({ _id: toTurfId, campaignId: req.campaign._id, status: { $ne: 'archived' } });
+      if (!to) return res.status(404).json({ error: 'Target book not found' });
+      passId = to.passId;
+    } else {
+      if (!mongoose.isValidObjectId(newBook?.passId)) return res.status(400).json({ error: 'newBook.passId required' });
+      passId = new mongoose.Types.ObjectId(String(newBook.passId));
+    }
+
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1, status: 1 }).lean();
+    if (!pass) {
+      return to
+        ? res.status(409).json({ error: 'That book’s pass no longer exists.' })
+        : res.status(404).json({ error: 'Pass not found' });
+    }
+    if (pass.status === 'archived') {
+      return res.status(409).json({
+        error: 'That round is archived — its books never reach a canvasser.',
+        code: 'pass-archived',
+      });
+    }
+
+    // Disjointness: a book may only hold doors owned by the book's effort. And only doors
+    // this campaign owns AT ALL — recomputeTurf's mirror write is unscoped, so a foreign
+    // campaign's id must never reach the target's householdIds; unknown ids drop silently.
     const moving = await Household.find({ _id: { $in: ids }, campaignId: req.campaign._id }, { effortId: 1 }).lean();
-    const foreign = moving.filter((h) => String(h.effortId) !== String(toPass.effortId)).length;
+    const foreign = moving.filter((h) => String(h.effortId) !== String(pass.effortId)).length;
     if (foreign) {
       return res.status(409).json({ error: `${foreign} door(s) belong to a different effort and cannot be moved into this book.` });
     }
+    if (!moving.length) return res.status(404).json({ error: 'No matching doors in this campaign.' });
+    const movingIds = moving.map((h) => h._id);
 
-    const idSet = new Set(ids.map(String));
-    const changedTurfIds = [String(to._id)]; // donors that actually lost a door + the target
-    const others = await Turf.find({ campaignId: req.campaign._id, passId: to.passId, _id: { $ne: to._id } });
+    const idSet = new Set(movingIds.map(String));
+    const changedTurfIds = []; // donors that actually lost a door; the target joins at the end
+    const from = [];
+    const donorQuery = { campaignId: req.campaign._id, passId };
+    if (to) donorQuery._id = { $ne: to._id };
+    const others = await Turf.find(donorQuery);
     for (const t of others) {
       const before = t.householdIds.length;
       t.householdIds = t.householdIds.filter((id) => !idSet.has(String(id)));
       if (t.householdIds.length !== before) {
         await recomputeTurf(t);
         changedTurfIds.push(String(t._id));
+        // Stubs are stripped like always but never offered for deletion (DELETE refuses them).
+        if (t.status !== 'archived') {
+          from.push({ id: String(t._id), name: t.name, doorCount: t.doorCount, emptied: t.doorCount === 0 });
+        }
       }
     }
-    const have = new Set(to.householdIds.map(String));
-    for (const id of ids) if (!have.has(String(id))) to.householdIds.push(id);
-    await recomputeTurf(to);
-    await recomputePassTerritories(to.passId, { onlyTurfIds: changedTurfIds });
-    res.json({ to: { id: String(to._id), doorCount: to.doorCount } });
+
+    let created = false;
+    if (to) {
+      const have = new Set(to.householdIds.map(String));
+      for (const id of movingIds) if (!have.has(String(id))) to.householdIds.push(id);
+    } else {
+      // Born published iff the round already has accepted books (a mid-round add goes
+      // straight to the crew); otherwise a draft that rides the normal Accept with the cut.
+      const hasPublished = await Turf.exists({ campaignId: req.campaign._id, passId, status: 'published' });
+      to = new Turf({
+        organizationId: req.campaign.organizationId,
+        campaignId: req.campaign._id,
+        passId,
+        name: (newBook.name && String(newBook.name).trim()) || 'New book',
+        mode: 'manual',
+        params: {},
+        householdIds: movingIds,
+        doorCount: movingIds.length,
+        status: hasPublished ? 'published' : 'draft',
+        generatedBy: req.user._id,
+      });
+      created = true;
+    }
+    await recomputeTurf(to); // saves the new book too — first write it gets
+    await recomputePassTerritories(passId, { onlyTurfIds: [...changedTurfIds, String(to._id)] });
+    // Body ids don't trigger the :householdId param hook; tag them for the staff-access log.
+    addAuditSubjects(res, 'household', movingIds.map(String));
+    res.json({
+      to: { id: String(to._id), doorCount: to.doorCount, name: to.name, status: to.status, created },
+      from,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// Merge >=2 books (same pass) into the first; absorbed books are archived and
-// their assignments folded into the primary.
+// Merge >=2 books (same pass) into one survivor; absorbed books are hard-deleted and
+// their assignments folded into the survivor. Survivor = `primaryTurfId` when given
+// (the "move these books into that one" case), else DB order of the $in — NOT request
+// order — which is fine when any survivor will do (the panel's plain Merge).
 router.post('/merge', async (req, res, next) => {
   try {
-    const { turfIds } = req.body || {};
+    const { turfIds, primaryTurfId } = req.body || {};
     const ids = (turfIds || []).filter((x) => mongoose.isValidObjectId(x));
     if (ids.length < 2) return res.status(400).json({ error: 'turfIds (>=2) required' });
-    const turfs = await Turf.find({ _id: { $in: ids }, campaignId: req.campaign._id });
+    // Archived merge stubs hold stale householdIds naming doors live books own — unioning
+    // one in would steal those doors from their real book, so stubs never merge.
+    const turfs = await Turf.find({ _id: { $in: ids }, campaignId: req.campaign._id, status: { $ne: 'archived' } });
     if (turfs.length < 2) return res.status(404).json({ error: 'books not found' });
     const passId = String(turfs[0].passId);
     if (!turfs.every((t) => String(t.passId) === passId)) {
       return res.status(400).json({ error: 'books must be in the same pass' });
+    }
+    if (primaryTurfId != null) {
+      const i = turfs.findIndex((t) => String(t._id) === String(primaryTurfId));
+      if (i < 0) return res.status(400).json({ error: 'primaryTurfId must be one of turfIds' });
+      if (i > 0) turfs.unshift(...turfs.splice(i, 1));
     }
 
     const primary = turfs[0];
@@ -1536,31 +1613,39 @@ router.patch('/:turfId', async (req, res, next) => {
 });
 
 // Delete a single DRAFT book — surgical cleanup (e.g. one unwanted supplemental
-// book). Accepted books can only be removed via Discard (snapshot + type-confirm);
-// a draft carries no assignments (both assign routes 409 `not-accepted`) and no
-// FIELD history keyed to it, so this only has to clear the household mirror.
-// Single-home desk marks may carry this book's id as provenance only — nothing
-// reads it for counts/undo (deskRestrict.js keys by passId + current membership);
-// they survive as loose-door marks and count under the door's next book. NO
-// re-tessellation: removing a book's doors only GROWS the neighbors' Voronoi
-// entitlement, so every other stored shape stays disjoint and containing (same
-// invariant the onlyTurfIds notes in generateTurf.js rely on). Lock-guarded so a
-// supplemental/claim job re-tessellating this pass can't race the delete.
+// book) — or an accepted book a bulk move has EMPTIED (zero members, probed live
+// off householdIds, never the denormalized doorCount): with no doors left there is
+// no field history to strand, only dead-weight assignments, which are cleared.
+// Every other accepted book can only be removed via Discard (snapshot +
+// type-confirm); a draft carries no assignments (both assign routes 409
+// `not-accepted`) and no FIELD history keyed to it, so this only has to clear the
+// household mirror. Single-home desk marks may carry this book's id as provenance
+// only — nothing reads it for counts/undo (deskRestrict.js keys by passId +
+// current membership); they survive as loose-door marks and count under the
+// door's next book. NO re-tessellation: removing a book's doors only GROWS the
+// neighbors' Voronoi entitlement, so every other stored shape stays disjoint and
+// containing (same invariant the onlyTurfIds notes in generateTurf.js rely on).
+// Lock-guarded so a supplemental/claim job re-tessellating this pass can't race
+// the delete.
 router.delete('/:turfId', async (req, res, next) => {
   const { turfId } = req.params;
   let lockPassId = null;
   try {
     if (!mongoose.isValidObjectId(turfId)) return res.status(400).json({ error: 'invalid turfId' });
-    const turf = await Turf.findOne({ _id: turfId, campaignId: req.campaign._id }, { status: 1, passId: 1 }).lean();
+    const turf = await Turf.findOne(
+      { _id: turfId, campaignId: req.campaign._id },
+      { status: 1, passId: 1, householdIds: { $slice: 1 } }
+    ).lean();
     if (!turf) return res.status(404).json({ error: 'Book not found' });
-    if (turf.status !== 'draft') {
+    const emptyPublished = turf.status === 'published' && !(turf.householdIds || []).length;
+    if (turf.status !== 'draft' && !emptyPublished) {
       return res.status(409).json({ error: 'Accepted books can only be removed with Discard.', code: 'not-draft' });
     }
     if (!(await acquireRecutLock(turf.passId, req.user._id))) {
       return res.status(409).json({ error: 'A re-cut or restore is in progress on this pass. Try again shortly.' });
     }
     lockPassId = turf.passId;
-    await TurfAssignment.deleteMany({ turfId: turf._id }); // belt-and-braces; drafts can't be assigned
+    await TurfAssignment.deleteMany({ turfId: turf._id }); // load-bearing for an emptied published book; belt-and-braces for drafts
     await Household.updateMany({ turfId: turf._id }, { $set: { turfId: null, walkOrder: null } });
     await Turf.deleteOne({ _id: turf._id });
     res.json({ deleted: 1 });

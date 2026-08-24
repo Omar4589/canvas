@@ -6,7 +6,7 @@ kind: page
 order: 105
 sourceDoc: PASSES_AND_TURF.md
 summary: Cut a pass's doors into books, accept them, assign them, and watch a round's progress.
-tags: turf, books, cutting, assign, progress, status, page
+tags: turf, books, cutting, assign, progress, status, move, page
 ---
 
 **Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
@@ -122,6 +122,26 @@ completed this round"*, and your selection stays put — the rings turn from blu
 There's no undo link (unmarking would also strip marks that were already there), so **Unmark restricted…**
 is right there in the bar if you need it. Marks land on the round selected in the **Pass** dropdown. The
 [Map page](page-map) has the same mode; the phone marks one home at a time.
+
+## Moving doors between books in bulk
+
+The same **Select doors** picker also moves homes. Pick the doors — across any number of books, loose
+doors included — and choose **Move to book…** in the bar. A dialog lists the round's books with their
+door counts (searchable when the list is long); pick one, or pick **New book…** and name a brand-new
+book made from exactly the doors you selected. The dialog says which books the doors are leaving before
+you confirm, and both books' walk orders renumber themselves. Statuses and knock history always travel
+with the door, so nothing about your counts changes.
+
+A new book made **mid-round** — on a pass whose books are already accepted — comes out **live and
+assignable right away**; during cutting it's a draft that gets accepted with the rest. And if a move
+takes the **last** doors out of a book, the page asks whether to delete the now-empty book (that also
+clears any leftover assignments on it) — it never deletes anything on its own; keep it and it stays in
+the list with a zero-door badge.
+
+**Moving whole books.** Select books in the list (or by clicking their shapes) and choose **Move doors
+to…** on the panel. Everything those books hold moves into the target book you pick — the canvassers
+assigned to them follow their doors, and the emptied books are removed — or into one **new** book that
+combines them. It's the same machinery as **Merge**, with you choosing the surviving book.
 
 ## Fixing a pin from here
 

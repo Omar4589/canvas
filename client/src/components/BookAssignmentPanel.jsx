@@ -25,6 +25,10 @@ export default function BookAssignmentPanel({
   onRestrict,
   onUnrestrict,
   restrictPending,
+  // "Move doors to…" — the page owns the target dialog (MoveTargetModal) and the merge;
+  // presentational here, same contract as onMerge/onRestrict. Optional: absent, no button.
+  onMoveDoors = null,
+  movePending = false,
 }) {
   const qc = useQueryClient();
   const single = books.length === 1;
@@ -487,15 +491,26 @@ export default function BookAssignmentPanel({
         </div>
       </div>
 
-      {books.length >= 2 && (
-        <div className="border-t border-border px-4 py-2">
-          <button
-            onClick={onMerge}
-            disabled={mergePending}
-            className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
-          >
-            Merge {books.length} books into one
-          </button>
+      {(books.length >= 2 || onMoveDoors) && (
+        <div className="space-y-1.5 border-t border-border px-4 py-2">
+          {books.length >= 2 && (
+            <button
+              onClick={onMerge}
+              disabled={mergePending}
+              className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+            >
+              Merge {books.length} books into one
+            </button>
+          )}
+          {onMoveDoors && (
+            <button
+              onClick={onMoveDoors}
+              disabled={movePending}
+              className="w-full rounded-md border border-border-strong px-3 py-1.5 text-xs font-semibold text-fg-muted hover:bg-sunken disabled:opacity-50"
+            >
+              Move doors to… ({totalDoors.toLocaleString()} {totalDoors === 1 ? 'door' : 'doors'})
+            </button>
+          )}
         </div>
       )}
 

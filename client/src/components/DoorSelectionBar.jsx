@@ -63,6 +63,10 @@ export default function DoorSelectionBar({
   onDismissOverCap = null,
   onMark, // ({ ids, scope }) => void — scope 'unknocked' | 'incomplete'
   onUnmark, // ({ ids }) => void
+  // Turf Cutting only: open the bulk "Move to book…" dialog for the WHOLE selection — a move
+  // acts on every selected door, not the markable subset (membership is orthogonal to status).
+  // The page owns the dialog and the confirm; absent (the Map page) the button doesn't render.
+  onMove = null,
   onClear,
   onClose = null, // the ✕: leave select mode entirely (falls back to onClear)
 }) {
@@ -240,6 +244,16 @@ export default function DoorSelectionBar({
                     className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-sunken disabled:opacity-50"
                   >
                     {busy === 'unmark' ? 'Working…' : 'Unmark restricted…'}
+                  </button>
+                )}
+                {onMove && (
+                  <button
+                    type="button"
+                    disabled={blocked || total === 0}
+                    onClick={onMove}
+                    className="rounded-md border border-border-strong bg-card px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-sunken disabled:opacity-50"
+                  >
+                    Move to book…
                   </button>
                 )}
                 <button

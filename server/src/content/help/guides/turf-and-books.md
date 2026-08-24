@@ -33,12 +33,12 @@ Once canvassers have started, the same map shows you how the round is going: hou
 
 ## Recutting
 
-Don't like the layout, or the voter list changed? If the books are still drafts, just generate again. If they're published, you must **Discard** first — see [Recut books mid-pass](recut-books-mid-pass) for how that's guarded and how it keeps knocks while clearing assignments. When a pass has accepted books *and* drafts (say, an "Add as new book" you regret), the Discard dialog offers **Drafts only** — it removes just the unaccepted drafts and leaves your live books, assignments, and knocks alone. You can also select individual draft books in the list and delete just those.
+Don't like the layout, or the voter list changed? If the books are still drafts, just generate again. If they're published, you must **Discard** first — see [Recut books mid-pass](recut-books-mid-pass) for how that's guarded and how it keeps knocks while clearing assignments. When a pass has accepted books *and* drafts (say, an "Add as new book" you regret), the Discard dialog offers **Drafts only** — it removes just the unaccepted drafts and leaves your live books, assignments, and knocks alone. You can also select individual draft books in the list and delete just those — and an accepted book that a bulk move has emptied of every door can be deleted too (the page offers it right after the move).
 
 ## Smaller fixes
 
 - Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime. Big adds run in the background with the same progress bar as Generate; it's safe to leave the page and come back.
-- Reshape a book or two with **move**, **merge**, or **split**.
+- Reshape a book or two with **move**, **merge**, or **split** — one door from its popup, or in bulk: **Select doors** → **Move to book…** lassoes up to 1,000 doors into any book (or a brand-new one), and selecting books offers **Move doors to…** to fold whole books into another. If a move empties a book, the page asks whether to delete it. See [The Turf Cutting page](page-turf-cutting).
 - A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. Just one house? Click it on the map and **Mark restricted…** in its popup — same mark, one door. See [The Turf Cutting page](page-turf-cutting) and [Can I mark just one house restricted?](mark-one-home-restricted).
 - A dot sitting in the wrong place? Click it and choose **Move pin →** in its popup, drag the blue marker to the right spot, and **Save location** — or **Move building pin →** on a building to move every unit at that pin together. The book's outline redraws around the new spot; the door keeps its book and its place in the walk order (use **move** as well if it belongs in a different book). See [Fixing a house pin](fix-pin-location).
 
