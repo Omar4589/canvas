@@ -75,6 +75,23 @@ row was skipped, for a blank first name, and its address survived through anothe
 count and the app's count were both right — they counted different things. To reconcile a vendor's
 number, ask whether it counts **rows**, **addresses**, or **rooftops**; only the middle one is a door.
 
+**Some files run the other way — more people than rows.** A few vendors pack a whole household into
+each row (`FLVoterId` plus `FLVoterId2..4`, `FirstName1..4`, and so on — Florida's export does this).
+The importer detects these by the **voter-ID column having numbered siblings** — the number can sit
+anywhere in the name (`FirstName2`, `Voter2_ID`, `ID_2`) and capitalization doesn't matter — and
+offers the **"Explode multi-member rows"** toggle (on by default), splitting each row into one voter
+per person, up to 20 per row. Facts about the **address** fill down from the first voter to the
+others at the door when the file states them only once per row: precinct and the congressional /
+state senate / state house districts — everyone at a door is in the same district by definition.
+Facts about the **person** never fill down — a second voter whose party or gender the file doesn't
+state simply has none, rather than inheriting the first voter's. And when a file *looks* multi-voter
+but the importer can't read the shape, the preview shows a **red warning** instead of quietly
+importing one voter per row: either the column naming isn't one the importer recognizes (rename the
+extra columns to end in 2, 3, … — `FirstName2`, `StateVoterID2` — and re-upload), or the file has no
+voter-ID column per person (ask the vendor for one; every imported voter needs their own state Voter
+ID, so those extra people can't import at all until it exists). The warning never blocks the import —
+a file you know really is one voter per row can proceed.
+
 ## Any vendor file — CSV, Excel, or a delimited text export
 
 You can upload **`.csv`, `.xlsx`, or any delimited text export** (`.txt`, `.tsv`) directly. The
@@ -106,7 +123,8 @@ at a glance whether it picked the right one. If the data isn't on the first tab,
 delete the tabs in front of it) and upload again. Some vendors pack **multiple voters into one row**
 (e.g. `FLVoterId1..4`); the importer **detects** this and offers an **"Explode multi-member
 rows"** toggle (on by default) that splits each row into one voter per person — the preview
-counts update live. It also warns about **leading-zero risk** (IDs/zips stored as numbers) and
+counts update live (the full story, including what fills down to the extra voters and the red
+warning shown when the shape can't be read, is under **Rows are people; doors are addresses** above). It also warns about **leading-zero risk** (IDs/zips stored as numbers) and
 **Excel date serials**, and surfaces a **vendor** field on the mapping step so files with a
 universal person ID (a "uid") are matched across orgs (see *Shared voter database* below).
 
@@ -609,13 +627,46 @@ exploded set; the transform binds lazily on the first row, when headers become k
 `validCount` set). `applyImport` accepts either `validRows` (array — small files, CLI, tests) or
 `validRowsFile` + `validCount` (the worker's large-file path) and reads whichever exists via
 `ndjsonBatches` — **one 2000-row batch in heap at a time**. Multi-member files are detected by
-**numbered siblings of the mapped `stateVoterId` column** (`FLVoterId1..N`); only **voter-group**
-columns are suffix-substituted per member (household columns stay shared, so `Address1/2/3` never
-mis-explode). The explode decision persists on the `ImportJob` so the worker apply explodes
-identically to the preview. Detection (`{ format, multiMember, warnings[] }`) flows through
-`computeImportDiff` to the **"What we detected"** panel; warnings cover `leading_zero_risk` and
-`date_serial` (a bare numeric date is converted from the Excel serial **only** when the column maps to
-a date field).
+**numbered siblings of the mapped `stateVoterId` column** — the identity anchor; no other numbered
+column can trigger detection — but a "sibling" is a **template**, not a bare suffix:
+`memberTemplate(col1, headerIndex)` finds the digit run in member 1's header whose in-place variation
+yields an existing header (suffix `FirstName1→FirstName2`, prefix `Voter1_ID→Voter2_ID`, infix
+`ID_1→ID_2`; when several runs could work, the rightmost that yields a member-2 header wins, and a
+column is never its own member-2 sibling), falls back to the append case for an unsuffixed member 1
+(`FLVoterId→FLVoterId2`), and returns `{ make(n) }` — member N's header in its **real casing**, or
+null. Lookups resolve through `lowerHeaderIndex` (one lowercased-name → real-header map per pass), so
+vendor case drift (`Firstname2` for `FirstName2`) still matches. Contiguity (stop at the first gap)
+and the 20-member cap are unchanged. `detectMembers` adds a **name rail**: an ID template alone never
+explodes — without a per-member `firstName` or `lastName` column, every manufactured member 2+ has a
+blank name and fails required-field validation, thousands of errors instead of an explanation — so
+that shape returns `{ detected: false, idSiblings: true }` and falls through to the warning below.
+Only **voter-group** columns are template-substituted per member (household columns stay shared, so
+`Address1/2/3` and `Mail1/2/3` never mis-explode), with one carve-out: `ADDRESS_LEVEL_VOTER_FIELDS`
+(`precinct`, `congressionalDistrict`, `stateSenateDistrict`, `stateHouseDistrict`) are facts about
+the door, so `explodeRow` copies them to members 2+ from the source row **when the field has no
+per-member template** — a file that numbers its districts (`Congress2`) still reads member N's own
+column — while every other templateless voter field (party, gender: personal facts) stays blank
+rather than fabricated. The explode decision persists on the `ImportJob` so the worker apply explodes
+identically to the preview. Detection (`{ format, multiMember, warnings[] }`; `multiMember` is
+`{ detected: false }` or `{ detected: true, memberCount, sourceRows, exploded, explodedVoters }` —
+`idSiblings` stays internal to the detector, never on the wire) flows through `computeImportDiff` to
+the **"What we detected"** panel. `buildWarnings` covers `leading_zero_risk`, `date_serial` (a bare
+numeric date is converted from the Excel serial **only** when the column maps to a date field) and
+`missing_coordinates`; when detection did **not** fire, `buildImportRows` additionally asks
+`possibleMultiMemberWarning` for the **loud miss**: if at least **two** distinct mapped voter fields
+have digit-varied siblings (the same `memberTemplate` oracle — case-insensitive, any digit position;
+household fields are never scanned, which is what keeps `Address1/2/3` + `Mail1/2/3` silent), it
+pushes one `{ type: 'possible_multi_member', column, field, detail }` warning naming up to four of
+the offending headers, member-major. Variant (a) — the ID field has siblings, or the name rail
+blocked (`idSiblings`) — carries `field: 'stateVoterId'` and the rename remedy: these people *could*
+import under the recognized naming. Variant (b) — no per-person ID siblings — anchors on the first
+`firstName`/`lastName` sibling field and says the extra people **cannot** import: `stateVoterId` is
+required and `{campaignId, stateVoterId}` unique, so there is no identity to create members 2+
+under — a vendor request, not a mapping fix. The two-field threshold keeps one stray numbered column
+from nagging. `ImportPage`'s `DetectionPanel` renders it through `DANGER_WARNING_TYPES` — the red
+treatment `missing_coordinates` gets — but it never blocks the import: silent loss of a large
+fraction of a file is nearer an error than a note, yet a file the operator knows really is
+one-voter-per-row may still proceed.
 
 **Mapping auto-suggest is deliberately narrow**
 ([canonicalFields.js](../server/src/services/import/canonicalFields.js)). Exact normalized alias

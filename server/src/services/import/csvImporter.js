@@ -399,33 +399,71 @@ const VOTER_FIELDS = [
 const HOUSEHOLD_FIELDS = [
   'addressLine1', 'addressLine2', 'city', 'state', 'zipCode', 'county', 'latitude', 'longitude',
 ];
+// Voter fields that are really facts about the ADDRESS — everyone at a door is in
+// the same precinct and districts by definition. When a multi-member file states
+// them once per row (no Congress2), explodeRow copies them down to members 2+.
+// Party and gender are personal and never fill down.
+const ADDRESS_LEVEL_VOTER_FIELDS = [
+  'precinct', 'congressionalDistrict', 'stateSenateDistrict', 'stateHouseDistrict',
+];
 
 const nonEmpty = (v) => v != null && String(v).trim() !== '';
 
-// Given member 1's actual column (e.g. "FirstName1" or "FLVoterId"), return the
-// base such that base+N is member N's column — or null if there is no member-2
-// sibling. Handles the mixed vendor convention where member 1 may be unsuffixed
-// ("FLVoterId") or suffixed ("FirstName1").
-function memberBase(col1, headerSet) {
+// One lowercased header index per detection pass: lowercase name → the header's
+// REAL casing, so sibling lookups survive vendor case drift (FirstName2 vs
+// Firstname2) and always hand back the exact key the raw row object carries.
+export const lowerHeaderIndex = (headers) => new Map(headers.map((h) => [h.toLowerCase(), h]));
+
+// Given member 1's actual column (e.g. "FirstName1", "Voter1_ID" or "FLVoterId"),
+// return a column TEMPLATE { make(n) } where make(n) is member N's real header —
+// or null when that member's column doesn't exist. Two vendor conventions, tried
+// in order:
+//   1. a digit run varied IN PLACE, anywhere in the name — suffix ("FirstName1" →
+//      "FirstName2"), prefix ("Voter1_ID" → "Voter2_ID"), infix ("ID_1" → "ID_2").
+//      Only a run that reads 1 can be member 1's own index — every in-place
+//      convention numbers member 1 with a 1 — and the LEFTMOST such run that
+//      yields a member-2 header wins: member index leads, slot ranks trail
+//      ("Voter1_Phone1" varies the member 1, never the phone slot; "V2Voter1_ID"
+//      skips the 2 and varies the 1; "Phone3" has no 1-run and never templates,
+//      so a ranked slot column can't read a sibling slot as another person).
+//   2. today's append fallback for an unsuffixed member 1 ("FLVoterId" → "FLVoterId2").
+// Returns null if neither convention finds a member-2 sibling. make(1) is always
+// member 1's own column — the mapped one — regardless of convention.
+export function memberTemplate(col1, headerIndex) {
   if (!col1) return null;
-  if (/1$/.test(col1)) {
-    const b = col1.replace(/1$/, '');
-    if (headerSet.has(`${b}2`)) return b;
+  const lower1 = col1.toLowerCase();
+  const resolve = (name) => headerIndex.get(name.toLowerCase()) ?? null;
+  const runs = [...col1.matchAll(/\d+/g)];
+  for (let i = 0; i < runs.length; i += 1) {
+    // The value-1 rail: a run that isn't 1 is a slot rank or someone else's member
+    // number, and varying it reads a SIBLING column as another person ("Phone3" →
+    // "Phone2" is member 1's other phone). It also makes make(n) === col1
+    // impossible for every n ≥ 2, not just n = 2.
+    if (Number(runs[i][0]) !== 1) continue;
+    const start = runs[i].index;
+    const end = start + runs[i][0].length;
+    const make = (n) => (n === 1 ? col1 : resolve(col1.slice(0, start) + n + col1.slice(end)));
+    const two = make(2);
+    // Self-match backstop: unreachable while the value-1 rail holds (varying a
+    // 1 to a 2 always changes the name), kept as a cheap invariant.
+    if (two && two.toLowerCase() !== lower1) return { make };
   }
-  if (headerSet.has(`${col1}2`)) return col1;
+  if (resolve(`${col1}2`)) {
+    return { make: (n) => (n === 1 ? col1 : resolve(col1 + n)) };
+  }
   return null;
 }
 
 // Detect a multi-voter-per-row file. Anchored on the IDENTITY column
 // (stateVoterId) having numbered siblings — NOT any numbered column — so address
 // LINES (Address1/2/3, a household field) are never mistaken for members.
-function detectMembers(headers, resolved) {
-  const headerSet = new Set(headers);
-  const idBase = memberBase(resolved.stateVoterId, headerSet);
-  if (!idBase) return { detected: false };
+export function detectMembers(headers, resolved) {
+  const headerIndex = lowerHeaderIndex(headers);
+  const idTpl = memberTemplate(resolved.stateVoterId, headerIndex);
+  if (!idTpl) return { detected: false };
   let maxMembers = 1;
   for (let n = 2; n <= 20; n += 1) {
-    if (headerSet.has(idBase + n)) maxMembers = n;
+    if (idTpl.make(n)) maxMembers = n;
     else break;
   }
   if (maxMembers < 2) return { detected: false };
@@ -433,29 +471,46 @@ function detectMembers(headers, resolved) {
   for (const f of VOTER_FIELDS) {
     const col1 = resolved[f];
     if (!col1) continue;
-    const base = memberBase(col1, headerSet);
-    if (base) perMember[f] = { col1, base };
+    const tpl = memberTemplate(col1, headerIndex);
+    if (tpl) perMember[f] = { col1, tpl };
   }
-  return { detected: true, maxMembers, idBase, perMember };
+  // The name rail: an ID template alone is not enough to explode. Without a
+  // per-member firstName or lastName column, every manufactured member 2+ has a
+  // blank name and fails required-field validation — thousands of errors instead
+  // of an explanation. Fall through to the possible_multi_member warning, which
+  // idSiblings lets say honestly that the ID columns WERE recognized.
+  if (!perMember.firstName && !perMember.lastName) {
+    return { detected: false, idSiblings: true };
+  }
+  return { detected: true, maxMembers, idTpl, perMember };
 }
 
 // Explode ONE source row into one row per non-empty member. Per-member voter
 // columns are pulled from member N and written under member 1's column key (so
 // the validator reads them via the same mapping); household columns are shared;
-// non-per-member voter fields (e.g. a Party only member 1 has) are left blank for
-// members 2+ rather than fabricated. Per-row so the streaming path never holds
-// the exploded set.
-function explodeRow(row, resolved, members, out) {
+// ADDRESS-LEVEL voter fields (precinct + districts) stated once per row are
+// copied down to members 2+ — they are facts about the door, so member 1's value
+// is member 4's too; every OTHER non-per-member voter field (a Party or Gender
+// only member 1 has) is left blank for members 2+ rather than fabricated —
+// those are personal. Per-row so the streaming path never holds the exploded set.
+export function explodeRow(row, resolved, members, out) {
   if (nonEmpty(row[resolved.stateVoterId])) out(row); // member 1: as-is
   for (let n = 2; n <= members.maxMembers; n += 1) {
-    if (!nonEmpty(row[members.idBase + n])) continue;
+    const idCol = members.idTpl.make(n);
+    if (!idCol || !nonEmpty(row[idCol])) continue;
     const nr = {};
     for (const hf of HOUSEHOLD_FIELDS) {
       const col = resolved[hf];
       if (col) nr[col] = row[col];
     }
     for (const info of Object.values(members.perMember)) {
-      nr[info.col1] = row[info.base + n] ?? '';
+      const colN = info.tpl.make(n);
+      nr[info.col1] = (colN ? row[colN] : '') ?? '';
+    }
+    for (const f of ADDRESS_LEVEL_VOTER_FIELDS) {
+      if (members.perMember[f]) continue; // the file numbers it (Congress2) — member N's own value already read above
+      const col = resolved[f];
+      if (col) nr[col] = row[col];
     }
     out(nr);
   }
@@ -485,6 +540,66 @@ function buildWarnings(resolved, cellMeta, format, anyCoords) {
   }
   return warnings;
 }
+
+// The LOUD MISS. When the explode did NOT fire but the headers look like they hold
+// more people than one per row, the import completes green at one voter per row —
+// a quiet fraction of the file, not an error. This warning is what bounds the
+// damage of every vendor convention the detector hasn't thought of.
+//
+// The scan covers mapped VOTER-field columns ONLY — never household fields, which
+// is what keeps Address1/2/3 and Mail1/2/3 (address LINES) from ever reading as
+// three people — and reuses memberTemplate, so "has siblings" means exactly what
+// detection means by it. Two thresholds: at least TWO distinct voter fields must
+// show siblings, so one stray numbered column can't nag — and the evidence must
+// include an IDENTITY field (ID or name siblings), because slot conventions
+// number several contact fields in lockstep (Phone1/Phone2 + PhoneType1/PhoneType2
+// on a one-voter-per-row export) and a file numbering neither names nor IDs has
+// no per-person identity columns and isn't describing people. Two variants,
+// because the remedies differ:
+//   (a) the ID field has siblings (or the name rail blocked an ID template) — the
+//       extra people COULD import under a recognized naming; say how.
+//   (b) no per-person ID siblings — there is no identity to create members 2+
+//       under (stateVoterId is required and unique per campaign), so this is a
+//       vendor request, not a mapping fix.
+// Returns one warning object or null; the caller only asks when detection is off.
+export const possibleMultiMemberWarning = (headers, resolved, members) => {
+  const headerIndex = lowerHeaderIndex(headers);
+  const siblingFields = [];
+  for (const f of VOTER_FIELDS) {
+    const col1 = resolved[f];
+    if (!col1) continue;
+    const tpl = memberTemplate(col1, headerIndex);
+    if (tpl) siblingFields.push({ field: f, col1, tpl });
+  }
+  if (siblingFields.length < 2) return null;
+  // The identity gate. Every genuine multi-voter file rides on ID siblings
+  // (variant a, the name rail included) or name siblings (variant b) — this
+  // excludes only files numbering neither, which are slot conventions, not people.
+  const idSiblings = members.idSiblings === true || siblingFields.some((s) => s.field === 'stateVoterId');
+  const nameSiblings = siblingFields.some((s) => s.field === 'firstName' || s.field === 'lastName');
+  if (!idSiblings && !nameSiblings) return null;
+  // Name the actual offending columns, member-major (all of member 2's, then 3's…),
+  // deduped (two voter fields mapped to the SAME column — phone and cellPhone both
+  // → Phone1 — would otherwise name each sibling twice) and capped at 4 so a
+  // 20-member file doesn't print eighty headers.
+  const offenders = [];
+  const seen = new Set();
+  for (let n = 2; n <= 20; n += 1) {
+    const cols = siblingFields.map((s) => s.tpl.make(n)).filter(Boolean);
+    if (cols.length === 0) break;
+    for (const col of cols) {
+      if (!seen.has(col)) { seen.add(col); offenders.push(col); }
+    }
+  }
+  const shown = offenders.length > 4 ? `${offenders.slice(0, 4).join(', ')}, …` : offenders.join(', ');
+  if (idSiblings) {
+    return { type: 'possible_multi_member', column: resolved.stateVoterId ?? siblingFields[0].col1, field: 'stateVoterId',
+      detail: `This file looks like it packs more than one voter per row (columns like ${shown}), but the naming isn't one the importer recognizes — only the first voter in each row will import. Rename the extra columns to end in 2, 3, … (e.g. FirstName2, StateVoterID2) and re-upload. More: see 'Fewer doors than file rows?' in Help.` };
+  }
+  const lead = siblingFields.find((s) => s.field === 'firstName' || s.field === 'lastName') ?? siblingFields[0];
+  return { type: 'possible_multi_member', column: lead.col1, field: lead.field,
+    detail: `This file looks like it packs more than one voter per row (columns like ${shown}), but it has no voter-ID column per person, and every imported voter needs its own state voter ID — so the extra people in each row cannot be imported, and only the first voter in each row will. Ask your vendor for an export with an ID column per person (e.g. StateVoterID2), or one row per voter. More: see 'Fewer doors than file rows?' in Help.` };
+};
 
 /**
  * Smart-import entry point: stream-parse a CSV or XLSX buffer, detect multi-member
@@ -545,9 +660,14 @@ export async function buildImportRows(buffer, filename, mapping, { explode = tru
     validator = makeRowValidator(mapping, headers, sink ? { sink } : {});
   }
 
+  const warnings = buildWarnings(resolved, cellMeta, format, anyCoords);
+  if (!members.detected) {
+    const missWarning = possibleMultiMemberWarning(headers, resolved, members);
+    if (missWarning) warnings.push(missWarning);
+  }
   const detection = {
     format,
-    warnings: buildWarnings(resolved, cellMeta, format, anyCoords),
+    warnings,
     multiMember: members.detected
       ? { detected: true, memberCount: members.maxMembers, sourceRows, exploded: !!explode, explodedVoters: explode ? explodedVoters : null }
       : { detected: false },

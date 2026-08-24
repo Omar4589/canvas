@@ -13,6 +13,8 @@ tags: import, voters, intake
 
 **If your Excel file has several tabs, only the first one is imported** — the leftmost tab you can see (hidden sheets are skipped; note it isn't always the tab Excel opens on, which is whichever one was showing when the file was last saved). Extra `Summary` or `README` tabs after the data are simply ignored. The **Map columns** step names the tab it read and lists the ones it skipped, so you can check it picked the right one. If your voter data is on a different tab, move that tab to the front of the workbook and upload again.
 
+**Some files pack a whole household into one row** — numbered columns like `FirstName1..4` and `FLVoterId1..4`, one set per person. The importer spots these by the numbered voter-ID columns (the number can sit anywhere in the name, and capitalization doesn't matter) and offers an **Explode multi-member rows** toggle (on by default) that splits each row into one voter per person — the preview counts update live. Precinct and district values stated once per row fill down to everyone at the door (they're facts about the address); party and gender never do (they're facts about each person). If a file *looks* like it packs several voters per row but the columns are named in a way the importer can't read, the preview shows a **red warning** instead of quietly importing only the first voter in each row — what it means and how to fix it: [My file has more rows than the doors the import reports](fewer-doors-than-file-rows).
+
 ## How an upload is matched
 
 - A row matches an existing **door by its address** (after light normalization). A different or misspelled address becomes a separate door.

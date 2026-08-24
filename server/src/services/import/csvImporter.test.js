@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateRows, SPREADSHEET_ERROR_RE } from './csvImporter.js';
+import {
+  validateRows, SPREADSHEET_ERROR_RE,
+  detectMembers, explodeRow, possibleMultiMemberWarning,
+  memberTemplate, lowerHeaderIndex,
+} from './csvImporter.js';
 
 // Header names deliberately differ from canonical keys — the mapping is doing work.
 const MAPPING = {
@@ -274,4 +278,300 @@ test('a lot community — ONE house number, many lots — is still a real buildi
   const r = validateRows(rows, MAPPING, HEADERS);
   assert.equal(r.placeholderPins, 0);
   assert.equal(r.placeholderPinDoors, 0);
+});
+
+// ── Multi-member detection: templates, the name rail, the loud miss ──────────
+//
+// detectMembers is anchored on the stateVoterId column having numbered siblings;
+// memberTemplate generalizes the naming to a column template (suffix, prefix,
+// infix, case drift). When detection does NOT fire but the headers still look
+// multi-voter, possibleMultiMemberWarning is the loud miss — the thing that keeps
+// a 40%-of-the-file loss from completing green.
+
+// A "resolved" mapping in these tests is just canonical field → the file's ACTUAL header.
+
+test('the FL shape still detects 4 members (suffix + unsuffixed member 1)', () => {
+  const headers = ['FLVoterId', 'FLVoterId2', 'FLVoterId3', 'FLVoterId4',
+    'FirstName1', 'FirstName2', 'FirstName3', 'FirstName4',
+    'LastName1', 'LastName2', 'LastName3', 'LastName4',
+    'Address1', 'Address2', 'Address3', 'Mail1', 'Mail2', 'Mail3',
+    'Party', 'Gender', 'PrecinctMain', 'Congress', 'Senate', 'House'];
+  const resolved = { stateVoterId: 'FLVoterId', firstName: 'FirstName1', lastName: 'LastName1',
+    party: 'Party', gender: 'Gender', precinct: 'PrecinctMain',
+    congressionalDistrict: 'Congress', stateSenateDistrict: 'Senate', stateHouseDistrict: 'House',
+    addressLine1: 'Address1', addressLine2: 'Address2' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.maxMembers, 4);
+  assert.equal(m.idTpl.make(3), 'FLVoterId3');
+  assert.equal(m.perMember.firstName.tpl.make(2), 'FirstName2');
+  // Single-column personal fields have no template — they stay member 1's alone.
+  assert.equal(m.perMember.party, undefined);
+  assert.equal(m.perMember.gender, undefined);
+});
+
+test('prefix convention Voter1_*/Voter2_* detects', () => {
+  const headers = ['Voter1_FirstName', 'Voter1_LastName', 'Voter1_StateVoterID',
+    'Voter2_FirstName', 'Voter2_LastName', 'Voter2_StateVoterID', 'Address', 'City', 'State', 'Zip'];
+  const resolved = { stateVoterId: 'Voter1_StateVoterID', firstName: 'Voter1_FirstName',
+    lastName: 'Voter1_LastName', addressLine1: 'Address', city: 'City', state: 'State', zipCode: 'Zip' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.maxMembers, 2);
+  assert.equal(m.idTpl.make(2), 'Voter2_StateVoterID');
+});
+
+test('underscore/infix convention ID_1/ID_2 detects', () => {
+  const headers = ['ID_1', 'ID_2', 'FN_1', 'FN_2', 'LN_1', 'LN_2', 'Addr'];
+  const resolved = { stateVoterId: 'ID_1', firstName: 'FN_1', lastName: 'LN_1', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.maxMembers, 2);
+  assert.equal(m.perMember.lastName.tpl.make(2), 'LN_2');
+});
+
+test('case drift between siblings detects, and make(n) returns the REAL casing', () => {
+  const headers = ['VoterID', 'VoterId2', 'FirstName1', 'Firstname2', 'LastName1', 'Lastname2'];
+  const resolved = { stateVoterId: 'VoterID', firstName: 'FirstName1', lastName: 'LastName1' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.maxMembers, 2);
+  assert.equal(m.idTpl.make(2), 'VoterId2'); // the file's casing, not the constructed one
+  assert.equal(m.perMember.firstName.tpl.make(2), 'Firstname2');
+});
+
+test('Address1/2/3 + Mail1/2/3 with one unnumbered ID: NOT detected and NOT warned', () => {
+  // The false-positive guard, drawn straight from the FL file: numbered HOUSEHOLD
+  // columns (address lines) and unmapped Mail columns must never read as members.
+  const headers = ['VoterID', 'FirstName', 'LastName', 'Address1', 'Address2', 'Address3',
+    'Mail1', 'Mail2', 'Mail3', 'City', 'State', 'Zip'];
+  const resolved = { stateVoterId: 'VoterID', firstName: 'FirstName', lastName: 'LastName',
+    addressLine1: 'Address1', addressLine2: 'Address2', city: 'City', state: 'State', zipCode: 'Zip' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false });
+  assert.equal(possibleMultiMemberWarning(headers, resolved, m), null);
+});
+
+test('ID siblings but no name siblings: name rail blocks the explode, warns variant (a)', () => {
+  // Exploding here would manufacture blank-name members that all fail validation.
+  // The rail reports idSiblings so the warning can say the ID columns WERE found.
+  const headers = ['VoterID1', 'VoterID2', 'DOB1', 'DOB2', 'FirstName', 'LastName', 'Addr'];
+  const resolved = { stateVoterId: 'VoterID1', dateOfBirth: 'DOB1',
+    firstName: 'FirstName', lastName: 'LastName', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false, idSiblings: true });
+  const w = possibleMultiMemberWarning(headers, resolved, m);
+  assert.equal(w.type, 'possible_multi_member');
+  assert.equal(w.field, 'stateVoterId');
+  assert.equal(w.column, 'VoterID1');
+  // Variant (a): renameable — and it names the actual offending columns.
+  assert.match(w.detail, /Rename the extra columns to end in 2, 3/);
+  assert.match(w.detail, /VoterID2/);
+  assert.match(w.detail, /DOB2/);
+  assert.match(w.detail, /Fewer doors than file rows\?/);
+});
+
+test('name siblings without ID siblings: warns variant (b) — a vendor request, not a mapping fix', () => {
+  const headers = ['VoterID', 'FirstName1', 'FirstName2', 'LastName1', 'LastName2', 'Addr'];
+  const resolved = { stateVoterId: 'VoterID', firstName: 'FirstName1', lastName: 'LastName1', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false });
+  const w = possibleMultiMemberWarning(headers, resolved, m);
+  assert.equal(w.type, 'possible_multi_member');
+  assert.equal(w.field, 'firstName');
+  assert.equal(w.column, 'FirstName1');
+  assert.match(w.detail, /cannot be imported/);
+  assert.match(w.detail, /Ask your vendor/);
+  assert.match(w.detail, /FirstName2/);
+  assert.match(w.detail, /Fewer doors than file rows\?/);
+});
+
+test('only ONE voter field with siblings: below threshold, no warning', () => {
+  // Two mapped phone columns are the classic stray: phone → Phone1 sees Phone2 as
+  // a sibling, but nothing corroborates, so it never nags.
+  const headers = ['VoterID', 'FirstName', 'LastName', 'Phone1', 'Phone2', 'Addr'];
+  const resolved = { stateVoterId: 'VoterID', firstName: 'FirstName', lastName: 'LastName',
+    phone: 'Phone1', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false });
+  assert.equal(possibleMultiMemberWarning(headers, resolved, m), null);
+});
+
+test('slot-numbered contact columns on a single-voter file: two sibling fields, still no warning', () => {
+  // The identity gate. Ranked phone slots number SEVERAL contact fields in
+  // lockstep (Phone1/Phone2 + PhoneType1/PhoneType2 — a shape suggestMapping
+  // auto-maps with zero operator error), so the two-field threshold alone would
+  // red-flag a healthy one-voter-per-row export. Neither names nor IDs have
+  // siblings here, so nothing is describing people — silence.
+  const headers = ['VoterID', 'FirstName', 'LastName', 'Phone1', 'Phone2',
+    'PhoneType1', 'PhoneType2', 'Address1', 'Address2', 'City', 'State', 'Zip'];
+  const resolved = { stateVoterId: 'VoterID', firstName: 'FirstName', lastName: 'LastName',
+    phone: 'Phone1', phoneType: 'PhoneType1',
+    addressLine1: 'Address1', addressLine2: 'Address2', city: 'City', state: 'State', zipCode: 'Zip' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false });
+  assert.equal(possibleMultiMemberWarning(headers, resolved, m), null);
+  // Same story for phone + cellPhone slots (Phone1/2 + Cell1/2, also auto-mapped).
+  const headers2 = ['VoterID', 'FirstName', 'LastName', 'Phone1', 'Phone2', 'Cell1', 'Cell2', 'Addr'];
+  const resolved2 = { stateVoterId: 'VoterID', firstName: 'FirstName', lastName: 'LastName',
+    phone: 'Phone1', cellPhone: 'Cell1', addressLine1: 'Addr' };
+  const m2 = detectMembers(headers2, resolved2);
+  assert.equal(possibleMultiMemberWarning(headers2, resolved2, m2), null);
+});
+
+test('two voter fields on the SAME column never name a sibling twice in the warning', () => {
+  // resolveMapping permits phone and cellPhone both → Phone1; without the dedupe
+  // the offenders list read "Phone2, Phone2" and the red banner looked broken.
+  const headers = ['VoterID1', 'VoterID2', 'FirstName', 'LastName', 'Phone1', 'Phone2', 'Addr'];
+  const resolved = { stateVoterId: 'VoterID1', firstName: 'FirstName', lastName: 'LastName',
+    phone: 'Phone1', cellPhone: 'Phone1', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  const w = possibleMultiMemberWarning(headers, resolved, m);
+  assert.match(w.detail, /columns like Phone2, VoterID2\)/);
+});
+
+test('the offenders list is member-major, capped at 4 headers, and ends in an ellipsis', () => {
+  // Three sibling-bearing voter fields across three members: all of member 2's
+  // columns first (in field-scan order), then member 3's — cut at four so a
+  // 20-member file never prints eighty headers.
+  const headers = ['VoterID1', 'VoterID2', 'VoterID3', 'DOB1', 'DOB2', 'DOB3',
+    'Phone1', 'Phone2', 'Phone3', 'FirstName', 'LastName', 'Addr'];
+  const resolved = { stateVoterId: 'VoterID1', dateOfBirth: 'DOB1', phone: 'Phone1',
+    firstName: 'FirstName', lastName: 'LastName', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false, idSiblings: true }); // name rail — variant (a)
+  const w = possibleMultiMemberWarning(headers, resolved, m);
+  assert.equal(w.field, 'stateVoterId');
+  assert.match(w.detail, /columns like Phone2, DOB2, VoterID2, Phone3, …\)/);
+  // Member 3's later columns fell past the cap.
+  assert.doesNotMatch(w.detail, /DOB3/);
+  assert.doesNotMatch(w.detail, /VoterID3/);
+});
+
+test('non-contiguous member columns stop at the gap: ID2 present, ID3 missing, ID4 present → 2', () => {
+  const headers = ['VoterID1', 'VoterID2', 'VoterID4', 'FirstName1', 'FirstName2', 'LastName1', 'LastName2'];
+  const resolved = { stateVoterId: 'VoterID1', firstName: 'FirstName1', lastName: 'LastName1' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.maxMembers, 2);
+});
+
+test('member-prefix files with ranked phone slots: the member run wins, never the slot run', () => {
+  // "Voter1_Phone1" holds two digit runs. Varying the RIGHTMOST (the slot) to 2
+  // yields the existing "Voter1_Phone2" — member 1's OTHER phone — so the old
+  // rightmost-first order silently wrote it into member 2's row. Member index
+  // leads in every real prefix convention; the leftmost 1-run must win.
+  const headers = ['Voter1_ID', 'Voter2_ID', 'Voter1_FirstName', 'Voter2_FirstName',
+    'Voter1_LastName', 'Voter2_LastName',
+    'Voter1_Phone1', 'Voter1_Phone2', 'Voter2_Phone1', 'Voter2_Phone2', 'Addr'];
+  const resolved = { stateVoterId: 'Voter1_ID', firstName: 'Voter1_FirstName',
+    lastName: 'Voter1_LastName', phone: 'Voter1_Phone1', cellPhone: 'Voter1_Phone2',
+    addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.perMember.phone.tpl.make(2), 'Voter2_Phone1');
+  assert.equal(m.perMember.cellPhone.tpl.make(2), 'Voter2_Phone2');
+  const rows = [];
+  explodeRow({ Voter1_ID: 'A', Voter2_ID: 'B', Voter1_FirstName: 'Al', Voter2_FirstName: 'Bo',
+    Voter1_LastName: 'Ax', Voter2_LastName: 'Bx',
+    Voter1_Phone1: '111-1111', Voter1_Phone2: '111-2222',
+    Voter2_Phone1: '222-1111', Voter2_Phone2: '222-2222', Addr: '1 Main St' },
+  resolved, m, (r) => rows.push(r));
+  // Member 2's OWN phones — not member 1's second phone.
+  assert.equal(rows[1].Voter1_Phone1, '222-1111');
+  assert.equal(rows[1].Voter1_Phone2, '222-2222');
+});
+
+test('a ranked slot column (Phone3) never templates — member 2 gets a blank, not a sibling slot', () => {
+  // The value-1 rail: varying Phone3's run to 2 hits "Phone2" — member 1's other
+  // phone, not member 2's anything — and make(2)'s self-guard can't catch a
+  // collision with a SIBLING. Only a run reading 1 can be member 1's own index.
+  const headers = ['ID1', 'ID2', 'FN1', 'FN2', 'LN1', 'LN2', 'Phone1', 'Phone2', 'Phone3', 'Addr'];
+  assert.equal(memberTemplate('Phone3', lowerHeaderIndex(headers)), null);
+  const resolved = { stateVoterId: 'ID1', firstName: 'FN1', lastName: 'LN1',
+    phone: 'Phone1', cellPhone: 'Phone3', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.equal(m.detected, true);
+  assert.equal(m.perMember.cellPhone, undefined); // no template — stays member 1's alone
+  const rows = [];
+  explodeRow({ ID1: 'A', ID2: 'B', FN1: 'Al', FN2: 'Bo', LN1: 'Ax', LN2: 'Bx',
+    Phone1: 'p1', Phone2: 'p2', Phone3: 'p3', Addr: '1 Main St' }, resolved, m, (r) => rows.push(r));
+  assert.equal(rows[1].Phone3, undefined); // blank rather than fabricated from a slot
+});
+
+test('stateVoterId mis-mapped onto a non-first member column declines instead of duplicating member 1', () => {
+  // With ID3 as the anchor, the old code minted a template whose make(3) was ID3
+  // ITSELF — member 3 duplicated member 1 (hidden by the in-file dup drop) and
+  // ID1's person silently vanished. The rail makes it decline, like it used to.
+  const headers = ['ID1', 'ID2', 'ID3', 'ID4', 'FN1', 'FN2', 'FN3', 'FN4',
+    'LN1', 'LN2', 'LN3', 'LN4', 'Addr'];
+  const resolved = { stateVoterId: 'ID3', firstName: 'FN1', lastName: 'LN1', addressLine1: 'Addr' };
+  const m = detectMembers(headers, resolved);
+  assert.deepEqual(m, { detected: false });
+  // The name siblings still trip the loud miss, so the mis-mapping isn't silent.
+  const w = possibleMultiMemberWarning(headers, resolved, m);
+  assert.equal(w.type, 'possible_multi_member');
+});
+
+// Shared fixture for the explode tests: two members, single-column party/gender
+// and address-level fields, per-member names and IDs.
+const EXPLODE_HEADERS = ['ID1', 'ID2', 'FN1', 'FN2', 'LN1', 'LN2',
+  'Party', 'Gender', 'Precinct', 'Congress', 'Senate', 'House', 'Addr', 'City', 'ST', 'Zip'];
+const EXPLODE_RESOLVED = { stateVoterId: 'ID1', firstName: 'FN1', lastName: 'LN1',
+  party: 'Party', gender: 'Gender', precinct: 'Precinct',
+  congressionalDistrict: 'Congress', stateSenateDistrict: 'Senate', stateHouseDistrict: 'House',
+  addressLine1: 'Addr', city: 'City', state: 'ST', zipCode: 'Zip' };
+const EXPLODE_ROW = { ID1: 'A', ID2: 'B', FN1: 'Al', FN2: 'Bo', LN1: 'Ax', LN2: 'Bx',
+  Party: 'REP', Gender: 'F', Precinct: '12', Congress: '27', Senate: '8', House: '110',
+  Addr: '1 Main St', City: 'Townsville', ST: 'FL', Zip: '33001' };
+
+const runExplode = (row, headers = EXPLODE_HEADERS, resolved = EXPLODE_RESOLVED) => {
+  const members = detectMembers(headers, resolved);
+  assert.equal(members.detected, true);
+  const outRows = [];
+  explodeRow(row, resolved, members, (r) => outRows.push(r));
+  return outRows;
+};
+
+test('exploded member 2 carries precinct + districts, and NO party or gender', () => {
+  const rows = runExplode(EXPLODE_ROW);
+  assert.equal(rows.length, 2);
+  const m2 = rows[1];
+  // Member 2's own identity, written under member 1's column keys.
+  assert.equal(m2.ID1, 'B');
+  assert.equal(m2.FN1, 'Bo');
+  // Address-level facts fill down — everyone at the door shares them.
+  assert.equal(m2.Precinct, '12');
+  assert.equal(m2.Congress, '27');
+  assert.equal(m2.Senate, '8');
+  assert.equal(m2.House, '110');
+  // Personal facts never do.
+  assert.equal(m2.Party, undefined);
+  assert.equal(m2.Gender, undefined);
+  // Household columns shared as before.
+  assert.equal(m2.Addr, '1 Main St');
+});
+
+test('a file that numbers its districts reads them per-member, never copied from member 1', () => {
+  const headers = ['ID1', 'ID2', 'FN1', 'FN2', 'LN1', 'LN2', 'Congress1', 'Congress2', 'Addr'];
+  const resolved = { stateVoterId: 'ID1', firstName: 'FN1', lastName: 'LN1',
+    congressionalDistrict: 'Congress1', addressLine1: 'Addr' };
+  const row = { ID1: 'A', ID2: 'B', FN1: 'Al', FN2: 'Bo', LN1: 'Ax', LN2: 'Bx',
+    Congress1: '27', Congress2: '9', Addr: '1 Main St' };
+  const rows = runExplode(row, headers, resolved);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1].Congress1, '9'); // member 2's own district, not member 1's 27
+});
+
+test('explodeRow emits member 1 as-is and skips empty-ID members', () => {
+  // ID2 blank, ID3 filled: member 2 is skipped, member 3 still comes through.
+  const headers = ['ID1', 'ID2', 'ID3', 'FN1', 'FN2', 'FN3', 'LN1', 'LN2', 'LN3', 'Addr'];
+  const resolved = { stateVoterId: 'ID1', firstName: 'FN1', lastName: 'LN1', addressLine1: 'Addr' };
+  const row = { ID1: 'A', ID2: '', ID3: 'C', FN1: 'Al', FN2: '', FN3: 'Cy',
+    LN1: 'Ax', LN2: '', LN3: 'Cx', Addr: '1 Main St' };
+  const rows = runExplode(row, headers, resolved);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0], row); // member 1 is the raw row object itself
+  assert.equal(rows[1].ID1, 'C');
+  assert.equal(rows[1].FN1, 'Cy');
 });

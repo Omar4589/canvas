@@ -341,12 +341,16 @@ function HandEditConflictsPanel({ conflicts, overwrite, onToggle }) {
   );
 }
 
+// Warning types that get the danger (red) treatment. None of them block the import —
+// possible_multi_member especially is a loud heads-up, not a gate.
+const DANGER_WARNING_TYPES = new Set(['missing_coordinates', 'possible_multi_member']);
+
 function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
   if (!detection) return null;
   const { multiMember, warnings = [], format } = detection;
   if (!multiMember?.detected && !warnings.length) return null;
-  const blocking = warnings.find((w) => w.type === 'missing_coordinates');
-  const advisories = warnings.filter((w) => w.type !== 'missing_coordinates');
+  const dangers = warnings.filter((w) => DANGER_WARNING_TYPES.has(w.type));
+  const advisories = warnings.filter((w) => !DANGER_WARNING_TYPES.has(w.type));
   return (
     <div className="mb-4 rounded border border-border bg-card p-4">
       <h3 className="mb-2 text-sm font-medium">What we detected{format === 'xlsx' ? ' · Excel file' : ''}</h3>
@@ -364,9 +368,9 @@ function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
           </p>
         </div>
       )}
-      {blocking && (
-        <div className="mb-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">{blocking.detail}</div>
-      )}
+      {dangers.map((w, i) => (
+        <div key={i} className="mb-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">{w.detail}</div>
+      ))}
       {advisories.map((w, i) => (
         <div key={i} className="mb-2 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">{w.detail}</div>
       ))}
