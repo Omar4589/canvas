@@ -102,8 +102,12 @@ export const buildUnmarkPrompt = ({ label, bulkMarks }) => ({
 
 // ── Single-home desk marks ─────────────────────────────────────────────────────────────
 // One door, one round: the same row class as a book-level mark (via:'bulk'), written by
-// POST /turfs/restrict-doors and removed by POST /turfs/unrestrict-doors. No scope choice —
-// a single door is either marked for the round or it isn't.
+// POST /turfs/restrict-doors and removed by POST /turfs/unrestrict-doors. The phone sends ONE
+// id and NO scope, so the prompts below stay a single confirm — a lone door is either marked
+// for the round or it isn't, and the server's default ('incomplete') is exactly that. The route
+// itself does take an optional scope ('incomplete' | 'unknocked') since 2026-08-22, for the web
+// maps' lassoed multi-door selection, where a selection can hold doors the crew already reached
+// and the choice matters; omitting it here keeps this path byte-for-byte what it always was.
 
 const NO_MARK = Object.freeze({ kind: 'none', by: null, at: null, passId: null });
 

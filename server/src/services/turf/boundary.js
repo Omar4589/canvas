@@ -79,10 +79,14 @@ function padBbox([minX, minY, maxX, maxY], frac) {
 //
 // onlyIndices (Set<number>|null): compute the diagram over ALL books' doors (seams depend on
 // everyone) but run the expensive per-book union/intersect ONLY for these indices — the rest
-// return undefined so the caller leaves their stored shapes alone. Safe because a door MOVE
-// doesn't change the diagram (only cell ownership flips → untouched books' shapes stay exactly
-// right), and a door REMOVAL only grows the remaining cells (untouched books' stored shapes
-// stay strictly inside their new entitlement → still disjoint, still containing).
+// return undefined so the caller leaves their stored shapes alone. Safe because a door's BOOK
+// move doesn't change the diagram (only cell ownership flips → untouched books' shapes stay
+// exactly right), and a door REMOVAL only grows the remaining cells (untouched books' stored
+// shapes stay strictly inside their new entitlement → still disjoint, still containing). A
+// COORDINATE move (a pin correction) DOES change the diagram — a new site only SHRINKS its
+// neighbours' cells — so that caller (rehullAfterPinMove.js) also lists the books whose stored
+// shape contains the new point; books near the OLD spot only grow and keep a shape that is at
+// worst notched, never overlapping.
 //
 // ASYNC: yields the event loop between per-book geometry passes so a worker job's
 // BullMQ lock-renewal timer can fire (~1.6s at 16k doors extrapolates to minutes at
@@ -166,7 +170,10 @@ export async function computeTerritories(books, { onlyIndices = null } = {}) {
   return territories;
 }
 
-function safeContains(boundary, pt) {
+// Point-in-polygon that answers false instead of throwing on a null/degenerate stored shape
+// (turf accepts a bare Polygon/MultiPolygon geometry; null throws). Exported for the pin-move
+// re-hull (rehullAfterPinMove.js), which asks the same question of stored boundaries.
+export function safeContains(boundary, pt) {
   try {
     return turf.booleanPointInPolygon(pt, boundary);
   } catch {

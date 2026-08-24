@@ -205,6 +205,39 @@ An organizer sees the whole campaign at once:
   lists booked doors only. In the canvasser-filtered view the pin color is **that canvasser's** status,
   while the section speaks for the target round. History rows and the Last action line tag desk marks
   *desk*. Full rules in [PASSES_AND_TURF.md](PASSES_AND_TURF.md).
+- **Marking many doors at once — "Select doors".** For a fence line or a gated cul-de-sac, you don't have
+  to open forty panels. The **Select doors** pill in the map's top-left controls turns the map into a
+  picker: **drag a lasso** around the doors you mean (draw more shapes to add to the selection), **click**
+  a dot to toggle one, click a **building** to toggle every unit on that pin, **⌥-drag** to take doors back
+  out, **Space** (or the **Pan** tool) to move the map, **Esc** or **Done** to leave. A bar along the bottom
+  counts what you picked and offers **Mark restricted…** / **Unmark restricted…**; selected doors get a
+  **blue** ring where the action would mark them and a **slate** ring where it would skip them. It always
+  asks before it writes — a second tap up to 25 doors, the typed-`restrict` dialog above that — and takes at
+  most **1,000 doors** per action, refusing an over-size lasso whole rather than trimming it to an arbitrary
+  thousand. The full gesture list and the rules it shares with the Turf Cutting page are in
+  [PASSES_AND_TURF.md](PASSES_AND_TURF.md); what's particular to *this* map:
+  - **You can only catch what this map has loaded and is drawing** — your filters, the date window, the
+    excluded-doors **Hide** and the viewport all narrow it. If the pull hit the 50,000-door cap the bar says
+    *"Some doors in this area are not loaded — zoom in before selecting"*, because down there a lasso would
+    quietly catch only part of the street.
+  - **Which round each door is marked in.** Opened **from a round** (Walk Lists → Passes → Audit, or any
+    `?passId=` deep link) every mark lands in that round, and doors that belong to another walk list are
+    dropped with a note — that round only covers its own list. With **no round in scope**, each door is
+    marked in **its own walk list's current round**, and the bar says how many walk lists the selection
+    spans.
+  - **The breakdown only claims what this view can answer.** Scoped to a round, the bar prints exact
+    per-round numbers ("already restricted", "completed this round"). In the normal view a door's color is
+    its status **across the whole campaign** — a different question from the one the round is asked — so the
+    bar prints the total and the doors it can't send, and the **result** after the action reports the rest
+    exactly. In that case the crew's not-homes and refusals **are** marked, and the bar says so: open the
+    map from one round to get the *Only unknocked doors* choice instead. (A **canvasser filter** does the
+    same thing, because there each door's color is that one person's answer — clear it to get the choice.)
+  - **Unmark, in the normal view,** removes desk marks from each walk list's **current** round; a mark made
+    in an **earlier** round stays. The bar says so before you press it, and the result names how many doors
+    had no desk mark to remove.
+  - **Doors that can't be marked are never sent** — one still in **Intake** (no walk list, so no round could
+    own the mark), one held out of books by **Remove apartments**, one flagged **do-not-contact**. The bar
+    counts them under "can't be marked" and names the reason.
 - **Live mode**: a "**Live · updated Xs ago**" toggle (on by default) that auto-refreshes the map
   about every 20 seconds, so pins and pings update as the field works — no page reload. You can pause
   it or hit Refresh on demand. It pauses on its own when the browser tab isn't in front.
@@ -265,16 +298,22 @@ campaigns they manage (see [ROLES.md](ROLES.md)).
 A **looked-up (geocoded)** pin is a best guess — it can land a house or two off, especially in rural
 areas or on long roads. The web admin map flags these with a faint **amber ring** around the pin, and
 the door's detail panel shows **"Approximate location."** To fix one, an admin **drags the pin** to the
-right spot ("Move pin" → Save); a team lead can also fix it from the field in the mobile app. Once it's
-moved the amber ring disappears and the door reads **"Pin corrected."** Four things worth knowing:
+right spot ("Move pin" → Save) — on this Map page, or on the **Turf Cutting** page from a house's popup
+(**Move pin →**) or a building's popup (**Move building pin →**, which moves every unit at that pin
+together); a team lead can also fix it from the field in the mobile app. Once it's moved the amber ring
+disappears and the door reads **"Pin corrected."** Four things worth knowing:
 
 - **Only leads and admins can move a pin.** Canvassers still see the "Approximate location" badge, but
   the fix is a data change with an audit trail, so it belongs with the people accountable for the data
   — and leaving it open to anyone let a faked door be laundered (record it from home, collect a "far
   from house" flag, then drag the pin onto your own house). If a canvasser spots a bad pin, they tell
   their lead.
-- **Moving a pin doesn't re-cut books.** A correction only fixes *where the dot sits* — the door keeps
-  whatever book (turf) it's already in until you re-cut ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
+- **Moving a pin doesn't re-cut books — but the book's outline follows the dot.** A correction only
+  fixes *where the dot sits* — the door keeps whatever book (turf) it's already in, in the same walk
+  order, until you re-cut ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)). What *does* change is the drawn
+  shape on the Turf Cutting map: the door's book (and any other live book whose shape covered the new
+  spot) is redrawn so the dot still sits inside its own book. Best-effort — the pin is saved first, and
+  a very large round keeps its old outline until the outline repair runs.
 - **Canvassers see corrections automatically** on their next sync — you don't have to tell them.
 - A report you've already **published** keeps the map it was frozen with; republish it to pick up
   corrections made afterward.
@@ -298,7 +337,7 @@ help if the person who moved the pin is the one who recorded the door).
 | Admin overview map — [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Mobile | `@rnmapbox/maps` | Household pins + optional pings, first/last-knock rings, opt-in overlap rings; web-parity door sheet; the campaign-wide count chip | `GET /admin/households/map` + `/map/counts` | ~20s when Live on |
 | Canvasser path — [admin/canvasser/[id]/map.jsx](../mobile/app/(app)/admin/canvasser/[id]/map.jsx) | Mobile | `@rnmapbox/maps` | One canvasser's action pings | `GET /admin/reports/canvassers/:id/path` | one-shot |
 | Books overview — [books.jsx](../mobile/app/(app)/books.jsx) | Mobile | `@rnmapbox/maps` | Book centroid markers | `GET /mobile/bootstrap` | bootstrap |
-| Turf cutting map — [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Web | Mapbox GL JS + Draw | Turf polygons, draw tools | turf endpoints | on-demand |
+| Turf cutting map — [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Web | Mapbox GL JS + Draw | Turf polygons, draw tools, house / building popups (incl. **Move pin** — the same shared hook as MapPage, §J) | turf endpoints | on-demand |
 
 Turf polygons/cutting are documented in [PASSES_AND_TURF.md](PASSES_AND_TURF.md) — not repeated here.
 
@@ -318,15 +357,29 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
 - **Approximate pins are flagged.** The web admin map draws an **amber ring** under any `interpolated`
   pin ([lib/mapRender.js](../client/src/lib/mapRender.js)), and the door detail panel shows an
   "Approximate location" / "Pin corrected" badge.
-- **Correcting a pin.** An admin drags the pin (MapPage "Move pin" → `PATCH
-  /admin/campaigns/:id/households/:householdId/location`); a lead can fix it in the field (drop it at
+- **Correcting a pin.** An admin drags the pin — MapPage "Move pin", or the Turf Cutting page's house
+  popup (**Move pin →**, `scope:'unit'`) / building popup (**Move building pin →**, `scope:'building'`),
+  both web pages driving the one shared `useMovePin` hook + `MovePinCard` (§J) → `PATCH
+  /admin/campaigns/:id/households/:householdId/location`; a lead can fix it in the field (drop it at
   their GPS spot or drag it → `POST /mobile/households/:householdId/location`). Both go through the shared
   `updateHouseholdLocation` service ([services/households/updateHouseholdLocation.js](../server/src/services/households/updateHouseholdLocation.js)),
   which validates a **state-bounding-box** guardrail, sets `coordSource='corrected'` + provenance
   (`correctedBy`/`correctedAt`/`previousLocation`), and logs a `HouseholdLocationChange` audit row. A
-  `scope:'building'` move repositions every unit sharing the pin. **A correction never re-cuts turf** —
-  book membership is `turfId` (set at cut), not derived from coordinates — and `walkOrder`/`status` are
-  untouched.
+  `scope:'building'` move repositions every unit sharing the pin. **A correction never changes book
+  membership, walk order or status** — `turfId` is set at cut, not derived from coordinates, and
+  `walkOrder`/`status` are untouched — **but it DOES redraw the affected book outlines, best-effort**:
+  after the coordinates + audit rows are committed, the service calls
+  `rehullBooksForMovedHouseholds` ([services/turf/rehullAfterPinMove.js](../server/src/services/turf/rehullAfterPinMove.js)),
+  which re-hulls, per live (non-archived) pass, the door's own book(s) plus every book whose stored
+  `boundary` contains the new point (`recomputePassTerritories(passId, { onlyTurfIds, withCentroid: true })`
+  — `Turf.boundary` + `centroid`, display-only), skips a pass over `TURF_REHULL_INLINE_MAX_DOORS`
+  (default 60 000 booked doors) with a `[pin-move] skipped re-hull` warn, and never throws — the pin is
+  saved even when the outline isn't. Both routes return **`turfsRecomputed: string[]`** (the book ids
+  rewritten; `[]` when nothing was, e.g. a loose dot, a capped pass, or a failed re-hull) beside
+  `moved`/`updated` — additive. Geometry and the exact-coordinate caveat in
+  [PASSES_AND_TURF.md](PASSES_AND_TURF.md) §B.1 and §G. The web PATCH now also carries the household as
+  an `AccessLog` subject (`router.param('householdId')` in `campaignHouseholds.js`, same hook as the
+  turf-cutting door drill).
 - **Both paths enforce the SAME policy: `canManageCampaign`** — org admin (or super, who still needs a
   support grant to enter the org at all), or a team lead for a campaign they manage. The web route gets
   it from `requireCampaignManager`; the mobile route calls the same function inline with
@@ -654,7 +707,9 @@ constants). A small legend labels the two rings when they're shown.
 
 - **Coordinates are imported or geocoded (Geocodio), and can be corrected** (see §B); rows with no
   usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`),
-  never re-cuts turf, and is **lead/admin-only on both write paths** (`canManageCampaign`).
+  **never changes book membership, `walkOrder` or `status`** — it redraws the affected book outlines
+  (`Turf.boundary`/`centroid`) best-effort, after the pin is saved — and is **lead/admin-only on both
+  write paths** (`canManageCampaign`).
 - **Set the Mapbox access token BEFORE `setTelemetryEnabled()` — never the other way round.** On
   Android `setTelemetryEnabled` has no cheap native path: `RNMBXModule.kt` builds a throwaway Mapbox
   `MapView` on the UI thread just to reach the flag. Mapbox v11 throws `MapboxConfigurationException`
@@ -672,15 +727,21 @@ constants). A small legend labels the two rings when they're shown.
   (~1.1 m) is implemented in [client/src/lib/buildings.js](../client/src/lib/buildings.js) (web),
   [mobile/lib/buildings.js](../mobile/lib/buildings.js) (mobile), and
   [server/src/utils/buildingKey.js](../server/src/utils/buildingKey.js) (server). Count *implementations*,
-  not screens — the web one is shared by four surfaces already (admin map, [TurfsPage](../client/src/pages/TurfsPage.jsx)'s
+  not screens — the web one is shared by six surfaces already (admin map, [TurfsPage](../client/src/pages/TurfsPage.jsx)'s
   `doorKey`, [ClientReportMap](../client/src/components/ClientReportMap.jsx),
-  [AnswerMiniMap](../client/src/components/AnswerMiniMap.jsx)), and new consumers should import it rather
-  than add a fourth copy. **`POST /admin/turfs/exclude-apartments` still builds the key inline** — it is
+  [AnswerMiniMap](../client/src/components/AnswerMiniMap.jsx), and — since the "Select doors" mode (§K) —
+  [lassoSelect.js](../client/src/lib/lassoSelect.js)'s `snapBuildings` and
+  [cutMapDoors.js](../client/src/lib/cutMapDoors.js)'s `drawnCutDoors`), and new consumers should import it
+  rather than add a fourth copy. **`POST /admin/turfs/exclude-apartments` still builds the key inline** — it is
   the one site that has not been folded in, and it is the one where drift would be worst: the cut would
   exclude doors the map never showed as stacked. Change the rounding in one implementation and "this is
   one building" silently means a different set of doors on different screens. All three guard non-finite
   coordinates and return `null`; a `NaN`/`null` that rounds to `0` folds unrelated doors into a phantom
   building at the equator.
+- **"Select doors" hit-tests the array the page is DRAWING, never `queryRenderedFeatures`** — and the
+  selected id `Set` is always re-resolved against those rows before anything is counted, ringed or sent.
+  Both pages' existing keydown and hover-cursor handlers need their own guards for the mode (Esc gets its
+  own effect; the cursor handlers stand down on a `selectModeRef`). Full rules in §K.
 - **A door's *display* threshold is 2+, the *exclusion* threshold is the admin's.** The map groups at
   `BUILDING_MIN_UNITS = 2` because the job is "don't hide a door under another door." Turf Cutting's
   **Remove apartments (N+ units)** takes its own N (default 4) — the two are the same key at different
@@ -770,10 +831,17 @@ constants). A small legend labels the two rings when they're shown.
 
 | File | Renders |
 |---|---|
-| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters (incl. the in-page walk-list `<select>` on 2+-effort campaigns — see §D's deep-link row), the `/map/counts` query + header door count (`MapDoorCount`), Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)), and the opt-in **Overlaps** ring overlay (`/overlap-doors` query + `overlap-doors-ring` layer + the header "N overlaps" chip). |
+| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters (incl. the in-page walk-list `<select>` on 2+-effort campaigns — see §D's deep-link row), the `/map/counts` query + header door count (`MapDoorCount`), Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)), and the opt-in **Overlaps** ring overlay (`/overlap-doors` query + `overlap-doors-ring` layer + the header "N overlaps" chip). Also **"Select doors"** (§K): `selectMode` / `selectTool` / `spaceHeld` / `selection` state, the `selectedDoors` memo that resolves the id `Set` against `shownHouseholds`, the plan + off-walk-list pre-drop + `selectionNote` disclosures, the Esc and Space effects, the `door-selection` push, the two mutations and the top-center result toast. **Move pin** is no longer page-local: the panel's *Move pin →* calls `useMovePin().start(…)` and the page renders the shared `MovePinCard`; every once-bound layer click handler and the fullscreen-Esc effect bail on `armedRef.current` while a move is armed, and a save invalidates the cross-page set from `movePinInvalidationKeys` (not just this page's households query). |
+| [client/src/lib/movePin.js](../client/src/lib/movePin.js) | Move-pin, pure half (no React / api / mapbox imports): `movePinCopy({ scope, count, addressLine1 })` → the card's title/body/caveat/save label for `unit` vs `building`; `movePinErrorMessage(err)` (`out_of_bounds` → the server's "That spot is outside NE.", `invalid_coords`, archived-campaign 409, `FORBIDDEN_ROLE`, 404 → "no longer in the campaign", else the message); `movePinInvalidationKeys(campaignId)` — the cross-page contract: `['turf-doors', id]`, `['turfs', id]` (re-hulled boundaries), `['turf-household', id]`, `['admin','households-map', id]`, `['admin','packet-data', id]` (callers also run `invalidateFlagCaches` — the far-flag downgrade is computed live server-side); `movePinToast(scope, moved)` (*Pin moved.* / *Building pin moved · N units*). Tested in [movePin.test.js](../client/src/lib/movePin.test.js). |
+| [client/src/lib/useMovePin.js](../client/src/lib/useMovePin.js) | The hook both web maps share: `useMovePin({ mapRef, campaignId, onSaved })` → `{ armed, target, coords, copy, saving, error, armedRef, start, cancel, save }`. `start({ id, addressLine1, lng, lat, scope, count })` arms it (non-finite coords refused); the effect drops a draggable blue `mapboxgl.Marker` and removes it on cleanup; Esc cancels while armed; `save()` → `PATCH …/households/:id/location { lat, lng, scope }` → the `movePinInvalidationKeys` prefixes + `invalidateFlagCaches` → `onSaved(res, target, coords)` → reset. `armedRef` is the ref-indirection for once-bound map handlers — read `armedRef.current`, never `armed`, inside them. |
+| [client/src/components/MovePinCard.jsx](../client/src/components/MovePinCard.jsx) | The floating "Move pin" card (title, body with the address in `<strong>`, the amber caveat, inline `text-danger` error, Cancel / Save location). Presentational — the hook owns state; MapPage renders it where its inline card used to be, TurfsPage top-right over the cut map after the popups (which hide while armed). |
 | [client/src/components/HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) | Web admin map's tapped-door panel: header status/address, last action, **History by pass** (from the lazy `/activity` rounds), voters, surveys (answers lazy-loaded from `/surveys`), and the inline **⚠ Overlap** badge — computed no-new-fetch from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in one pass), with an "Also worked by …" line and a per-pass overlap pill in the history. Also the **Restricted access** section (`RestrictedSection`, right after the do-not-knock section): desk / field / unmarked states read from the same `activityQ` via [lib/restrictMark.js](../client/src/lib/restrictMark.js) (`pickRound(rounds, scopePassId \|\| currentPassId)`), Mark → `POST …/turfs/restrict-doors` (sends `passId` only in per-pass mode), Unmark → `unrestrict-doors` with the mark's own `passId`, the `PASS_REQUIRED` round picker (fed by `['admin','passes',campaignId]`, filtered to the door's `effortId`, non-archived), Intake / Not-in-books disabled hints, and *desk* tags on history rows + Last action (`lastAction.via`). Invalidates the households-map + counts prefixes, `['household-activity', id]`, `['campaign-rollup']` + the `['reports','campaign-rollup']` predicate, and the cross-page `['turf-doors']` / `['turf-progress']` / `['turfs']` prefixes, then `onChanged?.()` (MapPage passes `campaignId`). |
-| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`), the overlap-ring layer (`overlapDoorsToGeoJSON` → `overlap-doors-ring`), and the building layer (`drawBuildingIcon` / `buildingColorsForTheme` / `buildingsToGeoJSON` → `building-symbols`). |
-| [client/src/lib/buildings.js](../client/src/lib/buildings.js) | Web building grouping: `buildingKeyForCoords` (the shared ~1.1 m key — see §I), `groupHouseholds` → `{ buildings, stackedIds, byKey }`, `buildingLabel`. Consumed by MapPage, TurfsPage's `doorKey`, ClientReportMap and AnswerMiniMap. Tested in [buildings.test.js](../client/src/lib/buildings.test.js). |
+| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`), the overlap-ring layer (`overlapDoorsToGeoJSON` → `overlap-doors-ring`), and the building layer (`drawBuildingIcon` / `buildingColorsForTheme` / `buildingsToGeoJSON` → `building-symbols`); and the selection rings (`doorSelectionToGeoJSON` → `door-selection-halo` + `door-selection-ring`, colors `SELECTION_MARK_COLOR` / `SELECTION_SKIP_COLOR`). |
+| [client/src/lib/lassoSelect.js](../client/src/lib/lassoSelect.js) | "Select doors", pure half: `pointInRing` (even-odd ray cast, half-open boundary), `ringBBox` (one pass — never `Math.min(...xs)` on a densified ring), `doorsInRing` (bounds-prefiltered; default accessors read BOTH payload shapes — `d.location ? d.location.lng : d.lng` — so MapPage passes `/map` rows and TurfsPage `/doors` rows unchanged), `snapBuildings`, `applySelection` (`SELECTION_CAP = 1000`, over-cap ⇒ refused whole, original `Set` back by reference), `planDoorSelection` (the breakdown + the two payloads). **No dependencies** — the `@turf/*` packages under `client/node_modules` are transitive via `mapbox-gl-draw` and must never be imported. Tested in [lassoSelect.test.js](../client/src/lib/lassoSelect.test.js). |
+| [client/src/lib/useLassoDraw.js](../client/src/lib/useLassoDraw.js) | The drag half: pointer capture, the rubber band (its own `lasso-draw` source + fill/line layers, tinted from `SELECTION_MARK_COLOR` / `SELECTION_SKIP_COLOR`), `onRing(ring, { mode, tool })` in **lng/lat** (projecting 50k doors per lasso would cost more than the drag), a box densified to 64 vertices (four screen corners unproject to a curved quad under bearing/pitch), and `cancelDrag()` for the Esc ladder. Snapshots and restores `dragPan`/`boxZoom`/`doubleClickZoom` (never a blind `.enable()` — MapboxDraw disables `boxZoom` on the Turf page). 3 px threshold = mapbox's own `clickTolerance`, and it eats the one synthetic click a closed freehand loop would fire. |
+| [client/src/components/DoorSelectionBar.jsx](../client/src/components/DoorSelectionBar.jsx) | The bottom-center selection bar (`absolute`, inside the map section so fullscreen can't bury it): "N doors selected", the breakdown + ⓘ, the over-cap banner, Mark / Unmark / Clear, and the whole confirm ladder — inline ≤ 25, else `RestrictDoorsModal` (also exported) with the typed-`restrict` gate and the scope radio. **Always** confirms, and freezes the plan synchronously in the click handler. Presentational: the page owns the selection, the mutations and the result copy. |
+| [client/src/components/MapSelectModeControl.jsx](../client/src/components/MapSelectModeControl.jsx) | The "Select doors" pill and the mode panel it expands into (Done, the `Pan \| Lasso` segmented toggle, the gesture lines). Same chrome as the fullscreen / style buttons so it drops into either page's top-left cluster. |
+| [client/src/lib/buildings.js](../client/src/lib/buildings.js) | Web building grouping: `buildingKeyForCoords` (the shared ~1.1 m key — see §I), `groupHouseholds` → `{ buildings, stackedIds, byKey }`, `buildingLabel`. Consumed by MapPage, TurfsPage's `doorKey`, ClientReportMap, AnswerMiniMap, `lassoSelect.js` (`snapBuildings`) and `cutMapDoors.js` (`drawnCutDoors`). Tested in [buildings.test.js](../client/src/lib/buildings.test.js). |
 | [client/src/lib/excludedDoors.js](../client/src/lib/excludedDoors.js) | The Show/Dim/Hide predicate for doors held back from books: `isExcludedDoor`, `visibleMapDoors(households, mode)` (Hide must run BEFORE grouping — §I), `countExcludedDoors` (counts the payload, not the campaign). Tested in [excludedDoors.test.js](../client/src/lib/excludedDoors.test.js). |
 | [client/src/lib/mapCounts.js](../client/src/lib/mapCounts.js) | The header count's words + decisions, pure: `describeMatch` (what "match" means under the filters), `inViewClip` (when and why "N in view" is smaller), `headerCounts` (the line's branches), `explainCounts` (the ⓘ rows), `pluralize` / `fmtCount`. Tested in [mapCounts.test.js](../client/src/lib/mapCounts.test.js); mirrored in [mobile/lib/mapCounts.js](../mobile/lib/mapCounts.js). |
 | [client/src/components/MapDoorCount.jsx](../client/src/components/MapDoorCount.jsx) | The header's door count: `N doors match · of U in campaign`, the `N in view` pill, the ⓘ popover (`InfoHint`, `w-80`), the empty hint, a `Retry totals` link, the `⚠ Map capped` pill. Presentational — MapPage owns both queries. |
@@ -786,3 +854,91 @@ constants). A small legend labels the two rings when they're shown.
 | [mobile/app/(app)/books.jsx](../mobile/app/(app)/books.jsx) | Books overview map (centroid markers). |
 | [mobile/lib/buildings.js](../mobile/lib/buildings.js) · [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) · [mobile/lib/location.js](../mobile/lib/location.js) | Buildings grouping · base-style switcher · per-action location capture. |
 | [mobile/lib/mapCounts.js](../mobile/lib/mapCounts.js) | Hand-mirrored subset of the web `mapCounts.js` (`fmtCount`, `inViewClip`, `describeMatch`, `explainCounts`, `MAP_HOUSEHOLD_CAP`) for the admin map's count chip — keep the sentences in step. |
+
+## K. "Select doors" (lasso desk-restrict) — 2026-08-22
+
+Both **web** maps can select a set of doors and desk-restrict them in one action: MapPage (this doc) and
+TurfsPage ([PASSES_AND_TURF.md](PASSES_AND_TURF.md) §H). Not mobile. The server side is one additive
+param — `POST …/turfs/restrict-doors` now takes `scope: 'incomplete' | 'unknocked'` — documented in
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md) §C. No client-version bump: every other client sends no `scope`
+and gets exactly the old behavior.
+
+**THE RULE — hit-test the DRAWN ARRAY, never `queryRenderedFeatures`.** The rendered query can't see a
+door just off-screen, can't tell a markable door from a completed one, and on the cut map can't see the
+visibility that lives in Mapbox layer state. So each page hands `doorsInRing` its own drawn array —
+`shownHouseholds` on MapPage (the very array the household source is fed from), `drawnCutDoors(...)` on
+TurfsPage — and the hit test runs in **lng/lat**, the one space the ring (unprojected by `useLassoDraw`)
+and the doors already share. The `stacked` filter needs no special handling: a stacked door is drawn as a
+**building glyph** at the same coordinate, so it is still on screen and still hit-tested at its own point.
+
+- **Buildings snap by key.** Units in one building share a **rounded** key (§I) but the glyph is drawn at
+  the **first unit's real coordinate**, so a lasso edge can take 3 of 5 units while ringing a glyph that
+  stands for all 5. `snapBuildings` therefore expands a hit to every door at that key. A building-glyph
+  click passes all of its units for the same reason.
+- **The selection is a `Set` of ids, but it is always re-resolved against the drawn rows** before anything
+  is counted, ringed or sent. A door a refetch dropped, a filter hid or a chip filtered out simply stops
+  resolving — that is what keeps an orphan ring from floating over nothing and a hidden door out of the
+  payload. (TurfsPage additionally prunes the raw `Set` back to the resolved rows, so the 1,000 cap isn't
+  eaten by ids that are no longer drawn — skipped while nothing is drawn at all, since the selection is
+  meant to survive a Houses toggle.)
+- **Rings are a transparent `circle-color` over a white halo layer** (`door-selection-halo` +
+  `door-selection-ring`, registered with the rest so a basemap swap brings them back), blue
+  `SELECTION_MARK_COLOR` where the action would mark and slate `SELECTION_SKIP_COLOR` where it would skip —
+  fed from the drawn rows and the plan's `markIds`, never from the raw id set.
+- **One request, cap 1,000, never chunked; over-cap is refused WHOLE.** Neither map payload is sorted
+  (`/map` limits without sorting), so "the first 1,000" is an arbitrary, unrepeatable subset.
+
+**The two payloads are different on purpose.** `markIds` drops **Intake** (`effortId === null` — one such
+door 400s the whole batch with `PASS_REQUIRED` and writes nothing), **`excludedFromTurf`** and
+**`doNotKnock`** (both rejected by `KNOCKABLE_DOOR_FILTER`, so they'd land in `skipped.ineligible`), but
+deliberately still carries **completed** and **already-restricted** doors: the server's per-round
+classification is exact where the client's can be stale, and `scope:'unknocked'` needs the reached doors
+present to count `skipped.reached`. `unmarkIds` drops **only** Intake, and only when no `passId` is sent —
+`unrestrict-doors` applies no knockable filter, no effort guard and no pass-existence check, so a door
+desk-marked in March and excluded from books in April must still be unmarkable today.
+
+**The honesty rule (MapPage only).** `/admin/households/map` resolves a row's `status` per round **only in
+its `'pass'` mode**, and a canvasser filter wins the mode selection (`statusMode: userId ? 'user' : passId
+? 'pass' : 'global'`) — in `'user'` mode a row's status is that one canvasser's answer, and in `'global'`
+it is the sticky campaign-wide status. Either would be a confident lie printed as "completed this round".
+So MapPage computes `forRound = !!scopePassId && !canvasserId` and `planDoorSelection` returns the
+per-round buckets as **`null`** unless it holds; the bar prints the total plus only what the payload
+answers exactly (the campaign-wide gates — Intake, excluded, do-not-knock — are facts either way), and the
+**response tally owns the rest**. Consequences MapPage discloses in the bar rather than leaving implicit:
+
+| Situation | What the bar says |
+|---|---|
+| No round in scope | Each door is marked in **its own walk list's current round**; the note names how many walk lists the selection spans. |
+| No round in scope, or a canvasser filter over one | Reached doors **are** marked (the server's `'incomplete'` default — there is no honest `reached` count to offer a choice over), plus how to get the choice: open the map from one round, or clear the canvasser filter. |
+| A round in scope, doors from another walk list selected | They are **pre-dropped** and counted in "can't be marked" — that round covers one effort, and sending them blind would fold them into `skipped.ineligible` under a cheerful 200. |
+| No round in scope, Unmark | It removes desk marks in each walk list's **current** round only; a mark from an earlier round stays, and the result reports the shortfall (`sent − households`). |
+| `truncated` on the `/map` payload | *"Some doors in this area are not loaded — zoom in before selecting"* — the payload is viewport-bounded **and** 50k-capped, so a lasso down there catches part of the street. |
+
+**Selection lifecycle.** Cleared on: leaving the mode, **Clear**, the ✕, and any change to the **loaded
+set** — campaign, date window, status / canvasser / answer filters, effort / pass / import / saved-search
+scope on MapPage; pass or campaign switch and a completed cut job on TurfsPage. Deliberately **not**
+cleared by a bbox pan or the 20 s Live poll: both replace the array with the same door set, and losing a
+900-door selection to a refetch would make the mode unusable.
+
+**Interaction plumbing worth knowing before editing either page.**
+
+- **Esc needs its OWN effect** while select mode is on. Both pages' existing keydown effects early-return
+  unless the map is fullscreen, so extending one would leave Esc dead in the normal case. Ladder: cancel a
+  live drag (use `cancelDrag()`'s return value, never the `drawing` state) → on MapPage, an open basemap
+  menu → leave the mode. `useLassoDraw` swallows Esc mid-drag in the capture phase, and
+  `RestrictDoorsModal` does the same for an open confirm, so each of those wins over the page listener.
+- **The existing hover-cursor handlers must be guarded on a `selectModeRef`**, or the crosshair strobes as
+  the pointer crosses dots mid-drag. Both pages bind their layer handlers **once**, so live mode and
+  selection ride refs assigned during render; MapPage's click toggle also catches its ref up
+  **synchronously**, because one click can land on two layers and the second delegate would otherwise
+  toggle against the pre-click `Set`.
+- **A completed freehand loop that ends where it started still fires mapbox's synthetic click** (its
+  `clickTolerance` measures mousedown→click **point**, not path length), which would toggle the door under
+  the release point straight back out. `useLassoDraw` eats exactly that one click in the capture phase, and
+  both pages additionally ignore a toggle within 400 ms of a ring landing.
+- **The confirm freezes its plan synchronously in the click handler.** MapPage polls every 20 s; a number
+  must never move under a typed `restrict` gate.
+- **No new dependency, and no privacy change.** The point-in-polygon is hand-rolled (see §J). Nothing new
+  is collected, shared or exposed: the same route, the same row, the same `AccessLog` subject tagging that
+  a single-home mark already did — and `AccessLog` writes a row only under a **vendor support grant**, with
+  subjects already capped at 20,000, so a 1,000-door lasso by a campaign's own admin logs nothing extra.

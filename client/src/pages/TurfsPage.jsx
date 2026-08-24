@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from '../lib/mapboxInit.js';
@@ -8,6 +8,8 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
+import DoorSelectionBar from '../components/DoorSelectionBar.jsx';
+import MapSelectModeControl from '../components/MapSelectModeControl.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
 import StatCard from '../components/StatCard.jsx';
@@ -16,13 +18,18 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
-import { passBookIds, visibleCutDoors, countLooseDoors } from '../lib/cutMapDoors.js';
+import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors } from '../lib/cutMapDoors.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
 import { buildingKeyForCoords } from '../lib/buildings.js';
+import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
+import { useLassoDraw } from '../lib/useLassoDraw.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { useJobPoll } from '../lib/useJobPoll.js';
+import { useMovePin } from '../lib/useMovePin.js';
+import { movePinToast } from '../lib/movePin.js';
+import MovePinCard from '../components/MovePinCard.jsx';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
 import { pickRound, roundMarkFromEntries } from '../lib/restrictMark.js';
@@ -346,6 +353,35 @@ function registerBookLayers(map, dark) {
       'circle-stroke-width': 1.2,
       'circle-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
       'circle-stroke-opacity': ['case', ['boolean', ['get', 'dim'], false], 0.12, 1],
+    },
+  });
+  // "Select doors" rings. A TRANSPARENT circle with a white halo layer beneath it — the same
+  // treatment every other ring in this app uses (lib/mapRender.js) — so a ringed door keeps its
+  // own status/book color instead of being repainted by the selection. Blue = this action will
+  // mark it, slate = it will be skipped. Registered here with the rest so a basemap swap, which
+  // wipes every custom layer, brings the rings back too.
+  map.addSource('door-selection', { type: 'geojson', data: empty });
+  map.addLayer({
+    id: 'door-selection-halo',
+    type: 'circle',
+    source: 'door-selection',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6.5, 15, 10.5],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 4,
+      'circle-stroke-opacity': 0.9,
+    },
+  });
+  map.addLayer({
+    id: 'door-selection-ring',
+    type: 'circle',
+    source: 'door-selection',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6.5, 15, 10.5],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': ['case', ['boolean', ['get', 'mark'], false], '#2563eb', '#64748b'],
+      'circle-stroke-width': 2,
     },
   });
   // Lift the labels above the door dots so the dots don't overprint the text.
@@ -893,10 +929,21 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
   );
 }
 
-function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError }) {
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled }) {
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
+  // Pin provenance, same badges the Map page panel shows (coordSource / coordConfidence ride on
+  // the /turfs/household payload). Only a corrected or interpolated pin gets a badge.
+  const pinBadge = hh?.coordSource === 'corrected' ? (
+    <div className="inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
+      Pin corrected{hh.correctedAt ? ` · ${formatInTz(hh.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
+    </div>
+  ) : hh?.coordConfidence === 'interpolated' ? (
+    <div className="inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
+      Approximate location
+    </div>
+  ) : null;
   return (
     <div className="absolute right-3 top-3 z-10 w-64 rounded-lg border border-border bg-card p-3 shadow-lg">
       <div className="flex items-start justify-between gap-2">
@@ -949,6 +996,26 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
           error={restrictError}
         />
       )}
+      {/* Pin provenance + Move pin. The button is offered whenever the caller passes onMovePin
+          (the door is on the page and the campaign is not archived); a running cut disables it. */}
+      {hh && (pinBadge || onMovePin) && (
+        <div className="mt-2 border-t border-border pt-2">
+          {pinBadge}
+          {onMovePin && (
+            <div className={pinBadge ? 'mt-1.5' : ''}>
+              <button
+                type="button"
+                disabled={moveDisabled}
+                title={moveDisabled ? 'Wait for the cut to finish' : undefined}
+                onClick={onMovePin}
+                className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+              >
+                Move pin →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {hh && showRound && <RoundActivity householdId={householdId} passId={passId} status={status} tz={tz} />}
       {hh && (
         <div className="mt-2 border-t border-border pt-2">
@@ -973,7 +1040,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   );
 }
 
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError }) {
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled }) {
   // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
   // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
   // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
@@ -1069,6 +1136,23 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
       </div>
 
+      {/* Move pin for the whole stack (server scope 'building' — every unit at this coordinate
+          moves together). Offered whenever the caller passes onMovePin; a running cut disables it. */}
+      {onMovePin && (
+        <div className="mt-2 border-t border-border pt-2">
+          <button
+            type="button"
+            disabled={moveDisabled}
+            title={moveDisabled ? 'Wait for the cut to finish' : undefined}
+            onClick={onMovePin}
+            className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            Move building pin →
+          </button>
+          <p className="mt-1 text-[11px] text-fg-muted">Moves all {total} unit{total === 1 ? '' : 's'} together.</p>
+        </div>
+      )}
+
       <div className="mt-2 border-t border-border pt-2">
         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Units</div>
         <ul className="max-h-56 space-y-1 overflow-auto">
@@ -1162,7 +1246,7 @@ export default function TurfsPage() {
   const [showDiscard, setShowDiscard] = useState(false);
   const [discardScope, setDiscardScope] = useState('all'); // 'all' | 'drafts' (drafts offered only when both exist)
   const [showRestrict, setShowRestrict] = useState(null); // 'mark' | 'unmark' | null
-  const [restrictResult, setRestrictResult] = useState(null);
+  const [mapToast, setMapToast] = useState(null);
   const [clearKnocks, setClearKnocks] = useState(false);
   const [lastSnapshotId, setLastSnapshotId] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
@@ -1181,11 +1265,26 @@ export default function TurfsPage() {
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(new Set()); // empty = show all books
   const [crewOpen, setCrewOpen] = useState(false);
+  // "Select doors": lasso (or click) a set of doors on the map and desk-restrict them in one
+  // action. The selection is a Set of household ids, but what it MEANS is always re-resolved
+  // against the doors the map is drawing right now — see drawnDoors / selectedRows below.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectTool, setSelectTool] = useState('lasso'); // 'lasso' | 'pan'
+  const [spaceHeld, setSpaceHeld] = useState(false); // Space pans without leaving the mode
+  const [selectedDoorIds, setSelectedDoorIds] = useState(() => new Set());
+  const [overCap, setOverCap] = useState(null); // { wouldBe } from the last REFUSED lasso
 
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const drawRef = useRef(null);
   const editModeRef = useRef(false);
+  const selectModeRef = useRef(false); // read inside the once-bound map handlers
+  // When the last lasso landed. Mapbox suppresses its synthetic click only when the release
+  // point is 3px or more from the mouseDOWN (MapEventHandler.click in the dist) — so a freehand
+  // loop that comes back to where it started DOES fire one, and the door (or whole building)
+  // under the release point would be toggled straight back out of the shape that just took it.
+  // pointerup runs before mouseup runs before click, so this stamp is always the fresher one.
+  const ringAppliedAtRef = useRef(0);
   const moveDoorRef = useRef(() => {});
   const toggleSelectRef = useRef(() => {});
   const fittedSigRef = useRef(null);
@@ -1194,6 +1293,18 @@ export default function TurfsPage() {
   const buildingMarkersRef = useRef(new Map()); // key -> { marker, sig } (viewport-culled diff-sync)
   const syncRef = useRef(() => {}); // freshest sync closure, for the once-registered moveend handler
   const [culledBuildings, setCulledBuildings] = useState(0); // >0 → too many in view for DOM markers
+
+  // Move pin — the same hook the Map page arms (blue draggable marker + PATCH …/location;
+  // the hook drops every cache the move touches, incl. the re-hulled book outlines). Declared
+  // BEFORE the hook call so the callback exists when useMovePin captures it; it reads only
+  // state setters, so nothing below is in its TDZ.
+  const onPinMoved = (res, target, coords) => {
+    setMapToast(movePinToast(target.scope, res?.moved));
+    // A building pop-up is keyed by the rounded coordinate, so it has to follow the stack to
+    // its new spot (the house pop-up is keyed by household id and needs nothing).
+    if (target.scope === 'building' && coords) setPopupBuildingKey(buildingKeyForCoords(coords.lng, coords.lat));
+  };
+  const movePin = useMovePin({ mapRef, campaignId, onSaved: onPinMoved });
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
   // slim=1: the response drops each book's householdIds — this page never reads
@@ -1520,6 +1631,159 @@ export default function TurfsPage() {
   const shownBooksCount = turfs.filter(bookShown).length;
   const listFiltered = !!bookQuery || statusFilter.size > 0;
 
+  // ── "Select doors" ───────────────────────────────────────────────────────────────────────
+  // The pool a lasso may catch is WHAT IS DRAWN — never queryRenderedFeatures, which can't see
+  // a door just off-screen and can't tell a markable door from a completed one. Three of this
+  // page's visibility mechanisms decide that, and two of them (the book-status chips' setFilter
+  // and the Houses layer's visibility) live in Mapbox layer state where no memo can see them,
+  // so the rule lives in lib/cutMapDoors.js where cutMapDoors.test.js holds it.
+  const drawnDoors = useMemo(
+    () =>
+      drawnCutDoors({
+        doors: doorsQ.data?.doors,
+        bookIds: passTurfIds,
+        showLoose: layerVis.notInBook,
+        visibleBookIds,
+        housesVisible: layerVis.houses,
+      }),
+    [doorsQ.data, passTurfIds, layerVis.notInBook, layerVis.houses, visibleBookIds]
+  );
+  // The selection RESOLVED against what is drawn. A door a refetch dropped from the cut, or one
+  // a chip just hid, stops resolving — so it is neither counted in the bar nor sent to the
+  // server, and it can't leave an orphan ring floating over nothing.
+  const selectedRows = useMemo(() => {
+    if (!selectedDoorIds.size) return [];
+    const out = [];
+    for (const d of drawnDoors) if (selectedDoorIds.has(String(d.id))) out.push(d);
+    return out;
+  }, [drawnDoors, selectedDoorIds]);
+  // …and the raw Set is pruned back to that, so both tell one story. The counts and the two
+  // payloads already read `selectedRows`, but the 1,000 cap is measured against the SET — an id
+  // a chip has since hidden would otherwise eat cap room and inflate the over-cap warning
+  // ("that shape holds 1,050 doors" over a 150-door lasso). Skipped while nothing is drawn at
+  // all — Houses off, or a refetch between door sets — since the selection is meant to survive
+  // a layer toggle and pruning there would empty it the moment the layer went off.
+  useEffect(() => {
+    // `>=`, never `===`: fewer rows than ids is the only case worth pruning, and a duplicate id
+    // in the door payload would make an equality test re-set the Set on every render.
+    if (!drawnDoors.length || selectedRows.length >= selectedDoorIds.size) return;
+    setSelectedDoorIds(new Set(selectedRows.map((d) => String(d.id))));
+  }, [drawnDoors, selectedRows, selectedDoorIds]);
+  // forRound: this page is ALWAYS scoped to one pass, so each row's `passStatus` answers the
+  // very round the server will write to and every per-round bucket the bar prints is exact.
+  // /doors rows carry no effortId (every door here IS the round's effort, so `undefined` must
+  // not read as Intake) and are already KNOCKABLE_DOOR_FILTER'd server-side, which is why
+  // nothing on this page ever lands in the plan's "can't be marked" bucket.
+  const selectionPlan = useMemo(
+    () =>
+      planDoorSelection(
+        selectedRows.map((d) => ({ ...d, status: d.passStatus || 'unknocked' })),
+        { forRound: true }
+      ),
+    [selectedRows]
+  );
+  const markIdSet = useMemo(() => new Set(selectionPlan.markIds), [selectionPlan]);
+  // Unmark shows only when the selection holds a door that could carry a desk mark — the same
+  // gate BookAssignmentPanel puts on the whole-book Unmark. (A field-recorded Restricted also
+  // reads 'restricted'; the server removes desk rows only and the result says how many.)
+  const canUnmarkSelection = useMemo(() => selectedRows.some((d) => d.passStatus === 'restricted'), [selectedRows]);
+  // A live target-filter preview DIMS the doors it doesn't match (0.12 opacity) instead of
+  // hiding them, so they stay drawn and a lasso legitimately catches them. Say so rather than
+  // quietly counting doors the admin can barely see.
+  const dimmedSelected = useMemo(
+    () => (targetedSet ? selectedRows.filter((d) => !targetedSet.has(String(d.id))).length : 0),
+    [selectedRows, targetedSet]
+  );
+  const selectionScopeNote = dimmedSelected
+    ? `Includes ${dimmedSelected.toLocaleString()} door${dimmedSelected === 1 ? '' : 's'} the target filter you're previewing doesn't match — the preview fades them on the map, it doesn't limit what you can pick.`
+    : null;
+  // Ring geometry, fed from the DRAWN rows: blue "will be marked", slate "will be skipped".
+  const selectionFC = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: selectedRows.map((d) => ({
+        type: 'Feature',
+        properties: { id: String(d.id), mark: markIdSet.has(String(d.id)) },
+        geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
+      })),
+    }),
+    [selectedRows, markIdSet]
+  );
+
+  const clearDoorSelection = useCallback(() => {
+    setSelectedDoorIds((s) => (s.size ? new Set() : s));
+    setOverCap(null);
+  }, []);
+  // Where every lasso and every click-toggle lands. applySelection hands back the ORIGINAL Set
+  // when nothing changed (or when an over-cap lasso was refused whole), so this bails out of a
+  // re-render — and of re-serializing every ring — for free.
+  const applySelectionResult = useCallback(
+    (result) => {
+      setOverCap(result.overCap ? { wouldBe: result.wouldBe } : null);
+      if (result.ids !== selectedDoorIds) setSelectedDoorIds(result.ids);
+    },
+    [selectedDoorIds]
+  );
+  // A finished drag. snapBuildings first: units in one building share a ROUNDED key but the
+  // glyph sits at the first unit's real coordinate, so a lasso edge can slice a stack — if any
+  // unit at a key is hit, the admin meant the building.
+  const handleRing = useCallback(
+    (ring, { mode }) => {
+      ringAppliedAtRef.current = Date.now();
+      const hits = snapBuildings(doorsInRing({ doors: drawnDoors, ring }), drawnDoors);
+      applySelectionResult(applySelection(selectedDoorIds, hits, mode));
+    },
+    [drawnDoors, selectedDoorIds, applySelectionResult]
+  );
+  // mapReady is flipped inside the very `load` handler that fills mapRef, so on any render
+  // where it is true the ref already holds the map.
+  const lassoMap = mapReady ? mapRef.current : null;
+  const { cancelDrag } = useLassoDraw({
+    map: lassoMap,
+    enabled: selectMode,
+    tool: selectTool,
+    spaceHeld,
+    onRing: handleRing,
+  });
+
+  // Click-to-toggle rides the page's EXISTING click precedence (building pin → door dot → book
+  // fill) through the same openPopup/openBuildingPopup refs, so select mode changes what a
+  // click DOES without changing which thing a click lands on.
+  const toggleDoorSelection = (id) => {
+    if (Date.now() - ringAppliedAtRef.current < 400) return; // the tail of a closed lasso, not a click
+    const key = String(id);
+    const row = drawnDoors.find((d) => String(d.id) === key);
+    if (!row) return;
+    applySelectionResult(applySelection(selectedDoorIds, [row], selectedDoorIds.has(key) ? 'subtract' : 'add'));
+  };
+  const toggleBuildingSelection = (buildingKey) => {
+    if (Date.now() - ringAppliedAtRef.current < 400) return; // ditto — a 40-unit stack, in one click
+    const seed = drawnDoors.find((d) => buildingKeyForCoords(d.lng, d.lat) === buildingKey);
+    if (!seed) return;
+    // Every unit on that pin, never the one door the glyph happens to sit on — the rule
+    // BuildingPopup already uses for its own building-wide mark.
+    const units = snapBuildings([seed], drawnDoors);
+    const anySelected = units.some((u) => selectedDoorIds.has(String(u.id)));
+    applySelectionResult(applySelection(selectedDoorIds, units, anySelected ? 'subtract' : 'add'));
+  };
+
+  const enterSelectMode = () => {
+    // Popups and the assignment panel stay out of the way; a half-drawn manual area would
+    // otherwise keep MapboxDraw fighting the lasso for the same drag.
+    setPopupHouseholdId(null);
+    setPopupBuildingKey(null);
+    setMapToast(null);
+    restrictSelection.reset();
+    unrestrictSelection.reset();
+    if (drawRef.current) drawRef.current.changeMode('simple_select', { featureIds: [] });
+    setSelectMode(true);
+  };
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSpaceHeld(false);
+    clearDoorSelection();
+  }, [clearDoorSelection]);
+
   // Single household detail for the click-a-dot popup.
   const householdQ = useQuery({
     queryKey: ['turf-household', campaignId, popupHouseholdId],
@@ -1532,6 +1796,9 @@ export default function TurfsPage() {
     if (job.status === 'completed') {
       qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
       qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
+      // A completed cut re-books every door, so the ids under a door selection no longer mean
+      // what they meant when they were picked.
+      clearDoorSelection();
     }
   }, [job.status]);
 
@@ -1613,7 +1880,7 @@ export default function TurfsPage() {
       // Doors the crew reached, left untouched under the "only unknocked" scope.
       if (skips.reached) parts.push(`${skips.reached} reached left as-is`);
       const skipNote = parts.length ? ` · ${parts.join(', ')}` : '';
-      setRestrictResult(`Marked ${res.marked} door${res.marked === 1 ? '' : 's'} restricted${skipNote}.`);
+      setMapToast(`Marked ${res.marked} door${res.marked === 1 ? '' : 's'} restricted${skipNote}.`);
       invalidateRestrictMarks();
     },
   });
@@ -1622,7 +1889,7 @@ export default function TurfsPage() {
       api(`/admin/campaigns/${campaignId}/turfs/unrestrict-bulk`, { method: 'POST', body: { turfIds } }),
     onSuccess: (res) => {
       setShowRestrict(null);
-      setRestrictResult(`Removed ${res.unmarked} desk restricted mark${res.unmarked === 1 ? '' : 's'}.`);
+      setMapToast(`Removed ${res.unmarked} desk restricted mark${res.unmarked === 1 ? '' : 's'}.`);
       invalidateRestrictMarks();
     },
   });
@@ -1662,17 +1929,17 @@ export default function TurfsPage() {
       const n = householdIds.length;
       const skips = res.skipped || {};
       if (n === 1) {
-        if (res.marked >= 1) setRestrictResult('Marked restricted.');
-        else if (skips.alreadyRestricted) setRestrictResult('Already restricted this round.');
-        else if (skips.completed) setRestrictResult('Not marked — surveyed this round keeps its result.');
-        else setRestrictResult('Not marked — this door is no longer in the cut.');
+        if (res.marked >= 1) setMapToast('Marked restricted.');
+        else if (skips.alreadyRestricted) setMapToast('Already restricted this round.');
+        else if (skips.completed) setMapToast('Not marked — surveyed this round keeps its result.');
+        else setMapToast('Not marked — this door is no longer in the cut.');
       } else {
         const parts = [];
         if (skips.completed) parts.push(`${skips.completed} completed`);
         if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted} already restricted`);
         if (skips.ineligible) parts.push(`${skips.ineligible} no longer in the cut`);
         const skipNote = parts.length ? ` · ${parts.join(', ')}` : '';
-        setRestrictResult(`Marked ${res.marked} of ${n} unit${n === 1 ? '' : 's'} restricted${skipNote}`);
+        setMapToast(`Marked ${res.marked} of ${n} unit${n === 1 ? '' : 's'} restricted${skipNote}`);
       }
       invalidateRestrictMarks(householdIds);
     },
@@ -1682,9 +1949,52 @@ export default function TurfsPage() {
       api(`/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, { method: 'POST', body: { householdIds, passId } }),
     onSuccess: (res, { householdIds }) => {
       const n = res.unmarked || 0;
-      if (n === 0) setRestrictResult('No desk mark to remove — field-recorded marks stay.');
-      else if (n === 1) setRestrictResult('Removed the desk mark.');
-      else setRestrictResult(`Removed ${n} desk marks.`);
+      if (n === 0) setMapToast('No desk mark to remove — field-recorded marks stay.');
+      else if (n === 1) setMapToast('Removed the desk mark.');
+      else setMapToast(`Removed ${n} desk marks.`);
+      invalidateRestrictMarks(householdIds);
+    },
+  });
+  // The "Select doors" mark/unmark. Separate mutations from the popup pair above so the bar's
+  // busy/error state and its tally copy never bleed into a popup (and vice versa).
+  //
+  // ONE request, never chunked: the server takes 1–1000 ids (parseHouseholdIds) and pays
+  // recomputeCampaignStats' whole-ledger recompute once, so a second request would pay it twice.
+  // `scope` is the additive param the whole-book flow already speaks — 'unknocked' leaves the
+  // doors the crew reached byte-for-byte alone, 'incomplete' marks them too.
+  //
+  // The tally is printed against what was SENT, not against the whole selection: marked plus
+  // every skipped bucket sums to exactly that, so the sentence reconciles.
+  const restrictSelection = useMutation({
+    mutationFn: ({ householdIds, scope }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-doors`, { method: 'POST', body: { householdIds, passId, scope } }),
+    onSuccess: (res, { householdIds }) => {
+      const n = householdIds.length;
+      const skips = res.skipped || {};
+      const parts = [];
+      if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted.toLocaleString()} already restricted`);
+      if (skips.completed) parts.push(`${skips.completed.toLocaleString()} completed this round`);
+      if (skips.reached) parts.push(`${skips.reached.toLocaleString()} reached left as-is`);
+      if (skips.ineligible) parts.push(`${skips.ineligible.toLocaleString()} no longer in the cut`);
+      const skipNote = parts.length ? ` · ${parts.join(' · ')}` : '';
+      setMapToast(
+        `Marked ${(res.marked || 0).toLocaleString()} of ${n.toLocaleString()} door${n === 1 ? '' : 's'} restricted${skipNote}`
+      );
+      // The selection is KEPT and re-classifies as the invalidated doors land, so the rings
+      // flip from blue to slate in front of you — that is the confirmation.
+      invalidateRestrictMarks(householdIds);
+    },
+  });
+  const unrestrictSelection = useMutation({
+    mutationFn: ({ householdIds }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, { method: 'POST', body: { householdIds, passId } }),
+    onSuccess: (res, { householdIds }) => {
+      const n = res.unmarked || 0;
+      setMapToast(
+        n === 0
+          ? 'No desk marks to remove — marks canvassers recorded at the door stay.'
+          : `Removed ${n.toLocaleString()} desk restricted mark${n === 1 ? '' : 's'} on ${householdIds.length.toLocaleString()} selected door${householdIds.length === 1 ? '' : 's'}.`
+      );
       invalidateRestrictMarks(householdIds);
     },
   });
@@ -1720,13 +2030,32 @@ export default function TurfsPage() {
 
   // keep refs current for the once-registered map handlers
   editModeRef.current = editMode;
+  selectModeRef.current = selectMode;
   moveDoorRef.current = (householdId, toTurfId) => moveDoor.mutate({ householdId, toTurfId });
-  toggleSelectRef.current = toggleBook;
+  // A book fill click selects a book — but not in select mode, where the map belongs to doors.
+  toggleSelectRef.current = (id) => { if (selectMode) return; toggleBook(id); };
   // Opening a popup drops the previous door's desk-mark outcome (inline error + toast), so a
   // stale "Already restricted" can't be read against the door now on screen.
-  const resetRestrictDoors = () => { restrictDoors.reset(); unrestrictDoors.reset(); setRestrictResult(null); };
-  openPopupRef.current = (id) => { setPopupBuildingKey(null); setPopupHouseholdId(id); resetRestrictDoors(); };
-  openBuildingPopupRef.current = (key) => { setPopupHouseholdId(null); setPopupBuildingKey(key); resetRestrictDoors(); };
+  const resetRestrictDoors = () => { restrictDoors.reset(); unrestrictDoors.reset(); setMapToast(null); };
+  // Arm Move pin from a pop-up. A half-drawn manual area would fight the marker for the drag,
+  // and the door's desk-mark outcome has nothing to say about where its pin lands.
+  const beginMovePin = (target) => {
+    if (drawRef.current) drawRef.current.changeMode('simple_select', { featureIds: [] });
+    // Select mode's lasso would fight the marker for the same drag — leave it first.
+    if (selectMode) exitSelectMode();
+    resetRestrictDoors();
+    movePin.start(target);
+  };
+  openPopupRef.current = (id) => {
+    // In select mode a dot click TOGGLES that door instead of opening its panel.
+    if (selectMode) { toggleDoorSelection(id); return; }
+    setPopupBuildingKey(null); setPopupHouseholdId(id); resetRestrictDoors();
+  };
+  openBuildingPopupRef.current = (key) => {
+    // …and a building glyph toggles every unit on that pin.
+    if (selectMode) { toggleBuildingSelection(key); return; }
+    setPopupHouseholdId(null); setPopupBuildingKey(key); resetRestrictDoors();
+  };
 
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return;
@@ -1758,6 +2087,9 @@ export default function TurfsPage() {
     // a book click. Building HTML markers handle their own click (stopPropagation).
     const DOT_TOL = 6;
     map.on('click', (e) => {
+      // While Move pin is armed the map belongs to the blue marker: no pop-up, no book select.
+      // Read through the ref — this handler is bound once, `movePin.armed` would be stale.
+      if (movePin.armedRef.current) return;
       // Buildings first: when the DOM markers are viewport-culled, the circle
       // layer is the only clickable representation of a stacked building.
       const bHits = map.queryRenderedFeatures(
@@ -1785,10 +2117,13 @@ export default function TurfsPage() {
       // Clicking empty map does NOT clear the selection — only the ✕ in the assignment
       // panel deselects. Accidental blank-map clicks used to wipe a built-up selection.
     });
-    map.on('mouseenter', 'book-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'book-fill', () => { map.getCanvas().style.cursor = ''; });
-    map.on('mouseenter', 'doors', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'doors', () => { map.getCanvas().style.cursor = ''; });
+    // Hover cursors, guarded on select mode: there the whole canvas is a crosshair (or the grab
+    // hand while Space is held) and a pointer flashing on every dot crossed would strobe.
+    const hoverCursor = (v) => { if (!selectModeRef.current) map.getCanvas().style.cursor = v; };
+    map.on('mouseenter', 'book-fill', () => hoverCursor('pointer'));
+    map.on('mouseleave', 'book-fill', () => hoverCursor(''));
+    map.on('mouseenter', 'doors', () => hoverCursor('pointer'));
+    map.on('mouseleave', 'doors', () => hoverCursor(''));
 
     map.on('load', () => {
       registerBookLayers(map, darkBase);
@@ -1814,13 +2149,94 @@ export default function TurfsPage() {
     try { localStorage.setItem('turfPanelCollapsed', panelCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [panelCollapsed]);
 
-  // Esc leaves fullscreen (listener removed on exit, per the effect-cleanup rule).
+  // Esc leaves fullscreen (listener removed on exit, per the effect-cleanup rule). It stands
+  // down while select mode is on so Esc runs one rung at a time: cancel the drag, leave select
+  // mode, then leave fullscreen. Same ladder for Move pin: while armed, Esc cancels the move
+  // (useMovePin's own listener) and must NOT also drop fullscreen — read through the ref, since
+  // this listener is bound per [mapFullscreen, selectMode] and `movePin.armed` would be stale.
   useEffect(() => {
-    if (!mapFullscreen) return;
-    const onKey = (e) => { if (e.key === 'Escape') setMapFullscreen(false); };
+    if (!mapFullscreen || selectMode) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || movePin.armedRef.current) return;
+      setMapFullscreen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mapFullscreen]);
+  }, [mapFullscreen, selectMode]);
+
+  // Esc in select mode gets its OWN listener rather than a branch inside the one above, which
+  // early-returns unless the map is fullscreen — extending it would leave Esc dead in the
+  // normal, non-fullscreen case. Ladder: a live drag first (useLassoDraw already swallows Esc
+  // mid-drag in the capture phase, so this arm is belt-and-braces), else leave the mode.
+  useEffect(() => {
+    if (!selectMode) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (cancelDrag()) return;
+      e.preventDefault();
+      exitSelectMode();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectMode, cancelDrag, exitSelectMode]);
+
+  // Hold Space to pan without leaving the mode. Ignored while a focused control owns the key
+  // (the book search and the rename inputs need their spaces; a button or link activates on
+  // Space KEYUP, which the preventDefault below would cancel — that would leave Space dead on
+  // the selection bar's own Done / Mark restricted… / Cancel). Released on blur so alt-tabbing
+  // away mid-press can't strand the map in pan mode.
+  useEffect(() => {
+    if (!selectMode) return undefined;
+    const onControl = (t) =>
+      !!t &&
+      (t.tagName === 'INPUT' ||
+        t.tagName === 'TEXTAREA' ||
+        t.tagName === 'SELECT' ||
+        t.isContentEditable ||
+        !!t.closest?.('button, a, [role="button"]'));
+    const down = (e) => {
+      if (e.code !== 'Space' || e.repeat || onControl(e.target)) return;
+      e.preventDefault(); // Space would otherwise scroll the page
+      setSpaceHeld(true);
+    };
+    const up = (e) => { if (e.code === 'Space') setSpaceHeld(false); };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+      setSpaceHeld(false);
+    };
+  }, [selectMode]);
+
+  // The canvas cursor while select mode is on. Cleared on exit — which is also what the layer
+  // mouseleave handlers do, so the two can't disagree.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !selectMode) return undefined;
+    const canvas = map.getCanvas();
+    if (!canvas) return undefined;
+    canvas.style.cursor = spaceHeld || selectTool === 'pan' ? 'grab' : 'crosshair';
+    return () => { canvas.style.cursor = ''; };
+  }, [selectMode, spaceHeld, selectTool, mapReady]);
+
+  // Keep MapboxDraw's own selection empty for as long as select mode is on. Entering the mode
+  // clears it once, but simple_select still makes any drawn cut area active on a plain click
+  // (clickOnFeature), and its next mousedown on an ACTIVE feature drags the polygon — so a
+  // lasso started inside a manual area would move that area under the admin, with no undo.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !selectMode) return undefined;
+    const onSelChange = () => {
+      const draw = drawRef.current;
+      if (draw && draw.getSelectedIds().length) draw.changeMode('simple_select', { featureIds: [] });
+    };
+    map.on('draw.selectionchange', onSelChange);
+    return () => { map.off('draw.selectionchange', onSelChange); };
+  }, [selectMode, mapReady]);
 
   // Swap the basemap when the picker changes; re-register layers on style.load and
   // bump styleEpoch so paint() + building markers re-hydrate. fittedSigRef is kept
@@ -1895,6 +2311,16 @@ export default function TurfsPage() {
   // a book" toggle (which only changes `grouped`, not doorsQ.data) has to re-run this.
   useEffect(() => { paint(); }, [grouped, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
 
+  // Selection rings. Deliberately NOT folded into paint(): adding the selection to that
+  // effect's deps would re-serialize the whole book/door/building GeoJSON on every lasso.
+  // styleEpoch is a dep because a basemap swap re-creates the source empty.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map) return;
+    const src = map.getSource('door-selection');
+    if (src) src.setData(selectionFC);
+  }, [selectionFC, mapReady, styleEpoch]);
+
   // Building markers (HTML overlays) for stacked apartment units — synced apart from paint()
   // so book-select toggles don't churn the DOM. Hidden when Houses/Buildings is toggled off
   // or the building's book is filtered out; the "N units" badge shows at zoom ≥ 16 or on hover.
@@ -1963,7 +2389,11 @@ export default function TurfsPage() {
         el.addEventListener('mouseenter', () => { badge.style.display = 'block'; });
         el.addEventListener('mouseleave', () => { badge.style.display = map.getZoom() >= 16 ? 'block' : 'none'; });
       }
-      el.addEventListener('click', (ev) => { ev.stopPropagation(); openBuildingPopupRef.current(b.key); });
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (movePin.armedRef.current) return; // Move pin armed → the glyph is inert (ref: once-bound)
+        openBuildingPopupRef.current(b.key);
+      });
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([b.lng, b.lat]).addTo(map);
       current.set(key, { marker, sig: wanted.get(key).sig });
     }
@@ -2014,10 +2444,22 @@ export default function TurfsPage() {
     set('door-book-ring', layerVis.houses && statusMode);
   }, [layerVis, mapReady, styleEpoch, statusMode]);
 
-  // Clear selection + popups when switching pass/campaign (those books are gone).
-  useEffect(() => { setSelectedBooks(new Set()); setPopupHouseholdId(null); setPopupBuildingKey(null); }, [passId, campaignId]);
+  // Clear selection + popups when switching pass/campaign (those books are gone). The door
+  // selection goes with them: its ids belong to the round that just left the screen — and so
+  // does an armed Move pin (its marker sits on a door of the round that just left).
+  useEffect(() => {
+    setSelectedBooks(new Set());
+    setPopupHouseholdId(null);
+    setPopupBuildingKey(null);
+    clearDoorSelection();
+    movePin.cancel();
+  }, [passId, campaignId, clearDoorSelection]);
 
   function startDraw() {
+    // The blue Move-pin marker owns the drag while armed; Draw waits (its button is disabled too).
+    if (movePin.armed) return;
+    // Manual-cut drawing and select mode both want the drag — leave select mode first.
+    if (selectMode) exitSelectMode();
     // Don't clear — areas accumulate so you can draw several.
     if (drawRef.current) drawRef.current.changeMode('draw_polygon');
   }
@@ -2198,7 +2640,12 @@ export default function TurfsPage() {
           {mode === 'manual' && (
             <div className="mb-4 text-sm">
               <div className="flex gap-2">
-                <button onClick={startDraw} className="flex-1 rounded border border-brand-accent/40 bg-brand-tint px-3 py-2 text-sm font-medium text-brand-tint-fg hover:bg-brand-tint/80">
+                <button
+                  onClick={startDraw}
+                  disabled={movePin.armed}
+                  title={movePin.armed ? 'Finish or cancel the pin move first' : undefined}
+                  className="flex-1 rounded border border-brand-accent/40 bg-brand-tint px-3 py-2 text-sm font-medium text-brand-tint-fg hover:bg-brand-tint/80 disabled:opacity-60"
+                >
                   ✎ Draw an area
                 </button>
                 {drawnAreas.length > 0 && (
@@ -2750,12 +3197,14 @@ export default function TurfsPage() {
           ) : (
             <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
           )}
-          {/* Top-left control cluster: restore the collapsed panel + toggle fullscreen. */}
-          <div className="absolute left-3 top-3 z-10 flex flex-col gap-2">
+          {/* Top-left control cluster: restore the collapsed panel, toggle fullscreen, enter
+              "Select doors". A ROW (like the Map page's) so the mode panel opens BESIDE the
+              icon buttons instead of shoving them down the map. */}
+          <div className="absolute left-3 top-3 z-10 flex items-start gap-2">
             {panelCollapsed && (
               <IconButton
                 label="Show controls"
-                className="border border-border bg-card/95 shadow-lg backdrop-blur"
+                className="h-10 w-10 border border-border bg-card/95 shadow-lg backdrop-blur"
                 onClick={() => setPanelCollapsed(false)}
               >
                 <span className="block rotate-180"><IconChevron /></span>
@@ -2764,11 +3213,28 @@ export default function TurfsPage() {
             {tokenQ.data?.isReady && (
               <IconButton
                 label={mapFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
-                className="border border-border bg-card/95 shadow-lg backdrop-blur"
+                className="h-10 w-10 border border-border bg-card/95 shadow-lg backdrop-blur"
                 onClick={() => setMapFullscreen((v) => !v)}
               >
                 {mapFullscreen ? <IconMinimize /> : <IconExpand />}
               </IconButton>
+            )}
+            {tokenQ.data?.isReady && !!passId && (
+              <MapSelectModeControl
+                active={selectMode}
+                onActivate={enterSelectMode}
+                onDone={exitSelectMode}
+                tool={selectTool}
+                onToolChange={setSelectTool}
+                tools={['pan', 'lasso']}
+                panning={spaceHeld}
+                disabled={!mapReady || hasNoDoors || movePin.armed}
+                disabledReason={
+                  movePin.armed
+                    ? 'Finish moving this pin first.'
+                    : hasNoDoors ? 'This round has no mappable doors.' : 'The map is still loading.'
+                }
+              />
             )}
           </div>
           {tokenQ.data?.isReady && (
@@ -2813,7 +3279,8 @@ export default function TurfsPage() {
               </label>
             </div>
           )}
-          {tokenQ.data?.isReady && !!turfs.length && (
+          {/* Both of these sit bottom-center, exactly where the selection bar goes. */}
+          {tokenQ.data?.isReady && !!turfs.length && !selectMode && (
             <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
               {culledBuildings > 0 && (
                 <div className="mb-1 rounded-full border border-border bg-card/95 px-3 py-1 text-center text-xs text-fg-muted shadow backdrop-blur">
@@ -2847,7 +3314,12 @@ export default function TurfsPage() {
               </button>
             </div>
           )}
-          {popupHouseholdId && (
+          {/* Both pop-ups step aside while Move pin is armed (state kept — the pop-up comes back
+              where it was on Cancel, or at the new spot after Save); the MovePinCard takes their
+              corner. Move pin is offered only while the door is actually on the page (ghost-door
+              guard, same as onRestrict below) and the campaign is not archived (`isActive === false`
+              is the archived flag; a direct call still 409s and the card shows it inline). */}
+          {popupHouseholdId && !movePin.armed && (
             <HousePopup
               data={householdQ.data}
               loading={householdQ.isLoading}
@@ -2867,7 +3339,7 @@ export default function TurfsPage() {
                 // re-housing) — nothing to mark here; close rather than act on a ghost.
                 if (!popupDoor) {
                   setPopupHouseholdId(null);
-                  setRestrictResult('Not marked — this door is no longer in the cut.');
+                  setMapToast('Not marked — this door is no longer in the cut.');
                   return;
                 }
                 restrictDoors.mutate({ householdIds: [String(popupHouseholdId)] });
@@ -2875,10 +3347,23 @@ export default function TurfsPage() {
               onUnrestrict={() => unrestrictDoors.mutate({ householdIds: [String(popupHouseholdId)] })}
               restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
               restrictError={restrictDoors.error || unrestrictDoors.error}
+              onMovePin={
+                popupDoor && selected?.isActive !== false
+                  ? () => beginMovePin({
+                      id: String(popupHouseholdId),
+                      addressLine1: householdQ.data?.household?.addressLine1 || popupDoor.addressLine1,
+                      lng: popupDoor.lng,
+                      lat: popupDoor.lat,
+                      scope: 'unit',
+                      count: 1,
+                    })
+                  : undefined
+              }
+              moveDisabled={jobBusy || generate.isPending}
             />
           )}
           {/* Keyed per building so the inline mark-confirm resets when another building is clicked. */}
-          {popupBuilding && (
+          {popupBuilding && !movePin.armed && (
             <BuildingPopup
               key={popupBuilding.key}
               building={popupBuilding}
@@ -2892,17 +3377,78 @@ export default function TurfsPage() {
               onUnrestrict={(householdIds) => unrestrictDoors.mutate({ householdIds })}
               restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
               restrictError={restrictDoors.error || unrestrictDoors.error}
+              onMovePin={
+                selected?.isActive !== false
+                  ? () => beginMovePin({
+                      // Any unit's id — the server's scope:'building' fan-out moves every unit at
+                      // that coordinate; the toast count comes back as res.moved.
+                      id: String(popupBuilding.units[0].id),
+                      addressLine1: popupBuilding.addressLine1,
+                      lng: popupBuilding.lng,
+                      lat: popupBuilding.lat,
+                      scope: 'building',
+                      count: popupBuilding.total,
+                    })
+                  : undefined
+              }
+              moveDisabled={jobBusy || generate.isPending}
             />
           )}
-          {restrictResult && (
-            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-2 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg shadow">
-              <span>{restrictResult}</span>
-              <button onClick={() => setRestrictResult(null)} className="font-semibold hover:opacity-70">
+          {movePin.armed && (
+            <MovePinCard
+              copy={movePin.copy}
+              error={movePin.error}
+              saving={movePin.saving}
+              onCancel={movePin.cancel}
+              onSave={movePin.save}
+              className="absolute right-3 top-3 z-10 w-72"
+            />
+          )}
+          {mapToast && (
+            /* The selection bar spans the bottom of the map, so in select mode this sits ABOVE
+               it (bottom-48 clears the bar at its tallest — over-cap banner and error line and
+               all) rather than under it in the bottom-left corner. */
+            <div
+              className={
+                'absolute z-20 flex items-center gap-2 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg shadow ' +
+                (selectMode ? 'bottom-48 left-1/2 max-w-[90%] -translate-x-1/2' : 'bottom-4 left-4')
+              }
+            >
+              <span>{mapToast}</span>
+              <button onClick={() => setMapToast(null)} className="font-semibold hover:opacity-70">
                 ✕
               </button>
             </div>
           )}
-          {selectedTurfs.length > 0 && (
+          {selectMode && (
+            <DoorSelectionBar
+              plan={selectionPlan}
+              // This page's dots always carry the SELECTED round's passStatus, so the breakdown
+              // and the ⓘ speak per-round here — there is no global-status mode to fall back to.
+              statusBasis="round"
+              passLabel={passLabel}
+              scopeNote={selectionScopeNote}
+              canUnmark={canUnmarkSelection}
+              busy={restrictSelection.isPending ? 'mark' : unrestrictSelection.isPending ? 'unmark' : null}
+              error={restrictSelection.error || unrestrictSelection.error}
+              reloading={doorsQ.isFetching}
+              housesHidden={!layerVis.houses}
+              overCap={overCap}
+              onDismissOverCap={() => setOverCap(null)}
+              onMark={({ ids, scope }) => {
+                setMapToast(null);
+                restrictSelection.mutate({ householdIds: ids, scope });
+              }}
+              onUnmark={({ ids }) => {
+                setMapToast(null);
+                unrestrictSelection.mutate({ householdIds: ids });
+              }}
+              onClear={clearDoorSelection}
+              onClose={exitSelectMode}
+            />
+          )}
+          {/* Detail panels stay out of select mode's way — same rule the popups follow. */}
+          {selectedTurfs.length > 0 && !selectMode && (
             <BookAssignmentPanel
               campaignId={campaignId}
               passId={passId}
@@ -2912,11 +3458,11 @@ export default function TurfsPage() {
               onMerge={() => merge.mutate([...selectedBooks])}
               mergePending={merge.isPending}
               onRestrict={() => {
-                setRestrictResult(null);
+                setMapToast(null);
                 setShowRestrict('mark');
               }}
               onUnrestrict={() => {
-                setRestrictResult(null);
+                setMapToast(null);
                 setShowRestrict('unmark');
               }}
               restrictPending={restrictBulk.isPending || unrestrictBulk.isPending}

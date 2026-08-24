@@ -24,7 +24,7 @@ That's deliberate. Moving a pin is a data change with an audit trail, and when a
 canvasser could record a door from somewhere they'd never been, collect a **"far from house"** GPS flag,
 then drag the pin onto their own house to make the flag look innocent.
 
-## Two ways to do it
+## Where to do it
 
 - **On the web map** — click the door, choose **Move pin**, drag it to the right spot, and Save.
 - **In the mobile app** — open the door through **Switch to canvass mode**, tap **Fix pin location →**,
@@ -32,6 +32,11 @@ then drag the pin onto their own house to make the flag look innocent.
   weak) or drag the pin on the mini-map. It saves in the background and works **offline** — the fix
   holds and uploads when you're back on signal, writing the spot you picked rather than wherever you
   happen to be at sync time.
+- **On the Turf Cutting page** — where a wrong pin is usually *noticed*, sitting in the wrong book.
+  Click the house and choose **Move pin →** in its popup, drag the blue marker, then **Save location**;
+  that moves **one door**. Click an apartment building instead and its popup has **Move building
+  pin →**, which moves **every unit at that pin together**. Same fix, same audit trail, no trip to the
+  Map page. It works on a draft cut, an accepted book, or a loose dot not in any book.
 
 If the address shares a pin with other units — an apartment building — you'll be asked whether to move
 **just this unit** or the **whole building**.
@@ -41,6 +46,13 @@ If the address shares a pin with other units — an apartment building — you'l
 A correction fixes **only where the dot sits**. It never re-cuts books, never changes the walk order,
 never changes a door's status, and never moves a count. Canvassers pick up the corrected spot on their
 next sync, and every move is saved with who made it and when.
+
+One thing *does* follow the dot: the **book's shape** on the Turf Cutting map. Every house sits inside
+its book's outline, so when you move a pin, the door's book — and any other live book whose shape
+covered the new spot — is redrawn around it. The book's houses and their order don't change, just the
+drawn outline. The pin is saved first and the redraw follows; on a very large round (tens of thousands
+of booked doors) the redraw is skipped and the old outline stays until your Doorline contact runs the
+outline repair — the pin itself is still fixed.
 
 Two things worth knowing:
 

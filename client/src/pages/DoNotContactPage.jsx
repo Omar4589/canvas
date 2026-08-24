@@ -88,7 +88,7 @@ export default function DoNotContactPage() {
           <label className="mb-1 block text-xs font-medium text-fg-muted">Do-not-contact CSV</label>
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.tsv,.txt,.xls"
             onChange={(e) => onPickFile(e.target.files?.[0] || null)}
             className="block w-full text-sm"
           />

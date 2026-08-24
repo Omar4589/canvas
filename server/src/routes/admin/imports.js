@@ -16,6 +16,7 @@ import { saveRawImportFromFile, deleteRawImport } from '../../services/import/ra
 import { maybeExpireStaleImportJob } from '../../services/import/sweepStaleImports.js';
 import { buildImportRows } from '../../services/import/csvImporter.js';
 import { peekUpload } from '../../services/import/peekUpload.js';
+import { looksLegacyXls, LegacyXlsError } from '../../services/import/parseUpload.js';
 import { computeImportDiff } from '../../services/import/computeImportDiff.js';
 import { undoFileImport } from '../../services/import/undoImport.js';
 import {
@@ -68,6 +69,33 @@ function uploadCsv(req, res, next) {
   });
 }
 
+// Legacy .xls (Excel 97–2003) sniff for the routes that only STASH the upload and
+// leave parsing to the worker: refuse at the door instead of writing a GridFS blob
+// and an ImportJob the worker can only fail minutes later. Reads the 8 magic bytes,
+// never the file. Routes that parse inline get the same refusal from the parser.
+const refusedAsLegacyXls = (req, res) => {
+  const head = Buffer.alloc(8);
+  const fd = fs.openSync(req.file.path, 'r');
+  try {
+    fs.readSync(fd, head, 0, 8, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (!looksLegacyXls(head)) return false;
+  const err = new LegacyXlsError();
+  res.status(400).json({ error: err.message, code: err.code });
+  return true;
+};
+
+// Typed parse refusals answer 400 with a code the client can branch on, never the
+// generic 500: an oversized file gets its row count + remedy, a legacy .xls gets
+// the Save-As instruction.
+const typedParseRefusal = (err, res) => {
+  if (err?.name !== 'ImportTooLargeError' && err?.name !== 'LegacyXlsError') return false;
+  res.status(400).json({ error: err.message, code: err.code });
+  return true;
+};
+
 function activeOrgId(req) {
   return req.activeOrg?._id;
 }
@@ -105,6 +133,7 @@ router.post('/preview-headers', uploadCsv, async (req, res, next) => {
       otherSheets,
     });
   } catch (err) {
+    if (typedParseRefusal(err, res)) return;
     next(err);
   }
 });
@@ -184,6 +213,7 @@ router.post('/csv', uploadCsv, async (req, res, next) => {
       return res.status(400).json({ error: 'campaignId is required' });
     }
     if (!(await manages(req, res, campaignId))) return;
+    if (refusedAsLegacyXls(req, res)) return;
 
     // Resolve the field mapping: inline JSON, a saved profile, or the default.
     const resolved = await resolveImportMapping(req);
@@ -233,6 +263,7 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
       return res.status(400).json({ error: 'campaignId is required' });
     }
     if (!(await manages(req, res, campaignId))) return;
+    if (refusedAsLegacyXls(req, res)) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     // NOT_DELETING: no new imports into a mid-delete campaign (deletionState.js) — an
@@ -250,10 +281,7 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {
-    // Oversized files refuse with the count + remedy, not a generic 500.
-    if (err?.name === 'ImportTooLargeError') {
-      return res.status(400).json({ error: err.message, code: err.code });
-    }
+    if (typedParseRefusal(err, res)) return;
     next(err);
   }
 });
@@ -270,6 +298,7 @@ router.post('/csv/preview-enqueue', uploadCsv, async (req, res, next) => {
       return res.status(400).json({ error: 'campaignId is required' });
     }
     if (!(await manages(req, res, campaignId))) return;
+    if (refusedAsLegacyXls(req, res)) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;
@@ -318,6 +347,7 @@ router.post('/geocode-check', uploadCsv, async (req, res, next) => {
       return res.status(400).json({ error: 'campaignId is required' });
     }
     if (!(await manages(req, res, campaignId))) return;
+    if (refusedAsLegacyXls(req, res)) return;
     const resolved = await resolveImportMapping(req);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
     const { mapping, importProfileId } = resolved;

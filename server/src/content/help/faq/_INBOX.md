@@ -31,6 +31,8 @@ Format: one question per line, optionally with a note on where the answer lives.
 
 ## Triaged (answered — safe to delete)
 
+- "Why can't I import a .xls, only .xlsx? What's the real difference?" → xls-file-wont-upload.md (two different files share the extension: delimited text named .xls imports fine, a real Excel 97–2003 workbook is a different binary format and is refused with the Save-As remedy)
 - "I uploaded a second voter file — now what?" → add-a-second-voter-file.md
 - "I forgot my password" → reset-my-password.md
+- "The client says the files hold N doors but the import made fewer — did we lose some?" → fewer-doors-than-file-rows.md (rows are people; doors are addresses; a precinct's strong/swing files share addresses; one row skipped ≠ one door lost)
 - "My import has been on Analyzing / Linking forever — is it stuck?" → import-taking-long.md (stages explained; a genuinely stuck import now fails itself within minutes with a reason)

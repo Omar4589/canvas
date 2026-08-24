@@ -228,7 +228,9 @@ export default function BookAssignmentPanel({
   }
 
   return (
-    <div className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] w-80 flex-col rounded-xl border border-border bg-card shadow-xl">
+    // top-16, not top-3: the map's top-left control cluster (restore-panel, fullscreen, the
+    // "Select doors" pill) owns the first row, and this panel used to paint straight over it.
+    <div className="absolute left-3 top-16 z-10 flex max-h-[calc(100%-4.75rem)] w-80 flex-col rounded-xl border border-border bg-card shadow-xl">
       <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-fg">

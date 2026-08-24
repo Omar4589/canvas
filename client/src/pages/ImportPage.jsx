@@ -761,13 +761,19 @@ export default function ImportPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-fg-muted">CSV or Excel (.xlsx) file</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Voter file</label>
             <input
               type="file"
-              accept=".csv,.xlsx"
+              accept=".csv,.tsv,.txt,.xls,.xlsx"
               onChange={(e) => onPickFile(e.target.files?.[0] || null)}
               className="block w-full text-sm"
             />
+            <p className="mt-1 text-xs text-fg-subtle">
+              CSV, Excel <code>.xlsx</code>, or any delimited text export — <code>.txt</code>, <code>.tsv</code>, and
+              the <code>.xls</code>-named tab-separated files several state vendors ship. The delimiter is detected
+              for you. A genuine Excel 97&ndash;2003 <code>.xls</code> is a different format and is refused with
+              instructions &mdash; re-save it as <code>.xlsx</code> first.
+            </p>
             {fileNote?.tooBig && (
               <div className="mt-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
                 This file is over the 50 MB limit. Split it into smaller files (e.g. by region or county) and

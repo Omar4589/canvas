@@ -199,10 +199,16 @@ async function call(method, path, { token, orgId, body } = {}) {
   return { status: res.status, json };
 }
 const asAdmin = () => ({ token: ctx.adminTok, orgId: ctx.org._id });
-const mark = (householdIds, passId, campaignId = ctx.camp._id) =>
+// `scope` is left OUT of the body unless one is named — omitting it is the back-compat case an
+// already-released client exercises, and it must behave exactly like 'incomplete'.
+const mark = (householdIds, passId, campaignId = ctx.camp._id, scope) =>
   call('POST', `/admin/campaigns/${campaignId}/turfs/restrict-doors`, {
     ...asAdmin(),
-    body: { householdIds: householdIds.map((h) => String(h?._id ?? h)), ...(passId ? { passId: String(passId?._id ?? passId) } : {}) },
+    body: {
+      householdIds: householdIds.map((h) => String(h?._id ?? h)),
+      ...(passId ? { passId: String(passId?._id ?? passId) } : {}),
+      ...(scope === undefined ? {} : { scope }),
+    },
   });
 const unmark = (householdIds, passId, campaignId = ctx.camp._id) =>
   call('POST', `/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, {
@@ -610,4 +616,76 @@ test('18. /map rows carry effortId and lastAction.via', { skip }, async () => {
   assert.ok(d10, 'Intake door on the map');
   assert.strictEqual(d10.effortId, null);
   assert.strictEqual(d10.lastAction, null);
+});
+
+// ── scope: the reached-door ladder, mirroring restrict-bulk's (bulkRestrictScope.int.test.js) ──
+// The map lasso hands this route a street the crew worked in part, so the same choice the
+// whole-book flow offers has to exist here: 'unknocked' must never relabel a not-home or a
+// refusal as inaccessible. d12/d13 (Book 2, round P1) become the reached pair below; they were
+// untouched until now, so no earlier baseline moves.
+
+test("19. scope 'unknocked': reached doors are left exactly as they are and counted in skipped.reached", { skip }, async () => {
+  const ago = (min) => new Date(Date.now() - 1800_000 + min * 60_000);
+  await CanvassActivity.insertMany([
+    fieldRow(ctx.d12, ctx.canv._id, 'not_home', ctx.p1._id, ctx.b2._id, ago(0)),
+    fieldRow(ctx.d13, ctx.canv._id, 'refused', ctx.p1._id, ctx.b2._id, ago(10)),
+  ]);
+  await Household.updateOne({ _id: ctx.d12._id }, { status: 'not_home' });
+  await Household.updateOne({ _id: ctx.d13._id }, { status: 'refused' });
+
+  const r = await mark([ctx.d12, ctx.d13, ctx.d6, ctx.d1], ctx.p1, ctx.camp._id, 'unknocked');
+  assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+  assert.strictEqual(r.json.marked, 1, 'only the untouched door');
+  assert.deepStrictEqual(r.json.skipped, { ...noSkips, reached: 2, completed: 1 });
+
+  // The reached pair keeps its per-round status, its knock and its clean desk ledger.
+  const m = await getPassStatusMap(ctx.p1._id, [ctx.d12._id, ctx.d13._id], ctx.camp.type);
+  assert.strictEqual(m.get(String(ctx.d12._id)).status, 'not_home');
+  assert.strictEqual(m.get(String(ctx.d13._id)).status, 'refused');
+  assert.strictEqual((await deskRows({ householdId: { $in: [ctx.d12._id, ctx.d13._id] } })).length, 0);
+  assert.strictEqual(await statusOf(ctx.d6), 'restricted');
+  assert.strictEqual(await statusOf(ctx.d1), 'surveyed', 'a completed door is still completed, not reached');
+});
+
+test("20. scope 'incomplete' on the same selection marks the reached doors; their knocks survive", { skip }, async () => {
+  const r = await mark([ctx.d12, ctx.d13, ctx.d6, ctx.d1], ctx.p1, ctx.camp._id, 'incomplete');
+  assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+  assert.strictEqual(r.json.marked, 2, 'the two reached doors');
+  assert.deepStrictEqual(r.json.skipped, { ...noSkips, alreadyRestricted: 1, completed: 1 }, 'reached is never populated here');
+  assert.strictEqual(await statusOf(ctx.d12), 'restricted');
+  assert.strictEqual(await statusOf(ctx.d13), 'restricted');
+  assert.strictEqual(await CanvassActivity.countDocuments({ householdId: ctx.d12._id, actionType: 'not_home' }), 1, 'field row never deleted');
+
+  const undo = await unmark([ctx.d12, ctx.d13], ctx.p1); // reset for the back-compat case
+  assert.strictEqual(undo.json.unmarked, 2);
+  assert.strictEqual(await statusOf(ctx.d12), 'not_home', 'the field knock is the latest again');
+});
+
+test("21. an omitted scope is still 'incomplete' — and so is anything that is not 'unknocked'", { skip }, async () => {
+  const omitted = await mark([ctx.d12, ctx.d13], ctx.p1);
+  assert.strictEqual(omitted.status, 200, JSON.stringify(omitted.json));
+  assert.strictEqual(omitted.json.marked, 2, 'an older client sending no scope marks the reached doors, as it always did');
+  assert.strictEqual(omitted.json.skipped.reached, 0);
+  assert.strictEqual((await unmark([ctx.d12, ctx.d13], ctx.p1)).json.unmarked, 2);
+
+  const bogus = await mark([ctx.d12, ctx.d13], ctx.p1, ctx.camp._id, 'sideways');
+  assert.strictEqual(bogus.status, 200, JSON.stringify(bogus.json));
+  assert.strictEqual(bogus.json.marked, 2, 'an unknown scope falls back to the default, never to unknocked');
+  assert.strictEqual(bogus.json.skipped.reached, 0);
+  assert.strictEqual((await unmark([ctx.d12, ctx.d13], ctx.p1)).json.unmarked, 2);
+});
+
+test('22. the 1000-id cap: a full batch is accepted, 1001 is refused WHOLE', { skip }, async () => {
+  const pad = (n) => Array.from({ length: n }, () => new mongoose.Types.ObjectId());
+  const atCap = await mark([ctx.d12, ...pad(999)], ctx.p1);
+  assert.strictEqual(atCap.status, 200, JSON.stringify(atCap.json));
+  assert.strictEqual(atCap.json.marked, 1);
+  assert.strictEqual(atCap.json.skipped.ineligible, 999, 'ids that name no door in this campaign');
+  assert.strictEqual(await statusOf(ctx.d12), 'restricted');
+
+  // One over the cap: nothing is truncated and nothing is written — the client must trim first.
+  const over = await mark([ctx.d13, ...pad(1000)], ctx.p1);
+  assert.strictEqual(over.status, 400, JSON.stringify(over.json));
+  assert.strictEqual((await deskRows({ householdId: ctx.d13._id })).length, 0, 'the whole batch is refused');
+  assert.strictEqual(await statusOf(ctx.d13), 'refused');
 });

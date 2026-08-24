@@ -9,7 +9,7 @@ summary: Cut a pass's doors into books, accept them, assign them, and watch a ro
 tags: turf, books, cutting, assign, progress, status, page
 ---
 
-**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), and move, merge, or split books.
+**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
 
 ## Watching a round's progress here
 
@@ -76,6 +76,76 @@ door into whichever book it lands in next. Marks land on the round you have sele
 
 You can do the same on your phone — from the admin **Map** tab's door sheet, or by tapping a house inside a
 book — and from the web [Map page](page-map). See [Can I mark just one house restricted?](mark-one-home-restricted).
+
+## Marking several homes at once
+
+A fence line, a gated cul-de-sac, a block the contractors closed off — forty homes shouldn't mean forty
+popups, and marking the whole book would be too much. Click **Select doors** at the top-left of the map and
+the map becomes a picker:
+
+- **Drag a shape** around the homes you mean. Draw another one somewhere else and it adds to the first, so
+  three streets take three drags.
+- **Click a house** to add or remove just that one. **Click a building** and every unit on that pin goes in
+  or out together.
+- **Hold Option (Alt) while you drag** to take the doors inside that shape back out.
+- **Hold Space** — or switch the toggle to **Pan** — to move the map without leaving the mode.
+- **Esc** cancels a shape you're in the middle of drawing; press it again, or click **Done**, to leave. That
+  clears the selection.
+
+You can only pick homes the map is actually showing. Anything hidden by the **Layers** box, the book-status
+chips or your filters can't be caught — if you can't see it, a shape drawn over it takes nothing. (With the
+**Houses** layer off, nothing is selectable at all, and the bar tells you.) One action takes up to **1,000
+doors**; if a shape would go over that, none of it is added and the bar says how many it would have been —
+zoom in and take a smaller stretch.
+
+**The bar along the bottom** counts what you've picked — how many **will be marked**, how many are
+**already restricted**, how many were **completed this round**, how many **can't be marked** — with an **ⓘ**
+that explains each number. On the map, each picked home gets a **blue** ring if it will be marked and a
+**slate** ring if it will be skipped.
+
+**It always asks before it writes.** Up to 25 doors you just confirm in the bar; above that you get the same
+dialog as a whole book, including typing **restrict**. And if your crew already **reached** some of the homes
+you picked, you're asked which to mark — **only the untouched ones** (the default, leaving every not-home and
+refusal exactly as it is) or **every door not yet done** — the same choice a whole book gives you. The
+numbers are locked in when the dialog opens, so nothing shifts while you're reading it.
+
+Homes that can't be marked are simply never sent: one still in **Intake** (it isn't in a walk list yet, so no
+round could own the mark), one you've held out of books with **Remove apartments**, and one flagged
+do-not-contact. The bar counts them and names the reason.
+
+**Unmark restricted…** works the same way (it asks in the same dialog, without the typing) and removes **desk** marks only — every one on the homes you
+picked for this round, including marks made earlier or by someone else. Marks canvassers recorded at the door
+are kept.
+
+When it's done you get a line like *"Marked 842 of 1,284 doors restricted · 210 already restricted · 232
+completed this round"*, and your selection stays put — the rings turn from blue to slate in front of you.
+There's no undo link (unmarking would also strip marks that were already there), so **Unmark restricted…**
+is right there in the bar if you need it. Marks land on the round selected in the **Pass** dropdown. The
+[Map page](page-map) has the same mode; the phone marks one home at a time.
+
+## Fixing a pin from here
+
+A pin in the wrong place usually shows itself on this map first — a dot sitting in the wrong book, or
+miles from its street. You don't have to go to the Map page to fix it. **Click the house** and choose
+**Move pin →** in its popup: the popups step aside, a blue marker appears on the dot, and a small card
+tells you whose pin you're moving. Drag the marker to the right spot and click **Save location** (or
+**Cancel**, or press **Esc**, to back out). That moves **one door**. For an apartment building, click the
+building and choose **Move building pin →** — that moves **every unit at that pin together**, and the
+card says how many. While a move is armed, clicks elsewhere on the map do nothing, so you can't select
+a book by accident.
+
+When it saves, the dot moves and the **book outline redraws around it** — the door's own book, and any
+other book whose shape covered the new spot — so the house still sits inside its book's shape (below).
+Nothing else changes: the door keeps its book and its place in the walk order, its status and every
+count stay put, and the Map page, printed packets and the GPS audit pick the new spot up on their own.
+Canvassers see it on their next sync. Reopen the popup and it reads *Pin corrected* with the date; a
+looked-up pin that hasn't been fixed reads *Approximate location*.
+
+Three things to know. Only **team leads and admins** can move a pin (see [Fixing a house pin](fix-pin-location)
+for why). The button is greyed out while a cut is running — wait for it to finish. And a pin that was so
+wrong the house sat in the wrong *area* usually wants two fixes: move the pin, then **Move door** to put
+it in the right book — moving a pin never moves a door between books. On a very large round the outline
+redraw is skipped (the pin is still fixed); ask your Doorline contact to run the outline repair.
 
 ## Every house sits inside its book's shape
 

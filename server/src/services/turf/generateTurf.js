@@ -379,9 +379,18 @@ export async function recomputeTurf(turfDoc) {
 // touched (~150-250ms at 16k doors instead of ~1.6s for all 128). The Voronoi
 // diagram is still computed over the WHOLE pass — seams depend on every door —
 // but only the listed books' shapes are rebuilt and written; the rest keep their
-// stored shapes, which remain exactly correct (moves don't change the diagram)
-// or conservatively contained (removals only grow the remaining cells).
-export async function recomputePassTerritories(passId, { onlyTurfIds = null } = {}) {
+// stored shapes, which remain exactly correct (a door's BOOK move doesn't change
+// the diagram — only cell ownership flips) or conservatively contained (removals
+// only grow the remaining cells). A COORDINATE move DOES change the diagram: the
+// pin-move caller (rehullAfterPinMove.js) therefore also lists the books whose
+// stored shape contains the new point — the new site can only shrink those cells.
+//
+// withCentroid: also rewrite each listed book's `centroid` from its members'
+// current pins — for the pin-move caller, whose edit changes a coordinate rather
+// than the member list (recomputeTurf owns the centroid on a member edit). The
+// default keeps every other caller, and recompute:territories' "writes ONLY
+// Turf.boundary" promise, exactly as before.
+export async function recomputePassTerritories(passId, { onlyTurfIds = null, withCentroid = false } = {}) {
   // Sorted for the same reason as the household loads: computeTerritories dedupes
   // shared coordinates first-book-wins (boundary.js), so which book owns an apartment
   // stack's Voronoi cell — and therefore both books' drawn shapes — follows this order.
@@ -405,7 +414,9 @@ export async function recomputePassTerritories(passId, { onlyTurfIds = null } = 
   const bulk = [];
   turfs.forEach((t, i) => {
     if (onlyIndices && !onlyIndices.has(i)) return; // untouched book — keep its stored shape
-    bulk.push({ updateOne: { filter: { _id: t._id }, update: { $set: { boundary: territories[i] || null } } } });
+    const $set = { boundary: territories[i] || null };
+    if (withCentroid) $set.centroid = computeCentroid(books[i].households);
+    bulk.push({ updateOne: { filter: { _id: t._id }, update: { $set } } });
   });
   if (bulk.length) await Turf.bulkWrite(bulk, { ordered: false });
 }

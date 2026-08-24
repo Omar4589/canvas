@@ -179,6 +179,7 @@ test('BEHAVIORAL: a vendor read of /admin/imports — never on the old content l
 test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is exempt', () => {
   const C = '652f000000000000000000aa'; // a stand-in campaign id
   const W = '652f000000000000000000bb'; // a stand-in walklist id
+  const H = '652f000000000000000000cc'; // a stand-in household id
 
   // These are the routes that hand back names, addresses, phones, GPS or survey answers. Each MUST be
   // logged for a vendor — none may be audit-exempt. The walk-list CSV export is the one the dead-prefix
@@ -187,6 +188,9 @@ test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is
     [`/admin/campaigns/${C}/walklists/${W}/export.csv`, 'walklists'],
     [`/admin/campaigns/${C}/walklists`, 'walklists'],
     [`/admin/campaigns/${C}/households`, 'map'],
+    // The pin-move PATCH (a single-record WRITE of a door's GPS point) — logged like any other
+    // households route; its router.param hook tags the door (behavioral test below).
+    [`/admin/campaigns/${C}/households/${H}/location`, 'map'],
     [`/admin/campaigns/${C}/voted`, 'voted'],
     ['/admin/imports', 'imports'],
     // The Export Center: the artifact download streams whole voter files; list/poll are
@@ -300,6 +304,30 @@ test('RECORD-LEVEL: the turf-cutting door drill carries the household as its sub
     logs[0].subjects.map((s) => `${s.type}:${s.id}`),
     [`household:${ctx.hh._id}`]
   );
+});
+
+test('RECORD-LEVEL: the pin-move PATCH carries the household as its subject', { skip }, async () => {
+  // The campaign-nested households router's single-record WRITE — PATCH .../households/:householdId/
+  // location, the one pin-move endpoint behind the Map page, the mobile admin map and the Turf
+  // Cutting pop-ups. accessLog logs every successful vendor request regardless of method, and the
+  // router now carries the same router.param hook as the turfs door drill, so a staff pin move
+  // under a grant records WHICH door was moved — "was my record touched?" answers for writes too.
+  await grantFor(ctx.support.token);
+  const [lng, lat] = ctx.hh.location.coordinates;
+  const moved = await call('PATCH', `/admin/campaigns/${ctx.camp._id}/households/${ctx.hh._id}/location`, {
+    ...ctx.support,
+    body: { lat: lat + 0.0002, lng }, // a nudge, still inside FL for the bounds guardrail
+  });
+  assert.strictEqual(moved.status, 200, JSON.stringify(moved.json));
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, 'subjects.id': ctx.hh._id });
+  assert.strictEqual(logs.length, 1, 'the pin-move row carries the household subject');
+  assert.deepStrictEqual(
+    logs[0].subjects.map((s) => `${s.type}:${s.id}`),
+    [`household:${ctx.hh._id}`]
+  );
+  assert.strictEqual(logs[0].method, 'PATCH');
+  assert.strictEqual(logs[0].resource, 'map', 'a households route classifies as map (the structural list pins the same)');
 });
 
 test('RECORD-LEVEL: the person console read carries the person subject (direct recordAccess path)', { skip }, async () => {

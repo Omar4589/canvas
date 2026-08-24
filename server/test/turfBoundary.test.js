@@ -128,6 +128,33 @@ test('onlyIndices computes just the requested books and matches the full run exa
   assert.strictEqual(partial[2], undefined);
 });
 
+test('a COORDINATE move into a neighbour: redrawing just {own, containing} stays disjoint and containing', async () => {
+  // The pin-move re-hull (services/turf/rehullAfterPinMove.js) does not redraw the whole pass: it
+  // lists the moved door's own book plus every book whose STORED shape covers the new spot, and
+  // leaves the rest alone. This pins the geometry that makes that safe — the new site only shrinks
+  // the containing neighbour's cells, and a far book's stored shape is still disjoint afterwards.
+  const a = cluster();
+  const b = cluster(-76.879);
+  const far = cluster(-76.87, 38.94);
+  const books = asBooks(a, b, far);
+  const before = await computeTerritories(books);
+
+  // A pin correction drags A's NE corner door into B's grid — near, NOT on, a B coordinate (an exact
+  // collision is the separate first-book-wins dedupe rule above).
+  a[8].location.coordinates = [-76.8786, 38.9309];
+  assert.strictEqual(inside(a[8], before[1]), true, "fixture guard: B's stored shape covers the new spot, so B is a containing neighbour");
+  assert.strictEqual(inside(a[8], before[0]), false, "fixture guard: A's stored shape does not reach there yet");
+
+  const partial = await computeTerritories(books, { onlyIndices: new Set([0, 1]) });
+  assert.strictEqual(outsideCount(a, partial[0]), 0, 'the moved door (membership unchanged) is inside its own redrawn book');
+  assert.strictEqual(outsideCount(b, partial[1]), 0, "B's doors all still inside B");
+  assert.ok(overlapArea(partial[0], partial[1]) < 1, 'own and containing neighbour stay disjoint (m²)');
+  assert.strictEqual(partial[0].type, 'MultiPolygon', 'the moved door gets a pocket island inside B');
+  assert.strictEqual(partial[2], undefined, 'the far book keeps its stored shape');
+  assert.ok(overlapArea(partial[0], before[2]) < 1 && overlapArea(partial[1], before[2]) < 1, "the far book's STORED shape is still disjoint from the redrawn pair");
+  assert.strictEqual(outsideCount(far, before[2]), 0, "…and still contains its own doors");
+});
+
 test('deterministic: two runs on the same input are identical (worker re-runs must reproduce)', async () => {
   const books = asBooks([...cluster(), hh(-76.8785, 38.9308)], cluster(-76.879));
   assert.deepStrictEqual(await computeTerritories(books), await computeTerritories(books));

@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import unzipper from 'unzipper';
 import { SaxesParser } from 'saxes';
 import { StringDecoder } from 'node:string_decoder';
-import { looksXlsx, resolveFirstSheetTarget, listWorkbookSheets } from './parseUpload.js';
+import { looksXlsx, looksLegacyXls, LegacyXlsError, resolveFirstSheetTarget, listWorkbookSheets } from './parseUpload.js';
 
 // A true N-row peek for the mapping step: headers + a few sample rows, at a cost
 // of O(rows peeked), never O(file). parseUpload materializes EVERY row to serve
@@ -283,8 +283,12 @@ export async function peekUpload(source, filename, { rows = 5 } = {}) {
   if (typeof source === 'string') {
     const fd = fs.openSync(source, 'r');
     try {
-      const head = Buffer.alloc(2);
-      fs.readSync(fd, head, 0, 2, 0);
+      // 8 bytes, not 2: enough for looksXlsx's "PK" AND the OLE2 magic that marks a
+      // legacy .xls. That refusal comes first — the mapping step is where the user
+      // meets the file, so it must name the format problem, not show junk columns.
+      const head = Buffer.alloc(8);
+      fs.readSync(fd, head, 0, 8, 0);
+      if (looksLegacyXls(head)) throw new LegacyXlsError();
       if (looksXlsx(head, filename)) return await peekXlsx(await unzipper.Open.file(source), rows);
       const { size } = fs.fstatSync(fd);
       const headBuf = Buffer.alloc(Math.min(size, 1024 * 1024));
@@ -294,6 +298,7 @@ export async function peekUpload(source, filename, { rows = 5 } = {}) {
       fs.closeSync(fd);
     }
   }
+  if (looksLegacyXls(source)) throw new LegacyXlsError();
   if (looksXlsx(source, filename)) return peekXlsx(await unzipper.Open.buffer(source), rows);
   return peekCsv(source.slice(0, 1024 * 1024), source.length, rows);
 }

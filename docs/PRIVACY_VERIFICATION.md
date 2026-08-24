@@ -966,6 +966,23 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    by the already-hooked `/admin/households/:householdId/{activity,surveys}`, reached by the
    same roles (org admin + a lead who manages that campaign) that already reach the page — no
    route widened, no role granted anything new.]*
+   *[v6 2026-08-22: **GAP CLOSED — the pin-move PATCH.** The same miss, one router over:
+   `routes/admin/campaignHouseholds.js` served
+   `PATCH /admin/campaigns/:campaignId/households/:householdId/location` — a single-record WRITE
+   that moves a door's map pin (with `scope:'building'`, every unit at that pin) — with **no
+   `router.param` hook**, so a staff pin move under a grant logged the request but not WHICH
+   door. Surfaced while adding *Move pin* to the Turf Cutting page's popups (which call this
+   same endpoint, through the same `updateHouseholdLocation` writer, with the same
+   `HouseholdLocationChange` audit row); the same `addAuditSubjects` hook the households and
+   turfs routers use is now registered there, and `test/accessLogCoverage.int.test.js` gains a
+   case for it. The pin move itself is unchanged in what it collects and who may call it
+   (`canManageCampaign` — org admin, or a lead who manages that campaign), and the one new
+   behaviour — redrawing the affected book outlines (`Turf.boundary`/`centroid`, display-only
+   geometry derived from door pins already on file) — adds no personal data and shows nobody
+   anything new. This makes an existing write auditable — it is **not** a new exposure and needs
+   no Privacy Policy / ToS / DPA edit. Sibling gap, recorded not closed: the mobile twin
+   `POST /mobile/households/:householdId/location` rides `routes/mobile/canvass.js`, whose
+   `router.param` hooks cover `voterId` only.]*
 4. **The cross-org password-reset path is unprevented by decision** (v1 F14 Exc 3): an admin of any org
    a user belongs to can reset that user's global password. Mitigation: the reset issues a visible
    forced-change temp password. Rationale recorded at `memberships.js:423-432` (admin reset is the only

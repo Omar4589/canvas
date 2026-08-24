@@ -453,7 +453,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
 
     const data = locationCorrectionSchema.parse(req.body);
     try {
-      const { updated } = await updateHouseholdLocation(
+      const { updated, turfsRecomputed } = await updateHouseholdLocation(
         household,
         { lat: data.lat, lng: data.lng },
         { source: data.source, byUserId: req.user._id, accuracy: data.accuracy ?? null, scope: data.scope || 'unit' }
@@ -461,7 +461,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
       // Minimal wire shape: the client reads only location/coordSource/coordConfidence
       // (recordLocationCorrection reconcile) and `moved`. Not per-round — a pin move
       // has no status semantics — but the raw doc over-shipped (previousLocation,
-      // correctedBy, normalizedAddress...).
+      // correctedBy, normalizedAddress...). turfsRecomputed mirrors the web PATCH.
       const h = updated[0];
       return res.status(201).json({
         household: {
@@ -471,6 +471,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
           coordConfidence: h.coordConfidence,
         },
         moved: updated.length,
+        turfsRecomputed,
       });
     } catch (err) {
       if (err.code === 'out_of_bounds' || err.code === 'invalid_coords') {

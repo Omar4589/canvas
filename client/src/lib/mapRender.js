@@ -238,6 +238,23 @@ export function overlapDoorsToGeoJSON(households, overlapIds) {
   };
 }
 
+// "Select doors" rings. `doors` are the DRAWN rows the selection resolved to (never the raw id
+// set — a door a filter or a refetch dropped would otherwise leave a ring floating over nothing),
+// and `markIds` are the ones the action would actually mark, so the ring can say which is which.
+export function doorSelectionToGeoJSON(doors, markIds) {
+  const marks = markIds instanceof Set ? markIds : new Set(markIds || []);
+  return {
+    type: 'FeatureCollection',
+    features: (doors || [])
+      .filter((h) => h.location?.lng != null && h.location?.lat != null)
+      .map((h) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [h.location.lng, h.location.lat] },
+        properties: { id: h.id, mark: marks.has(h.id) },
+      })),
+  };
+}
+
 export function initialsFor(canvasser) {
   if (!canvasser) return '';
   const f = (canvasser.firstName || '').trim();
@@ -362,6 +379,12 @@ export function pointToGeoJSON(activity) {
 // (green/blue/red/amber/purple/gray) so they read as route endpoints, not statuses.
 export const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
 export const LAST_KNOCK_COLOR = '#db2777'; // pink
+
+// "Select doors" ring colors. Blue is the same blue the lasso band and the selected-door ring
+// already use ("this is what you picked"); slate is the restricted slate ("this one stays as it
+// is"). Literal hexes, like every other paint value here — Mapbox can't read CSS variables.
+export const SELECTION_MARK_COLOR = '#2563eb'; // blue — will be marked
+export const SELECTION_SKIP_COLOR = '#475569'; // slate — will be skipped
 
 // (Re)create all sources/layers/images. Called on initial `load` AND after every
 // `setStyle` (a style swap wipes custom sources/layers/images), so the basemap can
@@ -601,6 +624,41 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       'circle-stroke-color': '#f59e0b',
       'circle-stroke-width': 3,
       'circle-stroke-opacity': 0.95,
+    },
+  });
+
+  // "Select doors" selection — a ring around every door in the current lasso/click selection,
+  // blue where the action would mark and slate where it would skip. Two layers, the same
+  // treatment the other rings here use: a transparent fill so the house icon still reads
+  // through, over a white halo so the ring survives a dark or satellite basemap. Empty until
+  // MapPage pushes the drawn selection.
+  map.addSource('door-selection', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer({
+    id: 'door-selection-halo',
+    type: 'circle',
+    source: 'door-selection',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 13, 13, 16, 17, 18, 21],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 5.5,
+      'circle-stroke-opacity': 0.85,
+    },
+  });
+  map.addLayer({
+    id: 'door-selection-ring',
+    type: 'circle',
+    source: 'door-selection',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 13, 13, 16, 17, 18, 21],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': [
+        'case',
+        ['boolean', ['get', 'mark'], false],
+        SELECTION_MARK_COLOR,
+        SELECTION_SKIP_COLOR,
+      ],
+      'circle-stroke-width': 3,
     },
   });
 

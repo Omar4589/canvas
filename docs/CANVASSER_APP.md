@@ -251,7 +251,8 @@ spot on their next sync. Knock the door you actually stood at — if the pin was
 entry look suspicious, correcting the pin clears that up afterwards ([AUDIT.md](AUDIT.md) § B.7).
 
 Leads and admins: the affordance is the same screen, reached through **Switch to canvass mode**, plus
-the web map's "Move pin". See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+the web Map page's and Turf Cutting page's "Move pin" (the latter from a house or building popup). See
+[MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
 
 ### Taking a survey
 

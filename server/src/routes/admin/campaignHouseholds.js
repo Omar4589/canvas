@@ -8,6 +8,7 @@ import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 
 // Campaign-nested household admin actions. Today: correcting a door's pin
 // (PATCH .../households/:householdId/location). Mounted at
@@ -16,6 +17,14 @@ const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
 // Archived campaign ⇒ read-only: a finished race's pins stay where the field left them.
 router.use(requireActiveCampaign());
+
+// Record-level audit tag for :householdId (same pattern as routes/admin/turfs.js and
+// routes/admin/households.js) — the pin PATCH is a single-record write, so a staff request
+// under a grant logs WHICH door was moved.
+router.param('householdId', (req, res, next, householdId) => {
+  if (mongoose.isValidObjectId(householdId)) addAuditSubjects(res, 'household', householdId);
+  next();
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -46,7 +55,7 @@ router.patch('/:householdId/location', async (req, res, next) => {
 
     const data = locationSchema.parse(req.body);
     try {
-      const { updated } = await updateHouseholdLocation(
+      const { updated, turfsRecomputed } = await updateHouseholdLocation(
         household,
         { lat: data.lat, lng: data.lng },
         { source: 'admin_drag', byUserId: req.user._id, scope: data.scope || 'unit' }
@@ -61,6 +70,8 @@ router.patch('/:householdId/location', async (req, res, next) => {
           correctedAt: h.correctedAt,
         },
         moved: updated.length,
+        // Books whose outline was redrawn around the new spot (display-only; [] when none).
+        turfsRecomputed,
       });
     } catch (err) {
       if (err.code === 'out_of_bounds' || err.code === 'invalid_coords') {

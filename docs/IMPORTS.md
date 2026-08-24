@@ -39,9 +39,65 @@ history below only lists that campaign's imports.
   own voters, doors, and statuses. A person already marked **Do not contact** anywhere in the org
   arrives here already flagged.
 
-## Any vendor file — CSV or Excel
+## Rows are people; doors are addresses
 
-You can upload **`.csv` or `.xlsx`** directly. **If an Excel file has several tabs, only the first
+A vendor file has **one row per voter**, and Doorline counts **doors** — so the number of doors an
+import creates is always lower than the number of rows, often by a third. Nothing was lost; the rows
+were folded onto their addresses:
+
+- Several voters usually share an address, so several rows become **one door**. A file of about 2,900
+  rows where most homes hold two registered voters is roughly 2,000 doors.
+- **Each apartment unit is its own door** — "Apt 2" and "Apt 3" at one building are two doors (and one
+  map pin, because vendors place every unit of a building at the same rooftop). A building is never
+  counted as one door.
+- A second file that overlaps the first **reuses** the doors it already created rather than making new
+  ones. Vendors often split one precinct into two files by target (say a "strong" file and a "swing"
+  file); a home with one voter in each file is **one** door, created by the first file and simply
+  re-used by the second.
+- A row is **skipped** only for a missing required field (first name, last name, Voter ID, address,
+  city, state, zip), a Voter ID that is a spreadsheet error value, coordinates that aren't valid
+  numbers, or a Voter ID repeated inside the file. Skipped rows show under **Errors** in the history
+  table, and the preview lists each one with its reason. A skipped row costs a **voter**, not a door,
+  unless it was the only voter at that address.
+
+Reading the **Recent imports** table: **Voters** is how many rows imported; **Households** is how many
+distinct addresses those rows live at; **New** is how many of each were created by *this* file (lower
+than Households when an earlier file already had some of the addresses); **Moved / Emptied** is voters
+who changed address and doors left with no voters; **Errors** is skipped rows.
+
+**A worked example.** A client sent six files for three precincts — a "strong" and a "swing" file per
+precinct — and said they held 2,898 doors. The files had 2,898 rows, i.e. 2,898 voters (their vendor's
+household id was unique per row, so it was a person key, not a household key). Those voters live at
+**2,055 distinct addresses** — the doors Doorline reported — in **1,677 buildings** (43 apartment
+buildings hold 421 of the doors; the rest are single homes). Each swing file shared 98 to 143 addresses
+with its precinct's strong file, which is why its **New** was lower than its **Households**. Exactly one
+row was skipped, for a blank first name, and its address survived through another resident. The client's
+count and the app's count were both right — they counted different things. To reconcile a vendor's
+number, ask whether it counts **rows**, **addresses**, or **rooftops**; only the middle one is a door.
+
+## Any vendor file — CSV, Excel, or a delimited text export
+
+You can upload **`.csv`, `.xlsx`, or any delimited text export** (`.txt`, `.tsv`) directly. The
+delimiter — comma, tab, pipe, semicolon — is **detected for you**, and commas sitting *inside* a
+field don't confuse a tab-separated file.
+
+**About `.xls`.** Two completely different things arrive with that extension, and the app tells them
+apart by reading the file's **contents**, never its name:
+
+- **Delimited text named `.xls`** — what several state and vendor exports actually ship (Florida's
+  voter export is tab-separated text with a `.xls` name). This imports normally. Nothing to convert.
+- **A genuine Excel 97–2003 workbook** — an older binary format with nothing in common with `.xlsx`
+  beyond the first three letters. (`.xlsx` is a zip of XML files; `.xls` is an OLE2 binary document.)
+  The app cannot read it and **refuses it with the remedy**: open it in Excel, **File → Save As →
+  Excel Workbook (.xlsx)**, and upload the `.xlsx`. It also tops out at 65,536 rows, so a large voter
+  file was never one of these to begin with.
+
+Before this distinction existed, a real `.xls` was read as though it were text: the mapping step
+showed a single column of binary junk and zero rows, so a **format** problem looked like a **column**
+problem. The same content-first rule now applies to the Voter-ID uploads (walk list from CSV, early
+voting, do-not-contact), which share one parser.
+
+**If an Excel file has several tabs, only the first
 one is imported** — the leftmost tab you can see (hidden sheets are skipped, and it isn't necessarily
 the tab Excel opens on, which is whichever one was showing when the file was last saved). Vendor files
 often carry extra `Summary` or `README` tabs after the data; those are ignored, which is usually what
@@ -105,9 +161,11 @@ An audit run finds them and can correct them:
 - Nothing is corrected on suspicion. Each suspect is re-checked against the **address itself**, and
   only a confident, clearly-different answer wins.
 - Corrected doors keep their books. A door fixed this way stays in whatever book was cut around its
-  old location until you re-cut that pass. And if **Remove apartments** had excluded a fake stack,
-  fixing the pins does not put those doors back in books — re-include and re-cut (the script prints
-  the exact steps).
+  old location until you re-cut that pass — the book's **outline** is redrawn around the corrected pin
+  (the repair redraws every live round it touched once it applies, and a single pin moved by hand
+  redraws as it saves), but its membership and walk order don't move. And if **Remove apartments** had
+  excluded a fake stack, fixing the pins does not put those doors back in books — re-include and re-cut
+  (the script prints the exact steps).
 
 Ask your Doorline contact to run it — it's an operator tool, not a page in the app. The import
 preview also warns up front now: *"N doors sit on an exact map spot shared with doors from other addresses"*
@@ -214,6 +272,11 @@ walkthrough — including when to use **Claim all Intake** vs. a saved search �
   canvasser won't be sent back automatically.
 - **Bad/odd addresses aren't validated** beyond requiring coordinates; a coordinate-less row is skipped
   (the preview counts it under *Rows skipped*).
+- **A file coordinate that is a valid number in the wrong place is accepted as-is.** The import only
+  rejects coordinates that aren't numbers or are outside the world; it doesn't check that a pin is
+  anywhere near its street. (In one real file a row sat 179 miles from its address, with the vendor's
+  own delivery-point status marking it doubtful.) The door imports, pinned wrong, and the post-import
+  pin audit — not the import — is what finds and corrects it. See *Fixing pins that came in wrong*.
 - **Duplicate-ID skips are counted as rows, not values.** 37,000 rows all carrying the same junk ID read
   as 37,000 skipped rows — with the repeated value named — never as "1 duplicate".
 
@@ -238,6 +301,25 @@ Import pipeline: [services/import/csvImporter.js](../server/src/services/import/
 `normalizeAddress` = `[addr1, addr2, city, state, zip5]` upper-trimmed and joined with `|` — exact
 match only (no fuzzy / "St" vs "Street"). `looseAddressKey` (same file) is a fuzzier key — expands
 ST→STREET, N→NORTH, etc. — used **only** for the preview's near-duplicate detection, never for the upsert.
+
+**Recent-imports table columns** ([ImportPage.jsx](../client/src/pages/ImportPage.jsx), persisted on
+`ImportJob` by [importProcessor.js](../server/src/services/import/importProcessor.js)):
+
+| Column | Field | Meaning |
+|---|---|---|
+| Voters | `uniqueVoters` | valid rows after validation (and after any geocode drops) — `rowCount` in `applyImport` |
+| Households | `uniqueHouseholds` | `householdMap.size` — distinct `normalizedAddress` keys in the file |
+| New | `newVoters` / `newHouseholds` | `countDocuments` delta across the write — created by **this** import (rows that matched a pre-existing door/voter don't count) |
+| Moved / Emptied | `movedVoters` / `deactivatedDoors` | re-housed voters; doors at 0 voters after the import |
+| Errors | `errorCount` | `errors.length` — skipped rows (`missing_required`, `spreadsheet_error`, `bad_coords`, geocode-unplaceable). In-file duplicate Voter IDs are dropped first-wins and counted in `dupRows`, **not** in `errorCount`. |
+
+So Σ `newHouseholds` over a campaign's completed, non-undone imports equals the campaign's active door
+count when nothing was emptied, and `uniqueHouseholds − newHouseholds` on a later file is exactly the
+set of addresses an earlier file already created. `bad_coords` only tests that latitude/longitude are
+finite and in range — a file coordinate that is a valid number in the wrong place (one row in the
+worked example above sat 179 miles from its street, DPV `D`) is accepted as-is and is the pin audit's
+job (`repair:import-pins`, §H), not the validator's. Verified 2026-08-22 by replaying `buildImportRows`
+over a six-file upload: 2,898 rows → 2,897 valid → 2,055 keys, column for column against the table.
 
 **`isActive` lifecycle.** A door starts active. After an import,
 [`recomputeHouseholdActive`](../server/src/services/import/recomputeHouseholdActive.js) (over the
@@ -438,6 +520,25 @@ file whenever the zip lists the sheet before sharedStrings, and breaking out ear
 callback — a leaked spool per preview. `estimatedRows` (xlsx `<dimension>`; the CSV extrapolation)
 feeds the client's oversized warning before the user maps 24 columns. `peekUpload` takes a Buffer or a
 **file path** (multer `diskStorage`, §E — the upload never enters the web dyno's heap).
+
+**Format is decided by CONTENT, never by filename.** `looksXlsx` accepts the `.xlsx` name *or* the
+`PK` zip signature; `looksLegacyXls(buffer)` matches **only** the 8-byte OLE2 Compound File signature
+`D0 CF 11 E0 A1 B1 1A E1` that leads every Excel 97–2003 workbook, and raises the typed
+`LegacyXlsError` (`code: 'legacy-xls'`, HTTP 400, message carries the Save-As remedy) from
+`streamParse`, `parseUpload`, `peekUpload` **and** `parseIdsAndFindVoters`. It deliberately does
+**not** trigger on the `.xls` extension: vendors ship delimited *text* named `.xls` (Florida's export
+is tab-separated), Papa sniffs the delimiter, and those files import correctly — refusing on the name
+would break a working upload. Untrapped, an OLE2 buffer fell through to the CSV branch and Papa read
+the binary as text: one garbage header column, zero rows, so the mapping step blamed the *columns*.
+The same check catches a real `.xls` **renamed** `.xlsx`, which passed `looksXlsx` on the name and
+died inside unzipper as a bare `FILE_ENDED` 500. The three stash-and-enqueue routes (`POST /csv`,
+`/csv/preview-enqueue`, `/geocode-check`) never parse, so they sniff the upload's first 8 bytes
+themselves (`refusedAsLegacyXls`) and refuse **before** writing a GridFS blob and an ImportJob the
+worker could only fail; `importProcessor` still classes `LegacyXlsError` as **unrecoverable**, so a
+job queued before this shipped fails once instead of burning its retry schedule. Both typed parse
+refusals (`ImportTooLargeError`, `LegacyXlsError`) are mapped to a coded 400 by one helper,
+`typedParseRefusal`. Client `accept` lists were widened to match what the parser really handles —
+`.csv,.tsv,.txt,.xls,.xlsx` on the Import page, `.csv,.tsv,.txt,.xls` on the three Voter-ID uploads.
 
 **One parse seam, now streaming:** `streamParse(buffer, filename, { onRow, maxRows, maxCells })`
 ([services/import/parseUpload.js](../server/src/services/import/parseUpload.js)) reads **CSV via
@@ -656,6 +757,18 @@ Traps this script is built around, each of which is a real failure mode:
   the book cut around its old location until that pass is re-cut), and `coordSource: 'corrected'` enters
   `buildPinFixMap`, downgrading past far-knock GPS flags at those doors — correct, but it moves
   historical Audit numbers.
+- **It re-hulls the book outlines itself — once, at the end.** Each per-door call passes
+  `rehull: false` to `updateHouseholdLocation` (the inline per-move re-hull that the UI pin writers get
+  — [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction" — would re-run the whole-pass Voronoi
+  per repaired door), and the revert path writes `doc.location` directly; so the script collects the
+  passes of **every** door it moved, repairs and reverts alike, and under `--apply` calls
+  `recomputePassTerritories(passId)` (full, no `onlyTurfIds`) once per touched **live** pass after the
+  campaign loop. `npm run recompute:territories -- --apply` is therefore no longer a required follow-up,
+  only the fallback for a pass the run reports it left alone.
+- **A re-import can still move an un-corrected pin with no re-hull.** The importer's reconcile `$set`s
+  `location` on an existing `coordSource:'file'` door straight from the file — that path never re-hulls,
+  so the outline follows on the next cut or `recompute:territories`. Corrected doors are shielded from
+  it (below).
 
 Idempotent: a repaired door becomes `'corrected'` and is excluded from the next run.
 

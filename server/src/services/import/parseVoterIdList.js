@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import { Voter } from '../../models/Voter.js';
 import { Household } from '../../models/Household.js';
 import { suggestMapping } from './canonicalFields.js';
+import { looksLegacyXls, LegacyXlsError } from './parseUpload.js';
 
 // IDs in a file that didn't match a voter in this campaign — capped so the response
 // stays small; the admin downloads these to fix and re-upload.
@@ -11,6 +12,11 @@ export const NOT_FOUND_CAP = 10000;
 // stateVoterId within `scopeFilter` ({ campaignId } or { organizationId }) — voter rows are
 // per-campaign, so the scope decides whether a sibling campaign's row counts as a match.
 async function parseIdsAndFindVoters(scopeFilter, fileBuffer, idColumn, projection) {
+  // A legacy .xls is binary — Papa would read it as text and hand back one garbage
+  // column, so the caller's refusal reads "could not detect a Voter ID column"
+  // instead of naming the format. Returned as { error } like every other soft
+  // failure here, so all six callers 400 with it unchanged.
+  if (looksLegacyXls(fileBuffer)) return { error: new LegacyXlsError().message, columns: [] };
   const csv = fileBuffer.toString('utf8');
   const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
   const columns = parsed.meta?.fields || [];

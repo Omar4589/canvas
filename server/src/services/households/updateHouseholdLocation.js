@@ -2,6 +2,7 @@ import { Household } from '../../models/Household.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
+import { rehullBooksForMovedHouseholds } from '../turf/rehullAfterPinMove.js';
 
 // Correct a household's pin. Shared by the canvasser (mobile) and admin (web)
 // endpoints so provenance can never drift.
@@ -9,14 +10,24 @@ import { buildingKeyForCoords } from '../../utils/buildingKey.js';
 // Deliberately touches ONLY the coordinate + provenance. It does NOT change
 // `turfId`/`walkOrder`/book membership (set at cut time, not re-derived from coords),
 // `status`, or any published `ClientReportMapPoint` snapshot — so a fix never re-cuts
-// turf or resets a door. A `HouseholdLocationChange` audit row is written per move.
+// turf or resets a door. It DOES redraw the affected book outlines afterwards
+// (`Turf.boundary`/`centroid` — display-only, best-effort; services/turf/rehullAfterPinMove.js)
+// so the door still sits inside its book's drawn shape; `rehull: false` opts out for a bulk
+// caller that redraws whole passes itself (migrations/repairImportPins.js). A
+// `HouseholdLocationChange` audit row is written per move.
 //
 // `scope: 'building'` also moves every OTHER active household sharing the same pin
 // (an apartment tower placed wrong), each getting its own provenance + audit row.
 //
-// Returns { updated: [householdDoc, ...] } (the primary first) or throws an Error with
+// Returns { updated: [householdDoc, ...], turfsRecomputed: string[] } (the primary first;
+// the ids of the books whose outline was redrawn — [] when no live book holds the door,
+// the pass was over the re-hull cap, or the redraw failed) or throws an Error with
 // `.code = 'out_of_bounds' | 'invalid_coords'` for a 4xx.
-export async function updateHouseholdLocation(household, { lat, lng }, { source, byUserId, accuracy = null, scope = 'unit' } = {}) {
+export async function updateHouseholdLocation(
+  household,
+  { lat, lng },
+  { source, byUserId, accuracy = null, scope = 'unit', rehull = true } = {}
+) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     const err = new Error('Invalid coordinates');
     err.code = 'invalid_coords';
@@ -68,5 +79,21 @@ export async function updateHouseholdLocation(household, { lat, lng }, { source,
       to,
     });
   }
-  return { updated: targets };
+
+  // Outlines LAST — every coordinate + audit row above is already committed, so the redraw is
+  // derived from then-current pins and can never gate (or roll back) the pin write. Logged, never
+  // thrown: a failed redraw leaves a stale outline, which recompute:territories heals.
+  let turfsRecomputed = [];
+  if (rehull) {
+    try {
+      turfsRecomputed = (await rehullBooksForMovedHouseholds({
+        campaignId: household.campaignId,
+        householdIds: targets.map((h) => h._id),
+        point: [lng, lat],
+      })) || [];
+    } catch (err) {
+      console.error('[pin-move] re-hull failed:', err?.message || err);
+    }
+  }
+  return { updated: targets, turfsRecomputed };
 }

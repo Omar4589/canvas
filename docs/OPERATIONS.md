@@ -359,9 +359,10 @@ the database while people are canvassing. So we build them on purpose, when we m
 ### Redraw the book shapes on the cut map (ONE TIME — after the containment release)
 
 The Turf Cutting map's book shapes now **contain every one of their houses** (a stray door gets a
-small pocket of its book's color instead of sitting outside the shape). New cuts and any book edit
-draw the new shapes automatically; **books cut before the release keep their old shapes until you run
-this once.** It rewrites only the drawn outlines — doors, canvasser assignments, and knocks are
+small pocket of its book's color instead of sitting outside the shape). New cuts, any book edit, and
+any pin move draw the new shapes automatically; **books cut before the release keep their old shapes
+until you run this once.** (It is also the fallback for a pin move whose redraw was skipped — a round
+over the inline cap, `TURF_REHULL_INLINE_MAX_DOORS`, default 60,000 booked doors — or failed.) It rewrites only the drawn outlines — doors, canvasser assignments, and knocks are
 untouched, so it is safe to run in the middle of a live round. Dry-runs by default; idempotent, so
 re-running is harmless.
 
@@ -574,9 +575,13 @@ Five notes on `repair:import-pins` specifically, because they surprise people:
   the identical point, and its matched ZIP equals the address's ZIP. Every run also re-checks the
   script's own past repairs against those gates (cache-only, free) and reverts any that fail — back
   to the file's pin, provenance reset to `'file'`. A pin whose latest move was human is never touched.
-- **It does not move books.** A repaired door stays in whatever book was cut around its old location
-  until that pass is re-cut. Run `npm run recompute:territories -- --apply` if a book *outline* now
-  looks wrong — that redraws outlines only, never membership.
+- **It does not move books — but it does redraw them.** A repaired door stays in whatever book was cut
+  around its old location until that pass is re-cut; under `--apply` the script redraws the outlines of
+  every live round whose doors it moved (repairs and reverts alike) once at the end of the run, so the
+  shapes follow the corrected pins on their own. `npm run recompute:territories -- --apply` is only the
+  fallback if an outline still looks wrong afterwards — it redraws outlines only, never membership. (A
+  re-import that moves an *un*-corrected pin does not redraw; that outline follows on the next cut or
+  the same fallback.)
 - **Use `--geocode` on the FIRST apply.** The placeholder-pin signal is stack-based: once a pin's
   cached-answer neighbours move away, an uncached tail door there is a lone door with no signal, and
   a later `--geocode` pass can't find it. Adjudicate the whole stack in one run.

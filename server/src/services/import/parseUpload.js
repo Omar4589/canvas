@@ -22,6 +22,36 @@ export function looksXlsx(buffer, filename) {
   return !!buffer && buffer.length > 1 && buffer[0] === 0x50 && buffer[1] === 0x4b;
 }
 
+// Legacy .xls (Excel 97–2003) is an OLE2 Compound File — a binary container with
+// nothing in common with .xlsx's zip-of-XML, and exceljs has no reader for it.
+// Detected by its 8 magic bytes and NEVER by the extension: vendors routinely ship
+// delimited TEXT named `.xls` (Florida's state export is tab-separated), and those
+// import correctly on the CSV path below because Papa sniffs the delimiter.
+// Refusing on the name would reject a file that parses fine.
+//
+// Without this check an OLE2 file falls through to the CSV branch and Papa reads
+// the binary as text — one garbage header column, zero rows — so it failed as
+// "wrong columns" rather than "wrong format". The same check catches a real .xls
+// RENAMED .xlsx, which passed looksXlsx on the name and died inside unzipper as a
+// bare `FILE_ENDED` 500.
+const OLE2_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+export const looksLegacyXls = (buffer) =>
+  !!buffer && buffer.length >= OLE2_MAGIC.length && OLE2_MAGIC.every((b, i) => buffer[i] === b);
+
+// Typed like ImportTooLargeError so every route can 400 with the remedy and the
+// worker can mark it unrecoverable instead of retrying a file no retry can read.
+export class LegacyXlsError extends Error {
+  constructor() {
+    super(
+      'This is an old-format Excel file (.xls, Excel 97–2003), which we cannot read. Open it in Excel and use ' +
+        'File → Save As → Excel Workbook (.xlsx), then upload the .xlsx.'
+    );
+    this.name = 'LegacyXlsError';
+    this.code = 'legacy-xls';
+  }
+}
+
 function parseCsv(buffer) {
   const parsed = Papa.parse(buffer.toString('utf8'), {
     header: true,
@@ -211,6 +241,7 @@ export class ImportTooLargeError extends Error {
  * not after materializing everything.
  */
 export async function streamParse(buffer, filename, { onRow, maxRows = Infinity, maxCells = Infinity } = {}) {
+  if (looksLegacyXls(buffer)) throw new LegacyXlsError();
   let totalRows = 0;
   let cells = 0;
   const guard = (headerCount) => {
@@ -315,6 +346,8 @@ export async function streamParse(buffer, filename, { onRow, maxRows = Infinity,
 }
 
 export async function parseUpload(buffer, filename) {
+  // Guarded here too, not just in streamParse: the CSV branch below never calls it.
+  if (looksLegacyXls(buffer)) throw new LegacyXlsError();
   if (looksXlsx(buffer, filename)) {
     // Array mode, kept for small-file callers and tests — same engine, accumulated.
     const rows = [];

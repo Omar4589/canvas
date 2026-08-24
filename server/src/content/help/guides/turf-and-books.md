@@ -40,6 +40,7 @@ Don't like the layout, or the voter list changed? If the books are still drafts,
 - Added a few new addresses? Use **Add as new book** to cut only the doors not yet in any book — no recut, no downtime. Big adds run in the background with the same progress bar as Generate; it's safe to leave the page and come back.
 - Reshape a book or two with **move**, **merge**, or **split**.
 - A book gated off? **Mark restricted** — and if only *part* of it is out of reach, mark **just the untouched doors**, leaving the ones your crew already reached alone. Just one house? Click it on the map and **Mark restricted…** in its popup — same mark, one door. See [The Turf Cutting page](page-turf-cutting) and [Can I mark just one house restricted?](mark-one-home-restricted).
+- A dot sitting in the wrong place? Click it and choose **Move pin →** in its popup, drag the blue marker to the right spot, and **Save location** — or **Move building pin →** on a building to move every unit at that pin together. The book's outline redraws around the new spot; the door keeps its book and its place in the walk order (use **move** as well if it belongs in a different book). See [Fixing a house pin](fix-pin-location).
 
 > Tip: Knocks follow the *door*, not the book — so moving, merging, or splitting never changes your [coverage or knock counts](coverage-vs-knocks).
 

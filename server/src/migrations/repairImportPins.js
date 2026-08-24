@@ -7,6 +7,8 @@ import { User } from '../models/User.js';
 import { Household } from '../models/Household.js';
 import { HouseholdLocationChange } from '../models/HouseholdLocationChange.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
+import { Turf } from '../models/Turf.js';
+import { Pass } from '../models/Pass.js';
 import { haversineMeters } from '../utils/normalizeAddress.js';
 import { inStateBounds } from '../utils/stateBounds.js';
 import { streetOf, baseAddressOf } from '../utils/streetName.js';
@@ -14,6 +16,7 @@ import { buildingKeyForCoords } from '../utils/buildingKey.js';
 import { classifyStackedPins } from '../utils/stackedPins.js';
 import { resolve as geocodeResolve, geocodeCostCents } from '../services/import/geocode/geocodeService.js';
 import { updateHouseholdLocation } from '../services/households/updateHouseholdLocation.js';
+import { recomputePassTerritories } from '../services/turf/generateTurf.js';
 
 // Find — and optionally fix — doors that an import pinned in the wrong place.
 //
@@ -80,7 +83,11 @@ import { updateHouseholdLocation } from '../services/households/updateHouseholdL
 //     them when their evidence fails the trust gates.
 //   · Book / turf membership, walkOrder, status, or any knock. updateHouseholdLocation moves the
 //     coordinate and its provenance, nothing else. A repaired door therefore stays in the book
-//     that was cut around its WRONG location until you re-cut that pass.
+//     that was cut around its WRONG location until you re-cut that pass. What DOES follow the
+//     pin is the drawn OUTLINE: once every campaign is done, --apply redraws the territories
+//     (Turf.boundary — display only) of each live round that books a moved door, repairs and
+//     reverts alike, once per round rather than per door (the per-move re-hull the web/mobile
+//     pin writers get is switched off here with rehull:false). Archived rounds are left as-is.
 //   · Anything, at all, without --apply.
 //
 // KNOWN AFTER-EFFECTS of --apply, stated out loud because they change numbers you may be
@@ -504,6 +511,15 @@ async function main() {
   let totalDistrusted = 0;
   let totalRevertsPlanned = 0;
   let totalReverted = 0;
+  // Every door whose pin actually moved this run — repairs AND reverts — keyed by campaign, so
+  // the outlines of each live round that books one can be redrawn ONCE after the loop.
+  const movedByCampaign = new Map();
+  const noteMoved = (doc) => {
+    const k = String(doc.campaignId);
+    if (!movedByCampaign.has(k)) movedByCampaign.set(k, []);
+    movedByCampaign.get(k).push(doc._id);
+  };
+  const campaignName = new Map(campaigns.map((c) => [String(c._id), c.name]));
 
   for (const campaign of campaigns) {
     const audit = await auditCampaign(campaign);
@@ -555,12 +571,14 @@ async function main() {
       );
       if (!APPLY) continue;
       // Hydrated, not .lean() — updateHouseholdLocation calls h.save(). Never scope 'building':
-      // a wrong pin may sit on top of doors that are legitimately there.
+      // a wrong pin may sit on top of doors that are legitimately there. rehull:false — the
+      // outlines are redrawn once per touched round after the loop, not once per door here.
       const doc = await Household.findById(h._id);
       if (!doc) continue;
       try {
-        await updateHouseholdLocation(doc, to, { source: 'import_repair', byUserId: USER_ID, scope: 'unit' });
+        await updateHouseholdLocation(doc, to, { source: 'import_repair', byUserId: USER_ID, scope: 'unit', rehull: false });
         totalRepaired += 1;
+        noteMoved(doc);
       } catch (err) {
         console.log(`    ! skipped: ${err.message}`);
       }
@@ -605,8 +623,40 @@ async function main() {
             to: { type: 'Point', coordinates: from.coordinates },
           });
           totalReverted += 1;
+          noteMoved(doc);
         } catch (err) {
           console.log(`    ! revert skipped: ${err.message}`);
+        }
+      }
+    }
+  }
+
+  // Redraw the outlines the moves just invalidated — ONCE per touched live round, not per door
+  // (the per-move re-hull is switched off above; a run moves many doors in the same few rounds).
+  // Display-only Turf.boundary, the same write recompute:territories makes; membership, walkOrder
+  // and status are untouched. Archived rounds are history and are skipped. Best-effort: a failed
+  // round is named so the operator can run recompute:territories for it by hand.
+  if (APPLY && movedByCampaign.size) {
+    console.log('');
+    for (const [campaignId, hhIds] of movedByCampaign) {
+      const livePasses = await Pass.find({ campaignId, status: { $ne: 'archived' } }, { _id: 1 }).lean();
+      if (!livePasses.length) continue;
+      const passIds = await Turf.distinct('passId', {
+        passId: { $in: livePasses.map((p) => p._id) },
+        householdIds: { $in: hhIds },
+        status: { $in: ['draft', 'published'] },
+      });
+      for (const passId of passIds) {
+        const t0 = Date.now();
+        try {
+          // withCentroid: the label anchor follows the outline, exactly as a UI pin move does.
+          await recomputePassTerritories(passId, { withCentroid: true });
+          console.log(`${campaignName.get(campaignId) || campaignId}: redrew book outlines (and label centroids) for round ${passId} in ${Date.now() - t0}ms.`);
+        } catch (err) {
+          console.log(
+            `${campaignName.get(campaignId) || campaignId}: ! outline redraw FAILED for round ${passId} (${err.message}) — ` +
+              'run `npm run recompute:territories -- --apply` to redraw it.'
+          );
         }
       }
     }
@@ -645,9 +695,11 @@ async function main() {
     }
     if (APPLY && totalRepaired) {
       console.log('\nBook membership was NOT changed — a repaired door stays in the book cut around its old');
-      console.log('location until you re-cut that pass. Run `npm run recompute:territories -- --apply` if a');
-      console.log('book OUTLINE now looks wrong. Past "far from house" GPS flags at these doors are now');
-      console.log('downgraded, so historical Audit counts will drop.');
+      console.log('location until you re-cut that pass. The book OUTLINES of every live round that holds a');
+      console.log('moved door were redrawn above; archived rounds (and any round marked FAILED) were left');
+      console.log('alone — run `npm run recompute:territories -- --apply` only if one of those still looks');
+      console.log('wrong. Past "far from house" GPS flags at these doors are now downgraded, so historical');
+      console.log('Audit counts will drop.');
       console.log('\nIf "Remove apartments" had excluded any of these stacks (collapsed single-family homes');
       console.log('read as buildings), fixing the pins does NOT un-exclude the doors. On Turf Cutting, the');
       console.log('"N apartment doors excluded" strip has a "Re-include" button — it only appears while the');

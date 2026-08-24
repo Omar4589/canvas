@@ -9,7 +9,7 @@ summary: How a voter file matches your existing doors, what goes live, and what 
 tags: import, voters, intake
 ---
 
-**Voter Import** lives inside a campaign — open the campaign, then pick **Voter Import** in the sidebar. You can upload a `.csv` or `.xlsx` directly, and you can upload **more than one file** over the life of a campaign.
+**Voter Import** lives inside a campaign — open the campaign, then pick **Voter Import** in the sidebar. You can upload a `.csv`, an `.xlsx`, or any delimited text export (`.txt`, `.tsv`) directly — the separator is worked out for you — and you can upload **more than one file** over the life of a campaign. A file named `.xls` is usually delimited text and imports normally; if it turns out to be a genuine Excel 97–2003 workbook the upload is refused with the fix (Save As `.xlsx`) — see [My voter file is a .xls — can I upload it?](xls-file-wont-upload).
 
 **If your Excel file has several tabs, only the first one is imported** — the leftmost tab you can see (hidden sheets are skipped; note it isn't always the tab Excel opens on, which is whichever one was showing when the file was last saved). Extra `Summary` or `README` tabs after the data are simply ignored. The **Map columns** step names the tab it read and lists the ones it skipped, so you can check it picked the right one. If your voter data is on a different tab, move that tab to the front of the workbook and upload again.
 
@@ -18,6 +18,7 @@ tags: import, voters, intake
 - A row matches an existing **door by its address** (after light normalization). A different or misspelled address becomes a separate door.
 - A row matches a **voter by their state Voter ID, within the campaign you're importing into**. Re-uploading the same voter updates them in place — imports are safe to repeat.
 - **Running more than one campaign?** Each campaign gets its **own copy** of every voter and door it imports. Two campaigns can upload overlapping — even identical — files and neither disturbs the other: separate doors, separate books, separate counts. The person stays one person to your organization (a **Do not contact** set anywhere applies everywhere, and they appear once in the org-wide Voters directory), but each campaign works its own copy.
+- **Rows are people; doors are addresses.** Several voters usually share an address, every apartment unit is its own door, and a second file reuses the doors an earlier file already created — so an import always reports fewer doors than the file has rows. In the **Recent imports** table, **Voters** is rows imported, **Households** is distinct addresses in the file, **New** is what *this* file created, **Moved / Emptied** is voters who changed address and doors left empty, and **Errors** is skipped rows. See [My file has more rows than the doors the import reports](fewer-doors-than-file-rows).
 
 ## Preview before you commit
 

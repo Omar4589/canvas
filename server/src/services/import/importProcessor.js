@@ -426,7 +426,8 @@ export async function processImportJob(job) {
     const unrecoverable =
       err instanceof UnrecoverableError ||
       /FileNotFound|file not found/i.test(String(err?.message)) ||
-      err?.name === 'ImportTooLargeError';
+      err?.name === 'ImportTooLargeError' ||
+      err?.name === 'LegacyXlsError';
     await ImportJob.updateOne(
       { _id: importJobId },
       {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors } from './cutMapDoors.js';
+import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors, drawnCutDoors } from './cutMapDoors.js';
 
 // cutMapDoors.js is the ONE place the Turf Cutting map's loose-door rule lives, so this is
 // where it gets locked down. The regression under test (shipped + caught in prod, 2026-07):
@@ -61,4 +61,93 @@ test('the toggle count matches exactly the doors the default view hides', () => 
 test('undefined/empty doors are safe (queries still loading)', () => {
   assert.deepEqual(visibleCutDoors(undefined, PASS2_BOOKS, false), []);
   assert.equal(countLooseDoors(undefined, PASS2_BOOKS), 0);
+});
+
+// ---------------------------------------------------------------------------
+// drawnCutDoors — "what is the map ACTUALLY drawing", the pool a lasso may catch.
+// Two of the page's three visibility mechanisms live in Mapbox layer state (the
+// book-status chips' setFilter, the Houses layer's visibility) and are invisible to
+// `visibleCutDoors`, so a lasso hit-tested against that alone would select doors that
+// are not on the screen — and then desk-restrict them.
+
+// Doors carry coordinates here: the chip filter is applied per BUILDING (rounded key).
+const P = (id, turfId, lng, lat) => ({ id, turfId, lng, lat });
+
+test('no chip active: drawnCutDoors is exactly visibleCutDoors', () => {
+  const doors = [P('d1', 'b21', -96.1, 41.1), P('d2', 'b22', -96.2, 41.2), P('d3', 'b11', -96.3, 41.3)];
+  const drawn = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: true, visibleBookIds: null });
+  assert.deepEqual(drawn, visibleCutDoors(doors, PASS2_BOOKS, true));
+});
+
+test('Houses layer off: NOTHING is drawn, so nothing is selectable', () => {
+  const doors = [P('d1', 'b21', -96.1, 41.1)];
+  assert.deepEqual(
+    drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: true, visibleBookIds: null, housesVisible: false }),
+    []
+  );
+  // …even with a chip that would otherwise pass the door through.
+  assert.deepEqual(
+    drawnCutDoors({
+      doors,
+      bookIds: PASS2_BOOKS,
+      showLoose: true,
+      visibleBookIds: new Set(['b21']),
+      housesVisible: false,
+    }),
+    []
+  );
+});
+
+test('a book-status chip hides the other books\' doors', () => {
+  const doors = [P('d1', 'b21', -96.1, 41.1), P('d2', 'b22', -96.2, 41.2)];
+  const drawn = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: false, visibleBookIds: new Set(['b21']) });
+  assert.deepEqual(drawn.map((d) => d.id), ['d1']);
+});
+
+test('ANY active chip hides loose doors — their turfId is in no book\'s id list', () => {
+  // The regression this pins: the map draws loose dots with turfId '' (doorsToGeoJSON), and
+  // `['in', ['get','turfId'], [...bookIds]]` never matches '', so "Not in a book" being ON
+  // does NOT put them back on screen while a chip is active.
+  const doors = [P('d1', 'b21', -96.1, 41.1), P('d5', null, -96.5, 41.5)];
+  const drawn = drawnCutDoors({
+    doors,
+    bookIds: PASS2_BOOKS,
+    showLoose: true, // Layers → "Not in a book" is ON
+    visibleBookIds: new Set(['b21', 'b22']), // …but a chip is active
+  });
+  assert.deepEqual(drawn.map((d) => d.id), ['d1']);
+});
+
+test('the loose-door toggle still applies before the chip filter', () => {
+  const doors = [P('d1', 'b21', -96.1, 41.1), P('d3', 'b11', -96.3, 41.3)];
+  // Chip lets b11 through, but the door is loose for THIS pass and the toggle is off.
+  const drawn = drawnCutDoors({
+    doors,
+    bookIds: PASS2_BOOKS,
+    showLoose: false,
+    visibleBookIds: new Set(['b21', 'b11']),
+  });
+  assert.deepEqual(drawn.map((d) => d.id), ['d1']);
+});
+
+test('a stacked building is drawn or hidden as ONE pin, by its first unit\'s book', () => {
+  // Same rounded coordinate = one building pin, whose turfId is the FIRST unit's (groupDoors).
+  const stack = [P('u1', 'b21', -96.4, 41.4), P('u2', 'b22', -96.4, 41.4)];
+  const chip = new Set(['b21']);
+  // The pin passes the chip, so BOTH units are on the screen and both are selectable —
+  // judging u2 on its own turfId would let the lasso miss a door whose pin it ringed.
+  const shown = drawnCutDoors({ doors: stack, bookIds: PASS2_BOOKS, showLoose: false, visibleBookIds: chip });
+  assert.deepEqual(shown.map((d) => d.id), ['u1', 'u2']);
+  // And when the pin's own book is filtered out, neither unit is drawn.
+  const hidden = drawnCutDoors({
+    doors: stack,
+    bookIds: PASS2_BOOKS,
+    showLoose: false,
+    visibleBookIds: new Set(['b22']),
+  });
+  assert.deepEqual(hidden.map((d) => d.id), []);
+});
+
+test('undefined doors are safe (the query is still loading)', () => {
+  assert.deepEqual(drawnCutDoors({ doors: undefined, bookIds: PASS2_BOOKS, showLoose: false }), []);
 });

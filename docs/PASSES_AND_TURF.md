@@ -220,6 +220,67 @@ campaign's **desk marks — a whole book or a single home.**
   mark follows the **door** and counts under whatever book the door lands in next. Deleting a draft
   **round** does remove that round's desk marks (there would be no book left to undo them from).
 
+**Marking many homes at once — "Select doors" on the map.** A fence line, a cul-de-sac behind one gate, a
+block the contractors closed off: forty homes shouldn't mean forty popups, and a whole book is the wrong
+size. Both **web** maps — the Turf Cutting page and the **Map** page — carry a **Select doors** pill in the
+map's top-left controls, beside the fullscreen button (and it survives fullscreen). It expands into a small
+panel with a **Pan | Lasso** toggle, a **Done** button and the gestures; while the mode is on the map
+belongs to the doors — no popup or detail panel opens, and on Turf Cutting book selection and manual area
+drawing stand down so nothing fights the drag.
+
+- **Picking.** **Drag a lasso** around the homes you mean — draw another shape somewhere else and it adds
+  to the first, so three streets take three drags. **Click a dot** to toggle one home; **click a building**
+  and every unit on that pin toggles together, the same rule its popup already uses. **⌥-drag** (Option /
+  Alt) takes the doors inside the shape back out. **Hold Space** — or pick **Pan** — to move the map without
+  leaving the mode. **Esc** cancels a drag you're in the middle of; press it again, or hit **Done**, to
+  leave (which clears the selection).
+- **You can only pick what the map is drawing.** Whatever your filters, the **Layers** toggles and the
+  book-status chips are already hiding is not selectable — if you can't see it you can't catch it, and a
+  lasso over it takes nothing. Turn the **Houses** layer off on Turf Cutting and nothing is selectable at
+  all; the bar says so. Doors a **target-filter preview** merely *fades* are still drawn, so they are still
+  caught — the bar counts them and tells you.
+- **Buildings come as a whole.** Units at one pin share a rounded location, but the icon is drawn at the
+  first unit's exact spot, so a lasso edge can slice a stack. If the shape catches any unit at a pin it
+  takes them all — you meant the building.
+- **1,000 doors per action, and an over-size lasso is refused whole.** Nothing is silently trimmed to "the
+  first thousand": the bar tells you how many that shape would have made it, and the selection stays as it
+  was. Zoom in and take a smaller stretch, or act on what you have and lasso the rest after.
+- **The bar along the bottom does the counting.** "**1,284 doors selected**" over a breakdown — how many
+  **will be marked**, how many are **already restricted**, how many were **completed this round**, how many
+  **can't be marked** — with an **ⓘ** that spells each number out. On the map every selected door gets a
+  ring: **blue** where the action would mark it, **slate** where it would be skipped.
+- **It always asks before it writes.** Up to 25 doors the confirm is a second tap in the bar itself; above
+  that it's the same dialog the whole-book action uses, **typed `restrict`** gate included (the typing is
+  for **marking**; Unmark asks in the same dialog without it). Whatever the
+  size, if the selection holds doors your crew already **reached** you get the whole-book flow's **scope
+  choice** — *Only unknocked doors* (the default, which leaves every not-home and refusal exactly as it is)
+  or *Every door not yet done* — because a lasso must never quietly relabel the crew's work. The counts and
+  the door list are **frozen when the confirm opens**, so a live refresh can't move the number under a
+  typed gate.
+- **Doors that can't be marked are dropped before the request, not silently failed.** A door still in
+  **Intake**, one held out of books by **Remove apartments**, and one flagged **do-not-contact** are never
+  sent; the bar counts them under "can't be marked" and names the reason. (A single Intake door in the
+  payload would refuse the whole batch — no walk list, so no round could own the mark.) **Unmark** is the
+  other way round: it sends everything that could still be carrying a desk mark — including doors excluded
+  from books after they were marked — because that undo is the only way left to reach them.
+- **Unmark restricted…** removes **desk** marks only: every one on the selected doors for that round,
+  including marks made earlier and by someone else. Marks canvassers recorded at the door are kept. It is
+  offered whenever the selection holds a door that could be carrying one.
+- **After it runs**, the result lands in the page's usual result line — *"Marked 842 of 1,284 doors
+  restricted · 210 already restricted · 232 completed this round"* — and the **selection is kept**: the
+  rings flip from blue to slate in front of you as the map refreshes. There is no Undo link, because
+  unmarking would also strip the marks that were already there; **Unmark restricted…** stays in the bar as
+  a deliberate second action instead.
+- **What clears a selection.** Leaving the mode (**Done**, **Esc**, the **✕**), **Clear**, switching the
+  round or the campaign, a cut finishing, and — on the Map page — changing any filter, the date window or
+  the scope. A door that simply leaves the map (a refetch drops it, a chip hides it) falls out of the
+  selection on its own, so it is neither counted nor sent.
+
+On **Turf Cutting** the mode always speaks for the round in the **Pass** dropdown, so every per-round number
+in the bar is exact. The **Map** page can be looking at the whole campaign instead, and is careful to print
+only what that view can answer — see [MAPS.md](MAPS.md). The mode is **web-only**; the phone marks one home
+at a time.
+
 Books are first created as **drafts** — nothing reaches canvassers until you **accept** them (drafts →
 published). Re-cut freely until then; a **Discard** snapshots the layout so it's always recoverable.
 A pass needs accepted (published) books before it can be activated.
@@ -307,6 +368,12 @@ island of the owning book's color right around that house, and the surrounding b
 matching hole. A pocket isn't an error — it's the map telling you, at a glance, "this door belongs to
 that other book." The house's ring color and its popup say the same thing.
 
+The guarantee survives a **pin correction**, too. When someone moves a house pin (see *Fixing a
+mis-placed pin* below), the house's own book is redrawn around the new spot — and so is any other
+live book whose shape happened to cover that spot, so the dot never ends up sitting inside a
+neighbour's shape. Only the drawn outline changes: the book's houses, their walk order, and their
+statuses are exactly what they were.
+
 ## Recutting (changing the books)
 
 If you don't like the books, or the underlying voter list changed, you **recut**. Two situations:
@@ -372,14 +439,37 @@ the books editor on the Turf Cutting page and apply to a pass's **published** bo
 
 ## Fixing a mis-placed pin
 
-A house pin in the wrong spot can be dragged to its correct location — an admin does it on the web map
-(**"Move pin"**), and a **team lead can do it in the field** (**"Fix pin location,"** including "use my
-current GPS"). **Canvassers can't move pins** — a correction is a data change with an audit trail, so it
-is lead/admin-only ([MAPS.md](MAPS.md)); a canvasser who spots a bad pin tells their lead. Either way it corrects **only the coordinates** (with an audit trail); it does **not**
-change the book, the walk order, the door's status, or any count, and it **needs no recut**. Canvassers
-see the corrected spot on their **next sync (within ~30s** — see below). Full mechanics:
-[MAPS.md → Coordinate provenance & pin correction](MAPS.md). (What you _can't_ do in-app is edit the
-address _text_ or re-run geocoding on a single door — the pin drag is the tool.)
+A house pin in the wrong spot can be dragged to its correct location — an admin does it on the web
+**Map** page (**"Move pin"**) or **right here on the Turf Cutting page** (click the house, choose
+**Move pin →** in its popup, drag the blue marker, **Save location**; an apartment building's popup has
+**Move building pin →**, which moves every unit at that pin together), and a **team lead can do it in
+the field** (**"Fix pin location,"** including "use my current GPS"). **Canvassers can't move pins** — a
+correction is a data change with an audit trail, so it is lead/admin-only ([MAPS.md](MAPS.md)); a
+canvasser who spots a bad pin tells their lead. Whichever way it's done, it corrects **only the
+coordinates** (with an audit trail); it does **not** change the book, the walk order, the door's status,
+or any count, and it **needs no recut**. Canvassers see the corrected spot on their **next sync (within
+~30s** — see below). Full mechanics: [MAPS.md → Coordinate provenance & pin correction](MAPS.md).
+(What you _can't_ do in-app is edit the address _text_ or re-run geocoding on a single door — the pin
+drag is the tool.)
+
+**The book outline follows the dot.** Because every house sits inside its book's shape (above), a
+moved pin redraws the shapes it affects: the house's own book, plus any other live book whose drawn
+shape happened to contain the new spot — so the dot doesn't sit inside a neighbour's outline. That's a
+redraw, not a re-cut: membership and walk order are untouched, and it happens for every live round the
+door is booked in. Three things to know:
+
+- **It's best-effort.** The pin is saved first, then the outlines are redrawn; if the redraw fails for
+  any reason the pin stays corrected and the outline catches up on the next cut or edit (or ask your
+  Doorline contact to run the outline repair, which redraws outlines only — never membership).
+- **Very large rounds skip the redraw.** A round with more than about 60,000 booked doors keeps its old
+  outlines after a pin move (redrawing one would take too long inside a single request); the pin is
+  still corrected, and the same outline repair redraws it.
+- **Landing exactly on another book's pin** (coordinate for coordinate) — rare outside apartment stacks
+  — means two books share one spot, and only one of them can draw it; the house's ring color and its
+  popup still name its real book.
+
+A pin that was so wrong the house sat in the wrong *area* usually wants both fixes: move the pin,
+**and** use _Move door_ to put it in the right book.
 
 ## How field phones get these edits — and when
 
@@ -697,17 +787,31 @@ island** (the territory becomes a `MultiPolygon`; the surrounding book carries a
 display-only and never geo-queried (see the model comment; Mapbox on web and mobile renders both
 natively, and the canvasser bootstrap never ships boundary at all).
 
-**Edit-time cost is bounded by `onlyTurfIds`.** `recomputePassTerritories(passId, { onlyTurfIds })`
-still seeds the diagram with the whole pass (seams depend on every door) but re-unions only the books
-an edit touched (~110ms at 16k doors vs ~1.5s for all 128). Correct because a door *move* doesn't
-change the diagram — only cell ownership flips, so untouched books' stored shapes stay exactly right —
-and a door *removal* (the effort claim path) only grows the remaining cells, so untouched shapes stay
-strictly inside their new entitlement: still disjoint, still containing. `recomputeTurf` writes the
-**unclipped** hull and must always be followed by `recomputePassTerritories` — every call site does
-(move-door, move-doors, merge, split, and the effort door-claim path in
-[efforts.js](../server/src/routes/admin/efforts.js)), each passing the books it changed. Outlines cut
-before this change are healed in place by `npm run recompute:territories -- --apply`
-(see [OPERATIONS.md](OPERATIONS.md)) — it rewrites only `Turf.boundary`, so it is safe mid-round.
+**Edit-time cost is bounded by `onlyTurfIds`.** `recomputePassTerritories(passId, { onlyTurfIds,
+withCentroid })` still seeds the diagram with the whole pass (seams depend on every door) but re-unions
+only the books an edit touched (~110ms at 16k doors vs ~1.5s for all 128). Correct because a door's
+**book** move doesn't change the diagram — the seeds are the same points, only cell ownership flips, so
+untouched books' stored shapes stay exactly right — and a door *removal* (the effort claim path) only
+grows the remaining cells, so untouched shapes stay strictly inside their new entitlement: still
+disjoint, still containing. A **coordinate** move (a pin correction) is the one edit that *does* change
+the diagram: a seed moves, so the cells around both the old and the new spot change. The pin-move
+caller ([rehullAfterPinMove.js](../server/src/services/turf/rehullAfterPinMove.js), §G) therefore
+passes the door's own book(s) **plus every live book whose stored shape contains the new point**
+(`booleanPointInPolygon`): inserting a seed only *shrinks* the neighbours' cells, so any book whose
+shape covered the new spot would otherwise overlap the moved door's new cell, while books around the
+old spot only *grow* and stay contained (an un-drawn notch at worst, never an overlap). The residual —
+the new cell ∩ a Voronoi-adjacent book's stored shape that did *not* contain the point — is lot-scale
+at most (0 m² in 7 of 8 synthetic cases, 0.94 m² in the adversarial one) and is healed by the full
+recompute below. `withCentroid: true` (default `false`, so the seven pre-existing callers and the
+migration's "writes only `Turf.boundary`" promise are byte-identical) also rewrites `Turf.centroid`
+from the moved member set — display-only, like `boundary`. `recomputeTurf` writes the **unclipped**
+hull and must always be followed by `recomputePassTerritories` — every call site does (move-door,
+move-doors, merge, split, the effort door-claim path in [efforts.js](../server/src/routes/admin/efforts.js)),
+each passing the books it changed. The pin-move re-hull
+([rehullAfterPinMove.js](../server/src/services/turf/rehullAfterPinMove.js)) calls `recomputePassTerritories`
+directly — no `recomputeTurf`, because walk order is never recomputed mid-round. Outlines cut before this change are healed
+in place by `npm run recompute:territories -- --apply` (see [OPERATIONS.md](OPERATIONS.md)) — it rewrites
+only `Turf.boundary`, so it is safe mid-round.
 
 `tolerance` is surfaced on the Turf Cutting page as a **Tight / Balanced / Compact** toggle
 (`0.15 / 0.25 / 0.4`; default **Compact = 0.4**), sent through `params.tolerance` (the `/generate` route
@@ -748,13 +852,13 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/merge` `{ turfIds[] }` ([:930](../server/src/routes/admin/turfs.js#L930)) | Merge ≥2 books of the **same pass** into `turfs[0]` (survivor). Union the doors onto the survivor; **fold assignments** (`findOneAndUpdate` upsert on `{turfId:survivor, userId}` → same-user dedups, different-users **both survive**); **hard-delete** the absorbed `Turf`s + their `TurfAssignment`s; `recomputeTurf`/`recomputePassTerritories`. **No snapshot → irreversible.** Survivor = DB order of the `$in`, not request order. |
 | `POST .../turfs/:turfId/split` `{ householdIds[], name? }` ([:970](../server/src/routes/admin/turfs.js#L970)) | Peel `householdIds` out of the book into a **new** `Turf` (same pass/mode/params, `status` copied). `recomputeTurf` on both. **Creates no `TurfAssignment`** — the split-off book comes out unassigned. |
 | `POST .../turfs/unassign-bulk` `{ turfIds[], userIds[] }` ([:170](../server/src/routes/admin/turfs.js#L170)) | Campaign-scoped `TurfAssignment.deleteMany` for the given (book, user) pairs — powers both "unassign everywhere" (one person, many books) and "Unassign all" (everyone on the selected books). Touches no `Household`, no `CampaignAssignment` and no `CanvassActivity`. **Both arrays are required**: empty `userIds` is a **400**, never an "everyone" wildcard, so callers enumerate — and because `turfIds` alone pins the blast radius (re-scoped by campaign, then a turf × user cross-product delete), the clients deliberately send the **pass-wide** user set rather than a possibly-stale per-selection union. `deleted` counts **pairs**, not people. Guards + blast radius: `server/test/unassignBulk.int.test.js`. |
-| `POST .../turfs/restrict-bulk` `{ turfIds[], scope? }` | **Book-level desk mark.** 409 `not-accepted` if any book is a draft. Per book, `planDeskRestrict` ([services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) — the ONE desk-mark writer, shared with `restrict-doors`) builds one `CanvassActivity { actionType:'restricted', via:'bulk' }` row per eligible door (`KNOCKABLE_DOOR_FILTER` + coords; the acting admin as `userId`, `coordinatorId:null`, the house's own pin with `accuracy:null` / `distanceFromHouseMeters:0`, `passId` = the book's round, `turfId` = the book as provenance, `effortId` from the door), skipping `completed` (surveyed / lit_dropped this round), `alreadyRestricted`, `ineligible`, and — under `scope:'unknocked'` — `reached`; `scope:'incomplete'` (the default) marks reached doors too, leaving the field row in place. One `commitDeskRestrict`: `insertMany` → `recomputeHouseholdStatusesByIds` → `Household.updateMany $set lastActionAt` (the delta-poll touch; `lastActionBy` deliberately NOT set) → `recomputeCampaignStats`. Ignores `Campaign.disabledOutcomes`. → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, perTurf }`. Pinned by [bulkRestrict.int.test.js](../server/test/bulkRestrict.int.test.js) / [bulkRestrictScope.int.test.js](../server/test/bulkRestrictScope.int.test.js). |
+| `POST .../turfs/restrict-bulk` `{ turfIds[], scope? }` | **Book-level desk mark.** 409 `not-accepted` if any book is a draft. Per book, `planDeskRestrict` ([services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) — the ONE desk-mark writer, shared with `restrict-doors`) builds one `CanvassActivity { actionType:'restricted', via:'bulk' }` row per eligible door (`KNOCKABLE_DOOR_FILTER` + coords; the acting admin as `userId`, `coordinatorId:null`, the house's own pin with `accuracy:null` / `distanceFromHouseMeters:0`, `passId` = the book's round, `turfId` = the book as provenance, `effortId` from the door), skipping `completed` (surveyed / lit_dropped this round), `alreadyRestricted`, `ineligible`, and — under `scope:'unknocked'` — `reached`; `scope:'incomplete'` (the default) marks reached doors too, leaving the field row in place. One `commitDeskRestrict`: `insertMany` → `recomputeHouseholdStatusesBatched` ([status.js](../server/src/services/canvass/status.js) — 500-door chunks, 2 round trips per chunk and one `bulkWrite`, not the per-document `…ByIds`: a map lasso hands this 1,000 doors in one request and serial saves sat at the edge of Heroku's 30 s router timeout; same answer, since `resolveStatus` is pure and `Household` declares no save hooks) → `Household.updateMany $set lastActionAt` (the delta-poll touch — a recomputed status can be unchanged, e.g. a door restricted in a PRIOR pass, and `/mobile/changes` filters on `updatedAt`; `lastActionBy` deliberately NOT set) → `recomputeCampaignStats`. Ignores `Campaign.disabledOutcomes`. → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, perTurf }`. Pinned by [bulkRestrict.int.test.js](../server/test/bulkRestrict.int.test.js) / [bulkRestrictScope.int.test.js](../server/test/bulkRestrictScope.int.test.js). |
 | `POST .../turfs/unrestrict-bulk` `{ turfIds[] }` | One `removeDeskRestrict` call whose filter is the `$or` of each book's `deskMarkFilterForBook(turf)` (a plain filter for one book) = delete `{ campaignId, passId: turf.passId, householdId: { $in: turf.householdIds }, actionType:'restricted', via:'bulk' }` per book → one recompute of statuses → `$currentDate updatedAt` → `recomputeCampaignStats` (one delete across the books, so `households` stays a DISTINCT door count across books and the recompute/stats pass runs once). **Re-keyed by `(passId, current book membership)`, not the stamped `turfId`** (2026-08-21): a single-home mark written while the book was a draft points at a `turfId` that dies on re-cut/discard, `move-door` leaves rows on the old book, snapshot restore and merge mint fresh ids — under `turfId` keying all of those marks vanished from the count and the undo; keyed by membership, a desk mark on a door in Book 4 counts under — and falls to — Book 4's Unmark whenever it was made. `GET /turfs` `bulkRestrictedCount` comes from one aggregate (`deskMarkCountsForPasses` — bounded by `{ campaignId, passId ∈ the non-archived books' rounds }`, not a 250k-id `$in`) grouped by `{passId, householdId}`, `n` summed over each non-archived book's `householdIds` (`countDeskMarksByBook`; archived books → 0); `GET /:turfId/households` `turf.bulkRestrictedCount` is `countDocuments` over that book's same per-book filter. **Counts are ROWS everywhere** (`$sum:1` / `countDocuments` / `deletedCount`): two desk rows on one (pass, door) are reachable (mark → canvasser knock → mark again; two admins racing; no unique index), and an **inert** desk row under a newer field knock stays on file — in `Unmark (N)`, `activityCount`, exports — until a book-level undo, same as bulk re-runs. → `{ unmarked (rows), households (distinct doors) }`. Field rows never match. **No new index** — the filters ride `{campaignId, passId, householdId}` + `actionType_1`. Behavior change pinned by the move-door case in `bulkRestrict.int.test.js`. |
-| `POST .../turfs/restrict-doors` `{ householdIds[] (1–1000), passId? }` | **Single-home desk mark** — same row, same writer, same skip ladder (`scope:'incomplete'` — reached doors are marked, the field row stays), **no draft refusal** (allowed on draft books, accepted books and loose doors alike) and no `disabledOutcomes` check. **`passId` resolution** when omitted: the door's own effort's **active** round (`activePassIdForEffort`) → else the effort's **single** non-archived (draft) round → else `400 { code:'PASS_REQUIRED', unresolved:[{ id, reason:'intake' \| 'no-round' }] }` (all-or-nothing). An explicit `passId` must belong to the campaign (**404**) and must not be archived (**409 `pass-archived`** — phones only receive active-pass books, so an archived-round mark would flip global status while invisible to every canvasser). **Intake doors (`effortId:null`) can never be marked** — `Pass.effortId` is required, so no round can own them (reason `'intake'`, short-circuited before any query). A door whose `effortId` ≠ the pass's effort is `skipped.ineligible`. `turfId` on the row = the door's book in that pass at write time (draft or published; `null` for a loose dot) — **provenance only**, nothing reads it for counts/undo. Desk rows always carry a non-null `passId` (the module throws otherwise — `getPassStatusMap` matches `passId` exactly, so a null-pass row would flip global status but be invisible on every phone) and only ever `actionType:'restricted'` (a `via:'bulk'` row on a KNOCK action is contractually billable — `knocksByPass.int.test.js`). → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached:0 }, passId, passIds }`. Archived campaign → 409 (router-wide). Tagged as an `AccessLog` subject per door. Pinned by [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js). |
-| `POST .../turfs/unrestrict-doors` `{ householdIds[], passId? }` | One `removeDeskRestrict` call over the `$or` of per-round filters `{ passId, householdId:{ $in } }` (a plain filter for one round) — **no knockable filter, no effort guard, no pass-status and no pass-existence check**: it deletes for whatever `passId` the client sends (the mark's own round, from `/activity`), so a mark whose draft round was later deleted or whose door was re-housed can always be removed. Omitted `passId` → the same resolution as mark. Field rows never match (`unmarked:0`, door stays restricted). → `{ unmarked, households, passId, passIds }`. The clients' **Unmark** is offered only for a desk mark (`via:'bulk'` on the round's latest entry); a field-recorded Restricted shows who/when and no desk action. |
+| `POST .../turfs/restrict-doors` `{ householdIds[] (1–1000), passId?, scope? }` | **Door-level desk mark** — one home, every unit at one pin, or a whole lassoed map selection (the web "Select doors" mode; mobile still sends exactly one id and no `scope`). Same row, same writer, same skip ladder, **no draft refusal** (allowed on draft books, accepted books and loose doors alike) and no `disabledOutcomes` check. **`passId` resolution** when omitted: the door's own effort's **active** round (`activePassIdForEffort`) → else the effort's **single** non-archived (draft) round → else `400 { code:'PASS_REQUIRED', unresolved:[{ id, reason:'intake' \| 'no-round' }] }` (all-or-nothing). An explicit `passId` must belong to the campaign (**404**) and must not be archived (**409 `pass-archived`** — phones only receive active-pass books, so an archived-round mark would flip global status while invisible to every canvasser). **Intake doors (`effortId:null`) can never be marked** — `Pass.effortId` is required, so no round can own them (reason `'intake'`, short-circuited before any query). A door whose `effortId` ≠ the pass's effort is `skipped.ineligible`. **`scope`** (added 2026-08-22 for the map selection, parsed by the identical line `restrict-bulk` uses — `req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete'`): omitted, null, unknown (`'sideways'`) and the literal `'incomplete'` all mean **`'incomplete'`**, i.e. byte-for-byte what this route did before the param existed, so no shipped client had to change; only the exact string `'unknocked'` switches ladders, marking the never-touched doors and leaving each **reached** door alone (no desk row, per-round status and field row intact) in `skipped.reached`. The ladder itself is unchanged — `planDeskRestrict` always understood both scopes; the route simply stopped hard-coding one. `turfId` on the row = the door's book in that pass at write time (draft or published; `null` for a loose dot) — **provenance only**, nothing reads it for counts/undo. Desk rows always carry a non-null `passId` (the module throws otherwise — `getPassStatusMap` matches `passId` exactly, so a null-pass row would flip global status but be invisible on every phone) and only ever `actionType:'restricted'` (a `via:'bulk'` row on a KNOCK action is contractually billable — `knocksByPass.int.test.js`). → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, passId, passIds }` — **shape unchanged**; `reached` (always 0 from this route before) now carries a real count under `scope:'unknocked'`, and a client that ignores it is unaffected. Archived campaign → 409 (router-wide). Tagged as an `AccessLog` subject per door. **One request, cap 1,000, never chunked** — the batch is refused WHOLE over the cap, never truncated (neither map payload is sorted, so "the first 1,000" would be an arbitrary, unrepeatable subset), and chunking would pay `recomputeCampaignStats`' whole-ledger recompute once per chunk; cost is otherwise fixed + O(pass groups), ~3 queries per walk list in the per-pass-group loop. Pinned by [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) (19–20 the two scopes, 21 the default parse, 22 the 1000/1001 cap). |
+| `POST .../turfs/unrestrict-doors` `{ householdIds[], passId? }` | One `removeDeskRestrict` call over the `$or` of per-round filters `{ passId, householdId:{ $in } }` (a plain filter for one round) — **no knockable filter, no effort guard, no pass-status and no pass-existence check**: it deletes for whatever `passId` the client sends (the mark's own round, from `/activity`), so a mark whose draft round was later deleted or whose door was re-housed can always be removed. Omitted `passId` → the same resolution as mark. Field rows never match (`unmarked:0`, door stays restricted). **Takes no `scope` and ignores one if sent.** Because of the missing guards, an unmark payload must be filtered differently from a mark payload: drop only `effortId === null` (Intake) doors, and only when no `passId` is sent — a door desk-marked in March and excluded from books in April is still unmarkable today, and filtering it out on the knockable rule would strand its mark forever. → `{ unmarked, households, passId, passIds }`. The clients' **Unmark** is offered only for a desk mark (`via:'bulk'` on the round's latest entry); a field-recorded Restricted shows who/when and no desk action. |
 | `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. **`format=geojson`** (additive — without it the response is byte-identical) returns the same doors as a `FeatureCollection`, for the mobile Books map's file-backed `ShapeSource` (see [ADMIN_APP.md](ADMIN_APP.md) → *The Books screen*). |
 | `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. Also read by the mobile books screen, which ignores `statusCounts`. |
-| `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. |
+| `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. **Since 2026-08-22 the household object also carries `location` (`{ lng, lat }` \| null), `coordSource`, `coordConfidence` and `correctedAt`** (each `\|\| null`) — additive, so the mobile book map's call is unaffected — which is what the Turf Cutting popup's *Pin corrected · Aug 22* / *Approximate location* line and its **Move pin →** action read (the move itself is the existing `PATCH /admin/campaigns/:campaignId/households/:householdId/location`, §G). |
 
 ## D. Why new households are unassigned after import
 
@@ -796,8 +900,8 @@ historical knocks because activity rows keep their original `passId`.
 
 The move/merge/split routes in §C are **pure book-membership operations**: they rewrite
 `Turf.householdIds` and its `Household.turfId`/`walkOrder` mirror (via `recomputeTurf`,
-[generateTurf.js:245](../server/src/services/turf/generateTurf.js#L245)), then re-tessellate the pass
-(`recomputePassTerritories`, [:270](../server/src/services/turf/generateTurf.js#L270)). **None of them
+[generateTurf.js:352](../server/src/services/turf/generateTurf.js#L352)), then re-tessellate the pass
+(`recomputePassTerritories`, [:393](../server/src/services/turf/generateTurf.js#L393)). **None of them
 writes `CanvassActivity`.** That is what makes them count-safe:
 
 - **Knocks key on `(householdId, passId)`, never on a book** — see `CanvassActivity`
@@ -811,6 +915,41 @@ writes `CanvassActivity`.** That is what makes them count-safe:
   in reporting reads it (§E — "`bookId` not used in reporting at all"); book attribution always goes
   through the _live_ `Turf.householdIds`. **Do not** add a report that groups knocks by
   `CanvassActivity.turfId` without back-filling these edits first.
+
+**A pin move is the mirror image: a pure coordinate operation that re-draws, never re-members.**
+Every pin correction — web Map page, Turf Cutting popup (house = `scope:'unit'`, building =
+`scope:'building'`), mobile admin map, mobile FixPinModal, and the `repair:import-pins` script — goes
+through the ONE writer `updateHouseholdLocation`
+([services/households/updateHouseholdLocation.js](../server/src/services/households/updateHouseholdLocation.js)),
+which, after every coordinate + `HouseholdLocationChange` row is committed, calls
+`rehullBooksForMovedHouseholds({ campaignId, householdIds, point })` in
+[services/turf/rehullAfterPinMove.js](../server/src/services/turf/rehullAfterPinMove.js) (opt-out
+`rehull: false`, which only the repair script uses — it re-hulls its touched passes itself once at the
+end of the run). It never touches `Turf.householdIds`, `Household.turfId`/`walkOrder`/`status`, or
+`CanvassActivity` (the module must not import it — [AUDIT.md](AUDIT.md) §B.7 stays literally true). Per
+call: live passes (`Pass.status ≠ 'archived'` — explicit, because archiving a pass leaves its books
+`published`) → the moved doors' own draft/published books per pass (`{passId, householdIds}` index) →
+**scale guard first** (Σ `doorCount` over the pass's books; over `TURF_REHULL_INLINE_MAX_DOORS`, default
+**60 000**, read at call time → `console.warn('[pin-move] skipped re-hull: pass <id> has N booked
+doors')` and that pass is left alone — the fixed cost is the whole-pass `turf.voronoi` move-door already
+pays inline, and the guard keeps the PATCH under Heroku's 30 s router on a 250k-door pass; no queue job,
+so the pin write never depends on Redis) → neighbour expansion (the pass's other books whose stored
+`boundary` contains the new point, §B.1) → `recomputePassTerritories(passId, { onlyTurfIds,
+withCentroid: true })`, per-pass try/catch (`console.error('[pin-move] re-hull failed for pass …')`).
+**Best-effort by contract**: the service returns `{ updated, turfsRecomputed }` and never throws from the
+re-hull, so the pin is corrected even when the outline isn't; both routes —
+`PATCH /admin/campaigns/:campaignId/households/:householdId/location` and
+`POST /mobile/households/:householdId/location` — ship **`turfsRecomputed: string[]`** (additive) beside
+`moved`. A pass over the cap or one whose re-hull failed is healed by `npm run recompute:territories --
+--apply`. Concurrency follows move-door/merge/split: no `recutLock`, no 409 — the `$set` is
+deterministic from then-current data and a later claim/generate rewrite wins. A loose dot (no book) has
+nothing to re-hull. Out of scope by design: a re-import of an **un-corrected** door rewrites `location`
+(`csvImporter.js` `$set`) with no re-hull — the outline follows on the next cut / recompute; corrected
+doors are shielded from re-import ([IMPORTS.md](IMPORTS.md)). Pinned by
+[pinMoveRehull.int.test.js](../server/test/pinMoveRehull.int.test.js) (nudge inside a book; move into a
+neighbour's grid → containment + overlap < 1 m²; archived pass untouched; `Turf.find` throwing → pin still
+200 with `turfsRecomputed: []`; building scope; the `GET /turfs/household/:id` fields; the mobile route;
+the env cap).
 
 **Field-app propagation.** A canvasser's doors are resolved **live** per request from
 `TurfAssignment → Turf.householdIds` (`canvasserBooks` / `canvasserScopeWithPasses`,
@@ -830,6 +969,10 @@ would strand it until a cold re-bootstrap. Same cost class either way: index see
 canvasser's own book scope, projected to the bootstrap's identity-cache fields. Consequences:
 
 - **Pin moves & status changes propagate in ~30s** (they bump `Household.updatedAt` and stay in scope).
+  The redrawn **outline** is a different story: `Turf.boundary` is never shipped to canvassers (the web
+  cut map and the mobile admin Books map re-read it on their next fetch), and the rewritten
+  `Turf.centroid` — the canvasser Books-overview marker — rides the bootstrap only, so it moves on the
+  next **full** bootstrap, not the delta.
 - **Voter identity edits propagate in ~30s too** (track 2) — a corrected name/party reaches phones
   without a pull-to-refresh. (One projection caveat: the delta ships the identity-cache fields only —
   `phone` isn't among them, so a phone-only correction reaches the profile screen live but the cached
@@ -869,6 +1012,31 @@ unit test):
   no DOM marker, and it honors the book-narrowing chips via a layer filter. **Nothing is clustered
   anywhere** — the dots merge visually when zoomed out and separate when zoomed in, which is the
   honest version of density.
+
+**"Select doors": the lasso catches WHAT IS DRAWN.** The desk-restrict selection mode (Part 1) hit-tests
+the **door array the page is drawing**, never `queryRenderedFeatures` — a rendered query can't see a door
+just off-screen and can't tell a markable door from a completed one. On the cut map that array is
+`drawnCutDoors` in [client/src/lib/cutMapDoors.js](../client/src/lib/cutMapDoors.js), because **three** of
+this page's visibility mechanisms decide it and two of them live in Mapbox layer state where no memo can
+see them: `visibleCutDoors` (this pass's books + the *Not in a book* toggle), the **book-status chips**
+(`setFilter` on `doors` by `turfId` — and a loose door's `turfId` property is the empty string, so every
+loose dot is hidden the moment any chip is on), and the **Houses** layer's `visibility` (off ⇒ nothing is
+selectable at all). The chip filter is applied per **building**, not per door: stacked units are drawn as
+one pin whose `turfId` is the first unit's, so a mixed-book stack is drawn — or hidden — as a unit, and
+judging each unit on its own `turfId` would let the lasso catch a door whose pin isn't on screen. Pinned by
+[cutMapDoors.test.js](../client/src/lib/cutMapDoors.test.js).
+
+The rest of the mode is shared with the admin Map page and lives in
+[client/src/lib/lassoSelect.js](../client/src/lib/lassoSelect.js) (`pointInRing` / `ringBBox` /
+`doorsInRing` / `snapBuildings` / `applySelection` / `planDoorSelection`, `SELECTION_CAP = 1000`, no
+dependencies — the point-in-polygon is a hand-rolled even-odd ray cast, and the `@turf/*` packages under
+`client/node_modules` are transitive via `mapbox-gl-draw` and must never be imported),
+[client/src/lib/useLassoDraw.js](../client/src/lib/useLassoDraw.js) (the pointer drag and the rubber band),
+[DoorSelectionBar.jsx](../client/src/components/DoorSelectionBar.jsx) (the bar, the ≤25 inline confirm and
+the `RestrictDoorsModal` typed-`restrict` + scope dialog) and
+[MapSelectModeControl.jsx](../client/src/components/MapSelectModeControl.jsx) (the pill and mode panel).
+See [MAPS.md](MAPS.md) §K for the shared rules — the drawn-array hit test, the building snap, the
+refused-whole cap and the per-page honesty rule.
 
 **Wrong Address** is one of the `KNOCK_ACTIONS` ([aggregations.js:8](../server/src/services/reports/aggregations.js#L8)) —
 a real **billable knock that counts as coverage**, non-sticky in `Household.status` (`resolveStatus`

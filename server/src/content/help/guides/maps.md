@@ -90,9 +90,25 @@ A slate pin usually means a canvasser couldn't get to the door. You can put one 
 
 The door tells you which kind of mark it carries. *Marked from the desk by …* has an **Unmark restricted** button; *Recorded at the door by …* is a canvasser's own mark, and the desk can't undo it — only a canvasser re-knocking the door changes that. A door your crew already surveyed this round keeps its result and can't be marked. The mark goes on the door's walk list's current round (if a list has more than one candidate round, the web map asks you to pick one; on the phone, open the door from inside its book instead; a door still in Intake can't be marked until it's in a walk list). On the Turf Cutting page the same action is in the house popup, and there it always marks the round you have selected — see [The Turf Cutting page](page-turf-cutting).
 
+## Marking a whole stretch of doors at once
+
+A fence line or a gated cul-de-sac doesn't need forty panels opened one at a time, and it doesn't need the whole book marked either. Both web maps — this one and [Turf Cutting](page-turf-cutting) — have a **Select doors** button at the top-left of the map. Click it and the map becomes a picker:
+
+- **Drag a shape** around the doors you mean; draw another shape somewhere else and it adds to the first.
+- **Click a door** to add or remove one. **Click a building** and every unit on that pin goes in or out together.
+- **Hold Option (Alt) while dragging** to take doors back out. **Hold Space** (or switch the toggle to **Pan**) to move the map. **Esc** cancels the shape you're drawing; press it again, or click **Done**, to leave.
+
+You can only catch doors the map is actually showing, so your filters and Layers toggles decide the pool — if you can't see it, a shape over it takes nothing. One action takes up to **1,000 doors**; a shape that would go over that is refused whole, with the bar telling you how many it would have been, so nothing arbitrary gets marked.
+
+**A bar along the bottom does the counting** — how many will be marked, how many are already restricted, how many were completed this round, how many can't be marked — with an **ⓘ** that explains each figure. Picked doors get a **blue** ring where the action will mark them, **slate** where it will skip them. It always asks before it writes: a second click up to 25 doors, and above that the same dialog a whole book uses, typing **restrict** included. If your crew already **reached** some of the doors you picked, you're asked which to mark — **only the untouched ones** (leaving every not-home and refusal exactly as it is) or **every door not yet done**.
+
+Doors that can't be marked are never sent: one still in **Intake**, one held out of books by **Remove apartments**, one flagged do-not-contact. **Unmark restricted…** is right there in the bar — it confirms the same way, without the typing — and removes **desk** marks only — including ones made earlier, or by someone else. Marks canvassers recorded at the door are kept.
+
+Two things are specific to *this* map, because it can be looking at your whole campaign rather than one round. With no round in scope, each door is marked in **its own walk list's current round**, doors your crew already reached are marked too (open the map from one round — and clear any canvasser filter — if you want the *only untouched doors* choice), and **Unmark** reaches that same current round only, so a mark made in an earlier round stays. And if the map warns that the area is capped, zoom in first: a shape can only catch the doors it has loaded. The bar says all of this before you press anything, and the result afterwards reports exactly what happened. On Turf Cutting the mode always speaks for the round in the **Pass** dropdown. The phone marks one home at a time.
+
 ## Fixing an off-spot pin
 
-Some pins are looked up from the address, not read from your file, so they can land a house or two off. The web map draws a faint **amber ring** around these and the door reads *"Approximate location."* To fix one, drag the pin to the right spot and Save — the ring disappears and it reads *"Pin corrected."* Canvassers pick up the fix on their next sync, and moving a pin never re-cuts your books. **Canvassers can't move pins themselves** — if one flags a bad pin to you, this is where you fix it. Full details in [Fixing a house pin](fix-pin-location).
+Some pins are looked up from the address, not read from your file, so they can land a house or two off. The web map draws a faint **amber ring** around these and the door reads *"Approximate location."* To fix one, drag the pin to the right spot and Save — the ring disappears and it reads *"Pin corrected."* Canvassers pick up the fix on their next sync, and moving a pin never re-cuts your books — the door keeps its book and walk order; only the book's drawn outline on the Turf Cutting map redraws around the new spot. You can do the same from the [Turf Cutting page](page-turf-cutting): **Move pin →** in a house's popup moves one door, **Move building pin →** in a building's popup moves every unit at that pin together. **Canvassers can't move pins themselves** — if one flags a bad pin to you, this is where you fix it. Full details in [Fixing a house pin](fix-pin-location).
 
 ## What's live vs. what needs a refresh
 

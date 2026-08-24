@@ -476,7 +476,7 @@ export default function WalkListsPage() {
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Voter-ID CSV</span>
                 <input
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.tsv,.txt,.xls"
                   disabled={!campaignId}
                   onChange={(e) => onPickCsv(e.target.files?.[0] || null)}
                   className="block w-full text-sm disabled:opacity-50"

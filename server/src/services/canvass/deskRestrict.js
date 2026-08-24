@@ -6,7 +6,7 @@ import { Turf } from '../../models/Turf.js';
 import { KNOCKABLE_DOOR_FILTER } from './knockableDoorFilter.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
 import { activePassIdForEffort } from '../passes/activePasses.js';
-import { recomputeHouseholdStatusesByIds } from './status.js';
+import { recomputeHouseholdStatusesBatched } from './status.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 
 // THE ONE desk-mark writer. "Desk mark" = an admin marking doors Restricted Access from the
@@ -137,11 +137,16 @@ export const planDeskRestrict = async ({ campaign, passId, householdIds, userId,
 export const commitDeskRestrict = async ({ campaign, rows, touched, now }) => {
   if (!rows.length) return;
   await CanvassActivity.insertMany(rows);
-  await recomputeHouseholdStatusesByIds(touched, campaign.type);
-  // save() no-ops when the recomputed status is unchanged (e.g. a door restricted in a PRIOR
-  // pass), so bump the docs explicitly — the mobile delta poll (/changes filters updatedAt >
-  // since) must deliver every touched door. lastActionAt matches the single-door path;
-  // lastActionBy is deliberately NOT set (don't attribute a whole community to the admin).
+  // The BATCHED recompute (2 round trips per 500-door chunk), not the per-document one: a lasso
+  // on the map hands this 1,000 doors in one request, and ~3 serial round trips per door would
+  // sit at the edge of Heroku's 30 s router timeout. Same answer either way — resolveStatus is
+  // pure and Household declares no save hooks.
+  await recomputeHouseholdStatusesBatched(touched, campaign.type);
+  // lastActionAt is a real field the single-door path also sets, and the touch doubles as the
+  // delta-poll guarantee — the mobile poll (/changes filters updatedAt > since) must deliver
+  // every touched door even when the recomputed status is unchanged (e.g. a door restricted in
+  // a PRIOR pass). lastActionBy is deliberately NOT set (don't attribute a whole community to
+  // the admin).
   await Household.updateMany({ _id: { $in: touched } }, { $set: { lastActionAt: now } });
   // Desk rows change activityCount (campaign tallies include them) but never the
   // knock/canvasser counters (restricted ∉ KNOCK_ACTIONS; via:'bulk' is NOT_BULK-excluded) —
@@ -157,9 +162,9 @@ export const removeDeskRestrict = async ({ campaign, filter }) => {
   const touched = await CanvassActivity.distinct('householdId', match);
   const r = await CanvassActivity.deleteMany(match);
   if (touched.length) {
-    await recomputeHouseholdStatusesByIds(touched, campaign.type);
-    // Same stale-delta edge in reverse (a prior-pass-restricted door recomputes to the same
-    // status → no save → no updatedAt bump). Nothing "happened to" the door, so bump updatedAt
+    await recomputeHouseholdStatusesBatched(touched, campaign.type);
+    // Same delta guarantee in reverse, for a door whose recomputed status is unchanged (it was
+    // already restricted in a PRIOR pass). Nothing "happened to" the door, so bump updatedAt
     // without touching lastActionAt.
     await Household.updateMany({ _id: { $in: touched } }, { $currentDate: { updatedAt: true } });
     // Desk ledger delete → keep Campaign.stats.activityCount exact (see commitDeskRestrict).

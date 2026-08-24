@@ -971,23 +971,32 @@ const passRequiredMessage = (unresolved) =>
     ? 'This door is not in a walk list yet — assign it to one first.'
     : 'Pick a round first — this walk list has no current round.';
 
-// Single-home desk mark: one door (or every unit at one pin) Restricted Access, from the turf
-// page, the Map page or the mobile admin app — allowed any time the house is on the page
-// (draft books, accepted books, loose dots), unlike restrict-bulk's published-only gate.
-//   body { householdIds: string[], passId?: string }
+// Door-level desk mark: one home (or every unit at one pin, or a whole lassoed selection)
+// Restricted Access, from the turf page, the Map page or the mobile admin app — allowed any
+// time the house is on the page (draft books, accepted books, loose dots), unlike
+// restrict-bulk's published-only gate.
+//   body { householdIds: string[], passId?: string, scope?: 'incomplete'|'unknocked' }
 //   passId: explicit (must be this campaign's → 404; archived round → 409 `pass-archived`)
 //     else each door's own effort's active round, else its single draft round, else
 //     400 PASS_REQUIRED { unresolved:[{ id, reason:'intake'|'no-round' }] } — all-or-nothing.
 //     An Intake door (no walk list) can never be marked: no round can own it.
-//   → { marked, skipped:{ completed, alreadyRestricted, ineligible, reached:0 }, passId, passIds }
+//   scope: the same ladder restrict-bulk offers, so a map lasso over a part-worked street never
+//     silently relabels the crew's not-homes and refusals — 'incomplete' (the default, and what
+//     an older client that sends no scope gets) marks every door not surveyed/lit-dropped/
+//     restricted; 'unknocked' marks only the never-touched ones and counts each reached door in
+//     `skipped.reached`.
+//   → { marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, passId, passIds }
 //   ineligible = not in this campaign, not a knockable door (KNOCKABLE_DOOR_FILTER / no pin),
-//   or its effort ≠ the named round's effort. Always scope 'incomplete'.
+//   or its effort ≠ the named round's effort.
 router.post('/restrict-doors', async (req, res, next) => {
   try {
     const ids = parseHouseholdIds(req.body?.householdIds);
     if (!ids) return res.status(400).json({ error: 'householdIds required (1–1000)' });
     const rawPassId = req.body?.passId ? String(req.body.passId) : null;
     if (rawPassId && !mongoose.isValidObjectId(rawPassId)) return res.status(400).json({ error: 'invalid passId' });
+    // Parsed exactly like restrict-bulk's: anything but the literal 'unknocked' is 'incomplete',
+    // so an omitted (or unknown) scope behaves precisely as this route did before it existed.
+    const scope = req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete';
 
     const households = await Household.find(
       { _id: { $in: ids }, campaignId: req.campaign._id },
@@ -1027,7 +1036,7 @@ router.post('/restrict-doors', async (req, res, next) => {
         householdIds: hhIds,
         userId: req.user._id,
         turfIdFor: (hh) => book.get(String(hh._id)) || null,
-        scope: 'incomplete',
+        scope,
         now,
       });
       for (const k of Object.keys(skipped)) skipped[k] += plan.skipped[k];
@@ -1219,6 +1228,14 @@ router.get('/household/:householdId', async (req, res, next) => {
         zipCode: hh.zipCode,
         county: hh.county || null,
         status: hh.status,
+        // Pin + provenance for the pop-up's Move pin action (same shape as the pin PATCH's
+        // response): where the dot is, and whether a person corrected it / it is approximate.
+        location: hh.location?.coordinates?.length === 2
+          ? { lng: hh.location.coordinates[0], lat: hh.location.coordinates[1] }
+          : null,
+        coordSource: hh.coordSource || null,
+        coordConfidence: hh.coordConfidence || null,
+        correctedAt: hh.correctedAt || null,
       },
       voters: voters.map((v) => ({
         id: String(v._id),
@@ -1366,8 +1383,10 @@ router.post('/move-door', async (req, res, next) => {
     }
     if (!to.householdIds.map(String).includes(String(householdId))) to.householdIds.push(householdId);
     await recomputeTurf(to);
-    // Only the two touched books re-tessellate — a move flips cell ownership without
-    // changing the pass's Voronoi diagram, so every other book's shape is still exact.
+    // Only the two touched books re-tessellate — a BOOK move flips cell ownership without
+    // changing the pass's Voronoi diagram, so every other book's shape is still exact. (A
+    // COORDINATE move does change it — the pin-move writer also recomputes the books whose
+    // stored shape contains the new point; services/turf/rehullAfterPinMove.js.)
     const movedTurfIds = [String(to._id)];
     if (from && String(from._id) !== String(to._id)) movedTurfIds.push(String(from._id));
     await recomputePassTerritories(to.passId, { onlyTurfIds: movedTurfIds });

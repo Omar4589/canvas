@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
@@ -13,6 +13,12 @@ import CanvasserPingPanel from '../components/CanvasserPingPanel.jsx';
 import FlaggedEntryPanel from '../components/FlaggedEntryPanel.jsx';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import MapStyleControl from '../components/MapStyleControl.jsx';
+import MapSelectModeControl from '../components/MapSelectModeControl.jsx';
+import DoorSelectionBar from '../components/DoorSelectionBar.jsx';
+import { useLassoDraw } from '../lib/useLassoDraw.js';
+import { useMovePin } from '../lib/useMovePin.js';
+import MovePinCard from '../components/MovePinCard.jsx';
+import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
 import { IconButton } from '../components/ui/index.js';
 import { IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { useMapStyle } from '../lib/mapStyles.js';
@@ -35,6 +41,7 @@ import {
   flagsToGeoJSON,
   flagsToLinesGeoJSON,
   pointToGeoJSON,
+  doorSelectionToGeoJSON,
   FIRST_KNOCK_COLOR,
   LAST_KNOCK_COLOR,
   registerLayers,
@@ -42,6 +49,11 @@ import {
 
 const DEFAULT_CENTER = [-95.7129, 37.0902]; // continental US
 const DEFAULT_ZOOM = 3.5;
+
+// Shared empties for "Select doors", so clearing the selection (or having none) hands back the
+// SAME reference every time and the memos below bail out instead of re-ringing the map.
+const EMPTY_SELECTION = new Set();
+const EMPTY_DOORS = [];
 
 // Prefetch buffer for the households map: fetch a box padded beyond the viewport, and skip the
 // refetch entirely while the viewport stays inside the last padded box — so small pans are instant
@@ -87,6 +99,33 @@ function buildQuery(params) {
 // Verb shown in the brief post-review confirmation toast.
 const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirmed: 'confirmed as an issue', open: 'reopened' };
 
+// Result copy for a "Select doors" mark / unmark. `sent` is the FROZEN id count the confirm
+// promised, so the tally always reconciles with the number the admin pressed. The server's own
+// response owns every other number — in global mode it is the only thing that knows what each
+// walk list's current round said about these doors.
+const markResultText = (res, sent) => {
+  const skips = res?.skipped || {};
+  const parts = [];
+  if (skips.alreadyRestricted) parts.push(`${skips.alreadyRestricted.toLocaleString()} already restricted`);
+  if (skips.completed) parts.push(`${skips.completed.toLocaleString()} completed this round`);
+  if (skips.reached) parts.push(`${skips.reached.toLocaleString()} left as your crew found them`);
+  if (skips.ineligible) parts.push(`${skips.ineligible.toLocaleString()} no longer markable`);
+  const tail = parts.length ? ` · ${parts.join(' · ')}` : '';
+  return `Marked ${(res?.marked || 0).toLocaleString()} of ${sent.toLocaleString()} ${pluralize(sent, 'door')} restricted${tail}`;
+};
+
+const unmarkResultText = (res, sent) => {
+  const unmarked = res?.unmarked || 0;
+  const doors = res?.households || 0;
+  if (!unmarked) return 'No desk marks to remove — field-recorded marks stay.';
+  // Doors that carried no desk mark IN THE ROUND this hit — including one marked in an earlier
+  // round, which this action deliberately leaves alone. Say so rather than let the smaller
+  // number read as a failure.
+  const short = Math.max(0, sent - doors);
+  const tail = short ? ` · ${short.toLocaleString()} had no desk mark to remove — field-recorded marks stay` : '';
+  return `Removed ${unmarked.toLocaleString()} desk ${pluralize(unmarked, 'mark')} on ${doors.toLocaleString()} ${pluralize(doors, 'door')}${tail}`;
+};
+
 export default function MapPage() {
   const [searchParams] = useSearchParams();
   const containerRef = useRef(null);
@@ -125,12 +164,32 @@ export default function MapPage() {
   const [stackIds, setStackIds] = useState(null);
   const buildingsByKeyRef = useRef(new Map());
 
-  // "Move pin" mode: a draggable marker to correct a household's location.
-  const moveMarkerRef = useRef(null);
-  const [moveTarget, setMoveTarget] = useState(null); // the household being repositioned
-  const [moveCoords, setMoveCoords] = useState(null); // { lng, lat } from the drag
-  const [moveSaving, setMoveSaving] = useState(false);
-  const [moveErr, setMoveErr] = useState(null);
+  // "Select doors" mode: lasso (or click) the doors you mean and desk-mark them Restricted
+  // Access — or take the marks back off — in one action. While it is on, the map's own drag
+  // becomes the lasso and a click toggles a door instead of opening a panel.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectTool, setSelectTool] = useState('lasso');
+  const [spaceHeld, setSpaceHeld] = useState(false); // Space = pan without leaving the mode
+  const [selection, setSelection] = useState(EMPTY_SELECTION); // Set of household ids
+  const [selectOverCap, setSelectOverCap] = useState(null); // { wouldBe } from the last REFUSED lasso
+  const [restrictToast, setRestrictToast] = useState(null); // result copy, in the toast stack below
+  const restrictToastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(restrictToastTimer.current), []);
+  // The layer click handlers are bound ONCE at map init, so the live mode and selection ride
+  // refs — assigned during render, exactly like buildingsByKeyRef below.
+  const selectModeRef = useRef(false);
+  const selectionRef = useRef(EMPTY_SELECTION);
+  selectModeRef.current = selectMode;
+  selectionRef.current = selection;
+  // When a lasso was just applied. Mapbox suppresses its own click only when the mouseUP lands
+  // 3px or more from the mouseDOWN (MapEventHandler.click in the dist) — so a freehand loop that
+  // comes back to where it started still fires one, and the door under the release point would
+  // be toggled straight back out of the shape that just took it. pointerup runs before mouseup
+  // runs before click, so the stamp this hands the click handler is always the fresh one.
+  const ringAppliedAtRef = useRef(0);
+  // The basemap picker's wrapper. Esc has to walk past an open menu before it leaves the mode —
+  // see the Esc effect below.
+  const styleControlRef = useRef(null);
 
   const orgTz = useOrgTimeZone();
   // Default to Today. Seed from the org tz so the first paint (before the campaign loads)
@@ -613,6 +672,12 @@ export default function MapPage() {
     }
   }, [canvassers, canvasserId]);
 
+  // "Move pin" mode — the shared hook (lib/useMovePin.js, same one the Turf Cutting page uses):
+  // a draggable marker, Save PATCHes the new location and drops every cache a moved pin can
+  // stale (this page's dots, the Turf page's dots + re-hulled outlines, print packets, flags).
+  // Declared BEFORE the map-build effect so its once-bound handlers can read `movePin.armedRef`.
+  const movePin = useMovePin({ mapRef, campaignId });
+
   // Initialize the map once we have a token.
   useEffect(() => {
     if (!tokenQ.data?.isReady || !containerRef.current || mapRef.current) return;
@@ -632,10 +697,43 @@ export default function MapPage() {
     // took those over) both hit. Taking features[0] silently opened one of them and
     // hid the rest — the same failure that made 485 stacked doors invisible. More than
     // one hit now opens the door list instead of guessing.
+    //
+    // In "Select doors" mode these same handlers toggle instead of opening: a tap under the
+    // lasso's 3px threshold falls through to mapbox's own click synthesis, so this is where a
+    // click lands either way. The selection rides selectionRef because they are bound once.
+    //
+    // Mid-pin-move every click handler returns first (movePin.armedRef, read at event time): the
+    // map belongs to the marker, and a stray click must not open a panel under the card.
+    const toggleSelection = (ids) => {
+      if (!ids.length) return;
+      if (Date.now() - ringAppliedAtRef.current < 400) return; // the tail of a closed lasso, not a click
+      const current = selectionRef.current;
+      // All of them already in? Then the click means "take this pin back out".
+      const mode = ids.every((id) => current.has(id)) ? 'subtract' : 'add';
+      const r = applySelection(current, ids, mode);
+      // The ref is caught up HERE, not on the next render: one click can land on two layers at
+      // once (both draw with icon-allow-overlap, and mapbox runs an independent delegate per
+      // layer), and the second handler would otherwise toggle against the pre-click Set and
+      // drop what the first one just took.
+      selectionRef.current = r.ids;
+      setSelectOverCap(r.overCap ? { wouldBe: r.wouldBe } : null);
+      setSelection(r.ids);
+    };
+    // The pointer cursor fights select mode's crosshair — a mouseenter would repaint it on
+    // every dot the pointer crosses mid-drag, so the whole cursor dance sits out the mode.
+    const hoverCursor = (value) => () => {
+      if (selectModeRef.current) return;
+      map.getCanvas().style.cursor = value;
+    };
     map.on('click', 'households-symbols', (e) => {
+      if (movePin.armedRef.current) return;
       const hits = e.features || [];
       if (!hits.length) return;
       const ids = [...new Set(hits.map((f) => f.properties.id))];
+      if (selectModeRef.current) {
+        toggleSelection(ids);
+        return;
+      }
       setSelectedActivityId(null);
       if (ids.length > 1) {
         setStackIds(ids);
@@ -645,38 +743,46 @@ export default function MapPage() {
         setSelected(ids[0]);
       }
     });
-    map.on('mouseenter', 'households-symbols', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'households-symbols', () => { map.getCanvas().style.cursor = ''; });
-    // A building glyph stands for every door on that pin — open the list, never one unit.
+    map.on('mouseenter', 'households-symbols', hoverCursor('pointer'));
+    map.on('mouseleave', 'households-symbols', hoverCursor(''));
+    // A building glyph stands for every door on that pin — open the list, never one unit. In
+    // select mode the same rule holds: the glyph stands for all of them, so all of them toggle.
     map.on('click', 'building-symbols', (e) => {
+      if (movePin.armedRef.current) return;
       const key = e.features?.[0]?.properties?.key;
       const building = key && buildingsByKeyRef.current.get(key);
       if (!building) return;
+      if (selectModeRef.current) {
+        toggleSelection(building.units.map((u) => u.id));
+        return;
+      }
       setStackIds(building.units.map((u) => u.id));
       setSelected(null);
       setSelectedActivityId(null);
     });
-    map.on('mouseenter', 'building-symbols', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'building-symbols', () => { map.getCanvas().style.cursor = ''; });
+    map.on('mouseenter', 'building-symbols', hoverCursor('pointer'));
+    map.on('mouseleave', 'building-symbols', hoverCursor(''));
     map.on('click', 'canvasser-pings', (e) => {
+      if (movePin.armedRef.current) return;
       const f = e.features?.[0];
-      if (!f) return;
+      if (!f || selectModeRef.current) return; // no panel opens while picking doors
       setSelectedActivityId(f.properties.activityId);
       setSelected(null);
       setStackIds(null);
     });
-    map.on('mouseenter', 'canvasser-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'canvasser-pings', () => { map.getCanvas().style.cursor = ''; });
+    map.on('mouseenter', 'canvasser-pings', hoverCursor('pointer'));
+    map.on('mouseleave', 'canvasser-pings', hoverCursor(''));
     map.on('click', 'flagged-pings', (e) => {
+      if (movePin.armedRef.current) return;
       const f = e.features?.[0];
-      if (!f) return;
+      if (!f || selectModeRef.current) return;
       setSelectedFlagId(f.properties.actionId);
       setSelected(null);
       setStackIds(null);
       setSelectedActivityId(null);
     });
-    map.on('mouseenter', 'flagged-pings', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'flagged-pings', () => { map.getCanvas().style.cursor = ''; });
+    map.on('mouseenter', 'flagged-pings', hoverCursor('pointer'));
+    map.on('mouseleave', 'flagged-pings', hoverCursor(''));
 
     // Viewport-bounded fetching: after the first auto-fit, every settled move (pan OR zoom —
     // mapbox fires moveend for both) updates `bbox` debounced, so the query above refetches
@@ -725,10 +831,14 @@ export default function MapPage() {
     return () => ro.disconnect();
   }, [mapReady]);
 
-  // Esc leaves fullscreen. Listener only exists while fullscreen, and is removed on exit.
+  // Esc leaves fullscreen. Listener only exists while fullscreen, and is removed on exit. Mid-pin-
+  // move the press belongs to the move (useMovePin cancels on it) — read the ref, never the
+  // closure's `armed`, which this once-per-fullscreen listener froze.
   useEffect(() => {
     if (!mapFullscreen) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setMapFullscreen(false); };
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !movePin.armedRef.current) setMapFullscreen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mapFullscreen]);
@@ -803,6 +913,314 @@ export default function MapPage() {
       }
     }
   }, [shownHouseholds, buildings, stackedIds, excludedVis, mapBounds, mapReady, styleEpoch]);
+
+  // ── "Select doors" ────────────────────────────────────────────────────────────────────────
+  // Lasso (or click) the doors you mean and desk-mark them Restricted Access — or take those
+  // marks back off — in one action.
+  //
+  // THE RULE: what the lasso catches is what this page DRAWS — `shownHouseholds`, the very array
+  // the household source is fed from — never queryRenderedFeatures, which can't see a door just
+  // off-screen and can't tell a markable door from a completed one. The house layer's `stacked`
+  // filter needs no special handling here: a stacked door is drawn as a BUILDING glyph at the
+  // same coordinate, so it is still on screen and still hit-tested at its own lng/lat. Clicking
+  // that glyph toggles every unit on the pin (the layer handler above), and a lasso edge that
+  // clips a stack takes the whole building (snapBuildings) — the glyph sits at the first unit's
+  // real coordinate while the units share a rounded key, so an edge can otherwise split one.
+
+  // The map instance as a value, for the lasso hook. Safe to read during render: the `load`
+  // handler fills mapRef BEFORE it flips mapReady, and the teardown clears both together.
+  const map = mapReady ? mapRef.current : null;
+
+  // The round a mark would land in, and the walk list that round covers.
+  const scopePass = scopePassId
+    ? (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId) || null
+    : null;
+  const passLabel = scopePassId
+    ? scopePass
+      ? `Pass ${scopePass.roundNumber} · ${scopePass.name}`
+      : 'the selected round'
+    : null;
+  const passEffortId = scopePass?.effortId ? String(scopePass.effortId) : '';
+  const passEffortName = passEffortId
+    ? efforts.find((x) => String(x._id) === passEffortId)?.name || 'this walk list'
+    : null;
+  // A passId is sent whenever a round is in scope. The per-round BREAKDOWN needs more than that:
+  // households.js resolves `status` per round only in its 'pass' mode — a canvasser filter wins
+  // (`statusMode: userId ? 'user' : passId ? 'pass' : 'global'`), and in that mode a row's status
+  // is that ONE canvasser's answer, not the round's. Printing either of those as "completed this
+  // round" would be a confident lie, so the per-round buckets come back null unless the mode is
+  // truly 'pass' and the response tally owns those numbers instead.
+  const sendsPassId = !!scopePassId;
+  const forRound = sendsPassId && !canvasserId;
+
+  // The selection AS DRAWN. Resolving the id Set against the drawn array is what keeps a door a
+  // filter, a Hide toggle or a viewport refetch dropped from being counted, ringed or sent.
+  const selectedDoors = useMemo(() => {
+    if (!selection.size) return EMPTY_DOORS;
+    const out = [];
+    for (const h of shownHouseholds) if (selection.has(h.id)) out.push(h);
+    return out;
+  }, [selection, shownHouseholds]);
+
+  // The plan: what this selection would mark, skip and never send. In a pass scope the marks go
+  // to ONE round, which covers ONE walk list, so a door re-housed into another walk list is
+  // pre-dropped — sending it blind folds it into `skipped.ineligible` and returns a cheerful 200
+  // that says nothing about it.
+  const { plan, offListCount } = useMemo(() => {
+    const inRows = [];
+    let off = 0;
+    for (const d of selectedDoors) {
+      if (passEffortId && d.effortId && String(d.effortId) !== passEffortId) off += 1;
+      else inRows.push(d);
+    }
+    const base = planDoorSelection(inRows, { forRound, sendsPassId });
+    if (!off) return { plan: base, offListCount: 0 };
+    // Counted in BOTH total and cannotMark so the bar's line still adds up; the disclosure below
+    // names them (planDoorSelection only knows the campaign-wide gates — Intake, excluded from
+    // books, do-not-knock — not which round is on screen).
+    return { plan: { ...base, total: base.total + off, cannotMark: base.cannotMark + off }, offListCount: off };
+  }, [selectedDoors, passEffortId, forRound, sendsPassId]);
+
+  // Blue "will be marked" vs slate "will be skipped", both fed from the DRAWN rows.
+  const markIdSet = useMemo(() => new Set(plan.markIds), [plan]);
+
+  // How many walk lists the selection spans — in global mode each door is marked in its OWN
+  // walk list's current round, which is a thing to say out loud before someone presses Mark.
+  const walkListCount = useMemo(() => {
+    const s = new Set();
+    for (const d of selectedDoors) if (d.effortId) s.add(String(d.effortId));
+    return s.size;
+  }, [selectedDoors]);
+
+  const selectionNote = useMemo(() => {
+    const parts = [];
+    if (offListCount > 0) {
+      parts.push(
+        `${offListCount.toLocaleString()} selected ${pluralize(offListCount, 'door')} ${offListCount === 1 ? 'sits' : 'sit'} in another walk list and ${offListCount === 1 ? 'is' : 'are'} not sent — this round only covers ${passEffortName}.`
+      );
+    }
+    if (!sendsPassId) {
+      parts.push(
+        walkListCount > 1
+          ? `These doors span ${walkListCount} walk lists — each one is marked in its own walk list's current round.`
+          : "Doors are marked in their walk list's current round."
+      );
+    }
+    // Without per-round statuses there is no honest "reached" count to offer a choice over, so
+    // the server's default ladder applies and the crew's not-homes and refusals ARE marked. Two
+    // ways to land here: no round in scope at all, or a canvasser filter on top of one — which
+    // puts the payload in households.js' 'user' mode, where a row's status is that ONE person's
+    // answer. Never silently — say it, and name the way to get the choice.
+    if (!forRound) {
+      parts.push(
+        sendsPassId
+          ? 'Doors your crew already reached in that round (not home, refused) are marked too — clear the canvasser filter to choose.'
+          : 'Doors your crew already reached in that round (not home, refused) are marked too — open this map from one round (Walk Lists → Passes → Audit) to choose.'
+      );
+    }
+    if (!sendsPassId) {
+      parts.push('Unmark removes desk marks from that same current round; a mark made in an earlier round stays.');
+    }
+    // The payload is viewport-bounded AND capped, so at this zoom the lasso can only catch part
+    // of what is really down there.
+    if (householdsQ.data?.truncated) {
+      parts.push('Some doors in this area are not loaded — zoom in before selecting.');
+    }
+    return parts.length ? parts.join(' ') : null;
+  }, [offListCount, passEffortName, sendsPassId, forRound, walkListCount, householdsQ.data?.truncated]);
+
+  // A finished lasso → the doors inside it → the selection. useLassoDraw keeps the latest
+  // callback in a ref, so closing over `selection` here is always the live one.
+  const handleRing = useCallback(
+    (ring, { mode }) => {
+      ringAppliedAtRef.current = Date.now();
+      const hits = snapBuildings(doorsInRing({ doors: shownHouseholds, ring }), shownHouseholds);
+      const r = applySelection(selection, hits, mode);
+      // Over the cap the whole shape is REFUSED (neither payload is sorted, so "the first 1,000"
+      // would be an arbitrary, unrepeatable subset) — the bar says how many it would have taken.
+      setSelectOverCap(r.overCap ? { wouldBe: r.wouldBe } : null);
+      setSelection(r.ids);
+    },
+    [shownHouseholds, selection]
+  );
+
+  const { cancelDrag } = useLassoDraw({
+    map,
+    enabled: selectMode,
+    tool: selectTool,
+    spaceHeld,
+    onRing: handleRing,
+  });
+
+  const enterSelectMode = () => {
+    // Nothing opens over the map while picking doors.
+    setSelected(null);
+    setStackIds(null);
+    setSelectedActivityId(null);
+    setSelectedFlagId(null);
+    setSelectMode(true);
+  };
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelection(EMPTY_SELECTION);
+    setSelectOverCap(null);
+    setSpaceHeld(false);
+  }, []);
+
+  // Esc gets its OWN listener: the page's other keydown effect only exists while fullscreen, so
+  // extending it would leave Esc dead in the normal case. Ladder: cancel a live drag, else close
+  // an open map menu, else leave select mode. It listens on DOCUMENT (bubble) deliberately —
+  // useLassoDraw's mid-drag handler and the confirm modal's both listen on window in the CAPTURE
+  // phase and stopPropagation, so each of those wins over this one; stopping here in turn is what
+  // keeps Esc from ALSO dropping the map out of fullscreen on the same press.
+  useEffect(() => {
+    if (!selectMode) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (cancelDrag()) return; // a drag was live — cancelling it is all this Esc does
+      // The basemap picker closes on Escape from its own DOCUMENT listener (MapStyleControl.jsx:19)
+      // — a sibling of this one, which stopPropagation cannot reach (that would take
+      // stopImmediatePropagation, and then the menu would stay open). So this press belongs to
+      // the menu: it is still in the DOM here, because React has not re-rendered mid-dispatch.
+      if (styleControlRef.current?.querySelector('.animate-pop-in')) return;
+      exitSelectMode();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectMode, cancelDrag, exitSelectMode]);
+
+  // Hold Space to pan without leaving the mode. Never swallowed while typing — the confirm's
+  // typed-`restrict` gate is a text input, and a space is a character there.
+  useEffect(() => {
+    if (!selectMode) return undefined;
+    // Space is a character in a text box and the activation key on a button — swallow it only
+    // when the map itself has the keyboard.
+    const onControl = (t) =>
+      !!t &&
+      (t.tagName === 'INPUT' ||
+        t.tagName === 'TEXTAREA' ||
+        t.tagName === 'SELECT' ||
+        t.tagName === 'BUTTON' ||
+        t.tagName === 'A' ||
+        t.isContentEditable);
+    const down = (e) => {
+      if (e.code !== 'Space' || e.repeat || onControl(e.target)) return;
+      e.preventDefault(); // otherwise the page scrolls under the map
+      setSpaceHeld(true);
+    };
+    const up = (e) => {
+      if (e.code === 'Space') setSpaceHeld(false);
+    };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+      setSpaceHeld(false); // a key-up that lands after the mode closes would never arrive
+    };
+  }, [selectMode]);
+
+  // Crosshair while picking, the hand back while panning. The hover handlers above sit the mode
+  // out, so nothing else writes this cursor until select mode ends — and '' is this page's own
+  // resting value (what every mouseleave writes), so that is what the exit restores.
+  useEffect(() => {
+    if (!selectMode || !map) return undefined;
+    const canvas = map.getCanvas();
+    if (!canvas) return undefined;
+    canvas.style.cursor = spaceHeld || selectTool === 'pan' ? 'grab' : 'crosshair';
+    return () => {
+      canvas.style.cursor = '';
+    };
+  }, [selectMode, spaceHeld, selectTool, map]);
+
+  // Push the selection rings. Fed from the DRAWN rows (never the raw id Set) so a door hidden by
+  // a filter can't leave an orphan ring floating over nothing.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const src = mapRef.current.getSource('door-selection');
+    if (!src) return;
+    src.setData(doorSelectionToGeoJSON(selectMode ? selectedDoors : EMPTY_DOORS, markIdSet));
+  }, [selectMode, selectedDoors, markIdSet, mapReady, styleEpoch]);
+
+  // Clear the selection when the LOADED SET changes — a filter, the date window, a scope, the
+  // campaign. Deliberately NOT on a bbox pan or a live poll: both replace the array with the same
+  // door set, and losing a 900-door selection to a 20s refetch would make the mode unusable. (A
+  // door that genuinely leaves the drawn array is already dropped by `selectedDoors` above.)
+  useEffect(() => {
+    setSelection(EMPTY_SELECTION);
+    setSelectOverCap(null);
+  }, [
+    campaignId,
+    dateRange.from,
+    dateRange.to,
+    statusFilter.join(','),
+    canvasserId,
+    answerFilter.questionKey,
+    answerFilter.option,
+    answerFilter.optionId,
+    answerTemplateId,
+    scopeEffortId,
+    scopePassId,
+    scopeImportId,
+    scopeSavedSearchId,
+  ]);
+
+  const showRestrictToast = (text, ms = 10000) => {
+    setRestrictToast(text);
+    clearTimeout(restrictToastTimer.current);
+    restrictToastTimer.current = setTimeout(() => setRestrictToast(null), ms);
+  };
+
+  // Exactly what the single-home panel invalidates (HouseholdDetailPanel's RestrictedSection):
+  // both map keys by prefix, the doors' activity, the rollups, and the cross-page turf keys so
+  // Turf Cutting stays honest if it is open in another tab. The selection is KEPT — the rings
+  // re-classify from blue to slate as the refetch lands, which is the confirmation.
+  const invalidateRestrict = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'households-map'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'households-map-counts'] });
+    qc.invalidateQueries({ queryKey: ['household-activity'] });
+    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
+    qc.invalidateQueries({
+      predicate: (q) => q.queryKey?.[0] === 'reports' && q.queryKey?.[1] === 'campaign-rollup',
+    });
+    qc.invalidateQueries({ queryKey: ['turf-doors'] });
+    qc.invalidateQueries({ queryKey: ['turf-progress'] });
+    qc.invalidateQueries({ queryKey: ['turfs'] });
+  };
+
+  // ONE request per action, capped at 1,000 ids, never chunked: chunking would pay
+  // recomputeCampaignStats' whole-ledger recompute once per chunk. With a round in scope the
+  // passId rides along; in global mode it is omitted and the server resolves each door's own
+  // walk list's current round.
+  const markSelection = useMutation({
+    mutationFn: ({ ids, scope }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/restrict-doors`, {
+        method: 'POST',
+        body: { householdIds: ids, scope, ...(sendsPassId ? { passId: scopePassId } : {}) },
+      }),
+    onSuccess: (res, { ids }) => {
+      showRestrictToast(markResultText(res, ids.length));
+      invalidateRestrict();
+    },
+  });
+
+  const unmarkSelection = useMutation({
+    mutationFn: ({ ids }) =>
+      api(`/admin/campaigns/${campaignId}/turfs/unrestrict-doors`, {
+        method: 'POST',
+        body: { householdIds: ids, ...(sendsPassId ? { passId: scopePassId } : {}) },
+      }),
+    onSuccess: (res, { ids }) => {
+      showRestrictToast(unmarkResultText(res, ids.length));
+      invalidateRestrict();
+    },
+  });
 
   const householdsById = useMemo(() => {
     const m = new Map();
@@ -937,48 +1355,14 @@ export default function MapPage() {
   }, [stackIds, selectedBuilding, householdsById]);
 
   // Push the selected door to the highlight ring (see mapRender). Clears when nothing
-  // is selected or the selected door has no coordinates.
+  // is selected or the selected door has no coordinates — and while picking doors, where its
+  // blue would read as one more selection ring (Address search can still fly to a door there).
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const src = mapRef.current.getSource('selected-household');
     if (!src) return;
-    src.setData(pointToGeoJSON(selectedHousehold));
-  }, [selectedHousehold, mapReady, styleEpoch]);
-
-  // "Move pin" mode: drop a draggable marker at the target's current spot; the drag
-  // updates moveCoords; Save PATCHes the new location and refetches.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !moveTarget?.location) return undefined;
-    const start = [moveTarget.location.lng, moveTarget.location.lat];
-    setMoveCoords({ lng: start[0], lat: start[1] });
-    const marker = new mapboxgl.Marker({ draggable: true, color: '#2563eb' }).setLngLat(start).addTo(map);
-    marker.on('dragend', () => {
-      const ll = marker.getLngLat();
-      setMoveCoords({ lng: ll.lng, lat: ll.lat });
-    });
-    moveMarkerRef.current = marker;
-    return () => { marker.remove(); moveMarkerRef.current = null; };
-  }, [moveTarget]);
-
-  async function saveMovedPin() {
-    if (!moveTarget || !moveCoords) return;
-    setMoveSaving(true);
-    setMoveErr(null);
-    try {
-      await api(`/admin/campaigns/${campaignId}/households/${moveTarget.id}/location`, {
-        method: 'PATCH',
-        body: { lat: moveCoords.lat, lng: moveCoords.lng },
-      });
-      setMoveTarget(null);
-      setMoveCoords(null);
-      await householdsQ.refetch();
-    } catch (err) {
-      setMoveErr(err?.message || 'Could not move the pin.');
-    } finally {
-      setMoveSaving(false);
-    }
-  }
+    src.setData(pointToGeoJSON(selectMode ? null : selectedHousehold));
+  }, [selectedHousehold, selectMode, mapReady, styleEpoch]);
 
   const selectedActivity = useMemo(
     () => activities.find((a) => a.id === selectedActivityId) || null,
@@ -1220,7 +1604,11 @@ export default function MapPage() {
           {/* One top-left cluster so the style picker and the fullscreen toggle sit side by side
               rather than the toggle landing under the picker's downward-opening menu. */}
           <div className="absolute left-4 top-4 z-10 flex items-start gap-2">
-            <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="items-start" />
+            {/* `contents` keeps the picker's own box in this flex row untouched; the wrapper
+                exists only so the Esc ladder above can see its menu open. */}
+            <div ref={styleControlRef} className="contents">
+              <MapStyleControl value={styleId} onChange={setStyle} menuDirection="down" className="items-start" />
+            </div>
             <IconButton
               label={mapFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
               className="h-10 w-10 border border-border bg-card/95 shadow-lg backdrop-blur"
@@ -1228,10 +1616,27 @@ export default function MapPage() {
             >
               {mapFullscreen ? <IconMinimize /> : <IconExpand />}
             </IconButton>
+            {/* Same cluster as the style picker and the fullscreen toggle: the one slot that
+                survives fullscreen, so the way in never depends on a panel being open. Disabled
+                mid-pin-move — that mode owns the drag this one is about to take over. */}
+            <MapSelectModeControl
+              active={selectMode}
+              onActivate={enterSelectMode}
+              onDone={exitSelectMode}
+              tool={selectTool}
+              onToolChange={setSelectTool}
+              tools={['pan', 'lasso']}
+              panning={spaceHeld}
+              disabled={movePin.armed}
+              disabledReason="Finish moving this pin first."
+            />
           </div>
           {firstLastKnock.first && (
             <div
-              style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 10 }}
+              // The selection bar spans the full width at the bottom of the map, so on a narrow
+              // viewport its card reaches this corner — sit above its tallest state while the
+              // mode is on rather than under it.
+              style={{ position: 'absolute', left: 16, bottom: selectMode ? 200 : 16, zIndex: 10 }}
               className="rounded-lg border border-border bg-card/95 px-3 py-2 text-xs shadow-lg"
             >
               <div className="flex items-center gap-2">
@@ -1246,7 +1651,7 @@ export default function MapPage() {
               )}
             </div>
           )}
-          {selectedHousehold && !moveTarget && (
+          {selectedHousehold && !movePin.armed && !selectMode && (
             <div
               style={{
                 position: 'absolute',
@@ -1278,7 +1683,16 @@ export default function MapPage() {
                 household={selectedHousehold}
                 campaignId={campaignId}
                 onClose={() => { setSelected(null); setStackIds(null); }}
-                onMovePin={() => { setMoveErr(null); setMoveTarget(selectedHousehold); }}
+                onMovePin={() =>
+                  movePin.start({
+                    id: selectedHousehold.id,
+                    addressLine1: selectedHousehold.addressLine1,
+                    lng: selectedHousehold.location?.lng,
+                    lat: selectedHousehold.location?.lat,
+                    scope: 'unit',
+                    count: 1,
+                  })
+                }
                 // A desk mark / unmark recolors this door: the panel already invalidates the
                 // map + counts keys; the refetch joins that in-flight fetch (react-query
                 // dedupes) so the open panel's snapshot refreshes as soon as it lands.
@@ -1292,7 +1706,7 @@ export default function MapPage() {
           )}
           {/* Doors sharing one pin, listed. Only when no single door is open — picking one
               from the list swaps this for the detail panel (with a Back bar). */}
-          {!selectedHousehold && !moveTarget && stackDoors && stackDoors.length > 1 && (
+          {!selectedHousehold && !movePin.armed && !selectMode && stackDoors && stackDoors.length > 1 && (
             <div
               style={{
                 position: 'absolute',
@@ -1317,39 +1731,17 @@ export default function MapPage() {
               />
             </div>
           )}
-          {moveTarget && (
-            <div
+          {movePin.armed && (
+            <MovePinCard
+              copy={movePin.copy}
+              error={movePin.error}
+              saving={movePin.saving}
+              onCancel={movePin.cancel}
+              onSave={movePin.save}
               style={{ position: 'absolute', right: 16, top: 16, zIndex: 11, width: 320, maxWidth: 'calc(100% - 32px)' }}
-              className="rounded-lg border border-border bg-card p-4 shadow-lg"
-            >
-              <div className="text-sm font-semibold text-fg">Move pin</div>
-              <p className="mt-1 text-xs text-fg-muted">
-                Drag the blue marker to <strong>{moveTarget.addressLine1}</strong>'s correct spot, then Save.
-              </p>
-              <p className="mt-2 rounded border border-warning/30 bg-warning-tint px-2 py-1.5 text-[11px] leading-snug text-warning-fg">
-                Corrects the pin only — this door keeps its current book until you re-cut turf. Canvassers see the new
-                spot on their next sync.
-              </p>
-              {moveErr && <div className="mt-2 text-xs text-danger">{moveErr}</div>}
-              <div className="mt-3 flex justify-end gap-2">
-                <button
-                  onClick={() => { setMoveTarget(null); setMoveCoords(null); setMoveErr(null); }}
-                  disabled={moveSaving}
-                  className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-sunken"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveMovedPin}
-                  disabled={moveSaving}
-                  className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-                >
-                  {moveSaving ? 'Saving…' : 'Save location'}
-                </button>
-              </div>
-            </div>
+            />
           )}
-          {selectedActivity && !selectedHousehold && (
+          {selectedActivity && !selectedHousehold && !selectMode && (
             <div
               style={{
                 position: 'absolute',
@@ -1375,7 +1767,7 @@ export default function MapPage() {
               />
             </div>
           )}
-          {selectedFlag && !selectedHousehold && !selectedActivity && !moveTarget && (
+          {selectedFlag && !selectedHousehold && !selectedActivity && !movePin.armed && !selectMode && (
             <div
               style={{
                 position: 'absolute',
@@ -1471,11 +1863,56 @@ export default function MapPage() {
               </ul>
             </div>
           )}
-          {(flagFlash || bulkToast) && (
+          {/* Bottom-center INSIDE the map section, so fullscreen can't bury it. It owns the
+              whole confirm ladder (inline under 25 doors, the typed-`restrict` modal over) and
+              freezes the plan the moment a confirm opens — the 20s poll must never move a number
+              under a typed gate. */}
+          {selectMode && (plan.total > 0 || selectOverCap) && (
+            <DoorSelectionBar
+              plan={plan}
+              // What the pins on screen actually answer: this round only when a round scope is on
+              // with no canvasser filter; that canvasser's own status when one is picked
+              // (getUserStatusMap); otherwise the stored campaign-wide status.
+              statusBasis={forRound ? 'round' : canvasserId ? 'canvasser' : 'campaign'}
+              passLabel={passLabel}
+              scopeNote={selectionNote}
+              canUnmark={plan.unmarkIds.length > 0}
+              // An archived campaign is read-only server-side (requireActiveCampaign guards the
+              // whole turf router), so say so before the confirm ladder, not after it.
+              readOnly={selectedCampaign?.isActive === false}
+              readOnlyReason="This campaign is archived — reactivate it to mark doors."
+              busy={markSelection.isPending ? 'mark' : unmarkSelection.isPending ? 'unmark' : null}
+              error={markSelection.error || unmarkSelection.error || null}
+              // The DOOR SET is in motion (a filter or viewport fetch is landing), not merely
+              // fetching: a 20s poll returns the same doors and must not disable the buttons.
+              reloading={householdsQ.isPlaceholderData}
+              overCap={selectOverCap}
+              onDismissOverCap={() => setSelectOverCap(null)}
+              onMark={({ ids, scope }) => {
+                unmarkSelection.reset();
+                markSelection.mutate({ ids, scope });
+              }}
+              onUnmark={({ ids }) => {
+                markSelection.reset();
+                unmarkSelection.mutate({ ids });
+              }}
+              onClear={() => {
+                setSelection(EMPTY_SELECTION);
+                setSelectOverCap(null);
+              }}
+              onClose={exitSelectMode}
+            />
+          )}
+          {(flagFlash || bulkToast || restrictToast) && (
             <div
               style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
               className="flex flex-col items-center gap-2"
             >
+              {restrictToast && (
+                <div className="max-w-[min(90vw,42rem)] rounded-full bg-fg px-4 py-2 text-center text-xs font-medium text-bg shadow-lg">
+                  ✓ {restrictToast}
+                </div>
+              )}
               {bulkToast && (
                 <div className="flex items-center gap-3 rounded-full bg-fg px-4 py-2 text-xs font-medium text-bg shadow-lg">
                   <span>
