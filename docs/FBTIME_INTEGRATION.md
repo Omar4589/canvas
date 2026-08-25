@@ -111,6 +111,22 @@ looking:
   on this campaign never count here. A clocked day with no doors *anywhere* still counts toward
   the campaign they were working at the time — that is the idle day the previous note is about.
 
+### When a timesheet fix shows up in Doorline
+
+Doorline re-reads FbTime on a schedule rather than live: shifts from the **last 7 days** are
+re-pulled about **every 15 minutes**, and everything from the **last 120 days** is re-pulled
+**nightly**. So a correction someone makes in FbTime — a fixed clock-in, a closed shift, a deleted
+entry — shows up on its own within 15 minutes if the shift is recent, or by the next morning if it
+is older. Doors-per-hour itself is computed fresh on every report load; only the copy of the hours
+lags.
+
+When you don't want to wait for the nightly pass — you just fixed a weeks-old shift and want the
+report right now — press **Refresh hours now** on the Integrations page. It re-pulls the last few
+months on the spot; the button reports when the numbers are in (typically a few seconds), and it
+can be pressed once a minute. On a connection marked "Needs attention", the same button also
+retries the key — if the problem was fixed on the FbTime side, the connection heals itself
+without re-pasting anything.
+
 ### Disconnecting
 
 Disconnect on the Integrations page. Reports revert to estimated hours immediately, the stored key
@@ -160,7 +176,19 @@ the response over that range (upsert by the provider's shift id, delete what it 
 - `fbtime-hours-recent` — every 15 min (off the quarter-hour), trailing 7 days, `connected` orgs.
 - `fbtime-hours-deep` — nightly 06:29, trailing 120 days; also re-pings `errored` connections and
   self-heals (`sync-recovered`).
-- `fbtime-hours-org` — one-off at connect, so a fresh connection has a season of hours in seconds.
+- `fbtime-hours-org` — one-off, deep window, for a single org. Enqueued at connect (so a fresh
+  connection has a season of hours in seconds) and by **`POST /admin/integrations/fbtime/sync`**,
+  the "Refresh hours now" button (2026-08-24) — the admin's escape from the nightly wait after
+  fixing a weeks-old timesheet. The route stamps `manualSyncRequestedAt` on the connection (a
+  60-second cooldown, 429 `SYNC_COOLDOWN` inside it) and answers 202 with `requestedAt`; the
+  client polls the status GET until `lastSyncAt` or `lastErrorAt` moves past that instant
+  (`lastErrorAt` now rides the status payload for exactly this — additive, no version bump; the
+  mobile More row reads the same GET untouched). The job accepts `errored` connections and runs
+  `syncOneConnection` — the cron loop's per-connection body, extracted — so a manual refresh
+  probes-and-recovers a fixed key like the deep job would, and absorbs failures onto the
+  connection's `lastSyncError`/`lastErrorAt` where the status card explains them, instead of
+  dying as an invisible failed job. (Trade accepted: job-level retries are gone for this path —
+  a transient blip now waits for the next 15-minute tick rather than BullMQ backoff.)
 
 The traps, from the provider's contract, all deliberate here:
 

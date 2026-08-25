@@ -162,6 +162,32 @@ test('the figure setting accepts only the three wire names and audits changes', 
   await call('PATCH', '/admin/integrations/fbtime/settings', { ...ctx.admin, body: { hourFigure: 'adjustedHours' } });
 });
 
+test('manual refresh enqueues once and then holds a one-minute cooldown', { skip }, async () => {
+  const first = await call('POST', '/admin/integrations/fbtime/sync', ctx.admin);
+  assert.strictEqual(first.status, 202);
+  assert.strictEqual(first.json.queued, true);
+  assert.ok(!Number.isNaN(new Date(first.json.requestedAt).getTime()), 'requestedAt is the server instant the client polls against');
+
+  const connection = await FbTimeConnection.findOne({ organizationId: ctx.org._id });
+  assert.ok(connection.manualSyncRequestedAt, 'the cooldown stamp landed');
+
+  const second = await call('POST', '/admin/integrations/fbtime/sync', ctx.admin);
+  assert.strictEqual(second.status, 429);
+  assert.strictEqual(second.json.code, 'SYNC_COOLDOWN');
+
+  // An expired cooldown admits the next request.
+  await FbTimeConnection.updateOne(
+    { organizationId: ctx.org._id },
+    { $set: { manualSyncRequestedAt: new Date(Date.now() - 120_000) } }
+  );
+  const third = await call('POST', '/admin/integrations/fbtime/sync', ctx.admin);
+  assert.strictEqual(third.status, 202);
+
+  // The status wire carries the failure stamp the refresh poll reads.
+  const status = await call('GET', '/admin/integrations/fbtime', ctx.admin);
+  assert.ok('lastErrorAt' in status.json, 'lastErrorAt rides the status payload');
+});
+
 test('manual link backfills the cache immediately; unlink reverts it to unmapped', { skip }, async () => {
   await FbTimeShift.create({
     organizationId: ctx.org._id, shiftId: 'link1', fbtimePersonId: P1, userId: null,
@@ -234,6 +260,11 @@ test('disconnect clears the ciphertext, DELETES the cache, and keeps links + his
 
   const status = await call('GET', '/admin/integrations/fbtime', ctx.admin);
   assert.strictEqual(status.json.connected, false, 'indistinguishable from never-connected');
+});
+
+test('manual refresh refuses when disconnected — nothing to pull with', { skip }, async () => {
+  const res = await call('POST', '/admin/integrations/fbtime/sync', ctx.admin);
+  assert.strictEqual(res.status, 404);
 });
 
 test('history is served newest-first and never carries a key', { skip }, async () => {

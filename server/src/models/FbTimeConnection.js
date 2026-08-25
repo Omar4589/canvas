@@ -63,6 +63,10 @@ const fbTimeConnectionSchema = new mongoose.Schema(
     lastSyncAt: { type: Date, default: null },
     lastSyncError: { type: String, default: null },
     lastErrorAt: { type: Date, default: null },
+
+    // When an admin last pressed "Refresh hours now" — the cooldown stamp for
+    // the manual deep pull, not a sync-progress fact (lastSyncAt is that).
+    manualSyncRequestedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

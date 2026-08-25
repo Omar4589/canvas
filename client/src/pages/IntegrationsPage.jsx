@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
 
@@ -196,11 +196,64 @@ function ConnectCard({ configured, onDone }) {
 // ── Status ──────────────────────────────────────────────────────────────────
 
 function StatusCard({ data, onChanged }) {
+  const orgId = getActiveOrgId();
+  const qc = useQueryClient();
+
   const figureMut = useMutation({
     mutationFn: (hourFigure) =>
       api('/admin/integrations/fbtime/settings', { method: 'PATCH', body: { hourFigure } }),
     onSuccess: onChanged,
   });
+
+  // "Refresh hours now": the server enqueues a deep re-pull and answers with
+  // its requestedAt; completion is read off the connection's own sync stamps
+  // moving past that instant, so both sides of the comparison are the server's
+  // clock. (A 15-minute cron tick landing in the same window can trip the
+  // "refreshed" note a moment before the deep rows land — cosmetic; the rows
+  // arrive on the very next refetch.)
+  const [refreshingSince, setRefreshingSince] = useState(null); // ms epoch, server time
+  const [refreshNote, setRefreshNote] = useState(null);
+
+  const refreshMut = useMutation({
+    mutationFn: () => api('/admin/integrations/fbtime/sync', { method: 'POST' }),
+    onSuccess: (res) => {
+      setRefreshNote(null);
+      setRefreshingSince(new Date(res.requestedAt).getTime());
+    },
+  });
+
+  // Poll the status query while a refresh is in flight; give up politely after
+  // 90s (the job still runs — the next natural refetch shows its result).
+  useEffect(() => {
+    if (!refreshingSince) return undefined;
+    const tick = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['admin', 'integrations', 'fbtime', orgId] });
+    }, 2000);
+    const bail = setTimeout(() => {
+      setRefreshingSince(null);
+      setRefreshNote('Still working — the refresh runs in the background. Check back in a minute.');
+    }, 90_000);
+    return () => {
+      clearInterval(tick);
+      clearTimeout(bail);
+    };
+  }, [refreshingSince, qc, orgId]);
+
+  // lastSyncAt past our request = done; lastErrorAt past it = the sync ran and
+  // failed, and the error banner above already says why.
+  useEffect(() => {
+    if (!refreshingSince) return;
+    const syncedAt = data.lastSyncAt ? new Date(data.lastSyncAt).getTime() : 0;
+    const failedAt = data.lastErrorAt ? new Date(data.lastErrorAt).getTime() : 0;
+    if (syncedAt >= refreshingSince) {
+      setRefreshingSince(null);
+      setRefreshNote('Hours refreshed.');
+      onChanged(); // every report recomputes against the fresh cache
+    } else if (failedAt >= refreshingSince) {
+      setRefreshingSince(null);
+      setRefreshNote(null);
+    }
+  }, [data.lastSyncAt, data.lastErrorAt, refreshingSince, onChanged]);
 
   const disconnectMut = useMutation({
     mutationFn: () => api('/admin/integrations/fbtime', { method: 'DELETE' }),
@@ -242,6 +295,22 @@ function StatusCard({ data, onChanged }) {
           <dd className="text-fg">{data.linkCount}</dd>
         </div>
       </dl>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={refreshMut.isPending || Boolean(refreshingSince)}
+          onClick={() => refreshMut.mutate()}
+          className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-fg disabled:opacity-50"
+        >
+          {refreshMut.isPending || refreshingSince ? 'Refreshing…' : 'Refresh hours now'}
+        </button>
+        <span className="text-xs text-fg-muted">
+          Re-pulls the last few months from FbTime — use it after fixing a timesheet there.
+        </span>
+      </div>
+      {refreshNote && <p className="mt-1.5 text-xs text-fg-muted">{refreshNote}</p>}
+      {refreshMut.error && <p className="mt-1.5 text-xs text-danger">{refreshMut.error.message}</p>}
 
       <p className="mt-3 text-xs text-fg-muted">
         Doorline stores only each person's daily totals. Shift-level detail — exact clock-ins,

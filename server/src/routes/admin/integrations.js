@@ -77,6 +77,7 @@ router.get('/fbtime', async (req, res, next) => {
       connectedAt: connection.connectedAt,
       lastSyncAt: connection.lastSyncAt,
       lastSyncError: connection.lastSyncError,
+      lastErrorAt: connection.lastErrorAt,
       linkCount,
       // Distinct FbTime people with cached hours no Doorline user is mapped to —
       // the mapping screen's "unmatched hours exist" badge.
@@ -204,6 +205,49 @@ router.post('/fbtime/connect', async (req, res, next) => {
     } catch {
       next(err);
     }
+  }
+});
+
+// One manual refresh a minute per org is plenty: the pull itself takes seconds,
+// and anything faster is just hammering the provider with identical questions.
+const MANUAL_SYNC_COOLDOWN_MS = 60_000;
+
+/**
+ * Pull the deep window from FbTime NOW — the "I just fixed a timesheet" button.
+ * The cron pair already keeps the cache honest (15-minute recent window,
+ * nightly deep re-pull); this exists so an admin who corrects a weeks-old
+ * shift in FbTime sees the fix on the next report load instead of tomorrow
+ * morning. Enqueued rather than inline — the deep pull is seconds of provider
+ * paging that does not belong on a request — so the client watches
+ * lastSyncAt / lastErrorAt move past `requestedAt` on the status poll.
+ * 'errored' connections are allowed through on purpose: a manual refresh is
+ * exactly when a human retries a fixed key, and the job self-heals it.
+ */
+router.post('/fbtime/sync', async (req, res, next) => {
+  try {
+    const organizationId = orgIdOf(req);
+    const connection = await FbTimeConnection.findOne({ organizationId, status: { $ne: 'disconnected' } });
+    if (!connection?.keyCiphertext) return res.status(404).json({ error: 'FbTime is not connected.' });
+
+    const now = new Date();
+    if (connection.manualSyncRequestedAt && now - connection.manualSyncRequestedAt < MANUAL_SYNC_COOLDOWN_MS) {
+      return res.status(429).json({
+        error: 'Hours were just refreshed. Try again in a minute.',
+        code: 'SYNC_COOLDOWN',
+      });
+    }
+    connection.manualSyncRequestedAt = now;
+    await connection.save();
+
+    // Fire-and-forget, like the connect route's enqueue — completion is read
+    // off the connection's sync stamps, never off the job.
+    getQueue(QUEUE_NAMES.MAINTENANCE)
+      .add(FBTIME_ORG_JOB, { organizationId: String(organizationId) }, { removeOnComplete: true, removeOnFail: true })
+      .catch((err) => console.error('[integrations] manual sync enqueue failed:', err?.message));
+
+    res.status(202).json({ queued: true, requestedAt: now.toISOString() });
+  } catch (err) {
+    next(err);
   }
 });
 

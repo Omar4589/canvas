@@ -19,7 +19,7 @@ const { FbTimePersonLink } = await import('../src/models/FbTimePersonLink.js');
 const { IntegrationEvent } = await import('../src/models/IntegrationEvent.js');
 const { User } = await import('../src/models/User.js');
 const { sealSecret } = await import('../src/utils/sealedSecret.js');
-const { syncOrgHours, runFbtimeSync } = await import('../src/services/fbtime/sync.js');
+const { syncOrgHours, syncOneConnection, runFbtimeSync } = await import('../src/services/fbtime/sync.js');
 const { loadMeasuredHours } = await import('../src/services/reports/hoursSource.js');
 const { zonedDayStr, zonedTimeToUtc } = await import('../src/utils/timezone.js');
 const { installFbtimeFake, uninstallFbtimeFake, fbtimeCalls } = await import('./support/fbtimeFake.js');
@@ -223,6 +223,36 @@ test('the deep job self-heals an errored connection and audits the recovery', { 
   assert.strictEqual(await IntegrationEvent.countDocuments({ organizationId: org._id, type: 'sync-recovered' }), 1);
   // The probe pinged before pulling.
   assert.ok(fbtimeCalls().some((c) => c.path === '/ping'));
+});
+
+test('syncOneConnection self-heals an errored connection in one call — the manual-refresh retry path', { skip }, async () => {
+  const connection = await makeConnection(org._id, { status: 'errored', lastSyncError: 'KEY_REVOKED: revoked' });
+  installFbtimeFake({ shifts: [shift('s1', P1, at(0), 6)] });
+
+  const res = await syncOneConnection(connection, { windowDays: 120 });
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.recovered, true);
+
+  const saved = await FbTimeConnection.findOne({ organizationId: org._id });
+  assert.strictEqual(saved.status, 'connected');
+  assert.strictEqual(saved.lastSyncError, null);
+  assert.strictEqual(await IntegrationEvent.countDocuments({ organizationId: org._id, type: 'sync-recovered' }), 1);
+  assert.strictEqual(await FbTimeShift.countDocuments({ organizationId: org._id }), 1, 'the pull ran after the probe');
+});
+
+test('syncOneConnection absorbs a fatal refusal instead of throwing — the org job stays alive to record it', { skip }, async () => {
+  const connection = await makeConnection(org._id);
+  installFbtimeFake({ error: { code: 'KEY_REVOKED', status: 401 } });
+
+  const res = await syncOneConnection(connection, { windowDays: 120 });
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.code, 'KEY_REVOKED');
+
+  const saved = await FbTimeConnection.findOne({ organizationId: org._id });
+  assert.strictEqual(saved.status, 'errored');
+  assert.match(saved.lastSyncError, /KEY_REVOKED/);
+  assert.ok(saved.lastErrorAt, 'the client reads completion off this stamp');
+  assert.strictEqual(await IntegrationEvent.countDocuments({ organizationId: org._id, type: 'sync-failed' }), 1);
 });
 
 test('sync is dormant without CREDENTIAL_SEAL_KEY — a no-op, not a crash', { skip }, async () => {

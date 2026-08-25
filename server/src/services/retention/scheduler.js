@@ -9,7 +9,7 @@ import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExp
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
 import {
   runFbtimeSync,
-  syncOrgHours,
+  syncOneConnection,
   FBTIME_RECENT_JOB,
   FBTIME_DEEP_JOB,
   FBTIME_ORG_JOB,
@@ -205,17 +205,21 @@ export async function processMaintenanceJob(job) {
     return res;
   }
   if (job.name === FBTIME_ORG_JOB) {
-    // One-off from the connect route: deep window so a fresh connection shows
-    // a season of measured hours in seconds, not at the next cron tick.
+    // One-off for a single org: enqueued at connect (so a fresh connection
+    // shows a season of measured hours in seconds, not at the next cron tick)
+    // and by the admin's "Refresh hours now" button. Deep window both ways.
+    // 'errored' is accepted because the manual refresh is exactly when a human
+    // retries a fixed key — syncOneConnection probes and self-heals it, and
+    // absorbs failures onto the connection where the status card explains them.
     const connection = await FbTimeConnection.findOne({
       organizationId: job.data?.organizationId,
-      status: 'connected',
+      status: { $in: ['connected', 'errored'] },
     });
     if (!connection) return { skipped: true }; // disconnected before we ran — not an error
-    const res = await syncOrgHours(connection, { windowDays: DEEP_WINDOW_DAYS });
+    const res = await syncOneConnection(connection, { windowDays: DEEP_WINDOW_DAYS });
     console.log(
       `[maintenance] ${FBTIME_ORG_JOB}: org ${job.data.organizationId} — ` +
-      `${res.pulled} day-row(s), ${res.deleted} removed`
+      (res.ok ? `${res.pulled} shift(s), ${res.deleted} removed` : `failed (${res.code || 'transient'})`)
     );
     return res;
   }

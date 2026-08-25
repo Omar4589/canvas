@@ -186,14 +186,63 @@ export async function syncOrgHours(connection, { windowDays = RECENT_WINDOW_DAYS
 }
 
 /**
+ * Sync ONE connection with the full cron-loop posture — errored recovery,
+ * fatal-vs-transient handling, never a throw. Shared by the cron fan-out below
+ * and the one-off org job (connect + the admin's "Refresh hours now" button),
+ * so a manual refresh fails exactly the way a cron tick does: recorded on the
+ * connection where the status card can explain it, not lost in a dead job.
+ *
+ * An 'errored' connection is probed first — a key un-revoked or an org
+ * re-activated on the provider side self-heals here, audited as
+ * 'sync-recovered'; a still-dead key stays errored without a second audit row
+ * (markConnectionError only logs the transition).
+ *
+ * Returns { ok, recovered, ...counts } — `recovered` stays true even when the
+ * pull after a successful probe fails, matching the loop's historic counting.
+ */
+export async function syncOneConnection(connection, { windowDays } = {}) {
+  let recovered = false;
+  try {
+    if (connection.status === 'errored') {
+      await ping({ apiKey: openSecret(connection.keyCiphertext) });
+      connection.status = 'connected';
+      await connection.save();
+      await IntegrationEvent.create({
+        organizationId: connection.organizationId,
+        byUserId: null,
+        type: 'sync-recovered',
+        detail: null,
+      });
+      recovered = true;
+    }
+
+    const res = await syncOrgHours(connection, { windowDays });
+    return { ok: true, recovered, ...res };
+  } catch (err) {
+    if (err instanceof FbtimeApiError && FATAL_CODES.has(err.code)) {
+      await markConnectionError(connection, err);
+    } else {
+      // Transient: timeout, 5xx, network. Say so on the status card, keep
+      // the connection live, let the next tick retry.
+      connection.lastSyncError = `${err.code || 'TRANSIENT'}: ${String(err.message || '').slice(0, 200)}`;
+      connection.lastErrorAt = new Date();
+      await connection.save().catch(() => {});
+    }
+    console.error(
+      `[fbtime] sync failed for org ${connection.organizationId}: ${err.code || err.message}`
+    );
+    return { ok: false, recovered, code: err.code || null };
+  }
+}
+
+/**
  * The fan-out both cron jobs run. One org failing never aborts the sweep
  * (geocodeService's mark-and-continue posture): fatal provider codes mark the
  * connection 'errored' (audited once, on the transition); anything transient
  * records lastSyncError and stays 'connected' for the next tick.
  *
- * recoverErrored (the deep job): re-ping 'errored' connections first — a key
- * un-revoked or an org re-activated on the provider side self-heals here,
- * audited as 'sync-recovered'.
+ * recoverErrored (the deep job): include 'errored' connections so
+ * syncOneConnection's probe can self-heal them.
  */
 export async function runFbtimeSync({ windowDays, recoverErrored = false } = {}) {
   if (!sealedSecretConfigured()) {
@@ -207,40 +256,10 @@ export async function runFbtimeSync({ windowDays, recoverErrored = false } = {})
   const out = { orgs: connections.length, ok: 0, errored: 0, recovered: 0 };
 
   for (const connection of connections) {
-    try {
-      if (connection.status === 'errored') {
-        // Cheap probe before a full pull; a still-dead key stays errored
-        // without a second audit row (markConnectionError only logs the
-        // transition).
-        await ping({ apiKey: openSecret(connection.keyCiphertext) });
-        connection.status = 'connected';
-        await connection.save();
-        await IntegrationEvent.create({
-          organizationId: connection.organizationId,
-          byUserId: null,
-          type: 'sync-recovered',
-          detail: null,
-        });
-        out.recovered += 1;
-      }
-
-      await syncOrgHours(connection, { windowDays });
-      out.ok += 1;
-    } catch (err) {
-      if (err instanceof FbtimeApiError && FATAL_CODES.has(err.code)) {
-        await markConnectionError(connection, err);
-      } else {
-        // Transient: timeout, 5xx, network. Say so on the status card, keep
-        // the connection live, let the next tick retry.
-        connection.lastSyncError = `${err.code || 'TRANSIENT'}: ${String(err.message || '').slice(0, 200)}`;
-        connection.lastErrorAt = new Date();
-        await connection.save().catch(() => {});
-      }
-      out.errored += 1;
-      console.error(
-        `[fbtime] sync failed for org ${connection.organizationId}: ${err.code || err.message}`
-      );
-    }
+    const res = await syncOneConnection(connection, { windowDays });
+    if (res.recovered) out.recovered += 1;
+    if (res.ok) out.ok += 1;
+    else out.errored += 1;
   }
 
   return out;

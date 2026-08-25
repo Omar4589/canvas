@@ -58,6 +58,18 @@ To check one person without coming here, open them from Users or a campaign's Te
 profile says **FbTime linked** or **FbTime not linked**, with a shortcut back to this page. Team
 leads can see that too, even though they can't open the Integrations page themselves.
 
+## When a timesheet fix shows up
+
+Doorline re-checks FbTime on a schedule: the **last 7 days** about **every 15 minutes**, and the
+**last few months** overnight. So a correction made in FbTime — a fixed clock-in, a closed shift,
+a deleted entry — appears on its own within 15 minutes if the shift is recent, or by the next
+morning if it's older.
+
+Don't want to wait? Press **Refresh hours now** on the Integrations page. It re-pulls the last
+few months on the spot — usually done in seconds — and tells you when the numbers are in. If the
+connection shows **Needs attention**, the same button also retries it; a problem fixed on the
+FbTime side heals without re-pasting the key.
+
 ## Good to know
 
 - A canvasser still on the clock counts "so far" — the number keeps moving until they clock out,
