@@ -407,6 +407,50 @@ door-by-door session undoes as a single unit. A large run happens in the backgro
 bar; if it stops part-way, everything that landed is correct and you can either undo it or pick up
 where it stopped.
 
+### Unknock — striking entries from the record (added 2026-08)
+
+The page's fourth act, and the only one that **removes** entries instead of relabelling them.
+It exists for exactly one situation: entries that should never have been recorded at all — a
+canvasser fabricated their knocks, or a batch was recorded by genuine mistake — where the owner's
+requirements are specific: **don't bill them, don't count them, and put the doors back in play in
+the same round**, without cutting a new round that would make the first one read as honest work.
+
+Neither existing tool does all three. Converting fake surveys to Not home archives the answers but
+keeps the knock — Not home *is* a knock, so it still counts and still bills. A new round re-opens
+every door but bills the revisit as a second knock and leaves round 1 looking completed. **Unknock**
+deletes the selected entries outright, so:
+
+- **Every number they touched gives them back** — knocks, billable doors, contact and survey
+  rates, the canvasser's own totals (which drop by raw entries, the same way they were counted).
+  The confirm prices it first, in red, like every other change on the page — there is no such
+  thing as a rate-neutral deletion.
+- **The doors read Unknocked again, in their own round.** A fresh knock at one of them bills
+  exactly once, as the first real knock — because after deletion it *is* the first knock.
+- **Nothing is quietly lost.** The struck entries are frozen verbatim on the run (that's what
+  makes Undo exact), and survey answers are archived by name — evidence, not casualties. The
+  campaign's change history records the run and any undo.
+- **Only the selection is affected.** Another canvasser's honest visit to the same door survives,
+  and so does a desk restrict mark — a door left holding only the office's gate mark reads
+  Restricted, not Unknocked, which is correct: the office's warning outlives the cleanup. Notes
+  survive too.
+- **Unlike a conversion, unknock can take Lit dropped entries** — there are no answers to
+  fabricate or orphan in a deletion, and a faked lit drop bills like any other knock. A scoped
+  sweep ("everything Cara recorded") therefore takes one more entry than the table shows, and the
+  confirm says so. Entries an earlier change already converted are held by that run — the dry run
+  counts them (*held by earlier changes*) so they're never silently missing; undo that run first.
+
+Three honest edges, all named in the confirm: an **issued** past statement stays frozen and will
+show a drift warning on its next read (void-vs-reissue stays an account-manager call); a
+**published client report** keeps its frozen numbers with no warning at all; and answers a later
+*real* survey has since replaced stay archived on Undo rather than clobbering the newer work —
+the run row counts anything Undo couldn't put back, entries and answers alike, because a door
+re-knocked since the cleanup keeps its new, real entry.
+
+One more piece of protection you'll never see: a phone that recorded one of the struck knocks
+**before** the cleanup and delivers it from its offline queue **after** can't sneak it back into
+the record — the server recognizes the replay and quietly drops it. A live knock at the same door
+is new work and always lands.
+
 ### Archive vs. delete
 
 - **Archive** is always available and **reversible**: the campaign becomes **read-only** and you
@@ -683,6 +727,47 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   is in **both** delete cascades. Pinned by
   [reclassifyOutcomes.int.test.js](../server/test/reclassifyOutcomes.int.test.js), whose central
   assertion is the money invariant, compared field-by-field before and after.
+- **UNKNOCK** ([unknock.js](../server/src/services/canvass/unknock.js), 2026-08-26) is the page's
+  DELETION sibling: POST `/admin/campaigns/:id/unknock-entries` (+ dryRun, + `/revert`, + the GET
+  run list), org admins only, same `resolveEntryScope`/`resolveSelection` machinery — but over
+  `UNKNOCKABLE_SOURCES` = `CONVERTIBLE_SOURCES` + `lit_dropped` (a delete fabricates nothing, and
+  a faked lit drop bills), and with no spans-directions refusal (a deletion has no direction).
+  Deleted rows can't carry revert stamps, so the freeze IS the revert record —
+  [`UnknockRun`](../server/src/models/UnknockRun.js) (slim: status
+  `pending → completed → reverted`, counts, frozen `scopeSummary`) plus
+  [`UnknockRunChunk`](../server/src/models/UnknockRunChunk.js) (verbatim `.lean()` rows in
+  500-row chunks — a 25k-row manifest on one doc would cross the 16MB BSON cap — with
+  `visitKeys` + `frozenAt` for the tombstone probe below). **Ordering is freeze-first**: run
+  (pending) → chunks → archive responses (`SurveyResponseArchive` `via: 'unknock'` +
+  `unknockRunId`) → `deleteMany` → completed → settle; a crash mid-run leaves a `pending` run
+  whose revert is refused (`409 RUN_NOT_COMPLETED` — its entries were never removed). **Pricing**
+  is the same simulation posture as `computeImpact` but by exclusion:
+  `[{$match: {_id: {$nin: ids}}}, ...knocksPipeline]` — and it ALWAYS runs; a deletion is never
+  rate-neutral, so `recomputeCampaignStats` always follows. **Settle** re-resolves door status in
+  batches, re-derives `lastActionAt`/`lastActionBy` from the newest surviving non-note row
+  (nothing else ever recomputes those write-time facts — without this a struck visit stays named
+  on the door), recomputes voter `surveyStatus`, and bumps the platform counters negative
+  (best-effort; nightly `recomputeLive` is the true healer). **Revert** refuses to clobber on BOTH
+  ledgers by explicit reads, never by an index firing: a frozen activity row is re-inserted (raw
+  `collection.insertMany`, `ordered: false`, only-E11000 swallowed — original `_id`s preserved)
+  only when its visit triple is free of **outcome** rows — a surviving `note_added` at the triple
+  does not block its own door's outcome from coming back (the field path never replaces a note) —
+  and archived responses restore per-voter via promote-and-delete unless a newer real response
+  took the slot; both skips are counted (`rowsNotRestored`/`responsesNotRestored`). **The
+  offline-replay tombstone** ([mobile/canvass.js](../server/src/routes/mobile/canvass.js), both
+  write paths): a replay (`wasOfflineSubmission` only) whose tap-time predates a standing run's
+  `frozenAt` at that visit triple (`struckByUnknock` — `distinct('runId')` over chunk `visitKeys`,
+  then an any-standing-run check, so a reverted run never blocks) is answered with the existing
+  `superseded: true` 200 shape so queues drain; live writes always land, and after deletion the
+  `(householdId, passId)` pair groups fresh in `knocksPipeline`, so the re-knock bills exactly
+  once. `dryRun` also returns `doorsStillRecorded` (doors keeping another canvasser's row or a
+  desk mark) and `heldByRuns` (rows an earlier reclassify/conversion stamped — invisible to the
+  selection until that run reverts). History rows use `source: 'unknock'`. Both models are in
+  BOTH delete cascades. **New indexes** (chunk `{runId, seq}` + `{campaignId, visitKeys}`,
+  archive partial `{unknockRunId: 1}`) need `npm run migrate:build-indexes -- --apply` after
+  deploy. Pinned by [unknock.int.test.js](../server/test/unknock.int.test.js) — the money shot
+  both ways (preview == landed, revert == baseline byte-for-byte), tombstone, revert-after-reknock,
+  pending-run refusal, cascade.
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),

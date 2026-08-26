@@ -65,12 +65,21 @@ const surveyResponseArchiveSchema = new mongoose.Schema(
 
     // ---- replacement provenance (server-stamped) ----
     overwrittenBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    overwrittenVia: { type: String, enum: ['submit', 'restore', 'outcome_convert'], required: true },
+    overwrittenVia: { type: String, enum: ['submit', 'restore', 'outcome_convert', 'unknock'], required: true },
     overwrittenAt: { type: Date, required: true, default: () => new Date() },
     // Set only by 'outcome_convert'. Revert of that run reads it to restore these rows.
     conversionRunId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'SurveyConversionRun',
+      default: null,
+    },
+    // Set only by 'unknock' — the twin of conversionRunId for the run model that REMOVES the
+    // entry rather than relabelling it. A separate field rather than a shared "runId" because the
+    // ref differs and a reader must be able to tell which kind of run took these answers without
+    // guessing from `overwrittenVia`.
+    unknockRunId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'UnknockRun',
       default: null,
     },
   },
@@ -87,6 +96,13 @@ surveyResponseArchiveSchema.index({ campaignId: 1, overwrittenAt: -1 }); // repo
 surveyResponseArchiveSchema.index(
   { conversionRunId: 1 },
   { partialFilterExpression: { conversionRunId: { $exists: true } } }
+);
+// Same shape, same reason, for an unknock run's revert. DISTINCT key shape from every index
+// above — buildIndexes.js diffs by key shape alone, so a partial reusing an existing shape is
+// silently reported as already-present and never built.
+surveyResponseArchiveSchema.index(
+  { unknockRunId: 1 },
+  { partialFilterExpression: { unknockRunId: { $exists: true } } }
 );
 
 export const SurveyResponseArchive = mongoose.model(

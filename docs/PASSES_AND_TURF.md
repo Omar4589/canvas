@@ -661,6 +661,13 @@ We deliberately do **not** reopen the door in place: a re-knock in the *same* pa
 per house×pass, so it wouldn't **bill** the revisit, and rewriting a completed door's status back to
 "unknocked" would muddle the first knock's history.
 
+> **Both reasons invert when the first knock is fraudulent or mistaken** — that case has its own
+> tool, **Unknock** on the Door Outcomes page (docs/CAMPAIGNS.md §Unknock, 2026-08-26). It
+> *deletes* the bad entries, so the emptied house×pass pair bills the re-knock exactly once as the
+> first real knock, and the "history" being removed is fabricated — preserved as evidence on the
+> run, not as billable work. The rejection above is about *honest* first knocks; don't reach for a
+> new pass to clean up a dishonest one, because the new pass makes round 1 read as completed work.
+
 Instead, the **voter import has an opt-in checkbox — "Revisit already-worked homes that gain a new
 voter."** When it's on and the import lands new target voters in already-worked homes, those homes are
 collected into an auto-generated **saved search** ("New voters — <file>", `source: 'import'`). From

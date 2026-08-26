@@ -26,6 +26,7 @@ import { archiveOverwrittenResponse } from '../../services/surveys/archiveOverwr
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
+import { struckByUnknock } from '../../services/canvass/unknock.js';
 
 const router = Router();
 
@@ -339,6 +340,26 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // replay self-corrects the pin to the round's newer action with no client change.
   if (supersededByNewer(data, mineRows, ts)) {
     return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
+  }
+
+  // The unknock tombstone — supersededByNewer's blind spot. That guard compares a replay against
+  // rows that EXIST; an admin's unknock leaves none, so without this a queued copy of the struck
+  // knock walks straight back in, re-billing the visit and flipping the door off `unknocked` —
+  // and in the fraud case the phone holding the queue is the fraudulent canvasser's. Replays only
+  // (a live write never pays the lookup), tap-time before the freeze only (later work is new
+  // work), standing runs only (a reverted unknock restores the world, replays included). The 200
+  // `superseded` shape drains the phone's queue with no client change.
+  if (data.wasOfflineSubmission) {
+    const struck = await struckByUnknock({
+      campaignId: campaign._id,
+      householdId: household._id,
+      passId,
+      userId: req.user._id,
+      ts,
+    });
+    if (struck) {
+      return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
+    }
   }
 
   const replaced = buildReplacedSnapshot(mineRows);
@@ -713,6 +734,23 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       return res
         .status(200)
         .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
+    }
+
+    // The unknock tombstone, before the upsert for the same reason as the guard above it — a
+    // struck survey replay must never re-create its SurveyResponse. See the disposition path.
+    if (data.wasOfflineSubmission) {
+      const struck = await struckByUnknock({
+        campaignId: campaign._id,
+        householdId: household._id,
+        passId,
+        userId: req.user._id,
+        ts,
+      });
+      if (struck) {
+        return res
+          .status(200)
+          .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
+      }
     }
 
     const replaced = buildReplacedSnapshot(mineRows);

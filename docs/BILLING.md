@@ -251,7 +251,11 @@ spread at the top level so existing consumers are untouched.
 [services/billing/statementDrift.js](../server/src/services/billing/statementDrift.js) is a pure
 diff used by **both** the org panel and the month-close board, so the two can never disagree about
 what "drifting" means. `drift.material` is true only when `totalCents` moved; a late offline flush
-that shifts `knocksThisMonth` is reported but doesn't raise an alarm.
+that shifts `knocksThisMonth` is reported but doesn't raise an alarm. An **unknock run**
+(docs/CAMPAIGNS.md §Unknock, 2026-08-26) is the other known drift source — it deletes activity
+rows, so an issued month it reaches back into will read differently live; deletion can only
+*reduce* what a month would bill (grace months are free, the floor only bills a month that billed
+anyway), and void-vs-reissue stays an account-manager call.
 
 `GET /super-admin/billing/statements?month=&live=0|1`
 ([superAdmin/statements.js](../server/src/routes/superAdmin/statements.js), mounted **before** the

@@ -125,6 +125,7 @@ export default function DoorOutcomesPage() {
   const [allMatching, setAllMatching] = useState(false); // "select all N" — filter-scoped, not ids
   const [target, setTarget] = useState('not_home');
   const [preview, setPreview] = useState(null);
+  const [unknockPreview, setUnknockPreview] = useState(null);
   const [error, setError] = useState(null);
   // Surveyed direction state. `composing` holds the resolved template while the admin picks
   // answers; `activeRun` is the run being watched (bulk) or walked (queue).
@@ -330,6 +331,7 @@ export default function DoorOutcomesPage() {
     setPage(0);
     resetSelection();
     setPreview(null);
+    setUnknockPreview(null);
     setComposing(null);
     setError(null);
   }
@@ -514,6 +516,36 @@ export default function DoorOutcomesPage() {
   const revert = useMutation({
     mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/reclassify-outcomes/revert`, { method: 'POST', body: { runId } }),
     onSuccess: afterWrite,
+    onError: (e) => setError(e.message),
+  });
+
+  // UNKNOCK — the fourth act, and the only one that REMOVES entries. No target outcome, its own
+  // preview state (the reclassify `preview` renders a different modal family).
+  const unknockRunsQ = useQuery({
+    queryKey: ['admin', 'campaigns', campaignId, 'unknock'],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/unknock-entries`),
+    enabled: !!campaignId && isOrgAdmin,
+  });
+  const unknockRuns = unknockRunsQ.data?.runs || [];
+  const afterUnknock = () => {
+    setUnknockPreview(null);
+    afterWrite();
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'unknock'] });
+  };
+  const unknockDryRun = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/unknock-entries`, { method: 'POST', body: { ...selectionBody(), dryRun: true } }),
+    onSuccess: setUnknockPreview,
+    onError: (e) => setError(e.message),
+  });
+  const unknockRun = useMutation({
+    mutationFn: () => api(`/admin/campaigns/${campaignId}/unknock-entries`, { method: 'POST', body: selectionBody() }),
+    onSuccess: afterUnknock,
+    onError: (e) => { setError(e.message); setUnknockPreview(null); },
+  });
+  const unknockRevert = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/unknock-entries/revert`, { method: 'POST', body: { runId } }),
+    onSuccess: afterUnknock,
     onError: (e) => setError(e.message),
   });
 
@@ -1068,6 +1100,58 @@ export default function DoorOutcomesPage() {
         </Card>
       )}
 
+      {/* Unknock runs — the removals, listed beside the relabels because from an admin's point
+          of view they are the same act at different depths. */}
+      {unknockRuns.length > 0 && (
+        <Card className="mt-6">
+          <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-fg">Removed entries</h2>
+          <ul>
+            {unknockRuns.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
+                <div className="min-w-0 text-sm text-fg">
+                  <span className="font-medium">
+                    {(r.counts?.entriesRemoved || 0).toLocaleString()}{' '}
+                    {(r.counts?.entriesRemoved || 0) === 1 ? 'entry' : 'entries'} unknocked
+                  </span>
+                  <div className="mt-0.5 text-xs text-fg-muted">
+                    {(r.counts?.doorsAffected || 0).toLocaleString()} {(r.counts?.doorsAffected || 0) === 1 ? 'door' : 'doors'}
+                    {(r.counts?.responsesArchived || 0) > 0
+                      ? ` · ${(r.counts.responsesArchived || 0).toLocaleString()} answers archived`
+                      : ''}
+                    {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
+                    {r.status === 'reverted' && (r.counts?.rowsNotRestored || 0) > 0
+                      ? ` · ${r.counts.rowsNotRestored.toLocaleString()} not restored (re-knocked since)`
+                      : ''}
+                  </div>
+                  {r.scopeSummary && (
+                    <div className="mt-0.5 text-xs text-fg-subtle">
+                      Filtered to: {r.scopeSummary}
+                      {r.byIds ? ' · hand-picked rows' : ''}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {r.status === 'reverted' ? (
+                    <Badge variant="neutral">Undone</Badge>
+                  ) : r.status === 'pending' ? (
+                    <Badge variant="neutral">Did not finish — nothing was removed</Badge>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={unknockRevert.isPending}
+                      onClick={() => { setError(null); unknockRevert.mutate(r.id); }}
+                    >
+                      {unknockRevert.isPending ? 'Undoing…' : 'Undo'}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Past runs */}
       {runs.length > 0 && (
         <Card className="mt-6">
@@ -1140,10 +1224,20 @@ export default function DoorOutcomesPage() {
             )}
             <button type="button" className="text-sm text-fg-muted hover:underline" onClick={resetSelection}>Clear</button>
             {selectionSpans ? (
-              <span className="ml-auto text-sm text-fg-muted">
-                This selection mixes surveyed entries with door outcomes — the two are corrected by
-                different tools. Filter to one side and convert each separately.
-              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-sm text-fg-muted">
+                  This selection mixes surveyed entries with door outcomes — relabeling works one
+                  side at a time. Unknock can remove them together.
+                </span>
+                <Button
+                  variant="danger"
+                  disabled={unknockDryRun.isPending}
+                  title="Remove these entries from the record entirely — the doors read unknocked again and the knocks leave every total"
+                  onClick={() => { setError(null); unknockDryRun.mutate(); }}
+                >
+                  {unknockDryRun.isPending ? 'Checking…' : 'Unknock…'}
+                </Button>
+              </div>
             ) : (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm text-fg-muted">Change to</span>
@@ -1187,6 +1281,17 @@ export default function DoorOutcomesPage() {
                   {dryRun.isPending ? 'Checking…' : 'Review changes'}
                 </Button>
               )}
+              {/* Visually fenced off from the relabel controls: this one REMOVES the entries.
+                  It has no target outcome — that is the point. */}
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+              <Button
+                variant="danger"
+                disabled={unknockDryRun.isPending}
+                title="Remove these entries from the record entirely — the doors read unknocked again and the knocks leave every total"
+                onClick={() => { setError(null); unknockDryRun.mutate(); }}
+              >
+                {unknockDryRun.isPending ? 'Checking…' : 'Unknock…'}
+              </Button>
             </div>
             )}
           </div>
@@ -1195,6 +1300,86 @@ export default function DoorOutcomesPage() {
 
       {detailRun && (
         <RunDetailModal campaignId={campaignId} run={detailRun} tz={tz} onClose={() => setDetailRun(null)} />
+      )}
+
+      {/* The unknock confirm — priced like every other change, but the copy has to carry more,
+          because this one deletes: which totals move, whose answers are archived, what an issued
+          invoice will say, and which doors will still show older entries afterwards. */}
+      {unknockPreview && (
+        <Modal
+          onClose={() => setUnknockPreview(null)}
+          title={`Unknock ${unknockPreview.entries.toLocaleString()} ${unknockPreview.entries === 1 ? 'entry' : 'entries'} across ${unknockPreview.doors.toLocaleString()} ${unknockPreview.doors === 1 ? 'door' : 'doors'}`}
+          subtitle="Removes them from the record — the doors read unknocked again"
+          size="lg"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setUnknockPreview(null)} disabled={unknockRun.isPending}>Cancel</Button>
+              <Button variant="danger" onClick={() => unknockRun.mutate()} disabled={unknockRun.isPending}>
+                {unknockRun.isPending ? 'Removing…' : 'Unknock entries'}
+              </Button>
+            </>
+          }
+        >
+          <p className="mb-3 text-sm text-fg">
+            <span className="font-medium text-danger">These entries leave every total.</span> The
+            doors go back to unknocked in their round, and a fresh knock there counts — and bills —
+            as the first one. This is for entries that should never have existed; to keep the knock
+            and only change what it says, use the outcome controls instead.
+          </p>
+          <div className="mb-3 rounded-card border border-border bg-sunken/40 px-3 py-1">
+            <ImpactRow label="Knocks" before={unknockPreview.impact.before.knocks} after={unknockPreview.impact.after.knocks} />
+            <ImpactRow label="Billable doors" before={unknockPreview.impact.before.billableDoors} after={unknockPreview.impact.after.billableDoors} />
+            <ImpactRow label="Contact rate" before={unknockPreview.impact.before.contactRate} after={unknockPreview.impact.after.contactRate} suffix="%" />
+            <ImpactRow label="Survey rate" before={unknockPreview.impact.before.connectionRate} after={unknockPreview.impact.after.connectionRate} suffix="%" />
+            <ImpactRow label="Restricted doors" before={unknockPreview.impact.before.restrictedDoors} after={unknockPreview.impact.after.restrictedDoors} />
+          </div>
+
+          {unknockPreview.survey.responsesToArchive > 0 && (
+            <div className="mb-3 rounded-card border border-border">
+              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+                {unknockPreview.survey.responsesToArchive.toLocaleString()}{' '}
+                {unknockPreview.survey.responsesToArchive === 1 ? 'answer' : 'answers'} archived — kept
+                on each voter's record, restorable
+              </div>
+              <ul className="max-h-40 overflow-y-auto">
+                {unknockPreview.survey.manifest.map((m) => (
+                  <li key={m.voterId} className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-1.5 text-sm last:border-0">
+                    <span className="text-fg">{m.voterName}</span>
+                    <span className="text-xs text-fg-muted">
+                      {m.answerCount} {m.answerCount === 1 ? 'answer' : 'answers'} · {formatInTz(m.submittedAt, tz)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {unknockPreview.survey.manifestTruncated && (
+                <div className="px-3 py-2 text-xs text-fg-muted">
+                  Showing {unknockPreview.survey.manifest.length} of {unknockPreview.survey.manifestTotal.toLocaleString()}.
+                </div>
+              )}
+            </div>
+          )}
+
+          {unknockPreview.doorsStillRecorded > 0 && (
+            <p className="mb-2 text-xs text-fg-muted">
+              {unknockPreview.doorsStillRecorded.toLocaleString()} of these doors keep other entries
+              (an older outcome, another canvasser's visit, or an office restricted mark) and will
+              show that instead of unknocked.
+            </p>
+          )}
+          {unknockPreview.heldByRuns > 0 && (
+            <p className="mb-2 text-xs text-fg-muted">
+              {unknockPreview.heldByRuns.toLocaleString()} matching{' '}
+              {unknockPreview.heldByRuns === 1 ? 'entry is' : 'entries are'} held by earlier
+              correction runs and not included — revert those runs first to unknock them too.
+            </p>
+          )}
+          <p className="mt-2 text-xs text-fg-muted">
+            Canvasser totals shrink by these entries. A past month whose invoice was already issued
+            will show a drift warning rather than silently changing, and published client reports
+            keep the numbers they were published with. Undoable from this page; a door re-knocked
+            for real in the meantime keeps its new entry.
+          </p>
+        </Modal>
       )}
 
       {/* A run in flight, or the result of the last one. */}

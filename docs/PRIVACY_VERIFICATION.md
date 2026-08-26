@@ -1066,6 +1066,27 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `deleteOrganization.js` list `ReclassifyRun` and `SurveyConversionRun`); no new subprocessor,
     no new external flow, no new export (the summary renders in-app on the run list only, never
     in a CSV). Nothing in the published Privacy Policy / ToS / DPA changes.
+14. **[v6 2026-08-26 — NEW DELETION + RETENTION BEHAVIOR: Unknock.]** The Door Outcomes page
+    gained **Unknock** (`POST /admin/campaigns/:id/unknock-entries`, org admins only,
+    `services/canvass/unknock.js`): an admin-initiated **hard delete of selected
+    `CanvassActivity` rows** (fraud/mistake cleanup) — the first admin tool that deletes
+    field-recorded rows outside the existing four paths in §C11's coordinate-removal list, which
+    should now read five: *(v) an admin unknocking entries from Door Outcomes — admin-initiated,
+    never automatic or time-based, and revertible.* Two retention artifacts are created in the
+    same act: the deleted rows are frozen **verbatim** (GPS coordinates, timestamps, canvasser
+    userId included) on `UnknockRunChunk` documents for the life of the campaign — same PII, new
+    location — and the visit's survey answers move to the already-stamped
+    `SurveyResponseArchive` (`via: 'unknock'`), inheriting item 12's nobody-reverts growth note.
+    **Bounds verified:** no new data category (a frozen row is a copy of one we held), no new
+    party, no new export (frozen rows render in-app on the run list only); both new models ride
+    BOTH tenant-deletion cascades (verified 2026-08-26: `deleteCampaign.js` and
+    `deleteOrganization.js` list `UnknockRun` and `UnknockRunChunk`); §C11's "none of these is
+    automatic or time-based" stays true. One behavioral edge for §B5's delete-gate finding:
+    unknocking every row of a campaign re-opens the hard-delete gate exactly as the
+    clear-knocks checkbox already does (`campaignHasCanvassed` is a live-row check, not a
+    latch) — a known posture, not a new hole. Nothing in the published Privacy Policy / ToS /
+    DPA changes (the policy nowhere promises activity rows are immutable; archived-not-deleted
+    answers were already stamped in v6 item 12).
 
 ---
 
@@ -1692,7 +1713,7 @@ Two of your own findings conflict here and I am telling you which is right.
 **Server-side retention — VERIFIED: NO age-based expiry of location data exists anywhere.**
 The retention subsystem never deletes, ages out, or coarsens GPS. `purgeDeletedIdentities` writes only to `DeletedUserRecord`. **There is no TTL index on any coordinate-bearing collection** (no `expireAfterSeconds` anywhere in `server/src`). For an active customer, canvasser GPS is **retained indefinitely**.
 
-Coordinates are removed only by: (i) hard deletion of the whole organization (which cascades over `CanvassActivity`/`SurveyResponse`/`Household`); (ii) a canvasser overwriting their own prior action at the same door in the same round (`routes/mobile/canvass.js:139-144`, `:470-475` — replace-in-place, the earlier fix is destroyed); (iii) an admin discarding a round with "clear knocks" (`admin/turfs.js:342-344`); (iv) an admin undoing a bulk restrict (`admin/turfs.js:812`). **None of these is automatic or time-based.** *[v6 2026-08-21: (iv) is now **two routes** — `POST …/turfs/unrestrict-bulk` (every desk mark on a book's current doors for that round) and `POST …/turfs/unrestrict-doors` (one home's desk mark) — both `removeDeskRestrict` in `services/canvass/deskRestrict.js`, deleting only `{ actionType:'restricted', via:'bulk' }` rows; a field-recorded coordinate is never touched by either. Plus one adjacent path: `DELETE /admin/campaigns/:id/passes/:id` (draft round) now sweeps that round's desk rows. Still admin-initiated, never automatic or time-based.]*
+Coordinates are removed only by: (i) hard deletion of the whole organization (which cascades over `CanvassActivity`/`SurveyResponse`/`Household`); (ii) a canvasser overwriting their own prior action at the same door in the same round (`routes/mobile/canvass.js:139-144`, `:470-475` — replace-in-place, the earlier fix is destroyed); (iii) an admin discarding a round with "clear knocks" (`admin/turfs.js:342-344`); (iv) an admin undoing a bulk restrict (`admin/turfs.js:812`). **None of these is automatic or time-based.** *[v6 2026-08-21: (iv) is now **two routes** — `POST …/turfs/unrestrict-bulk` (every desk mark on a book's current doors for that round) and `POST …/turfs/unrestrict-doors` (one home's desk mark) — both `removeDeskRestrict` in `services/canvass/deskRestrict.js`, deleting only `{ actionType:'restricted', via:'bulk' }` rows; a field-recorded coordinate is never touched by either. Plus one adjacent path: `DELETE /admin/campaigns/:id/passes/:id` (draft round) now sweeps that round's desk rows. Still admin-initiated, never automatic or time-based.]* *[v6 2026-08-26: path (v) added — an admin **unknocking** entries from Door Outcomes (`POST /admin/campaigns/:id/unknock-entries`, `services/canvass/unknock.js`) hard-deletes the selected `CanvassActivity` rows, field coordinates included — but freezes each row verbatim on `UnknockRunChunk` for the life of the campaign, so the coordinate is *relocated*, not destroyed, until tenant deletion or a revert restores it. Admin-initiated, never automatic or time-based. See item 14 of "What changed".]*
 **Note:** `GeocodeCache` coordinates (address→point) are **never** deleted, including by organization deletion (B5, Exception 1).
 
 **Purpose — VERIFIED, and it is broader than fraud detection.** Confirmed consumers of a canvasser's stored GPS:

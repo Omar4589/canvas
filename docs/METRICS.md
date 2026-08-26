@@ -787,6 +787,18 @@ averaged). `activeCanvassers` is **not** summable — it uses a separate org-wid
 
 ## F. Invariants & edge cases
 
+### Unknock removes rows from EVERY metric (2026-08-26)
+
+**Unknock** (Door Outcomes → docs/CAMPAIGNS.md §Unknock) is the one operation that deletes
+`CanvassActivity` rows, so every live aggregation in this document simply stops seeing them —
+knocks, rates, coverage, per-canvasser rows (which drop by RAW rows, the same way they're
+counted), overlap detection, GPS flags, hours-on-doors spans. Two consequences worth naming:
+`coverageGained`'s first-ever-knock credit can migrate to a later round (correct — the fake first
+knock never happened), and a door's next knock in the same round bills exactly once, because the
+emptied `(household, pass)` pair groups fresh in `knocksPipeline`. `Campaign.stats` is recomputed
+in the same operation (a deletion is never rate-neutral), and the struck rows stay frozen on the
+run for revert — so a metric that "lost" rows can get them back byte-for-byte via Undo.
+
 ### Teams (coordinators) — the counting contract
 
 **THE CURRENT COORDINATOR OWNS ALL OF THAT CANVASSER'S HISTORY IN THIS CAMPAIGN.**

@@ -49,6 +49,15 @@ export const RECLASSIFIABLE_OUTCOMES = Object.freeze([
 // converts: surveyed rows are selectable so they can be handed to surveyConversion.js.
 export const CONVERTIBLE_SOURCES = Object.freeze([...RECLASSIFIABLE_OUTCOMES, 'survey_submitted']);
 
+// Everything the UNKNOCK path may remove — wider than what any path may relabel, and the reason
+// is the operation itself. `lit_dropped` is kept out of a RELABEL because a completion action owns
+// data a bare actionType flip would fabricate or orphan. A delete fabricates nothing: it strikes
+// the whole entry. And a faked lit drop is a billable knock (KNOCK_ACTIONS) that needs no answers
+// to invent, so it is the cheapest entry to fake — excluding it would leave lit-drop campaigns
+// with no fraud cleanup at all. `note_added` stays out: a note is not a knock, drives no status,
+// and an unknocked door may legitimately carry one.
+export const UNKNOCKABLE_SOURCES = Object.freeze([...CONVERTIBLE_SOURCES, 'lit_dropped']);
+
 // The three that are interchangeable ARITHMETIC: each is exactly one knock and none is a contact,
 // so any conversion among them provably moves nothing — not knocks, not contactRate (numerator is
 // surveyed + refused), not connectionRate (surveyed + lit), not billableDoors, and no

@@ -45,7 +45,7 @@ const campaignChangeSchema = new mongoose.Schema(
     // client change.
     source: {
       type: String,
-      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion'],
+      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock'],
       required: true,
     },
   },

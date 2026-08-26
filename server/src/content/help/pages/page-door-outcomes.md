@@ -5,8 +5,8 @@ audience: admin
 kind: page
 order: 117
 sourceDoc: CAMPAIGNS.md
-summary: Correct what a canvasser recorded at a door — including recording or removing survey answers.
-tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list, search, export, csv
+summary: Correct what a canvasser recorded at a door — relabel it, record or remove survey answers, or unknock it entirely.
+tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list, search, export, csv, unknock, fraud, remove entries
 ---
 
 **Door Outcomes** (in the sidebar's **Quality** group, next to Audit) is where you change what a recorded entry *says*. It's **org admins only** — leads decide what canvassers can record going forward, but changing the record itself sits one level up.
@@ -51,6 +51,35 @@ The review step lists **exactly whose answers are about to be removed, by name**
 
 Only that entry's own canvasser is affected. If a second canvasser genuinely surveyed the same door in the same round, their answers survive untouched.
 
+## Unknocking (removing entries entirely)
+
+Relabelling keeps the knock. Sometimes the knock itself is the lie — a canvasser fabricated a run
+of visits, or a batch was recorded by mistake — and then you don't want it relabelled, counted, or
+billed. **Unknock…** (the red button beside the outcome picker) removes the selected entries from
+the record:
+
+- **Every number they touched gives them back** — campaign totals, that canvasser's totals,
+  billable doors, contact and survey rates. The review step prices it in red first, like every
+  other change here.
+- **The doors read Unknocked again, in their own round.** A real knock at one of them counts
+  once, as the first knock — no new round needed, and the round's history stays honest about what
+  was actually worked.
+- **Answers are archived by name, and the struck entries are kept on the change** — that's the
+  evidence, and it's what makes **Undo** exact. Undo puts everything back; if a door was genuinely
+  re-knocked in the meantime, the newer real work is kept and the change says exactly what it
+  couldn't restore.
+
+Only the selection is affected: another canvasser's honest visit to the same door survives, a
+restricted mark the office placed survives (that door reads Restricted, not Unknocked), and notes
+survive. One difference from relabelling: an unknock by filter **can take Lit dropped entries** —
+a faked lit drop counts and bills like any other knock, so the cleanup takes it too, and the
+review step says so. Runs are listed under **Removed entries** with the filter that produced them.
+
+Three honest limits, all named in the review step: a billing statement already issued for a past
+month stays as issued (it will show a drift warning when read); a published client report keeps
+its frozen numbers; and a phone that recorded one of the struck knocks before the cleanup can't
+sneak it back in afterward — the server drops the replay quietly.
+
 ## Seeing exactly what a change did
 
 Every row under **Past changes** and **Survey answer changes** has a **Details** button. It opens
@@ -74,4 +103,4 @@ A large batch runs in the background with a progress bar. If it stops part-way, 
 
 ## What you won't see here
 
-Doors an admin marked restricted from the desk — a whole book with **bulk restrict**, or a single home from its popup (desk marks, each with its own undo where it was made), and entries an earlier change already converted, until you undo that one. **Lit dropped** entries never appear — a lit drop has no answers to move either way.
+Doors an admin marked restricted from the desk — a whole book with **bulk restrict**, or a single home from its popup (desk marks, each with its own undo where it was made), and entries an earlier change already converted, until you undo that one. **Lit dropped** entries never appear in the table — a lit drop has no answers to move either way, so there's nothing to relabel — but an **unknock by filter** does take them, since a faked lit drop counts and bills like any other knock.

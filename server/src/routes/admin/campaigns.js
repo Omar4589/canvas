@@ -19,6 +19,13 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { resolveEntryScope, sendScopeError, ScopeError } from '../../services/canvass/entryScope.js';
 import { describeScope } from '../../services/canvass/scopeSummary.js';
+import { UnknockRun } from '../../models/UnknockRun.js';
+import {
+  computeUnknockImpact,
+  computeUnknockAnswers,
+  runUnknock,
+  revertUnknock,
+} from '../../services/canvass/unknock.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
@@ -35,6 +42,7 @@ import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
   CONVERTIBLE_SOURCES,
+  UNKNOCKABLE_SOURCES,
   RECLASSIFY_MAX_IMPACT_ENTRIES,
   isRateNeutralPair,
   countConvertible,
@@ -829,6 +837,26 @@ const reclassifySchema = z.object({
   actionIds: z.array(objectIdish).max(RECLASSIFY_MAX_IMPACT_ENTRIES).optional(),
 });
 
+// Unknock takes no `to`: it has no target outcome, which is the whole point — the entry stops
+// existing rather than becoming something else.
+const unknockSchema = z.object({
+  dryRun: z.boolean().optional(),
+  scope: entryScopeSchema.optional(),
+  actionIds: z.array(objectIdish).max(RECLASSIFY_MAX_IMPACT_ENTRIES).optional(),
+});
+
+// Never ships `activities` — the frozen originals can be 25k documents (the same rule the
+// exports list follows for its subject ids).
+const unknockWire = (r) => ({
+  id: String(r._id),
+  status: r.status,
+  counts: r.counts,
+  scopeSummary: r.scopeSummary || null,
+  byIds: !!r.selection?.byIds,
+  createdAt: r.createdAt,
+  revertedAt: r.revertedAt,
+});
+
 const revertSchema = z.object({
   runId: z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid run id'),
 });
@@ -1257,6 +1285,168 @@ router.post('/:campaignId/reclassify-outcomes/revert', async (req, res, next) =>
 
     await revertReclassify({ campaign, run, byUserId: req.user._id });
     res.json({ reverted: true, runId: String(run._id), revertedAt: run.revertedAt });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// UNKNOCK — strike entries from the record so the doors read `unknocked` again and can be knocked
+// for real, in the round they are already in. The one Door Outcomes act that REMOVES rows: a
+// relabel leaves a fabricated knock counted and billed, and only frees the door for the next
+// round's cut. See services/canvass/unknock.js for the freeze-first safety model.
+router.post('/:campaignId/unknock-entries', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const { dryRun, scope, actionIds } = unknockSchema.parse(req.body);
+
+    const q = await resolveEntryScope(campaign, scope || {});
+    // A truncated resolution is an arbitrary cap-sized subset of what the admin described — never
+    // a write scope, and least of all for the write that deletes. Same rule as the other paths.
+    if (q.answerScope?.truncated && !actionIds?.length) {
+      return res.status(409).json({
+        error: `That answer filter matches more than ${q.answerScope.cap.toLocaleString()} answers — narrow it before unknocking.`,
+        code: 'ANSWER_SCOPE_TRUNCATED',
+      });
+    }
+    if (q.searchScope?.truncated && !actionIds?.length) {
+      return res.status(409).json({
+        error: `That address search matches more than ${q.searchScope.cap.toLocaleString()} doors — narrow it before unknocking, or tick the rows you mean.`,
+        code: 'SEARCH_SCOPE_TRUNCATED',
+      });
+    }
+
+    // UNKNOCKABLE_SOURCES, not CONVERTIBLE_SOURCES: `lit_dropped` is excluded from the RELABEL
+    // path because a completion action carries data a bare flip would fabricate or orphan — but a
+    // delete fabricates nothing, and a faked lit drop is a billable knock that needs no answers to
+    // invent, so it is the EASIEST entry to fake. Leaving it out would mean lit-drop campaigns had
+    // no fraud cleanup at all.
+    //
+    // And deliberately NO selectionSpansDirections check: unknock has no direction, so a selection
+    // mixing surveyed rows with door outcomes is the normal fraud batch, not a contradiction —
+    // every one of them is an entry that should not exist.
+    const sel = await resolveSelection(campaign._id, q, actionIds || null, UNKNOCKABLE_SOURCES);
+    if (!sel.entries) {
+      return res.status(400).json({ error: 'Nothing matches that selection.', code: 'EMPTY_SELECTION' });
+    }
+    if (sel.entries > RECLASSIFY_MAX_IMPACT_ENTRIES) {
+      return res.status(409).json({
+        error: `That's ${sel.entries.toLocaleString()} entries — narrow the filter to ${RECLASSIFY_MAX_IMPACT_ENTRIES.toLocaleString()} or fewer.`,
+        code: 'SELECTION_TOO_LARGE',
+      });
+    }
+
+    const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
+    const billRestricted = resolveBillRestricted(campaign, org);
+    const [impact, survey] = await Promise.all([
+      computeUnknockImpact({ campaign, ids: sel.ids, billRestricted }),
+      computeUnknockAnswers({ rows: sel.rows }),
+    ]);
+
+    if (dryRun) {
+      // Rows this scope matches but CANNOT take: a row an earlier correction run already stamped
+      // is out of scope everywhere (convertibleMatch's single-level provenance rule), and that is
+      // exactly the population most likely to need unknocking — fraud somebody already "cleaned"
+      // with the relabel tool, which left the knock billed. Without this count the admin sees a
+      // smaller number than they expect and nothing says why.
+      const heldByRuns = await CanvassActivity.countDocuments({
+        campaignId: campaign._id,
+        actionType: { $in: UNKNOCKABLE_SOURCES },
+        via: { $ne: 'bulk' },
+        reclassified: { $exists: true },
+        ...(q.userId ? { userId: q.userId } : {}),
+        ...(q.passId ? { passId: q.passId } : {}),
+        ...(q.effortId ? { effortId: q.effortId } : {}),
+        ...(q.timestamp ? { timestamp: q.timestamp } : {}),
+      });
+      // Doors that will NOT read unknocked afterwards, because rows outside the selection
+      // survive there — an older outcome the chips filtered away, another canvasser's visit, or
+      // a desk restrict mark (which correctly keeps the door reading `restricted`). The promise
+      // on the button is "knock them again"; this is the honest asterisk on it.
+      const stillRecorded = await CanvassActivity.distinct('householdId', {
+        campaignId: campaign._id,
+        householdId: { $in: sel.householdIds },
+        _id: { $nin: sel.ids },
+        actionType: { $ne: 'note_added' },
+      });
+      return res.json({
+        dryRun: true,
+        entries: sel.entries,
+        doors: sel.doors,
+        sources: sel.sources,
+        impact,
+        survey,
+        heldByRuns,
+        doorsStillRecorded: stillRecorded.length,
+      });
+    }
+
+    const run = await runUnknock({
+      campaign,
+      rows: sel.rows,
+      byUserId: req.user._id,
+      scope: scope || {},
+      byIds: !!actionIds?.length,
+      scopeSummary: await describeScope(campaign, scope || {}),
+    });
+    return res.status(201).json({ run: unknockWire(run) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
+    next(err);
+  }
+});
+
+// The runs list — rendered beside the reclassify and conversion runs, because from an admin's
+// point of view they are the same act at different depths.
+router.get('/:campaignId/unknock-entries', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const runs = await UnknockRun.find({ campaignId: campaign._id })
+      // The frozen originals can be 25k documents — never ship them on a list.
+      .select('-activities')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    const people = await hydrateCanvassers(runs.map((r) => r.byUserId).filter(Boolean), activeOrgId(req));
+    res.json({
+      runs: runs.map((r) => {
+        const p = r.byUserId ? people.get(String(r.byUserId)) : null;
+        return {
+          ...unknockWire(r),
+          by: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null,
+        };
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:campaignId/unknock-entries/revert', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+    const { runId } = revertSchema.parse(req.body);
+    const run = await UnknockRun.findOne({ _id: runId, campaignId: campaign._id });
+    if (!run) return res.status(404).json({ error: 'Run not found' });
+    if (run.revertedAt) {
+      return res.status(409).json({ error: 'That unknock was already undone.', code: 'ALREADY_REVERTED' });
+    }
+    // A `pending` run crashed between freezing and deleting: its rows may still be live, so
+    // "restoring" them would raw-insert duplicates of rows that never left. Undo is for a run
+    // that actually landed. (This inverts runReclassify's stamp-first ordering out of necessity —
+    // you cannot freeze a deleted row — so the status field carries the guarantee instead.)
+    if (run.status !== 'completed') {
+      return res.status(409).json({
+        error: 'That unknock did not finish, so there is nothing to undo — its entries were never removed.',
+        code: 'RUN_NOT_COMPLETED',
+      });
+    }
+    const reverted = await revertUnknock({ campaign, run, byUserId: req.user._id });
+    res.json({ run: unknockWire(reverted) });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
