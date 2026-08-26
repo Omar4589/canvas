@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Navigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -554,6 +554,13 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
   // so it takes a second tap. The reassurance matters as much as the warning: admins remove
   // people who quit, and they need to know the work those people did is being kept.
   const [confirming, setConfirming] = useState(false);
+  // The second tap lives in the Modal's PINNED footer while this copy renders at the top of
+  // a body that scrolls — so on a short viewport an admin could confirm the book release
+  // without the warning ever crossing the screen. Bring it to them.
+  const confirmRef = useRef(null);
+  useEffect(() => {
+    if (confirming) confirmRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [confirming]);
 
   return (
     <Modal
@@ -595,7 +602,7 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
         </div>
 
         {confirming && (
-          <div className="rounded-lg border border-danger/30 bg-danger-tint px-3 py-2 text-sm">
+          <div ref={confirmRef} className="rounded-lg border border-danger/30 bg-danger-tint px-3 py-2 text-sm">
             <p className="font-medium text-danger-fg">
               Remove {member.firstName} from this campaign?
             </p>

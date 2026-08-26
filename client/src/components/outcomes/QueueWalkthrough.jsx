@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { Button, Card, Modal, Skeleton } from '../ui/index.js';
@@ -35,6 +35,11 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
   const [door, setDoor] = useState(null);
   const [voters, setVoters] = useState(null);
   const [error, setError] = useState(null);
+  // The Modal body is the scroll box, and it is REUSED as this component walks to the next
+  // door — nothing remounts. Without a reset, door N+1 opens at door N's scroll offset with
+  // the per-door "Who answered" card scrolled off the top, right after its ticks were
+  // recomputed for a different household.
+  const bodyRef = useRef(null);
 
   const actionId = remaining?.[0] || null;
   const total = run.progress?.doorsTotal || run.counts?.doorsTargeted || 0;
@@ -60,6 +65,7 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
     const ac = new AbortController();
     setDoor(null);
     setVoters(null);
+    bodyRef.current?.scrollTo({ top: 0 });
     api(`/admin/campaigns/${campaignId}/survey-conversions/${run.id}/door/${actionId}`, { signal: ac.signal })
       .then((d) => {
         setDoor(d.door);
@@ -177,6 +183,7 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
       title={door ? door.address : 'Loading door…'}
       subtitle={`Door ${done + 1} of ${total.toLocaleString()}`}
       size="lg"
+      bodyRef={bodyRef}
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={apply.isPending}>
