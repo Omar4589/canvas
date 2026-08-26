@@ -1048,6 +1048,24 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     see the stamp there.
     **Not triggered:** no new subprocessor, no new external data flow, no new export destination
     (the new columns describe data we already hold), no change to who can access customer data.
+13. **[v6 2026-08-25 — NEW STORED ARTIFACT: the filter that produced a Door Outcomes run.]** The
+    Door Outcomes page gained a survey-answer filter ("everyone canvasser X surveyed who answered
+    Y"), and a scoped run now **freezes its selection criterion** onto the run document:
+    `ReclassifyRun.selection.scope` (new; mirrors the pre-existing
+    `SurveyConversionRun.selection.scope`) plus a human `scopeSummary` string that can embed a
+    voter's *answer text* ("answered Opposed") and a canvasser's name, retained for the life of
+    the campaign.
+    **Read-side is settled and needs no policy change:** an org admin seeing which doors gave
+    answer Y is an already-shipped capability at a *wider* audience (admin + lead) via
+    `voters-by-answer`, its CSV, and the map answer filter — the §B8 ruling below ("same-audience
+    exposure, not a new recipient class") covers this narrower org-admin-only surface a fortiori.
+    What is new is only the small **stored** artifact naming the criterion.
+    **Bounds verified:** org-admin-only routes; the criterion is the admin's own query, not new
+    data about a voter (the answer text it may quote is already held on `SurveyResponse`); both
+    run models ride the tenant-deletion cascades (verified 2026-08-25: `deleteCampaign.js` and
+    `deleteOrganization.js` list `ReclassifyRun` and `SurveyConversionRun`); no new subprocessor,
+    no new external flow, no new export (the summary renders in-app on the run list only, never
+    in a CSV). Nothing in the published Privacy Policy / ToS / DPA changes.
 
 ---
 

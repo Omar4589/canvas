@@ -325,7 +325,9 @@ per-walk-list aware — it unions the choice questions from whatever survey(s) t
 actually used.
 
 Surfaces that send it (each renders its walk-list control only with 2+ efforts): **web** —
-DashboardPage (+ its `CanvasserResponsesModal`), MapPage, AuditPage; **mobile** — the campaign
+DashboardPage (+ its `CanvasserResponsesModal`), MapPage, AuditPage, SurveyExplorerPage,
+DoorOutcomesPage (where it doubles as the fix `MIXED_SURVEY_TEMPLATES` names — "filter by walk
+list first" — and as a gate-satisfying narrowing for the survey-answer filter); **mobile** — the campaign
 screen (overview / campaign-rollup / canvassers / knocks-by-pass), Timeline (`/canvasser-timeline`,
 then threaded as a route param through every canvasser drill-in screen, the CSV export, and Compare —
 so `/canvassers/:userId/summary` and `/team-averages` compare within the walk list), the GPS audit

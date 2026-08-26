@@ -4,6 +4,10 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { useRoundOptions } from '../lib/useRoundOptions.js';
+import { buildScope, scopeToSearchParams } from '../lib/outcomeScope.js';
+import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
+import AnswerFilters from '../components/AnswerFilters.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
 import { Badge, Button, Card, DataTable, EmptyState, Modal, Select, Skeleton } from '../components/ui/index.js';
@@ -76,6 +80,18 @@ export default function DoorOutcomesPage() {
   const [outcomes, setOutcomes] = useState([]); // [] = every convertible outcome
   const [userId, setUserId] = useState('');
   const [passId, setPassId] = useState('');
+  const [effortId, setEffortId] = useState('');
+  // All time on purpose: this is a correction desk, reached because of a mistake that is usually
+  // days or weeks old — a Today default would open it empty on the exact journey it exists for.
+  // Both bounds null, so no tz-ready gate is needed to render the selector.
+  const [dateRange, setDateRange] = useState(() => defaultRange('all'));
+  // The survey-answer filter. Question keys and option ids are slugs unique only WITHIN one
+  // template, so the filter always carries which survey it means; '' = the campaign's current
+  // default. `answersOpen` is pure UI and never touches the page or the selection.
+  const [surveyTemplateId, setSurveyTemplateId] = useState('');
+  const [answerFilters, setAnswerFilters] = useState([]);
+  const [answerTagFilters, setAnswerTagFilters] = useState([]);
+  const [answersOpen, setAnswersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState(() => new Set());
   const [allMatching, setAllMatching] = useState(false); // "select all N" — filter-scoped, not ids
@@ -99,31 +115,60 @@ export default function DoorOutcomesPage() {
   });
   const current = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId));
   const tz = current?.timeZone || orgTz;
-  const { members } = useCampaignTeam(campaignId);
+  // allMembers, not members: the picker half of that hook drops deactivated people because the
+  // server refuses to ASSIGN them — but this page is a report over recorded history, and the
+  // flagship query here is about the canvasser who was just fired. Their rows are in the table
+  // with their name on them; the filter must be able to name them too.
+  const { allMembers } = useCampaignTeam(campaignId);
 
-  const passesQ = useQuery({
-    queryKey: ['admin', 'campaign-passes', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
-    enabled: !!campaignId && isOrgAdmin,
-  });
-  const passes = passesQ.data?.passes || [];
+  // Rounds + walk lists from the shared hook, so a round is named "walk list · Pass N" — a bare
+  // "Round 2" names a different round in every walk list, which stops being tolerable the moment
+  // a walk-list filter sits beside it. The 'legacy' sentinel row is excluded: it is not an
+  // ObjectId, and this page's scope schema refuses non-id values rather than ignoring them.
+  const { roundOptions, effortsQ } = useRoundOptions(campaignId);
+  const efforts = effortsQ.data?.efforts || [];
+  const roundChoices = useMemo(
+    () => roundOptions.filter((r) => r.id !== 'legacy' && (!effortId || r.effortId === effortId)),
+    [roundOptions, effortId]
+  );
 
-  // The filter as the server reads it — one object so the query key, the dry run and the write
-  // can never describe different scopes.
+  // The answer filter's three derived states. `narrowed` is the gate (mirrors the server's
+  // hasOtherNarrowing — the outcome chips deliberately don't count); `answerActive` means the
+  // picks are actually FILTERING, as opposed to sitting paused because the gate closed under
+  // them; `effectiveOutcomes` derives — never mutates — the locked Surveyed chip, so clearing
+  // the answer filter restores the admin's own chips with no save/restore dance.
+  const answerCount = answerFilters.length + answerTagFilters.length;
+  const narrowed = !!(userId || passId || effortId || dateRange.from || dateRange.to);
+  const answerActive = narrowed && answerCount > 0;
+  const effectiveOutcomes = answerActive ? [SURVEYED] : outcomes;
+
+  // The filter as the server reads it — ONE object (lib/outcomeScope.js), so the query key, the
+  // dry run and the write can never describe different scopes. The query string is DERIVED from
+  // it below, never rebuilt from page state beside it: under "Select all N matching" the server
+  // re-resolves the selection from this scope alone, so a filter present in the table's request
+  // but missing from the write's body would rewrite rows the admin never saw. Paused answer
+  // picks (gate closed) are withheld here — the server would refuse them, correctly.
   const scope = useMemo(
-    () => ({ ...(outcomes.length ? { outcomes } : {}), ...(userId ? { userId } : {}), ...(passId ? { passId } : {}) }),
-    [outcomes, userId, passId]
+    () =>
+      buildScope({
+        outcomes: effectiveOutcomes,
+        userId,
+        passId,
+        effortId,
+        dateRange,
+        surveyTemplateId,
+        answerFilters: answerActive ? answerFilters : [],
+        answerTagFilters: answerActive ? answerTagFilters : [],
+      }),
+    [effectiveOutcomes, userId, passId, effortId, dateRange, surveyTemplateId, answerFilters, answerTagFilters, answerActive]
   );
 
   const qs = useMemo(() => {
-    const sp = new URLSearchParams();
-    if (outcomes.length) sp.set('outcomes', outcomes.join(','));
-    if (userId) sp.set('userId', userId);
-    if (passId) sp.set('passId', passId);
+    const sp = scopeToSearchParams(scope);
     sp.set('skip', String(page * PAGE));
     sp.set('limit', String(PAGE));
     return sp.toString();
-  }, [outcomes, userId, passId, page]);
+  }, [scope, page]);
 
   const entriesQ = useQuery({
     queryKey: ['admin', 'outcome-entries', campaignId, qs],
@@ -142,10 +187,82 @@ export default function DoorOutcomesPage() {
   });
   const runs = runsQ.data?.runs || [];
 
+  // The answer picker's two feeds. Templates come from /admin/reports/surveys — every survey
+  // that has responses for this campaign plus the current one, so a campaign that SWAPPED
+  // surveys can still reach the old one's answers. Questions come from /survey-results for the
+  // chosen template (merged options, retired + legacy buckets, the __other__ write-in seeded),
+  // fetched lazily — a page that never opens the disclosure never pays for it. Deliberately NOT
+  // narrowed by the page's own filters: options must never depend on the filters they set, or
+  // narrowing to one canvasser would delete the chips that narrowed it.
+  const surveysQ = useQuery({
+    queryKey: ['reports', 'surveys', campaignId],
+    queryFn: () => api(`/admin/reports/surveys?campaignId=${campaignId}`),
+    enabled: !!campaignId && isOrgAdmin && current?.type === 'survey',
+  });
+  const surveyList = surveysQ.data || [];
+  const surveyResQ = useQuery({
+    queryKey: ['reports', 'survey-results', campaignId, surveyTemplateId],
+    queryFn: () =>
+      api(`/admin/reports/survey-results?campaignId=${campaignId}${surveyTemplateId ? `&surveyTemplateId=${surveyTemplateId}` : ''}`),
+    enabled: !!campaignId && isOrgAdmin && current?.type === 'survey' && answersOpen,
+  });
+  const choiceQuestions = (surveyResQ.data?.questions || []).filter(
+    (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
+  );
+  const surveyTags = (surveyResQ.data?.tags || []).map((t) => t.tag).filter(Boolean);
+
   const resetSelection = () => {
     setSelected(new Set());
     setAllMatching(false);
   };
+  // Every filter change invalidates both the page cursor and the selection — forgetting the
+  // second is the dangerous one, since `allMatching` means "write whatever the filter matches".
+  // One wrapper so a new filter can't be added without both.
+  const applyFilter = (apply) => {
+    apply();
+    setPage(0);
+    resetSelection();
+    setError(null);
+  };
+  // Rounds belong to walk lists: narrowing to one walk list clears a round that isn't in it,
+  // or the page would show two sane-looking filters over a permanently empty table.
+  const selectEffort = (id) => {
+    setEffortId(id);
+    if (passId && id && !roundOptions.some((r) => r.id === passId && r.effortId === id)) setPassId('');
+  };
+  const clearAnswers = () => {
+    setAnswerFilters([]);
+    setAnswerTagFilters([]);
+  };
+  // Question keys don't survive a template change — carrying picks across would silently match
+  // another survey's same-named option.
+  const selectTemplate = (id) => {
+    setSurveyTemplateId(id);
+    clearAnswers();
+  };
+
+  // One mounted element serves every /campaigns/:id/outcomes — the sidebar switcher re-renders
+  // it with a new id, so every campaign-scoped id below belongs to the campaign we're leaving.
+  // Render-phase reset (the AuditPage/DuplicateSurveysPage idiom) so no query fires with a stale
+  // pair. The date range deliberately survives the flip: it is campaign-agnostic, and both
+  // sibling pages keep theirs "so an audit survives a campaign flip".
+  const [prevCampaignId, setPrevCampaignId] = useState(campaignId);
+  if (prevCampaignId !== campaignId) {
+    setPrevCampaignId(campaignId);
+    setOutcomes([]);
+    setUserId('');
+    setEffortId('');
+    setPassId('');
+    setSurveyTemplateId('');
+    setAnswerFilters([]);
+    setAnswerTagFilters([]);
+    setAnswersOpen(false);
+    setPage(0);
+    resetSelection();
+    setPreview(null);
+    setComposing(null);
+    setError(null);
+  }
   const afterWrite = () => {
     setPreview(null);
     resetSelection();
@@ -163,11 +280,16 @@ export default function DoorOutcomesPage() {
   const answeredCount = () => composedAnswers().length;
 
   // `actionIds` is omitted for "select all N" so the server works from the filter — the selection
-  // is then whatever currently matches, not a page's worth of stale checkboxes.
-  const body = (extra = {}) => ({
-    to: target,
+  // is then whatever currently matches, not a page's worth of stale checkboxes. selectionBody is
+  // the ONE spelling of that rule; body/convBody/loadTemplate all spread it, so the three POSTs
+  // can never describe different selections.
+  const selectionBody = () => ({
     scope,
     ...(allMatching ? {} : { actionIds: [...selected] }),
+  });
+  const body = (extra = {}) => ({
+    to: target,
+    ...selectionBody(),
     ...extra,
   });
 
@@ -191,8 +313,7 @@ export default function DoorOutcomesPage() {
   const convBody = (extra = {}) => ({
     direction,
     to: direction === 'to_survey' ? SURVEYED : target,
-    scope,
-    ...(allMatching ? {} : { actionIds: [...selected] }),
+    ...selectionBody(),
     ...extra,
   });
 
@@ -202,7 +323,7 @@ export default function DoorOutcomesPage() {
     mutationFn: () =>
       api(`/admin/campaigns/${campaignId}/survey-conversions/template`, {
         method: 'POST',
-        body: { scope, ...(allMatching ? {} : { actionIds: [...selected] }) },
+        body: selectionBody(),
       }),
     onSuccess: (d) => {
       setComposing(d.template);
@@ -346,80 +467,238 @@ export default function DoorOutcomesPage() {
 
   const isSurveyCampaign = current?.type === 'survey';
   const selectionCount = allMatching ? total : selected.size;
-  // Direction is read off the SELECTION and the target, never asked for: picking Surveyed as the
-  // target means "record answers", and having surveyed rows selected means "remove them".
+  // Under a truncated answer scope `total` is a LOWER bound — the wire says so, the count
+  // renders "N+", and "Select all N matching" is withdrawn outright: its entire meaning is
+  // that N is the truth.
+  const totalIsLowerBound = !!entriesQ.data?.totalIsLowerBound;
+  const anyFilter =
+    outcomes.length > 0 || !!userId || !!passId || !!effortId || !!dateRange.from || !!dateRange.to || answerCount > 0;
   const selectedRows = entries.filter((e) => allMatching || selected.has(e.id));
-  const selectionHasSurveyed = allMatching
-    ? outcomes.length === 1 && outcomes[0] === SURVEYED
-    : selectedRows.some((e) => e.actionType === SURVEYED);
+  // Direction is read off the SELECTION and the target, never asked for: picking Surveyed as
+  // the target means "record answers", and having surveyed rows selected means "remove them".
+  // Under "select all N" the matching set's make-up comes from the server's `sources` — the
+  // old guess (`outcomes.length === 1 && outcomes[0] === SURVEYED`) broke the moment a filter
+  // could imply Surveyed without the chip being ticked, and was already wrong for a select-all
+  // whose chips were simply left blank over an all-surveyed table.
+  const selectionSources = allMatching
+    ? entriesQ.data?.sources || []
+    : [...new Set(selectedRows.map((e) => e.actionType))];
+  const selectionHasSurveyed = selectionSources.includes(SURVEYED);
+  // A selection straddling the surveyed boundary has no honest single action — the server
+  // refuses it (SELECTION_SPANS_DIRECTIONS), so the bar explains instead of offering buttons.
+  const selectionSpans = selectionHasSurveyed && selectionSources.some((k) => k !== SURVEYED);
   const direction = selectionHasSurveyed ? 'from_survey' : target === SURVEYED ? 'to_survey' : null;
   const isSurveyConversion = direction !== null;
-  const toggleOutcome = (k) => {
-    setPage(0);
-    resetSelection();
-    setOutcomes((prev) => (prev.includes(k) ? prev.filter((o) => o !== k) : [...prev, k]));
-  };
+  const toggleOutcome = (k) =>
+    applyFilter(() => setOutcomes((prev) => (prev.includes(k) ? prev.filter((o) => o !== k) : [...prev, k])));
 
   return (
     <div className="pb-24">
-      <div className="mb-4">
-        <h1 className="text-2xl font-semibold text-fg">{current?.name || 'Campaign'}</h1>
-        <div className="mt-1 text-sm text-fg-muted">
-          Door Outcomes — review and correct what canvassers recorded at each door
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-fg">{current?.name || 'Campaign'}</h1>
+          <div className="mt-1 text-sm text-fg-muted">
+            Door Outcomes — review and correct what canvassers recorded at each door
+          </div>
         </div>
+        {/* In the header, not the filter Card — it is the tallest control in the set, and every
+            other dated page puts it here. Held until the campaigns list lands so a click on
+            "Today" inside the first frame can't resolve the org's today instead of the
+            campaign's; the All-time default itself needs no tz at all. */}
+        {!campaignsQ.isLoading && (
+          <DateRangeSelector value={dateRange} onChange={(next) => applyFilter(() => setDateRange(next))} tz={tz} />
+        )}
       </div>
 
       {/* Filters */}
       <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {SOURCES.map((k) => {
-            const on = outcomes.includes(k);
+            const on = effectiveOutcomes.includes(k);
+            const locked = answerActive && k !== SURVEYED;
             const n = facets[k];
             return (
               <button
                 key={k}
                 type="button"
+                disabled={answerActive}
+                aria-pressed={on}
+                title={
+                  answerActive
+                    ? locked
+                      ? 'Clear the answer filter to include other outcomes.'
+                      : 'An answer filter only ever matches surveyed entries.'
+                    : undefined
+                }
                 onClick={() => toggleOutcome(k)}
                 className={[
                   'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
                   on ? 'border-brand-accent bg-brand-tint text-brand-tint-fg' : 'border-border bg-card text-fg-muted hover:bg-sunken',
+                  answerActive ? 'cursor-default' : '',
+                  locked ? 'opacity-50' : '',
                 ].join(' ')}
               >
                 <Dot k={k} />
                 {ACTION_LABELS[k]}
-                {n ? <span className="ml-1 text-fg-subtle">{n}</span> : null}
+                {/* An em dash, never a blank, on a locked chip: a chip with no number reads as
+                    "this campaign has none of these", which under the lock is a lie — and the
+                    facets can't say otherwise, since a zero-count outcome is simply absent from
+                    the $group. */}
+                {locked ? (
+                  <span className="ml-1 text-fg-subtle">—</span>
+                ) : n ? (
+                  <span className="ml-1 text-fg-subtle">{n}</span>
+                ) : null}
               </button>
             );
           })}
         </div>
+        {answerActive && (
+          <div className="mt-1.5 text-xs text-fg-muted">
+            Only surveyed entries carry answers, so the other outcomes are off while an answer filter is on.
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Select value={userId} onChange={(e) => { setUserId(e.target.value); setPage(0); resetSelection(); }} className="w-52">
+          <Select value={userId} onChange={(e) => applyFilter(() => setUserId(e.target.value))} className="w-52">
             <option value="">All canvassers</option>
-            {members.map((m) => (
+            {allMembers.map((m) => (
               <option key={m.user.id} value={m.user.id}>
                 {[m.user.firstName, m.user.lastName].filter(Boolean).join(' ') || m.user.email}
+                {m.user.isActive === false ? ' (deactivated)' : ''}
               </option>
             ))}
           </Select>
-          <Select value={passId} onChange={(e) => { setPassId(e.target.value); setPage(0); resetSelection(); }} className="w-52">
+          {efforts.length > 1 && (
+            <Select
+              value={effortId}
+              onChange={(e) => applyFilter(() => selectEffort(e.target.value))}
+              className="w-52"
+              title="Filter to one walk list"
+            >
+              <option value="">All walk lists</option>
+              {efforts.map((ef) => (
+                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              ))}
+            </Select>
+          )}
+          <Select value={passId} onChange={(e) => applyFilter(() => setPassId(e.target.value))} className="w-52">
             <option value="">All rounds</option>
-            {passes.map((p) => (
-              <option key={p._id} value={p._id}>{p.name || `Round ${p.roundNumber}`}</option>
+            {roundChoices.map((r) => (
+              <option key={r.id} value={r.id}>{r.label}</option>
             ))}
           </Select>
-          {(outcomes.length || userId || passId) ? (
+          {isSurveyCampaign && (
+            <Button variant="secondary" size="sm" aria-expanded={answersOpen} onClick={() => setAnswersOpen((o) => !o)}>
+              <span className="mr-1">{answersOpen ? '▾' : '▸'}</span>
+              Survey answers
+              {answerCount > 0 ? <span className="ml-1.5 text-brand-accent">{answerCount}</span> : null}
+            </Button>
+          )}
+          {anyFilter ? (
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => { setOutcomes([]); setUserId(''); setPassId(''); setPage(0); resetSelection(); }}
+              onClick={() =>
+                applyFilter(() => {
+                  setOutcomes([]);
+                  setUserId('');
+                  setEffortId('');
+                  setPassId('');
+                  setDateRange(defaultRange('all'));
+                  setSurveyTemplateId('');
+                  clearAnswers();
+                })
+              }
             >
               Clear filters
             </Button>
           ) : null}
           <span className="ml-auto text-xs text-fg-muted">
-            {entriesQ.isLoading ? 'Loading…' : `${total.toLocaleString()} ${total === 1 ? 'entry' : 'entries'}`}
+            {/* isFetching, not isLoading: keepPreviousData makes isLoading fire only on first
+                mount, so a slow refetch under a new filter would read as a finished count. */}
+            {entriesQ.isFetching
+              ? 'Loading…'
+              : `${total.toLocaleString()}${totalIsLowerBound ? '+' : ''} ${total === 1 ? 'entry' : 'entries'}`}
           </span>
         </div>
+
+        {/* The answer filter — collapsed by default; the tall block lives on a sunken
+            sub-surface so the card keeps reading as one control strip. */}
+        {answersOpen && isSurveyCampaign && (
+          <div className="mt-3 rounded-card border border-border bg-sunken/40 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-fg-muted">Filter answers from</span>
+              {surveyList.length > 1 ? (
+                <Select
+                  value={surveyTemplateId}
+                  onChange={(e) => applyFilter(() => selectTemplate(e.target.value))}
+                  className="w-56"
+                  title="Which survey's answers to filter by — answers recorded under other surveys stay out"
+                >
+                  <option value="">
+                    {surveyList.find((t) => t.current)
+                      ? `${surveyList.find((t) => t.current).name} (current)`
+                      : 'Current survey'}
+                  </option>
+                  {surveyList
+                    .filter((t) => !t.current)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} · {t.responseCount}
+                      </option>
+                    ))}
+                </Select>
+              ) : (
+                <span className="text-xs text-fg">{surveyList[0]?.name || 'this campaign’s survey'}</span>
+              )}
+              {answerCount > 0 && (
+                <button type="button" className="text-xs text-fg-muted hover:underline" onClick={() => applyFilter(clearAnswers)}>
+                  Clear answers
+                </button>
+              )}
+            </div>
+
+            {/* The gate, as an affordance (the server refusal is the backstop). Three states:
+                closed (no picks yet), paused (picks kept but not filtering — the state that
+                would otherwise be a silent lie), open. */}
+            {!narrowed && answerCount === 0 && (
+              <div className="mb-2 rounded-card border border-border bg-card px-2.5 py-1.5 text-xs text-fg-muted">
+                Pick a canvasser, walk list, round or date range first — an answer filter on its own
+                would read every survey in the campaign.
+              </div>
+            )}
+            {!narrowed && answerCount > 0 && (
+              <div className="mb-2 rounded-card border border-danger/30 bg-danger-tint px-2.5 py-1.5 text-xs text-danger">
+                These answer chips aren’t filtering anything right now. Pick a canvasser, walk list,
+                round or date range above to switch them back on — your picks are kept.
+              </div>
+            )}
+            {answerActive && totalIsLowerBound && (
+              <div className="mb-2 rounded-card border border-danger/30 bg-danger-tint px-2.5 py-1.5 text-xs text-danger">
+                More answers matched than can be scanned at once — this is the most recent{' '}
+                {(entriesQ.data?.answerScope?.cap || 0).toLocaleString()}. Narrow the date range, round
+                or canvasser to see the rest. “Select all matching” is off until you do.
+              </div>
+            )}
+
+            {surveyResQ.isLoading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : choiceQuestions.length === 0 && surveyTags.length === 0 ? (
+              <div className="text-xs text-fg-muted">This survey has no choice questions to filter by.</div>
+            ) : (
+              <div className={narrowed ? '' : 'pointer-events-none opacity-50'} aria-disabled={!narrowed}>
+                <AnswerFilters
+                  questions={choiceQuestions}
+                  value={answerFilters}
+                  onChange={(v) => applyFilter(() => setAnswerFilters(v))}
+                  tags={surveyTags}
+                  tagValue={answerTagFilters}
+                  onTagChange={(v) => applyFilter(() => setAnswerTagFilters(v))}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
       {error && (
@@ -429,14 +708,29 @@ export default function DoorOutcomesPage() {
       {/* Entries */}
       {entriesQ.isLoading ? (
         <Skeleton className="h-64 w-full" />
-      ) : !entries.length ? (
+      ) : entriesQ.isError ? (
+        // A failed fetch must never read as "no entries match" — the admin would widen the
+        // filter and select-all against whatever the retry returns.
         <EmptyState
-          title="No entries match"
-          hint="Nothing recorded here yet, or the filters are too narrow. Lit-drop entries never appear — a lit drop has no answers to move either way."
+          title="Couldn't load the entries"
+          hint={`${entriesQ.error?.message || 'The request failed.'} Nothing here is filtered — retry before acting on this page.`}
         />
+      ) : !entries.length ? (
+        anyFilter ? (
+          <EmptyState
+            title="No entries match these filters"
+            hint="Clear a filter to widen the view. Entries an earlier change already converted stay hidden until that change is undone."
+          />
+        ) : (
+          <EmptyState
+            title="Nothing recorded yet"
+            hint="Nothing recorded here yet. Lit-drop entries never appear — a lit drop has no answers to move either way."
+          />
+        )
       ) : (
         <>
           <DataTable
+            className={entriesQ.isFetching ? 'opacity-60 transition-opacity' : ''}
             head={
               <>
                 <th className="w-10 px-3 py-2">
@@ -457,6 +751,7 @@ export default function DoorOutcomesPage() {
                 </th>
                 <th className="px-3 py-2">Door</th>
                 <th className="px-3 py-2">Recorded</th>
+                {isSurveyCampaign && <th className="px-3 py-2">Answers</th>}
                 <th className="px-3 py-2">Canvasser</th>
                 <th className="px-3 py-2">When</th>
                 <th className="px-3 py-2">Round</th>
@@ -486,6 +781,44 @@ export default function DoorOutcomesPage() {
                   <Dot k={e.actionType} />
                   {ACTION_LABELS[e.actionType]}
                 </td>
+                {/* The row's survey evidence: a filter whose result the admin can't see would be
+                    unverifiable on a page that rewrites history — and the Surveyed direction
+                    archives EVERY answer at the visit, so "who else goes" must be said here. */}
+                {isSurveyCampaign && (
+                  <td className="px-3 py-2 align-top">
+                    {e.actionType !== SURVEYED || !e.survey ? (
+                      <span className="text-fg-subtle">—</span>
+                    ) : (
+                      <div className="max-w-[24rem]">
+                        {answerActive && e.survey.matched?.length ? (
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-xs font-medium text-fg">{e.survey.matched[0].voterName}</span>
+                            {e.survey.matched[0].answers.map((a) => (
+                              <Badge key={a.questionKey} variant="brand">{a.text}</Badge>
+                            ))}
+                            {e.survey.matchedVoters > 1 && (
+                              <span className="text-xs text-fg-muted">+{e.survey.matchedVoters - 1} more matched</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-fg-muted" title={(e.survey.otherNames || []).join(', ')}>
+                            {e.survey.voters.toLocaleString()} {e.survey.voters === 1 ? 'voter' : 'voters'} ·{' '}
+                            {e.survey.answers.toLocaleString()} {e.survey.answers === 1 ? 'answer' : 'answers'}
+                          </span>
+                        )}
+                        {answerActive && e.survey.voters > (e.survey.matchedVoters || 0) && (
+                          <div
+                            className={`mt-0.5 text-xs ${selected.has(e.id) || allMatching ? 'text-danger' : 'text-fg-muted'}`}
+                            title={(e.survey.otherNames || []).join(', ')}
+                          >
+                            {e.survey.voters - e.survey.matchedVoters} other
+                            {e.survey.voters - e.survey.matchedVoters === 1 ? '' : 's'} at this visit — their answers go too
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                )}
                 <td className="px-3 py-2 text-fg-muted">{e.canvasser}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-fg-muted">{formatInTz(e.timestamp, tz)}</td>
                 <td className="px-3 py-2 text-fg-muted">{e.round || '—'}</td>
@@ -527,6 +860,12 @@ export default function DoorOutcomesPage() {
                     {(r.counts?.entriesConverted || 0).toLocaleString()} entries
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
                   </div>
+                  {r.scopeSummary && (
+                    <div className="mt-0.5 text-xs text-fg-subtle">
+                      Filtered to: {r.scopeSummary}
+                      {r.byIds ? ' · hand-picked rows' : ''}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -608,6 +947,12 @@ export default function DoorOutcomesPage() {
                     {r.doorCount === 1 ? 'door' : 'doors'}
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
                   </div>
+                  {r.scopeSummary && (
+                    <div className="mt-0.5 text-xs text-fg-subtle">
+                      Filtered to: {r.scopeSummary}
+                      {r.byIds ? ' · hand-picked rows' : ''}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -648,12 +993,18 @@ export default function DoorOutcomesPage() {
             <span className="text-sm font-medium text-fg">
               {selectionCount.toLocaleString()} selected
             </span>
-            {!allMatching && selected.size === entries.length && total > entries.length && (
+            {!allMatching && !totalIsLowerBound && selected.size === entries.length && total > entries.length && (
               <button type="button" className="text-sm font-medium text-brand-accent hover:underline" onClick={() => setAllMatching(true)}>
                 Select all {total.toLocaleString()} matching
               </button>
             )}
             <button type="button" className="text-sm text-fg-muted hover:underline" onClick={resetSelection}>Clear</button>
+            {selectionSpans ? (
+              <span className="ml-auto text-sm text-fg-muted">
+                This selection mixes surveyed entries with door outcomes — the two are corrected by
+                different tools. Filter to one side and convert each separately.
+              </span>
+            ) : (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm text-fg-muted">Change to</span>
               <Select value={target} onChange={(e) => setTarget(e.target.value)} className="w-44">
@@ -697,6 +1048,7 @@ export default function DoorOutcomesPage() {
                 </Button>
               )}
             </div>
+            )}
           </div>
         </div>
       )}

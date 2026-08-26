@@ -907,6 +907,216 @@ test('run detail itemizes both ledgers, and says so honestly once undone', { ski
   await CanvassActivity.deleteOne({ _id: row._id });
 });
 
+// ── The survey-answer filter ────────────────────────────────────────────────
+// Fresh rows at a date no earlier test touches (Sep 15; the fixture lives on Jul 4), so the date
+// window doubles as both the gate narrowing and the isolation — whatever state the tests above
+// left the July ledger in, these see only their own.
+const SEP_AT = new Date('2026-09-15T15:00:00Z'); // 10:00 America/Chicago
+const SEP_SCOPE = { dateFrom: '2026-09-15', dateTo: '2026-09-15' };
+const probe = {}; // shared by the answer-filter tests below, seeded once
+
+test('an answer filter selects by the VISIT — the triple, never the row voter or the door', { skip }, async () => {
+  const { org, campaign, effort, effortB, pass, canv, other, boss, template, otherTemplate } = ctx;
+  const mkDoor = (n, eId) => ({
+    organizationId: org._id, campaignId: campaign._id, effortId: eId,
+    addressLine1: `${n} Answer Av`, city: 'Austin', state: 'TX', zipCode: '78701',
+    normalizedAddress: `${n} answer av austin tx 78701`,
+    location: { type: 'Point', coordinates: [-97.7 + n * 0.001, 30.3] },
+    status: 'surveyed', isActive: true,
+  });
+  const [dA, dB, dC] = await Household.insertMany([mkDoor(101, effort._id), mkDoor(102, effort._id), mkDoor(103, effortB._id)]);
+  const mkV = (d, n) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId: d._id,
+    stateVoterId: `SVA${n}`, firstName: `A${n}`, lastName: 'Probe', fullName: `A${n} Probe`, surveyStatus: 'surveyed',
+  });
+  const [pA1, pA2, pA3, pB1, pC1] = await Voter.insertMany([mkV(dA, 1), mkV(dA, 2), mkV(dA, 3), mkV(dB, 4), mkV(dC, 5)]);
+
+  const mkAct = (d, userId, voterId) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId: d._id, userId,
+    actionType: 'survey_submitted', voterId, effortId: d.effortId, passId: pass._id,
+    coordinatorId: boss._id, location: GPS, distanceFromHouseMeters: 9, timestamp: SEP_AT,
+  });
+  // Cara's visit to dA names pA2 on the row — while pA1 is the voter who gave the matching
+  // answer. A voterId join would MISS this door; the triple join must find it.
+  const acts = await CanvassActivity.insertMany([
+    mkAct(dA, canv._id, pA2._id),
+    mkAct(dA, other._id, pA3._id), // Otto's own honest visit to the same door, same round
+    mkAct(dB, canv._id, pB1._id),
+    mkAct(dC, canv._id, pC1._id),
+  ]);
+  const mkResp = (voter, d, userId, tmpl, optionId) => ({
+    organizationId: org._id, campaignId: campaign._id, voterId: voter._id, householdId: d._id,
+    userId, surveyTemplateId: tmpl._id, surveyTemplateVersion: tmpl.version || 1,
+    answers: [{ questionKey: 'support', questionLabel: 'Support?', answer: optionId, optionIds: [optionId] }],
+    location: GPS, submittedAt: SEP_AT, passId: pass._id, effortId: d.effortId, coordinatorId: boss._id,
+  });
+  await SurveyResponse.insertMany([
+    mkResp(pA1, dA, canv._id, template, 'undecided'), // THE match
+    mkResp(pA2, dA, canv._id, template, 'yes'),
+    mkResp(pA3, dA, other._id, template, 'yes'),      // Otto's voter answered differently
+    mkResp(pB1, dB, canv._id, template, 'yes'),
+    // Same questionKey AND same option id, but recorded under the OTHER template — the
+    // cross-template slug collision the template scope exists to keep out.
+    mkResp(pC1, dC, canv._id, otherTemplate, 'undecided'),
+  ]);
+  Object.assign(probe, { dA, dB, dC, pA1, pA2, pA3, canvRowA: acts[0], ottoRowA: acts[1] });
+
+  const qsFor = (extra = {}) => {
+    const sp = new URLSearchParams({ ...SEP_SCOPE, ...extra });
+    return `/admin/campaigns/${campaign._id}/outcome-entries?${sp}`;
+  };
+  const FILTER = JSON.stringify([{ questionKey: 'support', values: ['undecided'], texts: [] }]);
+
+  const hit = await call('GET', qsFor({ answerFilters: FILTER }), asAdmin());
+  assert.equal(hit.status, 200);
+  // Exactly Cara's visit to dA: not Otto's row at the SAME door (his voter answered yes — a
+  // door-level join would sweep his honest work into her cleanup), not dB (no match), not dC
+  // (matches only under the other template), and not the row voter's answer (pA2 said yes).
+  assert.equal(hit.json.total, 1);
+  assert.equal(hit.json.entries[0].id, String(acts[0]._id));
+  assert.deepEqual(hit.json.facets, { survey_submitted: 1 });
+  assert.deepEqual(hit.json.sources, ['survey_submitted']);
+
+  // The row carries its own evidence: who answered at THIS visit, who matched, and who is
+  // merely at the same door — the fact the removal preview will price.
+  const ev = hit.json.entries[0].survey;
+  assert.equal(ev.voters, 2);
+  assert.equal(ev.answers, 2);
+  assert.equal(ev.matchedVoters, 1);
+  assert.equal(ev.matched.length, 1);
+  assert.equal(ev.matched[0].voterName, 'A1 Probe');
+  assert.deepEqual(ev.matched[0].answers.map((a) => a.text), ['undecided']);
+  assert.deepEqual(ev.otherNames, ['A2 Probe']);
+  assert.equal(hit.json.answerScope.responses, 1);
+  assert.equal(hit.json.answerScope.truncated, false);
+  assert.equal(hit.json.totalIsLowerBound, undefined);
+
+  // A non-matching option selects nothing — {_id: null}, never an open filter.
+  const miss = await call('GET', qsFor({ answerFilters: JSON.stringify([{ questionKey: 'support', values: ['no'], texts: [] }]) }), asAdmin());
+  assert.equal(miss.json.total, 0);
+
+  // The SAME filter scoped to the other template finds ONLY the collision row.
+  const crossed = await call('GET', qsFor({ answerFilters: FILTER, surveyTemplateId: String(otherTemplate._id) }), asAdmin());
+  assert.equal(crossed.json.total, 1);
+  assert.equal(crossed.json.entries[0].id, String(acts[3]._id));
+});
+
+test('the answer filter refuses rather than guessing — gate, template, chip conflict', { skip }, async () => {
+  const FILTER = JSON.stringify([{ questionKey: 'support', values: ['undecided'], texts: [] }]);
+  const base = `/admin/campaigns/${ctx.campaign._id}/outcome-entries`;
+
+  // No other narrowing: the response scan would be campaign-wide, twice per page load.
+  const ungated = await call('GET', `${base}?answerFilters=${encodeURIComponent(FILTER)}`, asAdmin());
+  assert.equal(ungated.status, 400);
+  assert.equal(ungated.json.code, 'ANSWER_FILTER_NEEDS_NARROWING');
+  // ...and identically on a write body, since all four routes resolve through one function.
+  const ungatedWrite = await call('POST', url(), {
+    ...asAdmin(),
+    body: {
+      direction: 'from_survey', to: 'not_home', dryRun: true,
+      scope: { answerFilters: [{ questionKey: 'support', values: ['undecided'] }] },
+    },
+  });
+  assert.equal(ungatedWrite.status, 400);
+  assert.equal(ungatedWrite.json.code, 'ANSWER_FILTER_NEEDS_NARROWING');
+
+  // A non-Surveyed chip beside an answer filter is a contradiction, not a combination.
+  const conflicted = await call('GET', `${base}?outcomes=not_home&dateFrom=2026-09-15&dateTo=2026-09-15&answerFilters=${encodeURIComponent(FILTER)}`, asAdmin());
+  assert.equal(conflicted.status, 400);
+  assert.equal(conflicted.json.code, 'ANSWER_FILTER_REQUIRES_SURVEYED');
+
+  // A template id that resolves to nothing refuses — it must never fall back to matching
+  // another survey's same-named slugs.
+  const ghost = new mongoose.Types.ObjectId();
+  const noTemplate = await call('GET', `${base}?dateFrom=2026-09-15&dateTo=2026-09-15&surveyTemplateId=${ghost}&answerFilters=${encodeURIComponent(FILTER)}`, asAdmin());
+  assert.equal(noTemplate.status, 400);
+  assert.equal(noTemplate.json.code, 'ANSWER_FILTER_NEEDS_TEMPLATE');
+
+  // Unreadable JSON refuses too — a parse failure must never become "no filter".
+  const garbled = await call('GET', `${base}?dateFrom=2026-09-15&answerFilters=%7Bnot-json`, asAdmin());
+  assert.equal(garbled.status, 400);
+  assert.equal(garbled.json.code, 'INVALID_SCOPE');
+});
+
+test('door-unit semantics are PRICED out loud: one matching answer, two archived', { skip }, async () => {
+  // The filter selects doors where SOMEONE answered undecided; the conversion archives every
+  // response at that visit's triple — pA2's yes goes with pA1's undecided, and the preview must
+  // say so by name. Otto's voter at the same door is untouched (his triple, his work).
+  const scope = { ...SEP_SCOPE, answerFilters: [{ questionKey: 'support', values: ['undecided'] }] };
+  const dry = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'from_survey', to: 'not_home', dryRun: true, scope },
+  });
+  assert.equal(dry.status, 200);
+  assert.equal(dry.json.entries, 1);
+  assert.equal(dry.json.doors, 1);
+  assert.equal(dry.json.survey.responsesToArchive, 2);
+  assert.equal(dry.json.survey.votersAffected, 2);
+  // The widening is stated in numbers AND in names: one answer matched, two go, and the
+  // manifest is sorted matched-first with each row flagged — so a truncated manifest can never
+  // show only the swept-along voters.
+  assert.equal(dry.json.survey.matchedResponses, 1);
+  assert.equal(dry.json.survey.matchedVoters, 1);
+  assert.deepEqual(
+    dry.json.survey.manifest.map((m) => [m.voterName, m.matchedFilter]),
+    [['A1 Probe', true], ['A2 Probe', false]]
+  );
+});
+
+test('select-all under an answer filter writes EXACTLY the listed rows', { skip }, async () => {
+  const scope = { ...SEP_SCOPE, answerFilters: [{ questionKey: 'support', values: ['undecided'] }] };
+  const runId = await bulkRun({ direction: 'from_survey', to: 'not_home', scope });
+  const run = await SurveyConversionRun.findById(runId).lean();
+  assert.equal(run.status, 'completed');
+  assert.equal(run.counts.entriesConverted, 1);
+  assert.equal(run.counts.responsesArchived, 2);
+
+  // Cara's row converted and stamped; Otto's row at the same door untouched; his voter's
+  // answer intact.
+  const caraRow = await CanvassActivity.findById(probe.canvRowA._id).lean();
+  assert.equal(caraRow.actionType, 'not_home');
+  assert.equal(String(caraRow.reclassified.runId), String(runId));
+  const ottoRow = await CanvassActivity.findById(probe.ottoRowA._id).lean();
+  assert.equal(ottoRow.actionType, 'survey_submitted');
+  assert.equal(ottoRow.reclassified, undefined);
+  assert.ok(await SurveyResponse.exists({ voterId: probe.pA3._id }), "Otto's voter keeps her answer");
+  assert.equal(await SurveyResponse.exists({ voterId: probe.pA1._id }), null, 'the matching answer is archived');
+});
+
+test('a truncated answer scope caps the browse and refuses the filter-scoped write', { skip }, async () => {
+  // Cap forced to 1 via the call-time env override; 'yes' still matches at least two Sep
+  // responses (Otto's voter at dA, and dB), so the resolution truncates. The invariant being
+  // pinned: never write a row the admin did not see — a truncated resolution is an arbitrary
+  // cap-sized subset of what they described, so scope-only writes refuse while id-scoped ones
+  // (rows they explicitly ticked, by construction inside the resolved set) do not trip it.
+  const scope = { ...SEP_SCOPE, answerFilters: [{ questionKey: 'support', values: ['yes'] }] };
+  process.env.ANSWER_SCOPE_MAX_RESPONSES = '1';
+  try {
+    const sp = new URLSearchParams({ ...SEP_SCOPE, answerFilters: JSON.stringify(scope.answerFilters) });
+    const browse = await call('GET', `/admin/campaigns/${ctx.campaign._id}/outcome-entries?${sp}`, asAdmin());
+    assert.equal(browse.status, 200);
+    assert.equal(browse.json.answerScope.truncated, true);
+    assert.equal(browse.json.answerScope.cap, 1);
+    assert.equal(browse.json.totalIsLowerBound, true);
+
+    const scopeOnly = await call('POST', url(), {
+      ...asAdmin(),
+      body: { direction: 'from_survey', to: 'not_home', dryRun: true, scope },
+    });
+    assert.equal(scopeOnly.status, 409);
+    assert.equal(scopeOnly.json.code, 'ANSWER_SCOPE_TRUNCATED');
+
+    const byIds = await call('POST', url(), {
+      ...asAdmin(),
+      body: { direction: 'from_survey', to: 'not_home', dryRun: true, scope, actionIds: [String(probe.ottoRowA._id)] },
+    });
+    assert.notEqual(byIds.json.code, 'ANSWER_SCOPE_TRUNCATED');
+    assert.notEqual(byIds.status, 409);
+  } finally {
+    delete process.env.ANSWER_SCOPE_MAX_RESPONSES;
+  }
+});
+
 test('the campaign delete cascade takes SurveyConversionRun with it', { skip }, async () => {
   const doomed = await Campaign.create({
     organizationId: ctx.org._id, name: 'Doomed', type: 'survey', state: 'TX', isActive: true,

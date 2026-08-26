@@ -8,6 +8,7 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { Voter } from '../../models/Voter.js';
 import { recomputeHouseholdStatusesBatched, recomputeSurveyStatusesBatched } from './status.js';
+import { doorKey } from './doorKey.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { KNOCK_ACTIONS } from '../reports/aggregations.js';
 import { normalizeAndFilterAnswers } from '../surveys/normalizeAnswers.js';
@@ -69,7 +70,7 @@ const CHUNK = 200;
 const SAMPLE_CAP = 200;
 
 /** Rows convertible in each direction. Surveyed is the only legal source going backwards. */
-const SOURCES_FOR = (direction) => (direction === 'to_survey' ? RECLASSIFIABLE_OUTCOMES : ['survey_submitted']);
+export const SOURCES_FOR = (direction) => (direction === 'to_survey' ? RECLASSIFIABLE_OUTCOMES : ['survey_submitted']);
 
 const err = (status, code, error) => ({ status, body: { error, code } });
 
@@ -79,7 +80,7 @@ const err = (status, code, error) => ({ status, body: { error, code } });
 
 /**
  * Validate the campaign and the requested direction. Returns null when legal, else { status, body }.
- * The per-door template check lives in resolveConversion, which needs the selection to run it.
+ * The per-door template check lives in resolveSelectionTemplate, which needs the selection to run.
  */
 export function validateConversion(campaign, { direction, to }) {
   if (campaign.type !== 'survey') {
@@ -108,53 +109,12 @@ export function validateConversion(campaign, { direction, to }) {
 // Resolving a selection into doors, voters and a template
 // ---------------------------------------------------------------------------
 
-/**
- * Turn a scope + optional actionIds into the exact rows, doors and (forward) template a run
- * would use.
- *
- * `actionIds` may only NARROW — the same rule resolveSelection enforces for the plain reclassify,
- * so a stale checkbox can never reach a row the admin's current filter doesn't show. Rows are
- * additionally constrained to the direction's legal sources: ticking a Not-home row and asking to
- * convert it OUT of Surveyed silently selects nothing rather than doing something surprising.
- */
-export async function resolveConversion({ campaign, scope = {}, actionIds = null, direction }) {
-  const filter = {
-    ...convertibleMatch(campaign._id, null, CONVERTIBLE_SOURCES),
-    actionType: { $in: SOURCES_FOR(direction) },
-  };
-  if (scope.outcomes?.length) {
-    const wanted = scope.outcomes.filter((o) => SOURCES_FOR(direction).includes(o));
-    filter.actionType = { $in: wanted };
-  }
-  if (scope.userId) filter.userId = new mongoose.Types.ObjectId(String(scope.userId));
-  if (scope.passId) filter.passId = new mongoose.Types.ObjectId(String(scope.passId));
-  if (scope.effortId) filter.effortId = new mongoose.Types.ObjectId(String(scope.effortId));
-  if (scope.dateFrom || scope.dateTo) {
-    filter.timestamp = {};
-    if (scope.dateFrom) filter.timestamp.$gte = new Date(scope.dateFrom);
-    if (scope.dateTo) filter.timestamp.$lte = new Date(scope.dateTo);
-  }
-  if (actionIds?.length) {
-    filter._id = { $in: actionIds.map((id) => new mongoose.Types.ObjectId(String(id))) };
-  }
-
-  const rows = await CanvassActivity.find(filter, {
-    householdId: 1,
-    actionType: 1,
-    userId: 1,
-    passId: 1,
-  }).lean();
-
-  const householdIds = [...new Set(rows.map((r) => String(r.householdId)))];
-  return {
-    ids: rows.map((r) => r._id),
-    rows,
-    householdIds: householdIds.map((s) => new mongoose.Types.ObjectId(s)),
-    entries: rows.length,
-    doors: householdIds.length,
-    sources: [...new Set(rows.map((r) => r.actionType))],
-  };
-}
+// Selection resolution lives in reclassifyOutcomes.resolveSelection — ONE resolver for the
+// table, the plain reclassify and both conversion directions, so a filter honoured by one can
+// never be dropped by another. This module used to carry its own copy (resolveConversion), and
+// the two had already drifted apart on the date keys before it was deleted. Callers pass
+// SOURCES_FOR(direction) as the `outcomes` argument; the intersect inside buildEntryFilter
+// then constrains a selection to the direction's legal sources exactly as the old copy did.
 
 /**
  * The ONE template every selected door must resolve to.
@@ -219,7 +179,7 @@ const eligibleVotersFor = async (campaignId, householdIds) =>
  * {voterId, passId}. `passId ?? null` is written explicitly everywhere — omitting the key would
  * make the legacy null-pass bucket match every round at once.
  */
-export async function computeSurveyImpact({ campaign, rows, direction }) {
+export async function computeSurveyImpact({ campaign, rows, direction, answerMatch = null }) {
   const householdIds = [...new Set(rows.map((r) => String(r.householdId)))].map(
     (s) => new mongoose.Types.ObjectId(s)
   );
@@ -235,10 +195,29 @@ export async function computeSurveyImpact({ campaign, rows, direction }) {
           .limit(SURVEY_CONVERT_MAX_RESPONSES + 1)
           .lean()
       : [];
-    const byRow = new Set(existing.map((s) => `${s.householdId}|${s.passId ?? 'null'}|${s.userId}`));
+    const byRow = new Set(existing.map((s) => doorKey(s)));
     const entriesNoResponses = rows.filter(
-      (r) => !byRow.has(`${r.householdId}|${r.passId ?? 'null'}|${r.userId}`)
+      (r) => !byRow.has(doorKey(r))
     ).length;
+
+    // Under an answer filter the archive is WIDER than the match — it takes every response at
+    // each selected visit, including the neighbour who answered differently. Mark which of them
+    // matched (re-applying the resolved response clauses to these exact ids), and sort the
+    // manifest matched-first BEFORE the 50-row slice, or a truncated manifest could show only
+    // unmatched voters — the worst possible presentation of an honest number.
+    const matchedIds = answerMatch
+      ? new Set(
+          (
+            await SurveyResponse.find(
+              { _id: { $in: existing.map((s) => s._id) }, $and: answerMatch },
+              { _id: 1 }
+            ).lean()
+          ).map((r) => String(r._id))
+        )
+      : null;
+    if (matchedIds) {
+      existing.sort((a, b) => matchedIds.has(String(b._id)) - matchedIds.has(String(a._id)));
+    }
 
     const voterIds = [...new Set(existing.map((s) => String(s.voterId)))];
     const names = await Voter.find({ _id: { $in: voterIds.slice(0, 50) } }, 'fullName').lean();
@@ -248,11 +227,20 @@ export async function computeSurveyImpact({ campaign, rows, direction }) {
       responsesToArchive: existing.length,
       votersAffected: voterIds.length,
       entriesNoResponses,
+      ...(matchedIds
+        ? {
+            matchedResponses: existing.filter((s) => matchedIds.has(String(s._id))).length,
+            matchedVoters: new Set(
+              existing.filter((s) => matchedIds.has(String(s._id))).map((s) => String(s.voterId))
+            ).size,
+          }
+        : {}),
       manifest: existing.slice(0, 50).map((s) => ({
         voterId: String(s.voterId),
         voterName: nameById.get(String(s.voterId)) || 'Unknown voter',
         submittedAt: s.submittedAt,
         answerCount: (s.answers || []).length,
+        ...(matchedIds ? { matchedFilter: matchedIds.has(String(s._id)) } : {}),
       })),
       manifestTruncated: existing.length > 50,
       manifestTotal: existing.length,
@@ -578,9 +566,9 @@ async function convertChunkFromSurvey(ctx, rows, to) {
     touched.voterIds.push(...responses.map((r) => r.voterId));
   }
 
-  const hasResponse = new Set(responses.map((r) => `${r.householdId}|${r.passId ?? 'null'}|${r.userId}`));
+  const hasResponse = new Set(responses.map((r) => doorKey(r)));
   for (const row of rows) {
-    if (!hasResponse.has(`${row.householdId}|${row.passId ?? 'null'}|${row.userId}`)) {
+    if (!hasResponse.has(doorKey(row))) {
       acc.entriesNoResponses += 1;
     }
   }

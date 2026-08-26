@@ -4,6 +4,7 @@ import { CampaignChange } from '../../models/CampaignChange.js';
 import { Household } from '../../models/Household.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { recomputeHouseholdStatusesBatched } from './status.js';
+import { hydrateSurveyEvidence } from './answerScope.js';
 import { knocksPipeline, billableDoorsOf, contactRate, connectionRate } from '../reports/aggregations.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 
@@ -165,18 +166,34 @@ export function validatePair(campaign, from, to) {
 /**
  * Mongo filter for the page's table and for a filter-scoped run. Every field is optional; the
  * campaign scope and the two provenance rules are not.
+ *
+ * PURE AND SYNCHRONOUS on purpose — listEntries calls it twice per request (rows+count, then the
+ * facet aggregate) and resolveSelection a third time. Everything that needs a DB read or that can
+ * be misinterpreted — the civil-date window, id casting, the survey-answer join — is resolved
+ * ONCE upstream by services/canvass/entryScope.js and arrives here ready to assign.
+ *
+ * The `__resolved` throw is that arrangement's enforcement. A future call site that hands this an
+ * unresolved wire scope would silently drop its date window and its answer filter and select a
+ * WIDER set than the admin saw — which, under "Select all N matching", is a wider WRITE. Failing
+ * loudly in a test beats that.
  */
 export function buildEntryFilter(campaignId, q = {}, outcomes = RECLASSIFIABLE_OUTCOMES) {
+  if (!q.__resolved) {
+    throw new Error(
+      'buildEntryFilter: q must come from resolveEntryScope() — a raw wire scope would silently ' +
+        'drop its date window and its answer filter, widening the selection.'
+    );
+  }
   const filter = convertibleMatch(campaignId, null, outcomes);
   if (q.outcomes?.length) filter.actionType = { $in: q.outcomes.filter((o) => outcomes.includes(o)) };
-  if (q.userId) filter.userId = new mongoose.Types.ObjectId(q.userId);
-  if (q.passId) filter.passId = new mongoose.Types.ObjectId(q.passId);
-  if (q.effortId) filter.effortId = new mongoose.Types.ObjectId(q.effortId);
-  if (q.from || q.to) {
-    filter.timestamp = {};
-    if (q.from) filter.timestamp.$gte = new Date(q.from);
-    if (q.to) filter.timestamp.$lte = new Date(q.to);
-  }
+  if (q.userId) filter.userId = q.userId;
+  if (q.passId) filter.passId = q.passId;
+  if (q.effortId) filter.effortId = q.effortId;
+  if (q.timestamp) filter.timestamp = q.timestamp;
+  // $and, never a bare key: the answer clause is itself $or-shaped, and resolveSelection owns
+  // `_id` for the actionIds narrowing. $and is the only composition where neither can clobber
+  // the other (the rule reports.js states for the same clause builders).
+  if (q.answerClause) filter.$and = [...(filter.$and || []), q.answerClause];
   return filter;
 }
 
@@ -185,7 +202,7 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
   const filter = buildEntryFilter(campaignId, q, outcomes);
   const [rows, total, facets] = await Promise.all([
     CanvassActivity.find(filter, {
-      householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, distanceFromHouseMeters: 1,
+      householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1,
     })
       .sort({ timestamp: -1 })
       .skip(skip)
@@ -194,22 +211,29 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
     CanvassActivity.countDocuments(filter),
     CanvassActivity.aggregate([
       // Facet counts ignore the outcome chips (you need to see what ELSE is there to pick it),
-      // but honor every other filter.
+      // but honor every other filter — the spread carries the resolved date window and the
+      // answer clause through untouched, which is why they live ON q.
       { $match: buildEntryFilter(campaignId, { ...q, outcomes: [] }, outcomes) },
       { $group: { _id: '$actionType', n: { $sum: 1 } } },
     ]),
   ]);
 
-  const doorIds = [...new Set(rows.map((r) => String(r.householdId)))];
-  const doors = await Household.find(
-    { _id: { $in: doorIds } },
-    { addressLine1: 1, unit: 1, city: 1 }
-  ).lean();
+  const [doors, surveyByRow] = await Promise.all([
+    Household.find(
+      { _id: { $in: [...new Set(rows.map((r) => String(r.householdId)))] } },
+      { addressLine1: 1, unit: 1, city: 1 }
+    ).lean(),
+    // Who answered at each surveyed row's visit, and (under an answer filter) who matched —
+    // page-bounded, skipped when the page holds no surveyed rows. See answerScope.js.
+    hydrateSurveyEvidence(rows, q),
+  ]);
   const doorById = new Map(doors.map((d) => [String(d._id), d]));
+  const facetCounts = Object.fromEntries(facets.map((f) => [f._id, f.n]));
 
   return {
     entries: rows.map((r) => {
       const d = doorById.get(String(r.householdId));
+      const survey = surveyByRow.get(String(r._id));
       return {
         id: String(r._id),
         householdId: String(r.householdId),
@@ -219,10 +243,17 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
         userId: r.userId ? String(r.userId) : null,
         passId: r.passId ? String(r.passId) : null,
         timestamp: r.timestamp,
+        ...(survey ? { survey } : {}),
       };
     }),
     total,
-    facets: Object.fromEntries(facets.map((f) => [f._id, f.n])),
+    facets: facetCounts,
+    // What the MATCHING SET is made of — the chips honored when set, every present outcome
+    // otherwise. Derived from the facet aggregate at zero extra queries; the client reads the
+    // selection's direction off this rather than guessing from which chips are ticked.
+    sources: q.outcomes?.length
+      ? q.outcomes.filter((o) => facetCounts[o] > 0)
+      : Object.keys(facetCounts).filter((k) => facetCounts[k] > 0),
   };
 }
 
@@ -238,15 +269,53 @@ export async function resolveSelection(campaignId, q = {}, actionIds = null, out
   if (actionIds?.length) {
     filter._id = { $in: actionIds.map((id) => new mongoose.Types.ObjectId(String(id))) };
   }
-  const rows = await CanvassActivity.find(filter, { householdId: 1, actionType: 1 }).lean();
+  // userId/passId ride along for the survey-conversion caller, whose preview joins each row to
+  // its SurveyResponses on the {householdId, passId, userId} triple. Two extra ObjectIds on a
+  // capped projection — cheaper than the second resolver that used to exist for their sake.
+  const rows = await CanvassActivity.find(filter, { householdId: 1, actionType: 1, userId: 1, passId: 1 }).lean();
+  const householdIds = [...new Set(rows.map((r) => String(r.householdId)))];
   return {
     ids: rows.map((r) => r._id),
-    householdIds: [...new Set(rows.map((r) => String(r.householdId)))].map((s) => new mongoose.Types.ObjectId(s)),
+    rows,
+    householdIds: householdIds.map((s) => new mongoose.Types.ObjectId(s)),
     entries: rows.length,
-    doors: new Set(rows.map((r) => String(r.householdId))).size,
+    doors: householdIds.length,
     sources: [...new Set(rows.map((r) => r.actionType))],
   };
 }
+
+/**
+ * Narrow an already-resolved selection to a path's legal sources, in memory.
+ *
+ * Provably equal to re-running resolveSelection with the narrower `outcomes` argument — the two
+ * filters differ only in the actionType intersect, and every other clause already applied — so
+ * the write routes can resolve ONCE against CONVERTIBLE_SOURCES (to see whether the selection
+ * spans the surveyed boundary and refuse it honestly) and then narrow without a second query.
+ */
+export function narrowSelection(sel, outcomes) {
+  const rows = sel.rows.filter((r) => outcomes.includes(r.actionType));
+  const householdIds = [...new Set(rows.map((r) => String(r.householdId)))];
+  return {
+    ids: rows.map((r) => r._id),
+    rows,
+    householdIds: householdIds.map((h) => new mongoose.Types.ObjectId(h)),
+    entries: rows.length,
+    doors: householdIds.length,
+    sources: [...new Set(rows.map((r) => r.actionType))],
+  };
+}
+
+/**
+ * Does this selection straddle the surveyed / not-surveyed boundary?
+ *
+ * The one mix the two write paths cannot honestly serve: a plain reclassify would silently drop
+ * the surveyed rows and a survey conversion would silently drop the others, so the action bar
+ * would say 12 while the run writes 10. The routes refuse it (SELECTION_SPANS_DIRECTIONS)
+ * instead. A selection spanning several DOOR outcomes is a different, fully supported thing —
+ * runReclassify records from:'mixed' and stamps each row's own origin.
+ */
+export const selectionSpansDirections = (sel) =>
+  sel.sources.includes('survey_submitted') && sel.sources.length > 1;
 
 // ---------------------------------------------------------------------------
 // Pricing a conversion
@@ -325,7 +394,7 @@ async function householdsOfRun(runId) {
  * rows that simply aren't listed (and still carry `from`, so nothing is lost), whereas writing
  * the run first would offer a Revert for a conversion that never happened.
  */
-export async function runReclassify({ campaign, from, to, ids = null, byUserId }) {
+export async function runReclassify({ campaign, from, to, ids = null, byUserId, selection = null, scopeSummary = null }) {
   const runId = new mongoose.Types.ObjectId();
   const scoped = Array.isArray(ids);
   const match = scoped
@@ -368,6 +437,10 @@ export async function runReclassify({ campaign, from, to, ids = null, byUserId }
     count: entries,
     doorCount: affected.length,
     byUserId: byUserId || null,
+    // What produced this run — the validated wire scope plus its frozen human line, so the run
+    // list can tell a narrow scoped correction from a whole-campaign fold.
+    ...(selection ? { selection } : {}),
+    ...(scopeSummary ? { scopeSummary } : {}),
   });
 
   await CampaignChange.create({

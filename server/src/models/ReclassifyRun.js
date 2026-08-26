@@ -27,6 +27,21 @@ const reclassifyRunSchema = new mongoose.Schema(
     doorCount: { type: Number, default: 0 },
 
     byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+    // The FILTER that produced a scoped run, mirrored from SurveyConversionRun.selection.scope —
+    // without it a run scoped to "answered Opposed, Aug 1–7" was stored identically to a
+    // whole-campaign fold, and the run list could not tell an admin which they were undoing.
+    // Deliberately NO actionIds array here: this model's revert is stamp-driven
+    // (reclassified.runId on each row), so 25k ObjectIds on one doc would be dead weight —
+    // the opposite trade from SurveyConversionRun, whose worker genuinely re-reads its ids.
+    // `byIds` records whether the admin hand-ticked rows (true) or wrote by filter alone.
+    selection: {
+      scope: { type: mongoose.Schema.Types.Mixed, default: {} },
+      byIds: { type: Boolean, default: false },
+    },
+    // One human line for the filter, frozen at creation (services/canvass/scopeSummary.js) so it
+    // names what the admin SAW, not what the options are called now. Null = unscoped fold.
+    scopeSummary: { type: String, default: null },
     // null = still in effect. Set once, on Revert; a reverted run is kept (not deleted) so the
     // history feed and this list both stay honest about what was done and undone.
     revertedAt: { type: Date, default: null },

@@ -1509,25 +1509,11 @@ async function buildVotersByAnswerFilter(req) {
   return { filter: withTeam(filter, await crewFilter(req)), template, wantsTag };
 }
 
-// One stored answer rendered for a human — the drill-in list, its CSV, and any other
-// per-response readout. Shared so the screen and the export can never disagree.
-//
-// The capture flow embeds an "Other: ___" write-in INTO the answer snapshot as one of its
-// entries, so a raw cell reads "potholes" — indistinguishable from a canonical option someone
-// happened to name "potholes". Label just that entry, leaving a multi-select's other picks alone.
-export function formatAnswerCell(a) {
-  const parts = Array.isArray(a.answer) ? a.answer : a.answer != null ? [a.answer] : [];
-  if ((a.optionIds || []).includes(OTHER_OPTION_ID)) {
-    const typed = a.otherText || '';
-    if (!typed) return parts.join('; ') || 'Other';
-    const labeled = parts.map((p) => (p === typed ? `Other — ${typed}` : p));
-    if (!parts.includes(typed)) labeled.push(`Other — ${typed}`);
-    return labeled.join('; ');
-  }
-  // Legacy belt-and-braces: only append otherText when it isn't already in the snapshot.
-  const base = parts.join('; ');
-  return a.otherText && !parts.includes(a.otherText) ? `${base} — ${a.otherText}` : base;
-}
+// formatAnswerCell moved to services/surveys/answerDisplay.js so the Door Outcomes table could
+// share it without a route importing from a sibling route. Imported (this file still renders
+// with it below) and re-exported so existing callers keep finding it.
+import { formatAnswerCell } from '../../services/surveys/answerDisplay.js';
+export { formatAnswerCell };
 
 router.get('/voters-by-answer', async (req, res, next) => {
   try {

@@ -30,7 +30,12 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
   return (
     <Card className="mt-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm font-medium text-fg">{label(run)}</div>
+        <div className="text-sm font-medium text-fg">
+          {label(run)}
+          {run.scopeSummary && (
+            <div className="mt-0.5 text-xs font-normal text-fg-subtle">Filtered to: {run.scopeSummary}</div>
+          )}
+        </div>
         {run.status === 'completed' && <Badge variant="success">Done</Badge>}
         {run.status === 'reverted' && <Badge variant="neutral">Undone</Badge>}
         {run.status === 'failed' && <Badge variant="danger">Stopped</Badge>}

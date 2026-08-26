@@ -6,12 +6,14 @@ kind: page
 order: 117
 sourceDoc: CAMPAIGNS.md
 summary: Correct what a canvasser recorded at a door — including recording or removing survey answers.
-tags: outcomes, corrections, surveys, quality, page, admin
+tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list
 ---
 
 **Door Outcomes** (in the sidebar's **Quality** group, next to Audit) is where you change what a recorded entry *says*. It's **org admins only** — leads decide what canvassers can record going forward, but changing the record itself sits one level up.
 
-Filter by outcome, canvasser or round, tick the entries you want — one row to fix one door, or **Select all N matching** for a whole batch — then pick what they should become.
+Filter by outcome, canvasser, walk list, round, date range — or, on a survey campaign, by a **specific survey answer** — then tick the entries you want: one row to fix one door, or **Select all N matching** for a whole batch, then pick what they should become. Dates mean the campaign's own days, the same way they do on the dashboard.
+
+**Filtering by answer** (open **Survey answers** in the filter bar) finds the doors where someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It needs one other filter set first (a canvasser, walk list, round or date range), it only ever matches Surveyed entries, and if your campaign has used more than one survey you pick which survey's answers you mean. The table then shows who matched at each door — and who else answered at the same visit, because changing a Surveyed entry takes **every** answer recorded at that visit, not just the matching one. The review step names them all before anything happens.
 
 ## Every change is priced before it runs
 
@@ -35,7 +37,7 @@ You can leave questions blank. Record only what you actually know.
 
 **Who gets the credit:** the canvasser who knocked. The knock keeps their name, time, location, round and team, so their numbers reflect their work. The answers carry a visible **"Entered by ‹you› on ‹date›"** stamp on the voter's record and in exports, so a desk entry is never mistaken for a doorstep conversation. They count in your rates like any other answer.
 
-If the selected doors use **different surveys** (a walk list with its own survey), you'll be asked to filter by walk list first — one survey at a time.
+If the selected doors use **different surveys** (a walk list with its own survey), you'll be asked to filter by walk list first — the walk-list filter at the top of the page — one survey at a time.
 
 ## Removing survey answers (Surveyed → something else)
 
@@ -59,6 +61,8 @@ itemization. The exception is answers an undo couldn't put back (a newer field a
 the spot); those stay listed, since they're exactly what you'd need to find.
 
 ## Undoing
+
+Each change also remembers the filter that produced it — a change made under "Cara Canvasser · answered Opposed · Aug 1 – Aug 7" says so on its row, so a narrow correction is never mistaken for a whole-campaign fold.
 
 Every change is listed with an undo that reverses it exactly — including a selection that spanned several outcomes, and a door-by-door session, which undoes as one unit. Changes and undos both appear in the campaign's History.
 

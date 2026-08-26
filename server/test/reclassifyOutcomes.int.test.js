@@ -421,6 +421,123 @@ test('the entries browser lists convertible rows with door, canvasser and round,
   assert.equal((await call('GET', entriesUrl(), asLead())).status, 403);
 });
 
+// The date window, which the client is about to start sending for the first time. Every fixture
+// row is stamped 2026-08-01T15:00:00Z, which is Aug 1 at 10:00 in the campaign's America/Chicago
+// — so the campaign day and the UTC day agree on which date it is, and disagree about where that
+// date STARTS. That is exactly the gap the old `new Date(ymd)` + `$lte` arithmetic fell into.
+test('a date window is a whole campaign-tz day, inclusive at both ends', { skip }, async () => {
+  // THE REGRESSION. from === to is what every single-day preset emits ("Yesterday" is
+  // { from: d, to: d }). Under the old inclusive-$lte-on-UTC-midnight arithmetic this window had
+  // ZERO width and the table came back empty — and a "Select all N matching" write scoped to it
+  // resolved to nothing.
+  const oneDay = await call('GET', entriesUrl('?dateFrom=2026-08-01&dateTo=2026-08-01'), asAdmin());
+  assert.equal(oneDay.status, 200);
+  assert.equal(oneDay.json.total, 5);
+
+  // The day BEFORE is empty — proving the window really is bounded and not just permissive.
+  const dayBefore = await call('GET', entriesUrl('?dateFrom=2026-07-31&dateTo=2026-07-31'), asAdmin());
+  assert.equal(dayBefore.json.total, 0);
+
+  // 15:00Z is 10:00 Central on Aug 1 but 09:00 Central on... no day but Aug 1. The UTC-anchored
+  // reading would place the window's start at 2026-08-01T00:00Z = Jul 31 19:00 Central, so a
+  // Jul 31 window would have swept these rows in. It doesn't.
+  const julyOnly = await call('GET', entriesUrl('?dateTo=2026-07-31'), asAdmin());
+  assert.equal(julyOnly.json.total, 0);
+
+  // An open-ended start ("everything up to and including Aug 1") includes the whole day.
+  const openStart = await call('GET', entriesUrl('?dateTo=2026-08-01'), asAdmin());
+  assert.equal(openStart.json.total, 5);
+
+  // Facets honour the window too — they strip only the outcome chips.
+  assert.deepEqual(oneDay.json.facets, { no_soliciting: 3, refused: 1, survey_submitted: 1 });
+  assert.deepEqual(dayBefore.json.facets, {});
+});
+
+test('a scoped run RECORDS the filter that produced it, frozen as people read it', { skip }, async () => {
+  // Without this, "answered Opposed, Aug 1-7" and a whole-campaign fold stored identically and
+  // the run list could not say which one an admin was about to undo.
+  const list = await call('GET', entriesUrl('?outcomes=no_soliciting&dateFrom=2026-08-01&dateTo=2026-08-01'), asAdmin());
+  const scope = { outcomes: ['no_soliciting'], dateFrom: '2026-08-01', dateTo: '2026-08-01' };
+  const picked = [list.json.entries[0].id];
+  const res = await call('POST', url(), { ...asAdmin(), body: { to: 'not_home', scope, actionIds: picked } });
+  assert.equal(res.status, 201);
+
+  const runs = await call('GET', url(), asAdmin());
+  const run = runs.json.runs.find((r) => r.id === res.json.run.id);
+  assert.equal(run.scopeSummary, 'No soliciting · Aug 1');
+  assert.equal(run.byIds, true, 'hand-ticked rows are recorded as such');
+  const doc = await ReclassifyRun.findById(res.json.run.id).lean();
+  assert.deepEqual(doc.selection.scope, scope, 'the raw wire scope rides beside the human line');
+
+  // Put the row back so the later selection/mixed tests see the fixture they expect.
+  const undo = await call('POST', url('/revert'), { ...asAdmin(), body: { runId: res.json.run.id } });
+  assert.equal(undo.status, 200);
+});
+
+test('a selection straddling the surveyed boundary is REFUSED, never silently truncated', { skip }, async () => {
+  // The pre-existing hole this closes: hand-tick door-outcome rows AND a surveyed row, and the
+  // reclassify path used to quietly keep only the door outcomes — the bar said N, the run wrote
+  // fewer, and nothing said so. (A selection spanning several DOOR outcomes stays fully legal —
+  // that is the from:'mixed' feature, pinned elsewhere in this file.)
+  const all = await call('GET', entriesUrl(), asAdmin());
+  const surveyed = all.json.entries.find((e) => e.actionType === 'survey_submitted');
+  const door = all.json.entries.find((e) => e.actionType !== 'survey_submitted');
+
+  const spanning = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', actionIds: [surveyed.id, door.id], dryRun: true },
+  });
+  assert.equal(spanning.status, 409);
+  assert.equal(spanning.json.code, 'SELECTION_SPANS_DIRECTIONS');
+
+  // Entirely on the surveyed side is NOT a span — it keeps its long-standing refusal, because
+  // this tool has no honest way to convert a surveyed row at all.
+  const surveyedOnly = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', actionIds: [surveyed.id], dryRun: true },
+  });
+  assert.equal(surveyedOnly.status, 400);
+  assert.equal(surveyedOnly.json.code, 'EMPTY_SELECTION');
+});
+
+test('a malformed filter REFUSES — it never silently becomes "no filter"', { skip }, async () => {
+  // The failure this replaces: a bad value was read as null, so the table listed every row while
+  // the admin believed it was filtered — and "Select all N matching" would have written them.
+  const badDate = await call('GET', entriesUrl('?dateFrom=2026-8-1'), asAdmin());
+  assert.equal(badDate.status, 400);
+
+  const badId = await call('GET', entriesUrl('?userId=not-an-object-id'), asAdmin());
+  assert.equal(badId.status, 400);
+
+  // The same refusal on the write path, from the same schema.
+  const badBody = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { dateFrom: 'yesterday' }, dryRun: true },
+  });
+  assert.equal(badBody.status, 400);
+});
+
+test('the table and the write resolve the SAME rows from one scope', { skip }, async () => {
+  // The invariant the whole scope collapse exists to protect: `qs` and `scope` are two encodings
+  // of one object, so a filter honoured by the table must be honoured by the run it feeds. This
+  // is the test that would have caught the two-memo split.
+  const cases = [
+    ['?outcomes=no_soliciting', { outcomes: ['no_soliciting'] }],
+    ['?dateFrom=2026-08-01&dateTo=2026-08-01&outcomes=no_soliciting', { outcomes: ['no_soliciting'], dateFrom: '2026-08-01', dateTo: '2026-08-01' }],
+    ['?dateFrom=2026-07-31&dateTo=2026-07-31&outcomes=no_soliciting', { outcomes: ['no_soliciting'], dateFrom: '2026-07-31', dateTo: '2026-07-31' }],
+    [`?userId=${ctx.canv._id}&outcomes=no_soliciting`, { outcomes: ['no_soliciting'], userId: String(ctx.canv._id) }],
+  ];
+  for (const [qs, scope] of cases) {
+    const table = await call('GET', entriesUrl(qs), asAdmin());
+    assert.equal(table.status, 200, qs);
+    const write = await call('POST', url(), { ...asAdmin(), body: { to: 'not_home', scope, dryRun: true } });
+    // An empty table means an empty selection, which the write path reports as a 400 rather than
+    // a zero-row dry run — the two still agree about the row COUNT, which is the invariant.
+    const writeEntries = write.status === 400 ? 0 : write.json.entries;
+    assert.equal(writeEntries, table.json.total, qs);
+  }
+});
+
 test('a SELECTION converts exactly the chosen rows, and bumps updatedAt so phones resync', { skip }, async () => {
   const list = await call('GET', entriesUrl('?outcomes=no_soliciting'), asAdmin());
   const picked = list.json.entries.slice(0, 2);

@@ -314,9 +314,21 @@ whole safety model:
   Converting *into* Surveyed makes you enter the answers first; converting *out of* it removes
   real answers, so they are archived rather than deleted and you are shown exactly whose.
 
-Working the page: filter by outcome, canvasser or round, tick the entries you want (one row to fix
-one door, or **Select all N matching** to fold a whole outcome), pick what they should become, and
-review. **Everything else about each entry is kept** — the time, the GPS location, who knocked it,
+Working the page: filter by outcome, canvasser, walk list, round, or a date range (the campaign's
+own days, like every other dated page) — or, on a survey campaign, by a **specific survey answer**
+— tick the entries you want (one row to fix one door, or **Select all N matching** to fold a whole
+batch), pick what they should become, and review.
+
+The **answer filter** (the *Survey answers* disclosure in the filter bar) finds the doors where
+someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It
+asks for one other narrowing first (canvasser, walk list, round or dates), it only ever matches
+Surveyed entries — the other chips lock while it's on — and on a campaign that has used more than
+one survey you pick which survey's answers you mean. Each matching row then shows who matched at
+that visit and who else answered there, because a Surveyed entry is the whole visit: changing it
+takes every answer that canvasser recorded at that door that round, and the review step names each
+person, matched or merely present. Each change also freezes a one-line description of the filter
+that produced it ("Cara Canvasser · answered Opposed · Aug 1 – Aug 7"), so the run list can tell a
+narrow correction from a whole-campaign fold. **Everything else about each entry is kept** — the time, the GPS location, who knocked it,
 and which round and turf it belonged to. Only the label changes; door colors follow, and phones
 pick the new colors up on their next sync. Every change is listed with a **one-click Revert** that
 undoes it exactly — including a selection that spanned several outcomes, since each entry remembers
@@ -591,12 +603,45 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   for a rate-neutral pair (provably nothing moves) which is also what keeps the whole-outcome fold
   unbounded; a money-moving selection is capped at `RECLASSIFY_MAX_IMPACT_ENTRIES` (25k,
   `SELECTION_TOO_LARGE`) since it scans the ledger.
-- **Selection.** A scoped run sends `scope` (outcomes/userId/passId/effortId/dateFrom/dateTo — the
-  date bounds are `dateFrom`/`dateTo` because `from`/`to` already name the outcomes) and may send
-  `actionIds`, which only **narrows** it, the flag-bulk-review rule, so a stale checkbox can never
-  reach a row the current filter doesn't show. A selection may span outcomes: the run records
-  `from: 'mixed'` and each row's own origin is stamped, so revert is still exact. Omitting both
-  is the whole-outcome fold the App Customization card uses (id-free, so unbounded).
+- **Selection.** A scoped run sends `scope` (outcomes/userId/passId/effortId/dateFrom/dateTo/
+  surveyTemplateId/answerFilters/answerTagFilters — the date bounds are `dateFrom`/`dateTo`
+  because `from`/`to` already name the outcomes) and may send `actionIds`, which only **narrows**
+  it, the flag-bulk-review rule, so a stale checkbox can never reach a row the current filter
+  doesn't show. Every route resolves the scope ONCE through
+  [`resolveEntryScope`](../server/src/services/canvass/entryScope.js) — dates become half-open
+  campaign-tz windows via `zonedDayRange` (the old raw-`new Date()` parse made a single-day range
+  zero-width), ids are cast, the answer filter runs its one `SurveyResponse` read, and every
+  refusal is thrown there so all four routes refuse identically. `buildEntryFilter` **throws** on
+  a scope that didn't come from the resolver, and `resolveConversion` no longer exists — the
+  conversion routes call the same `resolveSelection` with `SOURCES_FOR(direction)`, so the table
+  and both write paths can never interpret one scope differently. A selection may span DOOR
+  outcomes (the run records `from: 'mixed'`, each row stamps its own origin, revert stays exact),
+  but one straddling the surveyed boundary is refused (`409 SELECTION_SPANS_DIRECTIONS`) instead
+  of silently narrowed as before. A malformed scope value is a 400, never "no filter". Omitting
+  scope and ids is the whole-outcome fold the App Customization card uses (id-free, so unbounded).
+- **The answer filter** ([`answerScope.js`](../server/src/services/canvass/answerScope.js)) joins
+  the two ledgers on the visit TRIPLE `(householdId, passId ?? null, userId)` — one canvasser's
+  visit to one door in one round, the same key the conversion archives on
+  ([`doorKey.js`](../server/src/services/canvass/doorKey.js)); never `CanvassActivity.voterId`
+  (names only the LAST voter surveyed) and never `householdId` alone (sweeps a second canvasser's
+  honest row into the cleanup). The `SurveyResponse` match requires `surveyTemplateId` (slugs are
+  unique only within one template), pushes down only the provably-safe narrowings (`userId`,
+  `passId`, the date window onto `submittedAt` — `effortId` deliberately stays activity-side), and
+  builds clauses with `answerFilterClause`/`answerTagClause` under `$and` (docs/SURVEYS.md §J's
+  dual-read + `__other__` rules, never a hand-rolled `$elemMatch`). Matched triples fold into one
+  `countDocuments`-able clause grouped by `(passId, userId)`. **Bounds:** the filter requires one
+  other narrowing (`400 ANSWER_FILTER_NEEDS_NARROWING` — a speed bump) and the response read caps
+  at `ANSWER_SCOPE_MAX_RESPONSES` (20k, env-overridable at call time — the hard bound). Truncation
+  makes `total` a lower bound (`totalIsLowerBound` on the GET), withdraws Select-all-N, and
+  refuses scope-only writes (`409 ANSWER_SCOPE_TRUNCATED`) while id-scoped writes stay legal — a
+  ticked row is by construction inside the resolved set. Other refusals:
+  `ANSWER_FILTER_NEEDS_TEMPLATE`, `ANSWER_FILTER_REQUIRES_SURVEYED`, `INVALID_SCOPE` (unreadable
+  JSON). The entries wire gains per-row `survey` evidence (voters/answers at the visit, who
+  matched), `sources` (what the matching set is made of — the client reads select-all direction
+  off this), and `answerScope` metadata; the removal preview gains `matchedResponses`/
+  `matchedVoters` and a matched-first, per-row-flagged manifest. Scoped runs freeze
+  `selection.scope` + a human `scopeSummary` on both run models
+  ([`scopeSummary.js`](../server/src/services/canvass/scopeSummary.js)).
 - **Door status** is re-resolved by `recomputeHouseholdStatusesBatched` — one read plus one
   `bulkWrite` per 500-door chunk instead of two round trips per door, which is what lets a
   several-thousand-door run finish inside a web request. Its `timestamps: true` is load-bearing:

@@ -17,6 +17,8 @@ import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
+import { resolveEntryScope, sendScopeError, ScopeError } from '../../services/canvass/entryScope.js';
+import { describeScope } from '../../services/canvass/scopeSummary.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
@@ -36,6 +38,8 @@ import {
   validatePair,
   listEntries,
   resolveSelection,
+  narrowSelection,
+  selectionSpansDirections,
   computeImpact,
   runReclassify,
   revertReclassify,
@@ -45,7 +49,7 @@ import {
   SURVEY_CONVERT_MAX_RESPONSES,
   MAX_VOTERS_PER_DOOR_SYNC,
   validateConversion,
-  resolveConversion,
+  SOURCES_FOR,
   resolveSelectionTemplate,
   computeSurveyImpact,
   executeConversionRun,
@@ -754,9 +758,55 @@ const entryScopeSchema = z.object({
   userId: objectIdish.optional(),
   effortId: objectIdish.optional(),
   passId: objectIdish.optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
+  // isoDateSchema, not a bare string: these are civil 'YYYY-MM-DD' days resolved in the
+  // campaign's timezone, and an unparseable one used to reach Mongoose as an Invalid Date and
+  // surface as a 500. A malformed filter must refuse, never silently become "no filter" — that
+  // shows MORE rows than the filter claims, and under "Select all N" writes them.
+  dateFrom: isoDateSchema.optional(),
+  dateTo: isoDateSchema.optional(),
+  // The survey-answer filter. Wire shape B — the AnswerFilters.jsx / SavedSearch shape — so the
+  // picker component and answerFilterClause consume it untranslated. surveyTemplateId scopes the
+  // match to the RESPONSE's template (slugs are unique only within one survey); required-with-
+  // answers is enforced in resolveEntryScope, not here, so the refusal carries a real code.
+  surveyTemplateId: objectIdish.optional(),
+  answerFilters: z
+    .array(
+      z.object({
+        questionKey: z.string().min(1),
+        values: z.array(z.string()).max(200).default([]),
+        texts: z.array(z.string()).max(200).optional(),
+      })
+    )
+    .max(25)
+    .optional(),
+  answerTagFilters: z.array(z.object({ tag: z.string().min(1) })).max(25).optional(),
 });
+
+/**
+ * The entries table's query string as the SAME wire scope the POST bodies carry.
+ *
+ * Empty keys are omitted rather than passed as '' so every field can stay `.optional()` — an
+ * empty string would fail objectIdish and refuse a request that simply isn't filtering.
+ */
+const scopeFromQuery = (query = {}) => {
+  const out = {};
+  const outcomes = query.outcomes ? String(query.outcomes).split(',').filter(Boolean) : [];
+  if (outcomes.length) out.outcomes = outcomes;
+  for (const k of ['userId', 'effortId', 'passId', 'dateFrom', 'dateTo', 'surveyTemplateId']) {
+    if (query[k]) out[k] = String(query[k]);
+  }
+  // The two structured filters ride the query string as JSON (the client derives them from the
+  // same scope object the POST bodies carry). A parse failure REFUSES — never "no filter".
+  for (const k of ['answerFilters', 'answerTagFilters']) {
+    if (!query[k]) continue;
+    try {
+      out[k] = JSON.parse(String(query[k]));
+    } catch {
+      throw new ScopeError(400, 'INVALID_SCOPE', "That filter isn't readable — reload the page and try again.");
+    }
+  }
+  return out;
+};
 
 const reclassifySchema = z.object({
   // Optional on a SCOPED run: the selection can span several outcomes, and each row's own origin
@@ -855,6 +905,8 @@ router.get('/:campaignId/reclassify-outcomes', async (req, res, next) => {
           createdAt: r.createdAt,
           revertedAt: r.revertedAt,
           by: p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null,
+          scopeSummary: r.scopeSummary || null,
+          byIds: !!r.selection?.byIds,
         };
       }),
     });
@@ -870,21 +922,18 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
 
-    const q = {
-      outcomes: req.query.outcomes ? String(req.query.outcomes).split(',').filter(Boolean) : [],
-      userId: mongoose.isValidObjectId(req.query.userId) ? req.query.userId : null,
-      effortId: mongoose.isValidObjectId(req.query.effortId) ? req.query.effortId : null,
-      passId: mongoose.isValidObjectId(req.query.passId) ? req.query.passId : null,
-      from: req.query.dateFrom || null,
-      to: req.query.dateTo || null,
-    };
+    // Through the SAME schema the POST bodies use, so the table and the write cannot disagree
+    // about what a scope means. It also replaces the old `isValidObjectId(x) ? x : null` reads,
+    // which turned a malformed filter into NO filter — listing more rows than the filter claimed.
+    const scope = entryScopeSchema.parse(scopeFromQuery(req.query));
+    const q = await resolveEntryScope(campaign, scope);
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const skip = Math.max(Number(req.query.skip) || 0, 0);
 
     // CONVERTIBLE_SOURCES so surveyed rows are listable and selectable — they route to the
     // survey-conversion endpoints, which can archive their answers, rather than to the plain
     // reclassify POST, which still refuses them.
-    const { entries, total, facets } = await listEntries(campaign._id, q, {
+    const { entries, total, facets, sources } = await listEntries(campaign._id, q, {
       skip,
       limit,
       outcomes: CONVERTIBLE_SOURCES,
@@ -907,10 +956,21 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
       }),
       total,
       facets,
+      // What the matching set is MADE OF. The client reads the selection's direction off this
+      // under "select all N" instead of guessing from which chips happen to be ticked — the
+      // guess broke the moment an answer filter could imply Surveyed without the chip.
+      sources,
       limit,
       skip,
+      // Present only under an answer filter. `truncated` means the response read hit its cap, so
+      // `total` is a LOWER BOUND — the client renders "N+" and withdraws "Select all N matching",
+      // whose entire meaning is that N is the truth.
+      ...(q.answerScope ? { answerScope: q.answerScope } : {}),
+      ...(q.answerScope?.truncated ? { totalIsLowerBound: true } : {}),
     });
   } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
     next(err);
   }
 });
@@ -927,10 +987,30 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
     const scoped = !!(scope || actionIds);
 
     if (scoped) {
-      const q = scope
-        ? { ...scope, from: scope.dateFrom, to: scope.dateTo }
-        : {};
-      const sel = await resolveSelection(campaign._id, q, actionIds);
+      const q = await resolveEntryScope(campaign, scope || {});
+      // A truncated answer scope refuses the FILTER-scoped write: the resolution is an arbitrary
+      // cap-sized subset of what the admin described, so writing it would write something nobody
+      // saw. An id-scoped write stays legal — the table only renders rows inside the resolved
+      // set, so a ticked row is by construction inside it.
+      if (q.answerScope?.truncated && !actionIds?.length) {
+        return res.status(409).json({
+          error: `That answer filter matches more than ${q.answerScope.cap.toLocaleString()} answers — narrow it with a canvasser, round, walk list or date range before converting.`,
+          code: 'ANSWER_SCOPE_TRUNCATED',
+        });
+      }
+      // Resolve WIDE first: a selection straddling the surveyed boundary used to be silently
+      // truncated here (this path kept only the door outcomes), so the bar said 12 and the run
+      // wrote 10. Refuse it instead, then narrow to this path's legal sources — provably the
+      // same set the old RECLASSIFIABLE-scoped resolution produced.
+      const wide = await resolveSelection(campaign._id, q, actionIds, CONVERTIBLE_SOURCES);
+      if (selectionSpansDirections(wide)) {
+        return res.status(409).json({
+          error:
+            'That selection mixes surveyed entries with door outcomes, and the two are corrected by different tools. Filter to one side — the Surveyed chip on or off — and convert each separately.',
+          code: 'SELECTION_SPANS_DIRECTIONS',
+        });
+      }
+      const sel = narrowSelection(wide, RECLASSIFIABLE_OUTCOMES);
       if (!sel.entries) {
         return res.status(400).json({ error: 'Nothing matches that selection.', code: 'EMPTY_SELECTION' });
       }
@@ -980,6 +1060,8 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
         to,
         ids: sel.ids,
         byUserId: req.user._id,
+        selection: { scope: scope || {}, byIds: !!actionIds?.length },
+        scopeSummary: await describeScope(campaign, scope || {}),
       });
       return res.status(201).json({
         run: {
@@ -1016,6 +1098,7 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
     next(err);
   }
 });
@@ -1168,6 +1251,8 @@ const runWire = (r, by = null) => ({
   samplesTruncated: r.samplesTruncated,
   samplesTotal: r.samplesTotal,
   surveyTemplateId: r.surveyTemplateId ? String(r.surveyTemplateId) : null,
+  scopeSummary: r.scopeSummary || null,
+  byIds: !!r.selection?.byIds,
   // null means NOT LOADED, never "none left" — the walkthrough distinguishes the two, because
   // treating null as an empty queue is what made a fresh session close itself instantly.
   doorsRemaining: null,
@@ -1186,12 +1271,16 @@ router.post('/:campaignId/survey-conversions/template', async (req, res, next) =
     if (!campaign) return;
     const body = conversionSchema.partial({ direction: true, to: true }).parse(req.body);
 
-    const sel = await resolveConversion({
-      campaign,
-      scope: body.scope || {},
-      actionIds: body.actionIds || null,
-      direction: 'to_survey',
-    });
+    const q = await resolveEntryScope(campaign, body.scope || {});
+    const wide = await resolveSelection(campaign._id, q, body.actionIds || null, CONVERTIBLE_SOURCES);
+    if (selectionSpansDirections(wide)) {
+      return res.status(409).json({
+        error:
+          'That selection mixes surveyed entries with door outcomes, and the two are corrected by different tools. Filter to one side — the Surveyed chip on or off — and convert each separately.',
+        code: 'SELECTION_SPANS_DIRECTIONS',
+      });
+    }
+    const sel = narrowSelection(wide, SOURCES_FOR('to_survey'));
     if (!sel.entries) {
       return res.status(400).json({ error: 'Nothing is selected.', code: 'EMPTY_SELECTION' });
     }
@@ -1212,6 +1301,7 @@ router.post('/:campaignId/survey-conversions/template', async (req, res, next) =
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
     next(err);
   }
 });
@@ -1228,12 +1318,23 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     const invalid = validateConversion(campaign, body);
     if (invalid) return res.status(invalid.status).json(invalid.body);
 
-    const sel = await resolveConversion({
-      campaign,
-      scope: body.scope || {},
-      actionIds: body.actionIds || null,
-      direction: body.direction,
-    });
+    const q = await resolveEntryScope(campaign, body.scope || {});
+    // Same rule as the reclassify write: a truncated answer scope may only be acted on by ids.
+    if (q.answerScope?.truncated && !body.actionIds?.length) {
+      return res.status(409).json({
+        error: `That answer filter matches more than ${q.answerScope.cap.toLocaleString()} answers — narrow it with a canvasser, round, walk list or date range before converting.`,
+        code: 'ANSWER_SCOPE_TRUNCATED',
+      });
+    }
+    const wide = await resolveSelection(campaign._id, q, body.actionIds || null, CONVERTIBLE_SOURCES);
+    if (selectionSpansDirections(wide)) {
+      return res.status(409).json({
+        error:
+          'That selection mixes surveyed entries with door outcomes, and the two are corrected by different tools. Filter to one side — the Surveyed chip on or off — and convert each separately.',
+        code: 'SELECTION_SPANS_DIRECTIONS',
+      });
+    }
+    const sel = narrowSelection(wide, SOURCES_FOR(body.direction));
     if (!sel.entries) {
       return res.status(400).json({ error: 'Nothing is selected.', code: 'EMPTY_SELECTION' });
     }
@@ -1255,7 +1356,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     const billRestricted = resolveBillRestricted(campaign, org);
     const [impact, survey] = await Promise.all([
       computeImpact({ campaign, ids: sel.ids, to: body.to, billRestricted }),
-      computeSurveyImpact({ campaign, rows: sel.rows, direction: body.direction }),
+      computeSurveyImpact({ campaign, rows: sel.rows, direction: body.direction, answerMatch: q.answerMatch }),
     ]);
 
     if (body.direction === 'to_survey' && survey.responsesToCreate > SURVEY_CONVERT_MAX_RESPONSES) {
@@ -1305,7 +1406,8 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       surveyTemplateVersion: template?.version ?? null,
       answers: body.mode === 'bulk' && template ? (body.answers || []) : [],
       note: body.note ?? null,
-      selection: { scope: body.scope || {}, actionIds: sel.ids },
+      selection: { scope: body.scope || {}, actionIds: sel.ids, byIds: !!body.actionIds?.length },
+      scopeSummary: await describeScope(campaign, body.scope || {}),
       // A door-by-door session stays OPEN between steps; a bulk run goes straight to the worker.
       status: body.mode === 'bulk' ? 'pending' : 'open',
       progress: { phase: null, pct: 0, doorsDone: 0, doorsTotal: sel.doors },
@@ -1351,6 +1453,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     res.status(201).json({ run: created });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
     next(err);
   }
 });

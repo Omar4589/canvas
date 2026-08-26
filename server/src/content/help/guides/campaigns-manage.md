@@ -51,7 +51,7 @@ Turning one off hides the button on canvassers' phones and blocks new recordings
 
 Sometimes an entry is simply wrong — a canvasser hit **Not home** when someone actually answered — or you've retired an outcome and want its old entries folded into another one. The **Door Outcomes** page (in the sidebar's **Quality** group, next to Audit) does both. It's **org admins only**: leads decide what canvassers can record going forward, but changing what the record *says* sits one level up.
 
-Filter by outcome, canvasser or round, tick the entries you want — one row to fix one door, or **Select all N matching** to fold a whole outcome — pick what they should become, and review.
+Filter by outcome, canvasser, walk list, round, date range — or, on a survey campaign, by a specific survey answer — tick the entries you want (one row to fix one door, or **Select all N matching** to fold a whole batch), pick what they should become, and review.
 
 **The review step is the important part: it tells you what the change does to your numbers.**
 

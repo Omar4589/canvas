@@ -54,6 +54,7 @@ Texas campaign, Eastern for a Florida one), identical for every admin wherever t
 | **Admin map** | **Today** | The map is an **audit tool** — it opens on **today's** activity. Because a window *hides* doors you didn't touch in it (see below), the map opens showing just today's touched doors; switch to **All time** to see the whole turf. |
 | **Notes hub** ([NOTES.md](NOTES.md)) | **Today** | Opens on today's notes; **All time** turns it into a full archive. (When you arrive via a note's "view on map" link, that map opens on **All time** so an old door still shows.) |
 | **Survey Explorer** ([SURVEYS.md](SURVEYS.md)) | **Today** | An audit surface like the map — it opens on today's entries ("who recorded this answer *today*?"); widen the range to study the whole drill. A shared drill link with its own dates keeps them. |
+| **Door Outcomes** ([CAMPAIGNS.md](CAMPAIGNS.md)) | **All time** | A **correction desk, not an activity feed**: you arrive because of a mistake you already know about, usually days or weeks old — a Today default would open it empty on the exact journey it exists for. (Same reasoning as Duplicate Surveys, the other Quality-group correction page.) Don't copy the audit pages' Today default here. |
 
 You can always change the window; the page just picks a sensible starting point.
 
@@ -90,8 +91,9 @@ The pure preset logic lives in [client/src/lib/datePresets.js](../client/src/lib
 (re-exported by [DateRangeSelector.jsx](../client/src/components/DateRangeSelector.jsx), which is the
 controlled button bar). It is the web mirror of mobile's
 [mobile/lib/dateRanges.js](../mobile/lib/dateRanges.js) + [DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx)
-— byte-for-byte the same builders, verified by a cross-timezone parity test, so the two surfaces never
-disagree.
+— the same builder math line for line (the preset arrays differ cosmetically: web keys them
+`RANGE_PRESETS`/`id`, mobile `PRESETS`/`key`), kept in step by hand — no cross-timezone parity
+test exists yet, so a change to either file must be mirrored deliberately.
 
 Exports (all take the anchor `tz`):
 
@@ -206,6 +208,7 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 | [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **Today** (audit-first; seeded from the org tz, reseeded to the campaign tz once it resolves — a `rangeTouchedRef` guards a manual pick, and a `?from`/`?to` deep-link seeds a custom range); campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). Also feeds `/admin/reports/flags` for the GPS-audit overlay ([AUDIT.md](AUDIT.md)). |
 | [pages/NotesPage.jsx](../client/src/pages/NotesPage.jsx) | Default **Today** in the campaign tz (`rangeTouchedRef` + tz-reseed, same as Audit); full presets incl. **All time** (it's a notes archive); range → `/admin/reports/notes` ([NOTES.md](NOTES.md)). The mobile port ([admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx)) mirrors this. |
 | [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Default **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding); a `?from`/`&to` **deep link seeds a touched custom range** (the untouched default is never written into the URL, so plain nav entries stay clean); range → `survey-results` / `answer-canvassers` / `voters-by-answer`(+`.csv`) and the mini-map's `/admin/households/map` ([SURVEYS.md](SURVEYS.md) §J). |
+| [pages/DoorOutcomesPage.jsx](../client/src/pages/DoorOutcomesPage.jsx) | Default **All time** (a correction desk — no tz gate needed, both bounds null; the selector renders once the campaigns list lands so a first-frame "Today" click can't resolve the org's day). Wire names are **`dateFrom`/`dateTo`** — the one divergence from `from`/`to`, because on the reclassify body those already name the *outcomes* — resolved server-side by `resolveEntryScope` → `zonedDayRange` in the campaign tz ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2). The range survives a campaign switch (campaign-agnostic, like Duplicate Surveys'). |
 
 ### Mobile ([mobile](../mobile))
 | File | Role |

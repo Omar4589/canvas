@@ -48,10 +48,15 @@ const surveyConversionRunSchema = new mongoose.Schema(
     note: { type: String, default: null },
 
     // Frozen, validated request snapshot (the ExportJob.params precedent) — the worker has no req.
+    // `byIds` records whether the admin hand-ticked rows or wrote by filter alone.
     selection: {
       scope: { type: mongoose.Schema.Types.Mixed, default: {} },
       actionIds: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+      byIds: { type: Boolean, default: false },
     },
+    // One human line for the filter, frozen at creation (services/canvass/scopeSummary.js) so it
+    // names what the admin SAW, not what the options are called now. Null = no filter.
+    scopeSummary: { type: String, default: null },
 
     status: {
       type: String,

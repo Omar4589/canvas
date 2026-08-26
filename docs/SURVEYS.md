@@ -1057,6 +1057,13 @@ plain `fetch` with `Authorization: Bearer` + `X-Org-Id` headers, `res.blob()`, t
 
 ## J. The answer drill-in (Survey Explorer + audit endpoints)
 
+> **This section's matching contract has a fourth consumer:** the Door Outcomes page's
+> survey-answer filter ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2,
+> [`answerScope.js`](../server/src/services/canvass/answerScope.js)) inherits the dual-read
+> (option id OR legacy text), the `__other__` sentinel rule and the template scope verbatim via
+> `answerFilterClause`/`answerTagClause` — it selects the ACTIVITY rows to rewrite, where these
+> endpoints select responses to read.
+
 The "who's behind this answer" surface (Part 1 → *Auditing answers*). Four endpoints in
 [routes/admin/reports.js](../server/src/routes/admin/reports.js), all behind the reports router's
 gate: `requireOrgRole('admin','lead')` **plus the lead-scoping middleware** — a team lead's request
