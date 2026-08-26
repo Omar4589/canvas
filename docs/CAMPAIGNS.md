@@ -656,7 +656,9 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   50k cap, shared `csvWriter` escaping, household + named-voter audit subjects, DNC column in the
   marked-not-dropped posture. **Address search** resolves in `resolveEntryScope` to a
   `householdId $in` (display fields, never `normalizedAddress`), capped by `addressSearchCap()`
-  (10k, env-overridable) with the same truncation posture as the answer scope
+  (2k — measured 2026-08-26, not guessed: a real search matches dozens, and the cap's only live
+  job is bounding the degenerate one; env-overridable) with the same truncation posture as the
+  answer scope
   (`SEARCH_SCOPE_TRUNCATED` on scope-only writes) — and it counts as a gate-satisfier for the
   answer filter, whose response read it narrows via the `householdId` pushdown (a triple
   component, so provably safe). The GET also returns `doors` (distinct households under the FULL

@@ -6,8 +6,11 @@ import { resolveAnswerScope } from './answerScope.js';
 
 // Address search: how many DOORS a search may resolve to before it refuses to stand in for a
 // write scope. Env-overridable at call time (the answerScopeCap pattern) so the truncation path
-// is testable without ten thousand fixtures.
-export const ADDRESS_SEARCH_MAX_DOORS = 10000;
+// is testable without thousands of fixtures. 2,000 was MEASURED, not guessed (2026-08-26, 20k
+// doors / 79k responses): a real search matches dozens, and the cap's only live job is bounding
+// the degenerate one ("St", the city name) — at 10k the resulting $in rode all four listEntries
+// queries for ~4s; at 2k it is ~5x cheaper and still far above any honest search.
+export const ADDRESS_SEARCH_MAX_DOORS = 2000;
 export const addressSearchCap = () => Number(process.env.ADDRESS_SEARCH_MAX_DOORS) || ADDRESS_SEARCH_MAX_DOORS;
 
 const escapeRegExp = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
