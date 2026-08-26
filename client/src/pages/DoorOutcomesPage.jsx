@@ -160,6 +160,37 @@ export default function DoorOutcomesPage() {
     [roundOptions, effortId]
   );
 
+  const resetSelection = () => {
+    setSelected(new Set());
+    setAllMatching(false);
+  };
+  // Every filter change invalidates both the page cursor and the selection — forgetting the
+  // second is the dangerous one, since `allMatching` means "write whatever the filter matches".
+  // One wrapper so a new filter can't be added without both.
+  const applyFilter = (apply) => {
+    apply();
+    setPage(0);
+    resetSelection();
+    setError(null);
+  };
+  // Rounds belong to walk lists: narrowing to one walk list clears a round that isn't in it,
+  // or the page would show two sane-looking filters over a permanently empty table.
+  const selectEffort = (id) => {
+    setEffortId(id);
+    if (passId && id && !roundOptions.some((r) => r.id === passId && r.effortId === id)) setPassId('');
+  };
+  const clearAnswers = () => {
+    setAnswerFilters([]);
+    setAnswerTagFilters([]);
+  };
+  // Question keys don't survive a template change — carrying picks across would silently match
+  // another survey's same-named option.
+  const selectTemplate = (id) => {
+    setSurveyTemplateId(id);
+    clearAnswers();
+  };
+
+
   // The answer filter's three derived states. `narrowed` is the gate (mirrors the server's
   // hasOtherNarrowing — the outcome chips deliberately don't count); `answerActive` means the
   // picks are actually FILTERING, as opposed to sitting paused because the gate closed under
@@ -277,36 +308,6 @@ export default function DoorOutcomesPage() {
     (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
   );
   const surveyTags = (surveyResQ.data?.tags || []).map((t) => t.tag).filter(Boolean);
-
-  const resetSelection = () => {
-    setSelected(new Set());
-    setAllMatching(false);
-  };
-  // Every filter change invalidates both the page cursor and the selection — forgetting the
-  // second is the dangerous one, since `allMatching` means "write whatever the filter matches".
-  // One wrapper so a new filter can't be added without both.
-  const applyFilter = (apply) => {
-    apply();
-    setPage(0);
-    resetSelection();
-    setError(null);
-  };
-  // Rounds belong to walk lists: narrowing to one walk list clears a round that isn't in it,
-  // or the page would show two sane-looking filters over a permanently empty table.
-  const selectEffort = (id) => {
-    setEffortId(id);
-    if (passId && id && !roundOptions.some((r) => r.id === passId && r.effortId === id)) setPassId('');
-  };
-  const clearAnswers = () => {
-    setAnswerFilters([]);
-    setAnswerTagFilters([]);
-  };
-  // Question keys don't survive a template change — carrying picks across would silently match
-  // another survey's same-named option.
-  const selectTemplate = (id) => {
-    setSurveyTemplateId(id);
-    clearAnswers();
-  };
 
   // One mounted element serves every /campaigns/:id/outcomes — the sidebar switcher re-renders
   // it with a new id, so every campaign-scoped id below belongs to the campaign we're leaving.
