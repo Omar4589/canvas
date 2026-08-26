@@ -1057,6 +1057,10 @@ plain `fetch` with `Authorization: Bearer` + `X-Org-Id` headers, `res.blob()`, t
 
 ## J. The answer drill-in (Survey Explorer + audit endpoints)
 
+> **The drill hands off to the remedy:** an option drill's header offers **Correct in Door
+> Outcomes** (org admins), carrying the question, option, template, and the drill's own
+> canvasser/walk-list/round/date scope as deep-link seeds.
+>
 > **This section's matching contract has a fourth consumer:** the Door Outcomes page's
 > survey-answer filter ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2,
 > [`answerScope.js`](../server/src/services/canvass/answerScope.js)) inherits the dual-read
@@ -1297,7 +1301,9 @@ synchronous per-door path.
 ### Where the marker surfaces
 
 `voterProfile.surveys[].deskEntry` and `overwrittenSurveys[].deskEntry`; `/admin/reports/responses/:id`;
-`/admin/households/:id/surveys`; `/admin/activities/:id`; per-row **`deskEntered`** on
+`/admin/households/:id/surveys`; `/admin/activities/:id` (whose response lookup is round-scoped —
+`{voterId, passId ?? null}` since 2026-08-25; the voterId-only query showed whichever round's
+answers Mongo yielded first on a multi-round campaign); per-row **`deskEntered`** on
 `/admin/reports/voters-by-answer` and a per-canvasser **`deskEntered` count** on
 `/admin/reports/answer-canvassers`; and two export columns (**Desk entered**, **Desk entered by**)
 on `survey-results` plus **Desk entered** on `survey-answers`. All additive.

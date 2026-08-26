@@ -1579,6 +1579,23 @@ inherit it. Full reasoning in the v5 2026-08-11 watchlist entry.]*
 
 > **[v5 2026-08-09 — `voters-by-answer.csv` and `knocks-by-pass.csv` accept an optional
 > `?coordinatorId` crew filter (the campaign home's crew scoping). Re-verified: no policy change.]**
+
+> **[v6 2026-08-26 — NEW export: `GET /admin/campaigns/:id/outcome-entries.csv` (the Door
+> Outcomes page's filtered table as a file).]** Per door ENTRY — timestamp (ISO + campaign-tz
+> date/time), address/unit/city/state/zip, outcome, canvasser name, round, walk list — plus, for
+> surveyed rows, the visit's voter/answer COUNTS and, under an answer filter, the **matched
+> voters by name with their matched answer snapshots** and a **Do not contact** column naming
+> flagged voters among those listed (record-of-past-contact posture: rows stay, marked — the
+> `voters-by-answer.csv` rule). Capped at 50,000 rows; the exact `entryScopeSchema` +
+> `resolveEntryScope` + `buildEntryFilter` machinery the table reads through, so the file cannot
+> hold a row the table would not show, and the same refusals fire (`ANSWER_FILTER_NEEDS_NARROWING`
+> et al.). **Gate: org admin only** (`loadForReclassify`) — STRICTLY NARROWER than
+> `voters-by-answer.csv`'s admin-or-lead, and every column class it carries (voter name + chosen
+> answer + address + canvasser identity) is already exported to that wider audience there — the
+> §B8 same-audience ruling covers this a fortiori, **so no Privacy Policy / ToS / DPA text change.**
+> Record-level audit: `addAuditSubjects` tags every household row written and every voter named
+> (the `walklists.js` precedent), persisted for staff access under a grant. Uses the shared
+> `csvWriter` cell escaping (formula-injection guard + BOM).**
 > The parameter only **narrows** the row set to one coordinator's crew (or the no-crew bucket) —
 > same gates, same audience, same columns, no new field and no new recipient; an omitted parameter
 > is byte-identical to before. Line anchors in the table above have drifted with unrelated code

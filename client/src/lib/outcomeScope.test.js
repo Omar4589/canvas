@@ -54,6 +54,14 @@ test('surveyTemplateId is carried only WITH an answer filter — alone it is not
   assert.deepEqual(buildScope({ surveyTemplateId: 't1' }), {});
 });
 
+test('an address search rides the scope trimmed, and counts as a narrowing', () => {
+  const scope = buildScope({ search: '  123 Main ' });
+  assert.deepEqual(scope, { search: '123 Main' });
+  assert.equal(hasOtherNarrowing(scope), true);
+  assert.deepEqual(buildScope({ search: '   ' }), {});
+  assert.equal(scopeToSearchParams(scope).get('search'), '123 Main');
+});
+
 test('the gate predicates mirror the server: chips and answers do not count as narrowing', () => {
   assert.equal(hasOtherNarrowing(buildScope({ outcomes: ['refused'] })), false);
   assert.equal(

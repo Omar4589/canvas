@@ -500,6 +500,69 @@ test('a selection straddling the surveyed boundary is REFUSED, never silently tr
   assert.equal(surveyedOnly.json.code, 'EMPTY_SELECTION');
 });
 
+test('the table reports doors beside entries, and the sort whitelist holds', { skip }, async () => {
+  const all = await call('GET', entriesUrl(), asAdmin());
+  assert.equal(all.json.total, 5);
+  assert.equal(all.json.doors, 5);
+  // Doors honour the chips (deliberately unlike the facets, which strip them).
+  const chipped = await call('GET', entriesUrl('?outcomes=no_soliciting'), asAdmin());
+  assert.equal(chipped.json.total, 3);
+  assert.equal(chipped.json.doors, 3);
+  // The whitelist: oldest is accepted, anything else falls back to newest rather than erroring
+  // or reaching Mongo raw.
+  const oldest = await call('GET', entriesUrl('?sort=oldest'), asAdmin());
+  assert.equal(oldest.status, 200);
+  assert.deepEqual(oldest.json.entries.map((e) => e.id).sort(), all.json.entries.map((e) => e.id).sort());
+  const bogus = await call('GET', entriesUrl('?sort=address'), asAdmin());
+  assert.equal(bogus.status, 200);
+  assert.equal(bogus.json.total, 5);
+});
+
+test('an address search narrows the table AND the write, and refuses when capped', { skip }, async () => {
+  // The fixture's doors are '1 Reclass Rd' … '5 Reclass Rd'.
+  const one = await call('GET', entriesUrl(`?search=${encodeURIComponent('3 Reclass')}`), asAdmin());
+  assert.equal(one.status, 200);
+  assert.equal(one.json.total, 1);
+  assert.equal(one.json.searchScope.matchedDoors, 1);
+
+  // The invariant: the write's dry run sees the SAME set the table showed.
+  const dry = await call('POST', url(), {
+    ...asAdmin(),
+    body: { to: 'not_home', scope: { search: '3 Reclass', outcomes: ['no_soliciting'] }, dryRun: true },
+  });
+  assert.equal(dry.status, 200);
+  assert.equal(dry.json.entries, 1);
+
+  // A search that matches nothing selects NOTHING — never falls open.
+  const none = await call('GET', entriesUrl('?search=zzz-no-such-street'), asAdmin());
+  assert.equal(none.json.total, 0);
+
+  // Capped resolution: browse reads as a lower bound, a scope-only write refuses, an id-scoped
+  // one does not trip the refusal.
+  process.env.ADDRESS_SEARCH_MAX_DOORS = '1';
+  try {
+    const capped = await call('GET', entriesUrl('?search=Reclass'), asAdmin());
+    assert.equal(capped.status, 200);
+    assert.equal(capped.json.searchScope.truncated, true);
+    assert.equal(capped.json.totalIsLowerBound, true);
+
+    const refused = await call('POST', url(), {
+      ...asAdmin(),
+      body: { to: 'not_home', scope: { search: 'Reclass', outcomes: ['no_soliciting'] }, dryRun: true },
+    });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.json.code, 'SEARCH_SCOPE_TRUNCATED');
+
+    const byIds = await call('POST', url(), {
+      ...asAdmin(),
+      body: { to: 'not_home', scope: { search: 'Reclass', outcomes: ['no_soliciting'] }, actionIds: [capped.json.entries[0].id], dryRun: true },
+    });
+    assert.notEqual(byIds.json.code, 'SEARCH_SCOPE_TRUNCATED');
+  } finally {
+    delete process.env.ADDRESS_SEARCH_MAX_DOORS;
+  }
+});
+
 test('a malformed filter REFUSES — it never silently becomes "no filter"', { skip }, async () => {
   // The failure this replaces: a bad value was read as null, so the table listed every row while
   // the admin believed it was filtered — and "Select all N matching" would have written them.
@@ -526,6 +589,7 @@ test('the table and the write resolve the SAME rows from one scope', { skip }, a
     ['?dateFrom=2026-08-01&dateTo=2026-08-01&outcomes=no_soliciting', { outcomes: ['no_soliciting'], dateFrom: '2026-08-01', dateTo: '2026-08-01' }],
     ['?dateFrom=2026-07-31&dateTo=2026-07-31&outcomes=no_soliciting', { outcomes: ['no_soliciting'], dateFrom: '2026-07-31', dateTo: '2026-07-31' }],
     [`?userId=${ctx.canv._id}&outcomes=no_soliciting`, { outcomes: ['no_soliciting'], userId: String(ctx.canv._id) }],
+    [`?search=${encodeURIComponent('2 Reclass')}&outcomes=no_soliciting`, { outcomes: ['no_soliciting'], search: '2 Reclass' }],
   ];
   for (const [qs, scope] of cases) {
     const table = await call('GET', entriesUrl(qs), asAdmin());

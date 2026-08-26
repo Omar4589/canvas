@@ -24,6 +24,11 @@ import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
+import { Effort } from '../../models/Effort.js';
+import { hydrateSurveyEvidence } from '../../services/canvass/answerScope.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
+import { csvCell, UTF8_BOM } from '../../services/export/csvWriter.js';
+import { tzAbbrev } from '../../utils/timezone.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
 import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
@@ -36,6 +41,7 @@ import {
   eligibleSources,
   eligibleTargets,
   validatePair,
+  buildEntryFilter,
   listEntries,
   resolveSelection,
   narrowSelection,
@@ -46,7 +52,7 @@ import {
 } from '../../services/canvass/reclassifyOutcomes.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import {
-  SURVEY_CONVERT_MAX_RESPONSES,
+  surveyConvertCap,
   MAX_VOTERS_PER_DOOR_SYNC,
   validateConversion,
   SOURCES_FOR,
@@ -780,6 +786,9 @@ const entryScopeSchema = z.object({
     .max(25)
     .optional(),
   answerTagFilters: z.array(z.object({ tag: z.string().min(1) })).max(25).optional(),
+  // Address search — resolved to door ids inside resolveEntryScope (it NARROWS, so it must ride
+  // the scope every write re-resolves, never be a table-only nicety).
+  search: z.string().trim().min(1).max(120).optional(),
 });
 
 /**
@@ -792,7 +801,7 @@ const scopeFromQuery = (query = {}) => {
   const out = {};
   const outcomes = query.outcomes ? String(query.outcomes).split(',').filter(Boolean) : [];
   if (outcomes.length) out.outcomes = outcomes;
-  for (const k of ['userId', 'effortId', 'passId', 'dateFrom', 'dateTo', 'surveyTemplateId']) {
+  for (const k of ['userId', 'effortId', 'passId', 'dateFrom', 'dateTo', 'surveyTemplateId', 'search']) {
     if (query[k]) out[k] = String(query[k]);
   }
   // The two structured filters ride the query string as JSON (the client derives them from the
@@ -927,16 +936,25 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
     // which turned a malformed filter into NO filter — listing more rows than the filter claimed.
     const scope = entryScopeSchema.parse(scopeFromQuery(req.query));
     const q = await resolveEntryScope(campaign, scope);
+    // Whitelisted sorts only, each with the `_id` tiebreaker (Mongo gives ties no stable order
+    // across separate skip/limit queries — pages duplicate or drop rows without it). Anything
+    // else falls back to newest; the selection paths never sort — a selection is a SET.
+    const SORTS = {
+      newest: { timestamp: -1, _id: 1 },
+      oldest: { timestamp: 1, _id: 1 },
+    };
+    const sort = SORTS[req.query.sort] || SORTS.newest;
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const skip = Math.max(Number(req.query.skip) || 0, 0);
 
     // CONVERTIBLE_SOURCES so surveyed rows are listable and selectable — they route to the
     // survey-conversion endpoints, which can archive their answers, rather than to the plain
     // reclassify POST, which still refuses them.
-    const { entries, total, facets, sources } = await listEntries(campaign._id, q, {
+    const { entries, total, doors, facets, sources } = await listEntries(campaign._id, q, {
       skip,
       limit,
       outcomes: CONVERTIBLE_SOURCES,
+      sort,
     });
     const [people, passes] = await Promise.all([
       hydrateCanvassers(entries.map((e) => e.userId).filter(Boolean), activeOrgId(req)),
@@ -955,6 +973,7 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
         };
       }),
       total,
+      doors,
       facets,
       // What the matching set is MADE OF. The client reads the selection's direction off this
       // under "select all N" instead of guessing from which chips happen to be ticked — the
@@ -962,12 +981,119 @@ router.get('/:campaignId/outcome-entries', async (req, res, next) => {
       sources,
       limit,
       skip,
-      // Present only under an answer filter. `truncated` means the response read hit its cap, so
-      // `total` is a LOWER BOUND — the client renders "N+" and withdraws "Select all N matching",
-      // whose entire meaning is that N is the truth.
+      // Present only under their filters. `truncated` on either means the resolution hit its
+      // cap, so `total` is a LOWER BOUND — the client renders "N+" and withdraws "Select all N
+      // matching", whose entire meaning is that N is the truth.
       ...(q.answerScope ? { answerScope: q.answerScope } : {}),
-      ...(q.answerScope?.truncated ? { totalIsLowerBound: true } : {}),
+      ...(q.searchScope ? { searchScope: q.searchScope } : {}),
+      ...(q.answerScope?.truncated || q.searchScope?.truncated ? { totalIsLowerBound: true } : {}),
     });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (sendScopeError(res, err)) return;
+    next(err);
+  }
+});
+
+// The filtered table as a file — the fraud journey's deliverable ("here is exactly what we are
+// removing, and from whom"). A DIRECT-download CSV on the voters-by-answer.csv pattern, not an
+// Export Center registry type: correction batches cap at 25k entries, half this route's cap, and
+// the direct shape inherits the page's exact scope semantics for free — the same entryScopeSchema,
+// one resolveEntryScope, the same buildEntryFilter behind the same __resolved throw, so the file
+// can never disagree with the table that previewed it. Registry treatment (background job, GridFS
+// artifact) buys nothing at this size.
+router.get('/:campaignId/outcome-entries.csv', async (req, res, next) => {
+  try {
+    const campaign = await loadForReclassify(req, res);
+    if (!campaign) return;
+
+    const scope = entryScopeSchema.parse(scopeFromQuery(req.query));
+    const q = await resolveEntryScope(campaign, scope);
+    const EXPORT_CAP = 50000;
+    const tz = campaign.timeZone || req.activeOrg?.timeZone || 'America/New_York';
+
+    const rows = await CanvassActivity.find(
+      buildEntryFilter(campaign._id, q, CONVERTIBLE_SOURCES),
+      { householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, effortId: 1 }
+    )
+      .sort({ timestamp: -1, _id: 1 })
+      .limit(EXPORT_CAP)
+      .lean();
+
+    const [doors, people, passes, efforts, surveyByRow] = await Promise.all([
+      Household.find(
+        { _id: { $in: [...new Set(rows.map((r) => String(r.householdId)))] } },
+        { addressLine1: 1, unit: 1, city: 1, state: 1, zipCode: 1 }
+      ).lean(),
+      hydrateCanvassers(rows.map((r) => r.userId).filter(Boolean), activeOrgId(req)),
+      Pass.find({ campaignId: campaign._id }, { name: 1, roundNumber: 1 }).lean(),
+      Effort.find({ campaignId: campaign._id }, { name: 1 }).lean(),
+      // Uncapped, id-carrying survey evidence: the file lists every voter whose answers a
+      // conversion of these rows would take, with their DNC standing — the record-of-past-contact
+      // posture voters-by-answer.csv uses (rows stay, marked), never a silent drop.
+      hydrateSurveyEvidence(rows, q, { matchedCap: Infinity, namesCap: Infinity, withVoterDetail: true }),
+    ]);
+    const doorById = new Map(doors.map((d) => [String(d._id), d]));
+    const passById = new Map(passes.map((p) => [String(p._id), p]));
+    const effortById = new Map(efforts.map((e) => [String(e._id), e]));
+
+    // Record-level audit: an export's subjects are what was actually WRITTEN to the file — every
+    // door row, plus every voter the survey evidence names (middleware/accessLog.js persists them
+    // for staff access under a grant).
+    addAuditSubjects(res, 'household', [...new Set(rows.map((r) => String(r.householdId)))]);
+    const namedVoterIds = new Set();
+    for (const ev of surveyByRow.values()) {
+      for (const m of ev.matched) namedVoterIds.add(m.voterId);
+      for (const o of ev.others) namedVoterIds.add(o.voterId);
+    }
+    addAuditSubjects(res, 'voter', [...namedVoterIds]);
+
+    const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const timeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const headers = [
+      'Recorded (ISO)', 'Date', `Time (${tzAbbrev(tz) || tz})`,
+      'Address', 'Unit', 'City', 'State', 'Zip',
+      'Outcome', 'Canvasser', 'Round', 'Walk list',
+      'Voters at visit', 'Answers at visit', 'Matched voters', 'Matched answers', 'Do not contact',
+    ];
+    const lines = [headers.map(csvCell).join(',')];
+    for (const r of rows) {
+      const d = doorById.get(String(r.householdId));
+      const person = r.userId ? people.get(String(r.userId)) : null;
+      const pass = r.passId ? passById.get(String(r.passId)) : null;
+      const ev = surveyByRow.get(String(r._id));
+      const allNamed = ev ? [...ev.matched, ...ev.others] : [];
+      lines.push(
+        [
+          r.timestamp ? new Date(r.timestamp).toISOString() : '',
+          r.timestamp ? dateFmt.format(new Date(r.timestamp)) : '',
+          r.timestamp ? timeFmt.format(new Date(r.timestamp)) : '',
+          d?.addressLine1 || '(door removed)',
+          d?.unit || '',
+          d?.city || '',
+          d?.state || '',
+          d?.zipCode || '',
+          r.actionType,
+          person ? [person.firstName, person.lastName].filter(Boolean).join(' ') || 'Unknown user' : 'Unknown user',
+          pass ? pass.name || `Round ${pass.roundNumber}` : '',
+          r.effortId ? effortById.get(String(r.effortId))?.name || '' : '',
+          ev ? ev.voters : '',
+          ev ? ev.answers : '',
+          ev ? ev.matched.map((m) => m.voterName).join('; ') : '',
+          ev ? ev.matched.map((m) => m.answers.map((a) => a.text).join(' / ')).join('; ') : '',
+          allNamed.filter((v) => v.dnc).map((v) => v.voterName || v.name).join('; '),
+        ].map(csvCell).join(',')
+      );
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="door-outcomes-${campaign._id}-${new Date().toISOString().slice(0, 10)}.csv"`
+    );
+    // Buffered on purpose (the voters-by-answer.csv shape): the access log's finish listener can
+    // then record honest row counts, and the cap above bounds the buffer.
+    res.send(UTF8_BOM + lines.join('\r\n'));
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     if (sendScopeError(res, err)) return;
@@ -996,6 +1122,14 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
         return res.status(409).json({
           error: `That answer filter matches more than ${q.answerScope.cap.toLocaleString()} answers — narrow it with a canvasser, round, walk list or date range before converting.`,
           code: 'ANSWER_SCOPE_TRUNCATED',
+        });
+      }
+      // Same invariant for the address search: a truncated resolution is an arbitrary cap-sized
+      // subset of what the admin described — never a write scope.
+      if (q.searchScope?.truncated && !actionIds?.length) {
+        return res.status(409).json({
+          error: `That address search matches more than ${q.searchScope.cap.toLocaleString()} doors — narrow it before converting, or tick the rows you mean.`,
+          code: 'SEARCH_SCOPE_TRUNCATED',
         });
       }
       // Resolve WIDE first: a selection straddling the surveyed boundary used to be silently
@@ -1326,6 +1460,12 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
         code: 'ANSWER_SCOPE_TRUNCATED',
       });
     }
+    if (q.searchScope?.truncated && !body.actionIds?.length) {
+      return res.status(409).json({
+        error: `That address search matches more than ${q.searchScope.cap.toLocaleString()} doors — narrow it before converting, or tick the rows you mean.`,
+        code: 'SEARCH_SCOPE_TRUNCATED',
+      });
+    }
     const wide = await resolveSelection(campaign._id, q, body.actionIds || null, CONVERTIBLE_SOURCES);
     if (selectionSpansDirections(wide)) {
       return res.status(409).json({
@@ -1359,9 +1499,20 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       computeSurveyImpact({ campaign, rows: sel.rows, direction: body.direction, answerMatch: q.answerMatch }),
     ]);
 
-    if (body.direction === 'to_survey' && survey.responsesToCreate > SURVEY_CONVERT_MAX_RESPONSES) {
+    if (body.direction === 'to_survey' && survey.responsesToCreate > surveyConvertCap()) {
       return res.status(409).json({
-        error: `That would create ${survey.responsesToCreate.toLocaleString()} survey responses — narrow the selection to ${SURVEY_CONVERT_MAX_RESPONSES.toLocaleString()} or fewer.`,
+        error: `That would create ${survey.responsesToCreate.toLocaleString()} survey responses — narrow the selection to ${surveyConvertCap().toLocaleString()} or fewer.`,
+        code: 'TOO_MANY_RESPONSES',
+      });
+    }
+    // The reverse direction had NO volume guard — only the forward one did — so past the read
+    // cap the preview reported responsesToArchive/manifestTotal as totals when they were silent
+    // lower bounds, and entriesNoResponses over-counted rows whose responses fell outside the
+    // capped read. Refusing here (before the dryRun return, like its twin above) means the
+    // truncated numbers never render at all.
+    if (body.direction === 'from_survey' && survey.responsesToArchive > surveyConvertCap()) {
+      return res.status(409).json({
+        error: `That would remove more than ${surveyConvertCap().toLocaleString()} survey answers in one change — narrow the selection and remove them in parts.`,
         code: 'TOO_MANY_RESPONSES',
       });
     }

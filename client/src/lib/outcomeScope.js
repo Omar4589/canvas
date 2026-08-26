@@ -19,6 +19,7 @@ export const buildScope = ({
   passId = '',
   effortId = '',
   dateRange = null,
+  search = '',
   surveyTemplateId = '',
   answerFilters = [],
   answerTagFilters = [],
@@ -30,6 +31,7 @@ export const buildScope = ({
   if (effortId) scope.effortId = effortId;
   if (dateRange?.from) scope.dateFrom = dateRange.from;
   if (dateRange?.to) scope.dateTo = dateRange.to;
+  if (search && search.trim()) scope.search = search.trim();
   if (answerFilters.length || answerTagFilters.length) {
     if (surveyTemplateId) scope.surveyTemplateId = surveyTemplateId;
     if (answerFilters.length) scope.answerFilters = answerFilters;
@@ -64,6 +66,6 @@ export const hasAnswerFilter = (scope = {}) =>
  * the affordance. The chips deliberately don't count — they can't bound the response read.
  */
 export const hasOtherNarrowing = (scope = {}) =>
-  !!(scope.userId || scope.passId || scope.effortId || scope.dateFrom || scope.dateTo);
+  !!(scope.userId || scope.passId || scope.effortId || scope.dateFrom || scope.dateTo || scope.search);
 
 export const scopeIsEmpty = (scope = {}) => Object.keys(scope).length === 0;

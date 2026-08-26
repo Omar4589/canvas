@@ -64,7 +64,7 @@ const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirm
 export default function AuditPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath } = useAuth();
+  const { homePath, isOrgAdmin } = useAuth();
   // Deep link from the dashboard's mock-GPS banner:
   // ?reason=mock_gps&status=open&from=YYYY-MM-DD&to=YYYY-MM-DD — seeded ONCE via the
   // state initializers (MapPage's ?flag=1/?focusActivityId pattern). Initializers don't
@@ -494,6 +494,24 @@ export default function AuditPage() {
                   >
                     Show all canvassers
                   </button>
+                )}
+                {/* Detection → remedy: this page finds the suspect entries, Door Outcomes
+                    rewrites them. Hand over the drilled canvasser and this page's window. */}
+                {userId && isOrgAdmin && (
+                  <Link
+                    to={`/campaigns/${campaignId}/outcomes?${new URLSearchParams(
+                      Object.fromEntries(
+                        Object.entries({
+                          userId,
+                          dateFrom: dateRange?.from || '',
+                          dateTo: dateRange?.to || '',
+                        }).filter(([, v]) => v)
+                      )
+                    )}`}
+                    className="text-xs font-medium text-brand-accent hover:underline"
+                  >
+                    Correct their entries in Door Outcomes
+                  </Link>
                 )}
               </div>
             </div>

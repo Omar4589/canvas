@@ -13,6 +13,8 @@ The **Audit** page surfaces doors the app flagged for a quality check — a mark
 
 Facing a backlog? Filter the list, tick the checkboxes (or **Select all shown**), and apply one decision to the whole set — with a confirmation that names the exact count, and an **Undo** right after.
 
+Reviewing flags records a decision; it never changes what an entry *says*. When a drilled-in canvasser's entries turn out to need actual correcting, **Correct their entries in Door Outcomes** (org admins, shown while drilled into one canvasser) carries them and this page's date window straight to the [Door Outcomes page](page-door-outcomes).
+
 For the full walkthrough, see [The GPS audit](audit).
 
 ## On the phone

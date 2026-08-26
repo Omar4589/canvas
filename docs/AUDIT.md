@@ -87,7 +87,10 @@ in the app display in **feet**, switching to **miles** once a distance reaches a
 
 - **KPI cards** — total flagged, and a count for each of the five flags, plus how many are still open.
 - **A per-canvasser table**, worst-first: each canvasser's flag counts by type and their worst
-  severity. Click a row to drill into just that person's flagged entries.
+  severity. Click a row to drill into just that person's flagged entries. A drilled canvasser
+  also gets a **Correct their entries in Door Outcomes** link (org admins): detection happens
+  here, the rewrite happens there — the link carries the canvasser and this page's date window
+  as deep-link seeds ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door Outcomes*).
 - **The entries list** — one card per flagged door: who, the address, the time, the reason(s) with the
   actual number (e.g. *205 ft from house*, *8 s after the previous door*), and the review buttons. Each
   card has a **"View on map"** link that jumps to the map focused on that exact entry — **on mobile

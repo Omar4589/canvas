@@ -190,6 +190,9 @@ export function buildEntryFilter(campaignId, q = {}, outcomes = RECLASSIFIABLE_O
   if (q.passId) filter.passId = q.passId;
   if (q.effortId) filter.effortId = q.effortId;
   if (q.timestamp) filter.timestamp = q.timestamp;
+  // Address search, already resolved to door ids by resolveEntryScope. A present-but-EMPTY
+  // array is a search that matched nothing and must select nothing — the $in stays.
+  if (q.householdIdIn) filter.householdId = { $in: q.householdIdIn };
   // $and, never a bare key: the answer clause is itself $or-shaped, and resolveSelection owns
   // `_id` for the actionIds narrowing. $and is the only composition where neither can clobber
   // the other (the rule reports.js states for the same clause builders).
@@ -198,17 +201,27 @@ export function buildEntryFilter(campaignId, q = {}, outcomes = RECLASSIFIABLE_O
 }
 
 /** One page of entries plus the per-outcome totals for the whole filtered set. */
-export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, outcomes = RECLASSIFIABLE_OUTCOMES } = {}) {
+export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, outcomes = RECLASSIFIABLE_OUTCOMES, sort = { timestamp: -1, _id: 1 } } = {}) {
   const filter = buildEntryFilter(campaignId, q, outcomes);
-  const [rows, total, facets] = await Promise.all([
+  const [rows, total, doorAgg, facets] = await Promise.all([
     CanvassActivity.find(filter, {
       householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1,
     })
-      .sort({ timestamp: -1 })
+      // The `_id` tiebreaker is not decoration: Mongo gives ties no stable order across separate
+      // skip/limit queries, and every fixture-shaped ledger is FULL of identical timestamps.
+      .sort(sort)
       .skip(skip)
       .limit(limit)
       .lean(),
     CanvassActivity.countDocuments(filter),
+    // Distinct DOORS under the FULL filter (chips honored — deliberately not shared with the
+    // facet aggregate below, whose $match drops the chips; one $facet serving both would force
+    // one of them to lie). Same shape countConvertible uses above.
+    CanvassActivity.aggregate([
+      { $match: filter },
+      { $group: { _id: '$householdId' } },
+      { $count: 'doors' },
+    ]),
     CanvassActivity.aggregate([
       // Facet counts ignore the outcome chips (you need to see what ELSE is there to pick it),
       // but honor every other filter — the spread carries the resolved date window and the
@@ -247,6 +260,7 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
       };
     }),
     total,
+    doors: doorAgg[0]?.doors || 0,
     facets: facetCounts,
     // What the MATCHING SET is made of — the chips honored when set, every present outcome
     // otherwise. Derived from the facet aggregate at zero extra queries; the client reads the

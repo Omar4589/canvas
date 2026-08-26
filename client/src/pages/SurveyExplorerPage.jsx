@@ -41,7 +41,7 @@ const SELECT_CLS =
 export default function SurveyExplorerPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath } = useAuth();
+  const { homePath, isOrgAdmin } = useAuth();
 
   // URL is the filter state (survey/q/optionId/option/userId/effortId/coordinatorId/view/tag
   // + from/to), written with replace so twiddling filters doesn't spam the back stack.
@@ -675,6 +675,32 @@ export default function SurveyExplorerPage() {
             </div>
             <div className="flex items-center gap-2">
               {exportError && <span className="text-xs text-danger">{exportError}</span>}
+              {/* The remedy half of the audit journey: this drill answers "who recorded this
+                  answer" — Door Outcomes is where it gets corrected, so hand the filter over
+                  prefilled (question, option, template, plus whatever this drill was scoped
+                  to). Admin-only, because that page is. */}
+              {isOrgAdmin && hasOption && (
+                <Link
+                  to={`/campaigns/${campaignId}/outcomes?${new URLSearchParams(
+                    Object.fromEntries(
+                      Object.entries({
+                        questionKey: q,
+                        optionId,
+                        option,
+                        surveyTemplateId: resolvedTemplateId,
+                        userId,
+                        effortId,
+                        passId: passId && passId !== 'legacy' ? passId : '',
+                        dateFrom: dateRange?.from || '',
+                        dateTo: dateRange?.to || '',
+                      }).filter(([, v]) => v)
+                    )
+                  )}`}
+                  className="rounded border border-border-strong bg-card px-3 py-1 text-sm text-fg-muted hover:bg-sunken"
+                >
+                  Correct in Door Outcomes
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={exportCsv}

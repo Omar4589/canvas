@@ -40,6 +40,8 @@ card, and **Esc** again leaves fullscreen.
 
 **Export CSV** downloads the current drill as a spreadsheet.
 
+When a drill turns out to be a cleanup job — a run of answers that shouldn't be there — **Correct in Door Outcomes** (org admins, beside Export CSV on an answer drill) opens the [Door Outcomes page](page-door-outcomes) with this drill's question, answer and filters already applied.
+
 > Tip: For a quick answer to "who wants a yard sign today?" — pick that question, the **Yes**
 > chip, leave the range on Today, and read the map or export. That's your pickup list.
 

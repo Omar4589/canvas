@@ -6,7 +6,7 @@ kind: page
 order: 117
 sourceDoc: CAMPAIGNS.md
 summary: Correct what a canvasser recorded at a door — including recording or removing survey answers.
-tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list
+tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list, search, export, csv
 ---
 
 **Door Outcomes** (in the sidebar's **Quality** group, next to Audit) is where you change what a recorded entry *says*. It's **org admins only** — leads decide what canvassers can record going forward, but changing the record itself sits one level up.
@@ -14,6 +14,10 @@ tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date r
 Filter by outcome, canvasser, walk list, round, date range — or, on a survey campaign, by a **specific survey answer** — then tick the entries you want: one row to fix one door, or **Select all N matching** for a whole batch, then pick what they should become. Dates mean the campaign's own days, the same way they do on the dashboard.
 
 **Filtering by answer** (open **Survey answers** in the filter bar) finds the doors where someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It needs one other filter set first (a canvasser, walk list, round or date range), it only ever matches Surveyed entries, and if your campaign has used more than one survey you pick which survey's answers you mean. The table then shows who matched at each door — and who else answered at the same visit, because changing a Surveyed entry takes **every** answer recorded at that visit, not just the matching one. The review step names them all before anything happens.
+
+There's also an **address search** (street, city or ZIP — it narrows the selection like any other filter), a newest/oldest **sort**, a running **entries · doors** count, and **Export CSV**, which downloads exactly what the table shows — survey evidence included — for handing off to whoever needs the worksheet.
+
+You can also arrive here with the filter already set: the **Audit** page's drilled-canvasser view and the **Survey Explorer**'s answer drill each offer a *Correct in Door Outcomes* link that carries their filter over.
 
 ## Every change is priced before it runs
 

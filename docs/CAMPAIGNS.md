@@ -319,6 +319,11 @@ own days, like every other dated page) — or, on a survey campaign, by a **spec
 — tick the entries you want (one row to fix one door, or **Select all N matching** to fold a whole
 batch), pick what they should become, and review.
 
+The table also carries an **address search** (matches street, city or ZIP — it narrows the
+selection exactly like every other filter, so "Select all N matching" means the searched set), a
+**newest/oldest sort**, a live **entries · doors** count, and **Export CSV** — the filtered table
+as a file, survey evidence included, for handing an investigation's worksheet to whoever needs it.
+
 The **answer filter** (the *Survey answers* disclosure in the filter bar) finds the doors where
 someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It
 asks for one other narrowing first (canvasser, walk list, round or dates), it only ever matches
@@ -641,7 +646,25 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   off this), and `answerScope` metadata; the removal preview gains `matchedResponses`/
   `matchedVoters` and a matched-first, per-row-flagged manifest. Scoped runs freeze
   `selection.scope` + a human `scopeSummary` on both run models
-  ([`scopeSummary.js`](../server/src/services/canvass/scopeSummary.js)).
+  ([`scopeSummary.js`](../server/src/services/canvass/scopeSummary.js)). The **reverse**
+  conversion is volume-guarded like the forward one (2026-08-25): `from_survey` past
+  `surveyConvertCap()` (default 50k, env-overridable at call time) refuses
+  `409 TOO_MANY_RESPONSES` *before* the preview renders — previously the capped read silently
+  presented `responsesToArchive`/`manifestTotal` as totals when they were lower bounds. **The CSV twin** (`GET …/outcome-entries.csv`, 2026-08-26) is a direct-download on the
+  `voters-by-answer.csv` pattern — same `entryScopeSchema`, one `resolveEntryScope`, the same
+  `buildEntryFilter` behind the `__resolved` throw, so the file can never disagree with the table;
+  50k cap, shared `csvWriter` escaping, household + named-voter audit subjects, DNC column in the
+  marked-not-dropped posture. **Address search** resolves in `resolveEntryScope` to a
+  `householdId $in` (display fields, never `normalizedAddress`), capped by `addressSearchCap()`
+  (10k, env-overridable) with the same truncation posture as the answer scope
+  (`SEARCH_SCOPE_TRUNCATED` on scope-only writes) — and it counts as a gate-satisfier for the
+  answer filter, whose response read it narrows via the `householdId` pushdown (a triple
+  component, so provably safe). The GET also returns `doors` (distinct households under the FULL
+  filter — deliberately not shared with the facet aggregate, which strips the chips) and takes a
+  whitelisted `sort` (`newest`/`oldest`, each with the `_id` tiebreaker). The page
+  also **accepts deep-link seeds** (`?userId&effortId&passId&dateFrom&dateTo&surveyTemplateId&questionKey&optionId&option`,
+  read once into state, never live URL state): the Audit page's drilled-canvasser link and the
+  Survey Explorer's option-drill link arrive with the filter prefilled — detection → remedy.
 - **Door status** is re-resolved by `recomputeHouseholdStatusesBatched` — one read plus one
   `bulkWrite` per 500-door chunk instead of two round trips per door, which is what lets a
   several-thousand-door run finish inside a web request. Its `timestamps: true` is load-bearing:

@@ -55,6 +55,9 @@ Texas campaign, Eastern for a Florida one), identical for every admin wherever t
 | **Notes hub** ([NOTES.md](NOTES.md)) | **Today** | Opens on today's notes; **All time** turns it into a full archive. (When you arrive via a note's "view on map" link, that map opens on **All time** so an old door still shows.) |
 | **Survey Explorer** ([SURVEYS.md](SURVEYS.md)) | **Today** | An audit surface like the map — it opens on today's entries ("who recorded this answer *today*?"); widen the range to study the whole drill. A shared drill link with its own dates keeps them. |
 | **Door Outcomes** ([CAMPAIGNS.md](CAMPAIGNS.md)) | **All time** | A **correction desk, not an activity feed**: you arrive because of a mistake you already know about, usually days or weeks old — a Today default would open it empty on the exact journey it exists for. (Same reasoning as Duplicate Surveys, the other Quality-group correction page.) Don't copy the audit pages' Today default here. |
+| **GPS audit** ([AUDIT.md](AUDIT.md)) | **Today** | An audit feed — you review what the team just did. Its preset set is unique: no All time (the endpoint caps the span at 62 days) and the custom picker **requires a From date**. |
+| **Overlaps** ([AUDIT.md](AUDIT.md)) | **Today** | Same audit-feed reasoning as the map: who double-knocked what, today, widening on demand. |
+| **Duplicate Surveys** ([SURVEYS.md](SURVEYS.md)) | **All time** | The other correction page: duplicates are found after the fact, so it opens on the full history. Its range is deliberately campaign-agnostic — it survives a campaign switch. |
 
 You can always change the window; the page just picks a sensible starting point.
 
@@ -92,8 +95,11 @@ The pure preset logic lives in [client/src/lib/datePresets.js](../client/src/lib
 controlled button bar). It is the web mirror of mobile's
 [mobile/lib/dateRanges.js](../mobile/lib/dateRanges.js) + [DateRangeBar.jsx](../mobile/components/DateRangeBar.jsx)
 — the same builder math line for line (the preset arrays differ cosmetically: web keys them
-`RANGE_PRESETS`/`id`, mobile `PRESETS`/`key`), kept in step by hand — no cross-timezone parity
-test exists yet, so a change to either file must be mirrored deliberately.
+`RANGE_PRESETS`/`id`, mobile `PRESETS`/`key`), pinned by a cross-timezone parity test
+([client/src/lib/datePresets.parity.test.js](../client/src/lib/datePresets.parity.test.js), run by
+the client suite): every preset and quick chip across an 8-tz matrix including Lord Howe's
+half-hour DST, plus clock-free `shiftDays` fixtures over DST/leap/year edges. A change to either
+file that drifts the math now fails a build instead of quietly forking the two surfaces.
 
 Exports (all take the anchor `tz`):
 
@@ -208,6 +214,9 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 | [pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Default **Today** (audit-first; seeded from the org tz, reseeded to the campaign tz once it resolves — a `rangeTouchedRef` guards a manual pick, and a `?from`/`?to` deep-link seeds a custom range); campaign tz from `useCampaignSelection().selected`; range → `/admin/households/map` (narrows pins, see §D). Also feeds `/admin/reports/flags` for the GPS-audit overlay ([AUDIT.md](AUDIT.md)). |
 | [pages/NotesPage.jsx](../client/src/pages/NotesPage.jsx) | Default **Today** in the campaign tz (`rangeTouchedRef` + tz-reseed, same as Audit); full presets incl. **All time** (it's a notes archive); range → `/admin/reports/notes` ([NOTES.md](NOTES.md)). The mobile port ([admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx)) mirrors this. |
 | [pages/SurveyExplorerPage.jsx](../client/src/pages/SurveyExplorerPage.jsx) | Default **Today** in the campaign tz (`rangeTouchedRef` + tz-ready seeding); a `?from`/`&to` **deep link seeds a touched custom range** (the untouched default is never written into the URL, so plain nav entries stay clean); range → `survey-results` / `answer-canvassers` / `voters-by-answer`(+`.csv`) and the mini-map's `/admin/households/map` ([SURVEYS.md](SURVEYS.md) §J). |
+| [pages/AuditPage.jsx](../client/src/pages/AuditPage.jsx) | Default **Today**, but the state starts **null until the campaign tz resolves** (the query is disabled until then), a `?from`/`?to` deep link seeds a touched custom range, and its preset set drops **All time** (the flags endpoint caps the window at 62 days) with `requireFrom` on the custom picker; range → `/admin/reports/flags`. |
+| [pages/OverlapsPage.jsx](../client/src/pages/OverlapsPage.jsx) | Default **Today** in the org tz, reseeded to the campaign tz once it loads (`rangeTouchedRef` guards a manual pick); range → `/admin/reports/overlap-doors`. |
+| [pages/DuplicateSurveysPage.jsx](../client/src/pages/DuplicateSurveysPage.jsx) | Default **All time** via `defaultRange('all')` with **no tz argument on purpose** (both bounds null, so no clock math and no tz gate — don't "fix" it); the range deliberately survives a campaign switch; range → `/admin/reports/duplicate-surveys`. |
 | [pages/DoorOutcomesPage.jsx](../client/src/pages/DoorOutcomesPage.jsx) | Default **All time** (a correction desk — no tz gate needed, both bounds null; the selector renders once the campaigns list lands so a first-frame "Today" click can't resolve the org's day). Wire names are **`dateFrom`/`dateTo`** — the one divergence from `from`/`to`, because on the reclassify body those already name the *outcomes* — resolved server-side by `resolveEntryScope` → `zonedDayRange` in the campaign tz ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2). The range survives a campaign switch (campaign-agnostic, like Duplicate Surveys'). |
 
 ### Mobile ([mobile](../mobile))

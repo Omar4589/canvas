@@ -57,6 +57,9 @@ import {
 // entry cap because the cost here scales with VOTERS, not entries: 25k doors at ~2 voters each is
 // already 50k document writes plus a counter recompute.
 export const SURVEY_CONVERT_MAX_RESPONSES = 50000;
+// Env override read at CALL time (the answerScopeCap pattern) — what lets the volume guards be
+// exercised by an int test without seeding fifty thousand responses. Unset, it is the constant.
+export const surveyConvertCap = () => Number(process.env.SURVEY_CONVERT_MAX_RESPONSES) || SURVEY_CONVERT_MAX_RESPONSES;
 
 // A single door applied synchronously (the single-fix and queue-step paths) must not outlive the
 // router's budget, so one pathological address can't hang the request.
@@ -192,7 +195,10 @@ export async function computeSurveyImpact({ campaign, rows, direction, answerMat
     }));
     const existing = or.length
       ? await SurveyResponse.find({ $or: or }, 'voterId householdId passId userId submittedAt answers')
-          .limit(SURVEY_CONVERT_MAX_RESPONSES + 1)
+          // The +1 is the truncation probe: past the cap, responsesToArchive reads cap+1 and the
+          // route's TOO_MANY_RESPONSES guard refuses BEFORE the preview renders — which is what
+          // keeps entriesNoResponses (computed off this read) from over-counting at the cap.
+          .limit(surveyConvertCap() + 1)
           .lean()
       : [];
     const byRow = new Set(existing.map((s) => doorKey(s)));

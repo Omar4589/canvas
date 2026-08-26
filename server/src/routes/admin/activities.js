@@ -34,8 +34,15 @@ router.get('/:activityId', async (req, res, next) => {
 
     let surveyResponse = null;
     if (activity.actionType === 'survey_submitted' && activity.voterId) {
+      // THIS visit's answers: the unique key is {voterId, passId}, so without the passId a
+      // multi-round campaign returned whichever round's response Mongo yielded first. The
+      // `?? null` matches the legacy pre-turf bucket (a real null, not an absent field).
+      // Deliberately NO userId clause: a voter holds one response per round regardless of who
+      // took it, and if a later canvasser re-surveyed this voter, the CURRENT answer is the
+      // honest thing to show on a ping's detail pane.
       surveyResponse = await SurveyResponse.findOne({
         voterId: activity.voterId._id,
+        passId: activity.passId ?? null,
         organizationId: orgId,
       })
         .select('answers note submittedAt surveyTemplateVersion deskEntry')

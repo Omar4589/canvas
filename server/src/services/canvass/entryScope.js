@@ -1,7 +1,16 @@
 import mongoose from 'mongoose';
 import { zonedDayRange } from '../../utils/timezone.js';
+import { Household } from '../../models/Household.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { resolveAnswerScope } from './answerScope.js';
+
+// Address search: how many DOORS a search may resolve to before it refuses to stand in for a
+// write scope. Env-overridable at call time (the answerScopeCap pattern) so the truncation path
+// is testable without ten thousand fixtures.
+export const ADDRESS_SEARCH_MAX_DOORS = 10000;
+export const addressSearchCap = () => Number(process.env.ADDRESS_SEARCH_MAX_DOORS) || ADDRESS_SEARCH_MAX_DOORS;
+
+const escapeRegExp = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // The ONE translation from a wire scope (routes/admin/campaigns.js `entryScopeSchema`) into the
 // `q` object every Door Outcomes filter builder takes.
@@ -58,7 +67,7 @@ export const hasAnswerFilter = (scope = {}) =>
  * exists to bound.
  */
 export const hasOtherNarrowing = (scope = {}) =>
-  !!(scope.userId || scope.passId || scope.effortId || scope.dateFrom || scope.dateTo);
+  !!(scope.userId || scope.passId || scope.effortId || scope.dateFrom || scope.dateTo || scope.search);
 
 /**
  * Resolve a validated wire scope against one campaign. Async because an answer filter costs a
@@ -84,6 +93,28 @@ export async function resolveEntryScope(campaign, scope = {}) {
   let answerScope = null;
   let answerMatch = null;
 
+  // Address search resolves HERE, like the answer filter, because a search NARROWS — and
+  // anything that narrows the table must narrow the write, or "Select all N matching" rewrites
+  // rows the admin never saw. Matched against the display fields, never normalizedAddress: that
+  // one is an uppercase pipe-joined dedupe key ('A1|A2|CITY|ST|ZIP5') no typed text can hit.
+  let householdIdIn = null;
+  let searchScope = null;
+  if (scope.search) {
+    const rx = new RegExp(escapeRegExp(scope.search), 'i');
+    const cap = addressSearchCap();
+    const doors = await Household.find(
+      { campaignId: campaign._id, $or: [{ addressLine1: rx }, { city: rx }, { zipCode: rx }] },
+      { _id: 1 }
+    )
+      .limit(cap + 1)
+      .lean();
+    const truncated = doors.length > cap;
+    // Kept even when truncated: the TABLE may browse a capped set (the count reads as a lower
+    // bound); the write routes refuse a truncated scope unless the admin ticked explicit rows.
+    householdIdIn = (truncated ? doors.slice(0, cap) : doors).map((d) => d._id);
+    searchScope = { matchedDoors: householdIdIn.length, truncated, cap };
+  }
+
   if (hasAnswerFilter(scope)) {
     // The gate. A speed bump, not the safety (the cap in answerScope.js is the hard bound), but
     // it keeps the common case index-served: without any other narrowing the clause scans every
@@ -92,7 +123,7 @@ export async function resolveEntryScope(campaign, scope = {}) {
       throw new ScopeError(
         400,
         'ANSWER_FILTER_NEEDS_NARROWING',
-        'Filtering by survey answer also needs a canvasser, round, walk list or date range — pick one of those first.'
+        'Filtering by survey answer also needs a canvasser, round, walk list, date range or address search — pick one of those first.'
       );
     }
     // A survey answer only ever exists on a Surveyed entry, so a non-Surveyed chip beside an
@@ -119,7 +150,7 @@ export async function resolveEntryScope(campaign, scope = {}) {
         'Pick which survey these answers were recorded under.'
       );
     }
-    const resolved = await resolveAnswerScope({ campaign, template, scope, timestamp });
+    const resolved = await resolveAnswerScope({ campaign, template, scope, timestamp, householdIdIn });
     answerClause = resolved.clause;
     answerScope = {
       surveyTemplateId: String(template._id),
@@ -150,6 +181,10 @@ export async function resolveEntryScope(campaign, scope = {}) {
     // other is Mongo syntax.
     answerScope,
     answerMatch,
+    // Address search, resolved to door ids. An EMPTY array means "matched nothing" and must
+    // stay an empty $in — never a vanished filter.
+    householdIdIn,
+    searchScope,
     // The exact validated wire object, for freezing onto a run record.
     raw: scope,
   });

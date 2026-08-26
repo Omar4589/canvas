@@ -1117,6 +1117,114 @@ test('a truncated answer scope caps the browse and refuses the filter-scoped wri
   }
 });
 
+// Sep 16 — its own isolation window, one day past the answer-filter probes.
+const SEP2_AT = new Date('2026-09-16T15:00:00Z');
+
+test('the activity detail pane shows THIS round\'s answers, not whichever came first', { skip }, async () => {
+  const { org, campaign, effort, pass, pass2, canv, boss, template } = ctx;
+  const [dX] = await Household.insertMany([{
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+    addressLine1: '201 Detail Dr', city: 'Austin', state: 'TX', zipCode: '78701',
+    normalizedAddress: '201 detail dr austin tx 78701',
+    location: { type: 'Point', coordinates: [-97.69, 30.31] }, status: 'surveyed', isActive: true,
+  }]);
+  const [vX, vY] = await Voter.insertMany([
+    { organizationId: org._id, campaignId: campaign._id, householdId: dX._id, stateVoterId: 'SVD1', firstName: 'D1', lastName: 'Probe', fullName: 'D1 Probe', surveyStatus: 'surveyed' },
+    { organizationId: org._id, campaignId: campaign._id, householdId: dX._id, stateVoterId: 'SVD2', firstName: 'D2', lastName: 'Probe', fullName: 'D2 Probe', surveyStatus: 'surveyed' },
+  ]);
+  const mkResp = (voter, passId, optionId) => ({
+    organizationId: org._id, campaignId: campaign._id, voterId: voter._id, householdId: dX._id,
+    userId: canv._id, surveyTemplateId: template._id, surveyTemplateVersion: template.version || 1,
+    answers: [{ questionKey: 'support', questionLabel: 'Support?', answer: optionId, optionIds: [optionId] }],
+    location: GPS, submittedAt: SEP2_AT, passId, effortId: effort._id, coordinatorId: boss._id,
+  });
+  // Round 1 says yes, round 2 says undecided — the voter changed their mind between rounds,
+  // which is exactly when a voterId-only lookup shows the wrong conversation.
+  await SurveyResponse.insertMany([mkResp(vX, pass._id, 'yes'), mkResp(vX, pass2._id, 'undecided'), mkResp(vY, pass._id, 'no')]);
+  const mkAct = (passId) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId: dX._id, userId: canv._id,
+    actionType: 'survey_submitted', voterId: vX._id, effortId: effort._id, passId,
+    coordinatorId: boss._id, location: GPS, distanceFromHouseMeters: 4, timestamp: SEP2_AT,
+  });
+  const [a1, a2] = await CanvassActivity.insertMany([mkAct(pass._id), mkAct(pass2._id)]);
+  Object.assign(probe, { detailDoor: dX, detailActs: [a1, a2] });
+
+  const r1 = await call('GET', `/admin/activities/${a1._id}`, asAdmin());
+  assert.equal(r1.status, 200);
+  assert.deepEqual(r1.json.surveyResponse.answers[0].optionIds, ['yes']);
+  const r2 = await call('GET', `/admin/activities/${a2._id}`, asAdmin());
+  assert.deepEqual(r2.json.surveyResponse.answers[0].optionIds, ['undecided']);
+});
+
+test('the REVERSE direction is volume-guarded too — a capped preview refuses, never lies', { skip }, async () => {
+  // The forward direction always refused past the cap; the reverse read silently truncated, so
+  // responsesToArchive and the manifest total presented lower bounds as totals. Cap forced to 1
+  // via the call-time env override; the Sep-16 visit holds two responses.
+  const scope = { dateFrom: '2026-09-16', dateTo: '2026-09-16', passId: String(ctx.pass._id) };
+  process.env.SURVEY_CONVERT_MAX_RESPONSES = '1';
+  try {
+    const dry = await call('POST', url(), {
+      ...asAdmin(),
+      body: { direction: 'from_survey', to: 'not_home', dryRun: true, scope },
+    });
+    assert.equal(dry.status, 409);
+    assert.equal(dry.json.code, 'TOO_MANY_RESPONSES');
+  } finally {
+    delete process.env.SURVEY_CONVERT_MAX_RESPONSES;
+  }
+  // With the cap back at its default the same preview renders, and its numbers are exact.
+  const ok = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'from_survey', to: 'not_home', dryRun: true, scope },
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.survey.responsesToArchive, 2);
+});
+
+test('the CSV export is the TABLE as a file — same scope machinery, evidence included', { skip }, async () => {
+  // The Sep-16 seed: vX answered yes in round 1 and undecided in round 2; vY answered no in
+  // round 1. An undecided filter therefore matches exactly the round-2 visit.
+  const sp = new URLSearchParams({
+    dateFrom: '2026-09-16',
+    dateTo: '2026-09-16',
+    answerFilters: JSON.stringify([{ questionKey: 'support', values: ['undecided'] }]),
+  });
+  const json = await call('GET', `/admin/campaigns/${ctx.campaign._id}/outcome-entries?${sp}`, asAdmin());
+  assert.equal(json.json.total, 1);
+
+  const res = await fetch(`${base}/api/admin/campaigns/${ctx.campaign._id}/outcome-entries.csv?${sp}`, {
+    headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/csv/);
+  const bodyText = await res.text();
+  const lines = bodyText.trim().split('\r\n');
+  // Header plus exactly the rows the JSON table showed — one scope resolver, one filter builder,
+  // so the file cannot disagree with the table that previewed it.
+  assert.equal(lines.length - 1, json.json.total);
+  assert.match(lines[0], /Matched voters/);
+  const row = lines[1];
+  assert.match(row, /201 Detail Dr/);
+  assert.match(row, /D1 Probe/);   // the matched voter, by name
+  assert.match(row, /undecided/);  // and the answer that matched
+
+  // The same route refuses the same things the table does — one resolver, one set of refusals.
+  const ungated = await fetch(
+    `${base}/api/admin/campaigns/${ctx.campaign._id}/outcome-entries.csv?answerFilters=${encodeURIComponent(
+      JSON.stringify([{ questionKey: 'support', values: ['undecided'] }])
+    )}`,
+    { headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) } }
+  );
+  assert.equal(ungated.status, 400);
+  assert.equal((await ungated.json()).code, 'ANSWER_FILTER_NEEDS_NARROWING');
+
+  // Leads cannot pull the file any more than they can see the page.
+  const lead = await fetch(`${base}/api/admin/campaigns/${ctx.campaign._id}/outcome-entries.csv?${sp}`, {
+    headers: { Authorization: `Bearer ${ctx.leadTok}`, 'X-Org-Id': String(ctx.org._id) },
+  });
+  assert.equal(lead.status, 403);
+});
+
 test('the campaign delete cascade takes SurveyConversionRun with it', { skip }, async () => {
   const doomed = await Campaign.create({
     organizationId: ctx.org._id, name: 'Doomed', type: 'survey', state: 'TX', isActive: true,
