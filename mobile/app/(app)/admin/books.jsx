@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,7 @@ import { getToken } from '../../../lib/auth';
 import { loadActiveOrgId } from '../../../lib/cache';
 import { doorDotsRequest, doorDotFilterExpr } from '../../../lib/doorDots';
 import { restrictCountsFromStatusCounts } from '../../../lib/restrictBooks';
+import { bookStatusSet as sharedBookStatusSet, matchesBookStatus } from '../../../lib/bookStatusFilter';
 import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../lib/restrictBooksConfirm';
 
 initMapbox();
@@ -56,25 +57,32 @@ const BOOK_SHEET_PEEK = 220;
 // last book card.
 const ACTION_BAR_CLEARANCE = 210;
 
-const BOOK_STATUS_CHIPS = [
-  { key: 'assigned', label: 'Assigned' },
-  { key: 'unassigned', label: 'Unassigned' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'in_progress', label: 'In progress' },
-  { key: 'not_started', label: 'Not started' },
+// Two chip groups — coverage (assigned/unassigned) and progress — OR within a group, AND
+// across them, mirroring the web Turf Cutting chips (matching rules shared via
+// lib/bookStatusFilter.js). Restricted = a fully restricted/no-soliciting book — taken off
+// the table, not finished work, so it no longer inflates Completed.
+const BOOK_STATUS_CHIP_GROUPS = [
+  [
+    { key: 'assigned', label: 'Assigned' },
+    { key: 'unassigned', label: 'Unassigned' },
+  ],
+  [
+    { key: 'completed', label: 'Completed' },
+    { key: 'in_progress', label: 'In progress' },
+    { key: 'not_started', label: 'Not started' },
+    { key: 'restricted', label: 'Restricted' },
+  ],
 ];
 
-// The status keys a book matches — coverage (assigned/unassigned) + progress (from per-book done/total).
+// The status keys a book matches. While the progress query is still loading, synthesize the
+// row from book.doors so the chips work instantly — restricted stays unreachable until real
+// statusCounts arrive (a fallback row has none). A zero-door book carries no progress key.
 function bookStatusSet(book, usersByBook, progressByTurf) {
-  const s = new Set();
-  s.add((usersByBook.get(book.id)?.length || 0) > 0 ? 'assigned' : 'unassigned');
   const prog = progressByTurf.get(book.id);
-  const total = prog?.total ?? book.doors;
-  const knocked = prog?.knocked ?? 0;
-  if (total > 0 && knocked >= total) s.add('completed');
-  else if (knocked > 0) s.add('in_progress');
-  else s.add('not_started');
-  return s;
+  return sharedBookStatusSet({
+    assigned: (usersByBook.get(book.id)?.length || 0) > 0,
+    progress: prog ?? { total: book.doors, knocked: 0 },
+  });
 }
 
 // Admin/super-admin: assign & unassign the active round's BOOKS (turf) to canvassers.
@@ -317,7 +325,7 @@ export default function AdminBooks() {
     [books, usersByBook]
   );
   const statusCounts = useMemo(() => {
-    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0 };
+    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0, restricted: 0 };
     for (const b of books) for (const k of bookStatusSet(b, usersByBook, progressByTurf)) c[k] += 1;
     return c;
   }, [books, usersByBook, progressByTurf]);
@@ -534,11 +542,7 @@ export default function AdminBooks() {
   const visibleBooks = useMemo(() => {
     let list = books;
     if (statusFilter.size) {
-      list = list.filter((b) => {
-        const s = bookStatusSet(b, usersByBook, progressByTurf);
-        for (const k of statusFilter) if (s.has(k)) return true;
-        return false;
-      });
+      list = list.filter((b) => matchesBookStatus(bookStatusSet(b, usersByBook, progressByTurf), statusFilter));
     }
     if (term) list = list.filter((b) => b.name.toLowerCase().includes(term));
     return list;
@@ -843,22 +847,27 @@ export default function AdminBooks() {
           // (empty-looking pills). Map view's plain flexed sibling never did.
           style={{ flexGrow: 0, flexShrink: 0 }}
         >
-          {BOOK_STATUS_CHIPS.map((chip) => {
-            const on = statusFilter.has(chip.key);
-            const n = statusCounts[chip.key] || 0;
-            return (
-              <Pressable
-                key={chip.key}
-                onPress={() => toggleStatus(chip.key)}
-                style={[styles.filterChip, on && styles.filterChipOn]}
-              >
-                <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
-                  {chip.label}
-                  {n ? ` ${n}` : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {BOOK_STATUS_CHIP_GROUPS.map((group, gi) => (
+            <Fragment key={gi}>
+              {gi > 0 && <View style={styles.chipDivider} />}
+              {group.map((chip) => {
+                const on = statusFilter.has(chip.key);
+                const n = statusCounts[chip.key] || 0;
+                return (
+                  <Pressable
+                    key={chip.key}
+                    onPress={() => toggleStatus(chip.key)}
+                    style={[styles.filterChip, on && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
+                      {chip.label}
+                      {n ? ` ${n}` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </Fragment>
+          ))}
         </ScrollView>
       )}
 
@@ -1011,6 +1020,13 @@ export default function AdminBooks() {
           {loading && (
             <View style={styles.mapLoading} pointerEvents="none">
               <ActivityIndicator color={colors.brand} />
+            </View>
+          )}
+          {/* An active filter that matches nothing otherwise leaves a silently blank map —
+              the list view says "No books match." at the same moment, so the map does too. */}
+          {!loading && statusFilter.size > 0 && visibleBooks.length === 0 && books.length > 0 && (
+            <View style={styles.mapLoading} pointerEvents="none">
+              <Text style={styles.mapEmptyPill}>No books match these filters</Text>
             </View>
           )}
           {!mapSheetBook && (
@@ -1562,6 +1578,8 @@ function makeStyles(t) {
     filterChipText: { fontSize: 12, fontWeight: '600', color: colors.textPrimary },
     filterChipTextOn: { color: colors.brand },
     chipsRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
+    // Between the coverage and progress chip groups — the AND across them made visible.
+    chipDivider: { width: 1, alignSelf: 'stretch', marginVertical: 2, backgroundColor: colors.border },
 
     mapLegend: {
       position: 'absolute',
@@ -1584,6 +1602,18 @@ function makeStyles(t) {
     legendHint: { fontSize: 11, color: colors.textMuted },
     mapSheetMeta: { ...type.caption, color: colors.textSecondary, marginBottom: spacing.sm },
     mapLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+    mapEmptyPill: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      overflow: 'hidden',
+    },
 
     // promoted-book sheet chrome now comes from components/PullableSheet.jsx;
     // the ⋯ actions menu anchors under the header row.

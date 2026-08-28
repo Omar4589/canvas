@@ -40,8 +40,12 @@ works the effort's **active round** — a read-only **"Pass N · active"** chip 
 round is visible; there is deliberately no round switcher (drafts are cut on web, archived rounds are
 read-only). Below it, a "Round 1 · 340/600 doors done" line and a "N books · M unassigned" count. A segmented toggle switches between:
 - **By book** — books are sorted by name; each row shows doors, a **knocked/total** progress bar, and
-  who's assigned. **Tap a book → its map detail** (see below). An **"Unassigned only"** filter finds
-  books with nobody. **Select** turns on checkboxes (+ Select all) → a bottom bar **"Assign N books →"**
+  who's assigned. **Tap a book → its map detail** (see below). A row of **status chips** filters the
+  books two ways at once — by **assignment** (*Assigned / Unassigned*) and by **progress** (*Completed /
+  In progress / Not started / Restricted*): picks within a family add together, picks across the
+  families combine (*Unassigned* + *In progress* = unassigned books that are in progress), and a book
+  whose doors are all restricted or no-soliciting this round reads **Restricted**, never *Completed* —
+  the same rules as the web Turf Cutting chips. **Select** turns on checkboxes (+ Select all) → a bottom bar **"Assign N books →"**
   opens a canvasser multi-select with **Distribute** (split across people) or **Everyone** (all to each),
   optionally replacing existing assignments. The same bar offers **Unassign all**, which takes every
   canvasser off the selected books in one action so you can hand them to someone else — it appears only
@@ -706,8 +710,14 @@ by book or by canvasser.
 - Data (active pass): books `GET /admin/campaigns/:id/turfs?passId=` (**published** only — `canvasserBooks`
   doesn't filter status, so assigning a draft book would expose it); assignments
   `GET …/turfs/assignments?passId=`; **per-book progress** `GET …/turfs/progress?passId=` →
-  `{progress:[{turfId,total,knocked}]}` (the round header sums these, so it always reconciles with the
-  cards — same eligible-door population); roster = campaign-assigned canvassers
+  `{progress:[{turfId,total,knocked,statusCounts}]}` (the round header sums these, so it always reconciles with the
+  cards — same eligible-door population). The status filter chips match via
+  [mobile/lib/bookStatusFilter.js](../mobile/lib/bookStatusFilter.js) — a MIRROR of
+  `client/src/lib/bookStatusFilter.js` (two AND-composed groups; the `restricted` bucket for a
+  fully off-limits book from `statusCounts`; change one mirror, change both, each pinned by its
+  own test). While `bookProgressQ` loads, the screen synthesizes `{total: book.doors, knocked: 0}` so
+  chips work instantly — `restricted` is unreachable until real `statusCounts` arrive, and a
+  zero-door book carries no progress bucket. Roster = campaign-assigned canvassers
   (`GET …/campaigns/:id/assignments` ∩ active canvassers from `GET /admin/memberships`). Books sorted by
   name (numeric-aware).
 - Actions: assign `POST …/turfs/:turfId/assignments {userIds}`; unassign `DELETE …/:turfId/assignments/:userId`;

@@ -1,7 +1,8 @@
-// The Turf Cutting page's book-status filter: which status keys a book carries, and
-// whether it matches the selected chips. MIRRORED in mobile/lib/bookStatusFilter.js (the
-// Books screen's chips) — same rules on both platforms so a book never reads Completed on
-// the phone and Restricted on the web; change one, change both.
+// The Books screen's book-status filter: which status keys a book carries, and whether it
+// matches the selected chips. MIRROR of client/src/lib/bookStatusFilter.js — same rules on
+// both platforms so a book never reads Completed on the phone and Restricted on the web;
+// change one, change both. Pure data in/out (no react-native imports) so
+// bookStatusFilter.test.js can pin the rules in plain node.
 //
 // The chips are TWO groups, not one flat set — coverage (assigned/unassigned) and
 // progress (completed/in-progress/not-started/restricted) — OR'd within a group and
@@ -10,7 +11,7 @@
 // completed-but-unassigned book back in (it matched on "unassigned"), which on a
 // desk-restricted round surfaced the exact books being filtered away. Now that click
 // means "unassigned AND unfinished"; selecting from one group only leaves the other
-// unconstrained, so single-chip behavior is unchanged. bookStatusFilter.test.js pins it.
+// unconstrained, so single-chip behavior is unchanged.
 
 export const COVERAGE_KEYS = ['assigned', 'unassigned'];
 export const PROGRESS_KEYS = ['completed', 'in_progress', 'not_started', 'restricted'];
