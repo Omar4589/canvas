@@ -112,6 +112,10 @@ const importJobSchema = new mongoose.Schema(
     // Households whose human-corrected map pin this import left alone (the same
     // overwriteHandEdits opt-in releases it, so a pin is a hand edit like any other).
     keptPins: { type: Number, default: 0 },
+    // Households whose confirm-in-place vouched pin (Pin Fixes, locationConfirmedAt) this
+    // import left alone. Counted apart from keptPins so that number keeps meaning
+    // "human-corrected pins kept" — the two are different promises.
+    keptConfirmed: { type: Number, default: 0 },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
     kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },

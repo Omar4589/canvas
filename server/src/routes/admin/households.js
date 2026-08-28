@@ -472,7 +472,7 @@ router.get('/map', async (req, res, next) => {
 
     let households = await Household.find(
       mapFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt doNotKnock excludedFromTurf effortId'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt locationConfirmedAt doNotKnock excludedFromTurf effortId'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
@@ -643,6 +643,9 @@ router.get('/map', async (req, res, next) => {
         coordSource: h.coordSource || null,
         coordConfidence: h.coordConfidence || null,
         correctedAt: h.correctedAt || null,
+        // Confirm-in-place stamp (Pin Fixes): an interpolated pin a manager vouched for. The
+        // ring layers skip these; the detail badge reads "Location confirmed".
+        locationConfirmedAt: h.locationConfirmedAt || null,
       };
     });
 

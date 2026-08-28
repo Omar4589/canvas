@@ -749,15 +749,29 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
   // narrow filter so only corrected rows come back, projection of just the key. Skipped entirely
   // when the admin asked for the file to win — overwriteHandEdits governs BOTH shields, so there's
   // one keep-or-overwrite decision, not two competing toggles.
+  // Two protected classes, one shield: human-MOVED pins (coordSource:'corrected') and
+  // human-VOUCHED approximate pins (locationConfirmedAt set — the Pin Fixes confirm-in-place,
+  // whose whole point is "a person checked this spot"; letting a re-import silently relocate it
+  // would leave the stamp vouching for a pin nobody saw). Tracked separately so keptPins keeps
+  // meaning what it has always meant.
   const correctedAddresses = new Set();
+  const confirmedAddresses = new Set();
   if (!overwriteHandEdits) {
     const addrs = householdValues.map((h) => h.normalizedAddress);
     for (let i = 0; i < addrs.length; i += batchSize) {
-      const corrected = await Household.find(
-        { campaignId, normalizedAddress: { $in: addrs.slice(i, i + batchSize) }, coordSource: 'corrected' },
-        { normalizedAddress: 1 }
+      const shielded = await Household.find(
+        {
+          campaignId,
+          normalizedAddress: { $in: addrs.slice(i, i + batchSize) },
+          $or: [{ coordSource: 'corrected' }, { locationConfirmedAt: { $ne: null } }],
+        },
+        { normalizedAddress: 1, coordSource: 1 }
       ).lean();
-      for (const h of corrected) correctedAddresses.add(h.normalizedAddress);
+      for (const h of shielded) {
+        // A door can't honestly be both (a move clears the stamp) — corrected wins if it is.
+        if (h.coordSource === 'corrected') correctedAddresses.add(h.normalizedAddress);
+        else confirmedAddresses.add(h.normalizedAddress);
+      }
     }
   }
 
@@ -771,6 +785,7 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
   );
 
   let keptPins = 0;
+  let keptConfirmed = 0;
   const householdOps = householdValues.map((h) => {
     const set = {
       organizationId: orgId,
@@ -785,6 +800,11 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
       location: h.longitude != null && h.latitude != null ? { type: 'Point', coordinates: [h.longitude, h.latitude] } : null,
       coordSource: h.coordSource || (h.longitude != null && h.latitude != null ? 'file' : null),
       coordConfidence: h.coordConfidence ?? null,
+      // Shield disarmed ⇒ the file's pin replaces whatever stands, so a confirm-in-place vouch
+      // must go with it — a corrected pin self-heals its provenance via coordSource in this same
+      // $set, but the stamp has no such sentinel and would otherwise vouch for the file's
+      // unverified coordinate. Harmless on inserts (the fields default to null anyway).
+      ...(overwriteHandEdits ? { locationConfirmedBy: null, locationConfirmedAt: null } : {}),
     };
     const setOnInsert = {
       campaignId,
@@ -797,11 +817,13 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     // doNotKnock ever appears in the $set spread, every re-import silently un-suppresses every
     // door we promised never to visit again.
     if (suppressedAddresses.has(h.normalizedAddress)) setOnInsert.doNotKnock = true;
-    // Corrected pin: move the location trio to $setOnInsert. The existing row keeps its
-    // human-placed pin; a row deleted between the prefetch and this write still inserts complete
-    // coords. A field must never appear in both operators — Mongo rejects the conflict.
-    if (correctedAddresses.has(h.normalizedAddress)) {
-      keptPins += 1;
+    // Corrected or confirmed pin: move the location trio to $setOnInsert. The existing row
+    // keeps its human-placed (or human-vouched) pin; a row deleted between the prefetch and
+    // this write still inserts complete coords. A field must never appear in both operators —
+    // Mongo rejects the conflict.
+    if (correctedAddresses.has(h.normalizedAddress) || confirmedAddresses.has(h.normalizedAddress)) {
+      if (correctedAddresses.has(h.normalizedAddress)) keptPins += 1;
+      else keptConfirmed += 1;
       for (const f of ['location', 'coordSource', 'coordConfidence']) {
         setOnInsert[f] = set[f];
         delete set[f];
@@ -971,6 +993,8 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     overwrittenHandEdits,
     // Households whose human-corrected pin this import left alone (0 when overwriteHandEdits).
     keptPins,
+    // Households whose confirm-in-place vouched pin this import left alone (same toggle).
+    keptConfirmed,
     // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
     insertedHouseholdIds,
     insertedVoterIds,

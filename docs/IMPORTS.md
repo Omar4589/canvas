@@ -825,20 +825,32 @@ Idempotent: a repaired door becomes `'corrected'` and is excluded from the next 
 
 `coordSource`/`coordConfidence` are no longer import-only bookkeeping: the maps now **surface** them
 (an amber "approximate" ring on `interpolated` pins) and a pin can be **corrected** — which sets
-`coordSource='corrected'`. See [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+`coordSource='corrected'` — or **confirmed in place** on the Pin Fixes page — which stamps
+`locationConfirmedBy/At` while leaving the geocoder's verdict untouched. See
+[MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
 
 **Pin shield (the household twin of the voter hand-edit shield).** A corrected pin is a
-field-verified fact the file cannot know, so `applyImport` **will not revert it**. Before building
-the household ops it prefetches this campaign's `coordSource:'corrected'` addresses (batched `$in`,
-key-only projection — the narrow filter keeps it tiny even on a 100k-row file) and, for those,
-moves `location`/`coordSource`/`coordConfidence` out of `$set` into `$setOnInsert`: the existing
-door keeps its human-placed pin, while a row deleted between prefetch and write still inserts with
-complete coords (a field must never appear in both operators — Mongo rejects the conflict). Every
-other household field still takes the file. **`overwriteHandEdits` governs BOTH shields** — one
-keep-or-overwrite decision, not two competing toggles — so ticking it lets the file's coords win and
-resets `coordSource` to `'file'`. The count of pins left alone rides back as `keptPins` (on the
-`ImportJob`, `$max`-merged like the other counters, so a retry can't double it). Guard cases 8–11 in
-[importHandEdits.int.test.js](../server/test/importHandEdits.int.test.js) pin all four behaviors:
+field-verified fact the file cannot know, so `applyImport` **will not revert it** — and since
+2026-08-28 a **confirmed** pin (Pin Fixes, `locationConfirmedAt` set) gets the same protection:
+its whole point is "a person checked this spot", and letting a re-import silently relocate it
+would leave the stamp vouching for a pin nobody saw. Before building the household ops the
+importer prefetches this campaign's shielded addresses — `$or` of `coordSource:'corrected'` and
+`locationConfirmedAt: { $ne: null }` (batched `$in`, key-only projection — the narrow filter keeps
+it tiny even on a 100k-row file) — and, for those, moves
+`location`/`coordSource`/`coordConfidence` out of `$set` into `$setOnInsert`: the existing
+door keeps its human-placed (or human-vouched) pin, while a row deleted between prefetch and write
+still inserts with complete coords (a field must never appear in both operators — Mongo rejects the
+conflict). Every other household field still takes the file. **`overwriteHandEdits` governs BOTH
+shields** — one keep-or-overwrite decision, not two competing toggles — so ticking it lets the
+file's coords win, resets `coordSource` to `'file'`, **and clears `locationConfirmedBy/At`**: a
+corrected pin self-heals its provenance through `coordSource` in the `$set`, but the confirm stamp
+has no such sentinel, so without the explicit clear a stale stamp would read as a valid
+confirmation of the file's unverified pin. Counts ride back separately — `keptPins`
+(human-corrected pins kept, its long-standing meaning) and **`keptConfirmed`** (confirmed pins
+kept) — both on the `ImportJob`, `$max`-merged like the other counters, so a retry can't double
+them. The confirmed-pin cases are pinned by test 8 of
+[pinFixes.int.test.js](../server/test/pinFixes.int.test.js); guard cases 8–11 in
+[importHandEdits.int.test.js](../server/test/importHandEdits.int.test.js) pin the corrected-pin four:
 kept by default, released on overwrite, never over-blocking an uncorrected door, and a brand-new
 address still inserting with coords.
 

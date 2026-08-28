@@ -68,6 +68,9 @@ export const CAMPAIGN_NAV = [
   // Data repair, so it sits with the other inspect-and-fix surfaces rather than with the
   // canvasser-app settings. Org-admin-only server-side; the page itself walls a lead.
   { slug: 'outcomes', label: 'Door Outcomes', icon: '/outcomes', group: 'quality' },
+  // The approximate-geocode work queue (amber-ring pins): fix or confirm each one. Lead-allowed
+  // like the Map/Turf pin tools — the server's requireCampaignManager gate is the wall.
+  { slug: 'pin-fixes', label: 'Pin Fixes', icon: '/pin-fixes', group: 'quality' },
   { slug: 'overlaps', label: 'Overlaps', icon: '/overlaps', group: 'quality' },
   { slug: 'notes', label: 'Notes', icon: '/notes', group: 'quality' },
   { slug: 'explorer', label: 'Survey Explorer', icon: '/surveys', group: 'results' },

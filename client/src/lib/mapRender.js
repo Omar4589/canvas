@@ -192,6 +192,9 @@ export function householdsToGeoJSON(households, stackedIds = null, dimExcluded =
           // Pin provenance — drives the "approximate" ring + detail badge.
           coordConfidence: h.coordConfidence || '',
           coordSource: h.coordSource || '',
+          // Confirm-in-place vouch (Pin Fixes): a confirmed interpolated pin stops ringing.
+          // Boolean-stamped so payloads that never ship the field read plain false.
+          locationConfirmed: h.locationConfirmedAt ? true : false,
           stacked: stackedIds ? stackedIds.has(h.id) : false,
           excluded: dimExcluded ? h.excludedFromTurf === true : false,
         },
@@ -484,12 +487,19 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
 
   // Amber "approximate" ring under any interpolated (non-rooftop) geocode, so admins
   // can spot the pins most likely to be off and correct them. Below the house icon.
+  // A door a manager vouched for in place (Pin Fixes confirm) stops ringing; to-boolean
+  // keeps payloads that never ship the flag (client report, answer mini-map) unchanged.
   map.addLayer(
     {
       id: 'household-approx-ring',
       type: 'circle',
       source: 'households',
-      filter: ['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!=', ['get', 'stacked'], true]],
+      filter: [
+        'all',
+        ['==', ['get', 'coordConfidence'], 'interpolated'],
+        ['!', ['to-boolean', ['get', 'locationConfirmed']]],
+        ['!=', ['get', 'stacked'], true],
+      ],
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
         'circle-color': 'rgba(0,0,0,0)',

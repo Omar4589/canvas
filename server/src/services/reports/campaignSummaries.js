@@ -8,6 +8,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { deriveSetupSteps } from './setupSteps.js';
 import { AUDIT_WINDOW_MAX_DAYS } from '../audit/flagThresholds.js';
+import { NEEDS_PIN_FIX } from '../households/confirmHouseholdLocation.js';
 
 // One round-trip of cheap grouped counts for a set of campaigns, turned into the
 // per-campaign setup-progress + management state used by the campaigns list, the
@@ -23,7 +24,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -54,6 +55,13 @@ export async function campaignSummaries({ organizationId, campaigns }) {
         },
         '_id campaignId'
       ).lean(),
+      // Approximate pins awaiting a fix or confirm (the Pin Fixes nav badge). A live derived
+      // count, deliberately NOT a Campaign.stats counter — stats' nightly reconcile reads only
+      // the activity/survey ledgers and could never repair drift in a Household field-state
+      // number. Shares NEEDS_PIN_FIX verbatim with the list endpoint so badge === list. Served
+      // by the partial {campaignId, locationConfirmedAt} interpolated-only index — strictly
+      // smaller than the two full-universe Household aggregates above.
+      Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, ...NEEDS_PIN_FIX } }, group]),
     ]);
 
   const canvassedByStats = new Map(); // idStr → boolean, trusted stats only
@@ -101,6 +109,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   const pubTurfBy = map(publishedTurfs);
   const assignBy = map(assignments);
   const activeBy = map(activePasses);
+  const pinsToFixBy = map(pinsToFix);
 
   for (const campaign of campaigns) {
     const k = String(campaign._id);
@@ -130,6 +139,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       deletable: !hasCanvassed,
       canEditType: !hasCanvassed,
       openMockFlags: openMockBy.get(k) || 0,
+      pinsToFix: pinsToFixBy.get(k) || 0,
     });
   }
   return out;

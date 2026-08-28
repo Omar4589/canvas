@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from '../lib/mapboxInit.js';
@@ -18,7 +18,8 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
-import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors } from '../lib/cutMapDoors.js';
+import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor } from '../lib/cutMapDoors.js';
+import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
 import { buildingKeyForCoords } from '../lib/buildings.js';
 import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
@@ -218,14 +219,25 @@ function StatChip({ label, value, hint, accent }) {
   );
 }
 
-// Book status filter chips (multi-select). Coverage (assigned/unassigned) + progress
-// (completed/in-progress/not-started). Filtering hides non-matching books + their dots.
-const BOOK_STATUS_CHIPS = [
-  { key: 'assigned', label: 'Assigned', color: '#16a34a' },
-  { key: 'unassigned', label: 'Unassigned', color: '#9ca3af' },
-  { key: 'completed', label: 'Completed', color: '#2563eb' },
-  { key: 'in_progress', label: 'In progress', color: '#ca8a04' },
-  { key: 'not_started', label: 'Not started', color: '#dc2626' },
+// Book status filter chips (multi-select). Two real groups — coverage (assigned/unassigned)
+// and progress (completed/in-progress/not-started/restricted) — OR'd within a group, AND'd
+// across them, so "Unassigned + In progress" means unassigned books that are in progress.
+// (The flat union this replaced pulled every completed-but-unassigned book back in the moment
+// Unassigned joined a progress pick.) Matching lives in lib/bookStatusFilter.js; the divider
+// between the groups is what makes the AND legible. Restricted = a fully off-limits book
+// (every door restricted/no-soliciting this round) — taken off the table, not finished work.
+// Filtering hides non-matching books + their dots.
+const BOOK_STATUS_CHIP_GROUPS = [
+  [
+    { key: 'assigned', label: 'Assigned', color: '#16a34a' },
+    { key: 'unassigned', label: 'Unassigned', color: '#9ca3af' },
+  ],
+  [
+    { key: 'completed', label: 'Completed', color: '#2563eb' },
+    { key: 'in_progress', label: 'In progress', color: '#ca8a04' },
+    { key: 'not_started', label: 'Not started', color: '#dc2626' },
+    { key: 'restricted', label: 'Restricted', color: STATUS_COLORS.restricted },
+  ],
 ];
 function BookStatusChips({ value, onChange, counts }) {
   const toggle = (k) => {
@@ -235,24 +247,29 @@ function BookStatusChips({ value, onChange, counts }) {
   };
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {BOOK_STATUS_CHIPS.map((c) => {
-        const active = value.has(c.key);
-        return (
-          <button
-            key={c.key}
-            type="button"
-            onClick={() => toggle(c.key)}
-            className={
-              'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ' +
-              (active ? 'border-brand-600 bg-brand-tint text-brand-accent' : 'border-border bg-card text-fg-muted hover:bg-sunken')
-            }
-          >
-            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
-            {c.label}
-            <span className="text-fg-subtle">{counts?.[c.key] ?? 0}</span>
-          </button>
-        );
-      })}
+      {BOOK_STATUS_CHIP_GROUPS.map((group, gi) => (
+        <Fragment key={gi}>
+          {gi > 0 && <span aria-hidden className="mx-0.5 h-3.5 w-px bg-border-strong" />}
+          {group.map((c) => {
+            const active = value.has(c.key);
+            return (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => toggle(c.key)}
+                className={
+                  'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ' +
+                  (active ? 'border-brand-600 bg-brand-tint text-brand-accent' : 'border-border bg-card text-fg-muted hover:bg-sunken')
+                }
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
+                {c.label}
+                <span className="text-fg-subtle">{counts?.[c.key] ?? 0}</span>
+              </button>
+            );
+          })}
+        </Fragment>
+      ))}
       {value.size > 0 && (
         <button type="button" onClick={() => onChange(new Set())} className="ml-1 text-[11px] text-brand-accent hover:underline">
           Clear
@@ -1052,11 +1069,16 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
-  // Pin provenance, same badges the Map page panel shows (coordSource / coordConfidence ride on
-  // the /turfs/household payload). Only a corrected or interpolated pin gets a badge.
+  // Pin provenance, same badges the Map page panel shows (coordSource / coordConfidence /
+  // locationConfirmedAt ride on the /turfs/household payload). Corrected outranks confirmed
+  // outranks approximate — the same precedence as HouseholdDetailPanel.
   const pinBadge = hh?.coordSource === 'corrected' ? (
     <div className="inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
       Pin corrected{hh.correctedAt ? ` · ${formatInTz(hh.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
+    </div>
+  ) : hh?.coordConfidence === 'interpolated' && hh?.locationConfirmedAt ? (
+    <div className="inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
+      Location confirmed
     </div>
   ) : hh?.coordConfidence === 'interpolated' ? (
     <div className="inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
@@ -1388,8 +1410,10 @@ export default function TurfsPage() {
   // `notInBook` starts HIDDEN so the cut map opens showing only this cut's booked doors —
   // a targeted second cut otherwise leaves every already-worked/excluded/restricted door on
   // the map as a gray dot, padding the density. Its Layers-box row appears only when the cut
-  // actually left doors loose.
-  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, notInBook: false });
+  // actually left doors loose. `offLimits` starts SHOWN (the docs promise an active-round
+  // audit never silently loses worked doors); its row appears only in status mode, where
+  // restricted/no-soliciting dots are actually distinguishable — see drawnSingles below.
+  const [layerVis, setLayerVis] = useState({ houses: true, buildings: true, fills: true, labels: true, notInBook: false, offLimits: true });
   // Reclaim map width: collapse the "Generate books" panel (persisted) and/or fullscreen the
   // map. Both just resize the map's container — the ResizeObserver below repaints the canvas.
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
@@ -1703,6 +1727,21 @@ export default function TurfsPage() {
   const [statusOverride, setStatusOverride] = useState(null);
   const statusMode = statusOverride ?? roundProgress.knocked > 0;
 
+  // The "Restricted & no soliciting" Layers row: in status mode those dots are the darkest on
+  // the map, and a heavily desk-restricted round buries the live work under them. Unchecking
+  // hides SINGLE-home off-limits dots only — a stacked building keeps every unit (its pin
+  // never takes a status color, so its units were never the clutter, and dropping them would
+  // change stack totals and pin ownership). Judged on passStatus (what colors the dot), and
+  // only in status mode — book-colored dots don't show the status, so there is nothing to
+  // declutter and the row itself is hidden. The same flag threads into drawnDoors below so a
+  // hidden dot is also un-lassoable (re-check the row before a bulk Unmark).
+  const offLimitsHidden = statusMode && !layerVis.offLimits;
+  const offLimitsDoorCount = useMemo(() => grouped.singles.filter(isOffLimitsDoor).length, [grouped]);
+  const drawnSingles = useMemo(
+    () => (offLimitsHidden ? grouped.singles.filter((d) => !isOffLimitsDoor(d)) : grouped.singles),
+    [grouped, offLimitsHidden]
+  );
+
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
   const attributePreviewQ = useQuery({
     queryKey: ['turf-attribute-preview', campaignId, passId, attribute],
@@ -1739,24 +1778,17 @@ export default function TurfsPage() {
     (assignedByTurf.get(String(t._id)) || []).some((u) => `${u.firstName} ${u.lastName}`.toLowerCase().includes(bookQuery));
   const selectedDoors = selectedTurfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
 
-  // Book status (coverage + progress) → the filter chips + the map/list filter.
-  const bookStatuses = (t) => {
-    const s = new Set();
-    s.add((assignedByTurf.get(String(t._id)) || []).length ? 'assigned' : 'unassigned');
-    const p = progressByTurf.get(String(t._id));
-    if (p && p.total > 0) s.add(p.knocked === 0 ? 'not_started' : p.knocked >= p.total ? 'completed' : 'in_progress');
-    return s;
-  };
-  // Additive chips: a book shows if it matches ANY selected status (union). Selecting
-  // "Assigned" + "In progress" shows every assigned book AND every in-progress book.
-  const matchesStatus = (t) => {
-    if (!statusFilter.size) return true;
-    const s = bookStatuses(t);
-    for (const k of statusFilter) if (s.has(k)) return true;
-    return false;
-  };
+  // Book status (coverage + progress) → the filter chips + the map/list filter. The grouping
+  // rules — OR within a group, AND across coverage/progress, and the `restricted` bucket for
+  // fully off-limits books — live in lib/bookStatusFilter.js, pinned by bookStatusFilter.test.js.
+  const bookStatuses = (t) =>
+    bookStatusSet({
+      assigned: (assignedByTurf.get(String(t._id)) || []).length > 0,
+      progress: progressByTurf.get(String(t._id)),
+    });
+  const matchesStatus = (t) => matchesBookStatus(bookStatuses(t), statusFilter);
   const statusCounts = useMemo(() => {
-    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0 };
+    const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0, restricted: 0 };
     for (const t of turfs) for (const k of bookStatuses(t)) c[k] += 1;
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1773,10 +1805,11 @@ export default function TurfsPage() {
 
   // ── "Select doors" ───────────────────────────────────────────────────────────────────────
   // The pool a lasso may catch is WHAT IS DRAWN — never queryRenderedFeatures, which can't see
-  // a door just off-screen and can't tell a markable door from a completed one. Three of this
-  // page's visibility mechanisms decide that, and two of them (the book-status chips' setFilter
-  // and the Houses layer's visibility) live in Mapbox layer state where no memo can see them,
-  // so the rule lives in lib/cutMapDoors.js where cutMapDoors.test.js holds it.
+  // a door just off-screen and can't tell a markable door from a completed one. Four of this
+  // page's visibility mechanisms decide that (the loose-door and off-limits data filters, the
+  // book-status chips, the Houses layer), and two of them (the chips' setFilter and the Houses
+  // layer's visibility) live in Mapbox layer state where no memo can see them, so the rule
+  // lives in lib/cutMapDoors.js where cutMapDoors.test.js holds it.
   const drawnDoors = useMemo(
     () =>
       drawnCutDoors({
@@ -1785,8 +1818,9 @@ export default function TurfsPage() {
         showLoose: layerVis.notInBook,
         visibleBookIds,
         housesVisible: layerVis.houses,
+        hideOffLimits: offLimitsHidden,
       }),
-    [doorsQ.data, passTurfIds, layerVis.notInBook, layerVis.houses, visibleBookIds]
+    [doorsQ.data, passTurfIds, layerVis.notInBook, layerVis.houses, visibleBookIds, offLimitsHidden]
   );
   // The selection RESOLVED against what is drawn. A door a refetch dropped from the cut, or one
   // a chip just hid, stops resolving — so it is neither counted in the bar nor sent to the
@@ -2518,7 +2552,9 @@ export default function TurfsPage() {
     if (!map || !map.getSource('books')) return;
     map.getSource('books').setData(booksToFillGeoJSON(turfs, colorByTurf, selectedBooks, progressByTurf));
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks, progressByTurf, statusMode));
-    map.getSource('doors').setData(doorsToGeoJSON(grouped.singles, colorByTurf, targetedSet, statusMode, darkBase));
+    // drawnSingles, not grouped.singles: the off-limits Layers row filters single-home dots
+    // at the data level (the ring layer shares this source, so it follows for free).
+    map.getSource('doors').setData(doorsToGeoJSON(drawnSingles, colorByTurf, targetedSet, statusMode, darkBase));
     // Buildings ride their own circle layer so they stay visible/clickable even
     // when the DOM markers are viewport-culled (see the building sync effect).
     if (map.getSource('buildings')) {
@@ -2563,9 +2599,10 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  // `grouped` MUST be here: paint() draws the door dots from grouped.singles, so the "Not in
-  // a book" toggle (which only changes `grouped`, not doorsQ.data) has to re-run this.
-  useEffect(() => { paint(); }, [grouped, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
+  // `grouped` MUST be here: paint() draws the buildings from grouped.buildings, so the "Not in
+  // a book" toggle (which only changes `grouped`, not doorsQ.data) has to re-run this. Same for
+  // `drawnSingles` (grouped.singles minus the off-limits toggle's hidden dots) and the door dots.
+  useEffect(() => { paint(); }, [grouped, drawnSingles, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
 
   // Selection rings. Deliberately NOT folded into paint(): adding the selection to that
   // effect's deps would re-serialize the whole book/door/building GeoJSON on every lasso.
@@ -3511,6 +3548,12 @@ export default function TurfsPage() {
                 // (already-worked, newly-added, and restricted) — default hidden, so the map
                 // opens showing only this cut's booked doors.
                 ...(looseDoorCount > 0 ? [['notInBook', `Not in a book (${looseDoorCount.toLocaleString()})`]] : []),
+                // Offered only in status mode (book-colored dots don't show the status) and
+                // only when the round has off-limits singles. Default SHOWN; unchecking hides
+                // the slate/pink dots — building stacks keep their units either way.
+                ...(statusMode && offLimitsDoorCount > 0
+                  ? [['offLimits', `Restricted & no soliciting (${offLimitsDoorCount.toLocaleString()})`]]
+                  : []),
               ].map(([key, label]) => (
                 <label key={key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-sunken">
                   <input

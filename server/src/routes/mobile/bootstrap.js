@@ -269,6 +269,7 @@ router.get('/bootstrap', async (req, res, next) => {
       walkOrder: 1, // list-view "walk order" sort
       coordSource: 1, // pin provenance: 'file' | 'geocodio' | 'corrected'
       coordConfidence: 1, // 'exact' | 'interpolated' | null (approximate-pin badge)
+      locationConfirmedAt: 1, // confirm-in-place stamp (Pin Fixes) — badge reads "confirmed"
     }).lean();
 
     const householdIds = households.map((h) => h._id);
@@ -434,6 +435,7 @@ router.get('/changes', async (req, res, next) => {
       location: 1, // so an admin pin-move (or another canvasser's fix) reflects live
       coordSource: 1,
       coordConfidence: 1,
+      locationConfirmedAt: 1, // mirrors the bootstrap projection (Pin Fixes confirm stamp)
     }).lean();
     // Per-round status + last visit from the canvasser's book round (same as
     // bootstrap) so deltas don't re-introduce a global status — or a prior round's

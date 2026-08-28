@@ -243,7 +243,9 @@ how restricted homes are (and aren't) counted.
 ### A pin in the wrong place
 
 Sometimes a door's pin sits in the wrong place — an **"Approximate location"** badge on the door detail
-flags the ones most likely to be off, and you'll still see that badge.
+flags the ones most likely to be off, and you'll still see that badge. (Two related badges can appear
+instead: **"Pin corrected"** when someone moved the pin to the right spot, and **"Location confirmed"**
+when an admin checked the approximate spot and vouched it's right without moving it.)
 
 **Moving a pin is a team lead / admin job**, so there's no "Fix pin location" button on the canvasser
 screen any more. Tell your lead which door is wrong and they'll move it; everyone picks up the corrected

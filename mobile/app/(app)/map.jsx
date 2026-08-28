@@ -564,6 +564,9 @@ export default function MapScreen() {
                     ...h,
                     status: c.status,
                     lastActionAt: c.lastActionAt,
+                    // Unconditional, not inside the location spread: a Pin Fixes confirm/undo
+                    // changes the stamp without moving the pin, and the badge must follow.
+                    locationConfirmedAt: c.locationConfirmedAt ?? null,
                     ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
                   };
                 })

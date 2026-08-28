@@ -23,7 +23,12 @@ const householdLocationChangeSchema = new mongoose.Schema(
     // 'import_repair' = repair:import-pins, the offline script that adjudicates doors whose
     // import rows disagreed on a pin. Its own value rather than 'admin_drag' — nobody dragged
     // anything, and mislabeling it would put a lie in a permanent audit log.
-    source: { type: String, enum: ['gps', 'drag', 'admin_drag', 'import_repair'], required: true },
+    // 'confirm' = a Pin Fixes confirm-in-place: a manager vouched the pin is already right, so
+    // nothing moved and `from` equals `to`. Its own value for the same reason — the row records
+    // a verification, not a movement. Only ever written for interpolated-geocode doors
+    // (services/households/confirmHouseholdLocation.js filters its targets), so a corrected
+    // door's latest row stays an honest move record.
+    source: { type: String, enum: ['gps', 'drag', 'admin_drag', 'import_repair', 'confirm'], required: true },
     scope: { type: String, enum: ['unit', 'building'], default: 'unit' },
     accuracy: { type: Number, default: null }, // GPS accuracy (m) when source === 'gps'
     from: { type: pointSchema, default: null }, // pre-move point (null if the door had none)

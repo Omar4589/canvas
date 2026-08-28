@@ -1088,6 +1088,26 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     DPA changes (the policy nowhere promises activity rows are immutable; archived-not-deleted
     answers were already stamped in v6 item 12).
 
+15. **[v6 2026-08-28 — Pin Fixes: confirm-in-place stamps + a first-of-kind outbound maps
+    link.]** Two facts, neither a policy edit. **(a)** `Household.locationConfirmedBy/At`
+    (new fields) record which staff user vouched an approximate geocode and when — the same
+    class as the existing `correctedBy/correctedAt` pin-correction attribution (staff metadata
+    on a customer-data record, visible to the same `canManageCampaign` roles, precedent: the
+    v6 2026-08-22 pin-move stamp — "not a new exposure"). Each confirm also writes a from==to
+    `HouseholdLocationChange` row (`source:'confirm'`), reusing a collection already in both
+    tenant-deletion cascades. Like `HouseholdLocationChange.userId`, the confirm attribution
+    is **not scrubbed by account deletion** — it joins the §A3 pseudonymity list below. **(b)**
+    The Pin Fixes page renders an **"Open in Google Maps"** link per door — the app's first
+    outbound maps link. Reasoning recorded deliberately: the link is a user-initiated browser
+    navigation (`https://www.google.com/maps/search/?api=1&query=<address>`); the voter's
+    address (plus the staff user's IP) reaches Google **only when the admin clicks**, from the
+    admin's own browser, replacing the identical manual workflow (pasting the address into
+    Google). No customer data flows server-side to Google, nothing is engaged "to provide the
+    Service", so it is **not** a DPA §6 subprocessor and the service-providers paragraph
+    (`privacy.html`) needs no edit — Google already appears in both documents for app
+    distribution and device location services. If this link is ever automated (prefetch,
+    server-side geocoding via Google, embedded Google tiles), THAT change is a §6 event.
+
 ---
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
@@ -1324,7 +1344,7 @@ After the purge, **all field records persist in full and remain linked to the de
 - `CanvassActivity.location {lat, lng, accuracy}` — **`required`** (`:39`)
 - `CanvassActivity.timestamp` — **`required`** (`:42`); `actionType`, free-text `note` (`:37`), `distanceFromHouseMeters` (`:40`), `coordinatorId` (`:69`)
 - `SurveyResponse.userId` (required), with its own required `location` and `submittedAt` and the answer payload (`models/SurveyResponse.js:44`, `:52`, `:55`, `:49`)
-- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId`
+- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId` *[v6 2026-08-28: also `Household.correctedBy` (pin correction) and the new `Household.locationConfirmedBy` (Pin Fixes confirm — item 15). Same class, same posture: staff attribution on customer records, untouched by account deletion.]*
 - The tombstoned `User` document itself still exists, carrying `_id`, `createdAt`, `lastLoginAt`, `deletedAt` — and an email that **embeds the user id**: `deleted+<userId>@deleted.doorline.invalid` *[v4 2026-07-22: `lastLoginAt` is no longer among them, nor is the new `lastSeenAt` — both are scrubbed. **The pseudonymity finding is unchanged and never depended on that field**: the tombstone still carries `_id`, `createdAt` and `deletedAt` plus an id-embedding email, and every field record still points at that id. Removing an activity clock removes a re-identification hint, not the identifier.]*
 
 Nothing in the deletion path or the purge path ever nulls, removes, or re-keys `CanvassActivity.userId`. `deleteAccount.js:170-173` states the omission is deliberate. `purgeDeletedIdentities.js:34-37` writes to `DeletedUserRecord` and nothing else.

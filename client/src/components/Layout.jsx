@@ -105,6 +105,9 @@ export default function Layout() {
   // Mock-GPS nudge: open mock-location flags for this campaign (61-day window, server-
   // computed). Drives the red badge on the Audit nav item below.
   const openMockFlags = currentCampaign?.openMockFlags || 0;
+  // Approximate pins still awaiting a fix or confirm (campaignSummaries.pinsToFix, the same
+  // predicate the Pin Fixes page lists). Drives the amber badge on the Pin Fixes item.
+  const pinsToFix = currentCampaign?.pinsToFix || 0;
   // The switcher LISTS active campaigns only — archived ones live on the Campaigns and
   // Overview pages, which is also where you reactivate them. It deliberately does NOT
   // validate against that filtered list: the current campaign stays listed even when
@@ -120,6 +123,7 @@ export default function Layout() {
   const isFullBleed =
     location.pathname.endsWith('/map') ||
     location.pathname.endsWith('/turfs') ||
+    location.pathname.endsWith('/pin-fixes') ||
     location.pathname.endsWith('/packets') ||
     location.pathname === '/queues';
 
@@ -130,36 +134,44 @@ export default function Layout() {
     const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
     // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
     const mockBadge = n.slug === 'audit' && openMockFlags > 0;
+    // Pin Fixes workload: same pill/dot mechanism, amber — a to-do count, not an alarm.
+    const pinBadge = n.slug === 'pin-fixes' && pinsToFix > 0;
     const flagNote = mockBadge
       ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
-      : '';
+      : pinBadge
+        ? `${pinsToFix} approximate pin${pinsToFix === 1 ? '' : 's'} to fix`
+        : '';
+    const badgeCount = mockBadge ? openMockFlags : pinBadge ? pinsToFix : 0;
+    const hasBadge = mockBadge || pinBadge;
     return (
       <RailTip
         key={n.slug || 'home'}
-        // Collapsed, the red dot on Audit is the only sign of the flag count — so the
+        // Collapsed, the dot on Audit / Pin Fixes is the only sign of the count — so the
         // tip carries it, or the badge is unreadable on the rail.
-        label={mockBadge ? `${n.label} · ${flagNote}` : n.label}
+        label={hasBadge ? `${n.label} · ${flagNote}` : n.label}
         enabled={collapsed}
       >
         <NavLink
           to={to}
           end={!n.slug}
           aria-label={collapsed ? n.label : undefined}
-          title={!collapsed && mockBadge ? flagNote : undefined}
-          className={(s) => navClass(collapsed)(s) + (mockBadge ? ' relative' : '')}
+          title={!collapsed && hasBadge ? flagNote : undefined}
+          className={(s) => navClass(collapsed)(s) + (hasBadge ? ' relative' : '')}
         >
           <Icon size={20} />
           {!collapsed && <span>{n.label}</span>}
-          {mockBadge && !collapsed && (
+          {hasBadge && !collapsed && (
             <span
-              aria-label={`${openMockFlags} open mock-GPS flags`}
-              className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60"
+              aria-label={flagNote}
+              // Amber pill = tint + warning-fg, the repo's small-amber-text pair (white on solid
+              // bg-warning fails WCAG AA at this size); the red danger pill keeps its precedent.
+              className={`ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ring-1 ring-white/60 ${mockBadge ? 'bg-danger text-white' : 'bg-warning-tint text-warning-fg'}`}
             >
-              {openMockFlags}
+              {badgeCount}
             </span>
           )}
-          {mockBadge && collapsed && (
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger" />
+          {hasBadge && collapsed && (
+            <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${mockBadge ? 'bg-danger' : 'bg-warning'}`} />
           )}
         </NavLink>
       </RailTip>

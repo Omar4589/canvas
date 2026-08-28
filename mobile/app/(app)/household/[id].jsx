@@ -321,6 +321,10 @@ export default function HouseholdDetail() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm }}>
           {household.coordSource === 'corrected' ? (
             <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>● Pin corrected</Text>
+          ) : household.coordConfidence === 'interpolated' && household.locationConfirmedAt ? (
+            /* Confirm-in-place (Pin Fixes). A stale bootstrap cache without the field simply
+               falls through to the approximate badge — fail-open, never a crash. */
+            <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>● Location confirmed</Text>
           ) : household.coordConfidence === 'interpolated' ? (
             <Text style={{ color: colors.warnFg, fontSize: 12, fontWeight: '700' }}>● Approximate location</Text>
           ) : (

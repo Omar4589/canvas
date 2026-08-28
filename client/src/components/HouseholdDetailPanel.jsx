@@ -601,6 +601,11 @@ export default function HouseholdDetailPanel({
             <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
               Pin corrected{h.correctedAt ? ` · ${formatInTz(h.correctedAt, zone, { month: 'short', day: 'numeric' }, false)}` : ''}
             </div>
+          ) : h.coordConfidence === 'interpolated' && h.locationConfirmedAt ? (
+            // Confirm-in-place (Pin Fixes): still the geocoder's pin, but a person vouched it.
+            <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
+              Location confirmed · {formatInTz(h.locationConfirmedAt, zone, { month: 'short', day: 'numeric' }, false)}
+            </div>
           ) : h.coordConfidence === 'interpolated' ? (
             <div className="mt-1.5 inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
               Approximate location

@@ -43,6 +43,16 @@ const householdSchema = new mongoose.Schema(
     correctedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     correctedAt: { type: Date, default: null },
     previousLocation: { type: pointSchema, default: null }, // the pre-correction point (context/undo)
+    // Confirm-in-place (the Pin Fixes queue): a campaign manager checked this door's
+    // interpolated geocode against imagery/Google Maps and vouched the pin is right WITHOUT
+    // moving it. coordConfidence stays 'interpolated' — the geocoder's honest verdict — and
+    // the stamp is what removes the door from the needs-fixing set and the amber ring. A
+    // confirmed pin is still the geocoder's answer, never a human-PLACED one: audit code
+    // (far-flag downgrade) must keep keying on coordSource === 'corrected', not this.
+    // Cleared by any real pin move (updateHouseholdLocation) and by an import overwrite of
+    // the pin when the hand-edit shield is disarmed (csvImporter, overwriteHandEdits).
+    locationConfirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    locationConfirmedAt: { type: Date, default: null },
 
     status: {
       type: String,
@@ -134,5 +144,15 @@ householdSchema.index({ campaignId: 1, effortId: 1 }); // per-effort ownership /
 // Admin map + campaignSummaries filter on campaignId + isActive (isActive was unindexed, so the
 // map's active-household filter rode the campaignId index alone and residual-scanned isActive).
 householdSchema.index({ campaignId: 1, isActive: 1 });
+// Pin Fixes queue: list + badge count of interpolated doors not yet human-confirmed. The
+// partial filter carries only the constant term (a `locationConfirmedAt: null` inside a
+// partialFilterExpression works on newer servers but matches no repo precedent and pins a
+// server-version floor nothing else pins); the null test rides the KEY bounds instead, which
+// measures just as selective. Key deliberately NOT bare {campaignId: 1}: the buildIndexes
+// dry run dedupes by key pattern alone, so a duplicate key would falsely report "present".
+householdSchema.index(
+  { campaignId: 1, locationConfirmedAt: 1 },
+  { partialFilterExpression: { coordConfidence: 'interpolated' } }
+);
 
 export const Household = mongoose.model('Household', householdSchema);

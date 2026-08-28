@@ -372,6 +372,20 @@ export function IconSwap({ size = 22 }) {
   );
 }
 
+// A crosshair — Pin Fixes: put approximate pins exactly where the buildings are. Not the
+// map's IconPin, which keeps meaning "the Map page".
+export function IconCrosshair({ size = 22 }) {
+  return (
+    <svg width={size} height={size} {...baseProps}>
+      <circle cx="12" cy="12" r="6.5" />
+      <path d="M12 2.5v3.5" />
+      <path d="M12 18v3.5" />
+      <path d="M2.5 12H6" />
+      <path d="M18 12h3.5" />
+    </svg>
+  );
+}
+
 export const NAV_ICONS = {
   '/admin': IconDashboard,
   '/map': IconPin,
@@ -383,6 +397,7 @@ export const NAV_ICONS = {
   '/exports': IconDownload,
   '/customize': IconPhoneToggle,
   '/outcomes': IconSwap,
+  '/pin-fixes': IconCrosshair,
   '/packets': IconPrinter,
   '/efforts': IconLayers,
   '/early-voting': IconBallot,

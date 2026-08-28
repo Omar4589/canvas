@@ -66,6 +66,10 @@ export async function updateHouseholdLocation(
     h.coordConfidence = null;
     h.correctedBy = byUserId || null;
     h.correctedAt = now;
+    // A real move supersedes a confirm-in-place vouch (Pin Fixes): the stamp described the
+    // OLD spot, so leaving it would vouch for a pin nobody verified.
+    h.locationConfirmedBy = null;
+    h.locationConfirmedAt = null;
     await h.save();
     await HouseholdLocationChange.create({
       organizationId: h.organizationId,

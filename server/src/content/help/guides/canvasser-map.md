@@ -23,4 +23,4 @@ If a **red notice** appears at the top of the map saying location is required, y
 
 > Tip: If your supervisor tells you they moved some houses to you, pull-to-refresh so your map picks them up.
 
-If a house's detail reads **Approximate location**, its spot was placed by looking up the address rather than from an exact coordinate, so it can sit a little off. If one is clearly in the wrong place, tell your team lead — they can move it, and everyone picks up the corrected spot on their next sync. Knock the door you actually stood at either way.
+If a house's detail reads **Approximate location**, its spot was placed by looking up the address rather than from an exact coordinate, so it can sit a little off. If one is clearly in the wrong place, tell your team lead — they can move it, and everyone picks up the corrected spot on their next sync. Knock the door you actually stood at either way. (A door that reads **Location confirmed** was one of these that an admin already checked — the spot is right.)

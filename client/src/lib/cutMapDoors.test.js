@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors, drawnCutDoors } from './cutMapDoors.js';
+import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor } from './cutMapDoors.js';
 
 // cutMapDoors.js is the ONE place the Turf Cutting map's loose-door rule lives, so this is
 // where it gets locked down. The regression under test (shipped + caught in prod, 2026-07):
@@ -150,4 +150,65 @@ test('a stacked building is drawn or hidden as ONE pin, by its first unit\'s boo
 
 test('undefined doors are safe (the query is still loading)', () => {
   assert.deepEqual(drawnCutDoors({ doors: undefined, bookIds: PASS2_BOOKS, showLoose: false }), []);
+});
+
+// ---------------------------------------------------------------------------
+// hideOffLimits — the "Restricted & no soliciting" Layers row. Hides single-home dots whose
+// PER-ROUND status is restricted/no_soliciting; a stacked building keeps every unit (its pin
+// never takes a status color, and dropping units would change stack totals / pin ownership).
+// Threaded through drawnCutDoors so a hidden dot is also un-selectable — same rule as the
+// other three visibility mechanisms above.
+
+// A door as /turfs/doors?withStatus=1 returns it: coordinates + this round's passStatus.
+const S = (id, turfId, lng, lat, passStatus) => ({ id, turfId, lng, lat, passStatus });
+
+test('off-limits statuses are restricted and no_soliciting, judged on passStatus', () => {
+  assert.equal(isOffLimitsDoor(S('d1', 'b21', -96.1, 41.1, 'restricted')), true);
+  assert.equal(isOffLimitsDoor(S('d2', 'b21', -96.1, 41.1, 'no_soliciting')), true);
+  assert.equal(isOffLimitsDoor(S('d3', 'b21', -96.1, 41.1, 'surveyed')), false);
+  // The global Household.status is NOT the judge — a prior round's restriction stays drawn.
+  assert.equal(isOffLimitsDoor({ id: 'd4', status: 'restricted', passStatus: 'unknocked' }), false);
+});
+
+test('hideOffLimits drops restricted/no-soliciting SINGLES, keeps everything else', () => {
+  const doors = [
+    S('d1', 'b21', -96.1, 41.1, 'restricted'),
+    S('d2', 'b21', -96.2, 41.2, 'no_soliciting'),
+    S('d3', 'b21', -96.3, 41.3, 'surveyed'),
+    S('d4', 'b22', -96.4, 41.4, 'unknocked'),
+  ];
+  const drawn = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true });
+  assert.deepEqual(drawn.map((d) => d.id), ['d3', 'd4']);
+  // Off by default: nothing changes.
+  const off = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: false });
+  assert.equal(off.length, doors.length);
+});
+
+test('a stacked building keeps ALL its units — restricted ones included', () => {
+  // Two units at one rounded key, one of them restricted: the stack is drawn whole, so
+  // both stay selectable (a lasso catches a building as a unit, and the pin shows no status).
+  const stack = [S('u1', 'b21', -96.5, 41.5, 'restricted'), S('u2', 'b21', -96.5, 41.5, 'unknocked')];
+  const drawn = drawnCutDoors({ doors: stack, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true });
+  assert.deepEqual(drawn.map((d) => d.id), ['u1', 'u2']);
+  // Even a FULLY off-limits stack stays: buildings are never status-filtered.
+  const allRestricted = [S('u3', 'b21', -96.6, 41.6, 'restricted'), S('u4', 'b21', -96.6, 41.6, 'restricted')];
+  assert.equal(drawnCutDoors({ doors: allRestricted, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true }).length, 2);
+});
+
+test('a hidden off-limits single is out of the pool even when its book passes the chips', () => {
+  const doors = [S('d1', 'b21', -96.1, 41.1, 'restricted'), S('d2', 'b21', -96.2, 41.2, 'not_home')];
+  const drawn = drawnCutDoors({
+    doors,
+    bookIds: PASS2_BOOKS,
+    showLoose: false,
+    visibleBookIds: new Set(['b21']),
+    hideOffLimits: true,
+  });
+  assert.deepEqual(drawn.map((d) => d.id), ['d2']);
+});
+
+test('an off-limits door with no coordinates is dropped when hiding (it was never drawable)', () => {
+  const doors = [{ id: 'd1', turfId: 'b21', passStatus: 'restricted' }, S('d2', 'b21', -96.2, 41.2, 'unknocked')];
+  const drawn = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true });
+  assert.deepEqual(drawn.map((d) => d.id), ['d2']);
 });

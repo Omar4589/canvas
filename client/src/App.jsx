@@ -51,6 +51,7 @@ const CampaignSurveyPage = lazy(() => import('./pages/CampaignSurveyPage.jsx'));
 const CampaignSurveyBuilderPage = lazy(() => import('./pages/CampaignSurveyBuilderPage.jsx'));
 const CampaignTeamPage = lazy(() => import('./pages/CampaignTeamPage.jsx'));
 const MapPage = lazy(() => import('./pages/MapPage.jsx'));
+const PinFixesPage = lazy(() => import('./pages/PinFixesPage.jsx'));
 const TurfsPage = lazy(() => import('./pages/TurfsPage.jsx'));
 const PassesPage = lazy(() => import('./pages/PassesPage.jsx'));
 const EffortsPage = lazy(() => import('./pages/EffortsPage.jsx'));
@@ -156,6 +157,9 @@ export default function App() {
           <Route path="/campaigns/:campaignId/walklists" element={<WalkListsPage />} />
           <Route path="/campaigns/:campaignId/import" element={<ImportPage />} />
           <Route path="/campaigns/:campaignId/map" element={<MapPage />} />
+          {/* Lead-allowed like Map/Turfs — no in-page wall; the server's requireCampaignManager
+              gate on the pin routes is the wall (the MapPage/TurfsPage precedent). */}
+          <Route path="/campaigns/:campaignId/pin-fixes" element={<PinFixesPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
           {/* The in-campaign survey builder is reachable by campaign managers (leads too);
               the server (canManageSurvey) enforces per-survey scope. The org /surveys

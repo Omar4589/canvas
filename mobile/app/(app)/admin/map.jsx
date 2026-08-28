@@ -108,6 +108,9 @@ function householdsToFeatures(households) {
           id: String(h.id),
           status: h.status || 'unknocked',
           coordConfidence: h.coordConfidence || '',
+          // Confirm-in-place vouch (Pin Fixes): a confirmed interpolated pin stops ringing.
+          // Boolean-stamped so an older server payload without the field reads plain false.
+          locationConfirmed: h.locationConfirmedAt ? true : false,
         },
         geometry: {
           type: 'Point',
@@ -1358,10 +1361,12 @@ export default function AdminMap() {
 
         <Mapbox.ShapeSource id="admin-households" shape={householdFeatures} onPress={onPinPress}>
           {/* Amber "approximate" ring under any interpolated (non-rooftop) geocode, so
-              admins can spot the pins most likely to be off. Below the house icon. */}
+              admins can spot the pins most likely to be off. Below the house icon. A door a
+              manager vouched for in place (Pin Fixes confirm) stops ringing; to-boolean keeps
+              a missing flag reading as unconfirmed. */}
           <Mapbox.CircleLayer
             id="admin-approx-ring"
-            filter={['==', ['get', 'coordConfidence'], 'interpolated']}
+            filter={['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!', ['to-boolean', ['get', 'locationConfirmed']]]]}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
               circleColor: 'rgba(0,0,0,0)',
@@ -1939,6 +1944,9 @@ export default function AdminMap() {
                   ● Pin corrected
                   {selected.correctedAt ? ` · ${formatInTz(selected.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
                 </Text>
+              ) : selected.coordConfidence === 'interpolated' && selected.locationConfirmedAt ? (
+                /* Confirm-in-place (Pin Fixes): the geocoder's pin, vouched by a person. */
+                <Text style={styles.coordChipCorrected}>● Location confirmed</Text>
               ) : selected.coordConfidence === 'interpolated' ? (
                 <Text style={styles.coordChipApprox}>● Approximate location</Text>
               ) : null}

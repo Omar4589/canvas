@@ -35,10 +35,19 @@ export const visibleCutDoors = (doors, bookIds, showLoose) => {
 export const countLooseDoors = (doors, bookIds) =>
   bookIds.size ? (doors || []).filter((d) => isLooseDoor(d, bookIds)).length : 0;
 
+// Per-round statuses that mean "off the table": restricted access and a posted no-soliciting
+// sign. In status mode their dots are the darkest on the map (slate/pink), and on a heavily
+// desk-restricted round they bury the work — so the Layers box offers to hide them. Judged on
+// `passStatus` (what colors the dot), never the global `Household.status` a prior round set.
+export const OFF_LIMITS_STATUSES = new Set(['restricted', 'no_soliciting']);
+export const isOffLimitsDoor = (d) => OFF_LIMITS_STATUSES.has(d.passStatus);
+
 // What the map is ACTUALLY DRAWING right now — the pool a lasso is allowed to catch.
 //
-// `visibleCutDoors` above answers only one of the page's three visibility mechanisms. The other
-// two live in Mapbox layer state, where no memo can see them:
+// `visibleCutDoors` above answers only the first of the page's FOUR visibility mechanisms.
+// The second is the off-limits toggle (`hideOffLimits` below — the "Restricted & no
+// soliciting" Layers row), another data filter. The other two live in Mapbox layer state,
+// where no memo can see them:
 //   · the book-status chips (Assigned / Completed / …) hide non-matching books AND their dots
 //     via `setFilter('doors', ['in', ['get','turfId'], …])` — and a loose door's `turfId`
 //     property is the empty string, which is in no book's id list, so every loose door is
@@ -54,9 +63,26 @@ export const countLooseDoors = (doors, bookIds) =>
 const NO_DOORS = []; // one stable reference, so a houses-off render doesn't churn every memo
 const doorKey = (d) => buildingKeyForCoords(d.lng, d.lat);
 
-export const drawnCutDoors = ({ doors, bookIds, showLoose, visibleBookIds = null, housesVisible = true, keyOf = doorKey }) => {
+export const drawnCutDoors = ({ doors, bookIds, showLoose, visibleBookIds = null, housesVisible = true, hideOffLimits = false, keyOf = doorKey }) => {
   if (!housesVisible) return NO_DOORS;
-  const visible = visibleCutDoors(doors, bookIds, showLoose);
+  let visible = visibleCutDoors(doors, bookIds, showLoose);
+  if (hideOffLimits) {
+    // Hides SINGLE-home dots only. A stacked building keeps every unit: its pin never takes
+    // a status color (so restricted units were never the clutter), and dropping units would
+    // change stack totals and pin ownership. Group sizes are counted over the same set
+    // groupDoors receives, so "single here" is exactly "drawn as a lone dot on the map".
+    // A stack's own units are never dropped, so the pin-owner map below is undisturbed.
+    const sizes = new Map();
+    for (const d of visible) {
+      const k = keyOf(d);
+      if (k) sizes.set(k, (sizes.get(k) || 0) + 1);
+    }
+    visible = visible.filter((d) => {
+      if (!isOffLimitsDoor(d)) return true;
+      const k = keyOf(d);
+      return !!k && sizes.get(k) >= 2;
+    });
+  }
   if (!visibleBookIds) return visible; // no chip active = every visible door is drawn
   // The door whose turfId the shared pin is drawn under, per rounded building key.
   const pinOwner = new Map();

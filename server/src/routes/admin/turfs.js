@@ -1263,6 +1263,9 @@ router.get('/household/:householdId', async (req, res, next) => {
         coordSource: hh.coordSource || null,
         coordConfidence: hh.coordConfidence || null,
         correctedAt: hh.correctedAt || null,
+        // Confirm-in-place stamp (Pin Fixes) — the popup badge reads "Location confirmed"
+        // instead of "Approximate location" when set.
+        locationConfirmedAt: hh.locationConfirmedAt || null,
       },
       voters: voters.map((v) => ({
         id: String(v._id),

@@ -12,7 +12,13 @@ tags: pin, map, location, gps, pin correction, approximate location
 Some pins are looked up from the address rather than read from your file, so they can land a house or
 two off — especially in rural areas or on long roads. The web map draws a faint **amber ring** around
 these and the door reads **"Approximate location."** Once someone moves it, the ring disappears and it
-reads **"Pin corrected."**
+reads **"Pin corrected."** If someone checks the spot and it's already right, they can **confirm** it
+instead — the ring goes out the same way and the door reads **"Location confirmed."**
+
+**Working through a whole backlog of them?** Use the [Pin Fixes page](page-pin-fixes) (sidebar →
+Quality): every approximate pin in the campaign, grouped by street, with satellite imagery, a Google
+Maps shortcut, and the move / confirm actions side by side. This guide covers moving a single pin
+wherever you run into one.
 
 ## Who can move a pin
 

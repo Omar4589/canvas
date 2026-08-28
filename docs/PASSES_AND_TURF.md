@@ -134,6 +134,14 @@ being set — `turfId` is a single global pointer that only the doors a cut *sel
 door a targeted round skipped still carries an earlier round's book id yet is loose here. (Before any cut
 there are no books, so nothing hides — the pre-cut map still shows the full universe gray.) Doors that are *inside* a book — including one a canvasser marked restricted
 mid-round — keep their book color and stay on the map, so an active-round audit never loses worked doors.
+The one opt-out is deliberate and yours to flip: in status mode, whenever any off-limits single-home
+dots are actually drawn, a **Restricted & no soliciting (N)**
+checkbox appears in the same Layers box (**shown by default** — the audit promise above holds until you
+uncheck it). Unchecking hides the slate/pink **single-home** dots, so a heavily desk-restricted round
+stops burying the live work under them. Apartment stacks keep every unit either way (a building glyph
+never takes a status color, so its units were never the clutter), the coverage bar keeps counting the
+hidden homes (its counts come from the progress oracle, not the drawn dots), and a hidden dot is not
+lasso-selectable — re-check the row before a bulk **Unmark restricted**.
 
 **Marking a book restricted (bulk).** When part or all of a book is inaccessible (a gated community),
 select it on the Turf Cutting page, or on mobile open its **⋯** menu (the Books map's promoted-book
@@ -252,8 +260,9 @@ drawing stand down so nothing fights the drag.
 - **You can only pick what the map is drawing.** Whatever your filters, the **Layers** toggles and the
   book-status chips are already hiding is not selectable — if you can't see it you can't catch it, and a
   lasso over it takes nothing. Turn the **Houses** layer off on Turf Cutting and nothing is selectable at
-  all; the bar says so. Doors a **target-filter preview** merely *fades* are still drawn, so they are still
-  caught — the bar counts them and tells you.
+  all; the bar says so. (Same rule for dots the **Restricted & no soliciting** row has hidden — re-check
+  it before a bulk **Unmark restricted**.) Doors a **target-filter preview** merely *fades* are still
+  drawn, so they are still caught — the bar counts them and tells you.
 - **Buildings come as a whole.** Units at one pin share a rounded location, but the icon is drawn at the
   first unit's exact spot, so a lasso edge can slice a stack. If the shape catches any unit at a pin it
   takes them all — you meant the building.
@@ -352,6 +361,14 @@ answering *"how is this round going?"* — without leaving the page.
   book nobody has started from across the map without reading a single number.
 - **A coverage bar** across the top gives the whole round's mix — how many surveyed, not home,
   refused, still unknocked — and doubles as the map's color key.
+- **Status chips filter the books** — and their dots — two ways at once: by **coverage**
+  (*Assigned / Unassigned*) and by **progress** (*Completed / In progress / Not started /
+  Restricted*). Picks within a family broaden (*Not started* + *In progress* = either); picks
+  across the families narrow (*Unassigned* + *In progress* = unassigned books that are in
+  progress). A book reads **Restricted** — never Completed — when every door in it is
+  restricted or no-soliciting this round: a book taken off the table is not finished work,
+  and *Completed* counts only books that were actually worked to the end. (A finished book
+  with a mix of real work and restricted doors stays Completed — nothing remains in it.)
 - **Click a house** for its status, who knocked it, when, and any survey answers recorded there this
   round, alongside the usual "move to another book".
 - **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway.
@@ -366,8 +383,11 @@ answering *"how is this round going?"* — without leaving the page.
 This appears **automatically once the round has knocks**. While you're still cutting, houses stay
 colored by book exactly as before — a fresh cut has no status to show, and coloring every dot the same
 gray would only make the cut harder to see. A **Door status** checkbox in the map's Layers box forces
-it either way, and a **Not in a book** checkbox there (shown only when the cut left doors loose, hidden by
-default) hides every loose dot — see *Excluding restricted-access homes from a later round* above.
+it either way, a **Not in a book** checkbox there (shown only when the cut left doors loose, hidden by
+default) hides every loose dot, and a **Restricted & no soliciting** checkbox (status mode only, offered
+only while any off-limits single-home dots are drawn, shown
+by default) hides the off-limits single-home dots — see *Excluding restricted-access homes from a later
+round* above for both.
 
 **It does not auto-refresh.** The page shows the round as of when you opened it; reload to update.
 
@@ -914,8 +934,8 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/restrict-doors` `{ householdIds[] (1–1000), passId?, scope? }` | **Door-level desk mark** — one home, every unit at one pin, or a whole lassoed map selection (the web "Select doors" mode; mobile still sends exactly one id and no `scope`). Same row, same writer, same skip ladder, **no draft refusal** (allowed on draft books, accepted books and loose doors alike) and no `disabledOutcomes` check. **`passId` resolution** when omitted: the door's own effort's **active** round (`activePassIdForEffort`) → else the effort's **single** non-archived (draft) round → else `400 { code:'PASS_REQUIRED', unresolved:[{ id, reason:'intake' \| 'no-round' }] }` (all-or-nothing). An explicit `passId` must belong to the campaign (**404**) and must not be archived (**409 `pass-archived`** — phones only receive active-pass books, so an archived-round mark would flip global status while invisible to every canvasser). **Intake doors (`effortId:null`) can never be marked** — `Pass.effortId` is required, so no round can own them (reason `'intake'`, short-circuited before any query). A door whose `effortId` ≠ the pass's effort is `skipped.ineligible`. **`scope`** (added 2026-08-22 for the map selection, parsed by the identical line `restrict-bulk` uses — `req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete'`): omitted, null, unknown (`'sideways'`) and the literal `'incomplete'` all mean **`'incomplete'`**, i.e. byte-for-byte what this route did before the param existed, so no shipped client had to change; only the exact string `'unknocked'` switches ladders, marking the never-touched doors and leaving each **reached** door alone (no desk row, per-round status and field row intact) in `skipped.reached`. The ladder itself is unchanged — `planDeskRestrict` always understood both scopes; the route simply stopped hard-coding one. `turfId` on the row = the door's book in that pass at write time (draft or published; `null` for a loose dot) — **provenance only**, nothing reads it for counts/undo. Desk rows always carry a non-null `passId` (the module throws otherwise — `getPassStatusMap` matches `passId` exactly, so a null-pass row would flip global status but be invisible on every phone) and only ever `actionType:'restricted'` (a `via:'bulk'` row on a KNOCK action is contractually billable — `knocksByPass.int.test.js`). → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, passId, passIds }` — **shape unchanged**; `reached` (always 0 from this route before) now carries a real count under `scope:'unknocked'`, and a client that ignores it is unaffected. Archived campaign → 409 (router-wide). Tagged as an `AccessLog` subject per door. **One request, cap 1,000, never chunked** — the batch is refused WHOLE over the cap, never truncated (neither map payload is sorted, so "the first 1,000" would be an arbitrary, unrepeatable subset), and chunking would pay `recomputeCampaignStats`' whole-ledger recompute once per chunk; cost is otherwise fixed + O(pass groups), ~3 queries per walk list in the per-pass-group loop. Pinned by [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) (19–20 the two scopes, 21 the default parse, 22 the 1000/1001 cap). |
 | `POST .../turfs/unrestrict-doors` `{ householdIds[], passId? }` | One `removeDeskRestrict` call over the `$or` of per-round filters `{ passId, householdId:{ $in } }` (a plain filter for one round) — **no knockable filter, no effort guard, no pass-status and no pass-existence check**: it deletes for whatever `passId` the client sends (the mark's own round, from `/activity`), so a mark whose draft round was later deleted or whose door was re-housed can always be removed. Omitted `passId` → the same resolution as mark. Field rows never match (`unmarked:0`, door stays restricted). **Takes no `scope` and ignores one if sent.** Because of the missing guards, an unmark payload must be filtered differently from a mark payload: drop only `effortId === null` (Intake) doors, and only when no `passId` is sent — a door desk-marked in March and excluded from books in April is still unmarkable today, and filtering it out on the knockable rule would strand its mark forever. → `{ unmarked, households, passId, passIds }`. The clients' **Unmark** is offered only for a desk mark (`via:'bulk'` on the round's latest entry); a field-recorded Restricted shows who/when and no desk action. |
 | `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. **`format=geojson`** (additive — without it the response is byte-identical) returns the same doors as a `FeatureCollection`, for the mobile Books map's file-backed `ShapeSource` (see [ADMIN_APP.md](ADMIN_APP.md) → *The Books screen*). |
-| `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. Also read by the mobile books screen, which ignores `statusCounts`. |
-| `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. **Since 2026-08-22 the household object also carries `location` (`{ lng, lat }` \| null), `coordSource`, `coordConfidence` and `correctedAt`** (each `\|\| null`) — additive, so the mobile book map's call is unaffected — which is what the Turf Cutting popup's *Pin corrected · Aug 22* / *Approximate location* line and its **Move pin →** action read (the move itself is the existing `PATCH /admin/campaigns/:campaignId/households/:householdId/location`, §G). |
+| `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. The chips' matching rules — coverage/progress as two AND-composed groups, and the `restricted` bucket (a finished book whose `statusCounts.restricted + no_soliciting >= total` reads *Restricted*, not *Completed*) — are client-derived from this same payload in [client/src/lib/bookStatusFilter.js](../client/src/lib/bookStatusFilter.js), pinned by its test. Also read by the mobile books screen, whose status chips ignore `statusCounts` and still use the flat-union match — the screen itself does read `statusCounts`, for the Mark-restricted confirm's counts (`restrictCountsFromStatusCounts`). |
+| `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. **Since 2026-08-22 the household object also carries `location` (`{ lng, lat }` \| null), `coordSource`, `coordConfidence` and `correctedAt`** (each `\|\| null`) — additive, so the mobile book map's call is unaffected — which is what the Turf Cutting popup's *Pin corrected · Aug 22* / *Approximate location* line and its **Move pin →** action read (the move itself is the existing `PATCH /admin/campaigns/:campaignId/households/:householdId/location`, §G). Since 2026-08-28 it also carries **`locationConfirmedAt`** (`\|\| null`, additive): the Pin Fixes confirm-in-place stamp, which the popup badge reads as *Location confirmed* (precedence corrected > confirmed > approximate — [MAPS.md](MAPS.md) §B). |
 
 ## D. Why new households are unassigned after import
 
@@ -1113,9 +1133,11 @@ which makes allegations about a person, and this is a fact about a gate.
 **"Select doors": the lasso catches WHAT IS DRAWN.** The desk-restrict selection mode (Part 1) hit-tests
 the **door array the page is drawing**, never `queryRenderedFeatures` — a rendered query can't see a door
 just off-screen and can't tell a markable door from a completed one. On the cut map that array is
-`drawnCutDoors` in [client/src/lib/cutMapDoors.js](../client/src/lib/cutMapDoors.js), because **three** of
+`drawnCutDoors` in [client/src/lib/cutMapDoors.js](../client/src/lib/cutMapDoors.js), because **four** of
 this page's visibility mechanisms decide it and two of them live in Mapbox layer state where no memo can
-see them: `visibleCutDoors` (this pass's books + the *Not in a book* toggle), the **book-status chips**
+see them: `visibleCutDoors` (this pass's books + the *Not in a book* toggle), the **off-limits toggle**
+(`hideOffLimits` — the *Restricted & no soliciting* Layers row; drops single-home dots whose `passStatus`
+is restricted/no-soliciting, never a stacked building's units), the **book-status chips**
 (`setFilter` on `doors` by `turfId` — and a loose door's `turfId` property is the empty string, so every
 loose dot is hidden the moment any chip is on), and the **Houses** layer's `visibility` (off ⇒ nothing is
 selectable at all). The chip filter is applied per **building**, not per door: stacked units are drawn as

@@ -345,6 +345,11 @@ geometry as well, in the one direction that can only help.
   `detail.pinCorrectedMeters` + `pinCorrectedAt` as reviewer context regardless. If the live distance
   minus accuracy is within `FAR_WARN_M`, severity drops to `low` with `detail.pinDowngraded` — unless
   `correctedBy === row.userId`, which sets `detail.pinMovedBySelf` and keeps the severity.
+- **A Pin Fixes confirm-in-place (`locationConfirmedAt`, [MAPS.md](MAPS.md) §B) must NEVER feed this
+  rule.** A confirmed pin is still the geocoder's answer — a human agreed with it, but nobody placed
+  it — so `buildPinFixMap` stays keyed on `coordSource === 'corrected'` and the confirm stamp is
+  deliberately absent from the far projections. A future "confirmed counts as verified" shortcut here
+  would downgrade flags on the strength of a coordinate no one measured.
 - **It never upgrades.** The block sits inside `if (farSev)` and assigns nothing but `'low'`. A pin
   dragged *away* from a door cannot manufacture or worsen a flag.
 - **The self-move guard is a WITHHOLD, not a revert.** If the `replaced` chain already earned `low` on

@@ -56,6 +56,8 @@ export const movePinInvalidationKeys = (campaignId) => [
   ['turf-household', campaignId], // the Turf pop-up's drill (location / provenance)
   ['admin', 'households-map', campaignId], // Map page dots + panel
   ['admin', 'packet-data', campaignId], // print packets with geo
+  ['admin', 'pin-fixes', campaignId], // Pin Fixes queue — a moved pin leaves the needs-fixing set
+  ['admin', 'campaigns'], // sidebar Pin Fixes badge (pinsToFix rides the campaigns rollup)
 ];
 
 // Toast after a save. `moved` is the server's count of doors it moved (res.moved).

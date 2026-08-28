@@ -438,7 +438,9 @@ function adjudicate(byId, suspects, stackedIds, answers, basesByPoint) {
 // latest audit row of source 'import_repair'; if the cached answer that justified such a move
 // fails today's trust gates, the move was made on the geocoder's placeholder and gets
 // reverted to the pin the file gave it. A door whose LATEST move is human
-// ('drag'/'admin_drag'/'gps') is never touched: people outrank providers.
+// ('drag'/'admin_drag'/'gps') is never touched: people outrank providers. ('confirm' rows —
+// Pin Fixes vouches — are written only for interpolated-geocode doors, never 'corrected' ones,
+// so they can't appear in this latest-row check; confirmHouseholdLocation.js keeps that true.)
 async function findOwnRepairs(campaign) {
   const households = await Household.find(
     {
@@ -610,6 +612,11 @@ async function main() {
         doc.correctedBy = null;
         doc.correctedAt = null;
         doc.previousLocation = null;
+        // Same "back to being a file pin" reason: a confirm-in-place vouch (Pin Fixes) can only
+        // exist on interpolated doors, so it can't be here today — cleared defensively so a
+        // future provenance drift never leaves a stamp vouching for the restored file pin.
+        doc.locationConfirmedBy = null;
+        doc.locationConfirmedAt = null;
         try {
           await doc.save();
           await HouseholdLocationChange.create({

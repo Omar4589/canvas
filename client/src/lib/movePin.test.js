@@ -67,6 +67,9 @@ test('invalidation keys: the exact cross-page prefix set, in order', () => {
     ['turf-household', 'c1'],
     ['admin', 'households-map', 'c1'],
     ['admin', 'packet-data', 'c1'],
+    // Pin Fixes: a moved pin leaves the needs-fixing queue and the sidebar badge counts down.
+    ['admin', 'pin-fixes', 'c1'],
+    ['admin', 'campaigns'],
   ]);
   // Prefixes only — never a passId or a date window, which would miss the other page's key.
   for (const k of movePinInvalidationKeys('c1')) assert.ok(k.length <= 3);

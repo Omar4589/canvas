@@ -57,8 +57,13 @@ export default function BottomNav() {
     staleTime: 60 * 1000,
     enabled: inCampaign,
   });
-  const openMockFlags =
-    (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId))?.openMockFlags || 0;
+  const currentCampaign = (campaignsQ.data?.campaigns || []).find(
+    (c) => String(c._id) === String(campaignId)
+  );
+  const openMockFlags = currentCampaign?.openMockFlags || 0;
+  // Approximate pins awaiting a fix/confirm — the amber pill on the Pin Fixes sheet item
+  // (same rollup field the desktop sidebar badge reads).
+  const pinsToFix = currentCampaign?.pinsToFix || 0;
 
   function close() {
     setOpen(false);
@@ -110,9 +115,12 @@ export default function BottomNav() {
         >
           <span className="relative">
             <IconMore />
-            {openMockFlags > 0 && (
+            {/* One dot only: red (open mock flags) outranks amber (pins to fix). */}
+            {openMockFlags > 0 ? (
               <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />
-            )}
+            ) : pinsToFix > 0 ? (
+              <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-warning" />
+            ) : null}
           </span>
           <span>More</span>
         </button>
@@ -153,6 +161,14 @@ export default function BottomNav() {
                       {it.label}
                       <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60">
                         {openMockFlags}
+                      </span>
+                    </span>
+                  ) : it.key === 'pin-fixes' && pinsToFix > 0 ? (
+                    <span className="flex items-center">
+                      {it.label}
+                      {/* Tint + warning-fg, not white-on-warning — the small-amber-text pair. */}
+                      <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-bold leading-none text-warning-fg ring-1 ring-white/60">
+                        {pinsToFix}
                       </span>
                     </span>
                   ) : (

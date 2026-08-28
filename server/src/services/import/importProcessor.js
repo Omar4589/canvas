@@ -413,6 +413,7 @@ export async function processImportJob(job) {
           keptHandEdits: counts.keptHandEdits || 0,
           overwrittenHandEdits: counts.overwrittenHandEdits || 0,
           keptPins: counts.keptPins || 0,
+          keptConfirmed: counts.keptConfirmed || 0,
         },
       }
     );

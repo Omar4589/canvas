@@ -23,6 +23,8 @@ The **Map** page shows all of your campaign's doors, colored by status, so you c
 
 Two filters are worth knowing: **filter to a single canvasser** and the doors recolor to show just **that person's own work** (green only where *they* surveyed, and so on); and **Show overlaps** rings the doors that **more than one canvasser knocked in the same pass** — even across different days. On a campaign with more than one [walk list](walk-lists), an **All walk lists** select also lets you scope the whole map to one list.
 
+**Amber rings mark approximate pins** — doors whose spot was looked up from the address rather than read from your file. The **Layers** panel's **"Approximate location rings"** checkbox (on by default) hides them when a busy all-time view gets noisy, and the [Pin Fixes page](page-pin-fixes) is where you work through them — move each to the right building, or confirm it's already right.
+
 For the full walkthrough, see [Using the maps](maps).
 
 ## On the phone

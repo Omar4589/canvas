@@ -438,7 +438,10 @@ opens the **response detail**, which now shows an *"Edited by …"* line when an
 
 ### The Map tab's door detail (now at web parity)
 Tapping a house on the mobile admin **Map** opens a bottom sheet that now matches the web console's
-door panel: the **status + address** header, **Last action**, a **History by pass** list (every round
+door panel: the **status + address** header (with the pin-provenance chip when one applies — **Pin
+corrected**, **Location confirmed** for a Pin Fixes vouch, or **Approximate location**, in that
+precedence; the map's amber approximate ring likewise skips confirmed doors — [MAPS.md](MAPS.md)),
+**Last action**, a **History by pass** list (every round
 the door was worked, so a door knocked in Round 1 *and* Round 2 shows both — the survey line names the
 voter, and it's **de-duped** so a survey never lists twice), its **voters**, and its **surveys** with
 the answers **lazy-loaded** on open (they don't ride the map's live refetch). Two overlap surfaces ride
