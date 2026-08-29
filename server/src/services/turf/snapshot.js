@@ -8,6 +8,7 @@ import { Pass } from '../../models/Pass.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../canvass/status.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
+import { departedMemberIdSet } from '../campaignRoster.js';
 
 // Capture a pass's current book set (+ assignments, + optionally the knock
 // history about to be cleared) into a TurfSnapshot for undo. Call this BEFORE
@@ -126,8 +127,21 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
     await Household.bulkWrite(mirrorOps.slice(i, i + 2000), { ordered: false });
   }
 
+  // A snapshot can be OLDER THAN THE ROSTER. releaseAssignedWork deletes a departed user's live
+  // TurfAssignment rows but never touches TurfSnapshot.assignments, so restoring verbatim would
+  // undelete books for someone no longer in the org — and the restore route checks only that the
+  // pass has no live books, unlike the assign endpoints. Refuse ONLY the people we can prove are
+  // gone (departedMemberIdSet — deleted/deactivated account, deactivated or absent membership),
+  // never "would I newly assign them": a book-holder's campaign-roster row is written by
+  // ensureCampaignAssignments and nothing re-checks it, so gating on the roster would let an
+  // incidental gap strip a book from someone who never left. Their books come back unassigned,
+  // and the count is reported rather than swallowed.
+  const candidates = [...new Set((snap.assignments || []).map((a) => String(a.userId)))].filter(Boolean);
+  const gone = candidates.length
+    ? await departedMemberIdSet(snap.organizationId, candidates)
+    : new Set();
   const asgOps = (snap.assignments || [])
-    .filter((a) => inserted[a.bookIndex])
+    .filter((a) => inserted[a.bookIndex] && !gone.has(String(a.userId)))
     .map((a) => ({
       turfId: inserted[a.bookIndex]._id,
       userId: a.userId,
@@ -155,5 +169,11 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
 
   snapshot.restoredAt = new Date();
   await snapshot.save();
-  return { bookCount: inserted.length, restoredKnocks: !!snap.clearedKnocks };
+  return {
+    bookCount: inserted.length,
+    restoredKnocks: !!snap.clearedKnocks,
+    // Snapshot rows the roster re-gate refused (departed or deactivated). Those books come back
+    // unassigned; the caller surfaces the number so a silently thinner crew is never a surprise.
+    assignmentsDropped: (snap.assignments || []).filter((a) => inserted[a.bookIndex]).length - asgOps.length,
+  };
 }

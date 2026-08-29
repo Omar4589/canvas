@@ -39,6 +39,46 @@ async function activeMemberIdSet(organizationId, ids) {
   return new Set(activeUserIds.map(String));
 }
 
+// The subset of `ids` we can POSITIVELY show as deactivated — an org membership explicitly
+// switched off, or a disabled user account. Deliberately NOT the complement of
+// activeMemberIdSet: a superadmin doing cross-org oversight holds no membership row in this
+// org at all, and "no evidence of activation" must never render as "inactive" beside a real
+// person's name. Read-only labelling — deactivating a member intentionally KEEPS their books
+// (memberships.js skips releaseAssignedWork), so this names that state, never changes it.
+export async function deactivatedMemberIdSet(organizationId, ids) {
+  const list = [...new Set((ids || []).map((u) => String(u)))].filter(Boolean);
+  if (!list.length) return new Set();
+  const [offMembers, offUsers] = await Promise.all([
+    Membership.find({ organizationId, userId: { $in: list }, isActive: false }).distinct('userId'),
+    User.find({ _id: { $in: list }, isActive: false }).distinct('_id'),
+  ]);
+  return new Set([...offMembers, ...offUsers].map(String));
+}
+
+// The subset of `ids` that have positively LEFT or been switched off: a deleted user account, a
+// deactivated one, a deactivated org membership, or no membership in this org at all (what
+// removal leaves behind — releaseAssignedWork drops the books, the membership goes with it).
+// Superadmins are exempt: cross-org oversight means they legitimately hold no membership here.
+//
+// This is deliberately NOT partitionAssignable inverted. That answers "may I hand this person
+// NEW work?" and refuses anyone merely absent from a campaign's roster — a book-holder is put on
+// that roster by ensureCampaignAssignments, but nothing re-checks it, so inverting it would let
+// an incidental roster gap silently strip a restored book from someone who never went anywhere.
+// Restoring a snapshot must only refuse people we can PROVE are gone.
+export async function departedMemberIdSet(organizationId, ids) {
+  const list = [...new Set((ids || []).map((u) => String(u)))].filter(Boolean);
+  if (!list.length) return new Set();
+  const [liveUsers, supers, activeMembers] = await Promise.all([
+    User.find({ _id: { $in: list }, isActive: true }).distinct('_id'),
+    User.find({ _id: { $in: list }, isSuperAdmin: true }).distinct('_id'),
+    Membership.find({ organizationId, userId: { $in: list }, isActive: true }).distinct('userId'),
+  ]);
+  const live = new Set(liveUsers.map(String));
+  const superSet = new Set(supers.map(String));
+  const member = new Set(activeMembers.map(String));
+  return new Set(list.filter((id) => !superSet.has(id) && (!live.has(id) || !member.has(id))));
+}
+
 // Who may be assigned work (a book) in a campaign: users on the campaign roster, OR org
 // admins — who can be assigned on the fly (incl. self) and get added to the roster when
 // they are — OR a team lead holding a management grant on THIS campaign, for the same

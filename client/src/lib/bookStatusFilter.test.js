@@ -93,3 +93,17 @@ test('a book with no progress bucket cannot pass a progress selection', () => {
   assert.equal(matchesBookStatus(zeroDoors, sel('not_started')), false);
   assert.equal(matchesBookStatus(zeroDoors, sel('unassigned')), true);
 });
+
+// TurfsPage synthesizes this row while /turfs/progress is in flight — a window that opens on
+// EVERY load, since progressQ can't be requested until turfsQ resolves. Mirrors the same case in
+// mobile/lib/bookStatusFilter.test.js; without it the four progress chips read 0 beside a fully
+// populated Assigned/Unassigned pair.
+test('the loading fallback row reads NOT STARTED, and can never read restricted', () => {
+  const loading = { total: 65, knocked: 0 }; // no statusCounts — the oracle has not landed
+  assert.equal(bookProgressKey(loading), 'not_started');
+  const b = bookStatusSet({ assigned: true, progress: loading });
+  assert.equal(matchesBookStatus(b, sel('not_started')), true);
+  assert.equal(matchesBookStatus(b, sel('restricted')), false);
+  // A book with no doors stays bucket-less even under the fallback, so it never lands in a chip.
+  assert.equal(bookProgressKey({ total: 0, knocked: 0 }), null);
+});

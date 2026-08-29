@@ -1503,7 +1503,13 @@ export default function TurfsPage() {
   });
   const turfs = turfsQ.data?.turfs || [];
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
-  const publishedCount = turfs.filter((t) => t.status === 'published').length;
+  // PUBLISHED books are the population every coverage/progress number describes — the status
+  // chips, the header's book-denominated counts and the Crew load pill. A draft can't be
+  // assigned (the server 409s) and has no round progress, so counting it as "unassigned"
+  // overstated the work left. Mirrors mobile's Books screen, which has always filtered here.
+  // `Books` deliberately stays the whole pass (drafts included) with its own "N draft" hint.
+  const publishedTurfs = turfs.filter((t) => t.status === 'published');
+  const publishedCount = publishedTurfs.length;
   const colorByTurf = useMemo(() => new Map(turfs.map((t, i) => [String(t._id), colorFor(i)])), [turfsQ.data]);
   const selectedTurfs = turfs.filter((t) => selectedBooks.has(String(t._id)));
   // Loose-door rules (pass-membership, never turfId presence) live in lib/cutMapDoors.js,
@@ -1789,12 +1795,12 @@ export default function TurfsPage() {
   const totalHouses = turfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
   // Canvassers holding a book, books they hold, books nobody holds — one walk, each named for
   // its unit, so the header strip and the map's Crew load pill can't drift (turfCrewCounts.js).
-  const crew = crewCounts(turfs, assignedByTurf);
+  const crew = crewCounts(publishedTurfs, assignedByTurf);
 
   // Per-canvasser load across the round (books + knockable doors) — for the panel.
   const crewLoad = (() => {
     const m = new Map();
-    for (const t of turfs) {
+    for (const t of publishedTurfs) {
       const doors = t.eligibleDoorCount ?? t.doorCount ?? 0;
       for (const u of assignedByTurf.get(String(t._id)) || []) {
         const e = m.get(u.id) || { user: u, books: 0, doors: 0 };
@@ -1817,21 +1823,31 @@ export default function TurfsPage() {
   // Book status (coverage + progress) → the filter chips + the map/list filter. The grouping
   // rules — OR within a group, AND across coverage/progress, and the `restricted` bucket for
   // fully off-limits books — live in lib/bookStatusFilter.js, pinned by bookStatusFilter.test.js.
+  // While /turfs/progress is in flight the four progress chips would read 0 beside a fully
+  // populated coverage pair — and that window happens on EVERY load, because progressQ can't
+  // even be requested until turfsQ resolves (`enabled: turfs.length > 0`). Synthesize an
+  // unknocked row from the door count the book already carries, exactly as mobile's Books
+  // screen does: books read Not started until the oracle lands, `restricted` stays unreachable
+  // (a fallback row has no statusCounts), and a zero-door book still gets no progress key.
+  const progressFor = (t) =>
+    progressByTurf.get(String(t._id)) ?? { total: t.eligibleDoorCount ?? t.doorCount ?? 0, knocked: 0 };
   const bookStatuses = (t) =>
     bookStatusSet({
       assigned: (assignedByTurf.get(String(t._id)) || []).length > 0,
-      progress: progressByTurf.get(String(t._id)),
+      progress: progressFor(t),
     });
   const matchesStatus = (t) => matchesBookStatus(bookStatuses(t), statusFilter);
   const statusCounts = useMemo(() => {
     const c = { assigned: 0, unassigned: 0, completed: 0, in_progress: 0, not_started: 0, restricted: 0 };
-    for (const t of turfs) for (const k of bookStatuses(t)) c[k] += 1;
+    for (const t of publishedTurfs) for (const k of bookStatuses(t)) c[k] += 1;
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turfsQ.data, assignmentsQ.data, progressQ.data]);
   const visibleBookIds = useMemo(() => {
     if (!statusFilter.size) return null; // null = show all books
-    return new Set(turfs.filter(matchesStatus).map((t) => String(t._id)));
+    // Drafts carry no chip status, so an active filter excludes them rather than parking them
+    // all under Unassigned — otherwise picking Unassigned would show more books than its count.
+    return new Set(publishedTurfs.filter(matchesStatus).map((t) => String(t._id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, turfsQ.data, assignmentsQ.data, progressQ.data]);
   // Did the off-limits toggle just take the LAST book shape off the map? On a round that was
@@ -2901,6 +2917,22 @@ export default function TurfsPage() {
         </div>
       )}
 
+      {/* Deactivating a member deliberately KEEPS their books, so a book whose whole crew is
+          switched off reads as covered while nobody on the roster can open it. Nothing above is
+          reclassified — this only stops the page being silent about it. warning-fg on the tint,
+          never white on solid warning, which fails WCAG at this size. */}
+      {!!turfs.length && crew.inactiveCanvassers > 0 && (
+        <div className="mb-4 inline-flex items-center gap-1.5 rounded bg-warning-tint px-2 py-1 text-[11px] text-warning-fg">
+          <span aria-hidden="true">⚠</span>
+          <span>
+            {crew.inactiveCanvassers} canvasser{crew.inactiveCanvassers === 1 ? '' : 's'} deactivated
+            {crew.booksAllInactive > 0
+              ? ` · ${crew.booksAllInactive} book${crew.booksAllInactive === 1 ? '' : 's'} nobody on the roster can open`
+              : ' · their books are also held by active canvassers'}
+          </span>
+        </div>
+      )}
+
       {/* Round coverage — the whole pass's door mix. Doubles as the legend for the map's
           status colors, which is why the page needs no separate legend widget. */}
       {statusMode && roundProgress.total > 0 && (
@@ -3483,9 +3515,15 @@ export default function TurfsPage() {
                         const asg = assignedByTurf.get(String(t._id)) || [];
                         if (!asg.length) return null;
                         return (
-                          <span className="flex -space-x-1" title={asg.map((u) => `${u.firstName} ${u.lastName}`).join(', ')}>
+                          <span className="flex -space-x-1" title={asg.map((u) => `${u.firstName} ${u.lastName}${u.inactive ? ' (deactivated)' : ''}`).join(', ')}>
                             {asg.slice(0, 3).map((u) => (
-                              <span key={u.id} className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-brand-tint text-[8px] font-semibold text-brand-tint-fg ring-1 ring-card">
+                              <span
+                                key={u.id}
+                                className={
+                                  'inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-semibold ring-1 ring-card ' +
+                                  (u.inactive ? 'bg-warning-tint text-warning-fg' : 'bg-brand-tint text-brand-tint-fg')
+                                }
+                              >
                                 {(u.firstName?.[0] || '') + (u.lastName?.[0] || '')}
                               </span>
                             ))}
@@ -3672,7 +3710,10 @@ export default function TurfsPage() {
                   <ul className="space-y-0.5 text-xs">
                     {crewLoad.map((c) => (
                       <li key={c.user.id} className="flex items-center justify-between gap-2">
-                        <span className="truncate text-fg">{c.user.firstName} {c.user.lastName}</span>
+                        <span className="truncate text-fg">
+                          {c.user.firstName} {c.user.lastName}
+                          {c.user.inactive && <span className="text-warning-fg"> · deactivated</span>}
+                        </span>
                         <span className="shrink-0 text-fg-muted">{c.books} bk · {c.doors.toLocaleString()} dr</span>
                       </li>
                     ))}

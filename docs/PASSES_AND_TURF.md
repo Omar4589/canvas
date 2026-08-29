@@ -328,11 +328,23 @@ see the balance, and a **search** box finds a book by name or assigned canvasser
 first.
 
 **The header counts people; the chips count books.** The strip above the map reads **Canvassers** — how
-many people hold at least one book this round — with the books nobody holds beside it ("83 books
-unassigned"). The *Assigned* chip to its right counts **books**. So on a 97-book round where 8 people
-hold 14 books, the header reads 8 and the chip reads 14, and both are right. The map's **Crew load** pill
-says it in one line: "8 canvassers · 14 books" — the books the crew is actually carrying, not the size
-of the pass.
+many people hold at least one book this round — with the books nobody holds beside it ("78 books
+unassigned"). The *Assigned* chip to its right counts **books**. So on a round where 8 people hold 14
+books, the header reads 8 and the chip reads 14, and both are right. The map's **Crew load** pill says it
+in one line: "8 canvassers · 14 books" — the books the crew is actually carrying, not the size of the pass.
+
+**Drafts sit outside all of that.** Every coverage and progress number — the chips, the "N books
+unassigned" hint, the Crew load pill — describes **accepted (published)** books only. A draft can't be
+assigned and hasn't been walked, so counting it as "unassigned work" overstated what was left to hand
+out. **Books** is the exception and still counts the whole pass, with its own "N draft" note; that is why
+the chips can add up to less than it (92 published + 5 draft = 97 books). Picking any chip also hides
+drafts from the list and map for the same reason — they carry no status to filter on.
+
+**A deactivated canvasser keeps their books.** Deactivating someone doesn't take their work away, so a
+book they hold still reads as assigned. The page now says so instead of leaving it silent: an amber note
+under the strip counts how many of the crew are deactivated and how many books nobody on the roster can
+open, their initials go amber in the book list, and the **Crew load** list marks them. No count moves —
+use **Unassign** if you want those books back in the pool.
 
 Taking books back works the same way, from either client. On **web**, the selected-books panel lists
 everyone assigned across the selection with an **Unassign** button each, plus **Unassign all (N)** to
@@ -1214,23 +1226,56 @@ The cut page's header strip and the map's **Crew load** pill report quantities t
 [client/src/lib/turfCrewCounts.js](../client/src/lib/turfCrewCounts.js), pinned by
 [turfCrewCounts.test.js](../client/src/lib/turfCrewCounts.test.js):
 
-| Surface | Reads | Unit |
-|---|---|---|
-| Header **Canvassers** | `crew.canvassers` | distinct people holding ≥ 1 book |
-| Header hint *"N books unassigned"* | `crew.unassignedBooks` | books |
-| **Houses** hint *"N not in a book"* | `unassignedCount` | doors |
-| Filter chips *Assigned / Unassigned* | `statusCounts` | books |
-| Map **Crew load** pill | `crew.canvassers` · `crew.assignedBooks` | people · books |
+| Surface | Reads | Unit | Population |
+|---|---|---|---|
+| Header **Books** | `turfs.length` (+ `draftCount` hint) | books | the whole pass |
+| Header **Canvassers** | `crew.canvassers` | distinct people holding ≥ 1 book | published |
+| Header hint *"N books unassigned"* | `crew.unassignedBooks` | books | published |
+| **Houses** hint *"N not in a book"* | `unassignedCount` | doors | the whole pass |
+| Filter chips *Assigned / Unassigned* | `statusCounts` | books | published |
+| Map **Crew load** pill | `crew.canvassers` · `crew.assignedBooks` | people · books | published |
 
-`crewCounts(turfs, assignedByTurf)` walks the **book list** once. Two consequences worth keeping.
-`assignedBooks + unassignedBooks === turfs.length` by construction, so the header hint and the
-*Unassigned* chip are two readings of one partition and cannot drift. And the canvasser count is derived
-from the **books** rather than from the raw assignment rows, which closes a latent split: `GET /turfs`
-hides `status: 'archived'` books while `GET /turfs/assignments` never joins `Turf`
-([turfs.js](../server/src/routes/admin/turfs.js)), so a row naming a book the list doesn't carry used to
-count a canvasser the Crew load pill — which has always walked the books — did not.
+`crewCounts(publishedTurfs, assignedByTurf)` walks that list once. Three consequences worth keeping.
+`assignedBooks + unassignedBooks === publishedTurfs.length` by construction, so the header hint and the
+*Unassigned* chip are two readings of one partition and cannot drift — note this is **less than** the
+Books chip whenever drafts exist, which is deliberate and is what the "N draft" hint explains. The
+canvasser count is derived from the **books** rather than from the raw assignment rows, which closes a
+latent split: `GET /turfs` hides `status: 'archived'` books while `GET /turfs/assignments` never joins
+`Turf` ([turfs.js](../server/src/routes/admin/turfs.js)), so a row naming a book the list doesn't carry
+used to count a canvasser the Crew load pill — which has always walked the books — did not. And
+`visibleBookIds` filters `publishedTurfs`, so an active chip excludes drafts rather than parking them all
+under *Unassigned*, where picking that chip would have shown more books than its own count.
 
 **The Crew load pill prints `assignedBooks`, never `turfs.length`.** It shipped printing the pass's whole
 book count under a "Crew load" label ("8 canvassers · 97 books" on a round where the crew held 14). The
 fix is also not to sum the popover's per-person rows: `crewLoad` does `e.books += 1` per *(book, user)*
 pair, so a co-assigned book counts twice and that sum is assignment **rows**, not books.
+
+**The progress chips carry a loading fallback.** `progressQ` is gated on `turfs.length > 0`, a hard
+serial dependency on `turfsQ` — so on EVERY load there is a window where coverage is populated and the
+four progress chips would read 0. `progressFor(t)` synthesizes `{ total: eligibleDoorCount, knocked: 0 }`
+until the oracle lands, mirroring `mobile/app/(app)/admin/books.jsx`: books read *Not started*,
+`restricted` stays unreachable (a fallback row has no `statusCounts`), and a zero-door book still gets no
+progress key. Pinned by the loading-fallback case in
+[bookStatusFilter.test.js](../client/src/lib/bookStatusFilter.test.js).
+
+**Deactivated members are LABELLED, never reclassified.** `GET /turfs/assignments` sets an additive
+`user.inactive` from `deactivatedMemberIdSet` ([campaignRoster.js](../server/src/services/campaignRoster.js)),
+which fires only on POSITIVE evidence — an `isActive:false` membership or user — never on the absence of a
+roster row, or a superadmin doing cross-org oversight would render as "deactivated". Deactivation
+deliberately keeps books (`memberships.js` skips `releaseAssignedWork`), so `crewCounts` returns
+`inactiveCanvassers` / `booksAllInactive` for display alongside counts that do not move. Both clients read
+it: the web strip's amber note and book-list initials, and the mobile Books row's "(deactivated)" suffix.
+
+**Two assignment-row hygiene rules, pinned by
+[turfAssignmentHygiene.int.test.js](../server/test/turfAssignmentHygiene.int.test.js).** *Discard* ends
+with a pass-wide `TurfAssignment.deleteMany({ campaignId, passId })` — the turfId-scoped sweep is built
+from the draft/published ids, so an archived merge-stub's rows (and anything already orphaned) outlived
+every book, and `/assignments` never joins `Turf`, so such a row is served to the page forever. *Restore*
+re-gates the snapshot through `departedMemberIdSet`, because `releaseAssignedWork` deletes a departed
+user's live rows but never touches `TurfSnapshot.assignments`. That gate is deliberately **not**
+`partitionAssignable` inverted: that one answers "may I hand this person NEW work?" and refuses anyone
+merely absent from the campaign roster — a book-holder is put on that roster by
+`ensureCampaignAssignments` and nothing re-checks it, so inverting it strips books from people who never
+left (it broke `effortClaim.int.test.js`'s undo case the moment it was tried). Refused rows restore
+unassigned and are reported as `assignmentsDropped`.

@@ -24,7 +24,7 @@ import { recomputeCampaignStats } from '../../services/reports/campaignCounters.
 import { acquireRecutLock, releaseRecutLock, isRecutLocked } from '../../services/turf/recutLock.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
-import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
+import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 import {
@@ -467,6 +467,12 @@ router.post('/discard', async (req, res, next) => {
     }
     // Sweep any archived merge-stubs for the pass (legacy; merge now hard-deletes).
     await Turf.deleteMany({ campaignId: req.campaign._id, passId, status: 'archived' });
+    // ...and their assignment rows, which the turfId-scoped sweep above cannot reach (it is
+    // built from the draft/published ids only). This is the pass's LAST book-bearing statement,
+    // so nothing may keep a row: /assignments never joins Turf, so an orphan left here is
+    // served to the cut page forever, counting a canvasser against a book that no longer exists.
+    // Pass-wide rather than stub-scoped, so rows already orphaned by an earlier discard go too.
+    await TurfAssignment.deleteMany({ campaignId: req.campaign._id, passId });
 
     // Recompute statuses for the cleared knocks (must run after deletion).
     if (clearKnocks) {
@@ -536,7 +542,14 @@ router.post('/restore-snapshot', async (req, res, next) => {
     lockPassId = snapshot.passId;
 
     const result = await restoreSnapshot({ campaign: req.campaign, snapshot, userId: req.user._id });
-    res.json({ restored: result.bookCount, restoredKnocks: result.restoredKnocks, snapshotId: String(snapshot._id) });
+    // ADDITIVE `assignmentsDropped`: snapshot rows the roster re-gate refused (a canvasser who
+    // has since left or been deactivated). Those books restore UNASSIGNED, so say how many.
+    res.json({
+      restored: result.bookCount,
+      restoredKnocks: result.restoredKnocks,
+      assignmentsDropped: result.assignmentsDropped,
+      snapshotId: String(snapshot._id),
+    });
   } catch (err) {
     next(err);
   } finally {
@@ -1352,12 +1365,23 @@ router.get('/assignments', async (req, res, next) => {
     const rows = await TurfAssignment.find({ campaignId: req.campaign._id, passId })
       .populate('userId', 'firstName lastName')
       .lean();
-    const assignments = rows
-      .filter((a) => a.userId)
-      .map((a) => ({
-        turfId: String(a.turfId),
-        user: { id: String(a.userId._id), firstName: a.userId.firstName, lastName: a.userId.lastName },
-      }));
+    const live = rows.filter((a) => a.userId);
+    // ADDITIVE `user.inactive`: deactivating a member deliberately keeps their books, so a book
+    // held only by deactivated people reports as covered while nobody on the roster can open it.
+    // The counts stay exactly as they were — this only lets the clients SAY so.
+    const off = await deactivatedMemberIdSet(
+      req.campaign.organizationId,
+      live.map((a) => String(a.userId._id))
+    );
+    const assignments = live.map((a) => ({
+      turfId: String(a.turfId),
+      user: {
+        id: String(a.userId._id),
+        firstName: a.userId.firstName,
+        lastName: a.userId.lastName,
+        ...(off.has(String(a.userId._id)) ? { inactive: true } : {}),
+      },
+    }));
     res.json({ assignments });
   } catch (err) {
     next(err);

@@ -11,7 +11,8 @@ import { bookStatusSet } from './bookStatusFilter.js';
 // crew's load. These tests pin each number to its unit and to the pill it must agree with.
 
 const book = (id) => ({ _id: id });
-const user = (id) => ({ id, firstName: 'C', lastName: id });
+// "u3!" marks a deactivated member — the ADDITIVE `user.inactive` flag /turfs/assignments sets.
+const user = (id) => ({ id: id.replace(/!$/, ''), firstName: 'C', lastName: id, ...(id.endsWith('!') ? { inactive: true } : {}) });
 
 // The page's own turfId -> [user] map, built from /turfs/assignments.
 const mapOf = (pairs) => {
@@ -20,6 +21,8 @@ const mapOf = (pairs) => {
   return m;
 };
 
+// `turfs` here is always the PUBLISHED set — drafts never reach this helper (TurfsPage passes
+// publishedTurfs), because a draft can't be assigned and so isn't "unassigned work".
 test('the reported screenshot: 8 canvassers hold 14 of 97 books', () => {
   const turfs = Array.from({ length: 97 }, (_, i) => book(`b${i}`));
   // 14 distinct books carrying 15 assignment rows across 8 people — one book is co-assigned,
@@ -89,9 +92,40 @@ test('an assignment row for a book the list does not carry is ignored', () => {
 });
 
 test('empty pass and empty crew', () => {
-  assert.deepEqual(crewCounts([], new Map()), { canvassers: 0, assignedBooks: 0, unassignedBooks: 0 });
+  assert.deepEqual(crewCounts([], new Map()), {
+    canvassers: 0, assignedBooks: 0, unassignedBooks: 0, inactiveCanvassers: 0, booksAllInactive: 0,
+  });
   const turfs = [book('a'), book('b')];
-  assert.deepEqual(crewCounts(turfs, new Map()), { canvassers: 0, assignedBooks: 0, unassignedBooks: 2 });
+  assert.deepEqual(crewCounts(turfs, new Map()), {
+    canvassers: 0, assignedBooks: 0, unassignedBooks: 2, inactiveCanvassers: 0, booksAllInactive: 0,
+  });
+});
+
+// Deactivating a member deliberately KEEPS their books (memberships.js skips
+// releaseAssignedWork), so the ruling is: name it, never silently reclassify it.
+test('a deactivated canvasser still counts — the book stays assigned', () => {
+  const turfs = [book('a'), book('b')];
+  const c = crewCounts(turfs, mapOf([['a', ['gone!']], ['b', ['here']]]));
+  assert.equal(c.canvassers, 2, 'still a canvasser: the count must not move');
+  assert.equal(c.assignedBooks, 2, 'the book must not flip to unassigned');
+  assert.equal(c.unassignedBooks, 0);
+  assert.equal(c.inactiveCanvassers, 1);
+  assert.equal(c.booksAllInactive, 1, 'nobody on the roster can open book a');
+});
+
+test('a book with one active canvasser beside a deactivated one is NOT flagged', () => {
+  const turfs = [book('a')];
+  const c = crewCounts(turfs, mapOf([['a', ['gone!', 'here']]]));
+  assert.equal(c.inactiveCanvassers, 1, 'the person is still named');
+  assert.equal(c.booksAllInactive, 0, 'but the book is walkable — never flag it');
+});
+
+test('one deactivated person across many books counts once', () => {
+  const turfs = [book('a'), book('b'), book('c')];
+  const c = crewCounts(turfs, mapOf([['a', ['gone!']], ['b', ['gone!']], ['c', ['here']]]));
+  assert.equal(c.inactiveCanvassers, 1);
+  assert.equal(c.booksAllInactive, 2);
+  assert.equal(c.canvassers, 2);
 });
 
 test('turfId is matched as a string, as the page stores it', () => {

@@ -276,7 +276,10 @@ export default function AdminBooks() {
     for (const a of assignmentsQ.data?.assignments || []) {
       const tid = String(a.turfId);
       if (!m.has(tid)) m.set(tid, []);
-      m.get(tid).push({ id: String(a.user.id), firstName: a.user.firstName, lastName: a.user.lastName });
+      // `inactive` is the ADDITIVE flag /turfs/assignments sets for a deactivated member. Their
+      // books are deliberately KEPT, so it changes no count here — it only lets the row say so,
+      // matching the web cut page. Absent on an older server, which reads as "not deactivated".
+      m.get(tid).push({ id: String(a.user.id), firstName: a.user.firstName, lastName: a.user.lastName, inactive: !!a.user.inactive });
     }
     return m;
   }, [assignmentsQ.data]);
@@ -1217,7 +1220,7 @@ export default function AdminBooks() {
                     </View>
                     <Text style={styles.assignees} numberOfLines={1}>
                       {assignees.length
-                        ? assignees.map((u) => `${u.firstName} ${(u.lastName || '')[0] || ''}`).join(', ')
+                        ? assignees.map((u) => `${u.firstName} ${(u.lastName || '')[0] || ''}${u.inactive ? ' (deactivated)' : ''}`).join(', ')
                         : 'Unassigned'}
                     </Text>
                   </View>
