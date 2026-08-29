@@ -34,7 +34,7 @@ test('street grouping: buildings collapse to one row, streets sort numeric-aware
     door('d', '9 Elm Ave Apt 2', -81.5, 28.4),
     door('e', '4 2nd St', -81.42, 28.32),
   ];
-  const { groups, rowCount, idToRowKey } = buildStreetGroups(households);
+  const { groups, rowCount, rowKeys, idToRowKey } = buildStreetGroups(households);
 
   assert.equal(rowCount, 4, '5 doors → 4 rows (the Elm pair is one building row)');
   assert.deepEqual(groups.map((g) => g.street), ['2nd St', 'Elm Ave', 'Oak St'], 'numeric-aware A→Z');
@@ -49,13 +49,20 @@ test('street grouping: buildings collapse to one row, streets sort numeric-aware
   assert.equal(bRow.sub, '2 units at one pin');
   assert.equal(bRow.target.scope, 'building');
   assert.equal(bRow.target.count, 2);
+  // The popup lists the building's units — the row must carry the FULL unit set.
+  assert.deepEqual(bRow.units.map((u) => u.id), ['c', 'd']);
   // EVERY unit id resolves to the building row — a stacked pin click must find its row.
   assert.equal(idToRowKey.get('c'), bRow.rowKey);
   assert.equal(idToRowKey.get('d'), bRow.rowKey);
   assert.equal(idToRowKey.get('a'), 'h:a');
 
+  // The flattened order Next/Prev and auto-advance walk: street order, house-number order
+  // inside — exactly the list as rendered.
+  assert.deepEqual(rowKeys, ['h:e', bRow.rowKey, 'h:b', 'h:a']);
+
   const single = groups.find((g) => g.street === 'Oak St').rows[0];
   assert.equal(single.kind, 'door');
+  assert.equal(single.units, null, 'door rows carry no unit list — the shape stays explicit');
   assert.deepEqual(single.target, {
     id: 'b', addressLine1: '2 Oak St', lng: -81.402, lat: 28.302, scope: 'unit', count: 1,
   });

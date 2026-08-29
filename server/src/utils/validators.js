@@ -56,6 +56,18 @@ export const nameSchema = z.string().trim().min(1).max(80);
 // A login email. Lowercasing stays in the handlers (some compare against existing values).
 export const emailSchema = z.string().trim().email().max(254);
 
+// An OPTIONAL contact email volunteered by a person (walk-up voters, admin edits). Absent /
+// empty → undefined; stored lowercased. Kept separate from emailSchema, which is a required
+// login field with handler-side casing.
+export const voterEmailSchema = z.preprocess(
+  (v) => {
+    if (v == null) return undefined;
+    const s = String(v).trim();
+    return s === '' ? undefined : s.toLowerCase();
+  },
+  z.string().email().max(254).optional()
+);
+
 // An admin-set TEMPORARY password (create user / admin reset / create canvasser). Min 8, no
 // complexity rule — it's short-lived and the user replaces it at first login, so complexity
 // would only add friction (a simple temp like "victory26" is fine). User-CHOSEN passwords use

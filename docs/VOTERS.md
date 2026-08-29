@@ -30,7 +30,8 @@ each person **once** (with a chip for every campaign they're in). Campaign-speci
 ## The directory (web: "Voters")
 
 A searchable, paginated list of every voter in the org. Search by **name, Voter ID, or address**;
-filter by **campaign, survey status, voted status, or party**. Each row → the voter's profile.
+filter by **campaign, survey status, voted status, source ("Added at the door"), or party**. Each
+row → the voter's profile.
 In an org running **more than one campaign**, the unfiltered view shows each person **once**
 (their campaigns listed as chips; "surveyed" means surveyed in *any* of them); picking a campaign
 filter shows that campaign's own records.
@@ -167,6 +168,36 @@ lacks is simply omitted (a voter with nothing on file shows only their name).
 still appears on the mobile **voter profile** (above) and on admin response-details, which are fed
 by different endpoints; it is no longer in the map/door bootstrap payload at all.
 
+## Adding a person at the door (walk-up voters)
+
+Sometimes the person who answers **lives there but isn't on the list** — voter files are always a
+little stale. Canvassers on **survey campaigns** get an **＋ Add person** button on the door screen
+(also offered on doors with no listed voters): first and last name required, **phone and email
+optional** — those two are only for people who'd like to be contacted back. The person is **saved
+immediately** to that address (they stay on the roster even if the conversation ends there), and
+the survey opens for them right away. It works **offline** exactly like every other door action —
+the add and its survey queue together and sync in order when signal returns.
+
+What campaigns control and admins see:
+
+- **Who can add** is a campaign setting on **App Customization** ("Adding people at the door"):
+  everyone on the campaign (the default), or team leads & admins only. Editable by leads, like the
+  outcome toggles, and audited in the campaign's history.
+- Door-added people are **marked "Added at the door"** (who added them, and when) — as a badge in
+  the Voters directory (with a filter to see only them), and as a banner on their profile.
+- They flow into **reports, surveys, tags, and exports like any other voter**. They have **no
+  state Voter ID** (nothing to match against a voter file), so the directory and exports show a
+  blank/dash for that column, and demographic walk-list filters (party, age…) won't match them.
+- **Billing does not change**: a knock is priced per door visit, not per person — surveying a
+  second resident at an already-knocked door costs nothing extra, and neither does adding one.
+- Admins can **edit** a door-added entry (including the new **email** field) and — uniquely for
+  door-added entries — **delete** one that was mistaken or fraudulent. Deleting permanently
+  removes the person, their survey answers, and notes; **the door visit itself stays recorded**
+  (the knock genuinely happened). Imported voters can never be deleted this way.
+- If the same person later arrives in a **voter-file import**, that import creates a **second,
+  separate record** under their real Voter ID — nothing merges automatically. The clean-up is to
+  delete the door-added duplicate.
+
 ---
 
 # Part 2 — Technical reference
@@ -179,6 +210,7 @@ by different endpoints; it is no longer in the map/door bootstrap payload at all
 | `Household.doNotKnock` | [models/Household.js](../server/src/models/Household.js) | The ADDRESS-level sibling — see **[DO_NOT_KNOCK.md](DO_NOT_KNOCK.md)**. NOT derived from voters: mirrored from the org-level `DoNotKnockAddress` record (keyed `{organizationId, normalizedAddress}`, no campaignId, survives a campaign delete). Written ONLY by [recomputeDoNotKnock.js](../server/src/services/dnc/recomputeDoNotKnock.js), same unconditional-`$set`/`updatedAt` contract as `fullyDnc`. In `KNOCKABLE_DOOR_FILTER` as the 5th flag. Never auto-reopens. |
 | `Household.fullyDnc` | [models/Household.js](../server/src/models/Household.js) | Derived: true when **every** voter at the door is flagged (≥1-voter guard — a voter-less door is never fullyDnc). Written ONLY by [services/dnc/recomputeFullyDnc.js](../server/src/services/dnc/recomputeFullyDnc.js), whose unconditional bulkWrite `$set` bumps `updatedAt` — the mobile `/changes` delta depends on that bump. Filtered via the shared [`KNOCKABLE_DOOR_FILTER`](../server/src/services/canvass/knockableDoorFilter.js) at every cut/serve/count site. |
 | `DncUpload` / `DncPendingId` | [models/DncUpload.js](../server/src/models/DncUpload.js), [models/DncPendingId.js](../server/src/models/DncPendingId.js) | Org-level (no campaignId) audit + sticky-pending stores for DNC list uploads; pendings graduate on later imports via [services/dnc/reapplyDncLists.js](../server/src/services/dnc/reapplyDncLists.js), hooked in importProcessor beside the voted reapply. `DncPendingId.uploadId` is now **nullable**: deleting a campaign that held a flagged person's LAST row parks their request as a pending id (null uploadId = admin-set, `reason` carried) so a later import re-flags them — "never contact me" survives a campaign delete. Both models are in the org-delete `ORG_SCOPED` sweep. |
+| `Voter.email` / `Voter.doorAdded` | [models/Voter.js](../server/src/models/Voter.js) | **Walk-up voter fields.** `email` (default null, lowercased) is **org-local contact info, not identity** — in the admin PATCH's `ORG_LOCAL_FIELDS`, never in `PERSON_IDENTITY_FIELDS`/propagateIdentity (Person has no email path), and **never in any mobile wire projection** (`MOBILE_VOTER_PROJECTION`). `doorAdded` subdoc `{byUserId, at}`, default null — `doorAdded != null` IS the provenance marker (imports never set it; import-safe by omission like `doNotContact`), the directory filter (partial index `{organizationId, 'doorAdded.at'}` on `$exists`, needs `migrate:build-indexes --apply`), and the delete gate. Door-added rows carry a **synthetic per-row `stateVoterId` = `manual:<their own _id hex>`** — unique under `{campaignId, stateVoterId}` by construction; a shared placeholder is forbidden (it would merge unrelated people through every `{organizationId, stateVoterId}` sibling surface: profile union, DNC fan-out, directory dedupe, Person svidKeys, platform counters). |
 | `VoterNote` | [models/VoterNote.js](../server/src/models/VoterNote.js) | **New, org-level** admin/canvasser note that follows the person: `{ organizationId, voterId, authorId, body, editedBy, editedAt, timestamps }`. Index `{voterId, createdAt:-1}`. |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | New: `editedBy`/`editedAt` audit fields for in-place edits. `answers` = `[{questionKey, questionLabel, answer}]`. |
 | `CanvassActivity` / `SurveyResponse` notes | — | Field notes shown read-only on the profile (no dedicated voter-note before this feature). |
@@ -209,8 +241,9 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 | `GET /admin/voters` | Directory: server-paginated (`limit`/`skip`/`total`). Search (name/Voter ID/address) + filters (`campaignId`, `party`, `surveyStatus`, `voted`, `precinct`, `dnc`). Rows carry a `dnc` boolean. `?campaignId` is a direct `filter.campaignId` (rows are per-campaign — always resolves that campaign's own row). The org-wide view of a **multi-campaign** org runs a dedupe-by-svid aggregation: one row per person (`$first` in directory order), additive `campaigns:[{id,name}]` chips, `surveyStatus` = surveyed-in-any; single-campaign orgs keep the plain indexed find. |
 | `POST /admin/voters/:voterId/dnc` | Flag do-not-contact (body `{reason}`, required, min 3 chars). Idempotent — a re-flag never restamps (upload-undo attribution). Writes by `{organizationId, stateVoterId}` so **every sibling row flips together**, writes a VoterNote, then `recomputeFullyDnc` for **every sibling's door**. Returns the profile. |
 | `DELETE /admin/voters/:voterId/dnc` | Clear the flag on **all sibling rows** (stamps the transition + VoterNote + recompute; doors may reopen in every campaign). |
-| `GET /admin/voters/:voterId` | Full profile (`buildVoterProfile`). |
-| `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
+| `GET /admin/voters/:voterId` | Full profile (`buildVoterProfile`; carries `voter.email` and `voter.doorAdded {at, by}`). |
+| `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod; incl. `email` — org-local, empty string → null; its phone fields stay deliberately LOOSE free-text because the form round-trips legacy file phones, unlike the strict `phoneSchema` on the walk-up create). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
+| `DELETE /admin/voters/:voterId` | **Door-added rows ONLY** (`doorAdded != null`, else 400 `NOT_DOOR_ADDED`) — the only voter delete in the product; imported rows leave via re-import/undo-import or campaign deletion. Cascade: `SurveyResponse` rows deleted (+`bumpCampaignStats surveys: -n` — `surveyCount` counts response docs), `SurveyResponseArchive` + `VoterNote` + `VotedVoter` deleted, **`CanvassActivity` rows KEPT with `voterId` nulled** (the door visit genuinely happened and is billable; nothing joins the field — doorKey.js), then the Voter, then `recomputeFullyDnc` + `recomputeHouseholdActive` (deleting a door's only voter deactivates the door and the delta drops it from phones). Phones that hold the voter keep a **phantom row until their next full bootstrap** (a deleted doc can't ride the merge-only delta) — a survey against it 404s and the offline queue drops it. |
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD. |
 | `PATCH /admin/voters/:voterId/surveys/:responseId` | Edit `answers`/`note`; sets `editedBy/At`; then `recomputeSurveyStatus`. |
 | `DELETE /admin/voters/:voterId/surveys/:responseId` | Delete a response; then `recomputeSurveyStatus`. Never touches archived (preserved) siblings. |
@@ -226,6 +259,7 @@ Canvassers are restricted to households in their **assigned books on the active 
 | `GET /mobile/voters?campaignId=&search=` | Campaign-scoped search (≤50). Rows carry `dnc`. |
 | `GET /mobile/voters/:voterId?campaignId=` | Read profile (403 if the voter isn't in the canvasser's books). |
 | `POST /mobile/voters/:voterId/notes` | Add a `VoterNote` (`{campaignId, body}`). |
+| `POST /mobile/households/:householdId/voters` | **Add a walk-up voter** (lives in [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) — it's a door write). Body: client-minted `voterId` (24-hex, becomes the `_id`), `firstName`/`lastName` (nameSchema), optional `phone` (strict `phoneSchema`, stored canonical) / `email` (`voterEmailSchema`, lowercased), `location` (**GPS required** — LOCATION_REQUIRED backstop like every door write). Guards, in order: household 404 → `assertHouseholdAccess` → campaign 404/`assertCampaignWritable` (archived 409) → survey-type 400 → `doorAddPolicy: 'leads'` + fresh + not-a-manager → 403 `ADD_VOTER_RESTRICTED` (**offline replays bypass**, the disabledOutcomes rule). **Idempotent on the client id**: replay → 200 with the existing row (queue drains, nothing duplicates); same id at another door/org → 409 `VOTER_ID_CONFLICT`. Writes the Voter (`manual:` svid, `doorAdded` stamp, `personId: null`), runs `recomputeFullyDnc` (its updatedAt bump ships the door's roster to teammates via `/changes`) + `recomputeHouseholdActive`, then answers **201 `{voter, household}` in the per-round wire** (`toWireVoter` through the shared `MOBILE_VOTER_PROJECTION` + `stampPerRoundSurvey` + `toWireHousehold`) — phone/email never in the response. NOT a knock: no CanvassActivity, no stats, no billing. Pinned by [doorAddVoter.int.test.js](../server/test/doorAddVoter.int.test.js). |
 
 **DNC list upload** (`/admin/dnc`, [routes/admin/dnc.js](../server/src/routes/admin/dnc.js)) —
 **org-level and org-admins-only** on purpose (the campaign-nested voted router's
@@ -257,6 +291,24 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
   authoritative backstop that also catches offline-queued submits flushed after a flag.
 - **History is never rewritten:** flagging changes nothing already recorded — billed knocks stay
   billed, past survey responses stay in reports (marked "Do not contact", never deleted).
+- **Walk-up (door-added) voters:**
+  - The `manual:<id>` svid means a door-added row **joins no sibling set** — no profile union, no
+    DNC fan-out to other rows, one directory row. That is correct: nothing ties them to any other
+    row yet. If the real person later arrives in a voter-file import, that import creates a
+    **second row under the real svid — no auto-merge**; the remedy is deleting the door-added
+    duplicate (see [IMPORTS.md](IMPORTS.md)).
+  - `personId` stays **null** (legal everywhere — "pre-backfill voters write straight"). A keyless
+    `resolvePerson` would raise a merge candidate per add into the deferred queue; a synthetic
+    svidKey would pollute Person's real-key space.
+  - The **offline pair** is ordering-safe by construction: the phone mints the voter's `_id`, the
+    create is idempotent on it, and the FIFO queue replays create-before-survey — so the queued
+    survey's path references an id that survives any number of replays.
+  - Adding a voter is **billing- and door-count-neutral** (billing = distinct household×pass over
+    CanvassActivity; doors = Household docs) and voter-unit surfaces (surveyedVoters, tags,
+    coverage) absorb the row naturally. Demographic filters skip them (null party/age/districts).
+  - After an admin **delete**, phones keep a phantom row until their next full bootstrap (the
+    30s delta is merge-plus-append, never remove) — unless it was the door's only voter, in which
+    case the deactivated door drops off phones via the delta.
 
 ## E. Frontend mapping
 

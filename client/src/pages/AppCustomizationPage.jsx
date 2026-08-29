@@ -86,6 +86,14 @@ export default function AppCustomizationPage() {
     onSettled: () => setPendingNext(null),
   });
 
+  // Same optimistic pattern for the walk-up policy (Campaign.doorAddPolicy).
+  const [pendingPolicy, setPendingPolicy] = useState(null);
+  const savePolicy = useMutation({
+    mutationFn: (policy) => api(`/admin/campaigns/${campaignId}`, { method: 'PATCH', body: { doorAddPolicy: policy } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] }),
+    onSettled: () => setPendingPolicy(null),
+  });
+
   if (!campaignId || (!campaignsQ.isLoading && !current)) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
@@ -153,6 +161,51 @@ export default function AppCustomizationPage() {
               </div>
             ))}
           </Section>
+
+          {/* Walk-up voters (survey campaigns only — lit-drop doors carry no voter roster).
+              Who gets the "Add person" button at a door; the server backstops a stale phone
+              with ADD_VOTER_RESTRICTED either way. */}
+          {type === 'survey' && (
+            <Section title="Adding people at the door">
+              <p className="mb-2 text-sm text-fg-muted">
+                Canvassers can add someone they spoke to who lives at the address but isn't on the
+                voter list — name required, phone and email optional. The person is saved to that
+                address and surveyed like anyone else, marked "Added at the door".
+              </p>
+              {[
+                { value: 'all', label: 'Everyone on the campaign', hint: 'Any assigned canvasser can add a person. The default.' },
+                { value: 'leads', label: 'Team leads & admins only', hint: 'Canvassers see no Add-person button; the server refuses their adds.' },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  htmlFor={`door-add-${opt.value}`}
+                  className={`flex items-start justify-between gap-3 border-b border-border py-2.5 last:border-0 ${savePolicy.isPending ? 'opacity-50' : 'cursor-pointer'}`}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm text-fg">{opt.label}</span>
+                    <span className="mt-0.5 block text-xs text-fg-muted">{opt.hint}</span>
+                  </span>
+                  <input
+                    id={`door-add-${opt.value}`}
+                    type="radio"
+                    name="doorAddPolicy"
+                    checked={(pendingPolicy ?? current.doorAddPolicy ?? 'all') === opt.value}
+                    disabled={savePolicy.isPending}
+                    onChange={() => {
+                      setPendingPolicy(opt.value);
+                      savePolicy.mutate(opt.value);
+                    }}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-brand-accent"
+                  />
+                </label>
+              ))}
+              {savePolicy.isError && (
+                <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                  {savePolicy.error?.message || 'Could not save. Try again.'}
+                </div>
+              )}
+            </Section>
+          )}
 
           {/* Shortcut for the fold that follows a toggle-off — org-admin-only, null for
               everyone else, keyed on disabledOutcomes so a flip above refreshes its eligible

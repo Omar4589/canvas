@@ -134,13 +134,21 @@ being set — `turfId` is a single global pointer that only the doors a cut *sel
 door a targeted round skipped still carries an earlier round's book id yet is loose here. (Before any cut
 there are no books, so nothing hides — the pre-cut map still shows the full universe gray.) Doors that are *inside* a book — including one a canvasser marked restricted
 mid-round — keep their book color and stay on the map, so an active-round audit never loses worked doors.
-The one opt-out is deliberate and yours to flip: in status mode, whenever any off-limits single-home
-dots are actually drawn, a **Restricted & no soliciting (N)**
+The one opt-out is deliberate and yours to flip: in status mode, whenever there is anything the
+toggle can hide — an off-limits single-home dot or a fully off-limits building — a **Restricted & no soliciting (N)**
 checkbox appears in the same Layers box (**shown by default** — the audit promise above holds until you
-uncheck it). Unchecking hides the slate/pink **single-home** dots, so a heavily desk-restricted round
-stops burying the live work under them. Apartment stacks keep every unit either way (a building glyph
-never takes a status color, so its units were never the clutter), the coverage bar keeps counting the
-hidden homes (its counts come from the progress oracle, not the drawn dots), and a hidden dot is not
+uncheck it). Unchecking hides everything that is off the table this round, at all three levels, so a
+heavily desk-restricted round stops burying the live work: the slate/pink **single-home dots**; any
+**apartment stack whose every unit is off-limits** (it hides as a whole — a *mixed* stack keeps every
+unit, its pin is a book-membership object over several statuses); and the **shape, outline and label of
+any book the hiding leaves with nothing drawn** — a fully restricted book otherwise sits there as a
+solid empty polygon, boldest exactly where there is least to see (a restricted door counts as knocked,
+so its completion tint reads finished). A book with even one live door keeps its shape, a book that drew
+nothing to begin with keeps whatever it showed before, and selecting the **Restricted** status chip
+overrides the shape-hiding — that chip is an explicit "show me the off-limits books", and the shapes are
+the answer. If hiding empties the map of books entirely, a small pill says so and names the checkbox.
+The coverage bar keeps counting the hidden homes (its counts come from the progress oracle, not the
+drawn dots), the sidebar book list never hides anything, and a hidden dot or stack is not
 lasso-selectable — re-check the row before a bulk **Unmark restricted**.
 
 **Marking a book restricted (bulk).** When part or all of a book is inaccessible (a gated community),
@@ -319,6 +327,13 @@ see the balance, and a **search** box finds a book by name or assigned canvasser
 (published) books can be assigned** — assigning a draft is blocked (a re-cut would wipe it), so Accept
 first.
 
+**The header counts people; the chips count books.** The strip above the map reads **Canvassers** — how
+many people hold at least one book this round — with the books nobody holds beside it ("83 books
+unassigned"). The *Assigned* chip to its right counts **books**. So on a 97-book round where 8 people
+hold 14 books, the header reads 8 and the chip reads 14, and both are right. The map's **Crew load** pill
+says it in one line: "8 canvassers · 14 books" — the books the crew is actually carrying, not the size
+of the pass.
+
 Taking books back works the same way, from either client. On **web**, the selected-books panel lists
 everyone assigned across the selection with an **Unassign** button each, plus **Unassign all (N)** to
 clear the whole selection at once (it asks to confirm in place). On the **phone**, Select mode's action
@@ -371,7 +386,10 @@ answering *"how is this round going?"* — without leaving the page.
   with a mix of real work and restricted doors stays Completed — nothing remains in it.)
 - **Click a house** for its status, who knocked it, when, and any survey answers recorded there this
   round, alongside the usual "move to another book".
-- **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway.
+- **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway. A building
+  whose units are **all** restricted or no-soliciting instead paints slate (pink when it is all
+  no-soliciting) and its badge names the state — `12 restricted`, never `12/12 hit`: every unit has an
+  entry, but nobody entered.
 - **Big campaigns don't drown the map.** Building markers exist only for the part of the map you're
   looking at, and past ~300 buildings in view they stand down behind a chip — *"N buildings in view —
   zoom in for building markers"* — while every building stays visible **and clickable** as a dot at
@@ -385,9 +403,9 @@ colored by book exactly as before — a fresh cut has no status to show, and col
 gray would only make the cut harder to see. A **Door status** checkbox in the map's Layers box forces
 it either way, a **Not in a book** checkbox there (shown only when the cut left doors loose, hidden by
 default) hides every loose dot, and a **Restricted & no soliciting** checkbox (status mode only, offered
-only while any off-limits single-home dots are drawn, shown
-by default) hides the off-limits single-home dots — see *Excluding restricted-access homes from a later
-round* above for both.
+only while it has anything to hide, shown
+by default) hides the off-limits single-home dots, the fully off-limits stacks, and the shapes of books
+that hiding empties — see *Excluding restricted-access homes from a later round* above for both.
 
 **It does not auto-refresh.** The page shows the round as of when you opened it; reload to update.
 
@@ -577,12 +595,16 @@ three fields are rewritten to the round of their assigned book: the door's
 `status`, its `lastActionAt` (a round-fresh door shows **no** "Last visit", not "Unknocked · Last
 visit 3 weeks ago"), and each voter's `surveyStatus` — 'surveyed' means *surveyed in this round*, so
 a Round-1 supporter presents "Take survey", not a "Surveyed" badge with a "Re-survey" button.
-That wire has **four** lanes, and every one must speak per-round: the bootstrap, the `/changes`
-delta, `me.js` ("Remaining"), and the **action responses** — the body a disposition/survey POST
+That wire has **five** lanes, and every one must speak per-round: the bootstrap, the `/changes`
+delta, `me.js` ("Remaining"), the **action responses** — the body a disposition/survey POST
 returns, which the client's reconcile reads (`response.household.status`) and re-arms its
 optimistic overlay with (`toWireHousehold` in
 [canvass.js](../server/src/routes/mobile/canvass.js), pinned by
-[actionResponsePerRound.int.test.js](../server/test/actionResponsePerRound.int.test.js)). The
+[actionResponsePerRound.int.test.js](../server/test/actionResponsePerRound.int.test.js)) — and
+the **walk-up voter create response** (`POST /mobile/households/:id/voters` returns
+`{voter, household}` through the same shapers; its idempotent replay must read the voter's
+per-round `surveyStatus`, pinned by
+[doorAddVoter.int.test.js](../server/test/doorAddVoter.int.test.js)). The
 action lane was the one missed when the wire went per-round: it echoed the stored **sticky**
 global status, so recording *not home* on a prior-round-surveyed door flipped the pin back to
 "surveyed" and the overlay defended the lie against correct deltas until app restart — the
@@ -1137,13 +1159,35 @@ just off-screen and can't tell a markable door from a completed one. On the cut 
 this page's visibility mechanisms decide it and two of them live in Mapbox layer state where no memo can
 see them: `visibleCutDoors` (this pass's books + the *Not in a book* toggle), the **off-limits toggle**
 (`hideOffLimits` — the *Restricted & no soliciting* Layers row; drops single-home dots whose `passStatus`
-is restricted/no-soliciting, never a stacked building's units), the **book-status chips**
+is restricted/no-soliciting, plus whole stacks in which every unit is (`isOffLimitsStack`) — never a
+*mixed* stack's units), the **book-status chips**
 (`setFilter` on `doors` by `turfId` — and a loose door's `turfId` property is the empty string, so every
 loose dot is hidden the moment any chip is on), and the **Houses** layer's `visibility` (off ⇒ nothing is
 selectable at all). The chip filter is applied per **building**, not per door: stacked units are drawn as
 one pin whose `turfId` is the first unit's, so a mixed-book stack is drawn — or hidden — as a unit, and
 judging each unit on its own `turfId` would let the lasso catch a door whose pin isn't on screen. Pinned by
 [cutMapDoors.test.js](../client/src/lib/cutMapDoors.test.js).
+
+**The off-limits toggle also takes BOOK SHAPES and STACK PINS — a separate rule from the door array.**
+`booksEmptiedByOffLimits(grouped)` ([cutMapDoors.js](../client/src/lib/cutMapDoors.js)) names the books
+the toggle leaves with nothing drawn; `paint()` subtracts that set from the `book-fill` / `book-outline` /
+`book-labels` filters (the door layers keep the chip-only filter — these books have no drawn dots by
+definition). Its two load-bearing rules: a unit counts for **its own** book, never the stack pin's
+(`units[0].turfId` — a stack can span books, and judging by the pin would hide book B's shape while a
+door of B's is on screen under book A's pin), and a **fully off-limits stack keeps no book alive**
+because the stack itself hides (`drawnBuildings` in TurfsPage filters it from the `buildings` source and
+the DOM marker sync). A visible fully off-limits stack paints `STATUS_COLORS.restricted` — or
+`no_soliciting` when every unit is no-soliciting — with a badge naming the state (`"N restricted"`, or
+`"N no soliciting"` for the all-no-soliciting case) instead of `"N/N hit"`. The badge's bare
+`passStatus !== 'unknocked'` test deliberately matches the `/turfs/progress` oracle for mixed stacks, so
+only the fully off-limits case is reworded (the same whole-object compensation as the chips'
+`restricted` book bucket). The guard `offLimitsHidden && !statusFilter.has('restricted')` makes the Restricted chip win
+over the shape-hiding, and a bottom-center pill covers the case where the toggle (not a chip matching
+nothing) hid the last book shape. The dots and stacks hide at the DATA level (`drawnSingles` /
+`drawnBuildings` feeding `setData`); the book-shape hiding is a `setFilter` on the three book layers —
+Mapbox layer state, but decided by the memo-visible `emptiedBookIds` and re-applied inside `paint()` on
+`styleEpoch` like the chip filter, so neither survives a basemap swap wrong. Pinned by the `booksEmptiedByOffLimits` and off-limits-stack
+sections of [cutMapDoors.test.js](../client/src/lib/cutMapDoors.test.js).
 
 The rest of the mode is shared with the admin Map page and lives in
 [client/src/lib/lassoSelect.js](../client/src/lib/lassoSelect.js) (`pointInRing` / `ringBBox` /
@@ -1162,3 +1206,31 @@ a real **billable knock that counts as coverage**, non-sticky in `Household.stat
 makes only survey/lit sticky, [statusPrecedence.js](../server/src/utils/statusPrecedence.js)). A canvasser
 can flag it and drop a note, but **cannot edit the address string or move the pin** — both are
 admin/lead data changes.
+
+## I. Header counts: canvassers, books and doors are three different units
+
+The cut page's header strip and the map's **Crew load** pill report quantities that were all once spelled
+"assigned", in three units, with nothing on screen naming which. They now come from one helper —
+[client/src/lib/turfCrewCounts.js](../client/src/lib/turfCrewCounts.js), pinned by
+[turfCrewCounts.test.js](../client/src/lib/turfCrewCounts.test.js):
+
+| Surface | Reads | Unit |
+|---|---|---|
+| Header **Canvassers** | `crew.canvassers` | distinct people holding ≥ 1 book |
+| Header hint *"N books unassigned"* | `crew.unassignedBooks` | books |
+| **Houses** hint *"N not in a book"* | `unassignedCount` | doors |
+| Filter chips *Assigned / Unassigned* | `statusCounts` | books |
+| Map **Crew load** pill | `crew.canvassers` · `crew.assignedBooks` | people · books |
+
+`crewCounts(turfs, assignedByTurf)` walks the **book list** once. Two consequences worth keeping.
+`assignedBooks + unassignedBooks === turfs.length` by construction, so the header hint and the
+*Unassigned* chip are two readings of one partition and cannot drift. And the canvasser count is derived
+from the **books** rather than from the raw assignment rows, which closes a latent split: `GET /turfs`
+hides `status: 'archived'` books while `GET /turfs/assignments` never joins `Turf`
+([turfs.js](../server/src/routes/admin/turfs.js)), so a row naming a book the list doesn't carry used to
+count a canvasser the Crew load pill — which has always walked the books — did not.
+
+**The Crew load pill prints `assignedBooks`, never `turfs.length`.** It shipped printing the pass's whole
+book count under a "Crew load" label ("8 canvassers · 97 books" on a round where the crew held 14). The
+fix is also not to sum the popover's per-person rows: `crewLoad` does `e.books += 1` per *(book, user)*
+pair, so a co-assigned book counts twice and that sum is assignment **rows**, not books.

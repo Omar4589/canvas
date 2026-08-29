@@ -18,8 +18,9 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
-import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor } from '../lib/cutMapDoors.js';
+import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits } from '../lib/cutMapDoors.js';
 import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
+import { crewCounts } from '../lib/turfCrewCounts.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
 import { buildingKeyForCoords } from '../lib/buildings.js';
 import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
@@ -58,6 +59,18 @@ const BOOK_COLORS = [
   '#ca8a04', '#dc2626', '#059669', '#9333ea', '#0d9488', '#e11d48',
 ];
 const colorFor = (i) => BOOK_COLORS[i % BOOK_COLORS.length];
+// A fully off-limits stack (isOffLimitsStack) paints as its STATUS, not its book — the pin is
+// the only status surface a building has, and book-colored + "12/12 hit" read as a worked
+// building nobody could actually enter. All-no-soliciting reads pink; any restricted unit
+// reads slate (the dominant semantic when the two mix). Mixed stacks stay book-colored.
+const offLimitsStackColor = (units) =>
+  (units || []).every((u) => u.passStatus === 'no_soliciting') ? STATUS_COLORS.no_soliciting : STATUS_COLORS.restricted;
+const offLimitsStackBadge = (units, total) =>
+  (units || []).every((u) => u.passStatus === 'no_soliciting') ? `${total} no soliciting` : `${total} restricted`;
+
+// One stable reference, so a render where the off-limits toggle empties nothing doesn't churn
+// the paint effect (same reason lib/cutMapDoors.js keeps NO_DOORS).
+const NO_BOOKS = new Set();
 
 const ATTRIBUTES = [
   { value: 'precinct', label: 'Precinct' },
@@ -1729,17 +1742,40 @@ export default function TurfsPage() {
 
   // The "Restricted & no soliciting" Layers row: in status mode those dots are the darkest on
   // the map, and a heavily desk-restricted round buries the live work under them. Unchecking
-  // hides SINGLE-home off-limits dots only — a stacked building keeps every unit (its pin
-  // never takes a status color, so its units were never the clutter, and dropping them would
-  // change stack totals and pin ownership). Judged on passStatus (what colors the dot), and
-  // only in status mode — book-colored dots don't show the status, so there is nothing to
-  // declutter and the row itself is hidden. The same flag threads into drawnDoors below so a
-  // hidden dot is also un-lassoable (re-check the row before a bulk Unmark).
+  // hides the off-limits SINGLE-home dots and any stack whose EVERY unit is off-limits (whole
+  // — a mixed stack keeps every unit: dropping some would change stack totals and pin
+  // ownership); the books that leaves empty drop their shapes too (emptiedBookIds below).
+  // Judged on passStatus (what colors the dot), and only in status mode — book-colored dots
+  // don't show the status, so there is nothing to declutter and the row itself is hidden. The
+  // same flag threads into drawnDoors below so a hidden dot or stack is also un-lassoable
+  // (re-check the row before a bulk Unmark).
   const offLimitsHidden = statusMode && !layerVis.offLimits;
-  const offLimitsDoorCount = useMemo(() => grouped.singles.filter(isOffLimitsDoor).length, [grouped]);
+  const offLimitsDoorCount = useMemo(
+    // Everything the toggle hides: off-limits singles + every unit of a fully off-limits
+    // stack (those stacks hide whole; a mixed stack's units never hide).
+    () =>
+      grouped.singles.filter(isOffLimitsDoor).length +
+      grouped.buildings.reduce((n, b) => n + (isOffLimitsStack(b.units) ? b.units.length : 0), 0),
+    [grouped]
+  );
+  const drawnBuildings = useMemo(
+    () => (offLimitsHidden ? grouped.buildings.filter((b) => !isOffLimitsStack(b.units)) : grouped.buildings),
+    [grouped, offLimitsHidden]
+  );
   const drawnSingles = useMemo(
     () => (offLimitsHidden ? grouped.singles.filter((d) => !isOffLimitsDoor(d)) : grouped.singles),
     [grouped, offLimitsHidden]
+  );
+  // …and the BOOK SHAPES the same toggle empties. Hiding the dots alone left a fully off-limits
+  // book as an empty filled polygon — and since a restricted door counts as knocked, its
+  // completion tint is solid, so the emptiest books rendered the boldest on a decluttered map.
+  // Rules (and the stacked-unit trap) live in lib/cutMapDoors.js. The Restricted CHIP wins over
+  // this: selecting it is an explicit "show me the off-limits books", and the two controls would
+  // otherwise cancel into a blank map.
+  const hideEmptiedBooks = offLimitsHidden && !statusFilter.has('restricted');
+  const emptiedBookIds = useMemo(
+    () => (hideEmptiedBooks ? booksEmptiedByOffLimits(grouped) : NO_BOOKS),
+    [grouped, hideEmptiedBooks]
   );
 
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
@@ -1751,9 +1787,9 @@ export default function TurfsPage() {
 
   // At-a-glance summary (all client-derived from data already loaded).
   const totalHouses = turfs.reduce((s, t) => s + (t.eligibleDoorCount ?? t.doorCount ?? 0), 0);
-  const assignedUserSet = new Set();
-  for (const arr of assignedByTurf.values()) for (const u of arr) assignedUserSet.add(u.id);
-  const booksUnassigned = turfs.filter((t) => !(assignedByTurf.get(String(t._id)) || []).length).length;
+  // Canvassers holding a book, books they hold, books nobody holds — one walk, each named for
+  // its unit, so the header strip and the map's Crew load pill can't drift (turfCrewCounts.js).
+  const crew = crewCounts(turfs, assignedByTurf);
 
   // Per-canvasser load across the round (books + knockable doors) — for the panel.
   const crewLoad = (() => {
@@ -1798,6 +1834,25 @@ export default function TurfsPage() {
     return new Set(turfs.filter(matchesStatus).map((t) => String(t._id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, turfsQ.data, assignmentsQ.data, progressQ.data]);
+  // Did the off-limits toggle just take the LAST book shape off the map? On a round that was
+  // desk-restricted wholesale that is the normal outcome, and a map with nothing on it while the
+  // sidebar still lists every book reads as a broken page — so the map says why. Measured against
+  // the books that can draw at all: a book with no boundary (emptied by a bulk move) never drew.
+  const bookShapesHidden = useMemo(() => {
+    if (!emptiedBookIds.size) return false;
+    const drawable = turfs.filter((t) => t.boundary?.coordinates?.length).map((t) => String(t._id));
+    if (!drawable.length) return false;
+    const chipVisible = (id) => !visibleBookIds || visibleBookIds.has(id);
+    // The toggle must be the OPERATIVE cause: at least one chip-visible book was emptied, and
+    // no chip-visible book survives. Without the first clause, a chip set matching zero books
+    // (empty visibleBookIds) would blame the toggle for a blank map the chips caused — and the
+    // pill's advice would be inert, since re-ticking the row restores nothing the chips hide.
+    return (
+      drawable.some((id) => chipVisible(id) && emptiedBookIds.has(id)) &&
+      !drawable.some((id) => chipVisible(id) && !emptiedBookIds.has(id))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turfsQ.data, visibleBookIds, emptiedBookIds]);
   // A book shows in the list when it passes BOTH the name/canvasser search and the status filter.
   const bookShown = (t) => matchBook(t) && (!visibleBookIds || visibleBookIds.has(String(t._id)));
   const shownBooksCount = turfs.filter(bookShown).length;
@@ -2560,12 +2615,18 @@ export default function TurfsPage() {
     if (map.getSource('buildings')) {
       map.getSource('buildings').setData({
         type: 'FeatureCollection',
-        features: grouped.buildings.map((b) => ({
+        // drawnBuildings, not grouped.buildings: the off-limits toggle hides fully off-limits
+        // stacks whole. A visible one paints its status color, never its book's (see
+        // offLimitsStackColor) — status mode only, like the door dots.
+        features: drawnBuildings.map((b) => ({
           type: 'Feature',
           properties: {
             key: b.key,
             turfId: b.turfId ? String(b.turfId) : null,
-            color: colorByTurf.get(String(b.turfId)) || '#9ca3af',
+            color:
+              statusMode && isOffLimitsStack(b.units)
+                ? offLimitsStackColor(b.units)
+                : colorByTurf.get(String(b.turfId)) || '#9ca3af',
             dim: targetedSet ? !(b.units || []).some((u) => targetedSet.has(String(u.id))) : false,
           },
           geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
@@ -2578,9 +2639,16 @@ export default function TurfsPage() {
     // stays in the sources, so a chip toggle never re-serializes. null = show everything
     // (selection just restyles, never hides). Re-applies on styleEpoch via the paint effect.
     const ids = visibleBookIds ? [...visibleBookIds] : null;
-    map.setFilter('book-fill', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
-    map.setFilter('book-outline', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
-    map.setFilter('book-labels', ids ? ['in', ['get', 'id'], ['literal', ids]] : null);
+    // Book SHAPES drop one more set than the dots do: any book the off-limits toggle left with
+    // nothing drawn (see emptiedBookIds). Empty = identical to `ids`, so with the toggle idle
+    // this is byte-for-byte today's behavior. The dot layers below keep `ids` — these books have
+    // no drawn dots by definition, so there is nothing there to hide or to lasso.
+    const shapeIds = emptiedBookIds.size
+      ? (ids || turfs.map((t) => String(t._id))).filter((id) => !emptiedBookIds.has(id))
+      : ids;
+    map.setFilter('book-fill', shapeIds ? ['in', ['get', 'id'], ['literal', shapeIds]] : null);
+    map.setFilter('book-outline', shapeIds ? ['in', ['get', 'id'], ['literal', shapeIds]] : null);
+    map.setFilter('book-labels', shapeIds ? ['in', ['get', 'id'], ['literal', shapeIds]] : null);
     // The ring shares the `doors` source, so it needs the SAME filter or a hidden book's
     // dots would vanish while their halos stayed behind.
     map.setFilter('doors', ids ? ['in', ['get', 'turfId'], ['literal', ids]] : null);
@@ -2599,10 +2667,10 @@ export default function TurfsPage() {
       if (bb) map.fitBounds(bb, { padding: 50, maxZoom: 15, duration: 0 });
     }
   }
-  // `grouped` MUST be here: paint() draws the buildings from grouped.buildings, so the "Not in
-  // a book" toggle (which only changes `grouped`, not doorsQ.data) has to re-run this. Same for
-  // `drawnSingles` (grouped.singles minus the off-limits toggle's hidden dots) and the door dots.
-  useEffect(() => { paint(); }, [grouped, drawnSingles, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
+  // drawnSingles / drawnBuildings / emptiedBookIds MUST be here: paint() draws from them, and
+  // all three are memos over `grouped`, so the "Not in a book" and off-limits toggles (which
+  // change only those memos, not doorsQ.data) re-run this through them.
+  useEffect(() => { paint(); }, [drawnSingles, drawnBuildings, emptiedBookIds, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
 
   // Selection rings. Deliberately NOT folded into paint(): adding the selection to that
   // effect's deps would re-serialize the whole book/door/building GeoJSON on every lasso.
@@ -2643,17 +2711,21 @@ export default function TurfsPage() {
 
     // What SHOULD be on the map right now.
     const wanted = new Map(); // key -> { b, color, badgeText, dimmed, sig }
-    for (const b of grouped.buildings) {
+    for (const b of drawnBuildings) {
       if (visibleBookIds && !visibleBookIds.has(String(b.turfId))) continue;
       if (!inBoundsWithMargin(bounds, b.lng, b.lat)) continue;
-      const color = colorByTurf.get(String(b.turfId)) || '#9ca3af';
-      // The glyph stays BOOK-colored (a building is a book-membership object, and its units
-      // can hold several different statuses). In status mode the badge answers "how many of
-      // these have been hit" instead of just how many units are stacked here.
+      // A MIXED stack's glyph stays BOOK-colored (a building is a book-membership object,
+      // and its units can hold several different statuses); in status mode its badge answers
+      // "how many of these have been hit". A FULLY off-limits stack instead paints its status
+      // and its badge names the state — "12 restricted", never "12/12 hit": every unit has an
+      // entry, but nobody entered, and `hit` (a bare not-unknocked test) can't tell the two
+      // apart. Same rule as the door dots and the paint() building-dots color.
+      const offLimits = statusMode && isOffLimitsStack(b.units);
+      const color = offLimits ? offLimitsStackColor(b.units) : colorByTurf.get(String(b.turfId)) || '#9ca3af';
       const hit = statusMode
         ? (b.units || []).filter((u) => (u.passStatus || 'unknocked') !== 'unknocked').length
         : 0;
-      const badgeText = statusMode ? `${hit}/${b.total} hit` : null;
+      const badgeText = statusMode ? (offLimits ? offLimitsStackBadge(b.units, b.total) : `${hit}/${b.total} hit`) : null;
       const dimmed = !!(targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id))));
       wanted.set(b.key, { b, color, badgeText, dimmed, sig: markerSig(color, badgeText, dimmed, darkBase) });
     }
@@ -2696,7 +2768,7 @@ export default function TurfsPage() {
   // Inputs changed → re-sync (and once at mapReady).
   useEffect(() => {
     syncRef.current();
-  }, [grouped, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
+  }, [drawnBuildings, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
 
   // Pan/zoom → re-sync from the ref (registered ONCE, so no listener churn), and
   // keep the zoom≥16 badge behavior for the markers that exist.
@@ -2811,10 +2883,10 @@ export default function TurfsPage() {
               hint={unassignedCount > 0 ? `${unassignedCount.toLocaleString()} not in a book` : undefined}
             />
             <StatChip
-              label="Assigned"
-              value={assignedUserSet.size.toLocaleString()}
-              accent={!!assignedUserSet.size}
-              hint={booksUnassigned > 0 ? `${booksUnassigned} book${booksUnassigned === 1 ? '' : 's'} unassigned` : 'every book covered'}
+              label="Canvassers"
+              value={crew.canvassers.toLocaleString()}
+              accent={!!crew.canvassers}
+              hint={crew.unassignedBooks > 0 ? `${crew.unassignedBooks} book${crew.unassignedBooks === 1 ? '' : 's'} unassigned` : 'every book covered'}
             />
             <StatChip
               label="Selected"
@@ -3549,8 +3621,9 @@ export default function TurfsPage() {
                 // opens showing only this cut's booked doors.
                 ...(looseDoorCount > 0 ? [['notInBook', `Not in a book (${looseDoorCount.toLocaleString()})`]] : []),
                 // Offered only in status mode (book-colored dots don't show the status) and
-                // only when the round has off-limits singles. Default SHOWN; unchecking hides
-                // the slate/pink dots — building stacks keep their units either way.
+                // only when there is something it can hide: off-limits singles or fully
+                // off-limits stacks (mixed stacks always keep their units). Default SHOWN;
+                // unchecking hides those dots and stacks, plus the shapes of books emptied.
                 ...(statusMode && offLimitsDoorCount > 0
                   ? [['offLimits', `Restricted & no soliciting (${offLimitsDoorCount.toLocaleString()})`]]
                   : []),
@@ -3589,6 +3662,11 @@ export default function TurfsPage() {
                   {culledBuildings.toLocaleString()} buildings in view — zoom in for building markers
                 </div>
               )}
+              {bookShapesHidden && (
+                <div className="mb-1 rounded-full border border-border bg-card/95 px-3 py-1 text-center text-xs text-fg-muted shadow backdrop-blur">
+                  Every book is fully off-limits — tick <span className="font-medium text-fg">Restricted &amp; no soliciting</span> under Layers to see them
+                </div>
+              )}
               {crewOpen && crewLoad.length > 0 && (
                 <div className="mb-1 max-h-56 w-72 overflow-auto rounded-lg border border-border bg-card/95 p-2 shadow-xl backdrop-blur">
                   <ul className="space-y-0.5 text-xs">
@@ -3607,8 +3685,8 @@ export default function TurfsPage() {
                 className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs font-medium text-fg shadow-lg backdrop-blur hover:bg-sunken"
               >
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Crew load</span>
-                {crewLoad.length > 0 ? (
-                  <span>{crewLoad.length} canvasser{crewLoad.length === 1 ? '' : 's'} · {turfs.length} books</span>
+                {crew.canvassers > 0 ? (
+                  <span>{crew.canvassers} canvasser{crew.canvassers === 1 ? '' : 's'} · {crew.assignedBooks} book{crew.assignedBooks === 1 ? '' : 's'}</span>
                 ) : (
                   <span className="text-fg-muted">no one assigned yet</span>
                 )}

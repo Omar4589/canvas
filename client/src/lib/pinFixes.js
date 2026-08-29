@@ -12,10 +12,13 @@ import { pluralize } from './mapCounts.js';
 // number + unit stripped) because that's how the list is worked: one street at a time against
 // the imagery. Streets sort A→Z numeric-aware; rows by house number, then label.
 //
-// Returns { groups: [{ street, rows }], rowCount, idToRowKey } where each row is
-//   { rowKey, kind: 'building'|'door', label, sub, lng, lat, target, door }
-// and `target` is exactly what useMovePin.start() and the confirm POST take. idToRowKey maps
-// EVERY door id (stacked units included) to its row, for the map's pin-click handler.
+// Returns { groups: [{ street, rows }], rowCount, rowKeys, idToRowKey } where each row is
+//   { rowKey, kind: 'building'|'door', label, sub, lng, lat, target, door, units }
+// and `target` is exactly what useMovePin.start() and the confirm POST take. `units` is the
+// building's full unit list (null on door rows) — the action popup renders it. idToRowKey maps
+// EVERY door id (stacked units included) to its row, for the map's pin-click handler. `rowKeys`
+// is the flattened street-sorted order — the ONE order Next/Prev and auto-advance walk, kept
+// here (not re-derived in the page) so the tests pin it.
 export const buildStreetGroups = (households) => {
   const { buildings, stackedIds } = groupHouseholds(households);
   const rows = [];
@@ -40,6 +43,7 @@ export const buildStreetGroups = (households) => {
         count: b.total,
       },
       door: b.units[0],
+      units: b.units,
     });
     for (const u of b.units) idToRowKey.set(String(u.id), rowKey);
   }
@@ -65,6 +69,7 @@ export const buildStreetGroups = (households) => {
         count: 1,
       },
       door: h,
+      units: null,
     });
     idToRowKey.set(String(h.id), rowKey);
   }
@@ -80,13 +85,15 @@ export const buildStreetGroups = (households) => {
     rows: list.sort((a, b) => a.houseNumber - b.houseNumber || a.label.localeCompare(b.label)),
   }));
   groups.sort((a, b) => a.street.localeCompare(b.street, undefined, { numeric: true }));
-  return { groups, rowCount: rows.length, idToRowKey };
+  const rowKeys = groups.flatMap((g) => g.rows.map((r) => r.rowKey));
+  return { groups, rowCount: rows.length, rowKeys, idToRowKey };
 };
 
 // The ADDRESS search, deliberately not a coordinate link: the point is seeing where Google
 // puts the address so the pin can be dragged (or confirmed) to match — a coordinate link
-// would just show Google our own possibly-wrong spot. Opened by the admin's own click in a
-// new tab, exactly the manual workflow it replaces; nothing is ever fetched by the app.
+// would just show Google our own possibly-wrong spot. Opened by the admin's own click (or
+// their G keypress — a per-door, user-initiated action all the same) in a new tab, exactly
+// the manual workflow it replaces; nothing is ever fetched by the app.
 export const googleMapsUrl = (d = {}) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     [d.addressLine1, d.city, `${d.state || ''} ${d.zipCode || ''}`.trim()].filter(Boolean).join(', ')

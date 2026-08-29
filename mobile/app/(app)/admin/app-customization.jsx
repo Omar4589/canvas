@@ -90,6 +90,33 @@ export default function AdminAppCustomization() {
     save.mutate(next);
   };
 
+  // Walk-up policy (Campaign.doorAddPolicy): one switch — ON = 'all' (any canvasser can add
+  // a person at a door), OFF = 'leads' (leads/admins only). Same local-flip + snap-back-on-
+  // error pattern as the outcome switches above.
+  const serverPolicy = campaign?.doorAddPolicy || 'all';
+  const [policyAll, setPolicyAll] = useState(serverPolicy === 'all');
+  useEffect(() => {
+    setPolicyAll((campaign?.doorAddPolicy || 'all') === 'all');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cId, serverPolicy]);
+  const savePolicy = useMutation({
+    mutationFn: (policy) => api(`/admin/campaigns/${cId}`, { method: 'PATCH', body: { doorAddPolicy: policy } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      flash('success', 'Add-person setting updated.');
+    },
+    onError: (err) => {
+      const rows = qc.getQueryData(['admin', 'campaigns'])?.campaigns || [];
+      const row = rows.find((c) => String(c._id) === String(cId));
+      setPolicyAll((row?.doorAddPolicy || 'all') === 'all');
+      flash('error', err.message);
+    },
+  });
+  const setPolicy = (all) => {
+    setPolicyAll(all);
+    savePolicy.mutate(all ? 'all' : 'leads');
+  };
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -158,6 +185,25 @@ export default function AdminAppCustomization() {
           ))}
         </InsetGroup>
         <GroupFooter>These can't be turned off — without them a walk can't be recorded at all.</GroupFooter>
+
+        {kind === 'survey' && (
+          <>
+            <SectionHeader title="Adding people at the door" caption />
+            <InsetGroup>
+              <InsetSwitchRow
+                label="Everyone can add people"
+                sub="Off = team leads & admins only. Adds a walk-up voter (name required, phone/email optional) to the door, marked “Added at the door”."
+                value={policyAll}
+                disabled={savePolicy.isPending || !campaign}
+                onValueChange={setPolicy}
+              />
+            </InsetGroup>
+            <GroupFooter>
+              Someone the canvasser spoke to who lives at the address but isn't on the voter list.
+              The person is saved to that address and surveyed like anyone else.
+            </GroupFooter>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

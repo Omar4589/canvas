@@ -176,6 +176,14 @@ porch. It's still on the voter's full profile under **Voters**.)
 Any door button recolors the pin and drops you back on the map the instant you tap — you're never
 waiting on the network.
 
+**Someone answers who isn't on your list?** On survey campaigns there's an **＋ Add person** link
+beside the voter list (and on doors that show "No registered voters listed here."). Type their
+first and last name — phone and email are optional, only for people who'd like to be contacted
+back — and tap **Add & take survey**: they're saved to this address immediately and their survey
+opens. It works offline like everything else, and the person stays on the door's list even if the
+survey doesn't happen. If the button isn't there, your campaign has limited adding to team leads
+and admins (an App Customization setting), or this is a lit-drop campaign.
+
 **Some buttons may be missing on purpose.** Your campaign can turn individual outcomes off (say,
 No soliciting) from its App Customization settings — if a button you expect isn't there, that's a
 campaign choice, not a bug. **Not home** and the completion action (**Surveyed** / **Lit dropped**)
@@ -564,6 +572,26 @@ branch the action area:
   disappears; a queued offline replay (`wasOfflineSubmission`) is accepted instead, so no real
   knock is dropped by a settings flip. The map's filter chips and legend hide a disabled outcome
   only once no loaded door still carries its status.
+
+**Add person (walk-up voters)** — on `survey` campaigns the roster header and the empty state
+offer **＋ Add person**, gated on `bootstrap.campaign.canAddVoters === true` (a server-computed
+per-user flag: `campaign.doorAddPolicy` 'all' | 'leads', additive — an older server/bundle simply
+shows nothing) and mounted like `FixPinModal` (gate at the mount, not just the button). The modal
+([components/AddPersonModal.jsx](../mobile/components/AddPersonModal.jsx)) collects
+first*/last*/phone/email, mints the voter's ObjectId **on the phone**
+([lib/objectId.js](../mobile/lib/objectId.js)) and calls `recordAddVoter`
+([lib/recordAction.js](../mobile/lib/recordAction.js)) — the standard `optimisticSubmit`
+pipeline: GPS-gated, then the wire-shaped voter is appended to `bootstrap.voters`
+**synchronously** (which is what lets the survey screen — a scan of that array — open
+immediately, even offline), then `POST /mobile/households/:id/voters` submits-or-queues. The
+server treats the client id as the real `_id` and is **idempotent** on it, so the FIFO queue's
+create-then-survey pair survives any replay; `onAccepted` closes the modal and `guardedPush`es
+to `/(app)/voter/<id>/survey` (under the `/voter/` prefix, so the OTA restart shield covers the
+flow). A stale-true button is backstopped by `ADD_VOTER_RESTRICTED` — typed alert, optimistic
+voter dropped by the `['bootstrap']` invalidate. Teammates' phones learn of the voter through
+the 30s delta: the fold ([lib/deltaFold.js](../mobile/lib/deltaFold.js)) merges known voters and
+**appends** unknown ones whose door is in the folded households (before this, the fold was
+merge-only and silently discarded new rows).
 
 All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` —
 `firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is

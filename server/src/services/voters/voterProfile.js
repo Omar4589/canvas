@@ -95,6 +95,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   const add = (id) => id && userIds.add(String(id));
   add(voter.lastEditedBy);
   add(voter.doNotContact?.byUserId);
+  add(voter.doorAdded?.byUserId);
   for (const a of activity) add(a.userId);
   for (const n of voterNotesRaw) add(n.userId);
   for (const s of surveys) { add(s.userId); add(s.editedBy); add(s.deskEntry?.byUserId); }
@@ -187,6 +188,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
       phone: voter.phone || null,
       phoneType: voter.phoneType || null,
       cellPhone: voter.cellPhone || null,
+      email: voter.email || null,
       party: voter.party || null,
       gender: voter.gender || null,
       dateOfBirth: voter.dateOfBirth || null,
@@ -213,6 +215,11 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
         : { flagged: false },
       lastEditedAt: voter.lastEditedAt || null,
       lastEditedBy: who(voter.lastEditedBy),
+      // Walk-up provenance: this row was typed at a door, not imported. Who/when powers the
+      // "Added at the door" banner and gates the admin delete (doorAdded rows only).
+      doorAdded: voter.doorAdded
+        ? { at: voter.doorAdded.at || null, by: who(voter.doorAdded.byUserId) }
+        : null,
     },
     household: household
       ? {

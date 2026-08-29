@@ -558,8 +558,11 @@ where relevant a grey line of explanation.
   campaign's numbers;
   **App customization** — which outcome buttons this campaign's canvassers see, a stack of
   switches (the inset grammar's `InsetSwitchRow`, its first use) with an always-available list
-  below; reached from the campaign screen's Quick actions like History, edits save on flip, and
-  every flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*);
+  below, plus — on survey campaigns — the **"Adding people at the door"** switch (ON = every
+  canvasser can add a walk-up voter at a door; OFF = team leads & admins only); reached from the
+  campaign screen's Quick actions like History, edits save on flip, and
+  every flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*;
+  [VOTERS.md](VOTERS.md) → *Adding a person at the door*);
   **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";
@@ -585,6 +588,20 @@ knowing about. The depth lives in the linked docs; here's what an admin can now 
 up. (Mobile is unchanged by all of this — the survey builder, the survey report, walk lists, and tags
 are web-only; the only field-app change is the new **Refused** button covered in
 [CANVASSER_APP.md](CANVASSER_APP.md).)
+
+### Walk-up voters: oversight on the web
+
+Canvassers can add a person at a door (someone who lives there but isn't on the imported list —
+[VOTERS.md](VOTERS.md) → *Adding a person at the door*). The web side of that feature:
+
+- **App Customization** gains an "Adding people at the door" card (survey campaigns): everyone on
+  the campaign (default) or team leads & admins only. Lead-editable, audited in History.
+- The **Voters directory** marks door-added entries with an **"Added at the door"** badge, adds an
+  "Any source / Added at the door" filter, and shows a dash for their (synthetic) Voter ID.
+- The **voter profile** shows who added them and when, gains an **Email** field (editable — walk-up
+  voters can volunteer one for follow-up), and — for door-added entries only — a **Delete this
+  person** action: their survey answers and notes are permanently removed, while the door visit
+  itself stays recorded (the knock genuinely happened and stays billed).
 
 ### The survey builder does more than plain questions
 On the **Surveys** page, beyond wording/type/required/options, a question can now carry:

@@ -16,20 +16,33 @@ where you clean them up: it lists **every** approximate pin in the campaign — 
 can't ring, like doors stacked inside an apartment building's icon — so nothing hides in a crowded
 view. The sidebar item carries an amber count of pins waiting, and the page shows the same number.
 
-## How to work the list
+## How to work the queue
 
 Doors are **grouped by street**, because that's how you actually check them — one street at a time.
-Click a row and the map flies to that pin. Then decide:
+Pick a pin either way:
+
+- **Click a pin on the map** and a **popup opens at the top-right of the map** with the address
+  (and, for an apartment building, the list of its units), the actions, and **← →** arrows to step
+  through the queue.
+- **Click a row in the list** and the map flies there with the same actions right under the row.
+
+Then decide:
 
 - **The pin is in the wrong spot → Move pin.** Drag the blue marker onto the right building and
   **Save location** — the same move-pin flow as the Map and Turf Cutting pages, same audit trail.
-  An apartment row moves **every unit at that pin together**.
+  An apartment building moves **every unit at that pin together**.
 - **The pin is actually right → Looks right — confirm.** The door leaves the list and the ring goes
   out everywhere, without pretending anyone moved anything. The door's detail then reads
   **"Location confirmed"** instead of "Approximate location," the confirmation is saved with who and
   when, and a later file re-import won't quietly move the pin you vouched for. Mis-clicked? The
-  toast has an **Undo**. Confirming an apartment row confirms every approximate unit at the pin — a
-  unit someone already hand-moved is left alone.
+  toast has an **Undo**. Confirming an apartment building confirms every approximate unit at the
+  pin — a unit someone already hand-moved is left alone.
+
+**After each fix the page moves you along on its own** — it flies to the next pin and opens its
+popup, so a big backlog is one decision per house. The header keeps score: **"12 doors cleared this
+session · 34 left"**, with a progress bar. And while the popup is open you can drive it entirely
+from the keyboard: **Enter** confirms, **← →** step to the previous or next pin, **G** opens Google
+Maps, **Esc** closes the popup.
 
 Two tools make the checking fast:
 
@@ -37,7 +50,7 @@ Two tools make the checking fast:
   Most pins can be placed on the right roof without leaving the page.
 - **Google Maps ↗** opens the door's address in a Google Maps search in a new tab, for the ones
   imagery alone can't settle. It's exactly the address search you'd type yourself — nothing is sent
-  anywhere until you click it.
+  anywhere until you open it (a click, or the **G** key).
 
 ## Who can use it
 

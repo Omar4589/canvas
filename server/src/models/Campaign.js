@@ -42,6 +42,13 @@ const campaignSchema = new mongoose.Schema(
     // (OUTCOME_DISABLED, with offline-replay tolerance); this is a recording policy only —
     // no aggregation reads it, and rows recorded before a toggle flip keep counting.
     disabledOutcomes: { type: [{ type: String, enum: TOGGLEABLE_OUTCOMES }], default: [] },
+    // Who may add a walk-up voter at a door in the canvasser app: 'all' (default — every
+    // rostered canvasser) or 'leads' (only leads with a CampaignManager grant + admins).
+    // Enforcement lives in routes/mobile/canvass.js (ADD_VOTER_RESTRICTED, with the same
+    // offline-replay tolerance as disabledOutcomes); the bootstrap ships a computed
+    // `canAddVoters` so the app hides the button. A recording policy only — flipping it
+    // never touches existing rows.
+    doorAddPolicy: { type: String, enum: ['all', 'leads'], default: 'all' },
     // What DOORLINE charges for this campaign per month, in cents. TRI-STATE like the flag above:
     // null = inherit Subscription.pricePerCampaignCents, a number = negotiated override. This is
     // how a firm running a governor's race and a school-board race prices them differently inside

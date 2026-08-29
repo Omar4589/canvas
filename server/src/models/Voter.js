@@ -27,6 +27,20 @@ const doNotContactSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// "This row was typed at a door, not imported" — the provenance marker for walk-up voters a
+// canvasser adds on the spot (routes/mobile/canvass.js POST /households/:id/voters). Null on
+// every imported row (csvImporter never sets it), so `doorAdded != null` IS the filter, the
+// admin badge, and the delete gate (only door-added rows may be deleted). Import-survival is
+// by omission, same mechanism as doNotContact: never in csvImporter's row.voter, so a
+// re-import's $set spread can never touch it.
+const doorAddedSchema = new mongoose.Schema(
+  {
+    byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    at: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const voterSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -79,6 +93,10 @@ const voterSchema = new mongoose.Schema(
     phone: { type: String, default: null, trim: true },
     phoneType: { type: String, default: null, trim: true },
     cellPhone: { type: String, default: null, trim: true },
+    // Volunteered at the door (walk-up voters) or admin-entered — voter files don't carry one.
+    // NOT identity: never in PERSON_IDENTITY_FIELDS / propagateIdentity (Person has no email
+    // path), and never in any mobile wire projection — admin-console-only, like phone.
+    email: { type: String, default: null, trim: true, lowercase: true },
 
     party: { type: String, default: null, trim: true },
     gender: { type: String, default: null, trim: true },
@@ -101,6 +119,9 @@ const voterSchema = new mongoose.Schema(
 
     // Do-not-contact (see doNotContactSchema above). Null until first touched.
     doNotContact: { type: doNotContactSchema, default: null },
+
+    // Walk-up provenance (see doorAddedSchema above). Null on every imported row.
+    doorAdded: { type: doorAddedSchema, default: null },
 
     // Admin edit stamp (the voter directory lets an admin correct voter fields).
     lastEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -126,6 +147,14 @@ voterSchema.index({ organizationId: 1, stateVoterId: 1 });
 voterSchema.index(
   { organizationId: 1, 'doNotContact.flagged': 1 },
   { partialFilterExpression: { 'doNotContact.flagged': true } }
+);
+// Directory "Added at the door" filter. Partial like the DNC one: only door-added rows are
+// indexed (a sliver of the collection). Key shape is distinct from every existing index, so
+// buildIndexes' shape-only diff sees it. Prod autoIndex is OFF — exists only after
+// `migrate:build-indexes --apply`.
+voterSchema.index(
+  { organizationId: 1, 'doorAdded.at': 1 },
+  { partialFilterExpression: { 'doorAdded.at': { $exists: true } } }
 );
 
 export const Voter = mongoose.model('Voter', voterSchema);

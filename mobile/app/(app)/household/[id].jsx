@@ -18,6 +18,7 @@ import { guardedPush } from '../../../lib/navGuard';
 import { buildingKey } from '../../../lib/buildings';
 import { loadRoleContext } from '../../../lib/role';
 import FixPinModal from '../../../components/FixPinModal';
+import AddPersonModal from '../../../components/AddPersonModal';
 import VoterMeta from '../../../components/VoterMeta';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
@@ -189,6 +190,11 @@ export default function HouseholdDetail() {
 
   const [note, setNote] = useState('');
   const [showFixPin, setShowFixPin] = useState(false);
+  const [showAddPerson, setShowAddPerson] = useState(false);
+  // Walk-up voters (Add person): the server computes canAddVoters per user from the
+  // campaign's doorAddPolicy. Strict === true so an older bundle/server (no field) shows
+  // nothing; a stale-true cache is backstopped by the server's ADD_VOTER_RESTRICTED 403.
+  const canAddPerson = bootstrap?.campaign?.canAddVoters === true && canCanvass;
   // Moving a pin is a data change with an audit trail, so it's leads/admins only — the server
   // refuses anyone else (routes/mobile/canvass.js), and this just keeps a canvasser from tapping
   // a button that can only fail. Defaults FALSE because loadRoleContext is async: defaulting true
@@ -353,21 +359,49 @@ export default function HouseholdDetail() {
           />
         )}
 
+        {/* Same gate-at-the-mount rule as FixPinModal: a stale showAddPerson must not be
+            able to present a modal whose save the server would refuse. */}
+        {canAddPerson && (
+          <AddPersonModal
+            visible={showAddPerson}
+            householdId={household._id}
+            qc={qc}
+            onClose={() => setShowAddPerson(false)}
+            // The voter is in the bootstrap cache the moment this fires (the optimistic
+            // append), so the survey screen resolves them instantly — even offline.
+            onAdded={(voterId) => guardedPush(router, `/(app)/voter/${voterId}/survey`)}
+          />
+        )}
+
         {campaignType === 'survey' && (
           <>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Voters at this address</Text>
-              {contactable.length > 0 && (
-                <Text style={styles.sectionCount}>
-                  {surveyedCount}/{contactable.length} surveyed
-                </Text>
-              )}
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.md }}>
+                {contactable.length > 0 && (
+                  <Text style={styles.sectionCount}>
+                    {surveyedCount}/{contactable.length} surveyed
+                  </Text>
+                )}
+                {canAddPerson && (
+                  <Pressable onPress={() => setShowAddPerson(true)} hitSlop={6} disabled={isSubmitting}>
+                    <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>＋ Add person</Text>
+                  </Pressable>
+                )}
+              </View>
             </View>
             {voters.length === 0 && (
               <View style={styles.emptyVoters}>
                 <Text style={type.caption}>
                   No registered voters listed here.
                 </Text>
+                {canAddPerson && (
+                  <Pressable onPress={() => setShowAddPerson(true)} hitSlop={6} disabled={isSubmitting} style={{ marginTop: spacing.sm }}>
+                    <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>
+                      ＋ Add the person you spoke to
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             )}
             {voters.map((v) => (

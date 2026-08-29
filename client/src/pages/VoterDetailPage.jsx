@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link, useLocation } from 'react-router-dom';
+import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -30,6 +30,7 @@ function answerText(a) {
 const EDIT_FIELDS = [
   ['firstName', 'First name'], ['lastName', 'Last name'],
   ['phone', 'Phone'], ['cellPhone', 'Cell phone'], ['phoneType', 'Phone type'],
+  ['email', 'Email'],
   ['party', 'Party'], ['gender', 'Gender'], ['registrationStatus', 'Registration status'],
   ['registeredState', 'Registered state'],
   ['congressionalDistrict', 'Congressional district'], ['stateSenateDistrict', 'State senate district'],
@@ -82,7 +83,13 @@ function VoterFields({ voter, person, onSave, saving, tz }) {
       >
         {lockNote}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
-          <Detail label="Voter ID" value={voter.stateVoterId} mono />
+          {/* A door-added row's synthetic `manual:` id is an implementation detail, not a
+              state voter ID — show the provenance instead. */}
+          <Detail
+            label="Voter ID"
+            value={voter.stateVoterId?.startsWith('manual:') ? 'None — added at the door' : voter.stateVoterId}
+            mono={!voter.stateVoterId?.startsWith('manual:')}
+          />
           {EDIT_FIELDS.map(([k, label]) => <Detail key={k} label={label} value={voter[k]} />)}
           <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, tz, false)} />
         </dl>
@@ -585,6 +592,7 @@ export default function VoterDetailPage() {
   const { voterId } = useParams();
   const orgTz = useOrgTimeZone();
   const { state } = useLocation(); // referrer (e.g. { from: 'notes', campaignId }) for a contextual back
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [newNote, setNewNote] = useState('');
   const [err, setErr] = useState('');
@@ -629,6 +637,15 @@ export default function VoterDetailPage() {
     mutationFn: () => api(`/admin/voters/${voterId}/dnc`, { method: 'DELETE' }),
     onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
   });
+  // Door-added rows only — the server refuses everything else (NOT_DOOR_ADDED).
+  const deleteVoter = useMutation({
+    mutationFn: () => api(`/admin/voters/${voterId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'voters'] });
+      navigate('/voters');
+    },
+    onError: onErr,
+  });
 
   if (profileQ.isLoading) return <div className="p-6 text-sm text-fg-muted">Loading…</div>;
   if (profileQ.error) return <div className="p-6 text-sm text-danger">Error: {profileQ.error.message}</div>;
@@ -647,7 +664,14 @@ export default function VoterDetailPage() {
       </Link>
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold text-fg">{v.fullName}</h1>
-        <span className="font-mono text-xs text-fg-subtle">{v.stateVoterId}</span>
+        {!v.stateVoterId?.startsWith('manual:') && (
+          <span className="font-mono text-xs text-fg-subtle">{v.stateVoterId}</span>
+        )}
+        {v.doorAdded && (
+          <span className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg">
+            Added at the door{v.doorAdded.by ? ` by ${v.doorAdded.by.name}` : ''}{v.doorAdded.at ? ` · ${fmtDate(v.doorAdded.at, orgTz, false)}` : ''}
+          </span>
+        )}
         {v.party && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">{v.party}</span>}
         <span className={'rounded-full px-2 py-0.5 text-xs font-medium ' + (v.surveyStatus === 'surveyed' ? 'bg-success-tint text-success' : 'bg-sunken text-fg-muted')}>
           {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
@@ -821,6 +845,34 @@ export default function VoterDetailPage() {
       </Section>
 
       <StaffAccessCard voterId={voterId} tz={orgTz} />
+
+      {/* Only door-added (walk-up) rows can be deleted — a mistaken or fraudulent entry typed
+          at a door. Imported voters leave via re-import/undo-import or campaign deletion. */}
+      {v.doorAdded && (
+        <Section title="Remove this entry">
+          <p className="text-sm text-fg-muted">
+            This person was added at the door{v.doorAdded.by ? ` by ${v.doorAdded.by.name}` : ''} and
+            isn't from a voter file. Deleting them permanently removes their survey answers and
+            notes; the door visit itself stays recorded.
+          </p>
+          <button
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete ${v.fullName}? Their survey answers and notes are permanently deleted. ` +
+                    'The door visit itself stays recorded. This cannot be undone.'
+                )
+              ) {
+                deleteVoter.mutate();
+              }
+            }}
+            disabled={deleteVoter.isPending}
+            className="mt-3 rounded-md border border-danger/40 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-60"
+          >
+            {deleteVoter.isPending ? 'Deleting…' : 'Delete this person'}
+          </button>
+        </Section>
+      )}
     </div>
   );
 }

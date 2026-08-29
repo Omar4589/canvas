@@ -1100,13 +1100,51 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     The Pin Fixes page renders an **"Open in Google Maps"** link per door — the app's first
     outbound maps link. Reasoning recorded deliberately: the link is a user-initiated browser
     navigation (`https://www.google.com/maps/search/?api=1&query=<address>`); the voter's
-    address (plus the staff user's IP) reaches Google **only when the admin clicks**, from the
+    address (plus the staff user's IP) reaches Google **only on the admin's explicit per-door
+    action — a click, or the page's G keyboard shortcut** *(v6 2026-08-29: the shortcut is a
+    synchronous `window.open` inside the admin's own keydown — the same user-initiated,
+    browser-side mechanism, still nothing prefetched or server-side)* — from the
     admin's own browser, replacing the identical manual workflow (pasting the address into
     Google). No customer data flows server-side to Google, nothing is engaged "to provide the
     Service", so it is **not** a DPA §6 subprocessor and the service-providers paragraph
     (`privacy.html`) needs no edit — Google already appears in both documents for app
     distribution and device location services. If this link is ever automated (prefetch,
     server-side geocoding via Google, embedded Google tiles), THAT change is a §6 event.
+
+16. **[v6 2026-08-29 — ⚠️ WALK-UP VOTERS: a NEW COLLECTION CHANNEL and a NEW DATA CATEGORY —
+    NEEDS AN OWNER DECISION on `privacy.html` BEFORE the production mobile release.]** Canvassers
+    on survey campaigns can now **create a voter record at the door** ("Add a person" —
+    `POST /mobile/households/:id/voters`, [VOTERS.md](VOTERS.md)): first/last name required,
+    phone and **email** optional, volunteered by the person for follow-up contact. Two policy
+    problems, one exposure audit:
+    **(a) The collection channel has no policy category.** The Privacy Policy's "Voter and
+    constituent information" paragraph states exactly one provenance: *"Our customers **upload**
+    records…"* — and its Canvassing-activity paragraph covers activity attached to *"the record
+    it relates to"*, i.e. an existing record. A canvasser **typing identity data into the app,
+    creating the record**, is a second acquisition channel the policy does not describe (the
+    same structural gap this doc recorded for the demo-request form). **(b) Email is a new
+    personal-data category for voters.** `Voter.email` is the first email field on a voter or
+    person record anywhere in the product; the policy's enumerated voter list (names, addresses,
+    party, DOB, gender, telephone numbers, districts, voter IDs, voting-participation) does not
+    include it. **Both are owner edits to `privacy.html`, made deliberately, never as a side
+    effect of code — and the edit is a SHIP GATE for the production mobile OTA** (staging may
+    precede it; the feature must not reach production phones while the published policy's
+    provenance sentence is false). **Exposure posture, code-verified:** phone/email are
+    admin-console-only — the mobile wire re-reads every voter through the shared
+    `MOBILE_VOTER_PROJECTION` (bootstrap, `/changes`, and the create response), so neither field
+    ever reaches a phone's offline cache, preserving the §C "strict subset" claim verbatim.
+    `Voter.doorAdded.byUserId/at` is staff attribution on a customer record (same class as the
+    pin-stamp items 15/v6-08-22; joins the §A3 pseudonymity list). The create tags its record
+    for the staff-under-grant audit (`addAuditSubjects`), so a support-session add is visible in
+    the voter's staff-access panel. **Deletion:** the new admin `DELETE /admin/voters/:voterId`
+    (door-added rows only) erases the person — SurveyResponse rows, their archives, VoterNotes,
+    VotedVoter rows — while `CanvassActivity` rows are kept with `voterId` nulled (the door
+    visit is billing history, not personal data once unlinked; precedent: the admin
+    survey-response delete). Door-added rows ride the existing campaign- and org-deletion
+    cascades like any Voter row — no new retention surface, no new third party, and **no new
+    export surface**: `email` is in no export's column set today (the CSV builders enumerate
+    their fields; none was touched). Adding it to an export later is its own disclosure-review
+    moment.
 
 ---
 
@@ -1344,7 +1382,7 @@ After the purge, **all field records persist in full and remain linked to the de
 - `CanvassActivity.location {lat, lng, accuracy}` — **`required`** (`:39`)
 - `CanvassActivity.timestamp` — **`required`** (`:42`); `actionType`, free-text `note` (`:37`), `distanceFromHouseMeters` (`:40`), `coordinatorId` (`:69`)
 - `SurveyResponse.userId` (required), with its own required `location` and `submittedAt` and the answer payload (`models/SurveyResponse.js:44`, `:52`, `:55`, `:49`)
-- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId` *[v6 2026-08-28: also `Household.correctedBy` (pin correction) and the new `Household.locationConfirmedBy` (Pin Fixes confirm — item 15). Same class, same posture: staff attribution on customer records, untouched by account deletion.]*
+- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId` *[v6 2026-08-28: also `Household.correctedBy` (pin correction) and the new `Household.locationConfirmedBy` (Pin Fixes confirm — item 15). Same class, same posture: staff attribution on customer records, untouched by account deletion.]* *[v6 2026-08-29: also `Voter.doorAdded.byUserId` (who added a walk-up voter — item 16). Same class, same posture.]*
 - The tombstoned `User` document itself still exists, carrying `_id`, `createdAt`, `lastLoginAt`, `deletedAt` — and an email that **embeds the user id**: `deleted+<userId>@deleted.doorline.invalid` *[v4 2026-07-22: `lastLoginAt` is no longer among them, nor is the new `lastSeenAt` — both are scrubbed. **The pseudonymity finding is unchanged and never depended on that field**: the tombstone still carries `_id`, `createdAt` and `deletedAt` plus an id-embedding email, and every field record still points at that id. Removing an activity clock removes a re-identification hint, not the identifier.]*
 
 Nothing in the deletion path or the purge path ever nulls, removes, or re-keys `CanvassActivity.userId`. `deleteAccount.js:170-173` states the omission is deliberate. `purgeDeletedIdentities.js:34-37` writes to `DeletedUserRecord` and nothing else.

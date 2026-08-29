@@ -36,7 +36,7 @@ router.use(requireAuth, orgContext, requireOrgMember);
 //
 // Keep the `dateOfBirth: 1` in the Mongo projections above: we need it HERE to compute the age. It
 // just must not survive into the response.
-function toWireVoter(v, voted) {
+export function toWireVoter(v, voted) {
   const { dateOfBirth, doNotContact, ...rest } = v;
   // Do-not-contact ships as a bare boolean — the reason/who/when stamp never reaches the phone's
   // offline cache (same principle as the DOB: the strongest protection is not sending it). The
@@ -44,13 +44,32 @@ function toWireVoter(v, voted) {
   return { ...rest, age: ageFromDob(dateOfBirth), voted, dnc: doNotContact?.flagged === true };
 }
 
+// The ONE voter projection every mobile wire reads through — bootstrap, the /changes delta,
+// and the walk-up create response (routes/mobile/canvass.js). toWireVoter spreads `...rest`,
+// so THIS LIST is what keeps phone/email/cellPhone/districts off phones ("a strict subset" —
+// the privacy-verified device cache). Never pass toWireVoter a full Voter doc; re-read
+// through this projection first. dateOfBirth is here only so toWireVoter can derive `age`
+// — it never survives into the response (see the comment block above).
+export const MOBILE_VOTER_PROJECTION = {
+  _id: 1,
+  householdId: 1,
+  fullName: 1,
+  firstName: 1,
+  lastName: 1,
+  party: 1,
+  gender: 1,
+  dateOfBirth: 1,
+  surveyStatus: 1,
+  'doNotContact.flagged': 1, // → toWireVoter's `dnc` boolean; never the reason
+};
+
 // Per-round voter state + the smart-confirm flag, in ONE place so the bootstrap and the
 // /changes delta cannot drift (a delta voter is never a partial view — the client spread-merges
 // it whole). `surveyedByMe` ships ONLY when the voter reads 'surveyed' this round: true = the
 // requesting canvasser took it, false = a teammate did (the door confirms before re-asking).
 // The teammate's IDENTITY never ships — a boolean, same minimalism as the dnc flag. Voters at
 // legacy null-pass doors keep the global status and carry no flag, matching door status.
-function stampPerRoundSurvey(w, doorPass, surveyedThisRound, meId) {
+export function stampPerRoundSurvey(w, doorPass, surveyedThisRound, meId) {
   if (!doorPass.has(String(w.householdId))) return w;
   const by = surveyedThisRound.get(String(w._id)) || null;
   w.surveyStatus = by ? 'surveyed' : 'not_surveyed';
@@ -310,17 +329,7 @@ router.get('/bootstrap', async (req, res, next) => {
       campaign.type === 'survey'
         ? Voter.find(
             { householdId: { $in: householdIds }, organizationId: orgId },
-            {
-              householdId: 1,
-              fullName: 1,
-              firstName: 1,
-              lastName: 1,
-              party: 1,
-              gender: 1,
-              dateOfBirth: 1,
-              surveyStatus: 1,
-              'doNotContact.flagged': 1, // → toWireVoter's `dnc` boolean; never the reason
-            }
+            MOBILE_VOTER_PROJECTION
           ).lean()
         : Promise.resolve([]),
       campaign.surveyTemplateId
@@ -379,6 +388,13 @@ router.get('/bootstrap', async (req, res, next) => {
         // Door outcomes turned off for this campaign — additive; older clients ignore it and
         // keep showing every button (the OUTCOME_DISABLED backstop in canvass.js covers them).
         disabledOutcomes: campaign.disabledOutcomes || [],
+        // Walk-up voter policy + this user's effective permission — additive; older clients
+        // ignore both and never show the Add-person button. A stale-true client (bootstrap
+        // predates a policy flip) hits the ADD_VOTER_RESTRICTED backstop in canvass.js.
+        doorAddPolicy: campaign.doorAddPolicy || 'all',
+        canAddVoters:
+          campaign.type === 'survey' &&
+          ((campaign.doorAddPolicy || 'all') === 'all' || (await canManageCampaign(req, campaign._id))),
       },
       activeSurvey: survey,
       surveys,
@@ -453,9 +469,9 @@ router.get('/changes', async (req, res, next) => {
       }
     }
 
-    // Identity-cache fields (match the bootstrap projection) so voter changes reach an
+    // The shared projection (same as the bootstrap) so voter changes reach an
     // already-bootstrapped client via the delta poll, not only a full re-bootstrap.
-    const VOTER_DELTA_PROJ = { _id: 1, householdId: 1, surveyStatus: 1, fullName: 1, firstName: 1, lastName: 1, party: 1, gender: 1, dateOfBirth: 1, 'doNotContact.flagged': 1 };
+    const VOTER_DELTA_PROJ = MOBILE_VOTER_PROJECTION;
 
     // Voters ride the delta on TWO tracks, unioned:
     //  1. ALL voters of a changed household (not only docs whose own updatedAt moved):

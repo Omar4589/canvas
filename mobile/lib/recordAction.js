@@ -42,6 +42,48 @@ function setHouseholdLocation(prev, householdId, coords) {
   };
 }
 
+// Append a wire-shaped walk-up voter to the bootstrap cache (Add person at the door). The
+// shape matches what the server's toWireVoter ships — the survey screen resolves its voter
+// by scanning bootstrap.voters, so this synchronous append is what lets the survey open
+// immediately after the add, even offline. Guarded on _id so a retry can't double-append.
+function addVoterToBootstrap(prev, householdId, { voterId, firstName, lastName }) {
+  const voters = prev.voters || [];
+  if (voters.some((v) => String(v._id) === String(voterId))) return prev;
+  return {
+    ...prev,
+    voters: [
+      ...voters,
+      {
+        _id: String(voterId),
+        householdId: String(householdId),
+        firstName,
+        lastName,
+        fullName: `${firstName} ${lastName}`.trim(),
+        party: null,
+        gender: null,
+        age: null,
+        surveyStatus: 'not_surveyed',
+        voted: false,
+        dnc: false,
+      },
+    ],
+  };
+}
+
+// Replace the optimistic voter with the server's authoritative wire row (or append it if a
+// bootstrap refetch dropped the optimistic one in the meantime).
+function replaceVoterInBootstrap(prev, wireVoter) {
+  const voters = prev.voters || [];
+  const id = String(wireVoter._id);
+  if (!voters.some((v) => String(v._id) === id)) {
+    return { ...prev, voters: [...voters, wireVoter] };
+  }
+  return {
+    ...prev,
+    voters: voters.map((v) => (String(v._id) === id ? { ...v, ...wireVoter } : v)),
+  };
+}
+
 // --- Pending optimistic statuses (the un-clobberable guarantee) -------------
 // An optimistic recolor lives in the ['bootstrap'] cache, but a server-sourced
 // write to that cache — a full bootstrap refetch, or the 30s `changes` delta —
@@ -353,6 +395,16 @@ export function optimisticSubmit(qc, opts) {
           'Outcome turned off',
           result.error?.message || 'This outcome is turned off for this campaign, so nothing was recorded.'
         );
+      } else if (result.error?.data?.code === 'ADD_VOTER_RESTRICTED') {
+        // The campaign restricted adding people to leads/admins after this phone's
+        // bootstrap — the invalidate above pulls canAddVoters:false down, so the button
+        // disappears from here on. It also drops the optimistic voter; if the canvasser
+        // is already mid-survey for them, the survey screen falls back to its
+        // missing-voter state — correct, the server refused the person.
+        Alert.alert(
+          'Adding people is turned off',
+          result.error?.message || 'Only team leads and admins can add a person on this campaign.'
+        );
       } else {
         Alert.alert(hardFailTitle, result.error?.message || hardFailMessage);
       }
@@ -389,6 +441,26 @@ export function recordHouseholdAction(qc, householdId, action, { note = null, on
     onAccepted,
   });
 }
+
+// Add a walk-up voter at the door (Add person). Saves immediately — the voter appears in the
+// bootstrap cache this frame (so the survey screen can open for them, even offline) and the
+// create is submitted-or-queued like any door write. The server treats voterId (client-minted,
+// lib/objectId.js) as the voter's real _id and is idempotent on it, so an offline replay can
+// never duplicate the person — and the follow-up survey queued behind it references an id
+// that survives the replay. GPS-gated like every other door write; `pending` stays empty
+// because adding a person never recolors the pin.
+export const recordAddVoter = (qc, householdId, { voterId, firstName, lastName, phone = null, email = null, onAccepted } = {}) =>
+  optimisticSubmit(qc, {
+    path: `/mobile/households/${householdId}/voters`,
+    body: { voterId, firstName, lastName, phone: phone || null, email: email || null },
+    optimisticPatch: (prev) => addVoterToBootstrap(prev, householdId, { voterId, firstName, lastName }),
+    reconcile: (prev, response) =>
+      response?.voter ? replaceVoterInBootstrap(prev, response.voter) : prev,
+    pending: [],
+    hardFailTitle: 'Person not added',
+    hardFailMessage: 'Could not add this person. Please try again.',
+    onAccepted,
+  });
 
 // Correct a household's pin (canvasser). Optimistically moves it (held un-clobberable
 // by pendingLocations until synced), offline-safe via the shared queue. coords in

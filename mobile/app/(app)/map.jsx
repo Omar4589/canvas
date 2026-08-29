@@ -37,6 +37,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
+import { foldDeltaVoters } from '../../lib/deltaFold';
 import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
 import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
@@ -538,51 +539,49 @@ export default function MapScreen() {
       qc.setQueryData(['bootstrap'], (prev) => {
         if (!prev) return prev;
         const hMap = new Map(households.map((h) => [String(h._id), h]));
-        const vMap = new Map(voters.map((v) => [String(v._id), v]));
+        // Hold just-recorded, server-not-yet-confirmed statuses AND pin fixes over
+        // the delta so a poll that predates the action can't revert a fresh
+        // optimistic recolor / move. Also apply a server-side location change
+        // (e.g. an admin pin-move) so it reflects live without a full re-bootstrap.
+        const foldedHouseholds = reconcilePendingLocations(
+          reconcilePendingHouseholds(
+            prev.households
+              .map((h) => {
+                const c = hMap.get(String(h._id));
+                if (!c) return h;
+                // archived, everyone voted, all-DNC, or the address asked that nobody come
+                // back — drop. This is how a door suppressed mid-shift leaves a running app;
+                // the server bumps updatedAt on every recompute so the delta always carries it.
+                if (
+                  c.isActive === false ||
+                  c.fullyVoted === true ||
+                  c.fullyDnc === true ||
+                  c.doNotKnock === true
+                ) return null;
+                return {
+                  ...h,
+                  status: c.status,
+                  lastActionAt: c.lastActionAt,
+                  // Unconditional, not inside the location spread: a Pin Fixes confirm/undo
+                  // changes the stamp without moving the pin, and the badge must follow.
+                  locationConfirmedAt: c.locationConfirmedAt ?? null,
+                  ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
+                };
+              })
+              .filter(Boolean)
+          )
+        );
         const next = {
           ...prev,
-          // Hold just-recorded, server-not-yet-confirmed statuses AND pin fixes over
-          // the delta so a poll that predates the action can't revert a fresh
-          // optimistic recolor / move. Also apply a server-side location change
-          // (e.g. an admin pin-move) so it reflects live without a full re-bootstrap.
-          households: reconcilePendingLocations(
-            reconcilePendingHouseholds(
-              prev.households
-                .map((h) => {
-                  const c = hMap.get(String(h._id));
-                  if (!c) return h;
-                  // archived, everyone voted, all-DNC, or the address asked that nobody come
-                  // back — drop. This is how a door suppressed mid-shift leaves a running app;
-                  // the server bumps updatedAt on every recompute so the delta always carries it.
-                  if (
-                    c.isActive === false ||
-                    c.fullyVoted === true ||
-                    c.fullyDnc === true ||
-                    c.doNotKnock === true
-                  ) return null;
-                  return {
-                    ...h,
-                    status: c.status,
-                    lastActionAt: c.lastActionAt,
-                    // Unconditional, not inside the location spread: a Pin Fixes confirm/undo
-                    // changes the stamp without moving the pin, and the badge must follow.
-                    locationConfirmedAt: c.locationConfirmedAt ?? null,
-                    ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
-                  };
-                })
-                .filter(Boolean)
-            )
+          households: foldedHouseholds,
+          // Merge known voters whole (identity included — see foldDeltaVoters), and APPEND
+          // unknown ones whose door survived the fold above: that's how a teammate's
+          // walk-up voter (Add person at the door) reaches this phone between bootstraps.
+          voters: foldDeltaVoters(
+            prev.voters,
+            voters,
+            new Set(foldedHouseholds.map((h) => String(h._id)))
           ),
-          voters: prev.voters.map((v) => {
-            const c = vMap.get(String(v._id));
-            // Take EVERYTHING the delta ships — identity included. The server sends
-            // fullName/party/gender/age through the delta precisely so a propagated Person edit
-            // (or an admin's hand correction) reaches an already-bootstrapped phone; the old
-            // cherry-pick of surveyStatus/voted discarded them until a cold re-bootstrap. Safe
-            // because both the bootstrap and /changes voter projections are identical and shaped
-            // by the same toWireVoter (bootstrap.js) — the delta voter is never a partial view.
-            return c ? { ...v, ...c } : v;
-          }),
         };
         saveBootstrap(next);
         return next;

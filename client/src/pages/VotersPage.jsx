@@ -38,6 +38,7 @@ export default function VotersPage() {
   const [surveyStatus, setSurveyStatus] = useState('');
   const [voted, setVoted] = useState('');
   const [dnc, setDnc] = useState('');
+  const [doorAdded, setDoorAdded] = useState('');
   const [skip, setSkip] = useState(0);
 
   const campaignsQ = useQuery({
@@ -72,11 +73,12 @@ export default function VotersPage() {
     surveyStatus,
     voted,
     dnc,
+    doorAdded,
     limit: PAGE_SIZE,
     skip,
   });
   const votersQ = useQuery({
-    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, skip }],
+    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, doorAdded, skip }],
     queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
     placeholderData: keepPreviousData,
   });
@@ -107,7 +109,7 @@ export default function VotersPage() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-8">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -151,6 +153,14 @@ export default function VotersPage() {
           <option value="true">Do not contact</option>
           <option value="false">Contactable</option>
         </select>
+        <select
+          value={doorAdded}
+          onChange={(e) => onFilter(setDoorAdded)(e.target.value)}
+          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
+        >
+          <option value="">Any source</option>
+          <option value="true">Added at the door</option>
+        </select>
         <input
           value={party}
           onChange={(e) => onFilter(setParty)(e.target.value)}
@@ -191,8 +201,24 @@ export default function VotersPage() {
                     onClick={() => navigate(`/voters/${v.id}`)}
                     className="cursor-pointer transition-colors hover:bg-sunken"
                   >
-                    <td className="px-4 py-2 font-medium text-fg">{v.fullName}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-fg-muted">{v.stateVoterId}</td>
+                    <td className="px-4 py-2 font-medium text-fg">
+                      <span className="inline-flex items-center gap-1.5">
+                        {v.fullName}
+                        {v.doorAdded && (
+                          <span
+                            className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg"
+                            title={`Added at the door${v.doorAdded.at ? ` · ${new Date(v.doorAdded.at).toLocaleDateString()}` : ''}`}
+                          >
+                            Added at the door
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    {/* A door-added row's synthetic `manual:` id is an implementation detail,
+                        not a state voter ID — show a dash. */}
+                    <td className="px-4 py-2 font-mono text-xs text-fg-muted">
+                      {v.stateVoterId?.startsWith('manual:') ? '—' : v.stateVoterId}
+                    </td>
                     <td className="px-4 py-2 text-fg-muted">{v.party || '—'}</td>
                     <td className="px-4 py-2 text-fg-muted">
                       {v.household ? `${v.household.addressLine1}, ${v.household.city} ${v.household.state}` : '—'}

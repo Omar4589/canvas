@@ -12,8 +12,10 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { AccessLog } from '../../models/AccessLog.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
+import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { archiveOverwrittenResponse, snapshotFromArchive } from '../../services/surveys/archiveOverwrite.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
@@ -68,6 +70,9 @@ router.get('/', async (req, res, next) => {
     // campaign gymnastics like `voted` needs below).
     if (req.query.dnc === 'true') filter['doNotContact.flagged'] = true;
     else if (req.query.dnc === 'false') filter['doNotContact.flagged'] = { $ne: true };
+    // "Added at the door" filter — walk-up rows a canvasser typed (rides the partial
+    // {organizationId, 'doorAdded.at'} index; single-direction like party/precinct).
+    if (req.query.doorAdded === 'true') filter['doorAdded.at'] = { $exists: true };
 
     const campaignId =
       req.query.campaignId && mongoose.isValidObjectId(req.query.campaignId)
@@ -198,6 +203,8 @@ router.get('/', async (req, res, next) => {
         // Deduped org view reads surveyed-in-ANY-campaign; row views read the row.
         surveyStatus: extras ? (extras.surveyedAny ? 'surveyed' : 'not_surveyed') : v.surveyStatus,
         dnc: !!v.doNotContact?.flagged,
+        // Walk-up badge: at-date only here; who added lives on the profile.
+        doorAdded: v.doorAdded ? { at: v.doorAdded.at } : null,
         voted: hcamp ? !!votedByVoter.get(String(v._id))?.has(hcamp) : false,
         household: h
           ? {
@@ -291,13 +298,20 @@ router.get('/:voterId/staff-access', async (req, res, next) => {
 });
 
 // Shared identity fields route through the Person layer; org-local fields (districts +
-// registered state) are written straight to the voter and never propagated cross-org.
+// registered state, plus email) are written straight to the voter and never propagated
+// cross-org. Email is org-local on purpose: Person has no email path (it's contact info
+// volunteered to THIS org, not identity), so it write-straights like the districts. No
+// locallyEditedFields arming needed either — imports never write email, so nothing can
+// clobber it.
 const PERSON_IDENTITY_FIELDS = ['firstName', 'lastName', 'phone', 'phoneType', 'cellPhone', 'party', 'gender', 'dateOfBirth', 'registrationStatus'];
-const ORG_LOCAL_FIELDS = ['registeredState', 'congressionalDistrict', 'stateSenateDistrict', 'stateHouseDistrict', 'precinct'];
+const ORG_LOCAL_FIELDS = ['registeredState', 'congressionalDistrict', 'stateSenateDistrict', 'stateHouseDistrict', 'precinct', 'email'];
 
 const updateVoterSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
   lastName: z.string().trim().min(1).optional(),
+  // Phones here stay LOOSE (max 40 free text) unlike the walk-up create's strict phoneSchema:
+  // the profile form round-trips every stored field on save, and voter-file phones arrive in
+  // arbitrary formats — a strict schema would make unrelated edits fail on legacy data.
   phone: z.string().trim().max(40).nullable().optional(),
   phoneType: z.string().trim().max(40).nullable().optional(),
   cellPhone: z.string().trim().max(40).nullable().optional(),
@@ -305,6 +319,11 @@ const updateVoterSchema = z.object({
   gender: z.string().trim().max(40).nullable().optional(),
   dateOfBirth: z.string().datetime().nullable().optional(),
   registrationStatus: z.string().trim().max(80).nullable().optional(),
+  // Contact email (walk-up voters volunteer one; admins can correct it). Empty → null.
+  email: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().trim().email().max(254).nullable()
+  ).optional(),
   registeredState: z.string().trim().max(2).nullable().optional(),
   congressionalDistrict: z.string().trim().max(40).nullable().optional(),
   stateSenateDistrict: z.string().trim().max(40).nullable().optional(),
@@ -403,6 +422,60 @@ router.patch('/:voterId', async (req, res, next) => {
     res.json(profile);
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
+    next(err);
+  }
+});
+
+// DELETE /admin/voters/:voterId — remove a DOOR-ADDED voter (a bad walk-up entry). The only
+// voter delete in the product, scoped hard to `doorAdded != null`: imported rows leave via
+// re-import/undo-import or the campaign cascade, never one-by-one. Cascade:
+//  - SurveyResponse rows (+ their archives) and VoterNotes go — the person is being erased.
+//    Campaign.stats.surveyCount counts SurveyResponse docs, so it moves by the deleted count.
+//  - CanvassActivity rows are KEPT with voterId nulled: the door VISIT genuinely happened and
+//    is billable (billing = distinct household×pass over CanvassActivity); a null voterId is
+//    honest once the person is gone, and nothing joins on it (doorKey.js). Same call the
+//    survey-response delete below makes.
+//  - Household invariants recomputed; the fullyDnc recompute's updatedAt bump also tells
+//    phones the door changed. Phones that already hold the voter keep a phantom row until
+//    their next full bootstrap (a deleted doc can't ride the delta) — a survey against it
+//    404s and the offline queue drops it. If this was the door's ONLY voter, the door
+//    deactivates and the delta drops it from phones entirely.
+// The router.param tag above logs the record for staff-under-grant requests.
+router.delete('/:voterId', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.voterId)) {
+      return res.status(400).json({ error: 'Invalid voterId' });
+    }
+    const orgId = activeOrgId(req);
+    const voter = await Voter.findOne({ _id: req.params.voterId, organizationId: orgId }).lean();
+    if (!voter) return res.status(404).json({ error: 'Voter not found' });
+    if (!voter.doorAdded) {
+      return res.status(400).json({
+        error: 'Only voters added at the door can be deleted. Imported voters leave via re-import or campaign deletion.',
+        code: 'NOT_DOOR_ADDED',
+      });
+    }
+
+    const responses = await SurveyResponse.find({ voterId: voter._id }, 'campaignId').lean();
+    await SurveyResponse.deleteMany({ voterId: voter._id });
+    // Every response of a per-campaign voter carries that voter's campaignId, so one bump.
+    if (responses.length) {
+      await bumpCampaignStats(voter.campaignId, { surveys: -responses.length });
+    }
+    await SurveyResponseArchive.deleteMany({ voterId: voter._id });
+    await VoterNote.deleteMany({ voterId: voter._id });
+    // Hygiene — a manual: id can never match a voted-list upload, but a row here would
+    // dangle after the delete.
+    await VotedVoter.deleteMany({ voterId: voter._id });
+    await CanvassActivity.updateMany({ voterId: voter._id }, { $set: { voterId: null } });
+    await Voter.deleteOne({ _id: voter._id });
+
+    await recomputeFullyDnc([String(voter.householdId)]);
+    await recomputeHouseholdActive(voter.campaignId, [voter.householdId]);
+
+    res.json({ ok: true, deleted: true, responsesDeleted: responses.length });
+  } catch (err) {
     next(err);
   }
 });

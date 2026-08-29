@@ -431,6 +431,15 @@ Still open (not built): reopening an already-knocked door when a new voter is ad
 former entry here — streaming the upload to disk + a sampled preview — shipped: multer `diskStorage`
 plus `peekUpload`, see §E and §G.)
 
+**Walk-up voters vs. imports.** A voter a canvasser adds at a door ([VOTERS.md](VOTERS.md) →
+*Adding a person at the door*) carries a synthetic `manual:<id>` stateVoterId, so a later
+voter-file import of the same human **matches nothing and creates a second row** under the real
+svid — deliberately: guessing that "Wally Walkup at 1 Main St" is the file's "Walter B. Walkup Jr"
+is exactly the kind of silent merge the import pipeline refuses everywhere else. **No auto-merge
+exists**; the remedy is the admin deleting the door-added duplicate from its profile. The
+`doorAdded` field is import-safe by omission (never in csvImporter's `row.voter` `$set`), the same
+mechanism that protects `doNotContact` and `surveyStatus`.
+
 ## E. Operations — the import worker
 
 Imports (and turf cuts) run in a **separate `worker` dyno** ([Procfile](../Procfile)

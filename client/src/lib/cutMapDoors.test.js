@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor } from './cutMapDoors.js';
+import { passBookIds, isLooseDoor, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits } from './cutMapDoors.js';
 
 // cutMapDoors.js is the ONE place the Turf Cutting map's loose-door rule lives, so this is
 // where it gets locked down. The regression under test (shipped + caught in prod, 2026-07):
@@ -184,15 +184,21 @@ test('hideOffLimits drops restricted/no-soliciting SINGLES, keeps everything els
   assert.equal(off.length, doors.length);
 });
 
-test('a stacked building keeps ALL its units — restricted ones included', () => {
+test('a MIXED stack keeps ALL its units — restricted ones included', () => {
   // Two units at one rounded key, one of them restricted: the stack is drawn whole, so
   // both stay selectable (a lasso catches a building as a unit, and the pin shows no status).
   const stack = [S('u1', 'b21', -96.5, 41.5, 'restricted'), S('u2', 'b21', -96.5, 41.5, 'unknocked')];
   const drawn = drawnCutDoors({ doors: stack, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true });
   assert.deepEqual(drawn.map((d) => d.id), ['u1', 'u2']);
-  // Even a FULLY off-limits stack stays: buildings are never status-filtered.
-  const allRestricted = [S('u3', 'b21', -96.6, 41.6, 'restricted'), S('u4', 'b21', -96.6, 41.6, 'restricted')];
-  assert.equal(drawnCutDoors({ doors: allRestricted, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true }).length, 2);
+});
+
+test('a FULLY off-limits stack hides WHOLE — the building goes with its units', () => {
+  // Every unit restricted/no-soliciting: nobody can enter the building, so with the toggle
+  // hiding, the pin leaves the map and none of its units stay in the lasso pool.
+  const allOff = [S('u3', 'b21', -96.6, 41.6, 'restricted'), S('u4', 'b21', -96.6, 41.6, 'no_soliciting')];
+  assert.deepEqual(drawnCutDoors({ doors: allOff, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true }), []);
+  // …and with the toggle showing, it stays intact.
+  assert.equal(drawnCutDoors({ doors: allOff, bookIds: PASS2_BOOKS, showLoose: false }).length, 2);
 });
 
 test('a hidden off-limits single is out of the pool even when its book passes the chips', () => {
@@ -211,4 +217,86 @@ test('an off-limits door with no coordinates is dropped when hiding (it was neve
   const doors = [{ id: 'd1', turfId: 'b21', passStatus: 'restricted' }, S('d2', 'b21', -96.2, 41.2, 'unknocked')];
   const drawn = drawnCutDoors({ doors, bookIds: PASS2_BOOKS, showLoose: false, hideOffLimits: true });
   assert.deepEqual(drawn.map((d) => d.id), ['d2']);
+});
+
+// ---------------------------------------------------------------------------
+// booksEmptiedByOffLimits — which BOOK SHAPES the off-limits toggle should take with it.
+// Hiding the dots alone left a fully desk-restricted book as an empty filled polygon, and
+// because a restricted door counts as knocked its completion tint is SOLID — so the emptiest
+// books rendered the boldest on a decluttered map. These pin the two rules that keep the shape
+// honest: judge "is anything of this book still drawn", and count a unit for its OWN book.
+
+const B = (turfId, units) => ({ key: `k:${turfId}`, turfId, units, total: units.length });
+
+test('a book whose only dots are off-limits singles is emptied', () => {
+  const singles = [S('d1', 'b21', -96.1, 41.1, 'restricted'), S('d2', 'b21', -96.2, 41.2, 'no_soliciting')];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings: [] })], ['b21']);
+});
+
+test('a book with ONE live door keeps its shape — the whole point of the rule', () => {
+  const singles = [
+    S('d1', 'b21', -96.1, 41.1, 'restricted'),
+    S('d2', 'b21', -96.2, 41.2, 'restricted'),
+    S('d3', 'b21', -96.3, 41.3, 'unknocked'), // the one door still worth walking to
+  ];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings: [] })], []);
+});
+
+test('a book holding a MIXED stack is never emptied — the stack still draws under its shape', () => {
+  // Every single is off-limits, but the mixed stack still draws, so the shape must stay.
+  const singles = [S('d1', 'b21', -96.1, 41.1, 'restricted')];
+  const buildings = [B('b21', [S('u1', 'b21', -96.5, 41.5, 'restricted'), S('u2', 'b21', -96.5, 41.5, 'unknocked')])];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings })], []);
+});
+
+test('a fully off-limits stack keeps no book alive — its shape hides with the pin', () => {
+  // The stack itself hides (isOffLimitsStack), so a book whose only doors sit in it is emptied.
+  const singles = [S('d1', 'b21', -96.1, 41.1, 'restricted')];
+  const buildings = [B('b21', [S('u1', 'b21', -96.5, 41.5, 'restricted'), S('u2', 'b21', -96.5, 41.5, 'restricted')])];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings })], ['b21']);
+});
+
+test('a unit counts for ITS OWN book, not the stack pin\'s — the pin-owner trap', () => {
+  // The pin is book b21's (units[0]), but b22 owns u2. b22's singles are all off-limits, so
+  // judging by the pin owner would hide b22's shape while u2 — a door of b22's — is on screen.
+  const singles = [S('d1', 'b22', -96.1, 41.1, 'restricted')];
+  const buildings = [B('b21', [S('u1', 'b21', -96.5, 41.5, 'restricted'), S('u2', 'b22', -96.5, 41.5, 'unknocked')])];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings })], []);
+});
+
+test('one book empties while its neighbour keeps its shape', () => {
+  const singles = [
+    S('d1', 'b21', -96.1, 41.1, 'restricted'),
+    S('d2', 'b22', -96.2, 41.2, 'restricted'),
+    S('d3', 'b22', -96.3, 41.3, 'surveyed'),
+  ];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings: [] })], ['b21']);
+});
+
+test('loose doors mint no phantom book', () => {
+  // A loose door's turfId is null from the server; String(null) must not become a book id.
+  const singles = [S('d5', null, -96.5, 41.5, 'restricted'), S('d6', undefined, -96.6, 41.6, 'no_soliciting')];
+  assert.deepEqual([...booksEmptiedByOffLimits({ singles, buildings: [] })], []);
+});
+
+test('a book that already drew no dots is never named — it keeps the bare shape it always had', () => {
+  // Its doors are non-knockable, so /doors never returned them: the book is in no drawn set.
+  const singles = [S('d1', 'b21', -96.1, 41.1, 'restricted')];
+  const emptied = booksEmptiedByOffLimits({ singles, buildings: [] });
+  assert.equal(emptied.has('b22'), false);
+});
+
+test('empty and undefined input are safe (the query is still loading)', () => {
+  assert.deepEqual([...booksEmptiedByOffLimits({})], []);
+  assert.deepEqual([...booksEmptiedByOffLimits()], []);
+});
+
+test('isOffLimitsStack: every unit off-limits = whole; one live unit = mixed; empty = never', () => {
+  const off = (id) => S(id, 'b21', -96.5, 41.5, 'restricted');
+  const sign = (id) => S(id, 'b21', -96.5, 41.5, 'no_soliciting');
+  const live = (id) => S(id, 'b21', -96.5, 41.5, 'not_home');
+  assert.equal(isOffLimitsStack([off('u1'), sign('u2')]), true);
+  assert.equal(isOffLimitsStack([off('u1'), live('u2')]), false);
+  assert.equal(isOffLimitsStack([]), false);
+  assert.equal(isOffLimitsStack(undefined), false);
 });

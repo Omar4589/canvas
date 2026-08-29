@@ -108,6 +108,8 @@ const createSchema = z.object({
   // Door outcomes turned OFF in the canvasser app. The enum is the whole gate: not_home and
   // the completion actions are not in TOGGLEABLE_OUTCOMES, so they can never be disabled.
   disabledOutcomes: z.array(z.enum(TOGGLEABLE_OUTCOMES)).optional(),
+  // Who may add a walk-up voter at a door: everyone rostered, or leads/admins only.
+  doorAddPolicy: z.enum(['all', 'leads']).optional(),
 });
 
 // A goal date with no goal is a dead field: nothing to count down to a target that doesn't
@@ -138,6 +140,8 @@ const AUDITED_FIELDS = [
   // Which door outcomes canvassers can record — a silent flip changes what a client
   // report can ever show going forward, the same class of promise as the fields above.
   'disabledOutcomes',
+  // Who may add walk-up voters at the door — same "changes what canvassers can record" class.
+  'doorAddPolicy',
 ];
 
 // Compare-and-store form. Mongoose hands back a String object for enum/String paths and `undefined`
@@ -433,6 +437,7 @@ router.post('/', async (req, res, next) => {
       // Must be wired here explicitly — Campaign.create builds from named fields, so a key
       // that only exists in createSchema would be silently dropped.
       disabledOutcomes: data.disabledOutcomes ? [...new Set(data.disabledOutcomes)] : [],
+      doorAddPolicy: data.doorAddPolicy ?? 'all',
       createdBy: req.user._id,
     });
     // Lifetime marketing counter. req.subscription is attached by the entitlement middleware, so the
@@ -539,6 +544,9 @@ router.patch('/:campaignId', async (req, res, next) => {
     // (which holds the old array by reference) can't alias the after value. Recording
     // policy only: no counter recompute — rows already recorded keep counting.
     if (data.disabledOutcomes !== undefined) campaign.disabledOutcomes = [...new Set(data.disabledOutcomes)];
+    // Lead-editable like disabledOutcomes (same class: a lead running a campaign owns what
+    // its canvassers can record at a door).
+    if (data.doorAddPolicy !== undefined) campaign.doorAddPolicy = data.doorAddPolicy;
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not

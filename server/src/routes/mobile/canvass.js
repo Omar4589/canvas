@@ -27,6 +27,11 @@ import { updateHouseholdLocation } from '../../services/households/updateHouseho
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { struckByUnknock } from '../../services/canvass/unknock.js';
+import { toWireVoter, stampPerRoundSurvey, MOBILE_VOTER_PROJECTION } from './bootstrap.js';
+import { surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
+import { nameSchema, phoneSchema, voterEmailSchema } from '../../utils/validators.js';
+import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
+import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
 
 const router = Router();
 
@@ -155,6 +160,15 @@ const outcomeDisabled = (actionType) => ({
   code: 'OUTCOME_DISABLED',
   message: `"${OUTCOME_DISABLED_LABELS[actionType] || actionType}" is turned off for this campaign, so this door was not recorded. Pick a different outcome.`,
 });
+// Campaign.doorAddPolicy === 'leads' and the caller is a plain canvasser. The client hides the
+// Add-person button, but a phone whose bootstrap predates the policy flip still shows it; this
+// is the backstop. Same offline-replay tolerance as OUTCOME_DISABLED: a queued add recorded
+// before the flip is real door data, and dropping it would also orphan its queued survey.
+const ADD_VOTER_RESTRICTED = {
+  status: 403,
+  code: 'ADD_VOTER_RESTRICTED',
+  message: 'Only team leads and admins can add a person on this campaign. Ask your lead to add them.',
+};
 
 function sendRouteError(res, error) {
   const body = { error: error.message };
@@ -907,6 +921,161 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // for a field is not sending it"). No shipped client ever read voter /
     // surveyResponse / activity from this response.
     res.status(201).json({ household: await toWireHousehold(household, passId, campaign.type) });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// ── Walk-up voters: add a person at the door ──────────────────────────────────────────────
+//
+// The ONLY voter-create path outside the import pipeline. A canvasser speaks to someone who
+// lives at the household but isn't on the imported list; they type first/last name (phone and
+// email optional) and the voter is saved immediately, tied to this door, then surveyed like
+// anyone else. Design notes that are load-bearing:
+//
+//  - THE CLIENT MINTS THE _id (a 24-hex ObjectId in `voterId`). The offline queue replays
+//    verbatim paths FIFO and drops non-auth 4xx, so the survey queued behind an offline add
+//    must reference an id that survives the replay. Making the client's id THE id (and this
+//    route idempotent on it — a replay returns 200 with the existing row) is what keeps a
+//    queued create+survey pair intact across any number of retries.
+//  - stateVoterId is `manual:<that id>` — required + unique per campaign by schema, so every
+//    door-added row mints its own. NEVER a shared placeholder: the org-wide sibling surfaces
+//    (voterProfile union, DNC fan-out, directory dedupe, Person svidKeys) all key on
+//    {organizationId, stateVoterId} and would silently merge unrelated people.
+//  - personId stays null ("pre-backfill voters write straight" — handled everywhere). A
+//    keyless resolvePerson would raise a merge-candidate per add; a synthetic svidKey would
+//    pollute Person's real-key space.
+//  - NOT a knock: no CanvassActivity, no Campaign.stats, no bumpLive. Billing counts distinct
+//    (household, pass) visits and door counts are Household docs — adding a person changes
+//    neither, by design.
+const addVoterSchema = z.object({
+  // The client-minted ObjectId (see above). Validity is the whole gate — the value becomes _id.
+  voterId: z.string().regex(/^[0-9a-f]{24}$/i),
+  firstName: nameSchema,
+  lastName: nameSchema,
+  phone: phoneSchema, // optional; stored canonical "(555) 123-4567"
+  email: voterEmailSchema, // optional; stored lowercased. Admin-console-only (never on the wire).
+  location: locationSchema,
+  timestamp: z.string().datetime().optional(),
+  wasOfflineSubmission: z.boolean().optional(),
+});
+
+router.post('/households/:householdId/voters', async (req, res, next) => {
+  try {
+    // Adding a person is a door write like every other — the GPS stamp evidences the visit.
+    if (missingLocation(req.body)) return sendRouteError(res, LOCATION_REQUIRED);
+    const data = addVoterSchema.parse(req.body);
+    const voterId = data.voterId.toLowerCase();
+
+    const household = await Household.findById(req.params.householdId);
+    if (!household) return res.status(404).json({ error: 'Household not found' });
+
+    const access = await assertHouseholdAccess(req, household);
+    if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+
+    const campaign = await Campaign.findById(household.campaignId).lean();
+    // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
+    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found' });
+    // A data change, not a disposition — archived campaigns take no new voters (the pin-fix rule).
+    if (!assertCampaignWritable(res, campaign)) return;
+    if (campaign.type !== 'survey') {
+      return res.status(400).json({ error: 'People can only be added on survey-type campaigns.' });
+    }
+    if (
+      campaign.doorAddPolicy === 'leads' &&
+      data.wasOfflineSubmission !== true &&
+      !(await canManageCampaign(req, campaign._id))
+    ) {
+      return sendRouteError(res, ADD_VOTER_RESTRICTED);
+    }
+
+    // The router.param voterId tag can't fire here (the path param is householdId) — tag
+    // explicitly so a staff-under-grant add is auditable like any single-record access.
+    addAuditSubjects(res, 'voter', voterId);
+
+    const { passId } = await resolveAttribution(campaign, household);
+    // Single-door doorPass map, same shape canvasserScopeWithPasses builds, so the per-round
+    // stamp below speaks the exact bootstrap/delta dialect.
+    const doorPass = passId ? new Map([[String(household._id), String(passId)]]) : new Map();
+
+    // Wire-shaped voter through the SHARED projection — toWireVoter spreads `...rest`, so
+    // re-reading through MOBILE_VOTER_PROJECTION (never echoing the created doc) is what keeps
+    // phone/email off the phone. `voted` is hardcoded false: voted-list uploads match by real
+    // state voter ids, which a manual: row can never carry.
+    const wireVoter = async () => {
+      const [lean, surveyedThisRound] = await Promise.all([
+        Voter.findById(voterId, MOBILE_VOTER_PROJECTION).lean(),
+        surveyedVotersFromDoorPass(doorPass),
+      ]);
+      return stampPerRoundSurvey(toWireVoter(lean, false), doorPass, surveyedThisRound, req.user._id);
+    };
+
+    // Idempotency (the offline-replay contract): the same client id landing again returns the
+    // existing row as a 200 — the queue drains on any 2xx and nothing duplicates. A same-id row
+    // belonging to a DIFFERENT door/org is a client id-collision (~2^-72 with 8 random bytes):
+    // 409, the flush loop drops the item, and its follow-up survey 404s and drops too.
+    const existing = await Voter.findById(voterId).lean();
+    if (existing) {
+      if (
+        String(existing.householdId) !== String(household._id) ||
+        String(existing.organizationId) !== String(household.organizationId)
+      ) {
+        return res.status(409).json({ error: 'That id is already in use.', code: 'VOTER_ID_CONFLICT' });
+      }
+      return res.status(200).json({
+        voter: await wireVoter(),
+        household: await toWireHousehold(household, passId, campaign.type),
+      });
+    }
+
+    const ts = data.timestamp ? new Date(data.timestamp) : new Date();
+    try {
+      await Voter.create({
+        _id: new mongoose.Types.ObjectId(voterId),
+        organizationId: household.organizationId,
+        campaignId: household.campaignId,
+        householdId: household._id,
+        stateVoterId: `manual:${voterId}`,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        fullName: `${data.firstName} ${data.lastName}`.trim(),
+        phone: data.phone ?? null,
+        email: data.email ?? null,
+        personId: null,
+        doorAdded: { byUserId: req.user._id, at: ts },
+      });
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      // Lost a concurrent double-replay race — the winner's row exists now. Matched → the
+      // idempotent 200; mismatched → the same collision 409 as above.
+      const winner = await Voter.findById(voterId).lean();
+      if (
+        winner &&
+        String(winner.householdId) === String(household._id) &&
+        String(winner.organizationId) === String(household.organizationId)
+      ) {
+        return res.status(200).json({
+          voter: await wireVoter(),
+          household: await toWireHousehold(household, passId, campaign.type),
+        });
+      }
+      return res.status(409).json({ error: 'That id is already in use.', code: 'VOTER_ID_CONFLICT' });
+    }
+
+    // Voter-derived household invariants. Near-moot for a door already on a phone (it wouldn't
+    // be there if fullyDnc/inactive), but airtight beats almost: a non-DNC person at an all-DNC
+    // door reopens it, and a person at an emptied door reactivates it. recomputeFullyDnc's
+    // unconditional $set also bumps Household.updatedAt — that is what makes the /changes delta
+    // re-ship this door's full roster to every teammate's phone (track 1); the new voter's own
+    // updatedAt covers track 2 independently.
+    await recomputeFullyDnc([String(household._id)]);
+    await recomputeHouseholdActive(household.campaignId, [household._id]);
+
+    res.status(201).json({
+      voter: await wireVoter(),
+      household: await toWireHousehold(household, passId, campaign.type),
+    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
