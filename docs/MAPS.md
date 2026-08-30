@@ -929,9 +929,9 @@ constants). A small legend labels the two rings when they're shown.
 - **The offline queue flushes on reconnect** (NetInfo listener in [map.jsx](../mobile/app/(app)/map.jsx))
   as well as on focus / foreground / refresh / next-action. NetInfo is a native module — it ships only in
   a native build, never an OTA (a bundle importing it would crash an older binary).
-- **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; plain location dot, no
-  compass; follow-mode auto-exits on pan/background). **Web is live** (~20s) because admins are at a
-  connected desk.
+- **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; native location puck
+  with a subtle pulse, no compass/magnetometer; follow-mode auto-exits on pan/background). **Web is
+  live** (~20s) because admins are at a connected desk.
 - **An embedded map must re-measure itself.** The full-page admin map ([MapPage.jsx](../client/src/pages/MapPage.jsx))
   is `100vh` from the first paint, so its Mapbox container is stable. The client-report map
   ([ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx)) is embedded inside a tab below
@@ -970,6 +970,7 @@ constants). A small legend labels the two rings when they're shown.
 | [mobile/app/(app)/admin/canvasser/[id]/map.jsx](../mobile/app/(app)/admin/canvasser/[id]/map.jsx) | One canvasser's path of action pings. |
 | [mobile/app/(app)/books.jsx](../mobile/app/(app)/books.jsx) | Books overview map (centroid markers). |
 | [mobile/lib/buildings.js](../mobile/lib/buildings.js) · [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) · [mobile/lib/location.js](../mobile/lib/location.js) | Buildings grouping · base-style switcher · per-action location capture. |
+| [mobile/components/AppLocationPuck.jsx](../mobile/components/AppLocationPuck.jsx) · [mobile/lib/useLocationFeed.js](../mobile/lib/useLocationFeed.js) · [mobile/lib/locationFeed.js](../mobile/lib/locationFeed.js) | The ONE engine-rendered blue-dot puck (never hide with `visible={false}` — unmount to stop GPS) · the canvasser map's owned GPS feed (foreground watcher + staleness watchdog) · its pure policy, tested in `locationFeed.test.js`. |
 | [mobile/lib/mapCounts.js](../mobile/lib/mapCounts.js) | Hand-mirrored subset of the web `mapCounts.js` (`fmtCount`, `inViewClip`, `describeMatch`, `explainCounts`, `MAP_HOUSEHOLD_CAP`) for the admin map's count chip — keep the sentences in step. |
 
 ## K. "Select doors" (lasso desk-restrict) — 2026-08-22

@@ -612,7 +612,8 @@ drops it, iOS builds it on a nil windowScene — which orphaned the promise and 
 when a canvasser pocketed the phone during the GPS wait. The map mounts a persistent
 [LocationBlockedBanner](../mobile/components/LocationBlockedBanner.jsx) (below the entitlement
 banner) that warns when services/permission/precise location are off — on iOS, Precise-off is
-additionally detected *proactively* by streaming the puck's fix accuracies through
+additionally detected *proactively* by the map's own location feed ([useLocationFeed](../mobile/lib/useLocationFeed.js),
+a foreground `expo-location` watcher) streaming fix accuracies through
 `reportFixAccuracy` (lib/location.js: >1km sustained across a rolling window, since expo-location
 exposes no `accuracyAuthorization`), so the banner lights before the first wasted knock.
 

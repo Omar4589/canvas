@@ -4,6 +4,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
+import AppLocationPuck from '../../components/AppLocationPuck';
 import {
   loadActiveCampaign,
   saveActiveCampaign,
@@ -369,7 +370,9 @@ export default function BooksScreen() {
           animationMode="flyTo"
           animationDuration={500}
         />
-        <Mapbox.UserLocation visible />
+        {/* Engine-rendered puck (see components/AppLocationPuck.jsx). Always
+            mounted — this is the stack's base screen, same posture as before. */}
+        <AppLocationPuck />
         <Mapbox.Images images={BOOK_ICONS} />
         {/* Book markers as native symbols + haloed label. Tap selects; the
             selected glyph grows via the `selected` feature property. */}

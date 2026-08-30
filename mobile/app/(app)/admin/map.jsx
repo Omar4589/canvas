@@ -17,6 +17,7 @@ import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { fmtCount, inViewClip, explainCounts, universeLabel, MAP_HOUSEHOLD_CAP } from '../../../lib/mapCounts';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
+import AppLocationPuck from '../../../components/AppLocationPuck';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
@@ -1302,9 +1303,13 @@ export default function AdminMap() {
           animationMode="flyTo"
           animationDuration={500}
         />
-        {/* Plain location dot (no compass) to avoid continuous magnetometer use.
-            Focus-gated so GPS stops while another screen covers this tab. */}
-        <Mapbox.UserLocation visible={isFocused} />
+        {/* Focus-gated by MOUNTING, not visible=: the native puck's visible={false}
+            only swaps in empty images — the engine keeps GPS running (and Android
+            still draws the pulse ring). Unmount is the only real off-switch, so this
+            is what actually delivers "GPS stops while another screen covers this
+            tab" (the old JS dot's visible gate never truly stopped it on Android —
+            a start/stop counter leak in the library kept the engine hot). */}
+        {isFocused && <AppLocationPuck />}
 
         <Mapbox.Images
           images={{

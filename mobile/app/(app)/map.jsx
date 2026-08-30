@@ -43,7 +43,10 @@ import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
-import { ensureLocationPermission, reportFixAccuracy } from '../../lib/location';
+import { ensureLocationPermission } from '../../lib/location';
+import { acceptCoords } from '../../lib/locationFeed';
+import LocationFeed from '../../lib/useLocationFeed';
+import AppLocationPuck from '../../components/AppLocationPuck';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
 import EntitlementBanner from '../../components/EntitlementBanner';
@@ -222,7 +225,7 @@ export default function MapScreen() {
   const [viewMode, setViewMode] = useState(undefined);
   const [sortMode, setSortMode] = useState('nearest'); // 'nearest' | 'walk' | 'status'
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [userCoords, setUserCoords] = useState(null); // [lng, lat] from the location puck
+  const [userCoords, setUserCoords] = useState(null); // [lng, lat] from the location feed
   const [chromeH, setChromeH] = useState(0); // measured top-chrome height → list top padding
 
   // Sheet animation state. translateY: 0 = expanded, snapDelta = peek.
@@ -912,6 +915,17 @@ export default function MapScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      {/* GPS feed for the JS consumers (list "nearest" sort + iOS Precise-off probe).
+          Mounted HERE, inside the real map's tree, so the bail-out screens above never
+          hold a High-accuracy watcher. The dot itself is the native puck below and
+          takes nothing from this stream — a dead feed can stale the sort, never the
+          dot. acceptCoords carries the old 10m re-sort hysteresis plus the
+          malformed-fix freeze fix (lib/locationFeed.js). */}
+      <LocationFeed
+        onFix={(next) => {
+          setUserCoords((prev) => (acceptCoords(prev, next) ? next : prev));
+        }}
+      />
       <Mapbox.MapView
         style={{ flex: 1 }}
         styleURL={styleURL}
@@ -929,25 +943,13 @@ export default function MapScreen() {
           animationMode="flyTo"
           animationDuration={500}
         />
-        {/* Plain location dot. We deliberately don't use androidRenderMode="compass":
-            the compass puck keeps the magnetometer polling the whole time the map is
-            open (the primary screen), which is a real battery drain for little gain. */}
-        <Mapbox.UserLocation
-          visible
-          onUpdate={(loc) => {
-            const c = loc?.coords;
-            if (!c) return;
-            // Feed the puck's accuracy to the iOS Precise-off probe — the only
-            // way that state is detectable before a tap fails (lib/location.js).
-            reportFixAccuracy(c.accuracy);
-            const next = [c.longitude, c.latitude];
-            // Only re-sort the list when the canvasser has actually moved (~>10m).
-            setUserCoords((prev) => {
-              if (prev && distanceToCoords(prev, next) < 10) return prev;
-              return next;
-            });
-          }}
-        />
+        {/* Engine-rendered puck — position never crosses the JS bridge (the old
+            JS-drawn UserLocation could freeze on Android and stay frozen until
+            logout). The JS fix stream its onUpdate used to provide now comes from
+            <LocationFeed/> above. Still no compass/bearing: the magnetometer polling
+            the whole time the map is open (the primary screen) is a real battery
+            drain for little gain. */}
+        <AppLocationPuck />
 
         <Mapbox.Images
           images={{

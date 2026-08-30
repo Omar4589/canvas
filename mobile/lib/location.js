@@ -1,11 +1,26 @@
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 
-export async function ensureLocationPermission() {
-  const { status } = await Location.getForegroundPermissionsAsync();
-  if (status === 'granted') return true;
-  const req = await Location.requestForegroundPermissionsAsync();
-  return req.status === 'granted';
+// Concurrent calls share ONE in-flight request. On a cold `undetermined` start the
+// map's initial-camera helper and the location feed both land here in the same tick,
+// and expo-modules-core's Android permissions service THROWS on an overlapping second
+// request ("Another permissions request is in progress") — an unhandled rejection that
+// also silently killed the smart-hybrid camera framing. Serializing every caller
+// (banner included) through one promise makes the overlap impossible.
+let permissionInFlight = null;
+export function ensureLocationPermission() {
+  if (permissionInFlight) return permissionInFlight;
+  permissionInFlight = (async () => {
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'granted') return true;
+      const req = await Location.requestForegroundPermissionsAsync();
+      return req.status === 'granted';
+    } finally {
+      permissionInFlight = null;
+    }
+  })();
+  return permissionInFlight;
 }
 
 // iOS "Precise Location" off fallback heuristic: expo-location v19 exposes no
@@ -86,15 +101,16 @@ export function promptEnableServices() {
 
 // Proactive iOS Precise-off probe. expo-location v19 exposes no accuracyAuthorization,
 // so on iOS reduced accuracy is invisible to getLocationGateStatus above — a canvasser
-// with Precise Location off only found out one blocked tap at a time. The map's puck
-// streams its fixes here: a sustained run of coarse readings lights the same
-// PRECISE_OFF banner the tap-time gate would (deep-indoor GNSS-less fixes trip the
-// tap gate's identical >1km heuristic, so probe and gate always agree), BEFORE the
-// first wasted knock — and one precise fix clears it. Hysteresis is load-bearing,
-// in both count and TIME: the first fixes after a cold start can legitimately be
-// km-coarse cell/Wi-Fi fixes while GNSS warms, and a stale run of coarse readings
-// from hours ago must not combine with one warm-up fix to trip it — so readings
-// only count within a rolling window, and the run must span real seconds.
+// with Precise Location off only found out one blocked tap at a time. The map's
+// location feed (useLocationFeed) streams its fixes here: a sustained run of coarse
+// readings lights the same PRECISE_OFF banner the tap-time gate would (deep-indoor
+// GNSS-less fixes trip the tap gate's identical >1km heuristic, so probe and gate
+// always agree), BEFORE the first wasted knock — and one precise fix clears it.
+// Hysteresis is load-bearing, in both count and TIME: the first fixes after a cold
+// start can legitimately be km-coarse cell/Wi-Fi fixes while GNSS warms, and a
+// stale run of coarse readings from hours ago must not combine with one warm-up
+// fix to trip it — so readings only count within a rolling window, and the run
+// must span real seconds.
 // iOS-only: Android's permission API reports coarse directly.
 const PRECISE_OFF_MIN_COUNT = 6;
 const PRECISE_OFF_MIN_SPAN_MS = 15 * 1000;
@@ -115,7 +131,7 @@ export const reportFixAccuracy = (accuracy) => {
     coarseLastAt = now;
     // setGateBlock dedups identical codes, and a coarse stream can't co-occur with
     // the blocks that gate fixes off entirely (services off / permission denied) —
-    // no fixes reach the puck in those states — so no guard on the current code.
+    // no fixes reach the feed in those states — so no guard on the current code.
     if (coarseCount >= PRECISE_OFF_MIN_COUNT && now - coarseFirstAt >= PRECISE_OFF_MIN_SPAN_MS) {
       setGateBlock('PRECISE_OFF');
     }
@@ -130,7 +146,7 @@ export const reportFixAccuracy = (accuracy) => {
 // THE canvassing gate — every disposition/survey stamp comes from here, and a throw
 // means the action must NOT be recorded (no location = no knock). Acquisition order:
 //   1. device location services on, app permission granted, precise (not coarse);
-//   2. a recent OS fix (≤15s, ≤20m — the Mapbox puck keeps this warm, so the common
+//   2. a recent OS fix (≤15s, ≤20m — the map's location feed keeps this warm, so the common
 //      case costs ~no latency);
 //   3. a fresh high-accuracy read, capped at freshTimeoutMs;
 //   4. any last-known fix no older than MAX_FIX_AGE_MS — NEVER unbounded: a stale fix

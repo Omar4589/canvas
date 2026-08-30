@@ -14,6 +14,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
+import AppLocationPuck from '../../../../components/AppLocationPuck';
 import { api } from '../../../../lib/api';
 import { loadActiveCampaign, loadCurrentUser } from '../../../../lib/cache';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../lib/config';
@@ -481,9 +482,11 @@ export default function AdminBookDetail() {
           rotateEnabled
         >
           <Mapbox.Camera ref={cameraRef} />
-          {/* Focus-gated so GPS stops while another screen covers this one
-              (hidden Tabs screens stay mounted for the whole session). */}
-          <Mapbox.UserLocation visible={isFocused} />
+          {/* Focus-gated by MOUNTING — the native puck's visible={false} would leave
+              the engine's GPS running (and Android still draws the pulse ring);
+              unmount is the only real off-switch. Hidden Tabs screens stay mounted
+              for the whole session, so without this gate GPS would run forever. */}
+          {isFocused && <AppLocationPuck />}
           <Mapbox.Images
             images={{
               'house-unknocked': require('../../../../assets/icons/house-unknocked.png'),

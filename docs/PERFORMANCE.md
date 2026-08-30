@@ -27,7 +27,10 @@ keep that from draining phones:
 2. **Covered screen → its polling stops.** Navigating away from a screen (another tab, a pushed
    detail screen) pauses that screen's polling and its GPS dot. Coming back refreshes it
    immediately and resumes. Before July 2026 this rule didn't exist — a visited admin map kept
-   polling all day behind other tabs.
+   polling all day behind other tabs. (The GPS-dot half of this rule only became genuinely true
+   on Android in August 2026: the old dot's `visible` gate never actually stopped the library's
+   location engine there — a start/stop counter leak kept it hot — and the native-puck migration
+   replaced the gate with real unmounting.)
 3. **Search boxes wait for you to stop typing.** Voter/household searches fire one request ~300ms
    after the last keystroke, not one per key, and abandoned searches are cancelled.
 
@@ -58,7 +61,7 @@ it can't be double-billed, and a knock recorded *during* a flush can't be lost.
 |---|---|---|
 | App backgrounded | `focusManager.setFocused` wired to AppState | `mobile/app/_layout.jsx` |
 | Screen covered | `...useFocusedPoll()` on polled queries | each polling screen |
-| GPS dot | `<Mapbox.UserLocation visible={isFocused} />` | admin map, book map |
+| GPS dot | `{isFocused && <AppLocationPuck />}` — mount-gated: the native puck's `visible` prop hides pixels but does NOT stop the engine's location component; only unmount does | admin map, book map |
 
 **Why screens need their own gating:** expo-router keeps screens mounted — Tabs screens forever
 once visited (including `href:null` hidden ones), and stack base screens under everything pushed on
