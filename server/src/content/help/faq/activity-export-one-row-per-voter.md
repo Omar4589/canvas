@@ -12,9 +12,9 @@ tags: export, csv, activity, not home, voters, rows, download
 Yes. By default the **Canvassing activity** export is one row per door event, and a knock that
 named nobody — *not home*, *refused*, *wrong address*, *lit dropped*, *no soliciting*,
 *restricted* — comes out as one row with the voter columns blank, because nobody was picked.
-When you queue the export, tick **One row per voter at the door** (on the phone: the **Rows**
-switch on the sheet) and each of those knocks repeats once per voter registered at that
-address — same outcome, time, canvasser, GPS and note on every row, with that voter's State
+Press **Queue export** and, in the dialog that opens, tick **One row per voter at the door** (on
+the phone: the **Rows** switch on the sheet) — each of those knocks then repeats once per voter
+registered at that address — same outcome, time, canvasser, GPS and note on every row, with that voter's State
 voter ID, UID, name and party filled in. Surveys already name the person and don't change.
 
 It's built for handing to a voter-keyed system — a mail-merge to everyone whose door was tried,
@@ -30,8 +30,9 @@ Two things to keep straight:
   pass for an invoice?](export-knocks-for-invoicing)). Every row of one knock shares the same
   **Activity DB id**.
 
-Want to drop restricted-access or wrong-address entries at the same time? Leave those unticked
-under **Door outcome** and they stay out of the file, fanned or not.
+Want to drop restricted-access or wrong-address entries at the same time? The same dialog has
+the **Door outcome** chips — leave those two unticked and they stay out of the file, fanned or
+not.
 
 People who have asked not to be contacted are never listed, and an address with nobody to list
 keeps its single blank row. The export history says **one row per voter at the door** on any

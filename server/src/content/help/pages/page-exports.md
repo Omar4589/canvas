@@ -19,17 +19,20 @@ Open a campaign and pick **Exports** in the sidebar.
 - **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's
   timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), the
   **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names),
-  or the **Door outcome** chips (**Canvassing activity** and **Notes** — tick the outcomes you
-  want; nothing ticked means all; leave *Restricted* or *Wrong address* unticked to drop them).
+  or the **Door outcome** chips (for **Notes** — tick the outcomes you want; nothing ticked
+  means all).
 - **Include contact & demographic details** — on the two survey exports only. Off by default;
   tick it to add phone, phone type, cell phone, gender, date of birth, county, latitude and
   longitude, precinct and districts to every row, for matching results back into another
   system. It adds columns, never rows, so the row count doesn't move.
-- **One row per voter at the door** — on **Canvassing activity** only. Off by default; tick it
-  and every knock that named nobody (not home, refused, lit drop, and so on) repeats once per
-  voter registered at that address, same outcome and note on each. It adds **rows**, not
-  columns, and the file is named `activity-log-by-voter` so its rows are never mistaken for
-  knocks. See [Exporting your data](exports) for what those repeated rows do and don't say about
+- **The Canvassing activity dialog** — on this type, **Queue export** opens a dialog before
+  anything is queued, with two choices: the **Door outcome** chips (tick the outcomes you want;
+  nothing ticked means all; leave *Restricted* or *Wrong address* unticked to drop them) and
+  **One row per voter at the door** — off by default; tick it and every knock that named nobody
+  (not home, refused, lit drop, and so on) repeats once per voter registered at that address,
+  same outcome and note on each. That adds **rows**, not columns, and the file is named
+  `activity-log-by-voter` so its rows are never mistaken for knocks. Confirm in the dialog to
+  queue. See [Exporting your data](exports) for what those repeated rows do and don't say about
   each person.
 - **Queue export** — creates the job. Building happens in the background; the history below
   polls until it's done. If the background worker is offline you'll see a notice — the export

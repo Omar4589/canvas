@@ -65,7 +65,9 @@ all three note sources on the Notes page for campaigns they manage.
 **Narrowing by outcome.** Canvassing activity and Notes both take a **Door outcome** filter —
 chips; tick the outcomes you want, and nothing ticked means every outcome. Leave *Restricted*
 and *Wrong address* unticked to drop desk marks and bad addresses from the file, or tick only
-*Not home* for a re-knock list with the full event detail behind it. The phone's row-count
+*Not home* for a re-knock list with the full event detail behind it. On the web, Canvassing
+activity's chips live in the dialog that **Queue export** opens for that type (beside the
+one-row-per-voter box); the Notes chips sit inline with the other filters. The phone's row-count
 preview follows it, and the export history lists the outcomes a file was narrowed to.
 
 **Who each row identifies.** The voter-bearing files (activity, both survey files, notes, and
@@ -88,8 +90,8 @@ columns at all — use Canvassing activity for who was reached.
 
 A "not home" is a fact about an address. Some tools on the receiving end want a fact about a
 *person* — a row per registered voter, so a knock can be matched to every household member in a
-voter-keyed system. Tick **One row per voter at the door** when queueing a Canvassing activity
-export and every knock that named nobody — not home, wrong address, refused, lit drop, no
+voter-keyed system. Press **Queue export** on a Canvassing activity export, tick **One row per
+voter at the door** in the dialog that opens, and every knock that named nobody — not home, wrong address, refused, lit drop, no
 soliciting, restricted — comes out once per voter registered at that address, each row carrying
 the same outcome, time, canvasser, GPS and note, with that voter's State voter ID, UID, name and
 party filled in. Rows that already name a voter (a survey at the door) are untouched.
@@ -404,7 +406,11 @@ Web: [`pages/ExportsPage.jsx`](../client/src/pages/ExportsPage.jsx) (campaign dr
 `exports`), downloads via the shared
 [`lib/downloadFile.js`](../client/src/lib/downloadFile.js) (the raw-fetch attachment idiom,
 extracted); its local `TYPES` list is filter-UI wiring plus fallback copy — `GET /types`
-overlays label/desc and decides visibility when present. Mobile:
+overlays label/desc and decides visibility when present. The narrowing filters render inline for
+every type; a type whose `filters` carry an *options* token (`outcome`, `perVoterRows` — today
+canvass-activity) gets an **options dialog** instead of queueing straight from **Queue export**:
+the NotesPage export-dialog pattern, carrying the outcome chips and the per-voter checkbox, with
+the dialog's own Queue button doing the POST. Mobile:
 [`admin/exports.jsx`](../mobile/app/(app)/admin/exports.jsx) — tapping one of the four everyday
 types opens [`components/ExportSheet.jsx`](../mobile/components/ExportSheet.jsx) (MetricSheet's
 Modal anatomy): description, "one row is…", contents, the web's filters for that type, and a
@@ -435,6 +441,9 @@ runs canvass-activity a second time with the option on as the keyed artifact
 `canvass-activity:fanned`; the fixture's h2 two-voter, h5 all-flagged and h6 voter-less doors pin
 the repeat/fallback/no-marker rules; header and download-name parity; estimate parity under five
 param sets; and the timed-out pipeline's floor via a stubbed `aggregate`),
+`client/src/lib/exportsRender.smoke.test.js` (renderToString of the real Exports page — with
+canvass-activity selected the outcome chips and the per-voter checkbox are NOT inline, they belong to
+the Queue-export dialog; SSR cannot click, so the open dialog is compiled, not rendered),
 `test/billing.int.test.js` (carve-out matrix ×2:
 create and estimate pass read-only, export-DELETE still 402),
 `test/accessLogCoverage.int.test.js` (the new URL shapes — including `/estimate` and `/types` —

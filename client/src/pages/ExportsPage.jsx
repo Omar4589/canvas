@@ -8,7 +8,7 @@ import Section from '../components/Section.jsx';
 import DateRangeSelector from '../components/DateRangeSelector.jsx';
 import InfoHint from '../components/InfoHint.jsx';
 import Pager from '../components/Pager.jsx';
-import { Button, Select, EmptyState, SkeletonRows } from '../components/ui/index.js';
+import { Button, Select, EmptyState, SkeletonRows, Modal } from '../components/ui/index.js';
 import { downloadFile } from '../lib/downloadFile.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
@@ -101,6 +101,12 @@ const NOTE_SOURCE_OPTIONS = [
 // Derived, never hand-copied: ACTION_LABELS is the display map for the actionType enum, so a
 // new outcome shows up here automatically instead of silently missing an option.
 const OUTCOME_OPTIONS = Object.keys(ACTION_LABELS);
+
+// Tokens that are OPTIONS — choices that change what the file IS — as opposed to the narrowing
+// filters. A type carrying one gets a dialog between the Queue button and the POST (today
+// canvass-activity: the outcome chips and the per-voter checkbox), so those choices are made
+// deliberately on their own screen rather than scrolled past among the pickers.
+const OPTION_TOKENS = ['outcome', 'perVoterRows'];
 
 const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
@@ -213,6 +219,7 @@ export default function ExportsPage() {
   // Off by default like the two above — and unlike them this one changes the ROW COUNT and the
   // file name (services/export/exportBuilders.js fanPlan). Frozen into ExportJob.params.
   const [perVoterRows, setPerVoterRows] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [backupScope, setBackupScope] = useState('campaign');
   const [skip, setSkip] = useState(0);
   const [rowBusy, setRowBusy] = useState(null); // jobId of an in-flight download/delete
@@ -355,11 +362,28 @@ export default function ExportsPage() {
     return p;
   }
 
-  function queueExport() {
+  function queueExport(mutateOpts) {
     const body = { type: type.id, params: paramsForCreate() };
     if (!(type.id === 'full-backup' && backupScope === 'org')) body.campaignId = campaignId;
-    createMut.mutate(body);
+    createMut.mutate(body, mutateOpts);
   }
+
+  const hasOptionsDialog = type.filters.some((f) => OPTION_TOKENS.includes(f));
+
+  // The Door-outcome chip row — inline for Notes (a narrowing filter beside the others), inside
+  // the options dialog for Canvassing activity. One element, two homes.
+  const outcomeChipRow = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {OUTCOME_OPTIONS.map((a) => (
+        <Chip
+          key={a}
+          active={actionTypes.includes(a)}
+          onClick={() => toggleIn(setActionTypes, a)}
+          label={ACTION_LABELS[a]}
+        />
+      ))}
+    </div>
+  );
 
   const createDisabled =
     createMut.isPending ||
@@ -490,25 +514,10 @@ export default function ExportsPage() {
               <div className="mt-1 text-xs text-fg-muted">All three unless you pick.</div>
             </div>
           )}
-          {(wants('noteOutcome') || wants('outcome')) && (
+          {wants('noteOutcome') && (
             <div>
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Door outcome</div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {OUTCOME_OPTIONS.map((a) => (
-                  <Chip
-                    key={a}
-                    active={actionTypes.includes(a)}
-                    onClick={() => toggleIn(setActionTypes, a)}
-                    label={ACTION_LABELS[a]}
-                  />
-                ))}
-              </div>
-              {actionTypes.length > 0 && (
-                <div className="mt-1 text-xs text-fg-muted">
-                  Profile notes have no door outcome, so they’re left out while this is set.
-                  {!actionTypes.includes('survey_submitted') && ' Survey notes are too.'}
-                </div>
-              )}
+              {outcomeChipRow}
             </div>
           )}
           {wants('noteAuthor') && noteAuthors.length > 0 && (
@@ -624,38 +633,80 @@ export default function ExportsPage() {
               </label>
             </div>
           )}
-          {/* The first ROW option in the Center (the two wells above add columns): it multiplies
-              rows and renames the file, so the copy leads with what a repeated outcome does and
-              does not claim about each person. */}
-          {wants('perVoterRows') && (
-            <div className="w-full rounded-md border border-border bg-sunken px-3 py-2">
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={perVoterRows}
-                  onChange={(e) => setPerVoterRows(e.target.checked)}
-                />
-                <span>
-                  <span className="font-medium text-fg">One row per voter at the door</span>
-                  <span className="block text-xs text-fg-muted">
-                    A knock that named nobody — not home, wrong address, refused, lit drop, no
-                    soliciting, restricted — is one row about the door. Tick this and it repeats once
-                    per registered voter at that address, each row carrying the same outcome, time,
-                    canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
-                    three rows means someone at that address declined, not that each person did. The
-                    columns are the same but the row count is not, so the file is named
-                    activity-log-by-voter — never count its rows as knocks. Do-not-contact voters are
-                    never listed, and an address with nobody to list keeps its single blank row.
-                  </span>
-                </span>
-              </label>
-            </div>
-          )}
-          <Button onClick={queueExport} loading={createMut.isPending} disabled={createDisabled}>
+          <Button
+            onClick={() => (hasOptionsDialog ? setOptionsOpen(true) : queueExport())}
+            loading={createMut.isPending && !optionsOpen}
+            disabled={createDisabled}
+          >
             Queue export
           </Button>
         </div>
+
+        {optionsOpen && (
+          <Modal
+            size="lg"
+            title={`${type.label} options`}
+            subtitle="These change what the file is, so they are chosen here, on purpose, before anything is queued."
+            onClose={() => !createMut.isPending && setOptionsOpen(false)}
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setOptionsOpen(false)} disabled={createMut.isPending}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => queueExport({ onSuccess: () => setOptionsOpen(false) })}
+                  loading={createMut.isPending}
+                  disabled={createDisabled}
+                >
+                  Queue export
+                </Button>
+              </>
+            }
+          >
+            <div className="space-y-4">
+              {wants('outcome') && (
+                <div>
+                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Door outcome</div>
+                  {outcomeChipRow}
+                  <p className="mt-1.5 text-xs text-fg-muted">
+                    Tick the outcomes you want; nothing ticked means every outcome. Leave Restricted
+                    and Wrong address unticked to drop desk marks and bad addresses, or tick only Not
+                    home for a re-knock list with the full detail behind it.
+                  </p>
+                </div>
+              )}
+              {/* The first ROW option in the Center (the other toggles add columns): it multiplies
+                  rows and renames the file, so the copy leads with what a repeated outcome does and
+                  does not claim about each person. */}
+              {wants('perVoterRows') && (
+                <label className="flex items-start gap-2 rounded-md border border-border bg-sunken px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={perVoterRows}
+                    onChange={(e) => setPerVoterRows(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-fg">One row per voter at the door</span>
+                    <span className="block text-xs text-fg-muted">
+                      A knock that named nobody — not home, wrong address, refused, lit drop, no
+                      soliciting, restricted — is one row about the door. Tick this and it repeats once
+                      per registered voter at that address, each row carrying the same outcome, time,
+                      canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
+                      three rows means someone at that address declined, not that each person did. The
+                      columns are the same but the row count is not, so the file is named
+                      activity-log-by-voter — never count its rows as knocks. Do-not-contact voters are
+                      never listed, and an address with nobody to list keeps its single blank row.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {createMut.isError && (
+                <p className="text-sm text-danger">{createMut.error?.message || 'Could not queue that export.'}</p>
+              )}
+            </div>
+          </Modal>
+        )}
 
         {type.id === 'voter-file' && (
           <div className="mt-3 rounded-md border border-warning/40 bg-warning-tint px-3 py-2 text-xs text-warning-fg">

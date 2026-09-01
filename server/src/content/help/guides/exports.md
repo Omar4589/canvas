@@ -18,8 +18,9 @@ keep, open in Excel or Google Sheets, or load into another tool.
 1. Pick an export type and, if you want, narrow it with filters (date range, walk list, round,
    canvasser, door outcome, or a saved search). On the phone, tapping a type opens a sheet that describes the
    file, takes the same filters, and shows a **live row count** before you queue anything.
-2. Press **Queue export**. The file is built in the background — big exports can take a minute
-   or two, and the list below updates as it goes.
+2. Press **Queue export**. For **Canvassing activity** a dialog opens first, with the door
+   outcome chips and the one-row-per-voter box — confirm there. The file is built in the
+   background — big exports can take a minute or two, and the list below updates as it goes.
 3. When the row says **Ready**, press **Download**. Files are kept for **7 days**, then deleted
    automatically — you can queue a fresh one any time.
 
@@ -28,10 +29,11 @@ keep, open in Excel or Google Sheets, or load into another tool.
 - **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at
   that door. The complete field record. Voter name and IDs fill in only when a survey named the
   voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter
-  columns are blank on purpose. Tick **One row per voter at the door** to repeat those knocks
-  once per registered voter at the address instead — see below. The **Door outcome** chips
-  narrow the file to the outcomes you tick: leave *Restricted* and *Wrong address* unticked to
-  drop them, or tick only *Not home* for a re-knock list with the full detail.
+  columns are blank on purpose. Pressing **Queue export** on this type opens a dialog with two
+  choices: **Door outcome** chips that narrow the file to the outcomes you tick (leave
+  *Restricted* and *Wrong address* unticked to drop them, or tick only *Not home* for a re-knock
+  list with the full detail), and **One row per voter at the door**, which repeats those knocks
+  once per registered voter at the address instead — see below.
 - **Doors by round** — one row per door per round with its status. Filter it to `not home` and
   you have a re-knock list.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
@@ -69,9 +71,9 @@ contacted are never listed, and the count beside the list counts only the names 
 ### One row per voter at a door (Canvassing activity)
 
 A *not home* is a fact about an address. If the tool you're handing the file to wants a fact
-about a person — a row for every registered voter at the address — tick **One row per voter at
-the door** when you queue a Canvassing activity export (on the phone: the **Rows** switch on the
-sheet). Every knock that named nobody (*not home*, *wrong address*, *refused*, *lit dropped*,
+about a person — a row for every registered voter at the address — press **Queue export** on a
+Canvassing activity export and tick **One row per voter at the door** in the dialog that opens
+(on the phone: the **Rows** switch on the sheet). Every knock that named nobody (*not home*, *wrong address*, *refused*, *lit dropped*,
 *no soliciting*, *restricted*) then comes out once per voter registered at that address, each
 row carrying the same outcome, time, canvasser, GPS and note, with that voter's State voter ID,
 UID, name and party filled in. Surveys, which already name the person, are unchanged.
