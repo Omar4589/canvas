@@ -264,7 +264,7 @@ test('GET /types: registry metadata, role-filtered, unified labels', { skip }, a
   assert.ok(byId['canvass-activity'].desc.length > 0, 'descriptions ship from the registry');
   // perVoterRows is the Center's first ROW option; both clients take their filter tokens from
   // this list, so the token shipping here is what makes the checkbox/switch render at all.
-  assert.deepStrictEqual(byId['canvass-activity'].filters, ['date', 'effort', 'pass', 'canvasser', 'perVoterRows']);
+  assert.deepStrictEqual(byId['canvass-activity'].filters, ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows']);
   assert.strictEqual(byId['canvass-activity'].estimate, true);
   assert.strictEqual(byId['full-backup'].estimate, false, 'the one previewless type');
 

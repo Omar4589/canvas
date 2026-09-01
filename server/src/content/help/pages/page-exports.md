@@ -17,8 +17,10 @@ Open a campaign and pick **Exports** in the sidebar.
   marked admin-only (voter profile notes, full backup) don't appear for team leads. The **Notes**
   type is available to leads.
 - **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's
-  timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), or the
-  **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names).
+  timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), the
+  **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names),
+  or the **Door outcome** chips (**Canvassing activity** and **Notes** — tick the outcomes you
+  want; nothing ticked means all; leave *Restricted* or *Wrong address* unticked to drop them).
 - **Include contact & demographic details** — on the two survey exports only. Off by default;
   tick it to add phone, phone type, cell phone, gender, date of birth, county, latitude and
   longitude, precinct and districts to every row, for matching results back into another
@@ -58,7 +60,7 @@ Exports work on an **archived** campaign too, on the web and on the phone. Archi
 On the phone, Admin → **More → Exports** queues the four everyday types with the same filters
 and a live row-count preview: tap a type, and a sheet explains what one row of the file is,
 what's in it, and roughly how many rows your filters will produce before you queue. Canvassing
-activity has the same **One row per voter at the door** switch there (under **Rows**), and the
-row count updates when you flip it. The other
+activity has the same **Door outcome** chips and the same **One row per voter at the door**
+switch there (under **Rows**), and the row count follows both. The other
 types — detailed survey answers, filtered voters, voter notes, and the full backup — stay on
 the web dashboard. Downloads open the share sheet, and touching and holding a row deletes it.

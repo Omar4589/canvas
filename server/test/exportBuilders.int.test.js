@@ -497,6 +497,20 @@ test('perVoterRows: voter-less knocks repeat per kept voter; empty rosters keep 
   }
 });
 
+test('outcome filter: leaving Restricted and Wrong address unticked drops them, fanned or not', { skip }, async () => {
+  const keep = ['not_home', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+  for (const perVoterRows of [false, true]) {
+    const params = perVoterRows ? { actionTypes: keep, perVoterRows: true } : { actionTypes: keep };
+    const { doc, text } = await runExport('canvass-activity', params);
+    assert.ok(!csvLines(text).slice(1).some((l) => cellsOf(l)[3] === 'restricted'), 'no restricted row');
+    // h5's restricted is the only excluded fixture row: it is one row un-fanned AND one row
+    // fanned (the empty-roster fallback), so both counts drop by exactly one.
+    assert.strictEqual(doc.rowCount, (perVoterRows ? FANNED_ROWS : UNFANNED_ROWS) - 1);
+    const est = await estimateFor('canvass-activity', params);
+    assert.strictEqual(est.rows, doc.rowCount, 'the estimate follows the outcome filter');
+  }
+});
+
 test('perVoterRows: the full backup stays un-fanned by construction', { skip }, async () => {
   const { text } = ctx.artifacts['full-backup'];
   // Entry and manifest names, not the whole text: the README's notes MENTION the fanned file by
@@ -706,6 +720,8 @@ test('estimates match filtered builds (estimate==build under params)', { skip },
     ['canvass-activity', { perVoterRows: true, from: '2026-07-01', to: '2026-07-02' }],
     ['canvass-activity', { perVoterRows: true, userId: String(ctx.uDel._id) }],
     ['canvass-activity', { perVoterRows: true, passId: 'legacy' }],
+    // The `outcome` chips' everyday use: everything except Restricted and Wrong address.
+    ['canvass-activity', { actionTypes: ['not_home', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'] }],
   ];
   for (const [type, params] of cases) {
     const validated = await EXPORT_TYPES[type].validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });

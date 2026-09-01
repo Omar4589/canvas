@@ -62,6 +62,12 @@ profile-notes type itself stays admin-only — a deliberate owner ruling (2026-0
 [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) v6, on the grounds that a lead already reads
 all three note sources on the Notes page for campaigns they manage.
 
+**Narrowing by outcome.** Canvassing activity and Notes both take a **Door outcome** filter —
+chips; tick the outcomes you want, and nothing ticked means every outcome. Leave *Restricted*
+and *Wrong address* unticked to drop desk marks and bad addresses from the file, or tick only
+*Not home* for a re-knock list with the full event detail behind it. The phone's row-count
+preview follows it, and the export history lists the outcomes a file was narrowed to.
+
 **Who each row identifies.** The voter-bearing files (activity, both survey files, notes, and
 the voter files) carry two match keys side by side: **State voter ID** (the id your voter file
 came with) and **UID** (the vendor id from your original upload, when it had one) — so a file
@@ -94,8 +100,8 @@ Four things to know before you rely on the file:
   address declined — not that each of the three did. *No soliciting* is a sign on the property,
   and neither is a do-not-contact request. *Restricted* rows repeat too, and many of those are
   desk marks over a whole book rather than a visit, so an export over a bulk-restricted book can
-  grow a lot; the `Via` column says which rows are desk marks, and filtering to one canvasser
-  leaves them out.
+  grow a lot; the `Via` column says which rows are desk marks, filtering to one canvasser
+  leaves them out, and unticking *Restricted* under **Door outcome** drops them altogether.
 - **Its rows are not knocks.** The columns are identical to the normal file but the row count is
   not, so the file is named **`activity-log-by-voter`** (and the download
   `…-canvass-activity-by-voter-<date>.csv`) — never sum its rows for an invoice; the invoice-grade
@@ -312,7 +318,14 @@ and roster omissions are never counted (`exportScope.js` rule (b)). Every fanned
 to `ctx.subjects` at write time, so the record-level audit names them — and `subjectsTruncated`
 becomes routine on large fanned exports. The full backup passes `params: {}`, so the bundle is
 un-fanned by construction. Off by default; frozen into `ExportJob.params`; surfaced by the web
-history's `scopeLabel` (which now also surfaces `includeDoorVoters`).
+history's `scopeLabel` (which now also surfaces `includeDoorVoters` and `actionTypes`).
+
+**The `outcome` filter token** on the same type is the notes export's Door-outcome chip row
+reused: both tokens feed the one `actionTypes` param (include semantics; empty = all), which
+`canvassActivityQuery` already applied and the estimate therefore already honoured — the token
+is what makes the chips render on both clients. Mobile renders it with `SourceChips` inside the
+sheet's scroller (the component's flex caveat applies), keyed off `ACTION_LABELS` in
+`lib/theme.js`.
 
 Shared rules: CSV dialect from
 [`services/export/csvWriter.js`](../server/src/services/export/csvWriter.js) (UTF-8 BOM, CRLF,

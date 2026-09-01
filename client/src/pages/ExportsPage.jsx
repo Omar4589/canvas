@@ -35,7 +35,7 @@ const TYPES = [
     id: 'canvass-activity',
     label: 'Canvassing activity',
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door.',
-    filters: ['date', 'effort', 'pass', 'canvasser', 'perVoterRows'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
   },
   {
     id: 'doors-by-round',
@@ -174,6 +174,7 @@ function scopeLabel(job, { effortName, passName, canvasserName }) {
   if (p.passId) bits.push(p.passId === 'legacy' ? 'Legacy / no pass' : passName(p.passId) || 'Round');
   if (p.userId) bits.push(canvasserName(p.userId) || 'Canvasser');
   if (p.roundStatuses?.length) bits.push(`Status: ${p.roundStatuses.join(', ')}`);
+  if (p.actionTypes?.length) bits.push(`Outcomes: ${p.actionTypes.map((a) => ACTION_LABELS[a] || a).join(', ')}`);
   if (p.from || p.to) bits.push([p.from, p.to].filter(Boolean).join(' → '));
   // Surfaced deliberately: the history is the record of which exports carried contact and
   // date-of-birth columns, so it has to say so on the row.
@@ -344,7 +345,9 @@ export default function ExportsPage() {
     if (wants('import') && importJobId) p.importJobId = importJobId;
     if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;
     if (wants('noteSource') && noteSources.length) p.noteSources = noteSources;
-    if (wants('noteOutcome') && actionTypes.length) p.actionTypes = actionTypes;
+    // One chip row, two tokens: `noteOutcome` (Notes) and `outcome` (Canvassing activity) both
+    // feed the server's actionTypes param, with the same include semantics.
+    if ((wants('noteOutcome') || wants('outcome')) && actionTypes.length) p.actionTypes = actionTypes;
     if (wants('noteAuthor') && userId) p.userId = userId;
     if (wants('noteSearch') && noteQ.trim()) p.q = noteQ.trim();
     if (wants('doorVoters') && includeDoorVoters) p.includeDoorVoters = true;
@@ -487,7 +490,7 @@ export default function ExportsPage() {
               <div className="mt-1 text-xs text-fg-muted">All three unless you pick.</div>
             </div>
           )}
-          {wants('noteOutcome') && (
+          {(wants('noteOutcome') || wants('outcome')) && (
             <div>
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Door outcome</div>
               <div className="flex flex-wrap items-center gap-1.5">

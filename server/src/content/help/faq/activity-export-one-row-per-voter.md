@@ -30,6 +30,9 @@ Two things to keep straight:
   pass for an invoice?](export-knocks-for-invoicing)). Every row of one knock shares the same
   **Activity DB id**.
 
+Want to drop restricted-access or wrong-address entries at the same time? Leave those unticked
+under **Door outcome** and they stay out of the file, fanned or not.
+
 People who have asked not to be contacted are never listed, and an address with nobody to list
 keeps its single blank row. The export history says **one row per voter at the door** on any
 file that carried it. See [Exporting your data](exports).

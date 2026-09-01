@@ -18,7 +18,7 @@ export const EXPORT_TYPE_META = [
     oneRowIs: 'one door event — who knocked, when, and the outcome',
     contents:
       'Timestamps in the campaign’s time zone, address, voter identity (State voter ID, UID, name, party — when a survey named the voter, or every registered voter with "One row per voter" on), canvasser and team, walk list and round, GPS, and the note.',
-    filters: ['date', 'effort', 'pass', 'canvasser', 'perVoterRows'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
   },
   {
     id: 'doors-by-round',
@@ -77,7 +77,7 @@ export function mergeTypeMeta(serverTypes) {
 // Mirror of the web page's paramsForCreate: only non-empty filters go on the wire, and the
 // SAME params feed both POST /admin/exports/estimate and POST /admin/exports — what the
 // preview counted is what the queue builds.
-export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail, perVoterRows }) {
+export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows }) {
   const wants = (f) => (meta.filters || []).includes(f);
   const p = {};
   if (wants('date') && range && (range.from || range.to)) {
@@ -89,6 +89,8 @@ export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, 
   if (wants('canvasser') && userId) p.userId = userId;
   if (wants('roundStatus') && roundStatus) p.roundStatuses = [roundStatus];
   if (wants('import') && importJobId) p.importJobId = importJobId;
+  // Door-outcome chips: an empty selection is "every outcome", never "match nothing".
+  if (wants('outcome') && actionTypes?.length) p.actionTypes = actionTypes;
   // Columns only — includeVoterDetail never changes the row count, so the estimate ignores it.
   // It still rides the wire params so what the sheet previewed is exactly what the queue builds.
   if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;

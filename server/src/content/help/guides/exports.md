@@ -16,7 +16,7 @@ keep, open in Excel or Google Sheets, or load into another tool.
 ## How it works
 
 1. Pick an export type and, if you want, narrow it with filters (date range, walk list, round,
-   canvasser, or a saved search). On the phone, tapping a type opens a sheet that describes the
+   canvasser, door outcome, or a saved search). On the phone, tapping a type opens a sheet that describes the
    file, takes the same filters, and shows a **live row count** before you queue anything.
 2. Press **Queue export**. The file is built in the background — big exports can take a minute
    or two, and the list below updates as it goes.
@@ -29,7 +29,9 @@ keep, open in Excel or Google Sheets, or load into another tool.
   that door. The complete field record. Voter name and IDs fill in only when a survey named the
   voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter
   columns are blank on purpose. Tick **One row per voter at the door** to repeat those knocks
-  once per registered voter at the address instead — see below.
+  once per registered voter at the address instead — see below. The **Door outcome** chips
+  narrow the file to the outcomes you tick: leave *Restricted* and *Wrong address* unticked to
+  drop them, or tick only *Not home* for a re-knock list with the full detail.
 - **Doors by round** — one row per door per round with its status. Filter it to `not home` and
   you have a re-knock list.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
@@ -79,7 +81,8 @@ Three things to know:
 - **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that
   address declined — not that each of the three did. *No soliciting* is a sign on the property.
   Neither is a request not to be contacted. *Restricted* rows repeat too, and many of those are
-  desk marks over a whole book rather than a visit — the **Via** column says which.
+  desk marks over a whole book rather than a visit — the **Via** column says which, and unticking
+  *Restricted* under **Door outcome** leaves them out altogether.
 - **Its rows are not knocks.** The columns are the same but the row count isn't, so the file
   arrives named **activity-log-by-voter** — never count its rows for an invoice. Every row of one
   knock shares the same **Activity DB id**, so counting distinct values there gets you back to

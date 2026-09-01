@@ -5,13 +5,14 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { radius, spacing } from '../lib/theme';
+import { radius, spacing, ACTION_LABELS, actionLabel } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { paramsFor, ROUND_STATUSES } from '../lib/exportTypes';
 import DateRangeBar from './DateRangeBar';
 import TabSwitcher from './TabSwitcher';
+import SourceChips from './SourceChips';
 import { SHEET_TIMING } from './PullableSheet';
 
 // The Export Center's "what am I about to download" sheet — tap a type, read what one row
@@ -24,6 +25,9 @@ import { SHEET_TIMING } from './PullableSheet';
 // The estimate hits POST /admin/exports/estimate with the SAME params Queue will send
 // (estimate==build, server-guaranteed). It is advisory: on any error the well says so and
 // Queue stays enabled — the server is the authority at POST time.
+// The Door-outcome chips (the notes screen's row, same include semantics: none ticked = all).
+const OUTCOME_CHIPS = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
+
 export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, onClose }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -50,6 +54,11 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   const [userId, setUserId] = useState('');
   const [roundStatus, setRoundStatus] = useState('');
   const [importJobId, setImportJobId] = useState('');
+  // Door-outcome chips (multi-select; [] = every outcome). Unticking Restricted / Wrong address
+  // is how a file drops desk marks and bad addresses.
+  const [actionTypes, setActionTypes] = useState([]);
+  const toggleOutcome = (key) =>
+    setActionTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   // Off by default (the web page's rule, and the server's) — a survey export shouldn't carry
   // a date of birth unless someone asked for one.
   const [includeVoterDetail, setIncludeVoterDetail] = useState(false);
@@ -97,7 +106,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const imports = (importsQ.data?.jobs || []).filter((j) => j.status === 'completed' && !j.undone);
 
-  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail, perVoterRows });
+  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows });
   // Debouncing the SERIALIZED params gives a stable query key and kills object-identity
   // churn in one move; api() threads react-query's abort signal, so a superseded count
   // stops on the wire.
@@ -273,6 +282,17 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                     onValueChange={setIncludeVoterDetail}
                     trackColor={{ true: colors.brand }}
                   />
+                </View>
+              </View>
+            ) : null}
+
+            {wants('outcome') ? (
+              <View style={styles.filterBlock}>
+                <Text style={styles.filterLabel}>Door outcome</Text>
+                {/* SourceChips is a horizontal ScrollView with the flex caveat at its top: it is
+                    safe here because it sits inside this sheet's vertical scroller content. */}
+                <View style={styles.bleed}>
+                  <SourceChips sources={OUTCOME_CHIPS} selected={actionTypes} onToggle={toggleOutcome} />
                 </View>
               </View>
             ) : null}

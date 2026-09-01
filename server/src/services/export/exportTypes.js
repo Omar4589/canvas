@@ -183,7 +183,11 @@ export const EXPORT_TYPES = {
     label: 'Canvassing activity',
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
-    filters: ['date', 'effort', 'pass', 'canvasser', 'perVoterRows'],
+    // `outcome` renders the same Door-outcome chip row the notes type has and feeds the same
+    // actionTypes param below — a narrowing filter, so canvassActivityQuery applies it and the
+    // estimate follows for free. Leaving Restricted / Wrong address unticked is how a client
+    // drops desk marks and bad addresses from the file.
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
