@@ -26,5 +26,8 @@ Three things to know:
 **Exports** page can queue the same per-round numbers inside a full backup, plus a
 **Doors by round** file that reconciles to this table door by door — and exports keep working
 during the read-only wind-down after a subscription ends. See [Exporting your data](exports).
+One caution: a Canvassing activity export queued with **One row per voter at the door** arrives
+named `activity-log-by-voter` and repeats each knock once per voter — never invoice from that
+file; the name is the tell.
 
 See [Understanding the numbers](metrics) and [Billing and your account](billing).

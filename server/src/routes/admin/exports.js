@@ -205,6 +205,8 @@ router.post('/estimate', async (req, res, next) => {
       dncWithheld: est.dncWithheld,
       approx: !!est.approx,
       ...(est.files ? { files: est.files } : {}),
+      // The fanned canvass-activity count hit its time cap and `rows` is a floor (≥ truth never).
+      ...(est.rowsAreFloor ? { rowsAreFloor: true } : {}),
     });
   } catch (err) {
     next(err);

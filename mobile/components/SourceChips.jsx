@@ -2,14 +2,16 @@ import { ScrollView, Pressable, Text, View, StyleSheet } from 'react-native';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
-// Multi-select source filter for the Notes hub (Door / Survey / Admin). Unlike
-// TabSwitcher (single-select), each chip toggles independently; an empty
-// `selected` array means "all sources". Each chip carries a fixed source-color dot
-// and its live count. Mirrors the web NotesPage SOURCES chips.
+// Multi-select chip row for the Notes hub. Unlike TabSwitcher (single-select), each chip
+// toggles independently; an empty `selected` array means "all". Mirrors the web NotesPage chips.
 //
-// sources: [{ key, label, color, count }]
+// sources: [{ key, label, color?, count? }]
 // selected: string[] (keys); [] = all
 // onToggle(key)
+//
+// `color` and `count` are BOTH optional, and that is load-bearing for the second call site: the
+// outcome row has no per-outcome total to show, and a hard-coded 0 beside every outcome would
+// read as "no notes with this outcome" — the opposite of the truth.
 export default function SourceChips({ sources, selected, onToggle }) {
   const styles = useThemedStyles(makeStyles);
   return (
@@ -31,9 +33,11 @@ export default function SourceChips({ sources, selected, onToggle }) {
             onPress={() => onToggle(s.key)}
             style={[styles.pill, active && styles.pillActive]}
           >
-            <View style={[styles.dot, { backgroundColor: s.color }]} />
+            {s.color ? <View style={[styles.dot, { backgroundColor: s.color }]} /> : null}
             <Text style={[styles.text, active && styles.textActive]}>{s.label}</Text>
-            <Text style={[styles.count, active && styles.countActive]}>{s.count ?? 0}</Text>
+            {s.count == null ? null : (
+              <Text style={[styles.count, active && styles.countActive]}>{s.count}</Text>
+            )}
           </Pressable>
         );
       })}

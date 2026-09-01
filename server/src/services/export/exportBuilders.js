@@ -18,8 +18,14 @@ import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import { buildKnocksByPassData } from '../reports/knocksByPass.js';
 import { zonedDayRange, tzAbbrev } from '../../utils/timezone.js';
 import { DNC_FILTER } from './exportScope.js';
-import { ExportUserError } from './exportErrors.js';
+import { ExportUserError, EstimateTimeout } from './exportErrors.js';
 import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
+import {
+  resolveNoteScope,
+  doorNotesMatch,
+  surveyNotesMatch,
+  adminNotesMatch,
+} from '../notes/notesQuery.js';
 
 // Row builders for every Export Center type. Each builder receives:
 //   ctx  — { organizationId, campaignId, campaign, org, params, anchorTz, dnc (Set of flagged
@@ -141,7 +147,8 @@ const detailPlan = (ctx) => {
 };
 
 // ---------------------------------------------------------------------------------------
-// canvass-activity — one row per CanvassActivity (door-unit ledger)
+// canvass-activity — one row per CanvassActivity (door-unit ledger); or, opt-in, one row per
+// voter registered at the door for the rows that named nobody (params.perVoterRows — fanPlan).
 
 // The exact ledger query the builder streams, exported so the estimate endpoint counts the
 // SAME universe — estimate==build by construction (the turf target-preview principle).
@@ -167,16 +174,126 @@ export const canvassActivityQuery = (ctx) => {
   return q;
 };
 
+const ACTIVITY_VOTER_PROJ = 'stateVoterId uid firstName lastName party';
+
+// The by-voter row grain (params.perVoterRows), resolved ONCE — detailPlan's pattern. Owns the
+// file name and the roster predicate, so the builder, the estimate and the download name cannot
+// drift. Emission rule: an activity whose STORED voterId is null repeats once per voter in the
+// kept roster of its door, and an EMPTY kept roster falls back to exactly one row identical to
+// the un-fanned one (see the flush loop). Rows that already name a voter are never fanned.
+export const fanPlan = (ctx) => {
+  const on = !!ctx.params.perVoterRows;
+  return {
+    on,
+    // Identical 34 headers either way — the NAME is the only signal the grain moved, so a
+    // downstream pivot cannot silently absorb fanned rows as knocks. exportTypes' fileSlug
+    // renames the download to match.
+    fileName: on ? 'activity-log-by-voter' : 'activity-log',
+    // Who "a voter at this door" is: campaign-scoped (Voter rows are per-campaign) and read
+    // through the SAME DNC clause voterfile-current.csv publishes through, so the roster this
+    // file repeats over is exactly the roster that file already hands the same audience.
+    // oid() is defensive: ctx.campaignId is an ObjectId on both paths today, but the estimate
+    // spreads this into an aggregation $match, which NEVER Mongoose-casts — a string id would
+    // match nothing and every door would read as empty. Pin the cast, don't assume it.
+    rosterMatch: { campaignId: oid(ctx.campaignId), ...DNC_FILTER },
+    rosterProj: `${ACTIVITY_VOTER_PROJ} householdId`,
+  };
+};
+
+// Per-batch roster prefetch for the fan: Map<householdId, Voter[]> over the batch's voter-less
+// doors (≤ BATCH doors), empty when the plan is off. DNC_FILTER lives inside plan.rosterMatch:
+// a flagged voter is structurally incapable of producing a row here, blank or otherwise. Do NOT
+// "fix" this into fetch-and-blank to match the door-unit blanking rule in the loop below — a
+// blank row per flagged voter, beside named siblings, is exactly the per-door marker
+// exportScope.js forbids.
+const loadFanRoster = async (plan, batch) => {
+  if (!plan.on) return new Map();
+  const doorIds = [...new Set(batch.filter((a) => !a.voterId).map((a) => String(a.householdId)))];
+  if (!doorIds.length) return new Map();
+  const roster = await Voter.find(
+    { householdId: { $in: doorIds.map(oid) }, ...plan.rosterMatch },
+    plan.rosterProj,
+  ).lean();
+  const byHome = new Map();
+  for (const v of roster) {
+    const k = String(v.householdId);
+    if (!byHome.has(k)) byHome.set(k, []);
+    byHome.get(k).push(v);
+  }
+  // Deterministic sibling order inside a door (voterfile-current.csv's sort).
+  for (const list of byHome.values()) {
+    list.sort(
+      (a, b) =>
+        (a.lastName || '').localeCompare(b.lastName || '') ||
+        (a.firstName || '').localeCompare(b.firstName || '') ||
+        String(a._id).localeCompare(String(b._id)),
+    );
+  }
+  return byHome;
+};
+
+// Rows THIS file will contain under these params — the builder's progress denominator AND
+// estimateCanvassActivity's `rows`, one code path, so estimate==build stops being a convention.
+// Plan off: the identical countDocuments it has always been. Plan on: the fanned count is a
+// JOIN CARDINALITY — Σ over doors of (voter-less knocks at the door × max(1, kept roster size))
+// plus the rows that already name a voter — with no arithmetic shortcut, so it is one
+// $unionWith pipeline: two index scans and a merge, ONE document back to Node (a correlated
+// $lookup would be one sub-pipeline per door). opts.maxTimeMS caps that pipeline — the estimate
+// runs inline in the web dyno behind a 30s router; the worker passes nothing — and on expiry
+// throws EstimateTimeout, which only the estimate catches (it answers with the floor).
+export const countCanvassActivityRows = async (ctx, opts = {}) => {
+  const q = canvassActivityQuery(ctx);
+  const plan = fanPlan(ctx);
+  if (!plan.on) return CanvassActivity.countDocuments(q);
+  const agg = CanvassActivity.aggregate([
+    // {voterId: null} matches null AND missing; {$ne: null} is its exact complement — the same
+    // partition the builder's `a.voterId ? … : …` truthy test makes.
+    { $match: { ...q, voterId: null } },
+    { $group: { _id: '$householdId', k: { $sum: 1 }, r: { $sum: 0 } } },
+    {
+      $unionWith: {
+        coll: Voter.collection.name,
+        pipeline: [
+          { $match: plan.rosterMatch },
+          { $group: { _id: '$householdId', k: { $sum: 0 }, r: { $sum: 1 } } },
+        ],
+      },
+    },
+    { $group: { _id: '$_id', k: { $sum: '$k' }, r: { $sum: '$r' } } },
+    // Doors the roster branch contributed that carry no voter-less knock drop out here.
+    { $match: { k: { $gt: 0 } } },
+    // $max:[1,'$r'] IS the empty-roster fallback the builder writes, as arithmetic.
+    { $group: { _id: null, rows: { $sum: { $multiply: ['$k', { $max: [1, '$r'] }] } } } },
+  ]).allowDiskUse(true);
+  if (opts.maxTimeMS) agg.option({ maxTimeMS: opts.maxTimeMS });
+  try {
+    const [named, fanned] = await Promise.all([
+      CanvassActivity.countDocuments({ ...q, voterId: { $ne: null } }),
+      agg,
+    ]);
+    return named + (fanned[0]?.rows || 0);
+  } catch (err) {
+    if (err?.codeName === 'MaxTimeMSExpired' || err?.code === 50) throw new EstimateTimeout();
+    throw err;
+  }
+};
+
+// The honest floor when the exact fanned count times out: every knock is at least one row.
+export const canvassActivityFloorRows = (ctx) => CanvassActivity.countDocuments(canvassActivityQuery(ctx));
+
 export const buildCanvassActivity = async (ctx, sink) => {
   const { anchorTz } = ctx;
   const fmts = instantFmts(anchorTz);
   const q = canvassActivityQuery(ctx);
+  const plan = fanPlan(ctx);
 
+  // The progress denominator is the SAME counter the estimate returns — under the fan a plain
+  // countDocuments would pin the bar at 99% for the whole run.
   const [{ passById, effortNameById }, userIds, coordIds, total] = await Promise.all([
     loadPassEffortMaps(ctx),
     CanvassActivity.distinct('userId', q),
     CanvassActivity.distinct('coordinatorId', q),
-    CanvassActivity.countDocuments(q),
+    countCanvassActivityRows(ctx),
   ]);
   const people = await hydrateCanvassers(
     [...userIds, ...coordIds].filter(Boolean).map(String),
@@ -184,7 +301,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
   );
   ctx.setTotalEstimate(total);
 
-  const writer = await sink.file('activity-log', [
+  const writer = await sink.file(plan.fileName, [
     'Timestamp (ISO)', 'Date', `Time (${fmts.tzLabel})`, 'Action',
     'Address', 'Address line 2', 'City', 'State', 'Zip', 'County',
     'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
@@ -201,9 +318,10 @@ export const buildCanvassActivity = async (ctx, sink) => {
     if (!batch.length) return;
     const hhIds = [...new Set(batch.map((a) => String(a.householdId)))];
     const vIds = [...new Set(batch.map((a) => a.voterId && String(a.voterId)).filter(Boolean))];
-    const [homes, voters] = await Promise.all([
+    const [homes, voters, rosterByHome] = await Promise.all([
       Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode county').lean(),
-      vIds.length ? Voter.find({ _id: { $in: vIds } }, 'stateVoterId uid firstName lastName party').lean() : [],
+      vIds.length ? Voter.find({ _id: { $in: vIds } }, ACTIVITY_VOTER_PROJ).lean() : [],
+      loadFanRoster(plan, batch),
     ]);
     const homeById = new Map(homes.map((h) => [String(h._id), h]));
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
@@ -221,23 +339,36 @@ export const buildCanvassActivity = async (ctx, sink) => {
       const p = a.passId ? passById.get(String(a.passId)) : null;
       const canv = people.get(String(a.userId)) || null;
       const team = a.coordinatorId ? people.get(String(a.coordinatorId)) : null;
-      await writer.writeRow([
-        ...instantCells(a.timestamp, fmts), a.actionType,
-        h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '', h?.county || '',
-        v?.stateVoterId || '', v?.uid || '', v?.firstName || '', v?.lastName || '', v?.party || '',
-        ...canvasserCells(canv),
-        team ? `${team.firstName} ${team.lastName}`.trim() : '',
-        p ? effortNameById.get(String(p.effortId)) || '' : '',
-        p ? p.roundNumber : '', p ? p.name : passLabel(p),
-        a.via === 'bulk' ? 'bulk' : 'field',
-        a.wasOfflineSubmission ? 'yes' : 'no',
-        a.location?.lat ?? '', a.location?.lng ?? '', a.location?.accuracy ?? '',
-        a.distanceFromHouseMeters ?? '',
-        a.replaced?.actionType || '',
-        a.replaced?.timestamp ? new Date(a.replaced.timestamp).toISOString() : '',
-        a.note || '',
-        String(a.householdId), dncHit ? '' : vid || '', String(a._id),
-      ]);
+      // Fan ONLY on a stored null voterId. A DNC-blanked row and a dangling-voterId row also
+      // print blank identity and are deliberately NOT fanned: fanning either would attribute
+      // one person's knock to their neighbours, and neither is visible to the query-level
+      // null/non-null partition the estimate counts.
+      const fan = !vid && plan.on ? rosterByHome.get(String(a.householdId)) || [] : [];
+      // `[null]` is the row exactly as it has always been written — and it is ALSO the fallback
+      // when the kept roster is empty (no registered voters, OR every one of them flagged), so
+      // an all-flagged door is byte-identical to an empty one and the ABSENCE of rows can never
+      // become the marker the door-unit rule forbids. Do not optimize this row away.
+      for (const fv of fan.length ? fan : [null]) {
+        const rv = fv || v;
+        if (fv) ctx.subjects.add(String(fv._id)); // only identities that actually shipped
+        await writer.writeRow([
+          ...instantCells(a.timestamp, fmts), a.actionType,
+          h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '', h?.county || '',
+          rv?.stateVoterId || '', rv?.uid || '', rv?.firstName || '', rv?.lastName || '', rv?.party || '',
+          ...canvasserCells(canv),
+          team ? `${team.firstName} ${team.lastName}`.trim() : '',
+          p ? effortNameById.get(String(p.effortId)) || '' : '',
+          p ? p.roundNumber : '', p ? p.name : passLabel(p),
+          a.via === 'bulk' ? 'bulk' : 'field',
+          a.wasOfflineSubmission ? 'yes' : 'no',
+          a.location?.lat ?? '', a.location?.lng ?? '', a.location?.accuracy ?? '',
+          a.distanceFromHouseMeters ?? '',
+          a.replaced?.actionType || '',
+          a.replaced?.timestamp ? new Date(a.replaced.timestamp).toISOString() : '',
+          a.note || '',
+          String(a.householdId), fv ? String(fv._id) : dncHit ? '' : vid || '', String(a._id),
+        ]);
+      }
     }
     ctx.progress(writer.rowsWritten);
     batch = [];
@@ -247,7 +378,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
     if (batch.length >= BATCH) await flush();
   }
   await flush();
-  return { files: [{ name: 'activity-log', rows: writer.rowsWritten }] };
+  return { files: [{ name: plan.fileName, rows: writer.rowsWritten }] };
 };
 
 // ---------------------------------------------------------------------------------------
@@ -892,6 +1023,235 @@ export const buildVoterNotes = async (ctx, sink) => {
   }
   await flush();
   return { files: [{ name: 'voter-notes', rows: writer.rowsWritten }] };
+};
+
+// ---------------------------------------------------------------------------------------
+// notes — one row per note, unioning the three live note stores. The reason this type exists:
+// door notes (CanvassActivity.note) and survey notes (SurveyResponse.note) were only ever
+// reachable as one column buried in a wide door/survey file, and the Notes hub that unions all
+// three caps each source at 500 rows. This streams, uncapped.
+//
+// Scope resolution is shared with GET /admin/reports/notes through services/notes/notesQuery.js,
+// so the screen and the download can never disagree about what a filter selects — and the
+// estimate below calls this SAME function, which is what makes estimate==build hold.
+export const notesScopeOf = (ctx) =>
+  resolveNoteScope({
+    organizationId: ctx.organizationId,
+    campaignId: ctx.campaignId,
+    anchorTz: ctx.anchorTz,
+    from: ctx.params.from,
+    to: ctx.params.to,
+    effortId: ctx.params.effortId,
+    passId: ctx.params.passId,
+    userId: ctx.params.userId,
+    q: ctx.params.q,
+    sources: ctx.params.noteSources,
+    actionTypes: ctx.params.actionTypes,
+  });
+
+const SOURCE_LABEL = { door: 'Door', survey: 'Survey', voter: 'Admin' };
+
+// Tag each cursor's docs with the source and ONE comparable instant, so the merge below can
+// order across three collections whose time fields have three different names.
+const taggedNotes = async function* (cursor, source, tsField) {
+  for await (const d of cursor) yield { ...d, _source: source, _t: d[tsField] };
+};
+
+// K-way merge of already-sorted streams. Chronological across sources without ever holding more
+// than one row per source in memory — the whole point of not merging in JS after the fact.
+const mergeByTime = async function* (streams) {
+  const heads = await Promise.all(streams.map((it) => it.next()));
+  const live = heads.map((h) => (h.done ? null : h.value));
+  for (;;) {
+    let best = -1;
+    for (let i = 0; i < live.length; i += 1) {
+      if (!live[i]) continue;
+      if (best === -1 || new Date(live[i]._t) < new Date(live[best]._t)) best = i;
+    }
+    if (best === -1) return;
+    yield live[best];
+    const nxt = await streams[best].next();
+    live[best] = nxt.done ? null : nxt.value;
+  }
+};
+
+export const buildNotes = async (ctx, sink) => {
+  const scope = notesScopeOf(ctx);
+  const fmts = instantFmts(ctx.anchorTz);
+  const withDoorVoters = !!ctx.params.includeDoorVoters;
+  const has = (t) => scope.sources.includes(t);
+
+  const doorQ = doorNotesMatch(scope);
+  const surveyQ = surveyNotesMatch(scope);
+  const adminQ = adminNotesMatch(scope);
+
+  const [{ passById, effortNameById }, doorUsers, surveyUsers, deskUsers, adminUsers, dTotal, sTotal, aTotal] =
+    await Promise.all([
+      loadPassEffortMaps(ctx),
+      has('door') ? CanvassActivity.distinct('userId', doorQ) : [],
+      has('survey') ? SurveyResponse.distinct('userId', surveyQ) : [],
+      has('survey') ? SurveyResponse.distinct('deskEntry.byUserId', surveyQ) : [],
+      has('voter') ? VoterNote.distinct('authorId', adminQ) : [],
+      has('door') ? CanvassActivity.countDocuments(doorQ) : 0,
+      has('survey') ? SurveyResponse.countDocuments(surveyQ) : 0,
+      has('voter') ? VoterNote.countDocuments(adminQ) : 0,
+    ]);
+  const people = await hydrateCanvassers(
+    [...doorUsers, ...surveyUsers, ...deskUsers, ...adminUsers].filter(Boolean).map(String),
+    ctx.organizationId,
+  );
+  ctx.setTotalEstimate(dTotal + sTotal + aTotal);
+
+  const writer = await sink.file('notes', [
+    'Created (ISO)', 'Date', `Time (${fmts.tzLabel})`, 'Source', 'Outcome',
+    'State voter ID', 'UID', 'Voter first name', 'Voter last name',
+    'Address', 'City', 'State', 'Zip',
+    'Author first name', 'Author last name', 'Author status',
+    'Desk entered', 'Desk entered by',
+    'Walk list', 'Pass', 'Pass name',
+    'Edited', 'Edited at (ISO)', 'Note',
+    ...(withDoorVoters ? ['Voters at this door', 'Voter count at this door'] : []),
+    'Household DB id', 'Voter DB id', 'Note DB id',
+  ]);
+
+  const streams = [];
+  if (has('door')) {
+    streams.push(
+      taggedNotes(
+        CanvassActivity.find(doorQ, '_id note timestamp actionType userId householdId voterId passId')
+          .sort({ timestamp: 1 }).lean().cursor({ batchSize: BATCH }),
+        'door', 'timestamp',
+      ),
+    );
+  }
+  if (has('survey')) {
+    streams.push(
+      taggedNotes(
+        SurveyResponse.find(surveyQ, '_id note submittedAt userId householdId voterId passId editedBy editedAt deskEntry')
+          .sort({ submittedAt: 1 }).lean().cursor({ batchSize: BATCH }),
+        'survey', 'submittedAt',
+      ),
+    );
+  }
+  if (has('voter')) {
+    streams.push(
+      taggedNotes(
+        VoterNote.find(adminQ, '_id body createdAt authorId voterId editedBy editedAt')
+          .sort({ createdAt: 1 }).lean().cursor({ batchSize: BATCH }),
+        'voter', 'createdAt',
+      ),
+    );
+  }
+
+  let batch = [];
+  const flush = async () => {
+    if (!batch.length) return;
+
+    // Voter ids named by a row; household ids known directly (door/survey) — an admin note gets
+    // its household through its voter, which is also how it is scoped to this campaign.
+    const vIds = [...new Set(batch.map((n) => n.voterId && String(n.voterId)).filter(Boolean))];
+    const voters = vIds.length
+      ? await Voter.find(
+          { _id: { $in: vIds }, campaignId: ctx.campaignId },
+          'stateVoterId uid firstName lastName householdId',
+        ).lean()
+      : [];
+    const voterById = new Map(voters.map((v) => [String(v._id), v]));
+
+    const hhIds = new Set(batch.map((n) => n.householdId && String(n.householdId)).filter(Boolean));
+    for (const v of voters) if (v.householdId) hhIds.add(String(v.householdId));
+    const homes = hhIds.size
+      ? await Household.find({ _id: { $in: [...hhIds] } }, 'addressLine1 city state zipCode').lean()
+      : [];
+    const homeById = new Map(homes.map((h) => [String(h._id), h]));
+
+    // The opt-in door roster. DNC voters are omitted SILENTLY and the count counts listed names
+    // only — a count that disagreed with the list would itself be the do-not-contact marker the
+    // door-unit rule forbids. The omission is indistinguishable from voterfile-current.csv, which
+    // already excludes flagged voters through the same filter.
+    let rosterByHome = new Map();
+    if (withDoorVoters) {
+      const doorHomes = [...new Set(batch.filter((n) => n._source === 'door' && n.householdId).map((n) => String(n.householdId)))];
+      const roster = doorHomes.length
+        ? await Voter.find(
+            { householdId: { $in: doorHomes }, campaignId: ctx.campaignId, ...DNC_FILTER },
+            'firstName lastName householdId',
+          ).lean()
+        : [];
+      rosterByHome = roster.reduce((m, v) => {
+        const k = String(v.householdId);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(`${v.firstName || ''} ${v.lastName || ''}`.trim());
+        v.householdId && ctx.subjects.add(String(v._id));
+        return m;
+      }, new Map());
+    }
+
+    for (const n of batch) {
+      const vid = n.voterId ? String(n.voterId) : null;
+      const dncHit = vid && ctx.dnc.has(vid);
+
+      // Voter-unit rows ARE the person, so a flagged voter drops the row entirely — the note body
+      // very often quotes the opt-out request itself. Door-unit rows are a record of work: the row
+      // stays and the identity blanks, with no marker.
+      if (dncHit && n._source !== 'door') {
+        ctx.countDnc(1);
+        continue;
+      }
+      if (dncHit) ctx.countDnc(1);
+
+      const v = !dncHit && vid ? voterById.get(vid) : null;
+      if (vid && !dncHit && !v) {
+        // A survey note names a voter that no longer exists (import-undo). Voter-unit → the row
+        // goes, counted as an orphan so the estimate (which counts responses without a voter join)
+        // still reconciles. An ADMIN note misses for a second, indistinguishable reason — the voter
+        // belongs to another campaign, which is the COMMON case for an org-level VoterNote — and
+        // its estimate already excludes both through the campaign join, so it is skipped silently.
+        // A DOOR row is never skipped and therefore never counted here: unlike canvass-activity
+        // (approx:false, where orphans are informational), this type is approx:true, so a count
+        // with no matching skipped row would break est.rows === rowCount + orphanedRows.
+        if (n._source === 'survey') ctx.countOrphaned(1);
+        if (n._source !== 'door') continue;
+      }
+      if (n._source === 'voter' && !v) continue; // org-level note, not this campaign's voter
+      if (v) ctx.subjects.add(vid);
+
+      const hid = n.householdId ? String(n.householdId) : v?.householdId ? String(v.householdId) : '';
+      const h = hid ? homeById.get(hid) : null;
+      const p = n.passId ? passById.get(String(n.passId)) : null;
+      const author = people.get(String(n._source === 'voter' ? n.authorId : n.userId)) || null;
+      const desk = n.deskEntry?.byUserId ? people.get(String(n.deskEntry.byUserId)) : null;
+      const names = n._source === 'door' && withDoorVoters ? rosterByHome.get(hid) || [] : [];
+
+      await writer.writeRow([
+        ...instantCells(n._t, fmts),
+        SOURCE_LABEL[n._source],
+        n._source === 'door' ? n.actionType || '' : n._source === 'survey' ? 'survey_submitted' : '',
+        v?.stateVoterId || '', v?.uid || '', v?.firstName || '', v?.lastName || '',
+        h?.addressLine1 || '', h?.city || '', h?.state || '', h?.zipCode || '',
+        ...canvasserCells(author),
+        // The note on a desk-converted survey was typed by an ADMIN, but the row's userId is the
+        // field canvasser who took the original survey — so Author alone would name the wrong
+        // person in a file whose whole point is who wrote each note.
+        desk ? 'yes' : '', desk ? nameOf(desk) : '',
+        p ? effortNameById.get(String(p.effortId)) || '' : '',
+        p ? p.roundNumber : '', p ? p.name : '',
+        n.editedAt ? 'yes' : '', n.editedAt ? new Date(n.editedAt).toISOString() : '',
+        (n._source === 'voter' ? n.body : n.note) || '',
+        ...(withDoorVoters ? [names.join('; '), names.length || ''] : []),
+        hid, dncHit ? '' : vid || '', String(n._id),
+      ]);
+    }
+    ctx.progress(writer.rowsWritten);
+    batch = [];
+  };
+
+  for await (const doc of mergeByTime(streams)) {
+    batch.push(doc);
+    if (batch.length >= BATCH) await flush();
+  }
+  await flush();
+  return { files: [{ name: 'notes', rows: writer.rowsWritten }] };
 };
 
 // ---------------------------------------------------------------------------------------

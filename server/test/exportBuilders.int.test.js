@@ -124,6 +124,10 @@ before(async () => {
   ctx.h3 = await mkHome(3, ctx.e1._id);
   ctx.h4 = await mkHome(4, ctx.e2._id);
   ctx.h5 = await mkHome(5, ctx.e1._id, { fullyDnc: true });
+  // h6 has NO voters: the zero-roster control for the per-voter fan (perVoterRows). Its knock must
+  // come out as exactly one blank row, byte-identical to h5's (every voter flagged) — or the
+  // presence/absence of rows becomes the do-not-contact marker the door-unit rule forbids.
+  ctx.h6 = await mkHome(6, ctx.e1._id);
 
   const mkVoter = (home, sv, first, last, party, extra = {}) =>
     Voter.create({
@@ -151,6 +155,9 @@ before(async () => {
     doNotContact: { flagged: true, at: new Date(), reason: 'asked at door', source: 'admin' },
   });
   ctx.frank = await mkVoter(ctx.h2, 'SV2', '=HYPERLINK("http://evil","x")', 'Formula', 'DEM');
+  // Bea shares Frank's door: h2 is the one door with TWO kept voters, which is what makes the
+  // per-voter fan distinguishable from a no-op — every other door fans to at most one row.
+  ctx.bea = await mkVoter(ctx.h2, 'SV5', 'Bea', 'Beeson', 'IND', { uid: 'UBEA1' });
   ctx.carol = await mkVoter(ctx.h3, 'SV3', 'Carol', 'Errorson', 'REP'); // not in insertedVoterIds — the "error row"
   ctx.dave = await mkVoter(ctx.h4, 'SV4', 'Dave', 'Doorman', 'DEM', { uid: 'UDAV1' });
   ctx.edna = await mkVoter(ctx.h5, 'SVDNC2', 'Edna', 'Dncerson', 'REP', {
@@ -175,11 +182,16 @@ before(async () => {
   await mkAct(ctx.h1, ctx.p1, ctx.uAda, 'survey_submitted', '2026-07-01T15:00:00Z', { voterId: ctx.alice._id, coordinatorId: ctx.uCoord._id });
   await mkAct(ctx.h2, ctx.p1, ctx.uDel, 'not_home', '2026-07-02T16:30:00Z');
   await mkAct(ctx.h2, ctx.p1, ctx.uAda, 'survey_submitted', '2026-07-02T18:00:00Z', { voterId: new mongoose.Types.ObjectId() });
-  await mkAct(ctx.h5, ctx.p1, ctx.uAda, 'restricted', '2026-07-02T17:00:00Z', { via: 'bulk' });
-  await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'not_home', '2026-07-10T15:00:00Z');
-  await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'refused', '2026-07-11T15:00:00Z', { voterId: ctx.donna._id });
+  await mkAct(ctx.h5, ctx.p1, ctx.uAda, 'restricted', '2026-07-02T17:00:00Z', { via: 'bulk', note: 'gate code changed' });
+  await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'not_home', '2026-07-10T15:00:00Z', { note: 'dogs in yard, come back PM' });
+  await mkAct(ctx.h1, ctx.p2, ctx.uAda, 'refused', '2026-07-11T15:00:00Z', { voterId: ctx.donna._id, note: 'DOORNOTE-ON-FLAGGED-ROW' });
   await mkAct(ctx.h4, ctx.p3, ctx.uAda, 'survey_submitted', '2026-07-03T18:00:00Z', { voterId: ctx.dave._id });
   await mkAct(ctx.h3, null, ctx.uAda, 'not_home', '2026-06-01T12:00:00Z');
+  // Per-voter fan controls: h6 is a knock at a door with nobody registered, and the second h1
+  // not_home (P1, an hour before Alice's survey) proves the fan repeats per ACTIVITY, not per
+  // door — h1 now carries two voter-less knocks that must each fan to Alice alone.
+  await mkAct(ctx.h6, ctx.p1, ctx.uAda, 'not_home', '2026-07-04T16:00:00Z');
+  await mkAct(ctx.h1, ctx.p1, ctx.uAda, 'not_home', '2026-07-01T14:00:00Z');
 
   ctx.template = await SurveyTemplate.create({
     organizationId: ctx.org._id, name: 'Door Survey', version: 1,
@@ -235,6 +247,18 @@ before(async () => {
     { questionKey: 'notes2', questionLabel: 'Anything else?', answer: 'orphaned text', optionIds: [] },
   ]);
 
+  // Notes on the fixture, so the `notes` export is exercised by the registry-driven sweep at all
+  // (a builder whose sources are all empty passes every no-leak assertion vacuously):
+  //  - h1 carries Alice (clean) AND Donna (flagged), so the opt-in door roster on h1's not_home
+  //    note is the leak test for that column;
+  //  - the refused row NAMES Donna, so it is the leak test for a door row's OWN identity columns;
+  //  - h5 is fullyDnc with only Edna, so its note pins the empty-roster / count-0 case;
+  //  - Donna's survey note is voter-unit and must vanish entirely, body and all.
+  await SurveyResponse.updateOne(
+    { voterId: ctx.donna._id },
+    { $set: { note: 'DNCSURVEYNOTE-SENTINEL' } },
+  );
+
   ctx.importJob = await ImportJob.create({
     organizationId: ctx.org._id, campaignId: ctx.camp._id, filename: 'vendor.csv',
     kind: 'apply', status: 'completed', totalRows: 5,
@@ -273,24 +297,33 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
         { organizationId: ctx.org._id, campaignId: ctx.camp._id }
       );
     }
+    // The door roster is opt-in, so the sweep would never even render the column it most needs
+    // to police. Turn it ON here: h1's note then has a flagged voter one seat away from the list.
+    if (type === 'notes') return { includeDoorVoters: true };
     return {};
   };
   ctx.artifacts = {};
-  for (const type of Object.keys(EXPORT_TYPES)) {
-    const { doc, text } = await runExport(type, await paramsFor(type));
-    ctx.artifacts[type] = { doc, text };
+  // The per-voter fan is opt-in too, and it is the largest new linkage in the Center (a knock
+  // repeated against every name at the door): sweep it as a SECOND keyed artifact, so the
+  // canvass-activity assertions below keep reading the default file.
+  const runs = Object.keys(EXPORT_TYPES).map((type) => [type, type]);
+  runs.push(['canvass-activity', 'canvass-activity:fanned']);
+  for (const [type, key] of runs) {
+    const params = key === 'canvass-activity:fanned' ? { perVoterRows: true } : await paramsFor(type);
+    const { doc, text } = await runExport(type, params);
+    ctx.artifacts[key] = { doc, text };
     for (const leak of [
       'Donna', 'Dncerson', 'SVDNC1', 'Edna', 'SVDNC2', 'UIDDNC1', 'UIDDNC2',
       // contact/demographic cells are identity too — same guarantee as the name
       '555-DNCPHONE-1', '555-DNCPHONE-2', '555-DNCCELL-1', '555-DNCCELL-2', '1911-11-11',
     ]) {
-      assert.ok(!text.includes(leak), `${type}: DNC identity "${leak}" must not appear`);
+      assert.ok(!text.includes(leak), `${key}: DNC identity "${leak}" must not appear`);
     }
     for (const leak of ['ARCHIVED-ANSWER-SENTINEL', 'ARCHIVED-NOTE-SENTINEL']) {
-      assert.ok(!text.includes(leak), `${type}: a preserved (overwritten) response must never reach an artifact`);
+      assert.ok(!text.includes(leak), `${key}: a preserved (overwritten) response must never reach an artifact`);
     }
-    assert.ok(!text.includes(String(PRICE)), `${type}: pricePerCampaignCents must never reach an artifact`);
-    assert.ok(!text.includes('del-tomb'), `${type}: a deleted user's tombstone email must never leak`);
+    assert.ok(!text.includes(String(PRICE)), `${key}: pricePerCampaignCents must never reach an artifact`);
+    assert.ok(!text.includes('del-tomb'), `${key}: a deleted user's tombstone email must never leak`);
   }
   // Control: the sweep can actually SEE content (level-0 ZIP included). voters-filtered's
   // control is Dave — Alice's hand-edit (party DEM→IND in the fixture) correctly drops her
@@ -308,10 +341,12 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
 test('canvass-activity: anchor-tz columns, DNC row blanked not dropped, bulk labeled, deleted-user name', { skip }, async () => {
   const { doc, text } = ctx.artifacts['canvass-activity'];
   const lines = csvLines(text);
-  assert.strictEqual(doc.rowCount, 8, 'all 8 ledger rows — including the blanked DNC row and the dangling-voter row');
+  assert.strictEqual(doc.rowCount, 10, 'all 10 ledger rows — including the blanked DNC row and the dangling-voter row');
   assert.strictEqual(doc.excludedDncCount, 1, 'one identity withheld');
   assert.strictEqual(doc.orphanedRows, 1, 'the dangling voterId is counted, not silently blank');
-  assert.strictEqual(lines.length, 9, 'header + 8 rows');
+  assert.strictEqual(lines.length, 11, 'header + 10 rows');
+  assert.strictEqual(doc.files[0].name, 'activity-log', 'the default grain keeps the default file name');
+  assert.match(doc.artifact.filename, /-canvass-activity-\d{4}-\d{2}-\d{2}\.csv$/, '…and the default download name');
   assert.match(lines[0], /State voter ID,UID,Voter first name/, 'identity columns: renamed state id + the import UID');
 
   // 2026-07-01T15:00:00Z in America/Chicago (CDT) = 10:00:00 on the same day.
@@ -336,6 +371,139 @@ test('canvass-activity: anchor-tz columns, DNC row blanked not dropped, bulk lab
 
   const legacyRow = lines.find((l) => l.includes('2026-06-01T12:00:00.000Z'));
   assert.match(legacyRow, /Legacy \/ no pass/, 'pre-turf rows land in the legacy bucket');
+});
+
+// ---- canvass-activity: one row per voter at the door (perVoterRows) ---------------------
+
+// The fixture arithmetic the assertions below lean on — voter-less rows and their KEPT rosters:
+//   h2 not_home            → Frank, Bea   (2)
+//   h1 not_home (P1)       → Alice        (1 — Donna is flagged and simply absent)
+//   h1 not_home (P2)       → Alice        (1)
+//   h3 not_home (legacy)   → Carol        (1)
+//   h5 restricted (bulk)   → nobody kept (Edna flagged) → the ONE blank fallback row
+//   h6 not_home            → nobody registered          → the ONE blank fallback row
+// plus the 4 rows that already name a voter (two surveys, Donna's refused, the dangling survey),
+// which are never fanned: 4 + 2 + 1 + 1 + 1 + 1 + 1 = 11.
+const UNFANNED_ROWS = 10;
+const FANNED_ROWS = 11;
+// RFC-4180 cell split for the assertions that index into a row: the fixture's hostile voter name
+// carries a comma inside a quoted cell, so a naive split(',') shifts every column after it.
+const cellsOf = (line) => {
+  const out = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 1; } else quoted = false;
+      } else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+};
+
+test('perVoterRows: voter-less knocks repeat per kept voter; empty rosters keep ONE blank row; named rows untouched', { skip }, async () => {
+  const off = ctx.artifacts['canvass-activity'];
+  const { doc, text } = ctx.artifacts['canvass-activity:fanned'];
+  const lines = csvLines(text);
+  const header = cellsOf(lines[0]);
+
+  // The count. Discriminative: a no-op fan says 10, dropping empty rosters says 9, fanning the
+  // named rows too says 13, fanning per DOOR instead of per activity says 10.
+  assert.strictEqual(doc.rowCount, FANNED_ROWS);
+  assert.strictEqual(lines.length, FANNED_ROWS + 1, 'header + fanned rows');
+  // Identical header on and off: the NAME carries the grain, never a column — the DNC argument
+  // rests on there being no per-door voter count anywhere in the file.
+  assert.strictEqual(lines[0], csvLines(off.text)[0], 'header is byte-identical with the option on');
+  assert.strictEqual(header.length, 34);
+  // The file AND the download say so — renaming the sink entry alone is invisible (csvSink drops it).
+  assert.strictEqual(doc.files[0].name, 'activity-log-by-voter');
+  assert.match(doc.artifact.filename, /-canvass-activity-by-voter-\d{4}-\d{2}-\d{2}\.csv$/);
+
+  const idx = (h) => header.indexOf(h);
+  const actId = idx('Activity DB id');
+  const voterId = idx('Voter DB id');
+  const identity = ['State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party', 'Voter DB id'].map(idx);
+  const blank = (line) => identity.every((i) => cellsOf(line)[i] === '');
+
+  // h2's not_home is TWO rows sharing the Activity DB id and differing ONLY in identity.
+  const h2Rows = lines.filter((l) => l.includes('2026-07-02T16:30:00.000Z'));
+  assert.strictEqual(h2Rows.length, 2, 'Frank + Bea');
+  assert.strictEqual(new Set(h2Rows.map((l) => cellsOf(l)[actId])).size, 1, 'one activity');
+  assert.deepStrictEqual(
+    new Set(h2Rows.map((l) => cellsOf(l)[voterId])),
+    new Set([String(ctx.frank._id), String(ctx.bea._id)]),
+    'two voters',
+  );
+  const shared = header.map((_, i) => i).filter((i) => !identity.includes(i));
+  assert.deepStrictEqual(
+    shared.map((i) => cellsOf(h2Rows[0])[i]),
+    shared.map((i) => cellsOf(h2Rows[1])[i]),
+    'every non-identity cell (time, action, note, GPS, canvasser, door and activity ids) repeats verbatim',
+  );
+  assert.ok(h2Rows.some((l) => l.includes('Beeson')) && h2Rows.some((l) => l.includes('UBEA1')), 'the roster carries state id, UID, name, party');
+
+  // The no-marker proof: h5 (everyone flagged) and h6 (nobody registered) each come out as
+  // exactly ONE row with every identity cell blank, and the two are indistinguishable.
+  const h5Rows = lines.filter((l) => l.includes('restricted'));
+  const h6Rows = lines.filter((l) => l.includes('2026-07-04T16:00:00.000Z'));
+  assert.strictEqual(h5Rows.length, 1, 'all-flagged door: one row, not zero');
+  assert.strictEqual(h6Rows.length, 1, 'empty door: one row');
+  assert.ok(blank(h5Rows[0]) && blank(h6Rows[0]), 'both fallbacks are identity-blank');
+  assert.strictEqual(
+    h5Rows[0],
+    csvLines(off.text).find((l) => l.includes('restricted')),
+    'the all-flagged row is character-for-character its option-off form',
+  );
+
+  // A door with one kept + one flagged voter fans to the kept one alone, and the flagged voter's
+  // OWN refused row is still exactly one blank row — it names a voter, so it is never fanned
+  // (fan-on-rendered-blank would have put Alice on Donna's refusal).
+  const h1p2 = lines.filter((l) => l.includes('2026-07-10T15:00:00.000Z'));
+  assert.strictEqual(h1p2.length, 1);
+  assert.strictEqual(cellsOf(h1p2[0])[voterId], String(ctx.alice._id));
+  const refused = lines.filter((l) => l.includes('refused'));
+  assert.strictEqual(refused.length, 1);
+  assert.ok(blank(refused[0]));
+  // …and per ACTIVITY: h1's second voter-less knock (P1) also fans to Alice alone.
+  const h1p1 = lines.filter((l) => l.includes('2026-07-01T14:00:00.000Z'));
+  assert.strictEqual(h1p1.length, 1);
+  assert.strictEqual(cellsOf(h1p1[0])[voterId], String(ctx.alice._id));
+
+  // The dangling-voterId survey is not fanned either: voterId is non-null, the Voter is just gone.
+  // As always, its five identity cells are blank while Voter DB id keeps the dead id (the row is
+  // kept under the door-unit rule, and the id is what makes the orphan traceable).
+  const dangling = lines.filter((l) => l.includes('2026-07-02T18:00:00.000Z'));
+  assert.strictEqual(dangling.length, 1);
+  assert.ok(identity.slice(0, 5).every((i) => cellsOf(dangling[0])[i] === ''), 'identity blank');
+  assert.notStrictEqual(cellsOf(dangling[0])[voterId], '', 'the dangling id stays, exactly as with the option off');
+  assert.strictEqual(doc.orphanedRows, 1, 'orphan accounting is untouched by the fan');
+
+  // excludedDncCount is IDENTICAL on and off: roster omissions are never counted.
+  assert.strictEqual(doc.excludedDncCount, off.doc.excludedDncCount);
+  assert.strictEqual(doc.excludedDncCount, 1);
+
+  // The record-level audit names every voter that shipped, and neither flagged one.
+  const subjects = new Set((doc.audit?.subjectIds || []).map(String));
+  for (const v of [ctx.frank, ctx.bea, ctx.alice, ctx.carol, ctx.dave]) {
+    assert.ok(subjects.has(String(v._id)), `${v.firstName} is an audit subject`);
+  }
+  for (const v of [ctx.donna, ctx.edna]) {
+    assert.ok(!subjects.has(String(v._id)), `${v.firstName} (flagged) never enters the subject set`);
+  }
+});
+
+test('perVoterRows: the full backup stays un-fanned by construction', { skip }, async () => {
+  const { text } = ctx.artifacts['full-backup'];
+  // Entry and manifest names, not the whole text: the README's notes MENTION the fanned file by
+  // name to say the bundle never contains it.
+  assert.ok(text.includes('/activity-log.csv'), 'the bundle carries the default entry');
+  assert.ok(!text.includes('/activity-log-by-voter'), 'and never the fanned one (params: {} in buildFullBackup)');
+  assert.ok(!text.includes('activity-log-by-voter.csv'));
 });
 
 // ---- doors-by-round + Σ invariant ------------------------------------------------------
@@ -445,7 +613,7 @@ test('survey exports: contact/demographic columns are OPT-IN, and DNC-guarded wh
 
 test('voter-file (current roster): DNC absent, formula guard applied end to end', { skip }, async () => {
   const { doc, text } = ctx.artifacts['voter-file'];
-  assert.strictEqual(doc.rowCount, 4, 'alice, frank, carol, dave — both DNC voters absent');
+  assert.strictEqual(doc.rowCount, 5, 'alice, frank, bea, carol, dave — both DNC voters absent');
   assert.strictEqual(doc.excludedDncCount, 2);
   assert.ok(text.includes(`"'=HYPERLINK`), 'hostile voter name is neutralized, not executable');
 });
@@ -529,6 +697,15 @@ test('estimates match filtered builds (estimate==build under params)', { skip },
     // "columns, not rows" a pinned contract rather than a claim in a comment.
     ['survey-results', { includeVoterDetail: true }],
     ['survey-answers', { includeVoterDetail: true }],
+    // The per-voter fan is the Center's first ROW option, so unlike the detail toggle the estimate
+    // MUST know about it. The filtered cases catch a fan $match that dropped a filter, and the
+    // oid() casting trap (a string campaignId in the $unionWith sub-match reads every door as
+    // empty, and the estimate quietly equals the un-fanned count).
+    ['canvass-activity', { perVoterRows: true }],
+    ['canvass-activity', { perVoterRows: true, actionTypes: ['not_home'] }],
+    ['canvass-activity', { perVoterRows: true, from: '2026-07-01', to: '2026-07-02' }],
+    ['canvass-activity', { perVoterRows: true, userId: String(ctx.uDel._id) }],
+    ['canvass-activity', { perVoterRows: true, passId: 'legacy' }],
   ];
   for (const [type, params] of cases) {
     const validated = await EXPORT_TYPES[type].validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });
@@ -537,6 +714,48 @@ test('estimates match filtered builds (estimate==build under params)', { skip },
     const label = `${type} ${JSON.stringify(params)}`;
     assert.strictEqual(est.rows, doc.rowCount + (est.approx ? doc.orphanedRows : 0), `${label}: rows reconcile`);
     assert.strictEqual(est.dncWithheld, doc.excludedDncCount, `${label}: dncWithheld reconciles`);
+  }
+});
+
+test('perVoterRows estimate: exact, never approx, zero on an empty scope', { skip }, async () => {
+  const est = await estimateFor('canvass-activity', { perVoterRows: true });
+  assert.strictEqual(est.rows, FANNED_ROWS);
+  assert.strictEqual(est.approx, false, 'a fan drops nothing, so approx keeps its one meaning');
+  assert.ok(!est.rowsAreFloor, 'the exact count came back inside the cap');
+  assert.strictEqual(est.dncWithheld, 1, 'identical to the un-fanned figure — roster omissions are never counted');
+  const empty = await estimateFor('canvass-activity', { perVoterRows: true, from: '2030-01-01' });
+  assert.strictEqual(empty.rows, 0);
+  const { doc } = await runExport('canvass-activity', { perVoterRows: true, from: '2030-01-01' });
+  assert.strictEqual(doc.rowCount, 0, 'an empty scope builds an empty file, no crash on the empty $in');
+});
+
+test('perVoterRows estimate: a timed-out fan pipeline answers with the FLOOR, never with approx', { skip }, async () => {
+  // Stand in for Mongo's MaxTimeMSExpired on the aggregate (a real 1ms cap is not reliably
+  // reached on a ten-row fixture). The thenable mirrors what countCanvassActivityRows touches.
+  const expired = Object.assign(new Error('operation exceeded time limit'), { codeName: 'MaxTimeMSExpired', code: 50 });
+  const fake = { allowDiskUse: () => fake, option: () => fake, then: (res, rej) => Promise.reject(expired).then(res, rej) };
+  const own = Object.prototype.hasOwnProperty.call(CanvassActivity, 'aggregate');
+  const orig = CanvassActivity.aggregate;
+  CanvassActivity.aggregate = () => fake;
+  try {
+    const est = await estimateFor('canvass-activity', { perVoterRows: true });
+    assert.strictEqual(est.rowsAreFloor, true);
+    assert.strictEqual(est.approx, false, 'a floor is not an approximation');
+    assert.strictEqual(est.rows, UNFANNED_ROWS, 'the floor is one row per knock — the un-fanned count');
+    assert.ok(est.rows <= FANNED_ROWS, 'and it never lies upward');
+    assert.strictEqual(est.dncWithheld, 1);
+  } finally {
+    if (own) CanvassActivity.aggregate = orig;
+    else delete CanvassActivity.aggregate;
+  }
+  // Any other failure of the pipeline is NOT swallowed into a floor.
+  const boom = new Error('unrelated');
+  CanvassActivity.aggregate = () => ({ allowDiskUse() { return this; }, option() { return this; }, then: (res, rej) => Promise.reject(boom).then(res, rej) });
+  try {
+    await assert.rejects(estimateFor('canvass-activity', { perVoterRows: true }), /unrelated/);
+  } finally {
+    if (own) CanvassActivity.aggregate = orig;
+    else delete CanvassActivity.aggregate;
   }
 });
 

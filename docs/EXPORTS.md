@@ -45,17 +45,22 @@ still works** — that window exists precisely so you can take your data with yo
 
 | Type | One row is… | Use it for |
 |---|---|---|
-| **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) | the full field record; audits; "what happened at this address" |
+| **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) — or, with **One row per voter at the door** ticked, one voter at that door for every knock that named nobody | the full field record; audits; "what happened at this address"; a voter-keyed file when every person at a not-home address needs a row |
 | **Doors by round** | one door in one round, with its round status and visit count | re-knock lists; per-round door detail that adds up to the invoice numbers |
 | **Survey results** | one survey taken, one column per question | analysis in a spreadsheet; one file per survey when a campaign ran several; opt-in contact/demographic columns for matching back |
 | **Survey answers (detailed)** | one recorded answer, exactly as captured at the door | the audit-grade record — survives question re-wording; takes the same opt-in columns |
 | **Voter file** | one voter currently in the campaign | your file back; optionally with the column names from one of your uploads |
 | **Filtered voters** | one voter matching a saved search | handing a targeted subset to another tool |
-| **Voter notes** (admins only) | one staff note about a voter | the one dataset that previously had no way out |
+| **Notes** | one note — typed at a door, attached to a survey, or written on a voter profile | reading what the field actually wrote; "every not-home note from last week" |
+| **Voter profile notes** (admins only) | one note written on a voter profile | the profile trail on its own, with author and edit history |
 | **Full backup** (admins only, ZIP) | — | everything above for one campaign (or every campaign), plus per-round totals, a manifest, and a plain-language README |
 
-Team leads see the campaign-scoped types for the campaigns they manage; org-wide exports, voter
-notes, and the full backup are admin-only.
+Team leads see the campaign-scoped types for the campaigns they manage; org-wide exports, the
+**Voter profile notes** type, and the full backup are admin-only. **Notes** *is* lead-available,
+and note that this means a lead can download profile-note bodies through it even though the
+profile-notes type itself stays admin-only — a deliberate owner ruling (2026-09-01), recorded in
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) v6, on the grounds that a lead already reads
+all three note sources on the Notes page for campaigns they manage.
 
 **Who each row identifies.** The voter-bearing files (activity, both survey files, notes, and
 the voter files) carry two match keys side by side: **State voter ID** (the id your voter file
@@ -63,8 +68,49 @@ came with) and **UID** (the vendor id from your original upload, when it had one
 can be re-matched on another platform. In **Canvassing activity**, the voter columns fill in
 only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit
 drop) are records about the *door*, nobody was picked, and their voter columns are blank on
-purpose. **Doors by round** is a household file and deliberately has no voter columns at all —
-use Canvassing activity for who was reached.
+purpose. Two exports let you ask for the people registered at that door anyway, and both are
+off by default with the choice recorded in the export history, because a door record names
+nobody on its own and that roster is the one thing that ties it to named people. In
+**Canvassing activity**, tick **One row per voter at the door** and every knock that named
+nobody repeats once per registered voter at that address (the next section). In **Notes**, tick
+**Include the voters registered at each door** and a door note gains a column listing the people
+registered there; the count beside the list counts only the names shown. In both, do-not-contact
+voters are never listed. **Doors by round** is a household file and deliberately has no voter
+columns at all — use Canvassing activity for who was reached.
+
+## One row per voter at the door (the Canvassing activity export)
+
+A "not home" is a fact about an address. Some tools on the receiving end want a fact about a
+*person* — a row per registered voter, so a knock can be matched to every household member in a
+voter-keyed system. Tick **One row per voter at the door** when queueing a Canvassing activity
+export and every knock that named nobody — not home, wrong address, refused, lit drop, no
+soliciting, restricted — comes out once per voter registered at that address, each row carrying
+the same outcome, time, canvasser, GPS and note, with that voter's State voter ID, UID, name and
+party filled in. Rows that already name a voter (a survey at the door) are untouched.
+
+Four things to know before you rely on the file:
+
+- **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that
+  address declined — not that each of the three did. *No soliciting* is a sign on the property,
+  and neither is a do-not-contact request. *Restricted* rows repeat too, and many of those are
+  desk marks over a whole book rather than a visit, so an export over a bulk-restricted book can
+  grow a lot; the `Via` column says which rows are desk marks, and filtering to one canvasser
+  leaves them out.
+- **Its rows are not knocks.** The columns are identical to the normal file but the row count is
+  not, so the file is named **`activity-log-by-voter`** (and the download
+  `…-canvass-activity-by-voter-<date>.csv`) — never sum its rows for an invoice; the invoice-grade
+  files are still the per-round ones. To recover the knock count, count distinct **Activity DB
+  id** values, which every row of one knock shares.
+- **It is today's roster.** The people listed are the voters registered at that address *now* —
+  someone imported after the knock appears, someone moved out since does not — so the row count
+  on screen and the finished file can differ by a row if the roster changed in between.
+- **Nobody to list keeps one row.** An address with no registered voters, or none who can be
+  listed, keeps its single row with the voter columns blank, exactly as the normal file has it.
+  Do-not-contact voters are never listed, and the "N withheld" figure does not count them here —
+  a per-address count of who was left out would itself say who asked not to be contacted.
+
+The choice is recorded in the export history ("one row per voter at the door" in the row's
+scope), and the full backup never uses it.
 
 ## Contact & demographic details (the two survey exports)
 
@@ -114,7 +160,9 @@ do-not-contact promise, chosen deliberately). Dashboards still count the histori
 an export can trail the screen it mirrors. Every export records how many rows were withheld
 ("N withheld — do not contact" in the history), so the gap is always explainable. Door-level
 knock records keep the knock itself (the work happened and is billable) with the person's
-identity blanked.
+identity blanked. One deliberate exception to the counting: with **One row per voter at the
+door** on, a do-not-contact voter is simply absent from the address's rows and is *not* added to
+the withheld figure — a per-address count of who was left out would itself say who asked.
 
 Two other honest gaps: survey rows whose voter was later removed by an import undo are dropped
 and counted, and the per-round files deliberately do not reproduce the dashboard's synthetic
@@ -125,7 +173,9 @@ and counted, and the per-round files deliberately do not reproduce the dashboard
 The survey files carry the three units from [METRICS.md](METRICS.md): **Survey doors** counts
 doors (one per household per round), **Voters surveyed** counts distinct people, **Surveys
 taken** counts submissions — never sum across them. The activity log is finer than all three
-(one row per event). **Doors by round** reconciles to the invoice: for any round, its rows with
+(one row per event) — and **`activity-log-by-voter.csv`**, its opt-in one-row-per-voter form, is
+finer still and is *not* a count of anything: dedupe on **Activity DB id** to get back to events.
+**Doors by round** reconciles to the invoice: for any round, its rows with
 a status other than `unknocked`/`restricted` equal that round's **Knocks** in the knocks-by-pass
 report, and the backup's `knocks-by-round.csv` is built by the very same pipeline as that
 report, so the TOTAL row always matches.
@@ -179,13 +229,26 @@ The registry's keys must equal the model enum (checked at import time), and the 
 Each campaign type also declares **`estimate`** (from
 [`services/export/exportEstimates.js`](../server/src/services/export/exportEstimates.js)) — the
 pre-queue row count behind `POST /estimate`. The rule is **estimate==build**: every estimate
-imports the same exported query constructor its builder streams (`canvassActivityQuery`,
-`surveyBaseQuery`, `voterNotesQuery`, `resolveDoorsByRoundRounds` — the turf target-preview
-principle), so `rows` predicts `rowCount` and `dncWithheld` predicts `excludedDncCount` by
-construction. The two survey types are `approx: true` (their builders also drop orphaned
-import-undo rows the count can't see: `rows === rowCount + orphanedRows`); survey-answers must
+imports the same exported query constructor its builder streams (`canvassActivityQuery` and
+`countCanvassActivityRows`, `surveyBaseQuery`, `voterNotesQuery`, `resolveDoorsByRoundRounds`,
+`notesScopeOf` — the turf
+target-preview principle), so `rows` predicts `rowCount` and `dncWithheld` predicts
+`excludedDncCount` by construction. The two survey types are `approx: true` (their builders also
+drop orphaned import-undo rows the count can't see: `rows === rowCount + orphanedRows`);
+**`notes` is `approx: true` too, and its three sources contribute to `orphanedRows` very
+differently — get this wrong and the parity loop fails:**
+
+| source | on a missing voter | why |
+|---|---|---|
+| door | never counted | every matching row is WRITTEN (a flagged voter only blanks the identity), so the plain count IS the rowCount. Counting one here would break the identity — which is why this differs from `buildCanvassActivity`, whose `approx: false` makes its orphan count informational |
+| survey | `countOrphaned(1)`, row dropped | voter-unit, and the count has no voter join, so the row IS in `est.rows` — that is exactly what `orphanedRows` reconciles |
+| admin | never counted, row skipped silently | the estimate's campaign-membership join already excludes it. The builder cannot tell "voter deleted" from "voter in another campaign" (`VoterNote` is org-level, so cross-campaign notes are the *common* case), and neither case is in `est.rows` |
+
+survey-answers must
 count `$size(answers)` entries, never responses. All estimates are countDocuments-class and run
-inline in the web dyno; `full-backup` alone has no estimate (the endpoint 400s). Builders live in
+inline in the web dyno — except canvass-activity under `perVoterRows`, the one row-multiplying
+option (see *The opt-in row grain* below); `full-backup` alone has no estimate (the endpoint
+400s). Builders live in
 [`services/export/exportBuilders.js`](../server/src/services/export/exportBuilders.js); the
 full-backup **composes** them (never re-implements a file), and its `knocks-by-round.csv` calls
 [`services/reports/knocksByPass.js`](../server/src/services/reports/knocksByPass.js) — the
@@ -203,7 +266,8 @@ the same DNC-guarded object every other identity cell reads; `geoDetailCells` (C
 Longitude, then Precinct + the three districts) mixes household geography with the
 file-authoritative district/precinct fields on the voter. **Projections widen only when the
 toggle is on** — an export that is not printing a phone number does not read one out of Mongo.
-It is a COLUMN option, never a filter: row counts, `excludedDncCount` and therefore every
+It is a COLUMN option, never a filter (contrast `perVoterRows` below, the one ROW option): row
+counts, `excludedDncCount` and therefore every
 estimate are untouched, which is why `exportEstimates.js` needs no knowledge of it (pinned:
 `exportBuilders.int.test.js` asserts equal `rowCount`/`excludedDncCount` across both settings,
 and that flagged-fixture phone/DOB sentinels appear in NO artifact with the toggle ON).
@@ -212,6 +276,43 @@ Off by default (owner decision 2026-08-11); frozen into `ExportJob.params`, and 
 Adding an optional param is backward-compatible in both directions — an old client never sends
 it, and a new client sending it to an old server has the key dropped by the whitelist rather than
 4xx'd — so it needs no `CLIENT_API_VERSION` bump.
+
+**The opt-in row grain (`params.perVoterRows`)** — the Export Center's first ROW option, on
+`canvass-activity` only (token `perVoterRows`; same backward-compatibility argument, no version
+bump). `exportBuilders.js` resolves it once through **`fanPlan(ctx)`** (the `detailPlan` pattern):
+the file name (`activity-log-by-voter` vs `activity-log`) and the roster predicate
+`rosterMatch = { campaignId, ...DNC_FILTER }` that both the builder's per-batch roster prefetch
+(`loadFanRoster`, ≤ BATCH doors — the `buildNotes` roster lifted almost verbatim) and the
+estimate's `$unionWith` sub-`$match` spread, so preview and file cannot disagree about who counts
+as a voter at a door. **Emission rule:** an activity whose *stored* `voterId` is `null` repeats
+once per voter in its door's kept roster (sorted last, first, `_id`); an EMPTY kept roster falls
+back to exactly one row byte-identical to the un-fanned one; rows that already name a voter —
+including a DNC-blanked one and a dangling one — are never fanned (the rule keys on the stored
+id, never on rendered blankness). The 34 headers are identical either way: the grain rides the
+NAME — a privacy control, see the DNC paragraph — and it rides the *download* name through the
+registry's `fileSlug(params)` → `exportFilename({ slug })` → `exportProcessor`, because `csvSink`
+discards `sink.file()`'s name and neither client renders `ExportJob.files[].name`, so renaming
+the sink entry alone would be invisible. **The estimate** is the builder's own
+**`countCanvassActivityRows(ctx, { maxTimeMS })`** — literally the same function the builder
+uses as its progress denominator: plan off, `countDocuments(q)` as ever; plan on,
+`named + Σ_doors k_d × max(1, r_d)` as ONE `$unionWith` pipeline (voter-less activities grouped
+by household ∪ the campaign's kept roster grouped by household → merge → `$max: [1, r]` is the
+empty-roster fallback as arithmetic; two index scans, one document back to Node — served by the
+new `{campaignId, voterId, timestamp, householdId}` index on `CanvassActivity` and the covered
+`{campaignId, householdId, doNotContact.flagged}` index on `Voter`, both behind the
+`migrate:build-indexes --apply` gate). `approx` stays `false` and must: `countOrphaned` here fires
+on a row that IS written, so `approx: true` would make the registry parity loop demand
+`rowCount + orphanedRows`. Instead the pipeline carries `maxTimeMS` (`EXPORT_ESTIMATE_MAX_MS`,
+default 8000 — the first `maxTimeMS` in the server, justified because `POST /estimate` has no
+other bound, Heroku's router gives up at 30s, and an aborted request does not stop a running
+aggregation) and on expiry the estimate answers with the **floor** — `countDocuments(q)`, one row
+per knock, never above the truth — flagged `rowsAreFloor: true` (the mobile sheet says "at least
+N rows"). `dncWithheld` is identical on and off: it counts rows whose OWN `voterId` is flagged,
+and roster omissions are never counted (`exportScope.js` rule (b)). Every fanned voter is added
+to `ctx.subjects` at write time, so the record-level audit names them — and `subjectsTruncated`
+becomes routine on large fanned exports. The full backup passes `params: {}`, so the bundle is
+un-fanned by construction. Off by default; frozen into `ExportJob.params`; surfaced by the web
+history's `scopeLabel` (which now also surfaces `includeDoorVoters`).
 
 Shared rules: CSV dialect from
 [`services/export/csvWriter.js`](../server/src/services/export/csvWriter.js) (UTF-8 BOM, CRLF,
@@ -226,7 +327,13 @@ never enter a builder projection (grep-guarded in tests).
 [`services/export/exportScope.js`](../server/src/services/export/exportScope.js). The processor
 loads the org-wide flagged-voter id set (sibling rows are kept in lockstep) and injects it;
 builders never construct their own. Voter-unit rows are dropped; door-unit rows keep the event
-with voter-identity columns blanked, no marker. Both paths count into `excludedDncCount`.
+with voter-identity columns blanked, no marker. Both paths count into `excludedDncCount`. Two
+opt-in exceptions read a door's roster through `DNC_FILTER` instead — `notes`/`includeDoorVoters`
+and `canvass-activity`/`perVoterRows` — and `exportScope.js` states the three rules that keep an
+omission from becoming a marker: never a count, placeholder or withheld row for an omitted voter
+(an empty roster falls back to ONE blank row, byte-identical to a voter-less door's); roster
+omissions never count into `excludedDncCount`; and the fan keys on the stored `voterId`, never on
+rendered blankness.
 
 ## Routes
 
@@ -289,14 +396,19 @@ overlays label/desc and decides visibility when present. Mobile:
 types opens [`components/ExportSheet.jsx`](../mobile/components/ExportSheet.jsx) (MetricSheet's
 Modal anatomy): description, "one row is…", contents, the web's filters for that type, and a
 live `POST /estimate` count (debounced on the serialized params, `keepPreviousData`, advisory —
-an estimate error never blocks Queue, so either deploy order works). Type copy comes from
+an estimate error never blocks Queue, so either deploy order works). The sheet's **Rows** switch
+(`perVoterRows`, Canvassing activity only) is the one option whose flip moves that count, and it
+rewrites the "one row is…" line while on; a `rowsAreFloor` answer renders as "at least N rows".
+Type copy comes from
 [`lib/exportTypes.js`](../mobile/lib/exportTypes.js) (local fallback, server registry overlaid).
 History rows: failed/expired taps offer Retry (re-POST of the frozen params) and Delete;
 long-press deletes any non-running row; a worker-offline banner mirrors the web's.
 [`lib/artifactDownload.js`](../mobile/lib/artifactDownload.js) downloads TO DISK
 (`FileSystem.downloadAsync` — binary-safe for ZIPs, memory-flat) then opens the share sheet.
-Four types stay web-only (owner scope decision): Survey answers (detailed), Filtered voters,
-Voter notes, and the full-backup ZIP.
+Five types stay web-only (owner scope decision): Survey answers (detailed), Filtered voters,
+Voter profile notes, **Notes**, and the full-backup ZIP. Notes is the one with another way in on
+the phone: the admin **Notes** screen queues it directly, carrying the filters on screen, so the
+sheet does not need to grow a fifth type.
 
 ## Tests
 
@@ -305,7 +417,12 @@ sweeper placement, cascades; the estimate route's scope/400/throttle-independenc
 types route's role filtering), `test/exportBuilders.int.test.js` (per-type columns/semantics +
 the registry-driven DNC sweep — ZIPs run `EXPORT_ZIP_LEVEL=0` so artifacts stay greppable; the
 registry-driven **estimate==build** loop, filtered-parity cases, the survey-answers `$size`
-pin, and the canvass-activity orphan counter), `test/billing.int.test.js` (carve-out matrix ×2:
+pin, the canvass-activity orphan counter, and the `perVoterRows` fan — the registry DNC sweep
+runs canvass-activity a second time with the option on as the keyed artifact
+`canvass-activity:fanned`; the fixture's h2 two-voter, h5 all-flagged and h6 voter-less doors pin
+the repeat/fallback/no-marker rules; header and download-name parity; estimate parity under five
+param sets; and the timed-out pipeline's floor via a stubbed `aggregate`),
+`test/billing.int.test.js` (carve-out matrix ×2:
 create and estimate pass read-only, export-DELETE still 402),
 `test/accessLogCoverage.int.test.js` (the new URL shapes — including `/estimate` and `/types` —
 must log), `test/orgDelete.int.test.js` (bucket emptiness after org delete).
@@ -341,7 +458,7 @@ hours; if one ever grows an hours column, it inherits this rule.
 ## Appendix — column contracts (per type)
 
 The header arrays in `exportBuilders.js` are the source of truth; this is the readable copy.
-Voter identity in the four voter-bearing CSVs is always the pair **`State voter ID`, `UID`**
+Voter identity in the five voter-bearing CSVs is always the pair **`State voter ID`, `UID`**
 (sentence case — the voter files use the title-case canonical labels `State Voter ID` / `UID`
 from `canonicalFields.js`; the two spellings coexist deliberately, matching each file's
 neighbors). Every new identity cell must derive from the DNC-guarded voter object, never from
@@ -352,7 +469,10 @@ the event document — that guard is what blanks a do-not-contact person's row.
   when the event named a voter; blanked for DNC); Canvasser first/last/status, Team; Walk list,
   Pass, Pass name, Via (field|bulk), Offline submission; Latitude, Longitude, GPS accuracy (m),
   Distance from house (m); Replaces earlier action, Replaced at (ISO), Note; Household DB id,
-  Voter DB id, Activity DB id.
+  Voter DB id, Activity DB id. **`activity-log-by-voter.csv`** (`perVoterRows`) — the SAME 34
+  columns in the same order; each voter-less event repeats once per kept voter at its door with
+  the five identity cells and Voter DB id filled from the door ROSTER (never from the event), so
+  **Activity DB id is no longer unique per row** — it is the dedupe key back to events.
 - **`doors-by-round.csv`** — Walk list, Pass, Pass name, Pass status, Book; Address block +
   Precinct; Round status, Door visits this round; Last action at (ISO)/Date/Time; Last action
   by first/last/status; Campaign status, Active door, Household DB id. **No voter columns by
@@ -376,9 +496,16 @@ the event document — that guard is what blanks a do-not-contact person's row.
   Voter ID, First Name, Last Name, UID, Phone, …, County, Latitude, Longitude) + Household DB
   id, Voter DB id. **`voterfile-import.csv`** — the import's own vendor headers in canonical
   order (duplicates collapse first-wins) + the two DB ids.
-- **`voter-notes.csv`** — Created (ISO)/Date/Time; **State voter ID, UID**, Voter first/last
-  name; Address, City, State, Zip; Author first/last/status; Edited, Edited at (ISO), Note;
-  Voter DB id, Note DB id.
+- **`voter-notes.csv`** (the *Voter profile notes* type) — Created (ISO)/Date/Time; **State voter
+  ID, UID**, Voter first/last name; Address, City, State, Zip; Author first/last/status; Edited,
+  Edited at (ISO), Note; Voter DB id, Note DB id.
+- **`notes.csv`** — Created (ISO)/Date/Time; Source (Door/Survey/Admin), Outcome; **State voter
+  ID, UID**, Voter first/last name; Address, City, State, Zip; Author first/last/status; Desk
+  entered, Desk entered by; Walk list, Pass, Pass name; Edited, Edited at (ISO), Note;
+  *[with `includeDoorVoters`: Voters at this door, Voter count at this door]*; Household DB id,
+  Voter DB id, Note DB id. **Author vs Desk entered by:** on a desk-converted survey the note was
+  typed by an admin while the row's `userId` is still the field canvasser, so Author alone would
+  name the wrong person — the two columns are read together.
 - **`knocks-by-round.csv`** (backup only) — Walk list, Pass, Pass name, Pass status,
   Activated/Archived (ISO); Knocks, Survey doors, **Surveys taken**, Lit knocks, Refused;
   [Restricted doors, Billable doors when restricted billing is on]; Connection rate %,

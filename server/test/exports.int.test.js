@@ -33,6 +33,7 @@ const { processExportJob } = await import('../src/services/export/exportProcesso
 const { sweepExpiredExports, EXPORT_SWEEP_JOB } = await import('../src/services/export/sweepExpiredExports.js');
 const { REPEATABLE_JOBS, MAINTENANCE_JOBS } = await import('../src/services/retention/scheduler.js');
 const { openArtifactUploadStream } = await import('../src/services/export/exportArtifactStore.js');
+const { EXPORT_TYPES } = await import('../src/services/export/exportTypes.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -246,18 +247,36 @@ test('POST /estimate: read-only — never trips (or counts toward) the active-jo
 test('GET /types: registry metadata, role-filtered, unified labels', { skip }, async () => {
   const admin = await call('GET', '/admin/exports/types', { token: ctx.adminTok, orgId: ctx.org._id });
   assert.strictEqual(admin.status, 200);
-  assert.strictEqual(admin.json.types.length, 8, 'admin sees every type');
+  // Counted off the registry, not hard-coded: a new type used to mean editing two magic numbers
+  // here, and the failure read like a defect in the change rather than a fixture update.
+  const allKeys = Object.keys(EXPORT_TYPES);
+  const leadVisible = allKeys.filter((k) => !EXPORT_TYPES[k].adminOnly);
+  assert.strictEqual(admin.json.types.length, allKeys.length, 'admin sees every type');
   const byId = Object.fromEntries(admin.json.types.map((t) => [t.id, t]));
   assert.strictEqual(byId['survey-answers'].label, 'Survey answers (detailed)');
   assert.strictEqual(byId['voters-filtered'].label, 'Filtered voters');
+  // The notes type and the retitle that stopped 'Voter notes' promising the field notes it has
+  // never contained. Both are user-facing copy served from the registry, so both are pinned.
+  assert.strictEqual(byId['voter-notes'].label, 'Voter profile notes');
+  assert.strictEqual(byId.notes.label, 'Notes');
+  assert.strictEqual(byId.notes.adminOnly, false, 'notes is lead-visible (owner ruling)');
+  assert.strictEqual(byId.notes.estimate, true);
   assert.ok(byId['canvass-activity'].desc.length > 0, 'descriptions ship from the registry');
-  assert.deepStrictEqual(byId['canvass-activity'].filters, ['date', 'effort', 'pass', 'canvasser']);
+  // perVoterRows is the Center's first ROW option; both clients take their filter tokens from
+  // this list, so the token shipping here is what makes the checkbox/switch render at all.
+  assert.deepStrictEqual(byId['canvass-activity'].filters, ['date', 'effort', 'pass', 'canvasser', 'perVoterRows']);
   assert.strictEqual(byId['canvass-activity'].estimate, true);
   assert.strictEqual(byId['full-backup'].estimate, false, 'the one previewless type');
 
   const lead = await call('GET', '/admin/exports/types', { token: ctx.leadTok, orgId: ctx.org._id });
-  assert.strictEqual(lead.json.types.length, 6, 'admin-only types (voter-notes, full-backup) filtered out');
+  assert.strictEqual(
+    lead.json.types.length,
+    leadVisible.length,
+    'admin-only types (voter-notes, full-backup) filtered out',
+  );
   assert.ok(!lead.json.types.some((t) => t.adminOnly));
+  assert.ok(lead.json.types.some((t) => t.id === 'notes'), 'a lead CAN export notes');
+  assert.ok(!lead.json.types.some((t) => t.id === 'voter-notes'), 'but not the profile-notes type');
 });
 
 // ---- list / poll scoping ---------------------------------------------------------------

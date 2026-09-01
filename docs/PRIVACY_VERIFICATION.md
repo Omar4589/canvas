@@ -448,7 +448,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   artifact contains voter/canvasser data the same tenant already reads in-app.
   **Who can read it.** Org admins; team leads only for campaigns they manage
   (`canManageCampaign`) — the same audience as the five pre-existing CSV endpoints (§B8).
-  Org-wide bundles, voter-notes, and the full backup are admin-only. Staff access rides the
+  Org-wide bundles, voter-notes, and the full backup are admin-only. *[v6 2026-09-01: still true
+  of those TYPES, but no longer of voter-note CONTENT — the new lead-visible `notes` type exports
+  `VoterNote` bodies too. Owner ruling; see item 17(b) of "What changed".]* Staff access rides the
   fail-closed central access log: the download route classifies as `exports` (never
   audit-exempt), and because a streamed response defeats accessLog's row counter, the
   ExportJob doc itself is the durable record of rows/bytes and the download tags
@@ -1145,6 +1147,97 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     export surface**: `email` is in no export's column set today (the CSV builders enumerate
     their fields; none was touched). Adding it to an export later is its own disclosure-review
     moment.
+
+17. **[v6 2026-09-01 — NEW export type `notes`: a new DERIVED LINKAGE (opt-in, audited) and a
+    ROLE WIDENING. No new data, no new recipient, no new subprocessor — but two of this
+    document's own sentences needed amending, and they are amended below.]** The Export Center
+    gains **Notes** (`services/export/exportBuilders.js` `buildNotes`), one row per note across
+    the three live note stores — `CanvassActivity.note` (typed at a door), `SurveyResponse.note`
+    (attached to a survey), `VoterNote.body` (written on a profile). Every one of those was
+    already readable by the same audience on the Notes hub (`GET /admin/reports/notes`,
+    [NOTES.md](NOTES.md)) and already left the system inside `activity-log.csv`,
+    `survey-results*.csv` and `voter-notes.csv`. What is genuinely new:
+
+    **(a) A derived linkage — opt-in, off by default, and recorded per download.** A door note
+    names nobody: `CanvassActivity.householdId` is required, `voterId` defaults to `null`, and
+    the door-recording path never sets it. The optional **`includeDoorVoters`** column lists the
+    voters registered at that door beside the note — associating free text ("dogs in yard",
+    "hostile") with named people **who were never identified at the door**. This is the exact
+    inverse of the standing rule for `activity-log.csv`, whose voter columns are blank on plain
+    knocks on purpose. Mitigations, all verified by
+    `server/test/notesExport.int.test.js`: the column renders **only** when asked for; the choice
+    is frozen into `ExportJob.params`, so the export history is a permanent record of which
+    downloads carried it (the `includeVoterDetail` precedent); do-not-contact voters are excluded
+    from the list by the same `DNC_FILTER` that governs `voterfile-current.csv`; and **the count
+    column counts only the names printed** — a count of 3 beside two names would itself be the
+    do-not-contact marker the door-unit rule in `services/export/exportScope.js` forbids. Because
+    `voterfile-current.csv` already publishes that same household roster minus flagged voters, an
+    omission here reveals nothing the same admin could not already download.
+    **AMENDS the door-unit clause of `exportScope.js` and the "blank on purpose" sentence in
+    [EXPORTS.md](EXPORTS.md)**: a door-unit row now has one opt-in, audited exception.
+
+    **(b) A role widening — an owner ruling, and the reason two sentences here were false.** The
+    new type is `adminOnly: false`, so a **team lead** can download it — including the `voter`
+    source, i.e. `VoterNote` bodies, which the `voter-notes` type deliberately refuses them
+    (`adminOnly: true`, unchanged). Those bodies include the auto-generated *"Marked
+    do-not-contact: …"* notes that quote a person's stated opt-out reason. The owner ruled
+    (2026-09-01) to accept this, on the grounds that a lead already **reads** all three sources on
+    the Notes hub for campaigns they manage, under the same `canManageCampaign` gate the export
+    inherits. Reading a 500-per-source paged screen and downloading an uncapped permanent file are
+    nonetheless different exposures, so it is recorded rather than waved through.
+    **AMENDS the sentence above in this document — "Org-wide bundles, voter-notes, and the full
+    backup are admin-only"** — which stays true of the *type* but no longer of the *content*:
+    profile-note bodies are lead-exportable through `notes`. `docs/ROLES.md` and the two help
+    articles carrying the same sentence were corrected in the same change.
+
+    **(c) Not a new collection, category, recipient, or retention surface.** No field was added to
+    any model. The builder reads collections that already exist, through the same
+    campaign/`canManageCampaign` scope, into the same 7-day GridFS artifact under the same
+    sweeper, cascades and `addAuditSubjects` record-level audit as every other type (`subjectType:
+    'voter'`; ids are added only for identities that actually reached the file, never for a
+    DNC-skipped voter). The entitlement carve-out is path-based and untouched. **No Privacy
+    Policy / ToS / DPA text change is required** — (a) and (b) are internal-posture amendments to
+    this document, not to a published promise. The owner should nonetheless confirm they are
+    content with (b) before the change ships.
+
+18. **[v6 2026-09-01 — Canvassing activity, "One row per voter at the door" (`perVoterRows`): a
+    DERIVED LINKAGE of item 17(a)'s class, at ROW grain, across the whole knock ledger — opt-in,
+    audited, no new data, no new recipient, no new subprocessor. AMENDS item 17's "one opt-in,
+    audited exception" — there are now two.]** The `canvass-activity` export gains an opt-in that
+    repeats every activity row whose stored `voterId` is `null` — `not_home`, `wrong_address`,
+    `refused`, `lit_dropped`, `no_soliciting`, `restricted` — once per voter registered at that
+    door (same 34 columns, same order; the file is `activity-log-by-voter` and the download
+    `…-canvass-activity-by-voter-<date>.csv`). A knock's outcome, timestamp, GPS and free-text
+    note thereby become attached to named registered voters **who were never identified at the
+    door** — for `refused` and `no_soliciting` the attached claim is true of at most one person
+    per door, so the file is an inferential artifact, and every surface's copy says so ("the
+    outcome is repeated, not attributed"). Mitigations, all verified by
+    `server/test/exportBuilders.int.test.js` (the fixture gained a two-voter door, an all-flagged
+    door and a voter-less door, and the registry DNC sweep now runs the type a second time with
+    the option on): off by default; frozen into `ExportJob.params` and shown in the web export
+    history's scope label; the roster is read through `DNC_FILTER` inside ONE shared predicate
+    (`fanPlan().rosterMatch`, spread by the builder's prefetch and the estimate's `$unionWith`
+    alike), so a flagged voter is structurally incapable of producing a row, blank or otherwise,
+    and can never enter the record-level audit's subject set; an EMPTY kept roster emits exactly
+    one blank-identity row, byte-identical to a zero-voter door's, so `fullyDnc` is undetectable
+    by absence and no billable knock ever disappears from the ledger file; roster omissions do
+    NOT increment `excludedDncCount` (a per-door count on a one-door export would itself be the
+    marker `services/export/exportScope.js` forbids — that file now states the three rules a
+    third exception must satisfy); the column set is identical either way, which structurally
+    forbids a "voters at this door" count column; and the full backup passes `params: {}`, so the
+    bundle is un-fanned by construction. **No new bit is published:** rows per door =
+    `max(1, |the roster voterfile-current.csv already prints for that household|)`; both files
+    carry `Household DB id`, both are `adminOnly: false`, both apply the same DNC clause — the
+    same admin or lead can already perform this join by hand today, and the option automates it.
+    Recorded honestly: `ctx.subjects` now collects every voter at every fanned door, so
+    `audit.subjectsTruncated` (DEDUPE_CAP 100,000 / SUBJECT_CAP 20,000) becomes routine on large
+    fanned exports — the record-level audit for the exports that name the most people is the
+    likeliest to be partial. **Assessment: no Privacy Policy / ToS / DPA text edit required** —
+    an internal-posture amendment like item 17. Nothing new is *collected* (the linkage exists
+    only inside a generated file, for the same audience, through the same 7-day artifact,
+    sweeper, cascades and access log); the export-facing published promise is the do-not-contact
+    sentence, which this satisfies strictly. The owner should confirm before the production
+    release.
 
 ---
 

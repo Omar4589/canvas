@@ -246,7 +246,7 @@ export async function processExportJob(job) {
   try {
     const kind = await type.contentKind(ctx);
     const ext = kind === 'zip' ? 'zip' : 'csv';
-    const filename = exportFilename({ org, campaign, type: doc.type, anchorTz, ext });
+    const filename = exportFilename({ org, campaign, type: doc.type, slug: type.fileSlug?.(ctx.params), anchorTz, ext });
     const contentType = kind === 'zip' ? 'application/zip' : 'text/csv; charset=utf-8';
     upload = openArtifactUploadStream(doc._id, {
       filename, contentType, organizationId: doc.organizationId, campaignId: doc.campaignId,

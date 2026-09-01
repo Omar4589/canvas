@@ -7,6 +7,7 @@ import {
   TextInput,
   RefreshControl,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,7 +16,7 @@ import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign, saveActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../../../lib/dateRanges';
-import { spacing, radius, actionLabel } from '../../../lib/theme';
+import { spacing, radius, actionLabel, ACTION_LABELS } from '../../../lib/theme';
 import { formatInTz } from '../../../lib/datetime';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -72,6 +73,8 @@ export default function AdminNotes() {
 
   // Filters
   const [types, setTypes] = useState([]); // [] = all sources
+  const [outcomes, setOutcomes] = useState([]); // [] = every door outcome
+  const [exporting, setExporting] = useState(false);
   const [authorId, setAuthorId] = useState(''); // '' = any author
   const [effortId, setEffortId] = useState(''); // '' = all walk lists
   const [qInput, setQInput] = useState('');
@@ -88,6 +91,7 @@ export default function AdminNotes() {
   if (prevCid !== cId) {
     setPrevCid(cId);
     setTypes([]);
+    setOutcomes([]);
     setAuthorId('');
     setEffortId('');
     setQInput('');
@@ -154,9 +158,10 @@ export default function AdminNotes() {
   const today = todayInTz(tz);
   const fromDay = range.preset === 'today' ? today : range.from;
   const typeCsv = types.join(',');
+  const outcomeCsv = outcomes.join(',');
 
   const notesQ = useInfiniteQuery({
-    queryKey: ['admin', 'notes', cId, fromDay, range?.to, typeCsv, authorId, effortId, q],
+    queryKey: ['admin', 'notes', cId, fromDay, range?.to, typeCsv, outcomeCsv, authorId, effortId, q],
     initialPageParam: 0,
     queryFn: ({ pageParam }) => {
       const p = new URLSearchParams();
@@ -164,6 +169,7 @@ export default function AdminNotes() {
       if (fromDay) p.set('from', fromDay);
       if (range?.to) p.set('to', range.to);
       if (typeCsv) p.set('type', typeCsv);
+      if (outcomeCsv) p.set('actionType', outcomeCsv);
       if (authorId) p.set('userId', authorId);
       if (effortId) p.set('effortId', effortId);
       if (q) p.set('q', q);
@@ -194,6 +200,52 @@ export default function AdminNotes() {
     setTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
 
+  function toggleOutcome(key) {
+    setOutcomes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  // Queue a Notes export with exactly what is on screen. The export is NOT this endpoint: it
+  // streams, so it is not bound by the 500-per-source cap this screen shows.
+  async function queueNotesExport(includeDoorVoters) {
+    setExporting(true);
+    try {
+      await api('/admin/exports', {
+        method: 'POST',
+        body: {
+          type: 'notes',
+          campaignId: cId,
+          params: {
+            ...(fromDay ? { from: fromDay } : {}),
+            ...(range?.to ? { to: range.to } : {}),
+            ...(types.length ? { noteSources: types } : {}),
+            ...(outcomes.length ? { actionTypes: outcomes } : {}),
+            ...(authorId ? { userId: authorId } : {}),
+            ...(effortId ? { effortId } : {}),
+            ...(q ? { q } : {}),
+            ...(includeDoorVoters ? { includeDoorVoters: true } : {}),
+          },
+        },
+      });
+      Alert.alert('Export queued', 'It appears on the Exports screen once it finishes building.');
+    } catch (e) {
+      Alert.alert('Could not queue that export', e?.message || 'Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function askExport() {
+    Alert.alert(
+      'Export these notes',
+      'Queues a Notes export with the filters on screen. The file is not limited to the 500 per source shown here.\n\nA door note names nobody on its own — include the voters registered at each door?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Without voters', onPress: () => queueNotesExport(false) },
+        { text: 'Include voters', onPress: () => queueNotesExport(true) },
+      ],
+    );
+  }
+
   function openVoter(id) {
     // ?from=notes so the voter screen's back returns here, not to the Voters list.
     router.push(`/(app)/voters/${id}?from=notes`);
@@ -216,6 +268,9 @@ export default function AdminNotes() {
   }
 
   const sourcesWithCounts = SOURCES.map((s) => ({ ...s, count: counts[s.key] ?? 0 }));
+  // No color and no count on purpose: the endpoint reports totals per SOURCE, not per outcome,
+  // so a badge here could only ever show a misleading 0.
+  const outcomeChips = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
 
   // One note as an inset row. A note with a target NAVIGATES (voter note → voter profile;
   // household-only note → the map focused on that door); a note with neither is INERT — the
@@ -329,6 +384,24 @@ export default function AdminNotes() {
         </View>
 
         <SourceChips sources={sourcesWithCounts} selected={types} onToggle={toggleType} />
+        <SourceChips sources={outcomeChips} selected={outcomes} onToggle={toggleOutcome} />
+        {cId ? (
+          <View style={styles.exportWrap}>
+            <InsetGroup>
+              <InsetActionRow
+                label={exporting ? 'Queueing…' : 'Export these notes'}
+                onPress={askExport}
+                disabled={exporting}
+              />
+            </InsetGroup>
+          </View>
+        ) : null}
+        {outcomes.length ? (
+          <Text style={styles.caveat}>
+            Admin notes have no door outcome, so they&apos;re hidden while an outcome is selected.
+            {outcomes.includes('survey_submitted') ? '' : ' Survey notes are too.'}
+          </Text>
+        ) : null}
         <View style={styles.listWrap}>
           <InsetGroup>
             {!cId ? <InsetNoteRow>Pick a campaign to see its notes.</InsetNoteRow> : null}
@@ -405,5 +478,12 @@ function makeStyles(t) {
       color: colors.textPrimary,
     },
     listWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+    exportWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+    caveat: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+      color: t.colors.textMuted,
+      fontSize: 12,
+    },
   });
 }

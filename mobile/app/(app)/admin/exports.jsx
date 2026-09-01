@@ -41,7 +41,8 @@ const TYPE_LABEL = {
   'survey-answers': 'Survey answers',
   'voter-file': 'Voter file',
   'voters-filtered': 'Filtered voters',
-  'voter-notes': 'Voter notes',
+  'voter-notes': 'Voter profile notes',
+  notes: 'Notes',
   'full-backup': 'Full backup',
 };
 const STATUS_LABEL = {
@@ -268,7 +269,8 @@ export default function AdminExports() {
         <GroupFooter>
           Tap a type to see what&apos;s in the file, set filters, and queue it. Exports build in
           the background — the list below updates as each finishes. Detailed survey answers,
-          filtered voters, voter notes and the full-backup ZIP are on the web dashboard.
+          filtered voters, voter profile notes and the full-backup ZIP are on the web dashboard.
+          A Notes export is queued from the Notes screen, with the filters you have on screen.
         </GroupFooter>
 
         <SectionHeader caption title="Recent exports" />

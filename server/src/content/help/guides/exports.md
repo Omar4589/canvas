@@ -28,7 +28,8 @@ keep, open in Excel or Google Sheets, or load into another tool.
 - **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at
   that door. The complete field record. Voter name and IDs fill in only when a survey named the
   voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter
-  columns are blank on purpose.
+  columns are blank on purpose. Tick **One row per voter at the door** to repeat those knocks
+  once per registered voter at the address instead — see below.
 - **Doors by round** — one row per door per round with its status. Filter it to `not home` and
   you have a re-knock list.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
@@ -40,12 +41,56 @@ Both survey exports offer **Include contact & demographic details** — see belo
 - **Voter file** — everyone currently in the campaign. Pick one of your uploads in the
   **Columns** selector to get the file back under that vendor's own column names.
 - **Filtered voters** — only the voters matching one of your saved searches.
-- **Voter notes** *(admins only)* — staff notes about voters, with author and date.
+- **Notes** — every note currently on the campaign in one file, one row per note: the ones
+  canvassers type at a door, the ones attached to a submitted survey, and the ones written on a
+  voter's profile. Filter by source, door outcome, date, walk list, round, author, or note text.
+  You can also start one straight from the **Notes** page, carrying the filters you have on
+  screen.
+- **Voter profile notes** *(admins only)* — the notes written on voter profiles on their own,
+  with author and edit history. This one has never contained door or survey notes; use **Notes**
+  for those.
 - **Full backup** *(admins only)* — one ZIP with everything above for the campaign (or the whole
   organization), plus per-round totals and a README explaining each file.
 
-Team leads can export from the campaigns they manage; org-wide exports, voter notes, and the
-full backup are admin-only.
+Team leads can export from the campaigns they manage; org-wide exports, **Voter profile notes**,
+and the full backup are admin-only. **Notes** is available to team leads — it covers the same
+three sources they already read on the Notes page.
+
+### About the door notes in a Notes export
+
+A note typed at a door is a record about the **door**, not about a person — nobody was picked, so
+it names no one. The Notes export can add a column listing the people registered at that address
+beside the note, but you have to tick **Include the voters registered at each door** to get it,
+and the export history records which downloads carried it. People who have asked not to be
+contacted are never listed, and the count beside the list counts only the names shown.
+
+### One row per voter at a door (Canvassing activity)
+
+A *not home* is a fact about an address. If the tool you're handing the file to wants a fact
+about a person — a row for every registered voter at the address — tick **One row per voter at
+the door** when you queue a Canvassing activity export (on the phone: the **Rows** switch on the
+sheet). Every knock that named nobody (*not home*, *wrong address*, *refused*, *lit dropped*,
+*no soliciting*, *restricted*) then comes out once per voter registered at that address, each
+row carrying the same outcome, time, canvasser, GPS and note, with that voter's State voter ID,
+UID, name and party filled in. Surveys, which already name the person, are unchanged.
+
+Three things to know:
+
+- **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that
+  address declined — not that each of the three did. *No soliciting* is a sign on the property.
+  Neither is a request not to be contacted. *Restricted* rows repeat too, and many of those are
+  desk marks over a whole book rather than a visit — the **Via** column says which.
+- **Its rows are not knocks.** The columns are the same but the row count isn't, so the file
+  arrives named **activity-log-by-voter** — never count its rows for an invoice. Every row of one
+  knock shares the same **Activity DB id**, so counting distinct values there gets you back to
+  knocks. The per-round exports remain the invoice-grade files.
+- **Nobody to list keeps one row.** An address with no registered voters keeps its single row
+  with the voter columns blank, just like the normal file. People who have asked not to be
+  contacted are never listed. The people are the ones registered at the address *today*, so the
+  count you saw when queueing and the finished file can differ by a row if your voter file
+  changed in between.
+
+The export history says **one row per voter at the door** on any file that carried it.
 
 ## Matching your file on another platform
 

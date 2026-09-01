@@ -53,6 +53,9 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   // Off by default (the web page's rule, and the server's) — a survey export shouldn't carry
   // a date of birth unless someone asked for one.
   const [includeVoterDetail, setIncludeVoterDetail] = useState(false);
+  // Off by default too — and unlike the detail toggle this one changes the ROW COUNT and the file
+  // name, so the live estimate below reads it (lib/exportTypes paramsFor).
+  const [perVoterRows, setPerVoterRows] = useState(false);
 
   // The web page's rule: a round belongs to a walk list, so changing the list resets it.
   function pickEffort(id) {
@@ -94,7 +97,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const imports = (importsQ.data?.jobs || []).filter((j) => j.status === 'completed' && !j.undone);
 
-  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail });
+  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, includeVoterDetail, perVoterRows });
   // Debouncing the SERIALIZED params gives a stable query key and kills object-identity
   // churn in one move; api() threads react-query's abort signal, so a superseded count
   // stops on the wire.
@@ -134,9 +137,17 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
     ...ROUND_STATUSES.map((s) => ({ key: s, label: s.replace(/_/g, ' ') })),
   ];
 
+  // "One row is…" must not read "one door event" while the Rows switch is on.
+  const oneRowIs = wants('perVoterRows') && perVoterRows
+    ? 'one voter at one door event — a knock that named nobody repeats per registered voter at that address'
+    : meta.oneRowIs;
+
   const estimateLine = () => {
     if (!est) return null;
-    const bits = [`≈ ${Number(est.rows || 0).toLocaleString()} rows`];
+    // rowsAreFloor: the fanned count hit its time cap and the server answered with one row per
+    // knock — a floor, never above the truth — so say so instead of printing it as ≈.
+    const n = Number(est.rows || 0).toLocaleString();
+    const bits = [est.rowsAreFloor ? `at least ${n} rows` : `≈ ${n} rows`];
     if (est.dncWithheld > 0) bits.push(`${est.dncWithheld} withheld (do not contact)`);
     if (est.files?.length) bits.push(`${est.files.length} files — one per survey`);
     if (est.contentKind === 'zip') bits.push('ZIP');
@@ -166,7 +177,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
 
             <View style={styles.item}>
               <Text style={styles.itemLabel}>One row is…</Text>
-              <Text style={styles.itemText}>{meta.oneRowIs}.</Text>
+              <Text style={styles.itemText}>{oneRowIs}.</Text>
             </View>
             <View style={styles.item}>
               <Text style={styles.itemLabel}>In the file</Text>
@@ -260,6 +271,28 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                   <Switch
                     value={includeVoterDetail}
                     onValueChange={setIncludeVoterDetail}
+                    trackColor={{ true: colors.brand }}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            {wants('perVoterRows') ? (
+              <View style={styles.filterBlock}>
+                <Text style={styles.filterLabel}>Rows</Text>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchText}>
+                    <Text style={styles.switchLabel}>One row per voter at the door</Text>
+                    <Text style={styles.switchSub}>
+                      A knock that named nobody (not home, refused, lit drop…) repeats once per
+                      registered voter at that address, same outcome and note on each — repeated,
+                      not attributed. Same columns, more rows; the file is named
+                      activity-log-by-voter so its rows are never counted as knocks.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={perVoterRows}
+                    onValueChange={setPerVoterRows}
                     trackColor={{ true: colors.brand }}
                   />
                 </View>

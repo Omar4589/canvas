@@ -71,7 +71,11 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
   admins.
 - **Run org-wide or admin-only exports.** The Export Center works for a lead campaign by campaign:
   exports of a managed campaign are theirs to create and download; the org-wide scope and the
-  admin-only types (voter notes, the full backup) are refused.
+  admin-only types (**Voter profile notes**, the full backup) are refused. Note the deliberate
+  seam (owner ruling 2026-09-01): the lead-visible **Notes** type unions all three note sources,
+  so a lead *can* export voter-profile note bodies through it — they already read them on the
+  Notes hub for campaigns they manage. Recorded in
+  [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 17.
 - **Org settings or the org voter directory.** Those stay admin-only.
 - **The org-WIDE Users view.** Since 2026-07-23 a lead **does** get the Users page — but scoped:
   their list is exactly the people rostered on campaigns they manage, deduped, never the whole

@@ -156,5 +156,11 @@ canvassActivitySchema.index(
   { 'reclassified.runId': 1 },
   { partialFilterExpression: { 'reclassified.runId': { $exists: true } } }
 );
+// The by-voter activity estimate (exportBuilders countCanvassActivityRows) groups the campaign's
+// voter-less ledger rows by household. Without voterId beside campaignId, `voterId: null` is a
+// residual filter and the index-only count becomes a FETCH of every activity doc in range. Key
+// shape is distinct from every index above (buildIndexes diffs by shape). Prod autoIndex is OFF —
+// this exists only after `migrate:build-indexes --apply`.
+canvassActivitySchema.index({ campaignId: 1, voterId: 1, timestamp: 1, householdId: 1 });
 
 export const CanvassActivity = mongoose.model('CanvassActivity', canvassActivitySchema);

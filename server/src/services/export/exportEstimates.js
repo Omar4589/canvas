@@ -10,10 +10,14 @@ import { ExportUserError } from './exportErrors.js';
 import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import {
   canvassActivityQuery,
+  countCanvassActivityRows,
+  canvassActivityFloorRows,
   surveyBaseQuery,
   voterNotesQuery,
   resolveDoorsByRoundRounds,
+  notesScopeOf,
 } from './exportBuilders.js';
+import { doorNotesMatch, surveyNotesMatch, adminNotesMatch } from '../notes/notesQuery.js';
 
 // Pre-queue row-count estimates, one per registry type. The contract is estimate==build:
 // `rows` predicts ExportJob.rowCount and `dncWithheld` predicts excludedDncCount, because
@@ -27,7 +31,11 @@ import {
 // ctx is the read-only slice of the builder ctx: { organizationId, campaignId, campaign,
 // params (validated), anchorTz, dnc } — no sink, no counters. Everything below is
 // countDocuments/covered-aggregation class over campaign-bounded, indexed collections, so
-// it runs inline in the web dyno (same magnitude as the turf target-preview).
+// it runs inline in the web dyno (same magnitude as the turf target-preview) — with ONE
+// exception: canvass-activity's opt-in perVoterRows is the Export Center's first ROW option
+// (every other toggle adds columns), and its count is a $unionWith over the ledger and the
+// campaign roster. It is capped by maxTimeMS and falls back to an honest floor (rowsAreFloor),
+// never to `approx` — that flag keeps its one meaning above.
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 
@@ -39,16 +47,32 @@ const chunk = (arr, n) => {
 
 const flaggedOids = (ctx) => [...ctx.dnc].map(oid);
 
-// Rows are kept-and-blanked for DNC (door-unit rule), so the plain count IS the rowCount;
-// dncWithheld counts the rows whose identity the builder will blank.
+// Rows are kept-and-blanked for DNC (door-unit rule), so with perVoterRows off the plain count
+// IS the rowCount. With it on, `rows` is the builder's own countCanvassActivityRows — the SAME
+// function it uses as its progress denominator — capped here because this runs inline in the
+// web dyno; on expiry the answer is the FLOOR (one row per knock, always ≤ the truth), marked
+// rowsAreFloor. Never `approx`: that flag means "the builder drops rows the count cannot see",
+// and the fan drops nothing.
+//
+// dncWithheld counts rows whose OWN voterId is flagged. The fan never touches those (it runs
+// only where voterId is null) and roster omissions are deliberately uncounted — exportScope.js
+// rule (b): a per-door omission count on a one-door export would BE the marker — so this
+// number is IDENTICAL with the option on and off.
 const estimateCanvassActivity = async (ctx) => {
   const q = canvassActivityQuery(ctx);
   const flagged = flaggedOids(ctx);
-  const [rows, dncWithheld] = await Promise.all([
-    CanvassActivity.countDocuments(q),
-    flagged.length ? CanvassActivity.countDocuments({ ...q, voterId: { $in: flagged } }) : 0,
-  ]);
-  return { rows, dncWithheld, approx: false };
+  const dncWithheld = flagged.length
+    ? await CanvassActivity.countDocuments({ ...q, voterId: { $in: flagged } })
+    : 0;
+  try {
+    // Read at call time so a test (or an operator) can move the cap without a restart.
+    const maxTimeMS = Number(process.env.EXPORT_ESTIMATE_MAX_MS || 8000);
+    const rows = await countCanvassActivityRows(ctx, { maxTimeMS });
+    return { rows, dncWithheld, approx: false };
+  } catch (err) {
+    if (!err?.isEstimateTimeout) throw err;
+    return { rows: await canvassActivityFloorRows(ctx), dncWithheld, approx: false, rowsAreFloor: true };
+  }
 };
 
 // Iterates the builder's own round resolution ('_id'-only, statuses only when a status
@@ -184,6 +208,72 @@ const estimateVoterNotes = async (ctx) => {
   return { rows, dncWithheld, approx: false };
 };
 
+// notes — the three sources summed through the SAME scope the builder resolves (notesScopeOf),
+// so a filter can never mean one thing here and another there.
+//
+// approx: true, and the three sources contribute to orphanedRows very differently — this is the
+// whole subtlety of the type, so it is spelled out:
+//   door   — every matching row is WRITTEN (a flagged voter only blanks the identity), so the
+//            plain count IS the rowCount and door contributes ZERO orphans. Counting one here
+//            would break est.rows === rowCount + orphanedRows, which is why this differs from
+//            buildCanvassActivity (approx:false, where its orphan count is informational).
+//   survey — voter-unit: the builder drops a response whose Voter doc is gone and counts it as an
+//            orphan. This count has no voter join, so such a row IS in est.rows — that is exactly
+//            what orphanedRows reconciles.
+//   admin  — the campaign-membership join runs FIRST and the DNC flag second (ctx.dnc is
+//            ORG-scoped, so a flagged voter in another campaign must be skipped, never counted as
+//            DNC). A note whose voter is missing OR in another campaign is excluded here and
+//            skipped silently by the builder, so it contributes to NEITHER rows nor orphans.
+const estimateNotes = async (ctx) => {
+  const scope = notesScopeOf(ctx);
+  const has = (t) => scope.sources.includes(t);
+  const flagged = flaggedOids(ctx);
+  let rows = 0;
+  let dncWithheld = 0;
+
+  if (has('door')) {
+    const q = doorNotesMatch(scope);
+    const [total, blanked] = await Promise.all([
+      CanvassActivity.countDocuments(q),
+      flagged.length ? CanvassActivity.countDocuments({ ...q, voterId: { $in: flagged } }) : 0,
+    ]);
+    rows += total;
+    dncWithheld += blanked;
+  }
+
+  if (has('survey')) {
+    const q = surveyNotesMatch(scope);
+    const [total, dropped] = await Promise.all([
+      SurveyResponse.countDocuments(q),
+      flagged.length ? SurveyResponse.countDocuments({ ...q, voterId: { $in: flagged } }) : 0,
+    ]);
+    rows += total - dropped;
+    dncWithheld += dropped;
+  }
+
+  if (has('voter')) {
+    // n notes per voter, then the join order above.
+    const perVoter = (
+      await VoterNote.aggregate([{ $match: adminNotesMatch(scope) }, { $group: { _id: '$voterId', n: { $sum: 1 } } }])
+    ).filter((e) => e._id);
+    for (const part of chunk(perVoter, 5000)) {
+      const voters = await Voter.find(
+        { _id: { $in: part.map((e) => oid(e._id)) }, campaignId: ctx.campaignId },
+        '_id',
+      ).lean();
+      const inCampaign = new Set(voters.map((v) => String(v._id)));
+      for (const e of part) {
+        const vid = String(e._id);
+        if (!inCampaign.has(vid)) continue;
+        if (ctx.dnc.has(vid)) dncWithheld += e.n;
+        else rows += e.n;
+      }
+    }
+  }
+
+  return { rows, dncWithheld, approx: true };
+};
+
 // Keyed like EXPORT_TYPES; full-backup deliberately has no estimate (the endpoint 400s).
 export const EXPORT_ESTIMATES = {
   'canvass-activity': estimateCanvassActivity,
@@ -193,4 +283,5 @@ export const EXPORT_ESTIMATES = {
   'voter-file': estimateVoterFile,
   'voters-filtered': estimateVotersFiltered,
   'voter-notes': estimateVoterNotes,
+  notes: estimateNotes,
 };

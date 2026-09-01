@@ -57,7 +57,24 @@ phone — it never seats you in one on its own, you pick it.
 - **Author** — narrow to notes written by one person.
 - **Walk list** — if the campaign has more than one walk list, scope door + survey notes to it. (Admin
   notes aren't tied to a walk list, so they're hidden while a walk list is selected — the screen says so.)
+- **Outcome** — narrow door notes to the outcome they were left on: Not home, Refused, Lit
+  dropped, Surveyed and the rest. Admin notes have no door outcome, so they're hidden while an
+  outcome is selected; survey notes appear only when **Surveyed** is one of them (the screen says
+  so).
 - **Search** — type any text to match note contents.
+
+## Taking the notes with you
+
+**Export these** hands whatever you are looking at to the Export Center as a **Notes** export —
+one row per note, with who wrote it and the door or voter it belongs to. Two things worth
+knowing:
+
+- **The file is not capped.** This screen shows at most 500 per source; the export contains every
+  matching note.
+- **Door notes name nobody.** A note typed at a not-home door is a record about the *door*. The
+  export can add a column listing the people registered there, but you have to ask for it, and
+  which downloads carried it is recorded in the export history. Do-not-contact voters are never
+  listed.
 
 ## Tapping a note
 
@@ -88,7 +105,35 @@ reverse-chronological list:
 |---|---|---|---|
 | `door` | `CanvassActivity` | `.note` | Excludes the paired `survey_submitted` rows (those are the survey source) so a survey isn't counted twice. |
 | `survey` | `SurveyResponse` | `.note` | `timestamp` = `submittedAt`. |
-| `voter` | `VoterNote` | `.body` | Org-level, scoped to the campaign via a voter→household join (`$match campaignId`). Labeled **"Admin"** in the UI. |
+| `voter` | `VoterNote` | `.body` | Org-level, scoped to the campaign via a voter→household join (`$match campaignId`). Labeled **"Admin"** in the UI — but *not* admin-exclusive: a granted lead can write one, and the mobile POST is not management-gated. |
+
+### The matchers live in one shared module
+
+Since 2026-09-01 the three matchers, the source-exclusion rules and the day-window/id casting live
+in [`services/notes/notesQuery.js`](../server/src/services/notes/notesQuery.js), which this
+endpoint AND the `notes` export type both import — the same one-owner pattern as
+`services/reports/knocksByPass.js`. A filter can no longer mean one thing on screen and another in
+the download. It also owns `ACTION_TYPES` (the export registry imports it from here; the reverse
+would be a cycle).
+
+**The door `actionType` clause is built once, as `$or` branches under `$and`.** Three rules land on
+that one key, and spreading a second one silently disarms the first:
+
+1. **Dedup.** A field survey writes the same note text to BOTH ledgers (`routes/mobile/canvass.js`
+   sets `note` on the `survey_submitted` `CanvassActivity` row *and* on the `SurveyResponse`), so
+   an ordinary `survey_submitted` row is excluded here or every field-survey note appears twice.
+2. **The converted-door exemption.** `services/canvass/surveyConversion.js` rewrites an existing
+   door row **in place** — `actionType` becomes `survey_submitted`, `reclassified.kind` becomes
+   `to_survey` — and **never touches `note`**. So the canvasser's original door note survives on a
+   row rule 1 would discard, while the `SurveyResponse` that run creates carries the *admin's*
+   conversion note. Two different notes. Before this exemption the canvasser's was dropped from
+   every source — a real bug on this hub, not just a gap in the export.
+3. **The outcome filter.** A converted row's `actionType` now reads `survey_submitted`, so it is
+   reachable under **Surveyed** and not under its pre-conversion outcome — which is what the row,
+   the chip and the CSV all display, so filter and label agree. (Matching on `reclassified.from`
+   instead is implementable, but then the label must read "Surveyed (was Not home)" — never change
+   one without the other.) An empty selection normalizes to *no filter*, because an empty `$or`
+   reaches Mongo as an error.
 
 **Auth:** `requireAuth` → `orgContext` → `requireOrgRole('admin','lead')`; super-admin bypasses the role
 check, and a team **lead** is additionally scoped by `canManageCampaign(campaignId)`. It passes
@@ -102,6 +147,7 @@ already attaches the Bearer token + `X-Org-Id`, so mobile reuses it **as-is** �
 | `campaignId` | **Required** — 400 (`A campaignId is required.`) without it. |
 | `from`, `to` | Date-only `YYYY-MM-DD`, half-open window resolved in the campaign's anchor tz. Both absent = all-time. |
 | `type` | CSV subset of `door,survey,voter` (absent/unrecognized = all three). |
+| `actionType` | CSV subset of the eight `CanvassActivity.actionType` values. Narrows door notes; structurally excludes admin notes, and survey notes unless `survey_submitted` is among them. Unlike `type`, the counts **honor** it. |
 | `userId` | Author filter — matches `CanvassActivity.userId`, `SurveyResponse.userId`, `VoterNote.authorId`. |
 | `effortId` | Scopes door + survey to that walk list **and forces `includeVoter=false`** (VoterNote has no effort linkage → zero admin notes while set). |
 | `q` | Case-insensitive substring (regex-escaped) over the three note fields. |
@@ -132,7 +178,13 @@ already attaches the Bearer token + `X-Org-Id`, so mobile reuses it **as-is** �
   `capped` is true when a *wanted* source's `countDocuments` exceeds the rows actually fetched → the UI
   shows a "showing the most recent 500 per type — narrow the range" hint.
 - **Paginate off `total`, not `counts.total`.** `counts` deliberately ignore the `type` filter (so the
-  chips show real totals), so `counts.total` can exceed `total` when `type` is narrowed.
+  chips show real totals), so `counts.total` can exceed `total` when `type` is narrowed. Every
+  OTHER filter — including the new `actionType` — moves the counts. The scope object exposes both
+  sets for exactly this: `sources` (what to fetch, source picker applied) and `availableSources`
+  (what to count, structural exclusions only).
+- **The 500-per-source cap is why the export exists.** `GET /notes` merges and paginates in memory,
+  so it can never return more than 1,500 rows. The `notes` export type streams the same matchers
+  with no cap — see [EXPORTS.md](EXPORTS.md).
 - The timestamp field is **`note.timestamp`** (not `createdAt`); format it with the response's
   **`timeZone`/`tzAbbrev`** (server-resolved: campaign → org → ET), so every client shows the same clock.
 

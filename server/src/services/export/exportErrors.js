@@ -8,3 +8,14 @@ export class ExportUserError extends Error {
     this.isExportUserError = true;
   }
 }
+
+// The fanned canvass-activity estimate hit its maxTimeMS (exportBuilders countCanvassActivityRows).
+// Only the estimate catches it — it answers with the floor count instead — the worker never sets
+// a cap, so a build can never see one.
+export class EstimateTimeout extends Error {
+  constructor() {
+    super('estimate timed out');
+    this.name = 'EstimateTimeout';
+    this.isEstimateTimeout = true;
+  }
+}

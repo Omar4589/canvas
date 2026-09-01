@@ -10,6 +10,8 @@ import InfoHint from '../components/InfoHint.jsx';
 import Pager from '../components/Pager.jsx';
 import { Button, Select, EmptyState, SkeletonRows } from '../components/ui/index.js';
 import { downloadFile } from '../lib/downloadFile.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
+import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
 // The Export Center: queue background CSV/ZIP exports (built on the worker dyno), then
 // download them from the history below until they expire. Admins see every type; leads see
@@ -33,7 +35,7 @@ const TYPES = [
     id: 'canvass-activity',
     label: 'Canvassing activity',
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door.',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'perVoterRows'],
   },
   {
     id: 'doors-by-round',
@@ -66,11 +68,20 @@ const TYPES = [
     filters: ['savedSearch'],
   },
   {
+    // Retitled with the registry: "Voter notes" promised the field notes it has never held.
+    // The history table below resolves labels from THIS array, not the server overlay, so a
+    // server-only rename would show two different names for one type on the same screen.
     id: 'voter-notes',
-    label: 'Voter notes',
-    desc: 'Staff notes about voters, with author and date.',
+    label: 'Voter profile notes',
+    desc: 'Notes written on a voter’s profile, with author and date. Not the field record — for door and survey notes use Notes.',
     filters: ['date'],
     adminOnly: true,
+  },
+  {
+    id: 'notes',
+    label: 'Notes',
+    desc: 'Every note currently on this campaign — typed at the door, attached to a survey, or written on a voter profile. One row per note.',
+    filters: ['noteSource', 'noteOutcome', 'date', 'effort', 'pass', 'noteAuthor', 'noteSearch', 'doorVoters'],
   },
   {
     id: 'full-backup',
@@ -80,6 +91,16 @@ const TYPES = [
     adminOnly: true,
   },
 ];
+
+// Door / Survey / Admin — the same three the Notes page chips show.
+const NOTE_SOURCE_OPTIONS = [
+  { key: 'door', label: 'Door' },
+  { key: 'survey', label: 'Survey' },
+  { key: 'voter', label: 'Admin' },
+];
+// Derived, never hand-copied: ACTION_LABELS is the display map for the actionType enum, so a
+// new outcome shows up here automatically instead of silently missing an option.
+const OUTCOME_OPTIONS = Object.keys(ACTION_LABELS);
 
 const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
@@ -123,6 +144,26 @@ const daysLeft = (expiresAt) => {
 };
 
 // Compact human summary of a job's frozen params for the Scope column.
+// Multi-select pill, same grammar as the Notes page chips (no count badge here: the Export
+// Center has no per-option totals to show, and a hard-coded 0 would read as "none match").
+function Chip({ active, onClick, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ' +
+        (active ? 'border-brand-600 bg-brand-tint text-brand-accent' : 'border-border bg-card text-fg-muted hover:bg-sunken')
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
+const toggleIn = (setter, key) =>
+  setter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
 function scopeLabel(job, { effortName, passName, canvasserName }) {
   const p = job.params || {};
   const bits = [];
@@ -137,6 +178,10 @@ function scopeLabel(job, { effortName, passName, canvasserName }) {
   // Surfaced deliberately: the history is the record of which exports carried contact and
   // date-of-birth columns, so it has to say so on the row.
   if (p.includeVoterDetail) bits.push('contact & demographic details');
+  // Same reason, same rule: a door roster beside a note, and a knock repeated against every name
+  // at the door, are both linkages the row has to own up to.
+  if (p.includeDoorVoters) bits.push('voters listed at each door');
+  if (p.perVoterRows) bits.push('one row per voter at the door');
   return bits.join(' · ') || 'Everything';
 }
 
@@ -158,6 +203,15 @@ export default function ExportsPage() {
   // Off by default on purpose (services/export/exportBuilders.js detailPlan) — a survey
   // export shouldn't carry a date of birth unless someone asked for one.
   const [includeVoterDetail, setIncludeVoterDetail] = useState(false);
+  const [noteSources, setNoteSources] = useState([]);
+  const [actionTypes, setActionTypes] = useState([]);
+  const [noteQ, setNoteQ] = useState('');
+  // Off by default, like includeVoterDetail: a door note names nobody by itself, and the roster
+  // beside it is the one column that ties it to real people. Frozen into ExportJob.params.
+  const [includeDoorVoters, setIncludeDoorVoters] = useState(false);
+  // Off by default like the two above — and unlike them this one changes the ROW COUNT and the
+  // file name (services/export/exportBuilders.js fanPlan). Frozen into ExportJob.params.
+  const [perVoterRows, setPerVoterRows] = useState(false);
   const [backupScope, setBackupScope] = useState('campaign');
   const [skip, setSkip] = useState(0);
   const [rowBusy, setRowBusy] = useState(null); // jobId of an in-flight download/delete
@@ -188,6 +242,16 @@ export default function ExportsPage() {
     }
   );
   const type = visibleTypes.find((t) => t.id === typeId) || visibleTypes[0];
+  // allMembers, not the ledger-first canvasser roster the `canvasser` token uses: a note author
+  // may be a DEACTIVATED member whose notes must stay filterable. (Known gap, same on the Notes
+  // page: an org admin who is not rostered on this campaign is not selectable here.)
+  const { allMembers } = useCampaignTeam(campaignId);
+  const noteAuthors = (allMembers || [])
+    .map((m) => ({
+      id: String(m.user.id),
+      name: `${m.user.firstName || ''} ${m.user.lastName || ''}`.trim() || m.user.email,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const wants = (f) => type.filters.includes(f);
 
   // ── option sources (all existing endpoints) ────────────────────────────────────────────
@@ -279,6 +343,12 @@ export default function ExportsPage() {
     if (wants('savedSearch')) p.savedSearchId = savedSearchId;
     if (wants('import') && importJobId) p.importJobId = importJobId;
     if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;
+    if (wants('noteSource') && noteSources.length) p.noteSources = noteSources;
+    if (wants('noteOutcome') && actionTypes.length) p.actionTypes = actionTypes;
+    if (wants('noteAuthor') && userId) p.userId = userId;
+    if (wants('noteSearch') && noteQ.trim()) p.q = noteQ.trim();
+    if (wants('doorVoters') && includeDoorVoters) p.includeDoorVoters = true;
+    if (wants('perVoterRows') && perVoterRows) p.perVoterRows = true;
     return p;
   }
 
@@ -401,6 +471,66 @@ export default function ExportsPage() {
               </Select>
             </div>
           )}
+          {wants('noteSource') && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Sources</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {NOTE_SOURCE_OPTIONS.map((o) => (
+                  <Chip
+                    key={o.key}
+                    active={noteSources.includes(o.key)}
+                    onClick={() => toggleIn(setNoteSources, o.key)}
+                    label={o.label}
+                  />
+                ))}
+              </div>
+              <div className="mt-1 text-xs text-fg-muted">All three unless you pick.</div>
+            </div>
+          )}
+          {wants('noteOutcome') && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Door outcome</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {OUTCOME_OPTIONS.map((a) => (
+                  <Chip
+                    key={a}
+                    active={actionTypes.includes(a)}
+                    onClick={() => toggleIn(setActionTypes, a)}
+                    label={ACTION_LABELS[a]}
+                  />
+                ))}
+              </div>
+              {actionTypes.length > 0 && (
+                <div className="mt-1 text-xs text-fg-muted">
+                  Profile notes have no door outcome, so they’re left out while this is set.
+                  {!actionTypes.includes('survey_submitted') && ' Survey notes are too.'}
+                </div>
+              )}
+            </div>
+          )}
+          {wants('noteAuthor') && noteAuthors.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Author</div>
+              <Select className={selectCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
+                <option value="">Anyone</option>
+                {noteAuthors.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </Select>
+            </div>
+          )}
+          {wants('noteSearch') && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Note text</div>
+              <input
+                type="search"
+                value={noteQ}
+                onChange={(e) => setNoteQ(e.target.value)}
+                placeholder="Only notes containing…"
+                className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+            </div>
+          )}
           {wants('roundStatus') && (
             <div>
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Only doors with status</div>
@@ -448,6 +578,26 @@ export default function ExportsPage() {
               </Select>
             </div>
           )}
+          {wants('doorVoters') && (
+            <div className="w-full rounded-md border border-border bg-sunken px-3 py-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={includeDoorVoters}
+                  onChange={(e) => setIncludeDoorVoters(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-fg">Include the voters registered at each door</span>
+                  <span className="block text-xs text-fg-muted">
+                    A note typed at a door is a record about the <em>door</em> — nobody was picked, so
+                    it names no one. This adds the people registered there beside it. Do-not-contact
+                    voters are never listed. Leave it off and door notes carry the address only.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
           {/* w-full so it wraps onto its own line: the toggle reads as a decision about the
               file, not as one more narrowing filter beside the pickers. */}
           {wants('voterDetail') && (
@@ -466,6 +616,34 @@ export default function ExportsPage() {
                     longitude, precinct and districts — the columns for matching these answers back
                     to your own voter file. Leave it off and the file carries name, party and address
                     only.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+          {/* The first ROW option in the Center (the two wells above add columns): it multiplies
+              rows and renames the file, so the copy leads with what a repeated outcome does and
+              does not claim about each person. */}
+          {wants('perVoterRows') && (
+            <div className="w-full rounded-md border border-border bg-sunken px-3 py-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={perVoterRows}
+                  onChange={(e) => setPerVoterRows(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-fg">One row per voter at the door</span>
+                  <span className="block text-xs text-fg-muted">
+                    A knock that named nobody — not home, wrong address, refused, lit drop, no
+                    soliciting, restricted — is one row about the door. Tick this and it repeats once
+                    per registered voter at that address, each row carrying the same outcome, time,
+                    canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
+                    three rows means someone at that address declined, not that each person did. The
+                    columns are the same but the row count is not, so the file is named
+                    activity-log-by-voter — never count its rows as knocks. Do-not-contact voters are
+                    never listed, and an address with nobody to list keeps its single blank row.
                   </span>
                 </span>
               </label>

@@ -54,6 +54,12 @@ import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../ser
 import { FlagReview } from '../../models/FlagReview.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
+import {
+  resolveNoteScope,
+  doorNotesMatch,
+  surveyNotesMatch,
+  adminNotesPipeline,
+} from '../../services/notes/notesQuery.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
@@ -4764,14 +4770,7 @@ router.post('/flags/review-bulk', async (req, res, next) => {
 // VIEW-ONLY list: field door notes (CanvassActivity.note), survey notes (SurveyResponse.note), and
 // admin/profile notes (VoterNote.body). VoterNote is org-level, so it's scoped to the campaign via
 // voter → household. See docs/AUDIT.md sibling patterns; reuses voterProfile.js note shaping.
-const NOTE_SOURCES = ['door', 'survey', 'voter'];
 const NOTES_RESULT_CAP = 500;
-const NOTE_NONEMPTY = { $exists: true, $ne: null, $not: /^\s*$/ };
-
-// Escape user text so a search term can't inject regex metacharacters into a $regex.
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 router.get('/notes', async (req, res, next) => {
   try {
@@ -4785,76 +4784,33 @@ router.get('/notes', async (req, res, next) => {
     if (!campaignId || !mongoose.isValidObjectId(campaignId)) {
       return res.status(400).json({ error: 'A campaignId is required.' });
     }
-    const campaignObjId = new mongoose.Types.ObjectId(campaignId);
-    const orgObjId = new mongoose.Types.ObjectId(orgId);
+    // Match construction lives in services/notes/notesQuery.js — the ONE owner, shared with the
+    // `notes` export type so the screen and the download can never disagree about what a filter
+    // selects. It also resolves the day window in the campaign's anchor tz and casts every id.
+    const scope = resolveNoteScope({
+      organizationId: orgId,
+      campaignId,
+      anchorTz: req.anchorTz,
+      from: req.query.from,
+      to: req.query.to,
+      effortId:
+        req.query.effortId && mongoose.isValidObjectId(req.query.effortId) ? req.query.effortId : null,
+      userId: req.query.userId && mongoose.isValidObjectId(req.query.userId) ? req.query.userId : null,
+      q: req.query.q,
+      sources: req.query.type ? String(req.query.type).split(',').map((t) => t.trim()) : null,
+      actionTypes: req.query.actionType
+        ? String(req.query.actionType).split(',').map((t) => t.trim())
+        : null,
+    });
 
-    const typeSet = csvSet(req.query.type, NOTE_SOURCES); // null = all three
-    const wants = (t) => !typeSet || typeSet.has(t);
-    const userId =
-      req.query.userId && mongoose.isValidObjectId(req.query.userId)
-        ? new mongoose.Types.ObjectId(req.query.userId)
-        : null;
-    const effortActive = !!(req.query.effortId && mongoose.isValidObjectId(req.query.effortId));
-    const includeVoter = !effortActive; // VoterNote has no effort linkage
+    // `sources` honors the source chips (what to FETCH); `availableSources` ignores them but keeps
+    // every structural exclusion (what to COUNT), which is what keeps the chip counts accurate.
+    const wants = (t) => scope.sources.includes(t);
+    const countable = (t) => scope.availableSources.includes(t);
 
-    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    const rx = q ? new RegExp(escapeRegExp(q), 'i') : null;
-
-    const cFilter = baseFilter(req); // org + campaignId + optional effortId
-    const noteClause = rx ? { ...NOTE_NONEMPTY, $regex: rx } : NOTE_NONEMPTY;
-    const bodyClause = rx ? { $exists: true, $ne: null, $regex: rx } : { $exists: true, $ne: null };
-
-    const doorMatch = {
-      ...cFilter,
-      ...parseDateRange(req, 'timestamp'),
-      actionType: { $ne: 'survey_submitted' }, // dedup: survey notes come from SurveyResponse
-      note: noteClause,
-      ...(userId ? { userId } : {}),
-    };
-    const surveyMatch = {
-      ...cFilter,
-      ...parseDateRange(req, 'submittedAt'),
-      note: noteClause,
-      ...(userId ? { userId } : {}),
-    };
-    // VoterNote → campaign via voter → household (inner $match campaignId). Returns the household
-    // address + voter name in the join, so no second lookup for those.
-    const voterBase = [
-      {
-        $match: {
-          organizationId: orgObjId,
-          ...parseDateRange(req, 'createdAt'),
-          body: bodyClause,
-          ...(userId ? { authorId: userId } : {}),
-        },
-      },
-      {
-        $lookup: {
-          from: 'voters',
-          localField: 'voterId',
-          foreignField: '_id',
-          pipeline: [
-            { $match: { organizationId: orgObjId } },
-            {
-              $lookup: {
-                from: 'households',
-                localField: 'householdId',
-                foreignField: '_id',
-                pipeline: [
-                  { $match: { campaignId: campaignObjId } },
-                  { $project: { addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 } },
-                ],
-                as: 'hh',
-              },
-            },
-            { $unwind: '$hh' },
-            { $project: { fullName: 1, hh: 1 } },
-          ],
-          as: 'v',
-        },
-      },
-      { $unwind: '$v' },
-    ];
+    const doorMatch = doorNotesMatch(scope);
+    const surveyMatch = surveyNotesMatch(scope);
+    const voterBase = adminNotesPipeline(scope);
 
     const [doorRows, surveyRows, voterRows, doorCount, surveyCount, voterCountArr] = await Promise.all([
       wants('door')
@@ -4872,13 +4828,14 @@ router.get('/notes', async (req, res, next) => {
             .limit(NOTES_RESULT_CAP)
             .lean()
         : [],
-      wants('voter') && includeVoter
+      wants('voter')
         ? VoterNote.aggregate([...voterBase, { $sort: { createdAt: -1 } }, { $limit: NOTES_RESULT_CAP }])
         : [],
-      // Counts ignore `type` so the filter chips stay accurate; they honor every other filter.
+      // Counts ignore `type` so the filter chips stay accurate; they honor every other filter —
+      // including the outcome filter, which structurally excludes the survey and admin sources.
       CanvassActivity.countDocuments(doorMatch),
-      SurveyResponse.countDocuments(surveyMatch),
-      includeVoter ? VoterNote.aggregate([...voterBase, { $count: 'n' }]) : [{ n: 0 }],
+      countable('survey') ? SurveyResponse.countDocuments(surveyMatch) : 0,
+      countable('voter') ? VoterNote.aggregate([...voterBase, { $count: 'n' }]) : [{ n: 0 }],
     ]);
     const voterCount = voterCountArr?.[0]?.n || 0;
 
@@ -4971,7 +4928,7 @@ router.get('/notes', async (req, res, next) => {
     const capped =
       (wants('door') && doorCount > doorRows.length) ||
       (wants('survey') && surveyCount > surveyRows.length) ||
-      (wants('voter') && includeVoter && voterCount > voterRows.length);
+      (wants('voter') && voterCount > voterRows.length);
 
     res.json({
       notes: pageItems,

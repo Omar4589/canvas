@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -7,7 +7,7 @@ import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelecto
 import { defaultRange, labelForRange } from '../lib/datePresets.js';
 import { formatInTz } from '../lib/datetime.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
-import { Card, Badge } from '../components/ui/index.js';
+import { Card, Badge, Button } from '../components/ui/index.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
 
 function buildQuery(params) {
@@ -19,6 +19,9 @@ function buildQuery(params) {
   const s = sp.toString();
   return s ? `?${s}` : '';
 }
+
+// The door outcomes, derived from the display map so a new actionType can't go missing here.
+const OUTCOMES = Object.keys(ACTION_LABELS);
 
 // Door / Survey / Admin(VoterNote). `countKey` maps to the server counts object.
 const SOURCES = [
@@ -53,9 +56,13 @@ export default function NotesPage() {
   const [types, setTypes] = useState([]); // [] = all sources
   const [authorId, setAuthorId] = useState('');
   const [effortId, setEffortId] = useState('');
+  const [outcomes, setOutcomes] = useState([]); // [] = every outcome
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportDoorVoters, setExportDoorVoters] = useState(false);
+  const [exportDone, setExportDone] = useState('');
 
   // Reset all filters when the admin switches campaigns (one mounted element serves every campaign).
   const [prevCampaignId, setPrevCampaignId] = useState(campaignId);
@@ -64,6 +71,7 @@ export default function NotesPage() {
     setDateRange(defaultRange('today', tz));
     rangeTouchedRef.current = false;
     setTypes([]);
+    setOutcomes([]);
     setAuthorId('');
     setEffortId('');
     setQInput('');
@@ -85,10 +93,11 @@ export default function NotesPage() {
   }, [qInput]);
 
   const typeCsv = types.join(',');
+  const outcomeCsv = outcomes.join(',');
   // Any filter change returns to the first page.
   useEffect(() => {
     setPage(0);
-  }, [q, typeCsv, authorId, effortId, dateRange.from, dateRange.to]);
+  }, [q, typeCsv, outcomeCsv, authorId, effortId, dateRange.from, dateRange.to]);
 
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
@@ -110,7 +119,7 @@ export default function NotesPage() {
   );
 
   const notesQ = useQuery({
-    queryKey: ['admin', 'notes', campaignId, q, typeCsv, authorId, effortId, dateRange.from, dateRange.to, page],
+    queryKey: ['admin', 'notes', campaignId, q, typeCsv, outcomeCsv, authorId, effortId, dateRange.from, dateRange.to, page],
     queryFn: () =>
       api(
         `/admin/reports/notes${buildQuery({
@@ -118,6 +127,7 @@ export default function NotesPage() {
           from: dateRange.from,
           to: dateRange.to,
           type: typeCsv || undefined,
+          actionType: outcomeCsv || undefined,
           userId: authorId || undefined,
           effortId: effortId || undefined,
           q: q || undefined,
@@ -137,6 +147,37 @@ export default function NotesPage() {
   function toggleType(key) {
     setTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
+
+  function toggleOutcome(key) {
+    setOutcomes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  // Hand the filters on screen straight to the Export Center. The export is NOT the endpoint:
+  // it streams, so it is not bound by the 500-per-source cap this page shows.
+  const exportMut = useMutation({
+    mutationFn: () =>
+      api('/admin/exports', {
+        method: 'POST',
+        body: {
+          type: 'notes',
+          campaignId,
+          params: {
+            ...(dateRange.from ? { from: dateRange.from } : {}),
+            ...(dateRange.to ? { to: dateRange.to } : {}),
+            ...(types.length ? { noteSources: types } : {}),
+            ...(outcomes.length ? { actionTypes: outcomes } : {}),
+            ...(authorId ? { userId: authorId } : {}),
+            ...(effortId ? { effortId } : {}),
+            ...(q ? { q } : {}),
+            ...(exportDoorVoters ? { includeDoorVoters: true } : {}),
+          },
+        },
+      }),
+    onSuccess: () => {
+      setExportOpen(false);
+      setExportDone('Queued — it appears on the Exports page when it finishes building.');
+    },
+  });
 
   function onRangeChange(next) {
     rangeTouchedRef.current = true;
@@ -226,11 +267,86 @@ export default function NotesPage() {
               ))}
             </select>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {exportDone && <span className="text-xs text-fg-muted">{exportDone}</span>}
+            <Button variant="secondary" onClick={() => { setExportDone(''); setExportOpen(true); }}>
+              Export these
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-1 text-xs uppercase tracking-wide text-fg-muted">Outcome</span>
+          {OUTCOMES.map((a) => {
+            const active = outcomes.includes(a);
+            return (
+              <button
+                key={a}
+                type="button"
+                onClick={() => toggleOutcome(a)}
+                className={
+                  'inline-flex items-center rounded-full border px-2.5 py-1 text-xs transition-colors ' +
+                  (active ? 'border-brand-600 bg-brand-tint text-brand-accent' : 'border-border bg-card text-fg-muted hover:bg-sunken')
+                }
+              >
+                {ACTION_LABELS[a]}
+              </button>
+            );
+          })}
         </div>
         {effortId && (
           <p className="text-xs text-fg-subtle">Admin notes aren&apos;t tied to a walk list, so they&apos;re hidden while a walk list is selected.</p>
         )}
+        {outcomes.length > 0 && (
+          <p className="text-xs text-fg-subtle">
+            Admin notes have no door outcome, so they&apos;re hidden while an outcome is selected.
+            {!outcomes.includes('survey_submitted') && ' Survey notes are too.'}
+          </p>
+        )}
       </div>
+
+      {exportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+          <Card className="w-full max-w-md space-y-3 p-4">
+            <h2 className="text-lg font-semibold text-fg">Export these notes</h2>
+            <p className="text-sm text-fg-muted">
+              Queues a <strong>Notes</strong> export with the filters on screen: {labelForRange(dateRange, tz)}
+              {types.length ? ` · ${types.map((t) => SOURCES.find((s) => s.key === t)?.label || t).join(', ')}` : ''}
+              {outcomes.length ? ` · ${outcomes.map((a) => ACTION_LABELS[a]).join(', ')}` : ''}
+              {q ? ` · “${q}”` : ''}.
+            </p>
+            <p className="text-xs text-fg-subtle">
+              The file isn&apos;t limited to the {data.resultCap || 500} per source shown here — it contains
+              every matching note.
+            </p>
+            <label className="flex items-start gap-2 rounded-md border border-border bg-sunken px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={exportDoorVoters}
+                onChange={(e) => setExportDoorVoters(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-fg">Include the voters registered at each door</span>
+                <span className="block text-xs text-fg-muted">
+                  A door note names nobody on its own. This adds the people registered there beside it.
+                  Do-not-contact voters are never listed.
+                </span>
+              </span>
+            </label>
+            {exportMut.isError && (
+              <p className="text-sm text-danger">{exportMut.error?.message || 'Could not queue that export.'}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setExportOpen(false)} disabled={exportMut.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={() => exportMut.mutate()} disabled={exportMut.isPending}>
+                {exportMut.isPending ? 'Queueing…' : 'Queue export'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {data.capped && (
         <div className="mb-3 rounded border border-warning/30 bg-warning-tint px-3 py-1.5 text-xs text-warning-fg">

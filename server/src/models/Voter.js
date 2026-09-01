@@ -156,5 +156,10 @@ voterSchema.index(
   { organizationId: 1, 'doorAdded.at': 1 },
   { partialFilterExpression: { 'doorAdded.at': { $exists: true } } }
 );
+// The by-voter activity estimate's roster branch (exportBuilders countCanvassActivityRows) groups
+// the campaign's kept roster by household through the DNC clause. With householdId and the flag
+// both in the key this is a COVERED scan — no document fetch across the roster. Key shape is
+// distinct from every index above. Prod autoIndex is OFF — `migrate:build-indexes --apply`.
+voterSchema.index({ campaignId: 1, householdId: 1, 'doNotContact.flagged': 1 });
 
 export const Voter = mongoose.model('Voter', voterSchema);

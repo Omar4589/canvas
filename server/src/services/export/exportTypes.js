@@ -17,8 +17,10 @@ import {
   buildVoterFile,
   buildVotersFiltered,
   buildVoterNotes,
+  buildNotes,
   buildKnocksByRound,
 } from './exportBuilders.js';
+import { ACTION_TYPES, NOTE_SOURCES } from '../notes/notesQuery.js';
 import { EXPORT_ESTIMATES } from './exportEstimates.js';
 
 // The Export Center type registry — the anti-drift spine. The route validates from it, the
@@ -33,7 +35,6 @@ import { EXPORT_ESTIMATES } from './exportEstimates.js';
 // `estimate` (absent only on full-backup) is the pre-queue count from exportEstimates.js.
 
 const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
-const ACTION_TYPES = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s));
 const isId = (s) => mongoose.isValidObjectId(s);
@@ -83,7 +84,8 @@ const BACKUP_NOTES = [
   'voterfile-current.csv is a RECONSTRUCTION from the data currently in Doorline, not the originally uploaded file: unmapped vendor columns were never stored, rows that failed import are absent, and edits made since the upload are reflected.',
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
-  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file.',
+  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file. The bundle\u2019s activity-log.csv is ALWAYS one row per door event; repeating a door-level knock once per registered voter is an opt-in on a standalone Canvassing activity export (activity-log-by-voter).',
+  'notes.csv carries every note in one file, one row per note; voter-profile notes therefore appear in BOTH notes.csv and voter-notes.csv. The bundle\u2019s notes.csv never lists the voters registered at a door \u2014 that is an opt-in column on a standalone Notes export.',
   'The survey files here use the default columns (name, party, address). For phone, date of birth, districts, precinct and coordinates beside each answer, queue Survey results on its own with "Include contact & demographic details" — voterfile-current.csv in this bundle already carries all of those, keyed by State Voter ID.',
 ];
 
@@ -121,6 +123,7 @@ const buildFullBackup = async (ctx, sink) => {
       buildDoorsByRound,
       buildSurveyResultsWide,
       buildSurveyAnswersLong,
+      buildNotes,
       buildVoterNotes,
       buildKnocksByRound,
     ]) {
@@ -161,7 +164,8 @@ const buildFullBackup = async (ctx, sink) => {
       '  doors-by-round.csv      — one row per door per round, with its round status',
       '  survey-results*.csv     — one row per survey taken, one column per question',
       '  survey-answers.csv      — one row per recorded answer (the as-recorded snapshot)',
-      '  voter-notes.csv         — staff notes about voters',
+      '  notes.csv               — every note on the campaign: door, survey and voter-profile',
+      '  voter-notes.csv         — voter-profile notes only (the subset written on a profile)',
       '  knocks-by-round.csv     — the per-round totals, with a TOTAL row',
       '',
       ...BACKUP_NOTES.map((n) => `* ${n}`),
@@ -177,14 +181,19 @@ const buildFullBackup = async (ctx, sink) => {
 export const EXPORT_TYPES = {
   'canvass-activity': {
     label: 'Canvassing activity',
-    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank.',
+    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
-    filters: ['date', 'effort', 'pass', 'canvasser'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'perVoterRows'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
     estimate: EXPORT_ESTIMATES['canvass-activity'],
     contentKind: async () => 'csv',
+    // The row grain rides the DOWNLOAD name, not just the ZIP entry: csvSink discards
+    // sink.file()'s name (exportProcessor.js) and neither client renders ExportJob.files[].name,
+    // so renaming the sink entry alone would be invisible to every human. The processor
+    // optional-chains this, so no other type needs one.
+    fileSlug: (params) => (params?.perVoterRows ? 'canvass-activity-by-voter' : 'canvass-activity'),
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope);
       if (params.actionTypes != null) {
@@ -194,6 +203,10 @@ export const EXPORT_TYPES = {
         if (params.actionTypes.length) out.actionTypes = params.actionTypes;
       }
       if (params.excludeBulk) out.excludeBulk = true;
+      // Frozen into ExportJob.params like includeVoterDetail/includeDoorVoters — the history row
+      // is the permanent record of which downloads carried a knock attached to people nobody
+      // named. Unlike those two this is a ROW option, so the estimate reads it (exportEstimates).
+      if (params.perVoterRows) out.perVoterRows = true;
       return out;
     },
     build: buildCanvassActivity,
@@ -331,9 +344,13 @@ export const EXPORT_TYPES = {
     build: buildVotersFiltered,
   },
   'voter-notes': {
-    label: 'Voter notes',
-    desc: 'Staff notes about voters, with author and date.',
-    oneRowIs: 'one staff note about a voter',
+    // Retitled 2026-09-01: "Voter notes" promised the field notes it has never contained, and
+    // "staff"/"admin" overstated authorship — a granted LEAD can write a VoterNote, and the POST
+    // is not management-gated, so a rostered canvasser could too. It is the notes written on a
+    // voter's PROFILE. For door and survey notes, use the `notes` type.
+    label: 'Voter profile notes',
+    desc: 'Notes written on a voter\u2019s profile, with author and date. This is NOT the field record: notes a canvasser types at a door, and notes attached to a submitted survey, are in the Notes export.',
+    oneRowIs: 'one note written on a voter profile',
     filters: ['date'],
     adminOnly: true,
     requiresCampaign: true,
@@ -346,6 +363,47 @@ export const EXPORT_TYPES = {
       return out;
     },
     build: buildVoterNotes,
+  },
+  notes: {
+    label: 'Notes',
+    // Scoped copy on purpose: SurveyResponseArchive.note holds the note of an OVERWRITTEN survey
+    // (the voter profile still shows it), and this type does not read it — so "every note ever
+    // left" would be false in the canonical copy both clients and the help articles derive from.
+    desc: 'Every note currently on this campaign \u2014 the ones canvassers type at the door, the ones attached to a submitted survey, and notes written on a voter profile. One row per note.',
+    oneRowIs: 'one note, with who wrote it and the door or voter it belongs to',
+    filters: ['noteSource', 'noteOutcome', 'date', 'effort', 'pass', 'noteAuthor', 'noteSearch', 'doorVoters'],
+    // Lead-visible (owner ruling 2026-09-01), unlike voter-notes. This is a real widening: a lead
+    // can now bulk-export VoterNote bodies. Recorded in PRIVACY_VERIFICATION v6; ROLES.md and the
+    // two help articles were corrected in the same change.
+    adminOnly: false,
+    requiresCampaign: true,
+    subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES.notes,
+    contentKind: async () => 'csv',
+    validateParams: async (params, scope) => {
+      const out = await normalizeCommon(params, scope);
+      delete out.coordinatorId; // notes carry no team-attribution filter
+      if (params.noteSources != null) {
+        if (!Array.isArray(params.noteSources) || params.noteSources.some((v) => !NOTE_SOURCES.includes(v))) {
+          throw new ExportUserError('noteSources contains an unknown source.');
+        }
+        // An empty selection means "no filter", never "match nothing" — resolveNoteScope relies on
+        // this, because an empty $or would reach Mongo as an error.
+        if (params.noteSources.length) out.noteSources = params.noteSources;
+      }
+      if (params.actionTypes != null) {
+        if (!Array.isArray(params.actionTypes) || params.actionTypes.some((a) => !ACTION_TYPES.includes(a))) {
+          throw new ExportUserError('actionTypes contains an unknown action.');
+        }
+        if (params.actionTypes.length) out.actionTypes = params.actionTypes;
+      }
+      if (typeof params.q === 'string' && params.q.trim()) out.q = params.q.trim().slice(0, 200);
+      // Frozen into ExportJob.params like includeVoterDetail, so the history row is a permanent
+      // record of which downloads carried the door roster beside a note that named nobody.
+      if (params.includeDoorVoters) out.includeDoorVoters = true;
+      return out;
+    },
+    build: buildNotes,
   },
   'full-backup': {
     label: 'Full backup',
@@ -369,9 +427,11 @@ export const EXPORT_TYPES = {
 }
 
 // Download name: {org-slug}-{campaign-slug}-{type}-{YYYY-MM-DD}.{ext}, date in the anchor
-// tz (walklists.js filename-sanitization precedent).
-export const exportFilename = ({ org, campaign, type, anchorTz, ext }) => {
-  const parts = [safeSeg(org?.slug || org?.name), campaign ? safeSeg(campaign.name) : null, type, zonedDayStr(new Date(), anchorTz)]
+// tz (walklists.js filename-sanitization precedent). `slug` is a type's params-dependent stand-in
+// for the type segment (EXPORT_TYPES[type].fileSlug); it lands raw in Content-Disposition, so it
+// must be lowercase alnum/hyphen like the type keys are.
+export const exportFilename = ({ org, campaign, type, slug, anchorTz, ext }) => {
+  const parts = [safeSeg(org?.slug || org?.name), campaign ? safeSeg(campaign.name) : null, slug || type, zonedDayStr(new Date(), anchorTz)]
     .filter(Boolean);
   return `${parts.join('-')}.${ext}`;
 };
