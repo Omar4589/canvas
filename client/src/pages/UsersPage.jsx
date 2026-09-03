@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import UserProfileModal from '../components/UserProfileModal.jsx';
+import CampaignChips from '../components/integrations/CampaignChips.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
 import {
   Card,
@@ -223,7 +224,10 @@ export default function UsersPage() {
 
   const labelCls = 'block text-xs font-medium text-fg';
   // Table column count — the optional Billing-access column shifts the empty-state colSpans.
-  const colCount = canViewBilling ? 5 : 4;
+  // The Hours column only exists where the org actually has an FbTime connection,
+  // which the server signals by sending `fbtime` on a member at all (admin-only).
+  const showHours = members.some((m) => m.fbtime);
+  const colCount = 5 + (canViewBilling ? 1 : 0) + (showHours ? 1 : 0);
 
   return (
     <div>
@@ -455,8 +459,10 @@ export default function UsersPage() {
           head={
             <>
               <th className="px-4 py-2.5">Member</th>
+              <th className="px-4 py-2.5">Campaigns</th>
               <th className="px-4 py-2.5">Role</th>
               <th className="px-4 py-2.5">Status</th>
+              {showHours && <th className="px-4 py-2.5">Hours</th>}
               {canViewBilling && <th className="px-4 py-2.5">Billing access</th>}
               <th className="w-8 px-4 py-2.5"></th>
             </>
@@ -486,6 +492,17 @@ export default function UsersPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
+                  {/* Rostered campaigns (CampaignAssignment), active-only chips.
+                      The ids ride /admin/memberships already, and this page holds
+                      /admin/campaigns for the names — so the column is free. */}
+                  <CampaignChips
+                    campaigns={(m.campaignIds || [])
+                      .map((id) => campaigns.find((c) => String(c._id) === String(id)))
+                      .filter((c) => c && c.isActive !== false)
+                      .map((c) => ({ id: String(c._id), name: c.name }))}
+                  />
+                </td>
+                <td className="px-4 py-3">
                   <Badge variant={m.role === 'admin' ? 'brand' : m.role === 'lead' ? 'info' : 'neutral'}>
                     {ROLE_LABEL[m.role] || 'Canvasser'}
                   </Badge>
@@ -495,6 +512,23 @@ export default function UsersPage() {
                     {active ? 'Active' : 'Inactive'}
                   </Badge>
                 </td>
+                {showHours && (
+                  <td className="px-4 py-3">
+                    {m.fbtime?.linked ? (
+                      <Badge variant="success" title={m.fbtime.personName || undefined}>
+                        Measured
+                      </Badge>
+                    ) : (
+                      <Link
+                        to="/integrations"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs text-fg-muted underline underline-offset-2 hover:text-fg"
+                      >
+                        Not linked
+                      </Link>
+                    )}
+                  </td>
+                )}
                 {canViewBilling && (
                   <td className="px-4 py-3">
                     {m.role === 'admin' ? (

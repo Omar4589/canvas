@@ -142,8 +142,15 @@ export const listAllPeople = async ({ apiKey, includeInactive = true } = {}) => 
  * changed under us, so re-pull once from the top. A second drift is accepted
  * as-is — the next 15-minute sync heals it, and looping until quiescence would
  * let an actively-edited org starve its own sync.
+ *
+ * `timeoutMs` is optional and PER REQUEST, not per call: the default (30s,
+ * FBTIME_TIMEOUT_MS) is right for the background cron, but an interactive route
+ * paging a wide window must bound itself well under Heroku's 30s router limit.
  */
-export const getShifts = async ({ apiKey, startDate, endDate, timeZone }, { retried = false } = {}) => {
+export const getShifts = async (
+  { apiKey, startDate, endDate, timeZone, timeoutMs },
+  { retried = false } = {}
+) => {
   const shifts = [];
   const limit = 1000;
   let expectedTotal = null;
@@ -152,11 +159,12 @@ export const getShifts = async ({ apiKey, startDate, endDate, timeZone }, { retr
       apiKey,
       path: '/shifts',
       params: { startDate, endDate, timeZone, page, limit },
+      timeoutMs,
     });
     const total = body.pagination?.total ?? null;
     if (expectedTotal === null) expectedTotal = total;
     else if (total !== expectedTotal && !retried) {
-      return getShifts({ apiKey, startDate, endDate, timeZone }, { retried: true });
+      return getShifts({ apiKey, startDate, endDate, timeZone, timeoutMs }, { retried: true });
     }
     shifts.push(...(body.shifts || []));
     const totalPages = body.pagination?.totalPages || 1;

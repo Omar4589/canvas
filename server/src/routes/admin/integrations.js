@@ -9,10 +9,11 @@ import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { Organization } from '../../models/Organization.js';
 import { sealSecret, openSecret, sealedSecretConfigured } from '../../utils/sealedSecret.js';
-import { ping, listAllPeople, FbtimeApiError } from '../../services/fbtime/client.js';
+import { ping, listAllPeople, getShifts, FbtimeApiError } from '../../services/fbtime/client.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
-import { FBTIME_ORG_JOB } from '../../services/fbtime/sync.js';
+import { FBTIME_ORG_JOB, windowFor } from '../../services/fbtime/sync.js';
 
 // The FbTime integration, managed by the org's OWN admin. Connecting is the
 // act of consent — nobody at Doorline can wire a customer's timesheets up on
@@ -35,6 +36,14 @@ const keySchema = z.object({
 });
 
 const hex24 = z.string().regex(/^[0-9a-f]{24}$/i, 'Must be a 24-hex id');
+
+// The mapping screen's trailing window for recent project labels. 7 (the cron's
+// RECENT_WINDOW_DAYS) leaves half a seasonal roster blank; 120 shows labels three
+// months stale. The timeout is well under Heroku's 30s router limit, because this
+// route can page and the default per-request budget is 30s on its own.
+const PROJECT_WINDOW_DAYS = Number(process.env.FBTIME_PROJECT_WINDOW_DAYS || 30);
+const PROJECT_TIMEOUT_MS = Number(process.env.FBTIME_PROJECT_TIMEOUT_MS || 8000);
+const PROJECTS_PER_PERSON = 3;
 
 const audit = (organizationId, byUserId, type, detail = null) =>
   IntegrationEvent.create({ organizationId, byUserId, type, detail }).catch((err) =>
@@ -341,6 +350,30 @@ router.get('/fbtime/people', async (req, res, next) => {
       if (match) suggestions.push({ fbtimePersonId: String(p.id), userId: String(match._id) });
     }
 
+    // Two sets the roster proxy alone cannot express, and the mapping screen must:
+    //
+    //  · orphanLinks — a link whose FbTime person is no longer on /people. It
+    //    still attributes cached hours, so it has to be visible and unlinkable,
+    //    and its denormalized name/email is the only identity left to show.
+    //  · ghostPersonIds — unlinked person ids that HAVE cached hours but are off
+    //    the roster. GET /fbtime counts these in unmatchedWithHours (a distinct
+    //    over our own cache, independent of the provider's roster), so without
+    //    them the warning banner counts rows the table structurally cannot show.
+    const rosterIds = new Set(people.map((p) => String(p.id)));
+    const orphanLinks = links
+      .filter((l) => !rosterIds.has(l.fbtimePersonId))
+      .map((l) => ({
+        fbtimePersonId: l.fbtimePersonId,
+        userId: String(l.userId),
+        fbtimeName: l.fbtimeName || null,
+        fbtimeEmail: l.fbtimeEmail || null,
+        source: l.source || null,
+        linkedAt: l.linkedAt || null,
+      }));
+    // userId:null on a shift means unlinked (link creation backfills it), so a
+    // ghost can never also be an orphanLink.
+    const ghostPersonIds = unmatchedIds.map(String).filter((id) => !rosterIds.has(id));
+
     res.json({
       people: people.map((p) => {
         const link = linkByPerson.get(String(p.id));
@@ -356,6 +389,8 @@ router.get('/fbtime/people', async (req, res, next) => {
         };
       }),
       suggestions,
+      orphanLinks,
+      ghostPersonIds,
     });
   } catch (err) {
     try {
@@ -366,12 +401,118 @@ router.get('/fbtime/people', async (req, res, next) => {
   }
 });
 
-const linkSchema = z.object({ userId: hex24, fbtimePersonId: hex24 });
+/**
+ * Recent FbTime project labels per person, for the mapping screen.
+ *
+ * A LABEL, NEVER A KEY. The provider's /people deliberately withholds location —
+ * its own contract calls that projection "the privacy boundary" — so the label is
+ * only reachable as `project: { id, name }` riding shift rows. It is derived here
+ * IN MEMORY and discarded: models/FbTimeShift.js says "DELIBERATELY NOT STORED"
+ * and nothing in this handler writes it anywhere, which keeps that literally true.
+ *
+ * It must never become an attribution input. Hours attach to campaigns by the
+ * KNOCK LEDGER (services/reports/hoursSource.js → unionDayAllowed), because an
+ * FbTime location is an honor-system dropdown a canvasser forgets to switch and
+ * would silently move hours between campaigns' rates. Owner-ruled 2026-08-16; the
+ * projectLocation-mapping idea is DEAD — do not re-propose.
+ *
+ * Deliberately a SEPARATE route from /fbtime/people. That one already pages the
+ * provider's whole roster on every page load and is the request the table cannot
+ * render without; getShifts pages to exhaustion too, so stacking both in one
+ * handler would put a multi-page pull on the critical path. Split, a slow or
+ * failing pull costs an em-dash in one column instead of the page.
+ */
+router.get('/fbtime/projects', async (req, res, next) => {
+  try {
+    const organizationId = orgIdOf(req);
+    const connection = await FbTimeConnection.findOne({
+      organizationId,
+      status: { $ne: 'disconnected' },
+    });
+    if (!connection?.keyCiphertext) return res.status(404).json({ error: 'FbTime is not connected.' });
+
+    const asked = parseInt(req.query.days, 10);
+    const windowDays = Math.min(
+      120,
+      Math.max(7, Number.isFinite(asked) ? asked : PROJECT_WINDOW_DAYS)
+    );
+    const org = await Organization.findById(organizationId).select('timeZone').lean();
+    const timeZone = org?.timeZone || 'America/New_York';
+    const { startDate, endDate } = windowFor(timeZone, windowDays);
+
+    // ONLY the provider call is guarded, and deliberately NOT via
+    // sendProviderError: a 4xx here would paint an error over a working table.
+    // This column is decoration; it degrades, it never fails the request.
+    let shifts = [];
+    let degraded = false;
+    let reason = null;
+    try {
+      shifts = await getShifts({
+        apiKey: openSecret(connection.keyCiphertext),
+        startDate,
+        endDate,
+        timeZone,
+        timeoutMs: PROJECT_TIMEOUT_MS,
+      });
+    } catch (err) {
+      if (!(err instanceof FbtimeApiError)) throw err;
+      degraded = true;
+      reason = err.code || 'UNAVAILABLE';
+    }
+
+    const byPerson = new Map();
+    for (const s of shifts) {
+      const name = s?.project?.name;
+      if (!s?.userId || !s.clockIn || !name) continue;
+      const at = new Date(s.clockIn);
+      if (Number.isNaN(at.getTime())) continue;
+      const pid = String(s.userId);
+      let projects = byPerson.get(pid);
+      if (!projects) byPerson.set(pid, (projects = new Map()));
+      const id = String(s.project.id ?? name);
+      const seen = projects.get(id);
+      if (!seen) projects.set(id, { id, name, lastAt: at, shifts: 1 });
+      else {
+        seen.shifts += 1;
+        if (at > seen.lastAt) seen.lastAt = at;
+      }
+    }
+
+    const projects = [...byPerson.entries()].map(([fbtimePersonId, byProject]) => {
+      const rows = [...byProject.values()].sort(
+        (a, b) => b.lastAt - a.lastAt || b.shifts - a.shifts || a.name.localeCompare(b.name)
+      );
+      return {
+        fbtimePersonId,
+        lastShiftAt: rows[0].lastAt,
+        // Capped: one label would hide the split-week case, which is exactly
+        // when a location column earns its place.
+        projects: rows.slice(0, PROJECTS_PER_PERSON),
+      };
+    });
+
+    res.json({ windowDays, startDate, endDate, timeZone, projects, degraded, reason });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const linkSchema = z.object({
+  userId: hex24,
+  fbtimePersonId: hex24,
+  // Display labels, denormalized onto the link. FbTimePersonLink carries them so
+  // a row "still means something if the person later disappears from /people" —
+  // but only autoMatchByEmail ever wrote them, so every HAND-MADE link was blank
+  // in exactly the case the fields exist for. Optional: an older client that
+  // omits them leaves whatever is already stored untouched.
+  fbtimeName: z.string().trim().max(200).nullish(),
+  fbtimeEmail: z.string().trim().toLowerCase().max(320).nullish(),
+});
 
 /** Manually link one Doorline user to one FbTime person. */
 router.post('/fbtime/links', async (req, res, next) => {
   try {
-    const { userId, fbtimePersonId } = linkSchema.parse(req.body);
+    const { userId, fbtimePersonId, fbtimeName, fbtimeEmail } = linkSchema.parse(req.body);
     const organizationId = orgIdOf(req);
 
     // The target must be a member of THIS org — a link is an org-scoped fact.
@@ -387,6 +528,10 @@ router.post('/fbtime/links', async (req, res, next) => {
           source: 'manual',
           linkedByUserId: req.user._id,
           linkedAt: new Date(),
+          // Only when supplied — re-linking without labels must not blank the
+          // ones an earlier auto-match already stored.
+          ...(fbtimeName ? { fbtimeName } : {}),
+          ...(fbtimeEmail ? { fbtimeEmail } : {}),
         },
         $setOnInsert: { organizationId, userId },
       },

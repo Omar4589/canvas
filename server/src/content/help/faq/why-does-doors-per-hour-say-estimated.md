@@ -24,7 +24,7 @@ came from. Hover it for the full explanation.
 |---|---|---|
 | **FbTime** | Every day in range came from their clock time. | Nothing. |
 | **Part** | Some days measured, the rest estimated. | Nothing, unless the split surprises you. |
-| **No link** | FbTime is connected, but this person isn't matched to an FbTime profile — so **none** of their clocked hours count. | Link them on the Integrations page. |
+| **No link** | FbTime is connected, but this person isn't matched to an FbTime profile — so **none** of their clocked hours count. | Link them on the [Integrations page](page-integrations) — they'll be near the top of the list. |
 | **Open shift** | Someone forgot to clock out, so a shift stayed open from an earlier day. Doorline ignores it rather than counting a 30-hour day. | Close it in FbTime; the number corrects itself. |
 | **Est** | They're linked and everything's fine — they just have no clocked hours in this range. | Usually nothing. This is a day off. |
 
@@ -53,7 +53,7 @@ of the hours were typed into FbTime by hand rather than clocked.
 
 **I fixed a timesheet in FbTime but the number hasn't changed.** Doorline re-checks recent days
 every few minutes and older days overnight, so it will catch up on its own — or press **Refresh
-hours now** on the Integrations page to pull it immediately. See
+hours** in the connection bar at the top of the Integrations page to pull it immediately. See
 [I fixed a shift in FbTime — when does Doorline update?](fixed-fbtime-shift-not-updating)
 
 **What if someone works two shifts in one day?** That's handled and needs nothing from you. A

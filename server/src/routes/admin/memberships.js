@@ -208,6 +208,52 @@ router.get('/', async (req, res, next) => {
       managedByUser.get(k).push(String(g.campaignId));
     }
 
+    // The campaigns each member is ROSTERED on (CampaignAssignment) — distinct from
+    // managedCampaignIds above, which is a lead's GRANT. Ids only: any caller that
+    // wants names already holds GET /admin/campaigns, and a campaign mid-deletion
+    // ships in that response's separate deletingCampaigns array by design, so an id
+    // resolving to nothing there is correct rather than missing.
+    //
+    // SCOPED FOR LEADS, unlike the grants block it mirrors. The member LIST is already
+    // narrowed by leadVisibleUserIds, but an assignment SET is not: unfiltered, a lead
+    // would learn every campaign each of their canvassers is on, including campaigns
+    // the lead holds no grant for at all. That is an access widening, so it is cut here.
+    const assignments = await CampaignAssignment.find({ organizationId: activeOrgId(req) })
+      .select('userId campaignId')
+      .lean();
+    const leadScope = isOrgAdmin(req)
+      ? null
+      : new Set((await managedCampaignIds(req)).map(String));
+    const campaignsByUser = new Map();
+    for (const a of assignments) {
+      const cid = String(a.campaignId);
+      if (leadScope && !leadScope.has(cid)) continue;
+      const k = String(a.userId);
+      if (!campaignsByUser.has(k)) campaignsByUser.set(k, []);
+      campaignsByUser.get(k).push(cid);
+    }
+
+    // FbTime link state, org-wide — ADMIN ONLY, and only when a connection exists.
+    // The whole /admin/integrations router is admin-gated, and the one lead-visible
+    // disclosure is deliberately per-user (GET /:userId/stats, for a canvasser already
+    // inside their scope). An org-wide roll-up for leads is its own decision, not a
+    // side effect of a UI change.
+    let fbtimeByUser = null;
+    if (isOrgAdmin(req)) {
+      const connected = await FbTimeConnection.findOne({
+        organizationId: activeOrgId(req),
+        status: 'connected',
+      })
+        .select('_id')
+        .lean();
+      if (connected) {
+        const fbLinks = await FbTimePersonLink.find({ organizationId: activeOrgId(req) })
+          .select('userId fbtimeName source')
+          .lean();
+        fbtimeByUser = new Map(fbLinks.map((l) => [String(l.userId), l]));
+      }
+    }
+
     res.json({
       members: members.map((m) => ({
         membershipId: String(m._id),
@@ -216,6 +262,16 @@ router.get('/', async (req, res, next) => {
         addedAt: m.createdAt,
         billingAccess: !!m.billingAccess,
         managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
+        campaignIds: campaignsByUser.get(String(m.userId._id)) || [],
+        // null when the org has no FbTime connection, or the reader is a lead —
+        // the client renders the column only when the field is present.
+        fbtime: fbtimeByUser
+          ? {
+              linked: fbtimeByUser.has(String(m.userId._id)),
+              personName: fbtimeByUser.get(String(m.userId._id))?.fbtimeName || null,
+              source: fbtimeByUser.get(String(m.userId._id))?.source || null,
+            }
+          : null,
         user: {
           id: String(m.userId._id),
           firstName: m.userId.firstName,
@@ -225,6 +281,9 @@ router.get('/', async (req, res, next) => {
           isSuperAdmin: !!m.userId.isSuperAdmin,
           isActive: m.userId.isActive,
           isMultiOrg: (orgCount.get(String(m.userId._id)) || 0) >= 2,
+          // Already loaded by .populate('userId'); it just was never projected, so
+          // clients had to sniff the tombstone email domain to spot a deleted account.
+          isDeleted: !!m.userId.deletedAt,
           lastLoginAt: m.userId.lastLoginAt,
           createdAt: m.userId.createdAt,
         },

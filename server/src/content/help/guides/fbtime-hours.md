@@ -51,8 +51,21 @@ recommended setting.
 ## Mapping canvassers
 
 Hours only count for canvassers linked to their FbTime person. Same email in both apps links
-automatically. For the rest, use the mapping table on the Integrations page. A person showing a
-**"has hours"** badge has clocked time that counts nowhere until you link them.
+automatically. For the rest, use the mapping table on the Integrations page. A person marked
+**Hours not counted** has clocked time that counts nowhere until you link them.
+
+The table shows **both rosters side by side** — matched pairs, your people who have no FbTime
+match, and FbTime people who have no match here — with each person's campaigns next to the FbTime
+project they most recently clocked into, so you can tell at a glance whether the two line up.
+Doorline doesn't judge that for you: the two names come from different systems, so both are shown
+plainly and neither is ever flagged as wrong. The project name is **information only and never
+changes any number** — hours attach to campaigns from your knock records.
+
+Search matches either system's names and emails. The list is sorted with the work at the top, and
+people who have left either system are hidden until you tick **Include inactive** (the line above
+the table always says how many are hidden). When several people match by email, Doorline offers
+them as a list you can review and untick before linking, rather than linking them silently — and
+you can tick several rows to link or unlink them together.
 
 To check one person without coming here, open them from Users or a campaign's Team page — their
 profile says **FbTime linked** or **FbTime not linked**, with a shortcut back to this page. Team
@@ -65,7 +78,8 @@ Doorline re-checks FbTime on a schedule: the **last 7 days** about **every 15 mi
 a deleted entry — appears on its own within 15 minutes if the shift is recent, or by the next
 morning if it's older.
 
-Don't want to wait? Press **Refresh hours now** on the Integrations page. It re-pulls the last
+Don't want to wait? Press **Refresh hours** in the connection bar at the top of the Integrations
+page. It re-pulls the last
 few months on the spot — usually done in seconds — and tells you when the numbers are in. If the
 connection shows **Needs attention**, the same button also retries it; a problem fixed on the
 FbTime side heals without re-pasting the key.
@@ -87,9 +101,14 @@ FbTime side heals without re-pasting the key.
   day falls back to the estimate.
 - A day someone was clocked in but knocked nothing still counts its hours — time driving between
   turfs is exactly what the estimate could never see.
-- Doorline shows **daily totals only**. For shift-level detail — exact clock-in and clock-out
-  times, breaks, who edited a shift — open the person's timesheet in FbTime itself.
+- Doorline holds **each shift's start time and its hours figures**, and nothing else. Clock-out
+  times, breaks and who edited a shift are never stored here — open the person's timesheet in
+  FbTime for those.
 - Disconnecting reverts every report to estimates immediately and destroys the stored key. Your
   canvasser links are kept for a reconnect.
+- Two rows mean something is actually wrong. **Broken link** means the link points at somebody who
+  has left your organization, so their clocked hours are landing on an account nobody uses — unlink
+  it. **Orphan hours** means hours from a person no longer on your FbTime roster; you can still
+  link them to the right canvasser.
 
-See also: [Your dashboard numbers, defined](metrics), [Export knocks for invoicing](export-knocks-for-invoicing).
+See also: [The Integrations page](page-integrations), [Your dashboard numbers, defined](metrics), [Export knocks for invoicing](export-knocks-for-invoicing).

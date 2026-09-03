@@ -9,7 +9,10 @@ import { setFbtimeFake, FbtimeApiError } from '../../src/services/fbtime/client.
 //   installFbtimeFake({
 //     ping: { ok: true, organization: { id: 'org1', name: 'Fox Bryant' }, ... },
 //     people: [{ id: 'p1', firstName: 'Maria', ... }],   // served in one page
-//     shifts: [{ id: 's1', userId: 'p1', clockIn: ..., ... }],  // array → one page
+//     shifts: [{ id: 's1', userId: 'p1', clockIn: ..., 
+//               project: { id: 'pr1', name: 'Ward 5 Field' } }],  // array → one page
+//       (`project` rides every real shift row — PARTNER_API.md — and the fake
+//        passes rows through verbatim, so supplying it is all a test needs to do.)
 //     error: { code: 'KEY_REVOKED', status: 401 },       // every call throws this
 //   })
 //

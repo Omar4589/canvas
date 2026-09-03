@@ -1196,6 +1196,9 @@ resolver-not-direct-read pattern). The rules, in full in
 - **Campaign-scoped attribution follows the knock ledger** (never FbTime locations): a clocked
   day with no knocks on the scoped campaign counts only inside that canvasser's knock stint there,
   and never on a day they knocked a different campaign. Org-wide reports keep the full union.
+  The Integrations mapping screen now *displays* an FbTime project label beside each person's
+  campaigns, purely so an admin can sanity-check a pairing — it is a label, never an input to any
+  figure on this page, and it is not stored (see FBTIME_INTEGRATION.md, *Recent project labels*).
 - Every figure carries `hoursSource`: `measured` | `estimated` | `mixed` — mixed only at the
   labeled per-person grain.
 - **Aggregates are all-or-nothing**: a team/campaign rate is measured only when EVERY contributor

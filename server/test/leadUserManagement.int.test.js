@@ -117,6 +117,56 @@ test('admin list is unchanged — the whole org', { skip }, async () => {
   assert.strictEqual(r.json.members.length, 5);
 });
 
+test('campaignIds ship on the list, and a lead only ever sees campaigns they manage', { skip }, async () => {
+  // The block this mirrors (managedCampaignIds) is attached UNFILTERED. Copying
+  // that shape verbatim would hand a lead the full assignment set of every
+  // canvasser in their scope — including campaigns the lead holds no grant for.
+  // canvA is on BOTH campaigns; the lead manages only Camp A.
+  await CampaignAssignment.create({
+    userId: ctx.canvA._id, campaignId: ctx.campB._id, organizationId: ctx.org._id,
+  });
+
+  const asAdminRes = await call('GET', '/api/admin/memberships', asAdmin());
+  const adminRow = asAdminRes.json.members.find((m) => m.user.email === 'lu-canva@t.co');
+  assert.deepStrictEqual(
+    [...adminRow.campaignIds].sort(),
+    [String(ctx.campA._id), String(ctx.campB._id)].sort(),
+    'an admin sees the whole assignment set'
+  );
+
+  const asLeadRes = await call('GET', '/api/admin/memberships', asLead());
+  const leadRow = asLeadRes.json.members.find((m) => m.user.email === 'lu-canva@t.co');
+  assert.deepStrictEqual(
+    leadRow.campaignIds,
+    [String(ctx.campA._id)],
+    'a lead sees only the campaigns they manage — Camp B never leaks'
+  );
+
+  // Never undefined: the client maps over this field on every row.
+  const adminSelf = asAdminRes.json.members.find((m) => m.user.email === 'lu-admin@t.co');
+  assert.deepStrictEqual(adminSelf.campaignIds, [], 'somebody on no campaign gets an empty array');
+
+  await CampaignAssignment.deleteOne({ userId: ctx.canvA._id, campaignId: ctx.campB._id });
+});
+
+test('fbtime link state is admin-only, and absent entirely without a connection', { skip }, async () => {
+  // The whole /admin/integrations router is admin-gated; the one lead-visible
+  // disclosure is deliberately per-user (GET /:userId/stats), never an org roll-up.
+  const asAdminRes = await call('GET', '/api/admin/memberships', asAdmin());
+  for (const m of asAdminRes.json.members) {
+    assert.strictEqual(m.fbtime, null, 'no FbTime connection in this org — the column never renders');
+  }
+  const asLeadRes = await call('GET', '/api/admin/memberships', asLead());
+  for (const m of asLeadRes.json.members) {
+    assert.strictEqual(m.fbtime, null, 'and a lead is never told either way');
+  }
+});
+
+test('user.isDeleted rides the list so clients stop sniffing the tombstone email', { skip }, async () => {
+  const r = await call('GET', '/api/admin/memberships', asAdmin());
+  assert.ok(r.json.members.every((m) => m.user.isDeleted === false), 'a live account is explicitly false, not undefined');
+});
+
 test('lead temp-password: canvasser on their campaign 200; everyone else 403', { skip }, async () => {
   const pw = { password: 'TempPass99!' };
   const ok = await call('PATCH', `/api/admin/memberships/${ctx.canvA._id}/password`, { ...asLead(), body: pw });

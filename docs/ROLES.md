@@ -455,6 +455,14 @@ no race whose history the call has authority over.
 `resolveManagedCampaigns` validates every id is a campaign in the org, and the route reconciles
 `CampaignManager` rows (upsert the set, delete the rest). Leaving the `lead` role clears all grants;
 `DELETE /:userId` clears them too. `GET /admin/memberships` returns each member's `managedCampaignIds`.
+It also returns each member's **`campaignIds`** — the campaigns they are ROSTERED on
+(`CampaignAssignment`), which is a different fact from the grant set above. That list is
+**scoped for a lead** to campaigns they actually manage: the member list is already narrowed by
+`leadVisibleUserIds`, but an unfiltered assignment set would tell a lead every campaign each of
+their canvassers is on, including ones they hold no grant for. `fbtime {linked, personName,
+source}` rides the same response but is **admin-only** and null unless the org has a live FbTime
+connection — the org-wide roll-up is a wider disclosure than the per-user one a lead already gets
+from `GET /:userId/stats`.
 The login / `/auth/me` payload carries `managedCampaignIds` on a lead membership so the client scopes
 without an extra fetch.
 

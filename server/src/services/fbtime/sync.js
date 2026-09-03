@@ -59,7 +59,9 @@ export const DEEP_WINDOW_DAYS = Number(process.env.FBTIME_DEEP_WINDOW_DAYS || 12
 const localDay = (instant, timeZone) =>
   new Date(instant).toLocaleDateString('en-CA', { timeZone });
 
-const windowFor = (timeZone, windowDays) => {
+// Exported: the interactive /fbtime/projects route reuses this so the mapping
+// screen's window and the cron's window are one definition, not two.
+export const windowFor = (timeZone, windowDays) => {
   const now = Date.now();
   return {
     endDate: localDay(now, timeZone),

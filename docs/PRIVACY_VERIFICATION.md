@@ -926,6 +926,37 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   CATEGORY on an existing lawful surface: the same people already appear as User accounts; what is
   new is their daily hour totals held here and their identifiers flowing to/from a second system
   the customer itself operates.
+  *[v6 2026-09-03: **a new FbTime field reaches an admin's screen — and is deliberately not
+  held.** The Integrations mapping roster now shows each FbTime person's most recent **project
+  label** (`project: {id, name}`, which rides every `/shifts` row per the provider's contract)
+  beside the Doorline person's campaign assignments, so an admin can sanity-check a pairing before
+  linking. **Derived per request and persisted nowhere**: `FbTimeShift` is unchanged and its
+  "DELIBERATELY still NOT held" list above stays true as written; no collection, log, export or
+  `IntegrationEvent` detail receives the label, pinned by `fbtimeSync.int.test.js` (no shift
+  document may carry a project field) and by `fbtimeIntegration.int.test.js`. Same provider, same
+  sealed key, same `timesheets:read` scope already used by sync, same read-only inbound direction —
+  no new endpoint credential, no new recipient, and what LEAVES is unchanged (still only date
+  ranges and a timezone). Audience unchanged: `requireOrgRole('admin')` on the whole router; leads
+  still cannot reach any of it. **NOT a new subprocessor, no DPA §6 notice event** — same reasoning
+  as the v5 2026-08-15 granularity stamp. **A label, never an attribution key**: hours remain
+  attributed by the knock ledger (owner-ruled 2026-08-16), and `unionDayAllowed` is structurally
+  unable to read this value — it is not in the cache and the resolver's projection does not select
+  it.
+  **Assessment: `docs/DPA.md` §6 needs NO change** — it already splits receive from retain
+  ("shift-level time records, **of which Doorline retains** each shift's start time and its
+  worked-hours figures"), and the retain half is unchanged. 🛑 **`client/public/privacy.html:106`
+  is an OWNER DECISION and is flagged, not edited.** That sentence is a flat enumeration with no
+  receive/retain split — "we send date ranges, and receive staff names, email addresses, and each
+  work shift's start time and hours worked" — so a project label is a fourth received category not
+  named there. Candidate wording, for the owner to accept or replace: "…start time, hours worked,
+  **and the project it was worked on**…". **The visible project column is gated on that ruling; the
+  rest of the redesign is not** and can ship ahead of it.
+  Also in this change, and needing no policy text: `GET /admin/memberships` gained `campaignIds`
+  (rostered campaigns, **scoped for a lead** to campaigns they manage — an unfiltered set would
+  have widened what a lead learns about their own canvassers, which is why it is filtered),
+  `user.isDeleted` (already disclosed, previously only inferable from the tombstone email), and
+  `fbtime {linked, personName, source}` which is **admin-only**: the per-user lead disclosure
+  stamped 2026-08-14 stays exactly as scoped, and this org-wide roll-up is not extended to leads.]*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 

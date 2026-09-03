@@ -133,6 +133,32 @@ test('replace-range: upserts what the response holds, deletes what it no longer 
   assert.strictEqual(after2.find((r) => r.shiftId === 's2').adjustedHours, 4.0, 'edit propagated');
 });
 
+test('the project label rides every shift and is NEVER persisted', { skip }, async () => {
+  // `project: { id, name }` travels on every real shift row (PARTNER_API.md), and
+  // the mapping screen now DISPLAYS it — derived live per request, stored nowhere.
+  // That keeps FbTimeShift's "DELIBERATELY NOT STORED" minimization list true, and
+  // it keeps the label out of reach of hours attribution, which follows the KNOCK
+  // LEDGER by owner ruling (2026-08-16) precisely because an FbTime location is an
+  // honor-system dropdown somebody forgets to switch.
+  const connection = await makeConnection(org._id);
+  installFbtimeFake({
+    shifts: [
+      shift('proj1', P1, at(1), 6, { project: { id: 'pr1', name: 'Ward 5 Field' } }),
+      shift('proj2', P2, at(0), 4, { project: { id: 'pr2', name: 'Warehouse' } }),
+    ],
+  });
+  await syncOrgHours(connection, { windowDays: 7 });
+
+  const rows = await FbTimeShift.find({ organizationId: org._id }).lean();
+  assert.ok(rows.length >= 2, 'the shifts still synced');
+  for (const row of rows) {
+    assert.ok(!('project' in row), 'no shift document may hold the provider project object');
+    assert.ok(!('projectId' in row) && !('projectName' in row), 'nor a flattened copy of it');
+  }
+  // The hours themselves are untouched by the label riding along.
+  assert.strictEqual(rows.find((r) => r.shiftId === 'proj1').adjustedHours, 6);
+});
+
 test('an edited clockIn UPDATES the same row — the shift id is the identity, not the instant', { skip }, async () => {
   const connection = await makeConnection(org._id);
   installFbtimeFake({ shifts: [shift('s1', P1, at(1, 14), 5.5)] });

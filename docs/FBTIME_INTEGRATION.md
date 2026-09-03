@@ -70,8 +70,52 @@ Adjusted is the recommended setting and Total is not recommended as a rate denom
    email, and pulls the last 120 days of hours within a couple of minutes.
 
 Canvassers whose email differs between the two apps are linked by hand on the same page. A person
-with clocked hours but no link shows a **"has hours"** badge — their hours count nowhere until
+with clocked hours but no link is marked **"Hours not counted"** — their hours count nowhere until
 linked.
+
+### The mapping table, both sides at once
+
+The table lists **both rosters together**, one row per pairing:
+
+- a **matched pair** — an FbTime person and the Doorline canvasser they're linked to;
+- a **Doorline person with no FbTime match** — the one whose hours will never arrive, and who used
+  to be invisible on this page entirely;
+- an **FbTime person with no Doorline match**.
+
+Each row shows the campaigns that person is on beside **the FbTime project they've most recently
+clocked into**, so you can see at a glance whether the two agree. Doorline never judges that for
+you: the two labels come from different systems and are written by different people ("Miami Field
+Office" may well be how your team refers to "FL-27 GOTV"), so both are shown plainly and nothing on
+screen claims they disagree. **The project label is information only — it never affects a single
+number.** Hours attach to campaigns from the knock ledger, not from what someone picked in FbTime.
+
+Finding the person you want:
+
+- **Search** matches names, emails and project names on either side.
+- **Sort** defaults to *needs attention* — broken links first, then people whose hours aren't
+  counting, then unlinked people, with everything already correct at the bottom. The top of the
+  list is the work.
+- **Filter** by campaign, or by whether someone is linked.
+- **Inactive people are hidden by default** — departed FbTime staff and switched-off Doorline
+  accounts. The count line says how many are hidden, and *Include inactive* brings them back. Rows
+  that matter are never hidden: a linked pair, a broken link, or anyone with hours going nowhere
+  always shows, whatever their status.
+
+### Linking several people at once
+
+- **Suggested matches.** When people have the same email in both systems, Doorline offers them as a
+  list you can review — each row showing both sides, their campaigns, and their recent project —
+  and you tick off any that look wrong before applying. (The blind *Auto-match everyone by email*
+  button still exists under **Settings**; it's the quicker tool for a first connect.)
+- **Tick several rows** and link or unlink them together. Unlinking asks first and tells you what
+  happens: those people's reports go back to estimated hours immediately.
+
+### Two rows that mean something is wrong
+
+- **Broken link** — the link points at somebody no longer in your organization. Their clocked hours
+  are being attributed to an account that has left. Unlink them.
+- **Orphan hours** — hours from a person who is no longer on your FbTime roster at all. They can
+  still be linked to the right canvasser.
 
 ### Checking one person without leaving what you're doing
 
@@ -147,11 +191,13 @@ kept, so reconnecting later finds the roster already mapped.
 | Sync jobs (replace-range re-pulls) | [`server/src/services/fbtime/sync.js`](../server/src/services/fbtime/sync.js), registered in [`services/retention/scheduler.js`](../server/src/services/retention/scheduler.js) |
 | The hours resolver (merge + labels) | [`server/src/services/reports/hoursSource.js`](../server/src/services/reports/hoursSource.js) |
 | Admin routes | [`server/src/routes/admin/integrations.js`](../server/src/routes/admin/integrations.js) (`/admin/integrations/fbtime…`) |
-| Web UI | [`client/src/pages/IntegrationsPage.jsx`](../client/src/pages/IntegrationsPage.jsx) (`/integrations`, orgAdmin RoleGate) |
+| Web UI | [`client/src/pages/IntegrationsPage.jsx`](../client/src/pages/IntegrationsPage.jsx) (`/integrations`, orgAdmin RoleGate) — a shell over [`client/src/components/integrations/`](../client/src/components/integrations/) |
+| The roster row model (pure — folding, filter, sort, candidates) | [`client/src/lib/fbtimeRoster.js`](../client/src/lib/fbtimeRoster.js) + `fbtimeRoster.test.js` |
+| Bulk link/unlink runner + the invalidation rule | [`client/src/lib/fbtimeBulk.js`](../client/src/lib/fbtimeBulk.js) |
 | Per-row provenance marker | [`client/src/components/CanvasserSummaryTable.jsx`](../client/src/components/CanvasserSummaryTable.jsx) `HOURS_MARK` — the five states, their words and their tooltips, in one table |
 | Per-person link state | [`client/src/components/UserProfileModal.jsx`](../client/src/components/UserProfileModal.jsx) Activity section, off `stats.fbtime` |
 | Mobile | read-only status row on admin **More**; badges on every hours surface |
-| Tests | `test/fbtimeClient.test.js`, `test/hoursSourceFold.test.js`, `test/fbtimeSync.int.test.js`, `test/fbtimeIntegration.int.test.js`, `test/reportsHoursSource.int.test.js` |
+| Tests | `test/fbtimeClient.test.js`, `test/hoursSourceFold.test.js`, `test/fbtimeSync.int.test.js`, `test/fbtimeIntegration.int.test.js`, `test/reportsHoursSource.int.test.js`; web `client/src/lib/fbtimeRoster.test.js` + `integrationsRender.smoke.test.js` |
 
 ### Configuration
 
@@ -279,6 +325,10 @@ mark-and-continue and never change status.
 | `/admin/reports/team-averages` | all-or-nothing applied server-side + top-level `hoursSource` |
 | `/admin/reports/canvassers/:id/summary` | merged `kpi.hoursOnDoors` + `kpi.hoursSource`/`hoursFlags`; `lastSevenDays[].hoursSource` |
 | `/admin/reports/canvassers/:id/daily` | per-day merge; each day exactly `measured` or `estimated` |
+| `/admin/integrations/fbtime/people` | additive `orphanLinks[]` (a link whose FbTime person left the provider roster — it still attributes cached hours, so it must be visible and unlinkable) and `ghostPersonIds[]` (unlinked person ids with cached hours that `/people` cannot return). Without them `unmatchedWithHours` counted people the table had no row for. **Web-only endpoint** |
+| `/admin/integrations/fbtime/projects` | **new.** `{ windowDays, startDate, endDate, timeZone, projects: [{ fbtimePersonId, lastShiftAt, projects: [{id, name, lastAt, shifts}] }], degraded, reason }`. See *Recent project labels* below |
+| `POST /admin/integrations/fbtime/links` | additive optional `fbtimeName` / `fbtimeEmail`. `FbTimePersonLink` has always carried these so a row still names somebody once the person leaves `/people`, but only the auto-match pass wrote them — every hand-made link was blank in exactly the case the fields exist for |
+| `/admin/memberships` | additive `campaignIds[]` per member (rostered campaigns, from `CampaignAssignment` — distinct from `managedCampaignIds`, which is a lead's grant), **lead-scoped**; `fbtime {linked, personName, source}` (**admin-only**, null when the org has no connection); `user.isDeleted` |
 | `/admin/reports/canvassers.csv` | preamble stamp rows (`Canvasser export, <range>, hours as of <ISO>` + blank) and a trailing `Hours source` column — see [EXPORTS.md](EXPORTS.md) for the standing rule |
 
 Clients: the web/mobile Timeline KPI applies the all-or-nothing rule over the rows **in view**
@@ -286,6 +336,47 @@ Clients: the web/mobile Timeline KPI applies the all-or-nothing rule over the ro
 never re-deriving. The canvasser's own pace lane (`mobile/lib/rates.js` `formatPace` off
 `firstDoorAt`/`lastDoorAt`) is deliberately untouched: it is a within-day span, and a live
 "measured pace" would need mid-shift freshness the 15-minute poll cannot honestly claim.
+
+### Recent project labels — displayed, never stored, never an attribution key
+
+`GET /people` **does not expose location**: the provider's contract names that `.select()` as its
+privacy boundary and withholds `locations` along with pay rates and phone numbers. The label is
+only reachable as `project: { id, name }` riding each **shift** row.
+
+So `GET /admin/integrations/fbtime/projects` derives it: `getShifts` over a trailing window
+(`FBTIME_PROJECT_WINDOW_DAYS`, default 30, clamped 7–120, using `sync.js`'s own exported
+`windowFor` so the mapping screen and the cron share one definition of "the window in the org's
+zone"), grouped per person in memory, most-recent-first, **capped at three** — one label would hide
+the split-week case, which is exactly when the column earns its place. Then it is thrown away.
+`FbTimeShift` is unchanged and its "DELIBERATELY NOT STORED" minimization list still holds;
+`fbtimeSync.int.test.js` pins that no shift document ever gains a project field.
+
+**A LABEL, NEVER A KEY.** Hours are attributed to campaigns by the **knock ledger**
+(`hoursSource.js` → `unionDayAllowed`), owner-ruled 2026-08-16, precisely because an FbTime
+location is an honor-system dropdown a canvasser forgets to switch and would silently move hours
+between campaigns' rates. The projectLocation-mapping idea is dead; do not re-propose it. The
+resolver cannot reach this value even by accident — it is not in the cache, and nothing in the
+report path reads it.
+
+**Its own route, deliberately.** `/fbtime/people` already pages the provider's whole roster on
+every load and is the one request the table cannot render without; `getShifts` pages to exhaustion
+too, so stacking both in one handler would put a multi-page pull on the critical path and can
+overrun Heroku's 30s router limit. Split, the roster renders immediately and a provider failure
+here costs an em-dash in one column: the route answers **200 with `degraded: true`** rather than a
+4xx, since a decoration must never paint an error over a working table. `getShifts` gained an
+optional `timeoutMs` (default unchanged, so the cron is untouched) which this path sets to 8s.
+
+### Bulk linking
+
+A client loop with bounded concurrency (3), not a batch endpoint. The per-item routes already
+enforce both unique indexes, backfill `FbTimeShift.userId`, and write **one `IntegrationEvent` per
+link** — per-link provenance is the point, because a wrong link is a payroll-adjacent mistake
+somebody has to be able to trace. Partial failure is the normal case (a `LINK_TAKEN` race), so
+results are per row and the caller invalidates **once** at the end.
+
+That invalidation is load-bearing: the page used to invalidate the prefix `['admin','integrations']`,
+which now also matches the projects query, so a prefix would put a paged provider `/shifts` pull
+behind every click of *Link*. `lib/fbtimeBulk.js` names the exact keys instead.
 
 ### Identity mapping
 
@@ -305,6 +396,14 @@ doesn't offer them and the client never asks). The start instant is held because
 shift's local day is derived from; it is the one granularity increase over the retired day-total
 cache, stamped in PRIVACY_VERIFICATION.md (v5 entry). All four collections are org-scoped and in
 the org-delete sweep.
+
+**The project label is DISPLAYED, not held.** The mapping screen shows each FbTime person's recent
+project so an admin can sanity-check a pairing before linking. It is derived per request from a
+trailing window of `/shifts` and discarded — no collection, log, export or `IntegrationEvent`
+detail ever receives it, which is what keeps the minimization list above true as written. Same
+provider, same sealed key, same `timesheets:read` scope, same read-only inbound direction, same
+admin-only audience: no new recipient, no new outbound data, **not a subprocessor event**. Stamped
+in PRIVACY_VERIFICATION.md (v6).
 
 **Who sees what.** Everything that *configures* the integration — the key, the hours figure, the
 mapping table, the event history — is admin-only, and leads deliberately cannot reach any of it.

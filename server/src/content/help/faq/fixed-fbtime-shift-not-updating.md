@@ -5,7 +5,7 @@ audience: admin
 kind: faq
 order: 63
 sourceDoc: FBTIME_INTEGRATION.md
-summary: How quickly a timesheet correction in FbTime reaches doors-per-hour, and the Refresh hours now button for when you don't want to wait.
+summary: How quickly a timesheet correction in FbTime reaches doors-per-hour, and the Refresh hours button for when you don't want to wait.
 tags: fbtime, hours, doors per hour, refresh, sync, timesheet, edit, clock in, not updating
 ---
 
@@ -20,7 +20,8 @@ It updates on its own — the only question is when. Doorline re-checks FbTime o
 Every kind of correction comes across: an edited clock-in or clock-out, a shift someone finally
 closed, even an entry that was deleted outright.
 
-**Don't want to wait for the overnight pass?** Press **Refresh hours now** on the Integrations
+**Don't want to wait for the overnight pass?** Press **Refresh hours** in the connection bar at
+the top of the Integrations
 page. It re-pulls the last few months from FbTime on the spot — usually done in seconds — and
 tells you when the numbers are in. It can be pressed once a minute.
 
