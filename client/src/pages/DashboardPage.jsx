@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { downloadFile } from '../lib/downloadFile.js';
 import StatCard from '../components/StatCard.jsx';
@@ -22,7 +22,9 @@ import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDat
 import { metricHelp } from '../lib/metricHelp.js';
 import { todayInTz, shiftDays } from '../lib/datePresets.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
-import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -48,7 +50,6 @@ export default function DashboardPage() {
   const location = useLocation();
   const justCreated = location.state?.justCreated; // set by CampaignsPage right after create
   const orgTz = useOrgTimeZone();
-  const { homePath } = useAuth(); // /admin for admins, /campaigns for leads (no Overview)
   // dateRange stays null until the campaign's timezone is known, so presets resolve in
   // the campaign's clock (not the device's) and range queries never fetch a device-tz window.
   const [dateRange, setDateRange] = useState(null);
@@ -105,21 +106,14 @@ export default function DashboardPage() {
   });
   const efforts = effortsQ.data?.efforts || [];
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const campaignsLoading = campaignsQ.isLoading;
-  const current =
-    campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const selectedCampaign = current || null;
   // Anchor timezone for date presets + the report window: the campaign's, falling back to
-  // the org's. tzReady flips once the campaigns list has loaded (so `current.timeZone` is known).
+  // the org's. tzReady flips once the CAMPAIGN itself has resolved (so `current.timeZone` is
+  // known) — not merely once the list query holds some answer, which on a stale cache is the
+  // org zone standing in for a campaign clock that was about to arrive.
   const tz = current?.timeZone || orgTz;
-  const tzReady = !campaignsLoading;
+  const tzReady = !resolving;
 
   // Once the campaign's timezone is known, compute the default range in THAT clock so
   // "Today"/"Yesterday" mean the campaign's day for every admin. Archived campaigns have
@@ -393,23 +387,15 @@ export default function DashboardPage() {
     ? Math.round((100 * (totals.homesKnocked || 0)) / totals.households)
     : 0;
 
-  // Guard: missing/falsy campaign id, or an id that resolves to no campaign.
-  if (!campaignId || (!campaignsLoading && !current)) {
+  // Still resolving vs. actually missing — see lib/useCurrentCampaign.js. A campaign created a
+  // moment ago lands here before the invalidated list has come back, and it is NOT missing.
+  if (resolving) return <CampaignLoading />;
+  if (notFound) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">
-          {!campaignId ? 'No campaign selected' : 'Campaign not found'}
-        </h1>
-        <p className="text-sm text-fg-muted">
-          Pick a campaign to view its dashboard.
-        </p>
-        <Link
-          to={homePath}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-        >
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
+      <CampaignMissing
+        title={campaignId ? 'Campaign not found' : 'No campaign selected'}
+        hint="Pick a campaign to view its dashboard."
+      />
     );
   }
 

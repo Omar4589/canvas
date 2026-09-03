@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
 import { defaultRange, labelForRange } from '../lib/datePresets.js';
 import { formatInTz } from '../lib/datetime.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button } from '../components/ui/index.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -39,17 +41,10 @@ const LIMIT = 50;
 export default function NotesPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath } = useAuth();
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
-  const tzReady = !campaignsQ.isLoading;
+  const tzReady = !resolving;
 
   const [dateRange, setDateRange] = useState(() => defaultRange('today', orgTz));
   const rangeTouchedRef = useRef(false);
@@ -184,16 +179,8 @@ export default function NotesPage() {
     setDateRange(next);
   }
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link to={homePath} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
-    );
-  }
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
 
   const pageStart = page * LIMIT;
   const hasNext = pageStart + notes.length < total;

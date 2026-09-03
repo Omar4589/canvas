@@ -234,10 +234,6 @@ export default function MapPage() {
     templateId: searchParams.get('surveyTemplateId') || '',
   }));
   const [showCanvasserPins, setShowCanvasserPins] = useState(false);
-  // Amber approximate-location rings (interpolated geocodes). Default ON — the ring is the
-  // map's honest provenance signal — but a congested All-Time view can switch it off. Per-visit
-  // like every neighboring layer toggle; the Pin Fixes page is the working surface for these.
-  const [showApproxRings, setShowApproxRings] = useState(true);
   // Opt-in overlap overlay: rings doors worked by 2+ distinct canvassers in the same pass
   // (a turf collision / potential double-count). Default OFF — the default map is unchanged.
   const [showOverlaps, setShowOverlaps] = useState(false);
@@ -1254,16 +1250,6 @@ export default function MapPage() {
     }
   }, [showCanvasserPins, mapReady, styleEpoch]);
 
-  // Approximate-location rings — visibility only, never a re-register (registerLayers'
-  // idempotency guard would no-op one). styleEpoch is load-bearing: a basemap swap recreates
-  // the layer VISIBLE, so the effect must re-assert the choice after every style.load.
-  useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-    if (mapRef.current.getLayer('household-approx-ring')) {
-      mapRef.current.setLayoutProperty('household-approx-ring', 'visibility', showApproxRings ? 'visible' : 'none');
-    }
-  }, [showApproxRings, mapReady, styleEpoch]);
-
   // First & last knock — only when auditing ONE canvasser with pings on. The endpoint
   // already scopes `activities` to that userId + date window, so first = earliest ping,
   // last = most recent. Skip "last" when there's a single ping (don't double-mark it).
@@ -1571,8 +1557,6 @@ export default function MapPage() {
             stackedDoorCount={stackedIds.size}
             showCanvasserPins={showCanvasserPins}
             onShowCanvasserPinsChange={setShowCanvasserPins}
-            showApproxRings={showApproxRings}
-            onShowApproxRingsChange={setShowApproxRings}
             showOverlaps={showOverlaps}
             onShowOverlapsChange={setShowOverlaps}
             overlapCount={overlapDoorsQ.data?.total || 0}

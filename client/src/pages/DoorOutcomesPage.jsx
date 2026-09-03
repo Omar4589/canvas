@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
@@ -20,6 +20,8 @@ import RemoveAnswersModal from '../components/outcomes/RemoveAnswersModal.jsx';
 import QueueWalkthrough from '../components/outcomes/QueueWalkthrough.jsx';
 import ConversionRunCard from '../components/outcomes/ConversionRunCard.jsx';
 import RunDetailModal from '../components/outcomes/RunDetailModal.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 // Door Outcomes — reviewing and correcting what canvassers recorded.
 //
@@ -81,7 +83,7 @@ export default function DoorOutcomesPage() {
   // re-applies someone's old scope is the accident class the rest of this file engineers out;
   // every write is still previewed and priced regardless of how the filter arrived.
   const [searchParams] = useSearchParams();
-  const { homePath, isOrgAdmin } = useAuth();
+  const { isOrgAdmin } = useAuth();
   const orgTz = useOrgTimeZone();
   const qc = useQueryClient();
 
@@ -137,12 +139,7 @@ export default function DoorOutcomesPage() {
   const [queueTemplate, setQueueTemplate] = useState(null);
   const [detailRun, setDetailRun] = useState(null); // the run whose itemized history is open
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const current = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId));
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
   // allMembers, not members: the picker half of that hook drops deactivated people because the
   // server refuses to ASSIGN them — but this page is a report over recorded history, and the
@@ -549,16 +546,8 @@ export default function DoorOutcomesPage() {
     onError: (e) => setError(e.message),
   });
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link to={homePath} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-          Go back
-        </Link>
-      </div>
-    );
-  }
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
   if (!isOrgAdmin) {
     return (
       <div className="max-w-lg">
@@ -607,12 +596,11 @@ export default function DoorOutcomesPage() {
           </div>
         </div>
         {/* In the header, not the filter Card — it is the tallest control in the set, and every
-            other dated page puts it here. Held until the campaigns list lands so a click on
-            "Today" inside the first frame can't resolve the org's today instead of the
-            campaign's; the All-time default itself needs no tz at all. */}
-        {!campaignsQ.isLoading && (
-          <DateRangeSelector value={dateRange} onChange={(next) => applyFilter(() => setDateRange(next))} tz={tz} />
-        )}
+            other dated page puts it here. It must never render before the campaign's timezone is
+            known, or a click on "Today" in the first frame resolves the ORG's today instead of the
+            campaign's; the resolving guard above is what guarantees that (`current` is non-null by
+            here, so `tz` is the campaign's), which is why there is no second check on it. */}
+        <DateRangeSelector value={dateRange} onChange={(next) => applyFilter(() => setDateRange(next))} tz={tz} />
       </div>
 
       {/* Filters */}

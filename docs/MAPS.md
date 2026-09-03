@@ -349,8 +349,8 @@ with street labels) and you can usually drop the pin on the right roof without l
 While a pin popup (or the Move-pin card) is open it sits over the map's zoom buttons — the same
 trade the Turf Cutting popups make; close it and they're back.
 
-The general Map page keeps its amber rings as a passive signal, and its **Layers** panel now has an
-**"Approximate location rings"** checkbox (on by default) for when a big all-time view gets too busy.
+The general Map page keeps its amber rings as a passive signal — always drawn, with no toggle. The
+Pin Fixes page is where they actually get cleared.
 
 Four things worth knowing about moving pins:
 
@@ -617,13 +617,14 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
   `coordConfidence === 'interpolated'` AND **not confirmed** — the confirmed test is
   `['!', ['to-boolean', ['get','locationConfirmed']]]` on purpose, so a payload that never ships the
   flag (ClientReportMap, AnswerMiniMap — both share `registerLayers`) reads as unconfirmed and renders
-  exactly as before. `householdsToGeoJSON` stamps the boolean from `locationConfirmedAt`. The web
-  MapPage also has a **Layers → "Approximate location rings"** checkbox (default on, per-visit state
-  like its neighbors): pure `setLayoutProperty` visibility with `styleEpoch` in the effect deps —
-  `registerLayers` recreates the layer *visible* on every basemap swap, so the effect must re-assert
-  the choice after `style.load`, and it must never re-call `registerLayers` (the idempotency guard
-  would no-op it). The **Pin Fixes page** ([PinFixesPage.jsx](../client/src/pages/PinFixesPage.jsx))
-  is the working surface: the TurfsPage list+map hybrid, the full default `registerLayers` (empty
+  exactly as before. `householdsToGeoJSON` stamps the boolean from `locationConfirmedAt`. **The ring
+  has no visibility toggle on any surface** — `registerLayers` adds it with no `layout.visibility`, so
+  it is simply always on wherever it is registered. (MapPage carried a **Layers → "Approximate
+  location rings"** checkbox until 2026-09-03; it was removed as redundant once the Pin Fixes page
+  became the working surface for these pins. Nothing replaced it — there is no `setLayoutProperty`
+  call for `household-approx-ring` any more, and none should be re-added without a reason the popup
+  badge and Pin Fixes page don't already cover.) The **Pin Fixes page**
+  ([PinFixesPage.jsx](../client/src/pages/PinFixesPage.jsx)) is the working surface: the TurfsPage list+map hybrid, the full default `registerLayers` (empty
   canvasser sources are harmless, and it's what carries the `selected-household` highlight ring),
   the shared basemap picker (`useMapStyle` + `MapStyleControl` — Hybrid is the workhorse for placing
   roofs), the shared `useMovePin`/`MovePinCard` move flow, and the confirm/undo actions

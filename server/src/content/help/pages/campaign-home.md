@@ -11,6 +11,8 @@ tags: dashboard, home, metrics
 
 The campaign **Home** is your dashboard — the first screen when you drill into a campaign. It does two jobs depending on where the campaign is in its life.
 
+Opening a campaign — especially one you just created — can land a beat before the app has finished reading your campaign list. That moment shows a plain grey **loading placeholder**. If you get **"Campaign not found"** and it stays, that's a different thing entirely: see [I created a campaign and it said "Campaign not found"](campaign-not-found-after-creating).
+
 ## Before you're live
 
 While you're still setting up, Home shows the **Setup progress** card: an ordered checklist with a highlighted next step and deep links to each screen. It's non-blocking — you can jump anywhere — but it's the fastest way to see what's left before canvassers can start.

@@ -16,6 +16,8 @@ import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
 import { TagResults } from '../components/QuestionResults.jsx';
 import TagTeamTable from '../components/TagTeamTable.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -41,7 +43,7 @@ const SELECT_CLS =
 export default function SurveyExplorerPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath, isOrgAdmin } = useAuth();
+  const { isOrgAdmin } = useAuth();
 
   // URL is the filter state (survey/q/optionId/option/userId/effortId/coordinatorId/view/tag
   // + from/to), written with replace so twiddling filters doesn't spam the back stack.
@@ -69,15 +71,9 @@ export default function SurveyExplorerPage() {
     setSearchParams(next, { replace: true });
   }
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
-  const tzReady = !campaignsQ.isLoading;
+  const tzReady = !resolving;
 
   // Range: seeded from a deep-link (?from/&to, or ?range=all — All time has NO bounds, so
   // absence alone can't encode it; a bare URL means "no deep link" and defaults to Today)
@@ -368,19 +364,8 @@ export default function SurveyExplorerPage() {
     else updateParams({ q: qKey, optionId: o.id || '', option: o.option, tag: '', view: '' });
   }
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link
-          to={homePath}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-        >
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
-    );
-  }
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
 
   const drillLabel = tag ? `Tag: ${tag}` : hasOption ? option : '';
 

@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="./out.css"><style>html,body{margin:0}</style></head>
+<body class="bg-surface text-fg">
+<div id="vp" style="width:390px;overflow:hidden"><div class="flex" style="height:600px">
+  <aside class="hidden md:flex flex-col w-60 px-4"></aside>
+  <div class="flex min-w-0 flex-1 flex-col">
+    <div class="md:hidden flex items-center gap-2 px-4 py-2">topbar</div>
+    <main id="main" class="flex-1 overflow-auto p-6 pb-20 md:pb-6">
+      <div>
+        <div class="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 class="text-2xl font-semibold text-fg">Ward 3</h1><div class="mt-1 text-sm text-fg-muted">Timeline &mdash; who&#39;s knocking, and how it&#39;s going</div></div></div>
+        <div class="h-64 w-full"></div>
+      </div>
+    </main>
+  </div>
+</div></div></div>
+<pre id="out"></pre>
+<script>
+ const m=document.getElementById('main'), s=document.getElementById('sub');
+ document.getElementById('out').textContent = JSON.stringify({
+   viewport: window.innerWidth,
+   mainClientWidth: m.clientWidth,
+   mainScrollWidth: m.scrollWidth,
+   overflowsHorizontally: m.scrollWidth > m.clientWidth,
+   subtitleBarWidth: s ? s.getBoundingClientRect().width : null,
+   docScrollWidth: document.documentElement.scrollWidth,
+ });
+</script></body></html>

@@ -63,8 +63,8 @@ reports a bad pin, this page is where you fix it.
 - **Fixing or confirming a pin never re-cuts books.** The door keeps its book, its walk order, and
   its status — only the dot (and the book's drawn outline around it) moves. Canvassers pick up
   corrected spots on their next sync.
-- The general [Map page](page-map) keeps its amber rings as a passive signal — and its **Layers**
-  panel has an **"Approximate location rings"** checkbox if a busy all-time view gets too noisy.
+- The general [Map page](page-map) keeps its amber rings as a passive signal — this page is where
+  you actually clear them.
 - An empty list is the goal: it means every pin in the campaign is exact, hand-corrected, or
   human-confirmed. New imports with street-level lookups will top the list back up.
 

@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useAuth } from '../auth/AuthContext.jsx';
 import Section from '../components/Section.jsx';
 import PhonePreview from '../components/outcomes/PhonePreview.jsx';
 import ReclassifyCard from '../components/outcomes/ReclassifyCard.jsx';
 import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
 import { OUTCOME_HINTS } from '../lib/outcomeToggles.js';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 // Door-screen order, not TOGGLEABLE_OUTCOMES order — the list should read the way canvassers
 // see the buttons. Lit-drop campaigns only get the two "signage" outcomes: wrong-address and
@@ -64,16 +65,9 @@ const Toggle = ({ id, label, hint, dot, checked, disabled, onChange }) => (
 // door goal.
 export default function AppCustomizationPage() {
   const { campaignId } = useParams();
-  const { homePath } = useAuth();
   const qc = useQueryClient();
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
 
   // Optimistic display while a save is in flight: show the array we just sent, then hand
   // back to server truth once the invalidate refetches (onSuccess returns the promise, so
@@ -94,17 +88,8 @@ export default function AppCustomizationPage() {
     onSettled: () => setPendingPolicy(null),
   });
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link to={homePath} className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
-    );
-  }
-  if (!current) return null; // still loading the list
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
 
   const type = current.type === 'lit_drop' ? 'lit_drop' : 'survey';
   const disabled = pendingNext ?? current.disabledOutcomes ?? [];

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { downloadFile } from '../lib/downloadFile.js';
-import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import Segmented from '../components/ui/Segmented.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
 import { todayInTz, shiftDays, formatDay, defaultRange, labelForRange } from '../lib/datePresets.js';
@@ -16,6 +16,8 @@ import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
 import TimelineGrid from '../components/TimelineGrid.jsx';
 import TimelineOverlaps from '../components/TimelineOverlaps.jsx';
 import TeamBreakdown from '../components/TeamBreakdown.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -51,7 +53,6 @@ function ymdSpanDays(from, to) {
 export default function TimelinePage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath } = useAuth(); // /admin for admins, /campaigns for leads (no Overview)
   const [dateRange, setDateRange] = useState(null);
   const rangeTouchedRef = useRef(false);
   const [metric, setMetric] = useState('knocks');
@@ -59,15 +60,9 @@ export default function TimelinePage() {
   const [coordinatorId, setCoordinatorId] = useState(''); // '' = all, 'none' = no coordinator
   const [live, setLive] = useState(true);
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
-  const tzReady = !campaignsQ.isLoading;
+  const tzReady = !resolving;
 
   // The same mounted element serves every /campaigns/:id/timeline — reset ALL
   // campaign-scoped view state synchronously when the admin switches campaigns, or
@@ -335,19 +330,8 @@ export default function TimelinePage() {
   const hasRows = rows.length > 0;
   const rangeLabel = dateRange ? labelForRange(dateRange) : '';
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link
-          to={homePath}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-        >
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
-    );
-  }
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
 
   return (
     <div>

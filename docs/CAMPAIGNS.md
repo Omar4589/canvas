@@ -205,6 +205,16 @@ The switcher lists **active campaigns only** — archived ones are reached from 
 An archived campaign you are *currently in* stays in the switcher (labelled `· Archived`) so the
 control is never blank and you can always switch back out of it.
 
+**"Still loading" and "not found" are different screens (fixed 2026-09).** Opening a campaign can
+land a beat before the console has finished re-reading your campaign list — most reliably right
+after you **create** one, because the new campaign is opened for you the instant it is saved. That
+beat now shows a plain grey loading placeholder. **"Campaign not found"** is reserved for what it
+says: the list came back and this campaign genuinely isn't in it — deleted, being deleted, in
+another organization, or (for a team lead) not one of yours. Until this was separated, creating a
+campaign flashed *"Campaign not found"* for a moment before its dashboard and Setup progress card
+appeared, which read as though the campaign hadn't been created at all. It had; the page was just
+asking a list written a second too early.
+
 ### The Setup progress card
 
 On a campaign's dashboard, the **Setup progress** card shows where you are in that setup chain —
@@ -880,6 +890,32 @@ The cold-start readiness chain is a pure derivation in
   `CampaignChip` deliberately lists archived campaigns and is **not** to be "made consistent"
   with this; [campaignSelection.js](../mobile/lib/campaignSelection.js) records why (an
   active-only validity check once left an all-archived org with nothing selectable).
+- **Resolving `:campaignId` — ONE owner:**
+  [lib/useCurrentCampaign.js](../client/src/lib/useCurrentCampaign.js). Every drill-in page
+  (Home, Timeline, Audit, Door Outcomes, Overlaps, Notes, Survey Explorer, App Customization)
+  calls `useCurrentCampaign(campaignId)` and renders `<CampaignLoading />` / `<CampaignMissing />`
+  from [components/campaigns/CampaignGate.jsx](../client/src/components/campaigns/CampaignGate.jsx).
+  It returns **three** states, and the whole point is that the third is not the second:
+  `campaign` (found), `resolving` (the list has not answered *for this id* yet), `notFound` (it
+  has, and the id isn't in it). Those pages each carried a copy of
+  `if (!campaignId || (!campaignsQ.isLoading && !current))`, and react-query's `isLoading` is only
+  true when the query holds **no data at all** — so any entry against a *stale* list (data
+  present, refetch in flight) skipped straight to "Campaign not found". Creating a campaign hit
+  that every time by construction: `CampaignsPage`'s create `onSuccess` invalidates
+  `['admin','campaigns']` and navigates to the new campaign **in the same tick**, so the drill-in
+  mounts against a list written before the campaign existed. The fix is `isFetching`, which
+  react-query reports optimistically in the mounting render pass (verified against 5.100.6:
+  a seeded-then-invalidated cache renders `isLoading:false` / `isFetching:true`), so there is no
+  frame in which a stale miss reads as final — and a *settled* list without the id still answers
+  "not found" at once, so a mistyped URL never becomes an endless spinner. Mid-delete campaigns
+  stay unresolvable here on purpose: the hook reads `data.campaigns`, and the server ships
+  deleting rows in their own `deletingCampaigns` array. `tzReady` on the five dated pages is now
+  `!resolving` rather than `!campaignsQ.isLoading`, so the default date range is never computed in
+  the **org** zone standing in for a campaign clock that was about to arrive. Pinned by
+  [useCurrentCampaign.test.js](../client/src/lib/useCurrentCampaign.test.js) (the decision) and
+  [campaignResolveRender.smoke.test.js](../client/src/lib/campaignResolveRender.smoke.test.js),
+  which drives the real `DashboardPage` through the exact create sequence and asserts the string
+  never renders.
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
 - **Change history (mobile):** [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) — a flat

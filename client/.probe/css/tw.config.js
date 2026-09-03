@@ -1,0 +1,1 @@
+export default { content: ['./page.html','./page_real.html'], theme: { extend: { colors: { sunken: 'rgb(var(--sunken) / <alpha-value>)', surface: 'rgb(var(--surface) / <alpha-value>)', fg: 'rgb(var(--fg) / <alpha-value>)', 'fg-muted': 'rgb(var(--fg) / <alpha-value>)' } } } };

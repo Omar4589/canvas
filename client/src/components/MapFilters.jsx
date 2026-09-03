@@ -69,10 +69,6 @@ export default function MapFilters({
   stackedDoorCount = 0,
   showCanvasserPins = false,
   onShowCanvasserPinsChange,
-  // Amber approximate-location rings (interpolated geocodes). Default ON; the checkbox lets a
-  // congested All-Time view switch them off. Pure layer visibility — MapPage owns the effect.
-  showApproxRings = true,
-  onShowApproxRingsChange,
   // Overlap overlay (admin map only): doors worked by 2+ canvassers in the same pass.
   showOverlaps = false,
   onShowOverlapsChange,
@@ -167,24 +163,6 @@ export default function MapFilters({
           <div className="mt-1 text-xs text-fg-muted">
             Where each survey, not-home, or wrong-address was submitted from, labeled
             with the canvasser&apos;s initials.
-          </div>
-
-          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showApproxRings}
-              onChange={(e) => onShowApproxRingsChange?.(e.target.checked)}
-              className="h-4 w-4 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
-            />
-            <span className="text-fg">Approximate location rings</span>
-          </label>
-          <div className="mt-1 flex items-center gap-2 text-xs text-fg-muted">
-            <span
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2"
-              style={{ borderColor: '#f59e0b', borderStyle: 'dashed' }}
-            />
-            Pins placed from the street address, not the exact building — fix or confirm them
-            on the Pin Fixes page.
           </div>
 
           <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">

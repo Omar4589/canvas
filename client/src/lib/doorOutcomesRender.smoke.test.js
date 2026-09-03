@@ -35,11 +35,25 @@ test('DoorOutcomesPage renders with a seeded answer filter — the TDZ regressio
      import { MemoryRouter, Routes, Route } from 'react-router-dom';
      import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
      import DoorOutcomesPage from '${join(here, '../pages/DoorOutcomesPage.jsx')}';
-     // Queries must be LOADING (not disabled) or the campaign-not-found guard fires before the
-     // full page renders; a never-settling fetch keeps every query pending without touching the
-     // network, and pending promises do not hold the node event loop open.
+     // A never-settling fetch keeps every query pending without touching the network (pending
+     // promises do not hold the node event loop open), so the page renders its loading states.
+     // The one query that must NOT be pending is the campaigns list: :campaignId has to resolve
+     // to a campaign or the drill-in renders its resolving skeleton and the page body — the
+     // thing this test exists to EXECUTE — never runs. So the list is seeded, fresh, with the
+     // campaign the URL names. (Before lib/useCurrentCampaign.js this test leaned on an
+     // accident: a cold list left isLoading true, which happened to skip the old guard.)
      globalThis.fetch = () => new Promise(() => {});
      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+     qc.setQueryData(['admin', 'campaigns'], {
+       campaigns: [{
+         _id: '6a0000000000000000000001',
+         name: 'Ward 3',
+         type: 'survey',
+         state: 'FL',
+         isActive: true,
+         timeZone: 'America/New_York',
+       }],
+     });
      export const html = renderToString(
        <QueryClientProvider client={qc}>
          <MemoryRouter initialEntries={[

@@ -15,6 +15,8 @@ import FlagLegend from '../components/FlagLegend.jsx';
 import BulkReviewBar from '../components/BulkReviewBar.jsx';
 import { REASON_META, SEV_RANK } from '../lib/flags.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -64,7 +66,7 @@ const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirm
 export default function AuditPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
-  const { homePath, isOrgAdmin } = useAuth();
+  const { isOrgAdmin } = useAuth();
   // Deep link from the dashboard's mock-GPS banner:
   // ?reason=mock_gps&status=open&from=YYYY-MM-DD&to=YYYY-MM-DD — seeded ONCE via the
   // state initializers (MapPage's ?flag=1/?focusActivityId pattern). Initializers don't
@@ -127,15 +129,9 @@ export default function AuditPage() {
 
   const [live, setLive] = useState(true);
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
-  const current = campaigns.find((c) => String(c._id) === String(campaignId)) || undefined;
+  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
-  const tzReady = !campaignsQ.isLoading;
+  const tzReady = !resolving;
 
   // Reset all campaign-scoped view state when the admin switches campaigns (one mounted
   // element serves every /campaigns/:id/audit).
@@ -349,19 +345,8 @@ export default function AuditPage() {
   const selectedName = userId ? summary?.byCanvasser?.find((c) => c.userId === userId)?.name || 'Canvasser' : '';
   const truncated = (data.total || 0) > entries.length;
 
-  if (!campaignId || (!campaignsQ.isLoading && !current)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <h1 className="text-xl font-semibold text-fg">Campaign not found</h1>
-        <Link
-          to={homePath}
-          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-        >
-          {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
-        </Link>
-      </div>
-    );
-  }
+  if (resolving) return <CampaignLoading />;
+  if (notFound) return <CampaignMissing />;
 
   return (
     <div>
