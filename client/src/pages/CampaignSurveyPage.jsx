@@ -3,6 +3,7 @@ import { useParams, useNavigate, Navigate, Link, useSearchParams } from 'react-r
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { Card, Badge, Button, Select, DataTable } from '../components/ui';
 import Modal from '../components/ui/Modal.jsx';
 import SurveyPreview from '../components/SurveyPreview.jsx';
@@ -87,11 +88,7 @@ export default function CampaignSurveyPage() {
   const [changing, setChanging] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
+  const { campaign, resolving, notFound } = useCurrentCampaign(campaignId);
   const surveysQ = useQuery({ queryKey: ['surveys'], queryFn: () => api('/admin/surveys') });
   // Same key the Walk Lists page uses, so override edits stay in sync between the two.
   const effortsQ = useQuery({
@@ -123,12 +120,22 @@ export default function CampaignSurveyPage() {
 
   // Wait for surveys + efforts too — otherwise the page flashes "No default survey
   // attached yet" / "No walk lists yet" before those lists arrive.
-  if (campaignsQ.isLoading || surveysQ.isLoading || effortsQ.isLoading) {
+  //
+  // `resolving`, NOT campaignsQ.isLoading. This page is the first Setup step after a campaign is
+  // created, and its old guard ejected the admin to the launchpad on exactly that path: isLoading
+  // is false the moment the list holds ANY data, so a list that predates the new campaign fell
+  // through find() to the Navigate below. The only thing holding the page was whether the two
+  // sibling queries happened to still be in flight — and neither is, by construction:
+  // CampaignsPage mounts ['surveys'] itself so that cache is warm before the create, and
+  // ['admin','efforts',<newId>] answers {efforts: []} for a brand-new campaign long before the
+  // org-wide withCounts rollup behind GET /admin/campaigns. Reproduced by rendering this page
+  // through the create sequence; pinned in campaignResolveRender.smoke.test.js.
+  if (resolving || surveysQ.isLoading || effortsQ.isLoading) {
     return <div className="text-sm text-fg-muted">Loading…</div>;
   }
-  const campaign = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(campaignId)) || null;
-  // Unknown / wrong-org campaign → bounce to the launchpad (same guard as the Dashboard).
-  if (!campaign) return <Navigate to="/campaigns" replace />;
+  // Unknown / wrong-org campaign → bounce to the launchpad. The redirect itself is unchanged;
+  // what changed is that it now fires only once the list has actually ANSWERED for this id.
+  if (notFound) return <Navigate to="/campaigns" replace />;
 
   const surveys = surveysQ.data?.surveys || [];
   const surveyById = new Map(surveys.map((s) => [String(s._id), s]));

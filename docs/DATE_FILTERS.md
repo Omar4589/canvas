@@ -147,14 +147,26 @@ seeds the device tz immediately and refines to the campaign tz — see §F and
 once that tz is known, so a preset never resolves in the device clock:
 
 ```js
+const { campaign: current, resolving } = useCurrentCampaign(campaignId);
 const tz = current?.timeZone || orgTz;              // campaign tz, else org (useOrgTimeZone)
 const [dateRange, setDateRange] = useState(null);   // null until the tz is known
 useEffect(() => {
-  if (rangeTouchedRef.current || !tzReady) return;  // tzReady = campaigns list loaded
+  if (rangeTouchedRef.current || !tzReady) return;  // tzReady = THIS CAMPAIGN resolved
   setDateRange(defaultRange(current?.isActive === false ? 'all' : 'today', tz));
 }, [tzReady, tz, current]);
 <DateRangeSelector value={dateRange} onChange={onRangeChange} tz={tz} />
 ```
+
+**`tzReady` is `!resolving`, never `!campaignsQ.isLoading`** — the distinction is load-bearing and
+was a live bug until 2026-09. react-query's `isLoading` is true only when a query holds **no data at
+all**, so the moment the shared `['admin','campaigns']` cache holds *any* answer it reads false —
+including an answer written before the campaign in the URL existed, which is exactly what creating a
+campaign produces (CampaignsPage invalidates that key and navigates in the same tick). Gate on
+`isLoading` and the effect fires while `current` is still undefined, `tz` silently falls back to the
+**org** zone, and the page's default "Today" resolves in the wrong clock — plus any range-gated
+query fires against that window before the campaign tz arrives. `resolving`
+([useCurrentCampaign.js](../client/src/lib/useCurrentCampaign.js)) is the predicate that stays false
+until the list has answered *for this id*; see [CAMPAIGNS.md](CAMPAIGNS.md) → **Frontend**.
 
 `dateRange` is `{ preset, from, to }` with **date-only** `from`/`to`. Range-scoped queries are
 **gated** on `!!dateRange` (and read it null-safely), so they never fetch a device-tz window before

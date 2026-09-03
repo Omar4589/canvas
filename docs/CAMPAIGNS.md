@@ -891,10 +891,14 @@ The cold-start readiness chain is a pure derivation in
   with this; [campaignSelection.js](../mobile/lib/campaignSelection.js) records why (an
   active-only validity check once left an all-archived org with nothing selectable).
 - **Resolving `:campaignId` — ONE owner:**
-  [lib/useCurrentCampaign.js](../client/src/lib/useCurrentCampaign.js). Every drill-in page
-  (Home, Timeline, Audit, Door Outcomes, Overlaps, Notes, Survey Explorer, App Customization)
-  calls `useCurrentCampaign(campaignId)` and renders `<CampaignLoading />` / `<CampaignMissing />`
-  from [components/campaigns/CampaignGate.jsx](../client/src/components/campaigns/CampaignGate.jsx).
+  [lib/useCurrentCampaign.js](../client/src/lib/useCurrentCampaign.js). Nine drill-in pages
+  (Home, Timeline, Audit, Door Outcomes, Overlaps, Notes, Survey Explorer, App Customization and
+  Survey) call `useCurrentCampaign(campaignId)`; the first eight render `<CampaignLoading />` /
+  `<CampaignMissing />` from
+  [components/campaigns/CampaignGate.jsx](../client/src/components/campaigns/CampaignGate.jsx),
+  while **Survey keeps its own two states** — its "Loading…" line (it also waits on `['surveys']`
+  and `['admin','efforts',id]`, or it flashes "No default survey attached yet") and its
+  `<Navigate to="/campaigns" replace />`. Only the PREDICATE changed there, not the shapes.
   It returns **three** states, and the whole point is that the third is not the second:
   `campaign` (found), `resolving` (the list has not answered *for this id* yet), `notFound` (it
   has, and the id isn't in it). Those pages each carried a copy of
@@ -914,8 +918,32 @@ The cold-start readiness chain is a pure derivation in
   the **org** zone standing in for a campaign clock that was about to arrive. Pinned by
   [useCurrentCampaign.test.js](../client/src/lib/useCurrentCampaign.test.js) (the decision) and
   [campaignResolveRender.smoke.test.js](../client/src/lib/campaignResolveRender.smoke.test.js),
-  which drives the real `DashboardPage` through the exact create sequence and asserts the string
-  never renders.
+  which drives the real `DashboardPage` **and** the real Survey tab through the exact create
+  sequence.
+- **The Survey tab failed the same way but worse, and is why the census mattered.** It did not
+  render text — it emitted `<Navigate to="/campaigns" replace />`, ejecting the admin from the
+  FIRST setup step of the campaign they had just created. Its old guard looked safer than the other
+  eight (`if (campaignsQ.isLoading || surveysQ.isLoading || effortsQ.isLoading) return 'Loading…'`)
+  but those extra terms are an ACCIDENT, not a guarantee: on the create path both siblings are
+  settled by construction — [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) mounts
+  `['surveys']` itself, so that cache is warm before the create ever happens, and
+  `['admin','efforts',<newId>]` answers `{efforts: []}` for a campaign with no walk lists long
+  before the org-wide `withCounts` rollup behind `GET /admin/campaigns`. Reproduced by rendering the
+  real page through the create sequence: siblings settled → redirect, siblings cold → held. The
+  lesson for the next screen added under `/campaigns/:campaignId`: **a guard that happens to be
+  covered by a sibling query's latency is not covered at all.**
+- **Deliberately NOT converted, with the reason:**
+  [CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx) (`/survey/new`)
+  carries the same old-shaped guard, but it is unreachable in that window: its only in-app doors are
+  two buttons on the Survey tab, which sit *behind* the guard fixed above, and a typed URL or reload
+  is a cold cache (there is no query-cache persistence on web), which yields "Loading…". Convert it
+  the moment a link to it is added from anywhere else. Likewise `useCampaignSelection`
+  ([CampaignSelector.jsx](../client/src/components/CampaignSelector.jsx)) still returns the
+  two-state answer, so Team / Early Voting / Client Reports redirect on a stale-list miss — verified
+  byte-identical before and after this change, and reachable only by abandoning a still-loading
+  dashboard inside the refetch window (`replace` overwrites only that one history entry, so Back
+  returns to the dashboard). Left as a known pre-existing gap rather than widened into an untested
+  drive-by.
 - Hub + hand-offs: [SetupProgress.jsx](../client/src/components/SetupProgress.jsx),
   [NextStepBanner.jsx](../client/src/components/NextStepBanner.jsx) (the reusable next-step signpost).
 - **Change history (mobile):** [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) — a flat
