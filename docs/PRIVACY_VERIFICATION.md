@@ -1239,6 +1239,32 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     sentence, which this satisfies strictly. The owner should confirm before the production
     release.
 
+19. **[v6 2026-09-02 — Billing month history: an EXISTING aggregate, shown over more months, to the
+    same gated audience. No new data, no new recipient, no money.]** The org Billing page grew a
+    12-to-24-month ledger (`GET /admin/billing/history`) and the super-admin panel a per-org month
+    ledger plus a multi-month issue batch. Checked against all five triggers in `CLAUDE.md`:
+    **What we collect** — nothing new. Every number is derived from `CanvassActivity` rows that
+    already exist; no field was added to any model, and `Statement` continues to carry no personal
+    data (campaign names, counts, dates, dollars), deleted with the org by the same cascade.
+    **Retention/deletion** — untouched; no TTL, purge or backup behavior changed, and the ledger is
+    computed live rather than stored, so it holds nothing to retain. **Who can access customer
+    data** — unchanged: the customer route sits behind the same `requireOrgRole('admin')` +
+    `Membership.billingAccess` gate as the rest of that router (pinned by a new 403 test), and the
+    staff routes behind `requireSuperAdmin`. **Sharing/subprocessors** — none; no third party is
+    involved and no data leaves the app. **What we expose** — this is the trigger that fires: a
+    customer can now see 24 months of their own campaign/door counts where they could see one, and
+    an account manager can export several months as one CSV. Both are the *same class of aggregate*
+    the single-month views already showed to the *same people*, widened along the time axis only;
+    no per-person data of any kind appears on either surface, at any depth. The **money boundary is
+    the one thing that could have moved and did not**: `publicMonthHistory()` is the single
+    projector for the customer surface and strips every `*Cents` field, which is now asserted
+    twice — on the projector (`statementRange.int.test.js`) and by walking the actual HTTP
+    **response body** (`billing.int.test.js`), plus a client render test asserting no `$` appears
+    on the page. That keeps `docs/BILLING.md`'s published line — *"Customers never see a price in
+    the app"* — true by construction rather than by care. **Assessment: no Privacy Policy / ToS /
+    DPA text edit required.** Nothing new is collected, retained, shared, or made visible to anyone
+    who could not already see it. Owner to confirm before the production deploy.
+
 ---
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree

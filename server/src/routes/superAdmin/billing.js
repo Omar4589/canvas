@@ -10,7 +10,14 @@ import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
 import { resolveRateCents } from '../../services/billing/rate.js';
 import { statementDrift } from '../../services/billing/statementDrift.js';
-import { currentMonth, monthDayBounds, monthlyStatement } from '../../services/billing/statement.js';
+import {
+  BILLING_HISTORY_MAX_MONTHS,
+  currentMonth,
+  monthlyStatement,
+  monthlyStatementRange,
+} from '../../services/billing/statement.js';
+import { ISSUE_STATUS_BY_CODE, issueStatementForMonth } from '../../services/billing/issueStatement.js';
+import { addMonths as addMonthsSafe } from '../../services/billing/billingMonths.js';
 
 // The account-manager surface: /super-admin/organizations/:orgId/billing.
 // Super-admin only — org admins get the read-mostly /admin/billing instead.
@@ -349,6 +356,69 @@ router.get('/statement', async (req, res, next) => {
   }
 });
 
+// EVERY month in a range, in one request — the invoicing view. Frozen months read from their
+// issued Statement (that is the number that was sent); un-issued months are the live recompute; an
+// issued month that no longer agrees with a recompute carries its `drift` so a two-months-late
+// invoice can't be built on a figure the system has quietly moved past.
+//
+// One monthlyStatementRange() call underneath, so this costs three queries per campaign no matter
+// how long the range — see the note on that function.
+router.get('/history', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org } = loaded;
+    const to = String(req.query.to || currentMonth());
+    const from = String(req.query.from || addMonthsSafe(to, -11)); // default: the last 12 months
+    const range = await monthlyStatementRange(org._id, { from, to });
+    const months = range.statements.map((s) => s.month);
+
+    const issued = await Statement.find({
+      organizationId: org._id,
+      month: { $in: months },
+      status: 'issued',
+    })
+      .populate('issuedByUserId', 'firstName lastName')
+      .lean();
+    const byMonth = new Map(issued.map((i) => [i.month, i]));
+
+    res.json({
+      from: range.from,
+      to: range.to,
+      rateCents: range.rateCents,
+      rulesVersion: range.rulesVersion,
+      // Newest first — a ledger is read from the present backwards.
+      months: range.statements
+        .map((live) => {
+          const frozen = byMonth.get(live.month) || null;
+          return {
+            month: live.month,
+            // What this month IS on an invoice: the frozen total when issued, else the live one.
+            totalCents: frozen ? frozen.totalCents : live.totalCents,
+            liveTotalCents: live.totalCents,
+            billableCampaigns: (frozen || live).lines.filter((l) => l.billable).length,
+            issued: Boolean(frozen),
+            statementId: frozen ? String(frozen._id) : null,
+            issuedAt: frozen?.issuedAt ?? null,
+            issuedBy: frozen?.issuedByUserId
+              ? `${frozen.issuedByUserId.firstName || ''} ${frozen.issuedByUserId.lastName || ''}`.trim()
+              : null,
+            externalRef: frozen?.externalRef || null,
+            rulesVersion: frozen?.rulesVersion ?? live.rulesVersion,
+            drift: statementDrift(frozen, live),
+            // The lines that were (or would be) invoiced, so a combined export never has to go back
+            // for them month by month.
+            lines: (frozen || live).lines,
+          };
+        })
+        .reverse(),
+    });
+  } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+});
+
 // ── Issuing ───────────────────────────────────────────────────────────────────────────────────
 // Freeze a month. From here on that month reads from the frozen row, not from a recompute, and any
 // later divergence surfaces as drift rather than silently rewriting what you invoiced.
@@ -363,94 +433,74 @@ router.post('/statement/:month/issue', async (req, res, next) => {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
     const { org, sub } = loaded;
-    const { month } = req.params;
-    if (!monthDayBounds(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
     const data = issueSchema.parse(req.body || {});
-
-    // Internal orgs are permanently non-billable and never appear on a revenue surface. Check BOTH
-    // signals: billing-rollup filters on the subscription status and the status chokepoint on the
-    // org flag, so an org whose two drifted apart would otherwise slip past whichever we picked.
-    if (org.isInternal || sub.status === 'internal') {
-      return res.status(403).json({
-        error: 'Internal organizations are never billed and cannot have statements issued.',
-        code: 'INTERNAL_NOT_BILLABLE',
-      });
-    }
-    // Don't freeze a month that's still accumulating knocks. `currentMonth()` is UTC while each
-    // campaign's month boundary is its own timezone, so this is a deliberate approximation: it can
-    // let a behind-UTC org's October be issued during the first hours of Nov 1 UTC. `force` exists
-    // for the real cases that need it (a customer closing out early, a prepay).
-    if (!data.force && month >= currentMonth()) {
-      return res.status(422).json({
-        error: `${month} has not finished yet — issue it once the month closes, or pass force to override.`,
-        code: 'MONTH_NOT_ENDED',
-      });
-    }
-    // Cheap, friendly pre-check. The real guard is the duplicate-key catch below.
-    const existing = await Statement.findOne({ organizationId: org._id, month, status: 'issued' }).lean();
-    if (existing) {
-      return res.status(409).json({
-        error: `${month} is already issued. Void it first to reissue.`,
-        code: 'ALREADY_ISSUED',
-        statementId: String(existing._id),
-      });
-    }
-
-    const live = await monthlyStatement(org._id, month);
-    let statement;
-    try {
-      statement = await Statement.create({
-        organizationId: org._id,
-        month,
-        status: 'issued',
-        rateCents: live.rateCents,
-        rulesVersion: live.rulesVersion,
-        totalCents: live.totalCents,
-        lines: live.lines,
-        issuedAt: new Date(),
-        issuedByUserId: req.user._id,
-        externalRef: data.externalRef || '',
-      });
-    } catch (err) {
-      // THE race guard. Two concurrent issues both pass the pre-check; the partial unique index
-      // lets exactly one insert win and the loser lands here. No transactions exist in this
-      // codebase, so single-document atomicity is doing the work.
-      if (err?.code === 11000) {
-        return res.status(409).json({ error: `${month} was issued by someone else just now.`, code: 'ALREADY_ISSUED' });
-      }
-      throw err;
-    }
-
-    // Point the most recent voided row at its replacement. Best-effort: the statement is already
-    // committed and correct, and a broken back-reference must never fail an issue.
-    try {
-      const prior = await Statement.findOne({ organizationId: org._id, month, status: 'void' })
-        .sort({ voidedAt: -1 })
-        .select({ _id: 1 });
-      if (prior) {
-        await Statement.updateOne({ _id: prior._id }, { $set: { supersededByStatementId: statement._id } });
-      }
-    } catch {
-      /* leave the back-reference unset rather than fail a committed issue */
-    }
-
-    // If this throws, the statement still carries issuedAt/issuedByUserId — the audit is not lost,
-    // so do NOT roll the statement back.
-    await SubscriptionEvent.create({
-      organizationId: org._id,
-      byUserId: req.user._id,
-      changes: {
-        statementIssued: {
-          month,
-          totalCents: statement.totalCents,
-          rulesVersion: statement.rulesVersion,
-          statementId: String(statement._id),
-          externalRef: statement.externalRef || null,
-        },
-      },
-      reason: 'Statement issued',
+    const result = await issueStatementForMonth({
+      org,
+      sub,
+      month: req.params.month,
+      userId: req.user._id,
+      externalRef: data.externalRef,
+      force: data.force,
     });
-    res.status(201).json({ statement: statement.toObject() });
+    if (!result.ok) {
+      const body = { error: result.error, code: result.code };
+      if (result.statementId) body.statementId = result.statementId;
+      return res.status(ISSUE_STATUS_BY_CODE[result.code] || 400).json(body);
+    }
+    res.status(201).json({ statement: result.statement.toObject() });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
+// ── Issuing SEVERAL months at once ────────────────────────────────────────────────────────────
+// Invoicing a client for July AND August is one job, and doing it as two visits to a month picker
+// is how the second month gets forgotten. Each month is still its own Statement, its own race
+// guard and its own audit event — this only removes the clicking.
+//
+// Answers 200 with a per-month outcome list rather than failing the request: a batch where August
+// is already issued must still issue July, and the account manager needs to see which did what.
+// `ok` is true only when every month issued.
+const issueManySchema = z.object({
+  months: z.array(z.string()).min(1).max(BILLING_HISTORY_MAX_MONTHS),
+  externalRef: z.string().trim().max(200).optional(),
+  force: z.boolean().optional(),
+});
+
+router.post('/statements/issue', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org, sub } = loaded;
+    const data = issueManySchema.parse(req.body || {});
+    // Oldest first, and de-duplicated: the audit should read in calendar order, and a repeated
+    // month in the payload must not produce a spurious ALREADY_ISSUED against our own write.
+    const months = [...new Set(data.months)].sort();
+    const results = [];
+    for (const month of months) {
+      // Serial on purpose — concurrent issues for one org would race each other through the very
+      // guard this loop is meant to make unnecessary.
+      const r = await issueStatementForMonth({
+        org,
+        sub,
+        month,
+        userId: req.user._id,
+        externalRef: data.externalRef,
+        force: data.force,
+      });
+      results.push(
+        r.ok
+          ? { month, ok: true, statementId: String(r.statement._id), totalCents: r.statement.totalCents }
+          : { month, ok: false, code: r.code, error: r.error, statementId: r.statementId || null }
+      );
+    }
+    res.json({
+      ok: results.every((r) => r.ok),
+      issuedCount: results.filter((r) => r.ok).length,
+      totalCents: results.filter((r) => r.ok).reduce((sum, r) => sum + r.totalCents, 0),
+      results,
+    });
   } catch (err) {
     if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
     next(err);

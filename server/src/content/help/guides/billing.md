@@ -43,6 +43,18 @@ That last point is why we show a reminder to archive a campaign once its electio
 
 Your **Billing** page shows which campaigns are canvassing this month, which are still in free setup, and which are free on the last-week rule — so you can always see what's counting and what isn't. (See [Who can see the Billing page?](who-sees-billing) — it's limited to specific admins.)
 
+## Looking back at previous months
+
+Your Billing page keeps a **Month by month** history — the last 12 months by default, up to 24. For each month it shows how many campaigns were billing, how many doors were covered, and how many were knocked. Open a month to see the campaigns behind those numbers: when each started billing, its doors and knocks, and — for any that were free that month — why (still in setup, started in the last week, archived with nobody out).
+
+This is the page to check when you're putting together your own invoice for a past month, or double-checking one you've already been sent.
+
+Rates and amounts still aren't shown anywhere in the app; what a month cost is a conversation with your account manager.
+
+### Doors vs knocks
+
+**Knocks** are doors a canvasser actually knocked. **Doors** is the number you'd invoice from — the same figure, unless you've turned on **Count restricted homes as billable doors** at the bottom of the page, in which case it also includes homes a canvasser walked to but couldn't get into (a locked gate, a secured building). Flip that setting and the Doors column moves with it. It never changes what Doorline charges you.
+
 ## Your free trial
 
 Every new organization gets a **free trial** with full access — **7 days by default, though your account manager can set a longer one** (say two weeks) when they set you up. You'll see a countdown in the last few days, and the trial can be extended anytime if you need more time.

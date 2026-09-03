@@ -508,7 +508,11 @@ test('the month-close board lists issued vs unissued, and is super-admin only', 
     'internal orgs never appear on a revenue surface'
   );
 
-  const unissued = await call('GET', '/super-admin/billing/statements?month=2026-09', { token: ctx.superTok });
+  // A month in the PAST that this suite never issues. It must not be the CURRENT month: the
+  // force-issue test above issues currentMonth(), so a hardcoded near-future month silently becomes
+  // "issued" the day the wall clock reaches it — which is exactly what happened to 2026-09 on
+  // 2026-09-01, turning a green suite red with no code change.
+  const unissued = await call('GET', '/super-admin/billing/statements?month=2025-01', { token: ctx.superTok });
   assert.strictEqual(unissued.json.organizations.find((r) => r.organizationId === String(ctx.org._id)).issued, false);
 
   const denied = await call('GET', '/super-admin/billing/statements?month=2026-02', { token: ctx.adminTok, orgId: ctx.org._id });
@@ -516,6 +520,162 @@ test('the month-close board lists issued vs unissued, and is super-admin only', 
 
   const bad = await call('GET', '/super-admin/billing/statements?month=nope', { token: ctx.superTok });
   assert.strictEqual(bad.status, 400);
+});
+
+// ---- issuing several months at once ---------------------------------------------
+
+test('two months issue in ONE call, each with its own statement and audit event', { skip }, async () => {
+  const c = await makeCampaign({ name: 'Two-month client' });
+  await visit(c, '2026-01-06T18:00:00Z');
+  await visit(c, '2026-02-06T18:00:00Z');
+
+  const before = await SubscriptionEvent.countDocuments({ organizationId: ctx.org._id });
+  const res = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statements/issue`, {
+    token: ctx.superTok,
+    body: { months: ['2026-08', '2026-07'], externalRef: 'INV-778' },
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.ok, true);
+  assert.strictEqual(res.json.issuedCount, 2);
+  // Oldest first, whatever order they arrived in — the audit should read in calendar order.
+  assert.deepStrictEqual(res.json.results.map((r) => r.month), ['2026-07', '2026-08']);
+  assert.strictEqual(
+    res.json.totalCents,
+    res.json.results.reduce((sum, r) => sum + r.totalCents, 0),
+    'the batch total is the sum of its months'
+  );
+
+  const rows = await Statement.find({ organizationId: ctx.org._id, month: { $in: ['2026-07', '2026-08'] }, status: 'issued' }).lean();
+  assert.strictEqual(rows.length, 2, 'one frozen statement PER MONTH, never one spanning both');
+  assert.ok(rows.every((r) => r.externalRef === 'INV-778'), 'both carry the one invoice number');
+
+  const after = await SubscriptionEvent.countDocuments({ organizationId: ctx.org._id });
+  assert.strictEqual(after - before, 2, 'one audit event per month, not one per batch');
+});
+
+test('a batch skips an already-issued month and still issues the rest', { skip }, async () => {
+  const res = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statements/issue`, {
+    token: ctx.superTok,
+    body: { months: ['2026-07', '2026-04'] },
+  });
+  // 200, not an error: a partial batch is a NORMAL outcome and the account manager needs to see
+  // which month did what rather than have the whole request rejected.
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.ok, false, 'not every month issued');
+  assert.strictEqual(res.json.issuedCount, 1);
+  const jul = res.json.results.find((r) => r.month === '2026-07');
+  const apr = res.json.results.find((r) => r.month === '2026-04');
+  assert.strictEqual(jul.ok, false);
+  assert.strictEqual(jul.code, 'ALREADY_ISSUED');
+  assert.ok(jul.statementId, 'it points at the statement already standing');
+  assert.strictEqual(apr.ok, true, 'April issued anyway');
+});
+
+test('a batch refuses the unfinished current month unless forced', { skip }, async () => {
+  const now = new Date();
+  const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const res = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statements/issue`, {
+    token: ctx.superTok,
+    body: { months: [thisMonth] },
+  });
+  assert.strictEqual(res.json.results[0].ok, false);
+  assert.strictEqual(res.json.results[0].code, 'MONTH_NOT_ENDED');
+});
+
+test('a repeated month in one payload issues once, not twice', { skip }, async () => {
+  const res = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statements/issue`, {
+    token: ctx.superTok,
+    body: { months: ['2026-01', '2026-01'] },
+  });
+  assert.strictEqual(res.json.results.length, 1, 'deduplicated before issuing');
+  assert.strictEqual(res.json.results[0].ok, true);
+  const rows = await Statement.countDocuments({ organizationId: ctx.org._id, month: '2026-01', status: 'issued' });
+  assert.strictEqual(rows, 1);
+});
+
+test('issuing a batch is super-admin only', { skip }, async () => {
+  const denied = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statements/issue`, {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+    body: { months: ['2026-04'] },
+  });
+  assert.strictEqual(denied.status, 403);
+});
+
+// ---- the per-org history ledger --------------------------------------------------
+
+test('the history ledger reads frozen where issued and live where not, newest first', { skip }, async () => {
+  const res = await call('GET', `/super-admin/organizations/${ctx.org._id}/billing/history?from=2026-05&to=2026-08`, {
+    token: ctx.superTok,
+  });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.json.months.map((m) => m.month), ['2026-08', '2026-07', '2026-06', '2026-05']);
+
+  const aug = res.json.months.find((m) => m.month === '2026-08');
+  assert.strictEqual(aug.issued, true);
+  assert.strictEqual(aug.externalRef, 'INV-778');
+  assert.ok(aug.issuedBy, 'the ledger names who issued it');
+
+  // Every month carries the lines behind it, so a combined export never re-fetches month by month.
+  assert.ok(Array.isArray(aug.lines) && aug.lines.length > 0);
+  assert.strictEqual(
+    aug.totalCents,
+    aug.lines.reduce((sum, l) => sum + l.amountCents, 0),
+    'the month total is its own lines'
+  );
+});
+
+test('the history ledger agrees with the single-month statement route, month for month', { skip }, async () => {
+  const hist = await call('GET', `/super-admin/organizations/${ctx.org._id}/billing/history?from=2026-03&to=2026-06`, {
+    token: ctx.superTok,
+  });
+  for (const m of hist.json.months) {
+    const one = await call('GET', `/super-admin/organizations/${ctx.org._id}/billing/statement?month=${m.month}`, {
+      token: ctx.superTok,
+    });
+    const expected = one.json.statement ? one.json.statement.totalCents : one.json.totalCents;
+    assert.strictEqual(m.totalCents, expected, `${m.month}: the ledger and the statement page agree`);
+  }
+});
+
+test('the history ledger is super-admin only', { skip }, async () => {
+  const denied = await call('GET', `/super-admin/organizations/${ctx.org._id}/billing/history`, {
+    token: ctx.adminTok,
+    orgId: ctx.org._id,
+  });
+  assert.strictEqual(denied.status, 403);
+});
+
+// ---- the month-close board, over a RANGE -----------------------------------------
+
+test('the month-close board closes a RANGE, and single-month callers are unaffected', { skip }, async () => {
+  const board = await call('GET', '/super-admin/billing/statements?from=2026-05&to=2026-07', { token: ctx.superTok });
+  assert.strictEqual(board.status, 200);
+  assert.strictEqual(board.json.range, true);
+  assert.deepStrictEqual(board.json.months, ['2026-05', '2026-06', '2026-07']);
+
+  const row = board.json.organizations.find((r) => r.organizationId === String(ctx.org._id));
+  assert.strictEqual(row.months.length, 3, 'one cell per month');
+  assert.ok(row.months.every((m) => m.issued), 'all three were issued above');
+  assert.strictEqual(
+    row.rangeTotalCents,
+    row.months.reduce((sum, m) => sum + m.issuedTotalCents, 0),
+    'the org range total is its months'
+  );
+
+  // The single-month shape is untouched — the range fields are purely additive.
+  const single = await call('GET', '/super-admin/billing/statements?month=2026-05', { token: ctx.superTok });
+  assert.strictEqual(single.json.range, false);
+  const srow = single.json.organizations.find((r) => r.organizationId === String(ctx.org._id));
+  assert.strictEqual(srow.issued, true);
+  assert.strictEqual(srow.issuedTotalCents, row.months.find((m) => m.month === '2026-05').issuedTotalCents);
+});
+
+test('an inverted or malformed range is a 400', { skip }, async () => {
+  const bad = await call('GET', '/super-admin/billing/statements?from=2026-07&to=2026-05', { token: ctx.superTok });
+  assert.strictEqual(bad.status, 400);
+  const worse = await call('GET', '/super-admin/billing/statements?from=nope&to=2026-05', { token: ctx.superTok });
+  assert.strictEqual(worse.status, 400);
 });
 
 test('deleting an organization takes its statements with it', { skip }, async () => {

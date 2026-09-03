@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import { BillingPill, BILLING_STATUS_META, fmtUsd, currentMonthStr } from '../lib/billingStatus.jsx';
 import { saveCsvRows } from '../lib/downloadFile.js';
 import Pager from './Pager.jsx';
+import { Segmented } from './ui/index.js';
 
 const STATUSES = ['trial', 'active', 'past_due', 'suspended', 'canceled', 'internal'];
 const inputCls =
@@ -16,6 +17,23 @@ function fmtDate(d) {
 }
 
 const EVENTS_LIMIT = 25;
+
+// 'YYYY-MM' minus n months. Mirrors billingMonths.addMonths on the server; the panel needs it to
+// turn "last 12 months" into the from/to the history endpoint takes.
+function monthsAgo(month, n) {
+  const [y, m] = String(month).split('-').map(Number);
+  const total = y * 12 + (m - 1) - n;
+  const y2 = Math.floor(total / 12);
+  const m2 = total - y2 * 12 + 1;
+  return `${String(y2).padStart(4, '0')}-${String(m2).padStart(2, '0')}`;
+}
+
+// 'YYYY-MM' → 'July 2026'.
+function monthLabel(ym) {
+  const [y, m] = String(ym || '').split('-').map(Number);
+  if (!y || !m) return ym || '—';
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
 
 // Why a line is (or isn't) on the invoice. Mirrors the reason codes in
 // server/src/services/billing/billingMonths.js. 'billable' needs no label — it's the default —
@@ -87,6 +105,14 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const [trialUntil, setTrialUntil] = useState('');
   const [error, setError] = useState(null);
   const [eventsSkip, setEventsSkip] = useState(0);
+  // Which tab. Component state, not the URL: this panel is opened inline from OrganizationsPage
+  // against a selected org, so a URL param would end up fighting that selection.
+  const [tab, setTab] = useState('statement');
+  // History tab: the months ticked for a combined invoice, and the one ref they all carry.
+  const [picked, setPicked] = useState(() => new Set());
+  const [batchRef, setBatchRef] = useState('');
+  const [batchResult, setBatchResult] = useState(null);
+  const [historyMonths, setHistoryMonths] = useState(12);
   // Rename / re-slug (PATCH /super-admin/organizations/:orgId — it always supported name+slug;
   // this is the first UI for it).
   const [renameOpen, setRenameOpen] = useState(false);
@@ -110,6 +136,23 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   const thisMonthQ = useQuery({
     queryKey: [...key, 'statement', thisMonth],
     queryFn: () => api(`/super-admin/organizations/${orgId}/billing/statement?month=${thisMonth}`),
+  });
+
+  // The month ledger behind the History tab. One request for the whole range — the server does it
+  // in three queries per campaign regardless of how many months (monthlyStatementRange).
+  const historyQ = useQuery({
+    queryKey: [...key, 'history', historyMonths],
+    queryFn: () =>
+      api(`/super-admin/organizations/${orgId}/billing/history?from=${monthsAgo(thisMonth, historyMonths - 1)}&to=${thisMonth}`),
+    enabled: tab === 'history',
+    placeholderData: keepPreviousData,
+  });
+  // The paper trail: every statement ever issued OR VOIDED. The voided rows are the half the
+  // ledger above can't show — it only knows what currently stands for each month.
+  const paperQ = useQuery({
+    queryKey: [...key, 'statements'],
+    queryFn: () => api(`/super-admin/organizations/${orgId}/billing/statements`),
+    enabled: tab === 'history',
   });
 
   const sub = billingQ.data?.subscription;
@@ -169,6 +212,21 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
       api(`/super-admin/organizations/${orgId}/billing/statement/${month}/issue`, { method: 'POST', body }),
     onSuccess: () => {
       setExternalRef('');
+      setError(null);
+      refetchAll();
+    },
+    onError: onErr,
+  });
+  // Issue SEVERAL months under one invoice number. The server answers 200 with a per-month outcome
+  // even when some months fail, so this keeps the result rather than treating it as an error.
+  const issueManyMut = useMutation({
+    mutationFn: (body) =>
+      api(`/super-admin/organizations/${orgId}/billing/statements/issue`, { method: 'POST', body }),
+    onSuccess: (res) => {
+      setBatchResult(res);
+      setBatchRef('');
+      // Keep only the months that did NOT issue selected, so a retry is one click on what's left.
+      setPicked(new Set(res.results.filter((r) => !r.ok).map((r) => r.month)));
       setError(null);
       refetchAll();
     },
@@ -259,6 +317,52 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
     );
   }
 
+  // The COMBINED export: several months on one sheet, which is the artifact that gets attached to
+  // a single invoice covering July and August. Same provenance discipline as the single-month CSV —
+  // every line says whether it came from a FROZEN issued statement or a live recompute, because an
+  // unlabelled sheet is exactly how the two get confused six months later.
+  function downloadRangeCsv() {
+    const months = (historyQ.data?.months || []).filter((m) => picked.has(m.month));
+    if (!months.length) return;
+    const rows = [
+      ['Statements', `${months[months.length - 1].month} to ${months[0].month}`, displayName || ''],
+      [],
+      ['Month', 'Source', 'Campaign', 'Households', 'Billing started', 'Archived', 'Knocks', 'Restricted doors', 'Billable doors', 'Billable', 'Reason', 'Rate', 'Amount'],
+    ];
+    // Oldest first on the sheet — an invoice reads forwards even though the screen reads backwards.
+    for (const m of [...months].reverse()) {
+      const src = m.issued
+        ? `ISSUED ${fmtDate(m.issuedAt)}${m.issuedBy ? ` by ${m.issuedBy}` : ''} — rules v${m.rulesVersion}${m.externalRef ? ` — ref ${m.externalRef}` : ''}`
+        : 'LIVE — not issued, recomputed on export';
+      for (const l of m.lines) {
+        rows.push([
+          m.month,
+          src,
+          l.name,
+          l.households,
+          l.firstKnockAt ? new Date(l.firstKnockAt).toISOString().slice(0, 10) : '',
+          l.archivedAt ? new Date(l.archivedAt).toISOString().slice(0, 10) : '',
+          l.knocksThisMonth,
+          l.restrictedDoorsThisMonth,
+          l.billRestrictedDoors ? l.billableDoorsThisMonth : l.knocksThisMonth,
+          l.billable ? 'yes' : 'no',
+          l.reason || '',
+          ((l.rateCents ?? 0) / 100).toFixed(2),
+          (l.amountCents / 100).toFixed(2),
+        ]);
+      }
+      rows.push([`${m.month} subtotal`, '', '', '', '', '', '', '', '', '', '', '', (m.totalCents / 100).toFixed(2)]);
+      rows.push([]);
+    }
+    rows.push(['TOTAL', '', '', '', '', '', '', '', '', '', '', '', (pickedTotalCents / 100).toFixed(2)]);
+    saveCsvRows(
+      rows,
+      `${(displayName || 'org').replaceAll(/\s+/g, '-').toLowerCase()}-statements-${
+        months[months.length - 1].month
+      }-to-${months[0].month}.csv`
+    );
+  }
+
   const orgInfo = billingQ.data?.organization;
   const displayName = orgInfo?.name || orgName;
   // The born-immutable flag (Organization.isInternal), NOT the billing status. When set, the server
@@ -266,6 +370,12 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
   // when unset, it rejects a move TO 'internal' (403 INTERNAL_FLAG_REQUIRED). So the control mirrors
   // both server rules: locked note for a flagged org, and no selectable 'internal' for the rest.
   const isInternal = !!orgInfo?.isInternal;
+  const historyRows = historyQ.data?.months || [];
+  const pickedRows = historyRows.filter((m) => picked.has(m.month));
+  // What the ticked months add up to: the FROZEN figure where a month is issued, the live one where
+  // it isn't — the same rule the ledger renders, so the footer can never disagree with the table.
+  const pickedTotalCents = pickedRows.reduce((sum, m) => sum + m.totalCents, 0);
+  const pickedUnissued = pickedRows.filter((m) => !m.issued).map((m) => m.month);
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -347,7 +457,22 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
       )}
       {billingQ.isLoading && <p className="mt-3 text-sm text-fg-muted">Loading…</p>}
 
-      {sub && (
+      {/* Same panel, same information — three tabs instead of one long scroll. Statement opens
+          first because closing a month is the job this panel is opened for. */}
+      <div className="mt-4">
+        <Segmented
+          size="sm"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'statement', label: 'Statement' },
+            { value: 'history', label: 'History' },
+            { value: 'account', label: 'Account' },
+          ]}
+        />
+      </div>
+
+      {tab === 'account' && sub && (
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Status + trial */}
           <div className="rounded-lg border border-border bg-surface p-3">
@@ -501,6 +626,7 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
       )}
 
       {/* Statement */}
+      {tab === 'statement' && (
       <div className="mt-4 rounded-lg border border-border bg-surface p-3">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-brand-accent/20 bg-brand-tint px-3 py-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-brand-accent">This month</span>
@@ -711,9 +837,11 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
           </table>
         )}
       </div>
+      )}
 
-      {/* History — paged; before/after values come from SubscriptionEvent.changes. */}
-      {(billingQ.data?.events?.length > 0 || eventsSkip > 0) && (
+      {/* The SubscriptionEvent audit trail — who changed what, and why. Lives on Account: it is the
+          record of account decisions (status moves, rate edits), not of months. */}
+      {tab === 'account' && (billingQ.data?.events?.length > 0 || eventsSkip > 0) && (
         <div className="mt-4 rounded-lg border border-border bg-surface p-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">History</h3>
           <ul className="mt-2 space-y-1 text-sm text-fg-muted">
@@ -736,6 +864,233 @@ export default function OrgBillingPanel({ orgId, orgName, onClose }) {
               onChange={setEventsSkip}
               className="mt-2"
             />
+          )}
+        </div>
+      )}
+
+      {/* ── History: every month at once, and the multi-month invoice run ───────────────────── */}
+      {tab === 'history' && (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Month ledger</h3>
+              <p className="mt-0.5 text-xs text-fg-muted">
+                Issued months read from what was frozen; the rest are a live recompute. Tick the
+                months you are invoicing together.
+              </p>
+            </div>
+            <select
+              value={historyMonths}
+              onChange={(e) => {
+                setHistoryMonths(Number(e.target.value));
+                setPicked(new Set());
+                setBatchResult(null);
+              }}
+              className={inputCls + ' mt-0 w-auto'}
+            >
+              <option value={6}>Last 6 months</option>
+              <option value={12}>Last 12 months</option>
+              <option value={24}>Last 24 months</option>
+            </select>
+          </div>
+
+          {historyQ.isLoading && <p className="text-sm text-fg-muted">Computing…</p>}
+          {historyQ.error && (
+            <div className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+              {historyQ.error.message}
+            </div>
+          )}
+
+          {historyRows.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+                  <tr>
+                    <th className="py-2 pl-3 pr-2">
+                      <input
+                        type="checkbox"
+                        aria-label="Select every month shown"
+                        checked={picked.size > 0 && picked.size === historyRows.length}
+                        onChange={(e) =>
+                          setPicked(e.target.checked ? new Set(historyRows.map((m) => m.month)) : new Set())
+                        }
+                      />
+                    </th>
+                    <th className="py-2 pr-3">Month</th>
+                    <th className="py-2 pr-3">Campaigns</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {historyRows.map((m) => {
+                    const on = picked.has(m.month);
+                    return (
+                      <tr key={m.month} className={on ? 'bg-brand-tint/40' : ''}>
+                        <td className="py-1.5 pl-3 pr-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${m.month}`}
+                            checked={on}
+                            onChange={() =>
+                              setPicked((cur) => {
+                                const next = new Set(cur);
+                                if (next.has(m.month)) next.delete(m.month);
+                                else next.add(m.month);
+                                return next;
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="py-1.5 pr-3">
+                          <button
+                            onClick={() => {
+                              setMonth(m.month);
+                              setTab('statement');
+                            }}
+                            className="font-medium text-fg underline decoration-dotted underline-offset-2 hover:text-brand-accent"
+                            title="Open this month on the Statement tab"
+                          >
+                            {monthLabel(m.month)}
+                          </button>
+                        </td>
+                        <td className="py-1.5 pr-3 text-fg-muted">
+                          {m.billableCampaigns || '—'}
+                        </td>
+                        <td className="py-1.5 pr-3">
+                          {m.issued ? (
+                            <span className="inline-flex flex-wrap items-center gap-1">
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                                Issued {fmtDate(m.issuedAt)}
+                              </span>
+                              {m.externalRef && <span className="text-xs text-fg-muted">{m.externalRef}</span>}
+                              {/* Reality moved since the invoice went out. Never reconciled
+                                  automatically — voiding and reissuing is a judgement call. */}
+                              {m.drift?.material && (
+                                <span
+                                  className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900"
+                                  title={`A live recompute now says ${fmtUsd(m.liveTotalCents)}`}
+                                >
+                                  drifted
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-fg-subtle">
+                              {m.month >= thisMonth ? 'Live — month still open' : 'Not issued'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right font-medium text-fg">{fmtUsd(m.totalCents)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* The invoice run. Sticky so the total stays visible while ticking a long ledger. */}
+          {picked.size > 0 && (
+            <div className="sticky bottom-0 z-10 rounded-lg border border-brand-accent/30 bg-brand-tint px-3 py-2.5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-fg">
+                  {picked.size} month{picked.size === 1 ? '' : 's'} selected ·{' '}
+                  {fmtUsd(pickedTotalCents)}
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={downloadRangeCsv} className="text-xs font-semibold text-brand-accent hover:opacity-80">
+                    Export combined CSV
+                  </button>
+                  {pickedUnissued.length > 0 && (
+                    <>
+                      <input
+                        value={batchRef}
+                        onChange={(e) => setBatchRef(e.target.value)}
+                        placeholder="Invoice #"
+                        className={inputCls + ' mt-0 w-28'}
+                      />
+                      <button
+                        onClick={() => {
+                          // `force` is the deliberate override for a month that hasn't closed — a
+                          // prepay or an early close-out. Asked for explicitly, never assumed.
+                          const open = pickedUnissued.filter((m) => m >= thisMonth);
+                          if (
+                            open.length &&
+                            !window.confirm(
+                              `${open.join(', ')} ${open.length === 1 ? "hasn't" : "haven't"} finished yet. Issue anyway? Later knocks won't be included.`
+                            )
+                          ) return;
+                          issueManyMut.mutate({
+                            months: pickedUnissued,
+                            externalRef: batchRef || undefined,
+                            force: open.length > 0,
+                          });
+                        }}
+                        disabled={issueManyMut.isPending}
+                        className={btnCls + ' py-1.5 text-xs'}
+                      >
+                        {issueManyMut.isPending
+                          ? 'Issuing…'
+                          : `Issue ${pickedUnissued.length} month${pickedUnissued.length === 1 ? '' : 's'}`}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => {
+                      setPicked(new Set());
+                      setBatchResult(null);
+                    }}
+                    className="text-xs font-semibold text-fg-muted hover:text-fg"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              {/* A batch can partly succeed — already-issued months are skipped, not fatal — so the
+                  outcome is reported per month rather than as one verdict. */}
+              {batchResult && (
+                <ul className="mt-2 space-y-0.5 border-t border-brand-accent/20 pt-2 text-xs">
+                  {batchResult.results.map((r) => (
+                    <li key={r.month} className={r.ok ? 'text-fg' : 'text-danger'}>
+                      {r.month}: {r.ok ? `issued · ${fmtUsd(r.totalCents)}` : r.error}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* The paper trail — including the VOIDED rows, which the ledger above can't show because
+              it only knows what currently stands for each month. */}
+          {paperQ.data?.statements?.length > 0 && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Every statement</h3>
+              <ul className="mt-2 space-y-1 text-sm text-fg-muted">
+                {paperQ.data.statements.map((st) => (
+                  <li key={st._id}>
+                    <span className="font-medium text-fg">{st.month}</span> · {fmtUsd(st.totalCents)} ·{' '}
+                    {st.status === 'void' ? (
+                      <span className="text-danger">
+                        voided {fmtDate(st.voidedAt)}
+                        {st.voidedByUserId &&
+                          ` by ${[st.voidedByUserId.firstName, st.voidedByUserId.lastName].filter(Boolean).join(' ')}`}
+                        {st.voidReason ? ` — “${st.voidReason}”` : ''}
+                        {st.supersededByStatementId ? ' · replaced' : ''}
+                      </span>
+                    ) : (
+                      <>
+                        issued {fmtDate(st.issuedAt)}
+                        {st.issuedByUserId &&
+                          ` by ${[st.issuedByUserId.firstName, st.issuedByUserId.lastName].filter(Boolean).join(' ')}`}
+                        {st.externalRef ? ` · ${st.externalRef}` : ''}
+                      </>
+                    )}{' '}
+                    <span className="text-fg-subtle">· rules v{st.rulesVersion}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}

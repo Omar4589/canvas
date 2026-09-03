@@ -140,9 +140,22 @@ export function withTeam(match, team) {
 // with the flag OFF `billableDoors === knocks` and `restrictedDoors === 0` — an org that never
 // opts in sees nothing in the product change. That equivalence is the invariant this function
 // exists to hold; test/billableRestricted.int.test.js asserts it.
-export function knocksPipeline(match, { byCampaign = false, byPass = false, includeRestricted = false } = {}) {
+//
+// `monthTimeZone` buckets the SAME dedup by calendar month in that IANA zone, so one pass over a
+// date range answers what a per-month loop answered one query at a time (services/billing/statement.js
+// → monthlyStatementRange). The month goes in the INNER _id, which is what keeps a bucket identical
+// to the single-month result: a (household, pass) knocked in two months is one door in each, exactly
+// as two separately-windowed runs would report it. Mutually exclusive with byPass/byCampaign — the
+// outer group can only collapse to one key.
+export function knocksPipeline(
+  match,
+  { byCampaign = false, byPass = false, includeRestricted = false, monthTimeZone = null } = {}
+) {
   const inner = { householdId: '$householdId', passId: '$passId' };
   if (byCampaign) inner.campaignId = '$campaignId';
+  if (monthTimeZone) {
+    inner.month = { $dateToString: { format: '%Y-%m', date: '$timestamp', timezone: monthTimeZone } };
+  }
   const actions = includeRestricted ? BILLABLE_WITH_RESTRICTED : KNOCK_ACTIONS;
   return [
     { $match: { ...match, actionType: { $in: actions } } },
@@ -173,7 +186,7 @@ export function knocksPipeline(match, { byCampaign = false, byPass = false, incl
     },
     {
       $group: {
-        _id: byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
+        _id: monthTimeZone ? '$_id.month' : byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
         // Unchanged meaning: a door someone actually knocked. Rates read THIS.
         knocks: { $sum: '$hasKnock' },
         // What an opted-in org invoices from. The (household, pass) dedup does the hard part for

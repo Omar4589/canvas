@@ -88,7 +88,31 @@ reason** and reissued, and both rows survive.
 
 Only closed months can be issued (with a deliberate `force` override for a prepay or an early
 close-out), and internal orgs never can. **Close the month** at `/super-admin/billing` shows every
-org's issued / not-issued / drifting state for one month.
+org's issued / not-issued / drifting state — for one month, or across a **range** when you are
+closing several at once.
+
+### Invoicing several months at once
+
+Invoicing a client for July *and* August is one job, and doing it as two passes over a month picker
+is how the second month gets forgotten. The org's Billing panel has a **History** tab: every month
+in one ledger, each showing what it came to, whether it was issued, its invoice number, and a
+**drifted** flag where reality has moved since. Tick the months you're billing together and the
+footer gives you their combined total, a **single CSV** covering all of them, and **Issue** for the
+ones not yet frozen — under one invoice number.
+
+Each month still becomes its **own** statement, with its own audit entry. Nothing about the record
+changes; only the clicking does. A month that's already issued is skipped rather than failing the
+batch, and the result says per month what happened.
+
+### What a customer sees of their own history
+
+The org's own Billing page shows the same months — **without any money**. For each month: which
+campaigns were in the field, when each started billing, how many doors, and why any free ones were
+free. That last column is the useful one for a firm that invoices *its* client per door, and it
+moves with the **Count restricted homes as billable doors** setting on that same page.
+
+Prices are still absent by design (see above), and not merely hidden — the server strips every
+dollar figure before the page is sent.
 
 ## Trials, and what each account state means
 
@@ -320,6 +344,55 @@ reported for visibility, never priced.
 `billing[]` nor `setupCount`, so without it a $0 line would be invisible on the meter and the first
 question an account manager asks about a free campaign is "why".
 
+### A range of months — `monthlyStatementRange(orgId, {from, to})`
+
+Looping `monthlyStatement` is `O(months × campaigns × 3)` round-trips — ~336 queries for a
+fourteen-month view of an eight-campaign org, which is why a history view didn't exist. The range
+owner is **three queries per campaign for any range length**: first field visit, household count,
+and one **month-bucketed** knocks aggregation. The org, its subscription and its campaigns load once.
+
+The bucketing is a `monthTimeZone` option on the shared `knocksPipeline`
+([aggregations.js](../server/src/services/reports/aggregations.js)): it puts
+`$dateToString{format:'%Y-%m', timezone: tz}` in the **inner** `_id` beside `{householdId, passId}`
+and groups the outer stage on it. Extending the shared pipeline rather than writing a private one is
+what makes a bucket *structurally* identical to a separately-windowed run — same dedup, same
+`via:'bulk'` exclusion, same arithmetic. With the option unset the pipeline is byte-identical to
+before, so nothing else that uses it changes.
+
+Two consequences worth knowing:
+
+- The decision is still `decideMonth`, and the line is still `statementLine` — **one builder shared
+  with `monthlyStatement`**, so a month from the range is the same object the invoice is made of.
+  [statementRange.int.test.js](../server/test/statementRange.int.test.js) asserts exactly that,
+  `deepStrictEqual`, month by month. If those two ever diverge the history stops being evidence of
+  what was billed, which is the whole point of having it.
+- The conditional F+1 probe (`needsStartMonthVisitCount`) never runs here — the fact is already in
+  the bucket map. That is also why the aggregation window **overruns the range by one month**: when
+  the first-visit month is the *last* month asked for, the floor needs the following month's visit
+  count, which would otherwise be outside the window.
+
+Bounds: `BILLING_HISTORY_MAX_MONTHS = 24`; `monthsBetween(from, to)` validates and truncates from
+the **front**, so `to` — the month actually asked about — always survives. The bucket map is keyed by
+whatever months had activity, which is neither the range nor a subset of it, so the loop drives off
+the **requested** month list and treats a missing key as zero.
+
+`publicMonthHistory(range)` is the customer projection of it — same discipline as `publicUsage`, and
+the only place deciding what a client may see of their history: every `*Cents` field removed,
+per-campaign rows trimmed to months where a campaign billed, had door activity, or was made free by
+a grace/floor rule (the silent states would otherwise repeat on every row for years and are surfaced
+as `setupCount` instead). Two tests hold the line: the projector is walked for surviving cents keys
+in [statementRange.int.test.js](../server/test/statementRange.int.test.js), and the **HTTP response
+body** is walked in [billing.int.test.js](../server/test/billing.int.test.js) — because hiding a
+number in JSX still ships it.
+
+`issueStatementForMonth()` ([issueStatement.js](../server/src/services/billing/issueStatement.js))
+is the single owner of freezing one month — the internal-org refusal, the month-not-ended gate, the
+already-issued pre-check, the duplicate-key race guard, the `supersededByStatementId` back-stamp and
+the audit write. Both the single-month route and the batch route call it, so none of that exists
+twice. A refusal is a **return value, not a throw**, because a batch has to skip one month and keep
+going; the single-month route maps the codes back onto its original HTTP statuses, so its API is
+unchanged.
+
 `publicUsage(usage)` is the **customer-facing projection** — the same numbers with every dollar
 figure removed. [admin/billing.js](../server/src/routes/admin/billing.js) returns that, and
 `publicView` no longer sends `pricePerCampaignCents`. The money leaves the *payload*, not just the
@@ -415,9 +488,13 @@ pricing stays flat per campaign per month.
 | `GET …/billing/statement?month=YYYY-MM` | `{...live, statement, drift}` — the live recompute at the top level (unchanged shape), the frozen `Statement` if that month is issued, and the diff between them. CSV is built client-side from whichever is authoritative. |
 | `POST …/billing/statement/:month/issue` `{externalRef?, force?}` | **Freezes** the month into a `Statement`. 400 malformed · 403 `INTERNAL_NOT_BILLABLE` (checks both `org.isInternal` and `sub.status`) · 422 `MONTH_NOT_ENDED` unless `force` · 409 `ALREADY_ISSUED`, from the pre-check **and** from catching duplicate-key `11000` (the actual race guard). Back-stamps `supersededByStatementId` on the newest voided row, best-effort. Logs a `SubscriptionEvent`. |
 | `POST …/billing/statement/:statementId/void` `{reason}` | Voids an issued statement. `reason` **required** (400 without). Atomic `findOneAndUpdate` scoped by `organizationId` + `status:'issued'` → 409 if already void or another org's. Logs a `SubscriptionEvent`. |
-| `GET …/billing/statements` | Every statement ever issued or voided for this org, newest first, without `lines`. |
+| `GET …/billing/statements` | Every statement ever issued or voided for this org, newest first, without `lines`. Rendered as **Every statement** on the panel's History tab — the voided rows are the half the ledger can't show, since it only knows what currently stands per month. |
+| `GET …/billing/history?from=&to=` | **The month ledger.** One `monthlyStatementRange` pass: per month `{totalCents (frozen where issued, else live), liveTotalCents, billableCampaigns, issued, issuedAt/By, externalRef, rulesVersion, drift, lines}`, newest first. Defaults to the last 12 months. Carries each month's `lines` so a combined export never re-fetches month by month. |
+| `POST …/billing/statements/issue` `{months[], externalRef?, force?}` | **Issues several months under one invoice number.** De-duplicates and sorts oldest-first, then calls `issueStatementForMonth` per month — one `Statement` and one `SubscriptionEvent` each. Always **200** with `{ok, issuedCount, totalCents, results[]}`; a per-month `{ok:false, code}` (e.g. `ALREADY_ISSUED`) is a normal outcome and never aborts the rest. Capped at `BILLING_HISTORY_MAX_MONTHS`. |
 | `GET …/billing/campaigns` · `PATCH …/billing/campaigns/:campaignId` | Per-campaign negotiated rate. `pricePerCampaignCents` is `.nullable()` — **`null` restores "inherit the org rate"**, `0` is a legal comped rate. Org-scoped lookup (a foreign `campaignId` 404s). Super-admin only, by design: this must never be reachable from `admin/campaigns.js`. |
 | `GET /super-admin/billing/statements?month=&live=0\|1` | **The month-close board.** Every non-internal org's issued / not-issued state for one month + issued totals. `live=1` also recomputes each org and reports drift — `O(orgs × campaigns)` round-trips, so it is opt-in behind a button. Mounted **before** the `/super-admin` catch-all. |
+| `GET /super-admin/billing/statements?from=&to=` | **Range mode** on the same board — "who still owes me an invoice for July *and* August". Each org row keeps its single-month fields at the top level (additive, so the existing board is unaffected) and gains `months[]` plus `rangeTotalCents` (frozen where issued, live where not) and `unissuedMonths[]`. `live=1` costs **one** `monthlyStatementRange` per org rather than one statement walk per org per month. Inverted or malformed ranges 400. |
+| `GET /admin/billing/history?months=N` | The customer month ledger, same bill-payer gate. `publicMonthHistory` output: per month `{month, billableCampaigns, setupCount, graceCount, knocks, doors, campaigns[]}`, newest first, plus `maxMonths`. `months` is clamped to 1..`BILLING_HISTORY_MAX_MONTHS` (garbage falls back to 12) rather than trusted. **No dollar figure at any depth** — asserted by walking the response body. |
 | `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, **`usage`** via `publicUsage` (billable-campaign count, `setupCount`, `graceCount`, and the campaign breakdown), and the org's `billRestrictedDoors` default. **No dollar amounts at all** — no rate, no total, no per-campaign amount — and no billing contact / notes / source / Stripe ids. |
 | `PATCH /admin/billing/settings` `{billRestrictedDoors}` | Sets the org-wide default for counting restricted doors as billable doors. Same bill-payer gate as the GET. Exists here rather than on an org-settings page because there isn't one — every other org mutation is super-admin-only — and because it is a billing-counting policy. Per-campaign overrides go through `PATCH /admin/campaigns/:id` (org-admin only; a lead is refused). |
 | `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email,password?}` → uses the typed `password` or auto-generates a temp one, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
@@ -496,6 +573,30 @@ Added with the statement work:
   statement must not be retypeable), a **Reason** annotation per line, and a CSV that names itself
   `-issued` or `-live` and carries a provenance header row. `changeText()` renders the new
   `campaignRate` / `statementIssued` / `statementVoided` events.
+Added with the month-ledger work (Sep 2026):
+
+- **`OrgBillingPanel` is now three tabs** (`Segmented`): **Statement** (the existing single-month
+  section, and the tab it opens on — closing a month is what the panel is opened for), **History**,
+  and **Account** (status/trial, plan/contact/notes, rename, and the `SubscriptionEvent` audit list).
+  Nothing was removed; the panel simply stopped being one long scroll. Tab state is component state,
+  not the URL — the panel opens inline against an org selected on `OrganizationsPage`, and a URL
+  param would fight that selection.
+- **The History tab** — the month ledger with a checkbox per row, a sticky footer showing the
+  selected months' combined total, **Export combined CSV** (one sheet: month column, per-campaign
+  lines, per-month subtotals, grand total, each line carrying the same ISSUED/LIVE provenance the
+  single-month CSV stamps), and **Issue N months** under one invoice number. A partial batch reports
+  per month and leaves the failures ticked so a retry is one click. The history queries are
+  `enabled: tab === 'history'` so opening the panel costs nothing extra.
+- **[BillingPage.jsx](../client/src/pages/BillingPage.jsx) rebuilt** — the status card now renders
+  the per-campaign breakdown the server always sent and the page never showed, followed by a
+  **Month by month** table (Month · Billing · Doors · Knocks) whose rows expand to their campaigns,
+  with the restricted-doors toggle moved directly beneath it because that setting is what the Doors
+  column means. Still **dollar-free**, now enforced from both ends: the server strips the money and
+  [billingRender.smoke.test.js](../client/src/lib/billingRender.smoke.test.js) asserts no `$`
+  renders anywhere on the page.
+- **MonthClosePage range mode** — a One month / Range toggle; in range mode each org row shows a
+  chip per month (issued green, unissued amber, drift flagged) and a range total.
+
 - **[ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)** — on
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (aggregate, org-admin only, archives via
   the existing mutation) and [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)

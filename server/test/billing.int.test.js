@@ -342,6 +342,61 @@ test('statement: bills from first-knock month through archive month', { skip }, 
 
 // ── Batch 2: the cross-org revenue answers. ──
 
+// THE DOLLAR-FREE GUARANTEE, at the wire.
+//
+// publicMonthHistory() is unit-tested to strip cents (statementRange.int.test.js), but the promise
+// in docs/BILLING.md is about what a customer's BROWSER receives — and hiding a number in JSX still
+// ships it. So this walks the actual HTTP response body. It is the test that would have to fail
+// before the "customers never see a price in the app" line becomes false.
+test('the customer history endpoint ships NO dollar figure, at any depth', { skip }, async () => {
+  await Membership.updateOne(
+    { userId: (await User.findOne({ email: 'badmin@t.co' }))._id, organizationId: ctx.org._id },
+    { $set: { billingAccess: true } }
+  );
+  const res = await call('GET', '/admin/billing/history?months=6', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(res.status, 200, 'a billing admin can read their own history');
+  assert.ok(Array.isArray(res.json.months) && res.json.months.length === 6, 'six months back');
+
+  const leaked = [];
+  (function walk(v, path) {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${path}[${i}]`));
+    if (v && typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) {
+        if (/Cents$/.test(k) || k === 'rate' || k === 'price' || k === 'amount') leaked.push(`${path}.${k}`);
+        walk(val, `${path}.${k}`);
+      }
+    }
+  })(res.json, '$');
+  assert.deepStrictEqual(leaked, [], 'no money reaches the customer');
+  // Belt and braces: no dollar sign, and no bare 30000/300 rate anywhere in the serialized body.
+  assert.ok(!JSON.stringify(res.json).includes('$'), 'no currency symbol in the payload');
+});
+
+test('a SUPER admin reading the customer route gets the same dollar-free projection', { skip }, async () => {
+  // The projector is unconditional on purpose — one function decides what the customer surface
+  // shows, so there is no "staff mode" of this route that could be reached with the wrong token.
+  const res = await call('GET', '/admin/billing/history?months=3', { token: ctx.superTok, orgId: ctx.org._id });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!JSON.stringify(res.json).match(/Cents/), 'still no cents fields');
+});
+
+test('the customer history clamps the months window rather than trusting the query', { skip }, async () => {
+  const huge = await call('GET', '/admin/billing/history?months=9999', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(huge.status, 200);
+  assert.strictEqual(huge.json.months.length, huge.json.maxMonths, 'capped at the documented maximum');
+  const junk = await call('GET', '/admin/billing/history?months=banana', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.strictEqual(junk.status, 200);
+  assert.strictEqual(junk.json.months.length, 12, 'a garbage value falls back to the default');
+});
+
+test('the customer history is gated to billing admins, like the rest of the router', { skip }, async () => {
+  const plain = await User.create({ firstName: 'Pat', lastName: 'Plain', email: 'plainadmin@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: plain._id, organizationId: ctx.org._id, role: 'admin', isActive: true });
+  const denied = await call('GET', '/admin/billing/history', { token: signUserToken(plain), orgId: ctx.org._id });
+  assert.strictEqual(denied.status, 403);
+  assert.strictEqual(denied.json.code, 'billing-access-required');
+});
+
 test('billing-rollup: exact aggregate math, ranked rows, internal orgs excluded', { skip }, async () => {
   // An internal org must never appear in a revenue view.
   const internal = await Organization.create({ name: 'Doorline Internal', slug: 'dl-internal', isActive: true });

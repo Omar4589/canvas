@@ -7,7 +7,14 @@ import { Organization } from '../../models/Organization.js';
 import { Subscription } from '../../models/Subscription.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
-import { currentUsage, publicUsage } from '../../services/billing/statement.js';
+import {
+  BILLING_HISTORY_MAX_MONTHS,
+  currentUsage,
+  historyRange,
+  monthlyStatementRange,
+  publicMonthHistory,
+  publicUsage,
+} from '../../services/billing/statement.js';
 
 // The org-admin-facing slice of the subscription: enough to render the plan summary and the
 // banner. The billing contact and internal fields (notes, source, Stripe ids) never leave the
@@ -53,6 +60,28 @@ router.get('/', async (req, res, next) => {
       billRestrictedDoors: Boolean(org?.billRestrictedDoors),
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+// The month-by-month history behind the live meter — which campaigns were in the field in each of
+// the last N months, and how many doors. Same billing-admin gate as everything else on this router.
+//
+// DOLLAR-FREE, and enforced one layer down: publicMonthHistory() is the only projector that decides
+// what a customer may see, and it strips every cents field before this route ever gets the object.
+// Hiding a price in JSX would still ship it to the browser — see the note on publicUsage().
+//
+// What this DOES give them is the useful half: an org that invoices its own client per door reads
+// the `doors` column straight off this table, and the "count restricted homes" toggle below it is
+// exactly the switch that decides what `doors` means.
+router.get('/history', async (req, res, next) => {
+  try {
+    if (!req.activeOrg) return res.status(400).json({ error: 'Active organization required' });
+    const { from, to } = historyRange(req.query.months);
+    const range = await monthlyStatementRange(req.activeOrg._id, { from, to });
+    res.json({ ...publicMonthHistory(range), maxMonths: BILLING_HISTORY_MAX_MONTHS });
+  } catch (err) {
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
     next(err);
   }
 });
