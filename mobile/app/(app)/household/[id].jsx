@@ -20,6 +20,7 @@ import { loadRoleContext } from '../../../lib/role';
 import FixPinModal from '../../../components/FixPinModal';
 import AddPersonModal from '../../../components/AddPersonModal';
 import VoterMeta from '../../../components/VoterMeta';
+import DirectionsButton from '../../../components/DirectionsButton';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -307,6 +308,9 @@ export default function HouseholdDetail() {
             <Text style={styles.addressSub}>
               {household.city}, {household.state} {household.zipCode}
             </Text>
+            {/* Hands the ADDRESS to the canvasser's own maps app — the point is a second
+                opinion on where the house is when our pin looks wrong. */}
+            <DirectionsButton household={household} style={{ marginTop: spacing.sm }} />
             {household.lastActionAt && (
               <View style={styles.lastVisitBlock}>
                 <Text style={styles.lastVisitLine}>

@@ -6,7 +6,7 @@ kind: guide
 order: 33
 sourceDoc: MAPS.md
 summary: Read your assigned doors on the map, colored by status, and keep it in sync.
-tags: canvasser, map, doors, refresh
+tags: canvasser, map, doors, refresh, directions, navigation
 ---
 
 Your map shows the doors in your assigned book. Each pin is colored by its status, so you can see at a glance what's done and what's left as you work down the block.
@@ -22,5 +22,9 @@ The map stays in sync with your book automatically. Small changes an admin makes
 If a **red notice** appears at the top of the map saying location is required, your phone's location is off (or Doorline doesn't have permission). Tap the notice to fix it — recording doors is paused until location is back on, because every door needs a GPS stamp. See [Why does Doorline need my location?](why-location-required).
 
 > Tip: If your supervisor tells you they moved some houses to you, pull-to-refresh so your map picks them up.
+
+**Getting to the house.** Under the address on the pull-up panel there's a **Directions →** link. Tap it, pick your maps app, and it opens with walking directions to that house. On an iPhone you'll be offered Apple Maps, Google Maps and Waze; on Android, Google Maps or whichever other maps app you have. The link is on the house screen and the building screen too.
+
+Doorline sends the **street address**, not the pin from the map. That's on purpose: if a pin is sitting in the wrong spot, your maps app still looks the address up itself and takes you to the right house. Tapping Directions doesn't record anything, and if the app you pick isn't installed the directions open in your browser instead.
 
 If a house's detail reads **Approximate location**, its spot was placed by looking up the address rather than from an exact coordinate, so it can sit a little off. If one is clearly in the wrong place, tell your team lead — they can move it, and everyone picks up the corrected spot on their next sync. Knock the door you actually stood at either way. (A door that reads **Location confirmed** was one of these that an admin already checked — the spot is right.)

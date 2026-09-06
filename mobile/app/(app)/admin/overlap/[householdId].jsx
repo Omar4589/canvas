@@ -10,6 +10,7 @@ import { radius, spacing, actionLabel } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../../lib/useConsoleRole';
+import DirectionsButton from '../../../../components/DirectionsButton';
 
 initMapbox();
 
@@ -87,6 +88,7 @@ export default function OverlapDetail() {
             {h.city}, {h.state} {h.zipCode}
           </Text>
         ) : null}
+        {h ? <DirectionsButton household={h} style={{ marginTop: spacing.sm }} /> : null}
 
         {/* The house. ShapeSource + CircleLayer — never MarkerView/PointAnnotation (they
             break pinch-zoom on Fabric; the repo-wide rule). */}

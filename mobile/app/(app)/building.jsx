@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupBuildings } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
+import DirectionsButton from '../../components/DirectionsButton';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -59,6 +60,11 @@ export default function BuildingScreen() {
         <Text style={styles.summary}>
           {building.total} units · {building.done} done
         </Text>
+        {/* Whatever the header above shows: groupBuildings copies the first unit's
+            addressLine1, so `addressLine2` (the usual unit) is dropped, but a unit baked
+            into line 1 rides along. Either way both geocode to the same building, and the
+            link matches the address on screen. */}
+        <DirectionsButton household={building} style={{ marginTop: spacing.sm }} />
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + insets.bottom }}>

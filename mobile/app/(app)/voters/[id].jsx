@@ -17,6 +17,7 @@ import { formatExact, timeAgo } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import DirectionsButton from '../../../components/DirectionsButton';
 
 function answerText(a) {
   if (a == null || a === '') return '—';
@@ -125,6 +126,10 @@ export default function VoterProfile() {
               </Text>
               <Text style={styles.addrSub}>{h.city}, {h.state} {h.zipCode}</Text>
               {h.campaign ? <Text style={styles.addrSub}>Campaign: {h.campaign.name}</Text> : null}
+              {/* Below the whole address block, not between its lines: the sibling lines are
+                  2pt apart, so a link spliced in with an 8pt top margin would read as the
+                  heading for whatever followed it. */}
+              <DirectionsButton household={h} style={{ marginTop: spacing.sm }} />
               {h.members?.length ? (
                 <View style={{ marginTop: spacing.sm }}>
                   {h.members.map((m) => (

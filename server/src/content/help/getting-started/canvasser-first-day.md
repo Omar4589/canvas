@@ -20,7 +20,7 @@ Everything you need is right here in the app — the web console is for admins a
 3. **Allow location** when the app asks — and on iPhone, leave **Precise Location** on. Every door you record carries a GPS stamp (it's how your work is verified), and the app can't record doors without it. You can canvass with no signal, but not with location off.
 4. **Pick your campaign** on the "Pick a campaign" screen. If a campaign is split into several walk lists, it expands so you can pick the one you're working — then you land on your books.
 5. **Open a book** — your assigned books are waiting as pins on a map. Each book is an ordered list of houses for you to walk. The card at the top tells you two things: the campaign's **key dates** (Election Day with the actual date and how far off it is, plus the early-voting window) and a **legend** showing what the book pins mean — **Not started**, **In progress**, **Done**. Tap a book, then **Enter** to start.
-6. **Knock a door** — tap a house to see who lives there and record what happened. Each voter shows their party, age, and gender, when the record has them.
+6. **Knock a door** — tap a house to see who lives there and record what happened. Each voter shows their party, age, and gender, when the record has them. Not sure which house it is? Tap **Directions →** under the address to open your own maps app with walking directions: [How do I get directions to a house?](directions-to-a-house).
 
 ## Recording a door
 

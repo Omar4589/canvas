@@ -13,7 +13,7 @@ efforts) have their own docs.
 Related: [MAPS.md](MAPS.md) (the houses map + bottom sheet this flow lands on),
 [EFFORTS.md](EFFORTS.md) (efforts a canvasser picks between), [WALKLISTS.md](WALKLISTS.md) and
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (how books get assigned), [THEMING.md](THEMING.md) (the
-light/dark tokens every screen here is built from).
+light/dark tokens every screen here is built from), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (the **Directions** button — built on the door screen, map sheet, building screen and three lead surfaces — the keep-screen-on setting that was designed but not built, and what a lock-screen feature would cost).
 
 ---
 
@@ -176,6 +176,13 @@ porch. It's still on the voter's full profile under **Voters**.)
 Any door button recolors the pin and drops you back on the map the instant you tap — you're never
 waiting on the network.
 
+**Getting to the house.** Under the address there's a **Directions →** link (it's on the map's
+pull-up panel and the building screen too). Tap it and pick your maps app — on iPhone, Apple Maps,
+Google Maps or Waze; on Android, Google Maps or whatever else you have — and it opens with walking
+directions to the house. It sends the **street address**, not the app's pin, so if the pin is in the
+wrong spot the directions still take you to the right house. Nothing is recorded when you tap it,
+and if the app you pick isn't installed the directions open in your browser instead.
+
 **Someone answers who isn't on your list?** On survey campaigns there's an **＋ Add person** link
 beside the voter list (and on doors that show "No registered voters listed here."). Type their
 first and last name — phone and email are optional, only for people who'd like to be contacted
@@ -259,6 +266,11 @@ when an admin checked the approximate spot and vouched it's right without moving
 screen any more. Tell your lead which door is wrong and they'll move it; everyone picks up the corrected
 spot on their next sync. Knock the door you actually stood at — if the pin was wrong and it made your
 entry look suspicious, correcting the pin clears that up afterwards ([AUDIT.md](AUDIT.md) § B.7).
+
+Meanwhile, **Directions →** gets you there regardless: it hands your maps app the street address
+rather than the pin, so a misplaced pin doesn't misdirect you. That's the same reason the web Pin
+Fixes page sends the address to Google — see
+[LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md).
 
 Leads and admins: the affordance is the same screen, reached through **Switch to canvass mode**, plus
 the web Map page's and Turf Cutting page's "Move pin" (the latter from a house or building popup). See
@@ -563,6 +575,14 @@ branch the action area:
   `colors.status.restricted`, slate) *outside* the type branch — both are offered on every campaign
   type. The two look alike and count oppositely: `no_soliciting` is in `KNOCK_ACTIONS`, `restricted`
   is not (see [METRICS.md](METRICS.md)).
+- **Directions** (`components/DirectionsButton.jsx`) sits under the city line of the address card,
+  rendered from `lib/mapsLinks.js`. It opens an `ActionSheetIOS` sheet (Apple Maps / Google Maps /
+  Waze) or an Android `Alert` (Google Maps / Another maps app), each row an
+  `https:`-or-`geo:` URL carrying the **address**, never `location.coordinates`. Always
+  `Linking.openURL(...).catch(fallback)` and **never** `Linking.canOpenURL`, which would need
+  native config this build doesn't carry. Same component on the map sheet, the building screen and
+  three lead surfaces; full rationale in
+  [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) § B.
 - The four toggleable buttons (Wrong address, Refused, No soliciting, Restricted) are each gated on
   `outcomeOn(key)` — `bootstrap.campaign.disabledOutcomes` (per-campaign App Customization settings,
   [CAMPAIGNS.md](CAMPAIGNS.md)); a missing field (older server) means all on. Not home and the

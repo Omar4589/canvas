@@ -31,6 +31,7 @@ import LiveStatus from '../../../components/LiveStatus';
 import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
+import DirectionsButton from '../../../components/DirectionsButton';
 import { primaryReason, reasonColor, FAR_WARN_M } from '../../../lib/flags';
 import { postBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
 import { doorMarkState, describeMarkDoorResult, describeUnmarkDoorResult, deskMarkErrorMessage } from '../../../lib/restrictBooks';
@@ -1955,6 +1956,11 @@ export default function AdminMap() {
               ) : selected.coordConfidence === 'interpolated' ? (
                 <Text style={styles.coordChipApprox}>● Approximate location</Text>
               ) : null}
+              {/* Below the pin badges, not above them: the badges sit 4pt apart and
+                  `coordChipCorrected` is also brand-colored, so a brand link directly above
+                  them would read as part of that group. A lead checking a pin gets the same
+                  second opinion a canvasser does — the address, never our coordinate. */}
+              <DirectionsButton household={selected} style={{ marginTop: spacing.sm }} />
             </View>
             <View style={[styles.statusPill, { borderColor: colors.status[selected.status] || colors.border }]}>
               <View style={[styles.statusDot, { backgroundColor: colors.status[selected.status] }]} />

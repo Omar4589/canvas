@@ -31,6 +31,8 @@ Format: one question per line, optionally with a note on where the answer lives.
 - "Does an admin-entered survey answer count in my client report?" → **yes**, identically to one collected at the door — the "Entered by" stamp is about where the answer came from, not whether it counts. Covered in pages/page-door-outcomes.md + METRICS.md §Surveys — candidate FAQ if a client ever asks
 - "Why didn't the app warn before replacing a survey?" → the confirm needs a fresh sync; offline / a stale cache fails open **by design**, and the replaced answers are preserved server-side either way — guides/canvasser-door-survey.md + pages/page-duplicate-surveys.md
 
+- "Can I get directions to a house? The pin is in the wrong place." → **yes**, since 2026-09-05: **Directions →** under any address hands your maps app the STREET ADDRESS, not the pin, so a misplaced pin can't misdirect. Answered in faq/directions-to-a-house.md + guides/canvasser-map.md. Still tell the lead about a wrong pin — the app's own map keeps it until someone moves it (guides/fix-pin-location.md)
+
 ## Triaged (answered — safe to delete)
 
 - "Why can't I import a .xls, only .xlsx? What's the real difference?" → xls-file-wont-upload.md (two different files share the extension: delimited text named .xls imports fine, a real Excel 97–2003 workbook is a different binary format and is refused with the Save-As remedy)

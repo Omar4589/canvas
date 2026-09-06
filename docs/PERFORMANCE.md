@@ -10,7 +10,7 @@ stops when it isn't, and the guardrails that keep background work honest. Writte
 
 Related: [CANVASSER_APP.md](CANVASSER_APP.md) (the map screen and offline recording),
 [ADMIN_APP.md](ADMIN_APP.md) (admin screens and live map), [MAPS.md](MAPS.md) (map architecture),
-[TIMEZONES.md](TIMEZONES.md) (date handling in polled reports).
+[TIMEZONES.md](TIMEZONES.md) (date handling in polled reports), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (keep-screen-on and the lock-screen routes, and which of them would bend rule 1).
 
 ---
 

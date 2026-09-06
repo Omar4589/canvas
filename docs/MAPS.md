@@ -12,7 +12,7 @@ Related: [IMPORTS.md](IMPORTS.md) (where coordinates come from), [PASSES_AND_TUR
 map), [METRICS.md](METRICS.md) (the numbers behind the pins), [DATE_FILTERS.md](DATE_FILTERS.md)
 (the date-range control — on the map a window narrows the pins to interacted-with doors; the admin map
 now opens on **Today**), [AUDIT.md](AUDIT.md) (the GPS-audit **flag overlay** + the Audit page that
-reviews it).
+reviews it), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (the per-house **Directions** hand-off to the phone's maps app, and the lock-screen investigation).
 
 ---
 
@@ -148,6 +148,14 @@ A canvasser opens the app and sees the doors in the books assigned to them. They
   the phone; a "**pending**" badge shows how many are waiting. They sync automatically in the
   background once signal returns — nothing is lost.
 - **Switch the base map** between Street, Satellite, Hybrid, and more.
+
+**Directions to the house.** Tapping a pin opens the pull-up panel; under the address is a
+**Directions →** link (also on the house screen and the building screen). It opens your own maps app with
+walking directions: on iPhone a sheet offers Apple Maps, Google Maps and Waze; on Android, Google Maps
+or **Another maps app** for whatever else is installed. It sends the **street address**, not
+the pin, so a pin sitting on the wrong lot doesn't send you to the wrong lot. That's deliberate and
+it's the same choice the web Pin Fixes page makes with its Google Maps link. See
+[LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md).
 
 ## The web admin map
 
@@ -973,6 +981,16 @@ constants). A small legend labels the two rings when they're shown.
 | [mobile/lib/buildings.js](../mobile/lib/buildings.js) · [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) · [mobile/lib/location.js](../mobile/lib/location.js) | Buildings grouping · base-style switcher · per-action location capture. |
 | [mobile/components/AppLocationPuck.jsx](../mobile/components/AppLocationPuck.jsx) · [mobile/lib/useLocationFeed.js](../mobile/lib/useLocationFeed.js) · [mobile/lib/locationFeed.js](../mobile/lib/locationFeed.js) | The ONE engine-rendered blue-dot puck (never hide with `visible={false}` — unmount to stop GPS) · the canvasser map's owned GPS feed (foreground watcher + staleness watchdog) · its pure policy, tested in `locationFeed.test.js`. |
 | [mobile/lib/mapCounts.js](../mobile/lib/mapCounts.js) | Hand-mirrored subset of the web `mapCounts.js` (`fmtCount`, `inViewClip`, `describeMatch`, `explainCounts`, `MAP_HOUSEHOLD_CAP`) for the admin map's count chip — keep the sentences in step. |
+
+**Directions hand-off (mobile, 2026-09-05).** [`mobile/lib/mapsLinks.js`](../mobile/lib/mapsLinks.js)
+builds the URLs and [`mobile/components/DirectionsButton.jsx`](../mobile/components/DirectionsButton.jsx)
+renders the affordance, on six surfaces: the canvasser door screen, map sheet and building screen,
+and the lead-facing admin map sheet, overlap detail and voter profile. The URL always carries the
+**address**, never `location.coordinates` — a test enforces it, because a wrong pin is the reason
+the feature exists. Opens are `Linking.openURL(...).catch(fallback)`; `Linking.canOpenURL` is never
+called (it needs native config this build lacks, and Apple has deprecated it). Rationale, the URL
+forms per vendor, and the release and privacy paperwork are in
+[LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) § B.
 
 ## K. "Select doors" (lasso desk-restrict) — 2026-08-22
 

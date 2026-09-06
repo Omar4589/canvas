@@ -60,6 +60,7 @@ import StatusPill from '../../components/StatusPill';
 import TabSwitcher from '../../components/TabSwitcher';
 import DoorList from '../../components/DoorList';
 import VoterMeta from '../../components/VoterMeta';
+import DirectionsButton from '../../components/DirectionsButton';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors, formatPace } from '../../lib/rates';
 import { radius, spacing } from '../../lib/theme';
@@ -77,7 +78,12 @@ const DEFAULT_CENTER = [-84.5, 39.0];
 // air below the legend.
 const PROGRESS_PEEK_HEIGHT = 130;
 const PROGRESS_EXPANDED_HEIGHT = 480;
-const HOUSE_PEEK_HEIGHT = 220;
+// 220 → 248 when the Directions link joined the peek header (2026-09-05). The peek is a
+// FIXED height and everything below it is off-screen at rest, so the added row ate the
+// headroom the wrapping address needs: `sheetAddress` has no numberOfLines, and a long
+// "addressLine1, addressLine2" wraps to two lines, which used to fit and would otherwise
+// now push Open/Close out of view. Sized so the two-line address still fits.
+const HOUSE_PEEK_HEIGHT = 248;
 const HOUSE_EXPANDED_HEIGHT = 460;
 // Smooth ease, no bounce — the spring overshoot felt too playful for what is
 // essentially a stats panel.
@@ -1500,6 +1506,9 @@ function SelectedHouseSheetContent({
           <Text style={styles.sheetSub}>
             {selected.city}, {selected.state} {selected.zipCode}
           </Text>
+          {/* Under the address, not a third button in the Open/Close row — three buttons
+              crowd the sheet, and this mirrors the door screen's grammar. */}
+          <DirectionsButton household={selected} style={{ marginTop: spacing.sm }} />
         </View>
         <StatusPill status={selected.status} compact />
       </View>

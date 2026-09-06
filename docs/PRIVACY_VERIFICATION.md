@@ -1296,6 +1296,49 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     DPA text edit required.** Nothing new is collected, retained, shared, or made visible to anyone
     who could not already see it. Owner to confirm before the production deploy.
 
+20. **[v6 2026-09-05 — Per-house "Directions": a USER-INITIATED HAND-OFF of one address to the
+    canvasser's own maps app. Same class as item 15; no subprocessor, no policy edit.]** The mobile
+    app gained a **Directions** link under a door's address on six surfaces (canvasser door screen,
+    map sheet, building screen; lead/admin map sheet, overlap detail, voter profile). Tapping it
+    offers named maps apps and opens one with walking directions
+    (`mobile/lib/mapsLinks.js`, `mobile/components/DirectionsButton.jsx`). Checked against all five
+    triggers in `CLAUDE.md`: **What we collect** — nothing. No field, no model, no request; the
+    builder is pure and the app fetches nothing. **Retention/deletion** — untouched. **Who can
+    access customer data** — unchanged; every surface already rendered that address to that same
+    reader, and the link adds no route and no role. **Sharing/subprocessors** — the substantive
+    question, and the answer is the one item 15 already recorded for the web Pin Fixes "Open in
+    Google Maps" link: the address reaches Apple/Google/Waze **only on the canvasser's explicit
+    per-door tap**, from their own device, under their own account with that vendor, replacing the
+    identical manual workflow of typing the address into their maps app. Doorline engages nobody
+    "to provide the Service" (`DPA.md` §6's test), sends nothing server-side, prefetches nothing,
+    and embeds no maps SDK — every option is a plain `Linking.openURL` of an `https:` or `geo:`
+    URL. **Not a DPA §6 subprocessor event; no customer notice; no `privacy.html` edit.** Two
+    differences from item 15 are recorded deliberately: the actor is a **canvasser** rather than
+    staff (already an authorized reader of that address under the policy's within-your-organization
+    paragraph), and the recipient is **whichever maps app the canvasser or the OS picks, including
+    Waze**, not Google alone. Google Play's Data-safety definition of "sharing" does include
+    on-device transfer to another app, and this is exempt only through its user-initiated
+    exception — **so the explicit per-door tap and the named-app choice are load-bearing**: any
+    future auto-open, prefetch, or silent hand-off would leave that exemption and require a fresh
+    look. **What we expose** — the address, to a maps app the canvasser chose, and nothing else:
+    no voter name, no coordinate, no door status. The URL deliberately carries the **street
+    address, never `location.coordinates`** (a test asserts no builder emits a coordinate), which
+    is both the feature's purpose and a narrower disclosure than a pin would be. **Assessment: no
+    Privacy Policy / ToS / DPA text edit required.** If the link is ever automated, or an embedded
+    map or server-side geocoding replaces it, THAT is the §6 event — the same boundary item 15
+    draws. Owner to confirm before the production OTA. **Note the unrelated gate:** item 16's
+    `privacy.html` edit is still open and still blocks the production mobile OTA, so this ships to
+    staging only until the owner makes it (§B.8 of
+    [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md)).
+
+    *Housekeeping, folded in here rather than left to drift: the §C9(a) grep contract reads
+    "`watchPositionAsync` → exactly one match". As of 2026-09-05 it matches **one call site**
+    (`mobile/lib/useLocationFeed.js`) plus two comment lines that merely name the function
+    (`useLocationFeed.js`, `lib/locationFeed.js`). The contract should be read as counting call
+    sites, not lines; the background terms (`startLocationUpdatesAsync | TaskManager | defineTask |
+    ACCESS_BACKGROUND_LOCATION | requestBackgroundPermissionsAsync`) return **zero**, re-verified
+    2026-09-05, and must stay zero. Directions adds no location read of any kind.*
+
 ---
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
