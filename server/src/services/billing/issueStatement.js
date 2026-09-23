@@ -1,6 +1,7 @@
 import { Statement } from '../../models/Statement.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
 import { currentMonth, monthDayBounds, monthlyStatement } from './statement.js';
+import { dueAtFor, termsDaysFor } from './invoicingState.js';
 
 // FREEZING ONE MONTH — the whole of it, in one function.
 //
@@ -61,6 +62,12 @@ export async function issueStatementForMonth({ org, sub, month, userId, external
   }
 
   const live = await monthlyStatement(org._id, month);
+  // WHEN IT FALLS DUE, decided here and frozen. `issuedAt` is computed once so `dueAt - issuedAt`
+  // is exactly the terms, to the millisecond, however slow the create is. Terms come from the ONE
+  // resolver, so a deliberate net-0 survives (see invoicingState.termsDaysFor).
+  const issuedAt = new Date();
+  const termsDays = termsDaysFor(sub);
+  const dueAt = dueAtFor(issuedAt, termsDays);
   let statement;
   try {
     statement = await Statement.create({
@@ -71,9 +78,11 @@ export async function issueStatementForMonth({ org, sub, month, userId, external
       rulesVersion: live.rulesVersion,
       totalCents: live.totalCents,
       lines: live.lines,
-      issuedAt: new Date(),
+      issuedAt,
       issuedByUserId: userId,
       externalRef: externalRef || '',
+      termsDays,
+      dueAt,
     });
   } catch (err) {
     // THE race guard. Two concurrent issues both pass the pre-check; the partial unique index
@@ -116,6 +125,8 @@ export async function issueStatementForMonth({ org, sub, month, userId, external
         rulesVersion: statement.rulesVersion,
         statementId: String(statement._id),
         externalRef: statement.externalRef || null,
+        dueAt: statement.dueAt,
+        termsDays: statement.termsDays,
       },
     },
     reason: 'Statement issued',

@@ -33,6 +33,15 @@ Format: one question per line, optionally with a note on where the answer lives.
 
 - "Can I get directions to a house? The pin is in the wrong place." → **yes**, since 2026-09-05: **Directions →** under any address hands your maps app the STREET ADDRESS, not the pin, so a misplaced pin can't misdirect. Answered in faq/directions-to-a-house.md + guides/canvasser-map.md. Still tell the lead about a wrong pin — the app's own map keeps it until someone moves it (guides/fix-pin-location.md)
 
+- "A canvasser says the app won't let them record a door and blames the app" → check Precise Location first: approximate-only is a HARD block on both platforms, by design, and it records nothing rather than saving an unverifiable door. Answered in faq/why-location-required.md (with the per-platform settings path)
+
+
+- "Where do I record that a client paid?" → the org's **Statements** tab → **Mark paid** (date + your reference number), or the Outstanding card on its Overview. Answered in faq/where-do-i-record-a-payment.md + pages/page-organizations.md. Doorline still doesn't take payment — it keeps the bookkeeping
+- "Why isn't this month listed as needing an invoice? It's closed." → because it came to **$0**. Awaiting invoice = closed AND more than $0 AND no statement; a $0 month reads "Nothing to bill" and owes nobody anything. Answered in faq/what-does-awaiting-invoice-mean.md
+- "I changed the payment terms but an old invoice still shows the old due date" → by design: the due date is frozen when the statement is issued, exactly like the rate. Answered in faq/why-did-the-due-date-not-change.md
+- "Why won't it let me void this statement?" → it is marked **paid**; unmark it first, so the money record and the invoice correction are two separate audited steps. Covered in faq/where-do-i-record-a-payment.md — candidate FAQ of its own if it recurs
+- "A bunch of old invoices suddenly show as overdue" → expected on the day due dates shipped: every legacy invoice past its date became visible at once. Mark the already-paid ones paid from each org's Statements tab (Outstanding filter). Covered in BILLING.md → Migration & deploy — candidate FAQ if it reaches a second person
+
 ## Triaged (answered — safe to delete)
 
 - "Why can't I import a .xls, only .xlsx? What's the real difference?" → xls-file-wont-upload.md (two different files share the extension: delimited text named .xls imports fine, a real Excel 97–2003 workbook is a different binary format and is refused with the Save-As remedy)

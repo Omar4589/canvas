@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
+import { orgPagePath } from '../lib/orgPageTabs.js';
 
 
 const DOT_CLS = {
@@ -101,7 +102,7 @@ export default function CrossOrgActivityFeed({ limit = 50, refetchMs = 30_000 })
                 </span>
                 {e.organization && (
                   <button
-                    onClick={() => navigate(`/organizations?billing=${e.organization.id}`)}
+                    onClick={() => navigate(orgPagePath(e.organization.id, { tab: 'statements' }))}
                     title={`Open ${e.organization.name} on the Organizations page`}
                     className="rounded-full bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted hover:text-fg"
                   >

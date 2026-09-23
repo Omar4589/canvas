@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import Pager from '../components/Pager.jsx';
 import LockoutPanel from '../components/LockoutPanel.jsx';
 import { formatDate, formatRelative } from '../lib/dates.js';
+import { orgPagePath } from '../lib/orgPageTabs.js';
 
 const LIMIT = 25;
 
@@ -223,7 +224,7 @@ export default function SuperAdminUsersPage() {
                         {u.memberships.map((m) => (
                           <button
                             key={m.organizationId}
-                            onClick={() => navigate(`/organizations?billing=${m.organizationId}`)}
+                            onClick={() => navigate(orgPagePath(m.organizationId, { tab: 'statements' }))}
                             title={`Open ${m.organizationName}'s billing panel`}
                             className={
                               m.role === 'admin'

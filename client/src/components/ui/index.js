@@ -8,6 +8,7 @@ export { Avatar, AvatarGroup } from './Avatar.jsx';
 export { default as Skeleton, SkeletonRows } from './Skeleton.jsx';
 export { default as EmptyState } from './EmptyState.jsx';
 export { default as Segmented } from './Segmented.jsx';
+export { default as Tabs } from './Tabs.jsx';
 export { default as Overlay } from './Overlay.jsx';
 export { default as Modal } from './Modal.jsx';
 export { default as Drawer } from './Drawer.jsx';

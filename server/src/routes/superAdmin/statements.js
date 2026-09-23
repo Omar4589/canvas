@@ -4,8 +4,20 @@ import { Organization } from '../../models/Organization.js';
 import { NOT_DELETING } from '../../services/platform/orgDeletionState.js';
 import { Statement } from '../../models/Statement.js';
 import { Subscription } from '../../models/Subscription.js';
-import { monthDayBounds, monthlyStatementRange, monthsBetween } from '../../services/billing/statement.js';
+import {
+  currentMonth,
+  monthDayBounds,
+  monthlyStatementRange,
+  monthsBetween,
+} from '../../services/billing/statement.js';
 import { statementDrift } from '../../services/billing/statementDrift.js';
+import { addMonths } from '../../services/billing/billingMonths.js';
+import {
+  classifyMonth,
+  effectiveDueAt,
+  paymentStateOf,
+  termsDaysFor,
+} from '../../services/billing/invoicingState.js';
 
 // The MONTH-CLOSE BOARD: for one month, every org's issued-or-not state in a single view.
 //
@@ -32,8 +44,12 @@ router.get('/statements', async (req, res, next) => {
         return res.status(400).json({ error: err.message });
       }
     } else {
-      if (!monthDayBounds(month)) return res.status(400).json({ error: 'month must be YYYY-MM' });
-      months = [month];
+      // No month? Default to the LAST CLOSED one — the month you are almost always here to close.
+      // The client used to pick this from the browser clock, which disagrees with the server's UTC
+      // month for several hours around each boundary; now it adopts `month` from this response.
+      const resolved = month || addMonths(currentMonth(), -1);
+      if (!monthDayBounds(resolved)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+      months = [resolved];
     }
     // Recomputing every org's month live is the expensive path — it is O(orgs × campaigns) database
     // round-trips, strictly worse than /billing-rollup, which already loops serially. So it is
@@ -45,11 +61,13 @@ router.get('/statements', async (req, res, next) => {
       // NOT_DELETING: never put an invoice in front of a tenant we are destroying (and Statement
       // is swept by the cascade moments later anyway).
       Organization.find(NOT_DELETING, 'name slug isActive isInternal').sort({ name: 1 }).lean(),
-      Subscription.find({}, 'organizationId status').lean(),
+      Subscription.find({}, 'organizationId status paymentTermsDays').lean(),
       Statement.find({ month: { $in: months }, status: 'issued' }, { lines: 0 })
         .populate('issuedByUserId', 'firstName lastName')
+        .populate('paidByUserId', 'firstName lastName')
         .lean(),
     ]);
+    const now = new Date();
     const subMap = new Map(subs.map((s) => [String(s.organizationId), s]));
     // org -> month -> statement. In single-month mode the inner map has at most one entry, which is
     // what keeps the existing row shape below a straight lookup.
@@ -75,6 +93,7 @@ router.get('/statements', async (req, res, next) => {
         live = new Map(r.statements.map((st) => [st.month, st]));
       }
 
+      const termsDays = termsDaysFor(sub);
       const monthRows = [];
       for (const m of months) {
         const stmt = byMonth.get(m) || null;
@@ -92,6 +111,33 @@ router.get('/statements', async (req, res, next) => {
           issuedTotalCents: stmt?.totalCents ?? null,
           liveTotalCents: liveStmt ? liveStmt.totalCents : null,
           drift: null,
+          // ── additive: the same payment vocabulary the desk and the org page use ──
+          dueAt: stmt ? effectiveDueAt(stmt, termsDays) : null,
+          paidAt: stmt?.paidAt ?? null,
+          paidBy: stmt?.paidByUserId
+            ? `${stmt.paidByUserId.firstName || ''} ${stmt.paidByUserId.lastName || ''}`.trim()
+            : null,
+          paymentRef: stmt?.paymentRef || null,
+          paymentState: stmt ? paymentStateOf(stmt, { now, termsDays }) : null,
+          // In live mode a closed month with nothing to bill is 'zero', not an unissued alarm: a
+          // $0 month owes nobody anything, and clicking Issue on thirty of them is busywork.
+          //
+          // NULL for an un-issued month in the cheap mode, deliberately. Without a live total
+          // there is no way to tell "owes $600" from "owes nothing", and defaulting either way
+          // would be the exact lie this vocabulary exists to prevent. An ISSUED month is always
+          // classifiable — its frozen row carries everything the answer needs.
+          state:
+            stmt || liveStmt
+              ? classifyMonth({
+                  month: m,
+                  currentMonth: currentMonth(now),
+                  frozen: stmt,
+                  liveTotalCents: liveStmt ? liveStmt.totalCents : 0,
+                  internal: false,
+                  now,
+                  termsDays,
+                })
+              : null,
         };
         // Only an ISSUED month can drift — an un-issued one has nothing to disagree with.
         if (wantLive && stmt && liveStmt) {
@@ -126,7 +172,12 @@ router.get('/statements', async (req, res, next) => {
     // single-month ones always did.
     const all = rows.flatMap((r) => r.months);
     res.json({
-      month: rangeMode ? months[months.length - 1] : month,
+      month: rangeMode ? months[months.length - 1] : months[0],
+      // The server's month, so the client's picker never offers one the issue gate would refuse.
+      currentMonth: currentMonth(now),
+      asOf: now,
+      paidCount: all.filter((r) => r.paymentState === 'paid').length,
+      overdueCount: all.filter((r) => r.paymentState === 'overdue').length,
       from: months[0],
       to: months[months.length - 1],
       months,
@@ -134,7 +185,12 @@ router.get('/statements', async (req, res, next) => {
       live: wantLive,
       organizations: rows,
       issuedCount: all.filter((r) => r.issued).length,
-      unissuedCount: all.filter((r) => !r.issued).length,
+      // Counts the ALARM, not the absence. In live mode a closed $0 month is 'zero' — nobody owes
+      // anything for it — and folding those in told an operator to chase 35 invoices when there
+      // were 5, which is the exact miscount the 'zero' state exists to prevent. Without `live`
+      // there is no state to judge by, so that mode's count is unchanged.
+      unissuedCount: all.filter((r) => !r.issued && r.state !== 'zero').length,
+      zeroCount: all.filter((r) => r.state === 'zero').length,
       issuedTotalCents: all.reduce((s, r) => s + (r.issuedTotalCents || 0), 0),
       liveTotalCents: wantLive ? all.reduce((s, r) => s + (r.liveTotalCents || 0), 0) : null,
       driftingCount: wantLive ? all.filter((r) => r.drift?.material).length : null,

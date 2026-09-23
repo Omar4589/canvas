@@ -56,8 +56,8 @@ JavaScript change like Directions, and it would remove the most likely real pain
 phone at every door. The owner scoped this change to Directions alone; section C keeps the design
 if it is ever wanted.
 
-**One thing gates the production release, and it is not this feature.** A production mobile
-over-the-air publish is currently blocked by an unrelated commitment: see "The ship gate" below.
+**A gate stood in front of the production release, and it is now clear.** It was never this
+feature's: see "The ship gate" below for what it was and how it closed.
 
 **What a true lock-screen surface would cost:** a native store release on both platforms (four
 builds, two store reviews, the build-currency dance), a privacy decision from the owner because a
@@ -65,32 +65,29 @@ voter's street address would be readable by anyone holding a locked phone, and o
 framework upgrade or hand-written Swift, because iOS has no way to show an app over the lock
 screen at all.
 
-## The ship gate (read before publishing)
+## The ship gate (closed 2026-09-06)
 
-**Directions is finished and safe to publish to the staging lane today. It must not go to
-production until an unrelated edit lands.**
+**Directions is finished and clear to publish to both lanes.** For two days it was not, and the
+reason is worth keeping, because it had nothing to do with Directions.
 
-This has nothing to do with Directions. On 2026-08-29 the walk-up-voters feature shipped into
-`main`: canvassers on survey campaigns can now create a voter record at the door, typing a name and
-optionally a phone and email. Our privacy record wrote that up and recorded a condition in plain
-terms: the published Privacy Policy still says voter records arrive one way, because *"our customers
-upload"* them, and it lists the categories we hold without email. A person typing a new record into
-the app at a door is a second way in, and email is a new category. Until the owner edits the policy
-to say so, that feature must not reach production phones.
+On 2026-08-29 the walk-up-voters feature shipped into `main`: canvassers on survey campaigns can
+create a voter record at the door, typing a name and optionally a phone and email. Our privacy
+record wrote that up and attached a condition in plain terms. The published Privacy Policy said
+voter records arrive one way, because *"our customers upload"* them, and its list of what we hold
+did not include email. A person typing a new record into the app at a door is a second way in, and
+email was a new category. Until the policy said so, that feature could not reach production phones.
 
-Because a production publish sends everything in `main`, publishing Directions would carry walk-up
-voters with it. Verified 2026-09-05:
+Because a production publish sends everything in `main`, publishing Directions would have carried
+walk-up voters with it. So the gate applied to this change without being about it.
 
-- The condition is written at [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 16, which
-  calls the edit "a SHIP GATE for the production mobile OTA" and adds that staging may precede it.
-- No later item resolves it.
-- `client/public/privacy.html` still carries the upload-only sentence and no email in the voter
-  category, so the gate is open.
-- The walk-up-voters code, email field included, is in `main` and would ride any production bundle.
+**The owner made the edit on 2026-09-06**, and the "Voter and constituent information" paragraph in
+`client/public/privacy.html` now names both: email addresses joined the enumerated categories, and
+a new sentence describes a canvasser adding a person at the door, taking a phone and email only
+when that person volunteers them so the campaign can follow up. The privacy record's item 16 is
+stamped closed, and item 20, the stamp for Directions itself, no longer points at an open gate.
 
-**So:** publish `npm run ota:staging` now and confirm Directions in the field. Production waits on
-the owner's `privacy.html` edit, which is theirs to make deliberately and never a side effect of
-code. That edit unblocks two features at once.
+**So:** `npm run ota:staging`, confirm in the field, merge, then `npm run ota:production`. One edit
+released two features.
 
 ## Directions to a house
 
@@ -551,10 +548,9 @@ JavaScript and Help Center content only. Verified on the finished change, 2026-0
 - The help articles ship **with the server**, so the FAQ and guide changes reach both clients on a
   normal server deploy with no app release.
 
-**Publish to staging now; production is gated.** `npm run ota:staging` from the branch, confirm on a
-staging phone, merge. **Do not run `npm run ota:production` until the owner's `privacy.html` edit
-lands** — that gate is item 16's, not this feature's, and it is explained under "The ship gate" in
-Part 1. `ota:check` runs ahead of both and is the backstop that the tree still matches the fleet.
+**Both lanes are clear.** `npm run ota:staging` from the branch, confirm on a staging phone, merge,
+then `npm run ota:production` from `main`. The item 16 `privacy.html` gate that briefly held the
+production lane closed on 2026-09-06; see "The ship gate" in Part 1. `ota:check` runs ahead of both and is the backstop that the tree still matches the fleet.
 
 ## C. Keep screen on — design (NOT BUILT; kept as a costed option)
 

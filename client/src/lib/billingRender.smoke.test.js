@@ -110,38 +110,6 @@ test('BillingPage renders a month history and shows NO price, anywhere', async (
   assert.doesNotMatch(html, /\bRate\b/, 'and no rate column');
 });
 
-test('OrgBillingPanel renders all three tabs', async () => {
-  const html = await render({
-    entry: (h) => `import React from 'react';
-     import { renderToString } from 'react-dom/server';
-     import { MemoryRouter } from 'react-router-dom';
-     import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-     import OrgBillingPanel from '${join(h, '../components/OrgBillingPanel.jsx')}';
-     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-     qc.setQueryData(['super-admin', 'billing', 'o1', 'events', 0], {
-       organization: { name: 'Acme Field', slug: 'acme', isInternal: false },
-       subscription: { _id: 's1', status: 'active', statusChangedAt: '2026-01-01T00:00:00Z', pricePerCampaignCents: 30000, billingContact: { name: '', email: '' }, notes: '', source: 'manual' },
-       entitlement: { effective: 'active' },
-       events: [],
-       eventsTotal: 0,
-     });
-     globalThis.fetch = () => new Promise(() => {});
-     export const html = renderToString(
-       <QueryClientProvider client={qc}>
-         <MemoryRouter><OrgBillingPanel orgId="o1" orgName="Acme Field" onClose={() => {}} /></MemoryRouter>
-       </QueryClientProvider>
-     );`,
-  });
-
-  // The tab bar exists and the panel opens on Statement — the tab this panel is opened for.
-  assert.match(html, /Statement/);
-  assert.match(html, /History/);
-  assert.match(html, /Account/);
-  assert.match(html, /Monthly statement/, 'the Statement tab is the one rendered first');
-  // Account-tab content is behind its tab, so it must NOT be in the initial output.
-  assert.doesNotMatch(html, /Internal notes/, 'the Account tab is not rendered until selected');
-});
-
 test('MonthClosePage renders with the range toggle', async () => {
   const html = await render({
     entry: (h) => `import React from 'react';

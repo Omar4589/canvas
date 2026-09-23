@@ -34,6 +34,7 @@
     "migrate:billing": "node src/migrations/migrateBilling.js",
     "migrate:billing-access": "node src/migrations/migrateBillingAccess.js",
     "migrate:build-indexes": "node src/migrations/buildIndexes.js",
+    "migrate:statement-due": "node src/migrations/backfillStatementDueDates.js",
     "migrate:strip-geocode-raw": "node src/migrations/stripGeocodeRaw.js",
     "migrate:geocode-lastused": "node src/migrations/backfillGeocodeLastUsed.js",
     "migrate:scrub-map-points": "node src/migrations/scrubMapPointAnswers.js",

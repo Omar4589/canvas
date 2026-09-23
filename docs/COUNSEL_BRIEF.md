@@ -18,6 +18,11 @@ Three facts carry all of our legal exposure:
 
 1. **Our customers upload state voter files** to the platform (names, home addresses, party
    affiliation, date of birth, voter ID numbers). Voters themselves never interact with us.
+   Since August 2026 there is a **second, smaller intake**: a canvasser standing at a door can
+   create a record for someone who answers but is not on the uploaded list, entering a first and
+   last name plus — only if that person volunteers them so the campaign can follow up — a
+   telephone number and an **email address**. Email is the one category that arrives this way and
+   no other. Those records are flagged as added at the door, with who added them and when.
 2. **Our mobile app GPS-stamps every door a canvasser knocks**, and records the distance between the
    canvasser and the house, so the campaign can verify the work actually happened. This is a headline
    feature, not a side effect.

@@ -11,6 +11,8 @@ import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { BillingPill, InternalBadge } from '../lib/billingStatus.jsx';
 import { PLATFORM_TOTALS, OVERVIEW_HELP, TOTALS_INTRO, IDLE_ORGS_HELP, trendCaveat } from '../lib/platformStatsMeta.js';
 import { Sparkline } from '../components/charts/index.jsx';
+import { orgPagePath } from '../lib/orgPageTabs.js';
+import { atRiskLabel, atRiskTab } from '../lib/orgDesk.js';
 
 const TREND_RANGES = [
   { days: 30, label: '30d' },
@@ -265,19 +267,13 @@ export default function SuperAdminHomePage() {
               .map((it, i, arr) => (
                 <span key={`${it.organizationId}-${it.type}`}>
                   <button
-                    onClick={() => navigate(`/organizations?billing=${it.organizationId}`)}
+                    onClick={() => navigate(orgPagePath(it.organizationId, { tab: atRiskTab(it) }))}
                     className="font-semibold underline underline-offset-2 hover:opacity-80"
                   >
                     {it.name}
                   </button>
                   {' ('}
-                  {it.type === 'trial_expiring'
-                    ? it.trialDaysLeft === 0
-                      ? 'trial expired'
-                      : `trial ends in ${it.trialDaysLeft}d`
-                    : it.type === 'wind_down'
-                      ? `deletes ${new Date(it.windDownEndsAt).toLocaleDateString()}`
-                      : it.type.replace('_', ' ')}
+                  {atRiskLabel(it)}
                   {')'}
                   {i < arr.length - 1 ? ' · ' : ''}
                 </span>
@@ -307,7 +303,7 @@ export default function SuperAdminHomePage() {
           {idleOrgs.length > 0 && (
             <div className="mt-2 overflow-x-auto rounded border border-border">
               <table className="w-full text-left text-sm">
-                <thead className="bg-muted text-xs uppercase tracking-wide text-fg-muted">
+                <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
                   <tr>
                     <th className="px-3 py-2">Organization</th>
                     <th className="px-3 py-2">Status</th>
@@ -327,7 +323,7 @@ export default function SuperAdminHomePage() {
                       </td>
                       <td className="px-3 py-2 text-right">
                         <button
-                          onClick={() => navigate(`/organizations?billing=${o.organizationId}`)}
+                          onClick={() => navigate(orgPagePath(o.organizationId, { tab: 'statements' }))}
                           className="text-xs font-semibold text-brand-accent hover:underline"
                         >
                           Manage billing →
@@ -476,7 +472,7 @@ export default function SuperAdminHomePage() {
                           <BillingPill effective={o.billing.effective} />
                         )}
                       {o.activeNowCount > 0 && (
-                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                        <span className="rounded-full bg-success-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-fg">
                           🟢 {o.activeNowCount} active
                         </span>
                       )}

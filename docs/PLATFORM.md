@@ -1,8 +1,8 @@
 # The platform console (super admin)
 
 What a **super admin** is, and the platform-wide console they use to oversee every organization on the
-instance — the Control Room, Organizations, All Users, Imports (with geocoding costs), People, and
-background Jobs.
+instance — the Control Room, Organizations, Month close, All Users, Imports (with geocoding costs),
+People, and background Jobs.
 
 - **Part 1 — For everyone** is plain language: who a super admin is and what each screen does.
 - **Part 2 — Technical reference** is for developers (and Claude): the gate, the endpoints, and where
@@ -51,7 +51,7 @@ so "signed out then in" and "session expired then in" landed in different places
   **Restricted** / Survey / Lit drop) from across all orgs. Two more blocks (moved here from Support
   access): the **Idle organizations** queue — active-status, $0 (no live campaign), silent past the
   idle window; the population neither retention sweep can ever resolve, so a human decides
-  re-engage vs terminate, and each row's **Manage billing →** deep-links to that org's Billing panel
+  re-engage vs terminate, and each row's **Manage billing →** deep-links to that org's Account tab
   (`/organizations?billing=<orgId>`) — and the lifetime **Platform totals** (organizations,
   campaigns, doors knocked, surveys, voters), which exclude internal/demo orgs and survive customer
   deletion. **Every number on the page carries an ⓘ** explaining exactly what it counts (copy in
@@ -70,29 +70,41 @@ so "signed out then in" and "session expired then in" landed in different places
   deletions are scheduled (with a "need a human" count when any is overdue or failed) — each linking
   to Support access. The **Billing needs attention** strip is now server-defined (the shared
   "at-risk" list: trials expiring within 7 days, past due, suspended, canceled orgs in wind-down)
-  and each name deep-links to that org's Billing panel. Feed rows are drill-able (the org chip opens
-  its billing panel) and the feed can **Load older** — history is no longer capped at the newest 50.
-- **Organizations** — the revenue view. Each org's name opens a read-only **org detail page**
-  (`/organizations/:orgId`; also reachable from a "Details" chip on the Control Room cards): the
-  **member roster** — the one thing that previously required burning a logged support session just
-  to look at — plus the campaign list with last activity, and deep-links to the billing panel, the
-  access log pre-filtered to that org, and the deletion-requests list. All metadata, no grant, no
-  audit row; **switching in** stays the (correctly grant-gated) way to reach voter content. An
-  **internal**-status org shows an explicit warning that internal means *exempt from automatic
-  retention* — the dormancy sweep and wind-down never delete it (the same warning appears in the
-  billing panel when selecting the status). A **this-month rollup bar** across every customer org (total
-  billable dollars, billable-campaign count, a status breakdown, and the top payers — internal orgs
-  excluded), the server-defined **needs-attention strip** (expiring trials, past due, suspended,
-  wind-downs, idle $0 zombies), and a **searchable, sortable, paged table** (name/slug search; sort
-  by name, created, or trial end; columns for active members, campaigns split active/archived,
-  created date, trial end, rate, and this-month dollars). Create a new org, activate/deactivate them
-  (a deactivated org's members can't sign into it), manage each org's **billing** (status pill +
-  Manage → the Billing panel; see [BILLING.md](BILLING.md)) — the panel now shows whether the status
-  was set manually or by Stripe, a canceled org's deletion date, a **paged history with the actual
-  before→after values** of rate/contact edits, and a **Rename** control (name + slug, with a warning
-  that the slug is the org's platform-wide identity) — and **permanently delete** an org. Delete is a
-  hard, irreversible cascade — campaigns, doors, voters, history, reports, share links, memberships —
-  guarded by typing the org's slug back. User accounts always survive (someone in another org keeps
+  and each name deep-links to that org's Statements tab. Feed rows are drill-able (the org chip opens
+  its org page) and the feed can **Load older** — history is no longer capped at the newest 50.
+- **Organizations** — the billing desk, and one page per customer. See
+  [BILLING.md](BILLING.md) for what the money words mean; this is the screen tour.
+
+  **The desk** (`/organizations`) is full width: four figures across the top (**running month**,
+  **awaiting invoice**, **outstanding**, **overdue**), **filter chips** with counts that live in
+  the URL so a filtered view is a link you can send, and a table ordered by *what needs doing*
+  rather than alphabetically — chase overdue money, rescue an expiring trial, issue an invoice,
+  then everything already fine. An **expired trial** reads as its own state rather than as a
+  suspension, and an org you have **deactivated is never hidden while it owes money**. Create a
+  client from a dialog (org + trial + optional first admin, with the one-time credentials shown
+  inside it). The needs-attention strip is server-defined (expiring trials, past due, suspended,
+  wind-downs, idle $0 zombies, and now **overdue invoices**).
+
+  **Each org's page** (`/organizations/:orgId`; also reachable from a "Details" chip on the Control
+  Room cards) is five tabs, with the tab and month in the URL:
+
+  - **Overview** — *Next up*, then the running month, the backlog and what is unpaid.
+  - **Campaigns** — first field visit, the month each **bills from**, what it is doing this month
+    or why it is free, and how many of its months are awaiting / overdue / issued / paid.
+  - **Statements** — the month ledger: issue, void, mark paid, unmark, export, and the paper trail
+    including voided rows.
+  - **Members** — the **member roster**, the one thing that previously required burning a logged
+    support session just to look at.
+  - **Account** — status and trial, rate and **payment terms**, billing contact, internal notes,
+    rename (name + slug, warned because the slug is the org's platform-wide identity), the full
+    change history with actual before→after values, and the danger zone.
+
+  All of it is metadata: no grant, no audit row. **Switching in** stays the (correctly grant-gated)
+  way to reach voter content. An **internal**-status org shows an explicit warning that internal
+  means *exempt from automatic retention* — the dormancy sweep and wind-down never delete it.
+  Deleting an org is a hard, irreversible cascade — campaigns, doors, voters, history, reports,
+  share links, memberships — guarded by typing the org's slug back, and the dialog now warns when
+  unpaid statements will be destroyed with it. User accounts always survive (someone in another org keeps
   that access); the org's identity records (People) are deleted with it — People are per-org, so
   nothing is shared with anyone else (see [PERSONS.md](PERSONS.md)).
 - **Rebuild demo day** (Control Room) — one click rebuilds the demo org's canvassing
@@ -257,7 +269,8 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | Screen | Client page | Endpoint(s) |
 |---|---|---|
 | Control Room | [SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx) | `GET /super-admin/platform-overview`, `GET /super-admin/activity-feed` (`?since=` forward cursor, `?before=` backward "Load older") ([platform.js](../server/src/routes/superAdmin/platform.js)); `GET /super-admin/access/platform-stats`, `GET /super-admin/access/platform-trends?days=30\|90\|365` (the sparkline series — zero-filled UTC days ending at **yesterday**; returns `live`/`deleted`/`undated` so the ⓘ can print the exact gaps), `POST /super-admin/access/platform-stats/reconcile` (the "Reconcile now" button — `recomputeLive` **+ `recomputeDaily`**, same as the nightly job), `GET /super-admin/access/idle-orgs`, `GET /super-admin/access/health/retention`, `GET /super-admin/access/grants?all=1`, `GET /super-admin/access/deletion-requests` (the ops-health chips) ([access.js](../server/src/routes/superAdmin/access.js)); `GET /super-admin/organizations/at-risk` (billing strip) |
-| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) + [OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition), `GET /super-admin/organizations/:orgId` (the slim detail composite — roster incl. deactivated memberships, campaigns + last activity, billing header w/ the `internal` exemption flag; **registered after the literal routes** so `/:orgId` can't swallow them; metadata only — no grant, no AccessLog row), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; **`202 {queued}` — a BACKGROUND JOB since 2026-08**: it CAS-stamps `Organization.deletion` and enqueues on `org-delete-queue`, and the worker runs the cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js) minutes later. All four delete paths — this one plus the three retention triggers — go through the one chokepoint [enqueueOrgDelete.js](../server/src/services/platform/enqueueOrgDelete.js). While stamped the **whole tenant is walled**: `middleware/orgContext.js` 404s every `/admin` and `/mobile` request (`code: ORG_CONTEXT`, which both clients already recover from by ejecting to the org picker), the org drops out of `/auth/me` memberships and every super-admin list, `PATCH` answers `409 org-deleting`, and a running import/export makes this route `409 org-busy`. The list returns those rows in a separate **`deletingOrganizations`** array so nothing else has to learn about them; re-issuing the DELETE with the slug is Retry. Stuck/failed runs expire poll-side and surface as `orgDeletions` on `/health/retention`. Tested by [test/orgDeleteJob.int.test.js](../server/test/orgDeleteJob.int.test.js) (state machine + wall) and [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js) (the cascade's contents)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
+| Organizations | [OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) (the desk) + [OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) + `components/org/**` (the org page: `?tab=overview\|campaigns\|statements\|members\|account` and `?month=YYYY-MM`, parsed by [lib/orgPageTabs.js](../client/src/lib/orgPageTabs.js); `/organizations?billing=<id>` still answers as a **redirect** to the Statements tab) | `GET /super-admin/organizations` (opt-in `skip`/`limit`/`q`/`sort` + `total`; the desk sends **`?invoicing=1`** for the cheap per-org outstanding/overdue block, which is ABSENT without it so the parameterless shape stays a contract with the mobile org picker), `GET /super-admin/organizations/billing-rollup` (this-month revenue across all customer orgs), `GET /super-admin/organizations/at-risk` (the needs-attention definition, incl. `invoice_overdue`), `GET /super-admin/organizations/:orgId` (the slim detail composite — roster incl. deactivated memberships, campaigns + last activity, billing header w/ the `internal` exemption flag, payment terms and per-campaign household counts; **registered after the literal routes** so `/:orgId` can't swallow them; metadata only — no grant, no AccessLog row), `GET …/billing/history?from=origin` (the canonical window — one request feeding all five tabs), `GET …/billing`, `GET …/billing/statements`, `GET …/billing/campaigns`, and the statement writes (`issue`, `statements/issue`, `void`, **`paid`**, **`unpaid`**), `POST /super-admin/organizations`, `PATCH /super-admin/organizations/:orgId` (isActive + the Rename control's name/slug), `DELETE /super-admin/organizations/:orgId` (body `{confirmSlug}` must equal the slug; **`202 {queued}` — a BACKGROUND JOB since 2026-08**: it CAS-stamps `Organization.deletion` and enqueues on `org-delete-queue`, and the worker runs the cascade in [services/platform/deleteOrganization.js](../server/src/services/platform/deleteOrganization.js) minutes later. All four delete paths — this one plus the three retention triggers — go through the one chokepoint [enqueueOrgDelete.js](../server/src/services/platform/enqueueOrgDelete.js). While stamped the **whole tenant is walled**: `middleware/orgContext.js` 404s every `/admin` and `/mobile` request (`code: ORG_CONTEXT`, which both clients already recover from by ejecting to the org picker), the org drops out of `/auth/me` memberships and every super-admin list, `PATCH` answers `409 org-deleting`, and a running import/export makes this route `409 org-busy`. The list returns those rows in a separate **`deletingOrganizations`** array so nothing else has to learn about them; re-issuing the DELETE with the slug is Retry. Stuck/failed runs expire poll-side and surface as `orgDeletions` on `/health/retention`. Tested by [test/orgDeleteJob.int.test.js](../server/test/orgDeleteJob.int.test.js) (state machine + wall) and [test/orgDelete.int.test.js](../server/test/orgDelete.int.test.js) (the cascade's contents)) ([organizations.js](../server/src/routes/superAdmin/organizations.js)); billing routes in [BILLING.md](BILLING.md) |
+| Month close | [MonthClosePage.jsx](../client/src/pages/MonthClosePage.jsx) | `GET /super-admin/billing/statements?month=` (optional — defaults to the last CLOSED month server-side; the client adopts `data.month` rather than picking one from the browser clock) `&from=&to=` (range) `&live=0\|1`. Read-only: issuing and voiding live on the org page, one owner per write. In SUPER_NAV since Sep 2026 — it had been reachable only via a text link on the Organizations page, which is how a month gets missed. |
 | Emails | [SuperAdminEmailsPage.jsx](../client/src/pages/SuperAdminEmailsPage.jsx) (web) + `super-admin/emails.jsx` (mobile More ▸ Platform) | `GET /super-admin/emails` (opt-in `skip`/`limit` + `kind`/`outcome`/`organizationId` filters; returns `total`, distinct `kinds`, `last24h` sent/failed; rows carry `deliveryStatus`/`deliveryDetail` from the Resend webhook and `keptForever` on the never-expiring deletion-warning evidence), `GET /super-admin/emails/orgs` (filter dropdown) ([emails.js](../server/src/routes/superAdmin/emails.js)). Metadata only — see [EMAIL.md](EMAIL.md) for the send log, TTL, and webhook. |
 | Rebuild demo day | Control Room button ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx)), typed-confirm modal, `{confirm:'rebuild'}` body | `POST /super-admin/demo/refresh-day` (`requireBreakGlass`; module-scoped single-flight → `409 DEMO_REBUILD_RUNNING`) → [services/platform/seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js) `seedDemoOrg({apply:true, reset:true, rebuild:false, allowImport:false, syncPasswords:false, requireExisting:true, requireSharePassword:true, historySeed:Date.now(), log:()=>{}})`. Slug-locked to the demo org inside the engine. Refuses the cold-build path (`409 DEMO_NOT_BUILT` / `DEMO_IMPORT_REQUIRED`) **before the first write**, since `resetActivityLayer` commits its wipe long before the import branch. Books ARE re-cut/reassigned (the `deleteMany`+`insertMany` in `buildRoundBooks` is the only thing that heals drift), review accounts ARE recreated, the voted layer and client report ARE wiped and rebuilt; share link + its password survive. **No password ever crosses the API boundary** — the summary carries `credentialSource` (the config-var name) instead. Console equivalent: `npm run seed:demo -- --reset --apply`. |
 | All Users | [SuperAdminUsersPage.jsx](../client/src/pages/SuperAdminUsersPage.jsx) + [SuperAdminUserDetailPage.jsx](../client/src/pages/SuperAdminUserDetailPage.jsx) | `GET /super-admin/users` (opt-in `skip`/`limit`/`q`/`sort` — allowlist `name`(default)/`email`/`created`/`lastLogin`/`lastSeen`, every spec `_id`-tiebroken so ties can't straddle a page boundary; **the default changed 2026-07-29 from newest-first to alphabetical**, and mobile inherits it since it sends no sort param — + filters `super`/`deleted`/`tempPassword`/`orphan`/`active`; returns `total` + `deletedCount`, per-page `lastActivityAt`, and `lastSeenAt` — the last one is **not** page-gated, since unlike `lastActivityAt` it is already on the user document and costs no extra read), `GET /super-admin/users/:userId` (the drill-in composite → [services/platform/userOversight.js](../server/src/services/platform/userOversight.js): full identity incl. `tempPasswordSetAt`/`deletionLocked`/`lastSeenAt`, ALL memberships incl. deactivated, per-org structural activity counts, staff grant/access history, `DeletedUserRecord` **status only** — metadata, no grant, no AccessLog row), `GET /super-admin/users/:userId/lockout` (reads the per-email throttle state — per-process, labeled), `PATCH /super-admin/users/:userId/platform-role` (break-glass only; refuses to demote the last break-glass account), `POST /super-admin/users/:userId/promote`, `POST /super-admin/users/:userId/clear-lockout` (clears the per-email login throttle via `clearLoginLockout`, see [loginRateLimit.js](../server/src/middleware/loginRateLimit.js)), `POST /super-admin/users/:userId/resend-invite` (body `{organizationId}` — required, never inferred: the invite names an org; plain super-admin, shares one implementation with the org-scoped route via [services/memberships/resendInvite.js](../server/src/services/memberships/resendInvite.js)), `GET /super-admin/users/:userId/deletion-check` + `DELETE /super-admin/users/:userId` (break-glass; body `{confirmEmail}`; every `deleteAccount` blocker enforced, no force flag) ([users.js](../server/src/routes/superAdmin/users.js)) |
@@ -398,7 +411,7 @@ customer owns.
   ($0 under per-campaign billing), newest `CanvassActivity` (fallback `createdAt`) older than
   `PLATFORM_IDLE_MONTHS` (default 6). These escape **both** retention triggers by construction: the
   wind-down needs `canceled`, and the dormancy purge protects paying statuses — hence the human
-  queue. Terminating (Billing panel → status `canceled`, reason required) starts the 60-day
+  queue. Terminating (the org page's Account tab → status `canceled`, reason required) starts the 60-day
   wind-down; the nightly sweep deletes on lapse (see [OPERATIONS.md](OPERATIONS.md)).
 - **`promote`** toggles `User.isSuperAdmin`; a super admin **cannot** toggle their own flag (guards
   against self-lockout / accidental self-demotion).

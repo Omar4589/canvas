@@ -11,13 +11,19 @@ import { entitlementFor } from '../../services/billing/entitlement.js';
 import { resolveRateCents } from '../../services/billing/rate.js';
 import { statementDrift } from '../../services/billing/statementDrift.js';
 import {
-  BILLING_HISTORY_MAX_MONTHS,
   currentMonth,
   monthlyStatement,
   monthlyStatementRange,
 } from '../../services/billing/statement.js';
 import { ISSUE_STATUS_BY_CODE, issueStatementForMonth } from '../../services/billing/issueStatement.js';
 import { addMonths as addMonthsSafe } from '../../services/billing/billingMonths.js';
+import { historyRows, orgInvoicing } from '../../services/billing/invoicing.js';
+import {
+  INVOICING_LOOKBACK_MAX_MONTHS,
+  effectiveDueAt,
+  paymentStateOf,
+  termsDaysFor,
+} from '../../services/billing/invoicingState.js';
 
 // The account-manager surface: /super-admin/organizations/:orgId/billing.
 // Super-admin only — org admins get the read-mostly /admin/billing instead.
@@ -28,6 +34,9 @@ const BILLING_STATUSES = ['trial', 'active', 'past_due', 'suspended', 'canceled'
 
 const patchSchema = z.object({
   pricePerCampaignCents: z.number().int().min(0).max(10_000_000).optional(),
+  // Net-N. 0 is legal (due on issue). Changing it never moves a statement already issued — the
+  // due date is frozen onto the Statement — so this only affects the next invoice.
+  paymentTermsDays: z.number().int().min(0).max(365).optional(),
   billingContact: z
     .object({ name: z.string().max(200).optional(), email: z.string().max(200).optional() })
     .optional(),
@@ -102,6 +111,10 @@ router.get('/', async (req, res, next) => {
       entitlement: entitlementFor(sub),
       events,
       eventsTotal,
+      // The SERVER's month. Every billing surface takes it from here rather than the browser
+      // clock: `currentMonth` is UTC and is the same value the MONTH_NOT_ENDED gate reads, so a
+      // client can never offer to issue a month the server will refuse (or hide one it would take).
+      currentMonth: currentMonth(),
     });
   } catch (err) {
     next(err);
@@ -130,6 +143,10 @@ router.patch('/', async (req, res, next) => {
         changes.billingContact = { from: sub.billingContact, to: next_ };
         sub.billingContact = next_;
       }
+    }
+    if (data.paymentTermsDays !== undefined && data.paymentTermsDays !== sub.paymentTermsDays) {
+      changes.paymentTermsDays = { from: sub.paymentTermsDays ?? null, to: data.paymentTermsDays };
+      sub.paymentTermsDays = data.paymentTermsDays;
     }
     if (data.notes !== undefined && data.notes !== sub.notes) {
       changes.notes = { updated: true }; // don't duplicate free text into the log
@@ -341,6 +358,8 @@ router.get('/statement', async (req, res, next) => {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
     const { org } = loaded;
+    const { sub } = loaded;
+    const now = new Date();
     const live = await monthlyStatement(org._id, req.query.month);
     const issued = await Statement.findOne({
       organizationId: org._id,
@@ -348,8 +367,17 @@ router.get('/statement', async (req, res, next) => {
       status: 'issued',
     })
       .populate('issuedByUserId', 'firstName lastName')
+      .populate('paidByUserId', 'firstName lastName')
       .lean();
-    res.json({ ...live, statement: issued || null, drift: statementDrift(issued, live) });
+    const termsDays = termsDaysFor(sub);
+    res.json({
+      ...live,
+      statement: issued || null,
+      drift: statementDrift(issued, live),
+      currentMonth: currentMonth(now),
+      dueAt: issued ? effectiveDueAt(issued, termsDays) : null,
+      paymentState: issued ? paymentStateOf(issued, { now, termsDays }) : null,
+    });
   } catch (err) {
     if (err?.status === 400) return res.status(400).json({ error: err.message });
     next(err);
@@ -363,12 +391,38 @@ router.get('/statement', async (req, res, next) => {
 //
 // One monthlyStatementRange() call underneath, so this costs three queries per campaign no matter
 // how long the range — see the note on that function.
+// `from=origin` asks for the CANONICAL window — back to the org's creation month, capped at
+// INVOICING_LOOKBACK_MAX_MONTHS — and is what the org page sends. It also returns the invoicing
+// block, so the page's five tabs answer "what is owed" from one request rather than each deriving
+// it. An explicit from/to keeps the old 24-month cap and the old (money-only) shape plus the new
+// per-row fields.
 router.get('/history', async (req, res, next) => {
   try {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
-    const { org } = loaded;
-    const to = String(req.query.to || currentMonth());
+    const { org, sub } = loaded;
+    const now = new Date();
+
+    if (String(req.query.from || '') === 'origin') {
+      // The whole picture, from the one owner. Every other invoicing surface reads this same
+      // function, which is what stops the desk and the org page disagreeing about a month.
+      const state = await orgInvoicing(org, { now, includeLines: true });
+      return res.json({
+        from: state.window.from,
+        to: state.window.to,
+        rateCents: state.range.rateCents,
+        rulesVersion: state.range.rulesVersion,
+        currentMonth: currentMonth(now),
+        asOf: now,
+        paymentTermsDays: state.termsDays,
+        window: state.window,
+        invoicing: state.invoicing,
+        campaigns: state.range.campaigns,
+        months: state.rows,
+      });
+    }
+
+    const to = String(req.query.to || currentMonth(now));
     const from = String(req.query.from || addMonthsSafe(to, -11)); // default: the last 12 months
     const range = await monthlyStatementRange(org._id, { from, to });
     const months = range.statements.map((s) => s.month);
@@ -379,39 +433,27 @@ router.get('/history', async (req, res, next) => {
       status: 'issued',
     })
       .populate('issuedByUserId', 'firstName lastName')
+      .populate('paidByUserId', 'firstName lastName')
       .lean();
     const byMonth = new Map(issued.map((i) => [i.month, i]));
+    const termsDays = termsDaysFor(sub);
 
     res.json({
       from: range.from,
       to: range.to,
       rateCents: range.rateCents,
       rulesVersion: range.rulesVersion,
-      // Newest first — a ledger is read from the present backwards.
-      months: range.statements
-        .map((live) => {
-          const frozen = byMonth.get(live.month) || null;
-          return {
-            month: live.month,
-            // What this month IS on an invoice: the frozen total when issued, else the live one.
-            totalCents: frozen ? frozen.totalCents : live.totalCents,
-            liveTotalCents: live.totalCents,
-            billableCampaigns: (frozen || live).lines.filter((l) => l.billable).length,
-            issued: Boolean(frozen),
-            statementId: frozen ? String(frozen._id) : null,
-            issuedAt: frozen?.issuedAt ?? null,
-            issuedBy: frozen?.issuedByUserId
-              ? `${frozen.issuedByUserId.firstName || ''} ${frozen.issuedByUserId.lastName || ''}`.trim()
-              : null,
-            externalRef: frozen?.externalRef || null,
-            rulesVersion: frozen?.rulesVersion ?? live.rulesVersion,
-            drift: statementDrift(frozen, live),
-            // The lines that were (or would be) invoiced, so a combined export never has to go back
-            // for them month by month.
-            lines: (frozen || live).lines,
-          };
-        })
-        .reverse(),
+      currentMonth: currentMonth(now),
+      asOf: now,
+      paymentTermsDays: termsDays,
+      // Newest first — a ledger is read from the present backwards. Built by the shared projector
+      // so an explicit range and the canonical one render a month identically.
+      months: historyRows(range, byMonth, {
+        now,
+        termsDays,
+        internal: Boolean(org.isInternal || sub?.status === 'internal'),
+        includeLines: true,
+      }),
     });
   } catch (err) {
     if (err?.status === 400) return res.status(400).json({ error: err.message });
@@ -463,7 +505,9 @@ router.post('/statement/:month/issue', async (req, res, next) => {
 // is already issued must still issue July, and the account manager needs to see which did what.
 // `ok` is true only when every month issued.
 const issueManySchema = z.object({
-  months: z.array(z.string()).min(1).max(BILLING_HISTORY_MAX_MONTHS),
+  // Capped at the INVOICING window, not the history one: the org page's ledger now reaches back to
+  // the org's creation month, and a backlog you can see must be a backlog you can clear in one go.
+  months: z.array(z.string()).min(1).max(INVOICING_LOOKBACK_MAX_MONTHS),
   externalRef: z.string().trim().max(200).optional(),
   force: z.boolean().optional(),
 });
@@ -524,8 +568,13 @@ router.post('/statement/:statementId/void', async (req, res, next) => {
     const data = voidSchema.parse(req.body || {});
     // Atomic claim. The organizationId in the FILTER is what stops a cross-org void; the
     // status:'issued' is what makes a double-void a clean 409 instead of a silent second write.
+    //
+    // `paidAt: null` is what REFUSES to void a statement someone has recorded as paid. Voiding one
+    // would leave payment fields on a void row, which every paid total would then have to exclude
+    // by status — and it would collapse two decisions ("that money arrived" and "that invoice was
+    // wrong") into one unexplained click. Unmark it first: two changes, two audit rows.
     const statement = await Statement.findOneAndUpdate(
-      { _id: statementId, organizationId: org._id, status: 'issued' },
+      { _id: statementId, organizationId: org._id, status: 'issued', paidAt: null },
       {
         $set: {
           status: 'void',
@@ -537,6 +586,14 @@ router.post('/statement/:statementId/void', async (req, res, next) => {
       { new: true }
     );
     if (!statement) {
+      // One follow-up read to tell the two refusals apart, so the UI can say which it was.
+      const existing = await Statement.findOne({ _id: statementId, organizationId: org._id }).lean();
+      if (existing?.status === 'issued' && existing.paidAt) {
+        return res.status(409).json({
+          error: 'That statement is marked paid. Unmark it paid first, then void it.',
+          code: 'STATEMENT_PAID',
+        });
+      }
       return res.status(409).json({
         error: 'That statement is not issued — it may already be void, or belong to another organization.',
         code: 'NOT_ISSUED',
@@ -561,12 +618,147 @@ router.post('/statement/:statementId/void', async (req, res, next) => {
   }
 });
 
+// ── Payment ───────────────────────────────────────────────────────────────────────────────────
+// Doorline does not collect money — the account manager invoices outside the app (a PDF) and the
+// payment arrives wherever it arrives. These two routes RECORD that, so "which invoices are still
+// out" stops living in someone's memory. Deliberately not a status: `status` stays issued|void
+// because the partial unique index filters on it, and an invoice that was paid is still an issued
+// invoice. There are no partial payments (docs/BILLING.md).
+
+const paidSchema = z.object({
+  paidAt: z.string().datetime().optional(),
+  // A reference NUMBER — invoice #, check #, transfer id. Never a name (models/Statement.js).
+  paymentRef: z.string().trim().max(200).optional(),
+});
+
+// Twenty-four hours of slack: a date picker sends local midnight, which can be "tomorrow" in UTC,
+// and clock skew is real. Anything further ahead is a typo worth catching.
+const PAID_AT_MAX_AHEAD_MS = 24 * 60 * 60 * 1000;
+
+router.post('/statement/:statementId/paid', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org } = loaded;
+    const { statementId } = req.params;
+    if (!mongoose.isValidObjectId(statementId)) {
+      return res.status(400).json({ error: 'Invalid statement id' });
+    }
+    const data = paidSchema.parse(req.body || {});
+    const now = new Date();
+    const paidAt = data.paidAt ? new Date(data.paidAt) : now;
+    if (paidAt.getTime() > now.getTime() + PAID_AT_MAX_AHEAD_MS) {
+      return res.status(400).json({
+        error: 'That payment date is in the future.',
+        code: 'PAID_AT_FUTURE',
+      });
+    }
+    // No LOWER bound: a prepay legitimately lands before the statement was issued (the force-issue
+    // path exists for exactly that), and the UI says so rather than refusing it.
+    //
+    // Atomic claim, same idiom as void. `totalCents: {$gt: 0}` is what refuses a $0 statement:
+    // nothing was ever owed on it, so "paid" would be a fiction.
+    const statement = await Statement.findOneAndUpdate(
+      { _id: statementId, organizationId: org._id, status: 'issued', paidAt: null, totalCents: { $gt: 0 } },
+      { $set: { paidAt, paidByUserId: req.user._id, paymentRef: data.paymentRef || '' } },
+      { new: true }
+    );
+    if (!statement) {
+      const existing = await Statement.findOne({ _id: statementId, organizationId: org._id }).lean();
+      if (!existing || existing.status !== 'issued') {
+        return res.status(409).json({
+          error: 'That statement is not issued — it may be void, or belong to another organization.',
+          code: 'NOT_ISSUED',
+        });
+      }
+      if (existing.paidAt) {
+        return res.status(409).json({
+          error: 'That statement is already marked paid.',
+          code: 'ALREADY_PAID',
+        });
+      }
+      return res.status(409).json({
+        error: 'That statement is for $0 — there is nothing to pay.',
+        code: 'NOT_PAYABLE',
+      });
+    }
+    await SubscriptionEvent.create({
+      organizationId: org._id,
+      byUserId: req.user._id,
+      changes: {
+        statementPaid: {
+          month: statement.month,
+          statementId: String(statement._id),
+          totalCents: statement.totalCents,
+          paidAt: statement.paidAt,
+          paymentRef: statement.paymentRef || null,
+        },
+      },
+      reason: 'Statement marked paid',
+    });
+    res.json({ statement: statement.toObject() });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
+const unpaidSchema = z.object({ reason: z.string().trim().min(1).max(2000) });
+
+// Undo a payment record. A reason is required for the same purpose it is on void and suspend, and
+// it matters more here: the fields being cleared are the only record that the money arrived, so
+// the EVENT carries the previous values. The audit survives the erasure.
+router.post('/statement/:statementId/unpaid', async (req, res, next) => {
+  try {
+    const loaded = await loadOrgSub(req, res);
+    if (!loaded) return;
+    const { org } = loaded;
+    const { statementId } = req.params;
+    if (!mongoose.isValidObjectId(statementId)) {
+      return res.status(400).json({ error: 'Invalid statement id' });
+    }
+    const data = unpaidSchema.parse(req.body || {});
+    const before = await Statement.findOne({ _id: statementId, organizationId: org._id }).lean();
+    const statement = await Statement.findOneAndUpdate(
+      { _id: statementId, organizationId: org._id, status: 'issued', paidAt: { $ne: null } },
+      { $set: { paidAt: null, paidByUserId: null, paymentRef: '' } },
+      { new: true }
+    );
+    if (!statement) {
+      return res.status(409).json({
+        error: 'That statement is not marked paid.',
+        code: 'NOT_PAID',
+      });
+    }
+    await SubscriptionEvent.create({
+      organizationId: org._id,
+      byUserId: req.user._id,
+      changes: {
+        statementUnpaid: {
+          month: statement.month,
+          statementId: String(statement._id),
+          totalCents: statement.totalCents,
+          previousPaidAt: before?.paidAt ?? null,
+          previousPaymentRef: before?.paymentRef || null,
+        },
+      },
+      reason: data.reason,
+    });
+    res.json({ statement: statement.toObject() });
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: err.issues?.[0]?.message || 'Invalid input' });
+    next(err);
+  }
+});
+
 // Every statement ever issued or voided for this org, newest first — the paper trail.
 router.get('/statements', async (req, res, next) => {
   try {
     const loaded = await loadOrgSub(req, res);
     if (!loaded) return;
-    const { org } = loaded;
+    const { org, sub } = loaded;
+    const now = new Date();
+    const termsDays = termsDaysFor(sub);
     const statements = await Statement.find(
       { organizationId: org._id },
       { lines: 0 } // the list doesn't need every campaign line
@@ -574,9 +766,18 @@ router.get('/statements', async (req, res, next) => {
       .sort({ month: -1, issuedAt: -1 })
       .populate('issuedByUserId', 'firstName lastName')
       .populate('voidedByUserId', 'firstName lastName')
+      .populate('paidByUserId', 'firstName lastName')
       .limit(200)
       .lean();
-    res.json({ statements });
+    res.json({
+      // Resolved here rather than in the browser so the paper trail agrees with the ledger about
+      // which rows are overdue — one predicate, three surfaces.
+      statements: statements.map((s) => ({
+        ...s,
+        dueAt: s.status === 'issued' ? effectiveDueAt(s, termsDays) : null,
+        paymentState: paymentStateOf(s, { now, termsDays }),
+      })),
+    });
   } catch (err) {
     next(err);
   }

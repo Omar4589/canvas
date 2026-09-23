@@ -24,7 +24,7 @@ test('embedded quotes are doubled, not dropped', () => {
 });
 
 test('a nullish cell is EMPTY, never the text "null"', () => {
-  // The bug this replaces: OrgBillingPanel quoted with a bare String(c), so a blank cell
+  // The bug this replaces: the statement CSV quoted with a bare String(c), so a blank cell
   // in the billing statement printed the literal word null for a customer to read.
   assert.equal(csvRowsToText([[null, undefined, '', 0]]), '"","","","0"');
 });

@@ -1,161 +1,663 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams, useNavigate, Link, Navigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import OrgBillingPanel from '../components/OrgBillingPanel.jsx';
+import { Badge, Button, Card, DataTable, EmptyState, Input, Modal, Tooltip } from '../components/ui/index.js';
+import Skeleton from '../components/ui/Skeleton.jsx';
+import RowMenu from '../components/RowMenu.jsx';
+import StatCard from '../components/StatCard.jsx';
 import Pager from '../components/Pager.jsx';
-import { BillingPill, InternalBadge, fmtUsd } from '../lib/billingStatus.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
+import { AccountStateBadge, InternalBadge, fmtUsd } from '../lib/billingStatus.jsx';
+import { formatDate } from '../lib/dates.js';
+import { monthLabel, shortMonthLabel } from '../lib/months.js';
+import { nextActionLabel } from '../lib/invoicing.js';
+import {
+  CHIPS,
+  buildDeskRows,
+  rowMoney,
+  deskCounts,
+  filterDeskRows,
+  sortDeskRows,
+  parseDeskParams,
+  deskParams,
+  pageSlice,
+  atRiskLabel,
+  atRiskTab,
+} from '../lib/orgDesk.js';
+import { orgPagePath } from '../lib/orgPageTabs.js';
+import { DeactivateOrgModal, DeleteOrgModal } from '../components/org/modals/OrgModals.jsx';
 import { isValidEmail, tempPasswordProblem } from '../lib/validators.js';
 
-const fieldCls =
-  'mt-1 w-full rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
+// THE ORGANIZATIONS DESK — every customer account, its billing state, and what still needs doing.
+//
+// It replaces a 1024px-wide column whose first ~120 lines were a permanently expanded create form,
+// with the daily-use table below the fold and a billing panel that appended itself off-screen
+// underneath. The shell never capped the width; the page capped itself.
+//
+// Every filter, sort and count lives in lib/orgDesk.js so the rules that decide what an operator
+// SEES are testable. This file is rendering.
+const PAGE_SIZE = 25;
+const LOCAL_PREFS = 'doorline.orgDesk.prefs';
 
-const LIMIT = 25;
-
-// One line per at-risk item — the server (organizations.js /at-risk) owns the definition.
-function atRiskLabel(it) {
-  switch (it.type) {
-    case 'trial_expiring':
-      return it.trialDaysLeft === 0 ? 'trial expired' : `trial ends in ${it.trialDaysLeft}d`;
-    case 'past_due':
-      return `past due since ${new Date(it.since).toLocaleDateString()}`;
-    case 'suspended':
-      return `suspended since ${new Date(it.since).toLocaleDateString()}`;
-    case 'wind_down':
-      return `canceled — deletes ${new Date(it.windDownEndsAt).toLocaleDateString()}`;
-    case 'idle':
-      return `idle ${it.monthsIdle} mo at $0`;
-    default:
-      return it.type;
+const readPrefs = () => {
+  // Per-viewer conveniences only. Wrapped because storage throws in a private window, and the desk
+  // has to render correctly without it.
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_PREFS) || '{}');
+  } catch {
+    return {};
   }
-}
+};
+const writePrefs = (p) => {
+  try {
+    localStorage.setItem(LOCAL_PREFS, JSON.stringify(p));
+  } catch {
+    /* not worth telling anyone about */
+  }
+};
+
+const FilterChip = ({ chip, active, count, disabled, onClick }) => {
+  const btn = (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+        active
+          ? 'border-brand-accent bg-brand-tint text-brand-tint-fg'
+          : 'border-border bg-card text-fg-muted hover:bg-sunken'
+      }`}
+    >
+      {chip.label}
+      {count != null && <span className="ml-1.5 tabular-nums text-fg-subtle">{count}</span>}
+    </button>
+  );
+  return disabled ? <Tooltip label="Computing live totals…">{btn}</Tooltip> : btn;
+};
+
+const fieldLabel = 'block text-xs font-semibold text-fg-muted';
 
 export default function OrganizationsPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [trialDays, setTrialDays] = useState('7');
-  // Optional first-admin fields — filled together (all-or-nothing per createSchema).
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
-  // Optional typed temp password for the first admin; blank = auto-generate one server-side.
-  const [adminPassword, setAdminPassword] = useState('');
-  const [error, setError] = useState(null);
-  // One-time credentials to hand over, set from the create response's tempPassword.
-  const [createdCreds, setCreatedCreds] = useState(null); // { orgName, email, tempPassword }
-  const [copied, setCopied] = useState(false);
-  const [billingOrg, setBillingOrg] = useState(null); // { id, name } — panel target
-  const [deleteOrg, setDeleteOrg] = useState(null); // { id, name, slug } — confirm target
-  const [confirmSlug, setConfirmSlug] = useState('');
-  const [deleteMsg, setDeleteMsg] = useState(null);
-  // Server-driven table state (q searches name/slug; sort: created | name | trialEnds).
-  const [searchText, setSearchText] = useState('');
-  const [q, setQ] = useState('');
-  const [sort, setSort] = useState('created');
-  const [skip, setSkip] = useState(0);
+  const { user: me } = useAuth();
+  const canDelete = me?.platformRole === 'break_glass';
 
-  // The paged table. Keyed under the ['super-admin','organizations'] prefix so every existing
-  // invalidation (create / toggle / delete / billing panel) refreshes it too.
-  const tableParams = new URLSearchParams({ limit: String(LIMIT), skip: String(skip) });
-  if (q) tableParams.set('q', q);
-  if (sort !== 'created') tableParams.set('sort', sort);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { chip, q, sort, dir } = parseDeskParams(searchParams);
+  const [searchText, setSearchText] = useState(q);
+  const [skip, setSkip] = useState(0);
+  const [prefs, setPrefs] = useState(readPrefs);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deactivating, setDeactivating] = useState(null);
+  const [deletingRow, setDeletingRow] = useState(null);
+  // One page-level notice with a tone, rather than one blue box that also carried failures.
+  const [notice, setNotice] = useState(null); // { tone: 'info' | 'danger', text }
+
+  // ?billing=<orgId> used to open the inline panel; six surfaces still link that way. Redirect
+  // rather than break them — and land on the tab that panel was opened for.
+  const legacyBilling = searchParams.get('billing');
+
+  // ---- queries ----------------------------------------------------------------
+  // The FULL list, unpaged. The desk's default order and three of its chips key on money that
+  // lives in the rollup, which the server cannot sort by without moving the whole walk into the
+  // list route — and the route loads every org for any request anyway. `invoicing=1` opts into the
+  // one extra Statement read that makes the overdue column paint before the rollup lands.
   const orgsQ = useQuery({
-    queryKey: ['super-admin', 'organizations', 'table', q, sort, skip],
-    queryFn: () => api(`/super-admin/organizations?${tableParams.toString()}`),
-    placeholderData: keepPreviousData,
-    // Poll only while a delete runs in the background: the row vanishing — or flipping to failed —
-    // is the only completion signal. 5s rather than the Campaigns page's 2s: an org cascade runs for
-    // minutes and this payload carries the billing joins.
+    queryKey: ['super-admin', 'organizations', 'desk'],
+    queryFn: () => api('/super-admin/organizations?invoicing=1'),
     refetchInterval: (query) => (query.state.data?.deletingOrganizations?.length ? 5000 : false),
   });
 
-  // This month's revenue across all customer orgs (internal excluded) — the header rollup and the
-  // per-row "This month" column. One statement walk per org server-side; refreshed with the list.
   const rollupQ = useQuery({
     queryKey: ['super-admin', 'organizations', 'billing-rollup'],
     queryFn: () => api('/super-admin/organizations/billing-rollup'),
+    staleTime: 60_000,
   });
 
-  // The lifecycle triage list — one server-side definition (trials expiring, past due, suspended,
-  // wind-downs, idle $0 zombies), shared with the Control Room.
   const atRiskQ = useQuery({
     queryKey: ['super-admin', 'organizations', 'at-risk'],
     queryFn: () => api('/super-admin/organizations/at-risk'),
   });
 
-  // Deep link from the Control Room: /organizations?billing=<orgId> opens that org's billing panel,
-  // then consumes the param so closing the panel doesn't reopen it. The name resolves from whichever
-  // list already has it; the panel falls back to its own fetched org name otherwise.
-  const [searchParams, setSearchParams] = useSearchParams();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
+
+  const toggleActiveMut = useMutation({
+    mutationFn: ({ id, isActive }) => api(`/super-admin/organizations/${id}`, { method: 'PATCH', body: { isActive } }),
+    onSuccess: () => { setDeactivating(null); setNotice(null); invalidate(); },
+    // Reactivate fires straight from the row menu with no dialog, so a failure had nowhere to
+    // surface — the row stayed Inactive and the operator concluded the button was broken.
+    onError: (err) => setNotice({ tone: 'danger', text: err.message }),
+  });
+  const deleteMut = useMutation({
+    mutationFn: ({ id, confirmSlug }) => api(`/super-admin/organizations/${id}`, { method: 'DELETE', body: { confirmSlug } }),
+    onSuccess: (r, vars) => {
+      setNotice({
+        tone: 'info',
+        text: `Deleting ‘${vars.name}’… this runs in the background; the row disappears when it finishes.`,
+      });
+      setDeletingRow(null);
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
+    },
+    // The modal shows the refusal; this page-level notice must NOT repeat it in the informational
+    // tint, where "Organization not found" reads as part of a deletion that is running.
+  });
+
+  // ---- derived ----------------------------------------------------------------
+  const { rows, deleting } = useMemo(
+    () =>
+      buildDeskRows({
+        organizations: orgsQ.data?.organizations || [],
+        deletingOrganizations: orgsQ.data?.deletingOrganizations || [],
+        rollup: rollupQ.data,
+        atRisk: atRiskQ.data,
+      }),
+    [orgsQ.data, rollupQ.data, atRiskQ.data]
+  );
+
+  const counts = useMemo(
+    () => deskCounts(rows, { showInternal: prefs.showInternal, showInactive: prefs.showInactive }),
+    [rows, prefs.showInternal, prefs.showInactive]
+  );
+  const filtered = useMemo(
+    () => sortDeskRows(filterDeskRows(rows, { chip, q, showInternal: prefs.showInternal, showInactive: prefs.showInactive }), sort, dir),
+    [rows, chip, q, sort, dir, prefs.showInternal, prefs.showInactive]
+  );
+  const shown = pageSlice(filtered, skip, PAGE_SIZE);
+
+  const setParam = (patch) => {
+    const next = deskParams({ chip, q, sort, dir, ...patch });
+    // REPLACE, not push: a filter is a view of this page, not a place you navigated to. Pushing
+    // meant Back walked through every keystroke's debounce before it left the desk — and the
+    // restored URL had no `q` while the box still showed one, so an unfiltered table claimed to be
+    // filtered. The no-op guard stops the mount-time debounce writing a duplicate entry at all.
+    const current = Object.fromEntries(searchParams.entries());
+    const same =
+      Object.keys(next).length === Object.keys(current).length &&
+      Object.entries(next).every(([k, v]) => current[k] === v);
+    if (!same) setSearchParams(next, { replace: true });
+    setSkip(0);
+  };
+  const setPref = (patch) => {
+    const next = { ...prefs, ...patch };
+    setPrefs(next);
+    writePrefs(next);
+    setSkip(0);
+  };
+  const toggleSort = (key) => {
+    if (sort === key) setParam({ sort: key, dir: dir === 'desc' ? 'asc' : 'desc' });
+    else setParam({ sort: key, dir: 'desc' });
+  };
+
+  // Debounced search: typing filters a client-side list, so there is no request to throttle — only
+  // the render. The timer is cleared on every change and on unmount.
   useEffect(() => {
-    const target = searchParams.get('billing');
-    if (!target) return;
-    if (!orgsQ.data && !rollupQ.data) return;
-    const o = orgsQ.data?.organizations?.find((x) => x.id === target)
-      || rollupQ.data?.organizations?.find((x) => x.organizationId === target);
-    setBillingOrg({ id: target, name: o?.name || '' });
-    setSearchParams({}, { replace: true });
-  }, [orgsQ.data, rollupQ.data, searchParams, setSearchParams]);
+    const t = setTimeout(() => setParam({ q: searchText.trim() }), 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText]);
+
+  // …and the other direction: if the URL's `q` changes from outside this input (Back, or a link
+  // someone sent), the box has to follow, or it describes a filter that is no longer applied.
+  useEffect(() => {
+    setSearchText((cur) => (cur.trim() === q ? cur : q));
+  }, [q]);
+
+  if (legacyBilling) {
+    return <Navigate to={orgPagePath(legacyBilling, { tab: 'statements' })} replace />;
+  }
+
+  const rollup = rollupQ.data;
+  const rollupFailed = Boolean(rollupQ.error);
+  const SortHead = ({ label, sortKey, className = '', title }) => (
+    <th className={`px-3 py-2.5 ${className}`} title={title}>
+      <button
+        type="button"
+        onClick={() => toggleSort(sortKey)}
+        className={`uppercase tracking-wider hover:text-fg ${sort === sortKey ? 'text-fg' : ''}`}
+      >
+        {label}
+        {sort === sortKey && (dir === 'desc' ? ' ▾' : ' ▴')}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-fg">Organizations</h1>
+          <p className="text-sm text-fg-muted">
+            Every customer account, its billing state, and what still needs invoicing
+            {rollup?.asOf ? ` · as of ${formatDate(rollup.asOf)}` : ''}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/super-admin/billing"
+            className="inline-flex items-center justify-center rounded-lg border border-border-strong bg-card px-3.5 py-2 text-sm font-semibold text-fg hover:bg-sunken"
+          >
+            Month close
+          </Link>
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>New organization</Button>
+        </div>
+      </div>
+
+      {/* The platform's money, four ways. Each card applies its own chip — the numbers are the
+          filters, rather than decoration above a table you then have to search by hand. */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          compact
+          label="Running month"
+          value={rollup ? fmtUsd(rollup.totalCents) : <Skeleton className="h-6 w-24" />}
+          hint={rollup ? `${rollup.billableCampaigns} billable campaigns · ${monthLabel(rollup.currentMonth || rollup.month)}` : ' '}
+        />
+        <StatCard
+          compact
+          label="Awaiting invoice"
+          accent={rollup?.awaitingTotalCents ? 'amber' : undefined}
+          value={rollup ? fmtUsd(rollup.awaitingTotalCents) : <Skeleton className="h-6 w-24" />}
+          hint={rollup ? `${rollup.awaitingMonths} months across ${rollup.awaitingOrgs} orgs` : ' '}
+        />
+        <StatCard
+          compact
+          label="Outstanding"
+          value={rollup ? fmtUsd(rollup.outstandingTotalCents) : <Skeleton className="h-6 w-24" />}
+          hint={rollup ? `${rollup.outstandingCount} statement${rollup.outstandingCount === 1 ? '' : 's'} sent` : ' '}
+        />
+        <StatCard
+          compact
+          label="Overdue"
+          accent={rollup?.overdueTotalCents ? 'red' : undefined}
+          value={rollup ? fmtUsd(rollup.overdueTotalCents) : <Skeleton className="h-6 w-24" />}
+          hint={rollup ? `${rollup.overdueCount} across ${rollup.overdueOrgs} org${rollup.overdueOrgs === 1 ? '' : 's'}` : ' '}
+        />
+      </div>
+
+      {rollupFailed && (
+        <Card className="flex flex-wrap items-center justify-between gap-2 border-warning/30 bg-warning-tint px-4 py-2.5 text-sm text-warning-fg">
+          <span>Live totals are unavailable. Overdue and outstanding still show; the awaiting backlog does not.</span>
+          <Button variant="secondary" size="sm" onClick={() => rollupQ.refetch()}>Retry</Button>
+        </Card>
+      )}
+
+      {(atRiskQ.data?.items?.length || 0) > 0 && (
+        <Card className="border-warning/30 bg-warning-tint px-4 py-2.5 text-sm text-warning-fg">
+          <span className="font-semibold">Needs attention: </span>
+          {atRiskQ.data.items.map((it, i, arr) => (
+            <span key={`${it.organizationId}-${it.type}`}>
+              <Link
+                to={orgPagePath(it.organizationId, { tab: atRiskTab(it) })}
+                className="font-semibold underline underline-offset-2 hover:opacity-80"
+              >
+                {it.name}
+              </Link>
+              {` (${atRiskLabel(it)})`}
+              {i < arr.length - 1 ? ' · ' : ''}
+            </span>
+          ))}
+        </Card>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="search"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          placeholder="Search name or slug…"
+          className="max-w-xs"
+          aria-label="Search organizations"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {CHIPS.map((c) => (
+            <FilterChip
+              key={c.key}
+              chip={c}
+              active={chip === c.key}
+              count={counts[c.key]}
+              disabled={c.needsRollup && !rollup}
+              onClick={() => setParam({ chip: chip === c.key ? 'all' : c.key })}
+            />
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-3 text-xs text-fg-muted">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={Boolean(prefs.showInternal)} onChange={(e) => setPref({ showInternal: e.target.checked })} />
+            Show internal
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={Boolean(prefs.showInactive)} onChange={(e) => setPref({ showInactive: e.target.checked })} />
+            Show inactive
+          </label>
+        </div>
+      </div>
+
+      {notice && (
+        <div
+          className={`rounded-md px-4 py-2 text-sm ${
+            notice.tone === 'danger'
+              ? 'border border-danger/30 bg-danger-tint text-danger-fg'
+              : 'border border-info/30 bg-info-tint text-info-fg'
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      <DataTable
+        head={
+          <>
+            <SortHead label="Organization" sortKey="name" />
+            <SortHead label="Status" sortKey="trialEnds" title="Sorted by trial end date" />
+            <SortHead label="Billing since" sortKey="billingSince" className="hidden xl:table-cell" title="The first month that actually carried a billable campaign" />
+            <SortHead label="Running month" sortKey="running" className="text-right" />
+            <SortHead label="Awaiting" sortKey="awaiting" className="text-right" />
+            <SortHead label="Outstanding" sortKey="outstanding" className="text-right" />
+            <th className="px-3 py-2.5 hidden xl:table-cell">Members · campaigns</th>
+            <th className="px-3 py-2.5 hidden 2xl:table-cell">Rate</th>
+            <th className="px-3 py-2.5">Next action</th>
+            <th className="px-3 py-2.5 text-right" />
+          </>
+        }
+      >
+        {orgsQ.isLoading &&
+          Array.from({ length: 8 }).map((_, i) => (
+            <tr key={`sk-${i}`}>
+              <td className="px-3 py-3"><Skeleton className="h-3 w-40" /><Skeleton className="mt-1.5 h-2.5 w-24" /></td>
+              <td className="px-3 py-3"><Skeleton className="h-5 w-16 rounded-full" /></td>
+              <td className="px-3 py-3 hidden xl:table-cell"><Skeleton className="h-3 w-16" /></td>
+              <td className="px-3 py-3"><Skeleton className="h-3 w-12" /></td>
+              <td className="px-3 py-3"><Skeleton className="h-3 w-12" /></td>
+              <td className="px-3 py-3"><Skeleton className="h-3 w-12" /></td>
+              <td className="px-3 py-3 hidden xl:table-cell"><Skeleton className="h-3 w-16" /></td>
+              <td className="px-3 py-3 hidden 2xl:table-cell"><Skeleton className="h-3 w-12" /></td>
+              <td className="px-3 py-3"><Skeleton className="h-3 w-20" /></td>
+              <td className="px-3 py-3" />
+            </tr>
+          ))}
+
+        {/* Mid-delete tenants: inert, with Retry as the only action. */}
+        {deleting.map((o) => (
+          <tr key={o.id} className="bg-sunken/40">
+            <td className="px-3 py-3">
+              <div className="font-medium text-fg">{o.name}</div>
+              <div className="text-xs text-fg-subtle">{o.slug}</div>
+            </td>
+            <td className="px-3 py-3">
+              <Badge variant={o.deleting.status === 'failed' ? 'danger' : 'warning'}>
+                {o.deleting.status === 'failed' ? 'Delete failed' : 'Deleting…'}
+              </Badge>
+            </td>
+            <td className="px-3 py-3 text-fg-subtle" colSpan={7}>
+              {o.deleting.status === 'failed'
+                ? o.deleting.error || 'Removal stopped partway — the organization stays locked until a retry finishes it.'
+                : `Removing all data in the background${o.deleting.source && o.deleting.source !== 'break_glass' ? ` (${o.deleting.source.replace('_', '-')})` : ''}…`}
+            </td>
+            <td className="px-3 py-3 text-right">
+              {o.deleting.status === 'failed' && canDelete && (
+                <RowMenu items={[{ label: 'Retry delete…', onClick: () => setDeletingRow({ ...o, retry: true }), danger: true }]} />
+              )}
+            </td>
+          </tr>
+        ))}
+
+        {shown.map((r) => {
+          const m = rowMoney(r);
+          const next = nextActionLabel({ nextAction: r.nextAction, invoicing: r.invoicing });
+          return (
+            <tr key={r.id}>
+              <td className="px-3 py-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Link
+                    to={orgPagePath(r.id)}
+                    className="font-medium text-fg underline decoration-dotted underline-offset-2 hover:text-brand-accent"
+                  >
+                    {r.name}
+                  </Link>
+                  {r.isInternal && <InternalBadge label="Internal" compact />}
+                  {!r.isActive && <Badge variant="neutral">Inactive</Badge>}
+                </div>
+                <div className="text-xs text-fg-subtle">
+                  {r.slug} · created {formatDate(r.createdAt)}
+                </div>
+              </td>
+
+              <td className="px-3 py-3">
+                <AccountStateBadge
+                  effective={r.billing.effective}
+                  banner={r.billing.banner}
+                  status={r.billing.status}
+                  trialDaysLeft={r.billing.trialDaysLeft}
+                  windDownEndsAt={r.invoicing?.windDownEndsAt}
+                />
+                {r.billing.status === 'trial' && r.billing.trialEndsAt && (
+                  <div className="mt-0.5 text-xs text-fg-subtle">
+                    {r.billing.banner === 'trial_expired' ? 'expired' : 'ends'} {formatDate(r.billing.trialEndsAt)}
+                  </div>
+                )}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3 hidden xl:table-cell">
+                {r.pending ? (
+                  <Skeleton className="inline-block h-3 w-14" />
+                ) : m.billingSince ? (
+                  shortMonthLabel(m.billingSince)
+                ) : (
+                  <span className="text-fg-subtle" title="No campaign has been to the field yet">Not started</span>
+                )}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
+                {r.isInternal ? (
+                  <span className="text-fg-subtle">Not billed</span>
+                ) : r.pending ? (
+                  <Skeleton className="inline-block h-3 w-12" />
+                ) : (
+                  <>
+                    <div className="text-fg">{fmtUsd(m.runningCents)}</div>
+                    {r.invoicing?.running && (
+                      <div className="text-xs text-fg-subtle">{r.invoicing.running.billableCampaigns} billing</div>
+                    )}
+                  </>
+                )}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3 text-right">
+                {r.isInternal ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : !m.complete ? (
+                  <Skeleton className="inline-block h-3 w-12" />
+                ) : m.awaitingMonths === 0 ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  <Tooltip label={m.awaitingList.map((x) => shortMonthLabel(x.month)).join(', ')}>
+                    <Link to={orgPagePath(r.id, { tab: 'statements' })}>
+                      <Badge variant="warning">{fmtUsd(m.awaitingCents)} · {m.awaitingMonths} mo</Badge>
+                    </Link>
+                  </Tooltip>
+                )}
+              </td>
+
+              {/* Straight from the list route — this one paints before the rollup and survives it
+                  failing, because chasing money is the thing you cannot afford to lose. */}
+              <td className="whitespace-nowrap px-3 py-3 text-right">
+                {r.isInternal ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : m.overdueCount > 0 ? (
+                  <>
+                    <Badge variant="danger">{fmtUsd(m.overdueCents)} overdue</Badge>
+                    <div className="text-xs text-fg-subtle">
+                      {m.maxDaysOverdue}d · due {formatDate(m.oldestDueAt)}
+                    </div>
+                  </>
+                ) : m.outstandingCount > 0 ? (
+                  <>
+                    <Badge variant="info">{fmtUsd(m.outstandingCents)}</Badge>
+                    <div className="text-xs text-fg-subtle">{m.outstandingCount} sent</div>
+                  </>
+                ) : (
+                  <span className="text-fg-subtle">—</span>
+                )}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3 hidden xl:table-cell text-fg-muted">
+                {r.memberCount} · {r.campaignsActive}
+                {r.campaignsArchived > 0 && <span className="text-fg-subtle"> (+{r.campaignsArchived})</span>}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3 hidden 2xl:table-cell text-fg-muted">
+                {r.isInternal ? '—' : r.rateCents != null ? (
+                  <Tooltip label="Org default — a campaign can carry a negotiated rate">
+                    <span>{fmtUsd(r.rateCents)}{r.paymentTermsDays != null ? ` · net ${r.paymentTermsDays}` : ''}</span>
+                  </Tooltip>
+                ) : (
+                  <Skeleton className="inline-block h-3 w-12" />
+                )}
+              </td>
+
+              <td className="whitespace-nowrap px-3 py-3">
+                {next.label === '—' ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  <Link
+                    to={orgPagePath(r.id, { tab: next.tab })}
+                    className={`font-semibold underline decoration-dotted underline-offset-2 ${
+                      next.tone === 'danger' ? 'text-danger-fg' : next.tone === 'warning' ? 'text-warning-fg' : 'text-fg-muted'
+                    }`}
+                  >
+                    {next.label} →
+                  </Link>
+                )}
+              </td>
+
+              <td className="px-3 py-3 text-right">
+                <RowMenu
+                  items={[
+                    { label: 'Open', onClick: () => navigate(orgPagePath(r.id)) },
+                    { label: 'Statements', onClick: () => navigate(orgPagePath(r.id, { tab: 'statements' })) },
+                    { label: 'Account & billing', onClick: () => navigate(orgPagePath(r.id, { tab: 'account' })) },
+                    { label: 'Access log', onClick: () => navigate(`/super-admin/access?organizationId=${r.id}`) },
+                    r.isActive
+                      ? { label: 'Deactivate…', onClick: () => setDeactivating(r) }
+                      : { label: 'Reactivate', onClick: () => toggleActiveMut.mutate({ id: r.id, isActive: true }) },
+                    ...(canDelete ? [{ label: 'Delete…', onClick: () => setDeletingRow(r), danger: true }] : []),
+                  ]}
+                />
+              </td>
+            </tr>
+          );
+        })}
+
+        {!orgsQ.isLoading && shown.length === 0 && (
+          <tr>
+            <td colSpan={10}>
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No organizations yet"
+                  hint="Create the first customer account to start a trial."
+                  action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New organization</Button>}
+                />
+              ) : chip === 'needsInvoice' ? (
+                <EmptyState title="Every closed month is invoiced" hint="Nothing is waiting to be billed." />
+              ) : (
+                <EmptyState
+                  title="No organizations match"
+                  hint={`Filtered by ${CHIPS.find((c) => c.key === chip)?.label || 'a filter'}${q ? ` and “${q}”` : ''}.`}
+                  action={
+                    <Button variant="secondary" onClick={() => { setSearchText(''); setSearchParams({}); }}>
+                      Clear filters
+                    </Button>
+                  }
+                />
+              )}
+            </td>
+          </tr>
+        )}
+      </DataTable>
+
+      {filtered.length > PAGE_SIZE && (
+        <Pager skip={skip} limit={PAGE_SIZE} total={filtered.length} onChange={setSkip} />
+      )}
+
+      {orgsQ.error && (
+        <Card className="border-danger/30 bg-danger-tint px-4 py-2.5 text-sm text-danger-fg">
+          Could not load organizations: {orgsQ.error.message}
+          <Button variant="secondary" size="sm" className="ml-3" onClick={() => orgsQ.refetch()}>Retry</Button>
+        </Card>
+      )}
+
+      {createOpen && <CreateOrgModal onClose={() => setCreateOpen(false)} onCreated={invalidate} />}
+
+      {deactivating && (
+        <DeactivateOrgModal
+          org={deactivating}
+          onClose={() => { setDeactivating(null); toggleActiveMut.reset(); }}
+          onConfirm={() => toggleActiveMut.mutate({ id: deactivating.id, isActive: false })}
+          pending={toggleActiveMut.isPending}
+          error={toggleActiveMut.error}
+        />
+      )}
+
+      {deletingRow && (
+        <DeleteOrgModal
+          org={deletingRow}
+          retry={Boolean(deletingRow.retry)}
+          outstanding={
+            rowMoney(deletingRow).outstandingCount > 0
+              ? { count: rowMoney(deletingRow).outstandingCount, totalCents: rowMoney(deletingRow).outstandingCents }
+              : null
+          }
+          onClose={() => { setDeletingRow(null); deleteMut.reset(); }}
+          onConfirm={({ confirmSlug }) => deleteMut.mutate({ id: deletingRow.id, confirmSlug, name: deletingRow.name })}
+          pending={deleteMut.isPending}
+          error={deleteMut.error}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---- create ------------------------------------------------------------------
+
+// The create flow, behind a button. It used to be the first ~120 lines of the page, permanently
+// expanded, pushing the daily-use table below the fold — the rarest action in the most prominent
+// place. The one-time credentials hand-off stays INSIDE the modal so a temp password cannot be
+// lost behind a dialog that closed itself.
+function CreateOrgModal({ onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [trialDays, setTrialDays] = useState('7');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [error, setError] = useState(null);
+  const [created, setCreated] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const createMut = useMutation({
-    mutationFn: (data) => api('/super-admin/organizations', { method: 'POST', body: data }),
+    mutationFn: (body) => api('/super-admin/organizations', { method: 'POST', body }),
     onSuccess: (res) => {
-      setName('');
-      setSlug('');
-      setTrialDays('7');
-      setFirstName('');
-      setLastName('');
-      setAdminEmail('');
-      setAdminPassword('');
       setError(null);
-      // Confirm the seated admin. When a temp password was TYPED the server echoes it back —
-      // surface it ONCE for hand-off. When left blank, tempPassword is null: the admin gets in
-      // via the emailed set-password link, so show that note instead of a credential to copy.
+      onCreated();
       if (res?.admin) {
-        setCopied(false);
-        setCreatedCreds({
+        setCreated({
           orgName: res.organization?.name || '',
           email: res.admin.email,
           tempPassword: res.tempPassword || null,
         });
+      } else {
+        onClose();
       }
-      qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
     },
     onError: (err) => setError(err.message),
   });
 
-  const toggleActiveMut = useMutation({
-    mutationFn: ({ id, isActive }) =>
-      api(`/super-admin/organizations/${id}`, { method: 'PATCH', body: { isActive } }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] }),
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: ({ id, slug }) =>
-      api(`/super-admin/organizations/${id}`, { method: 'DELETE', body: { confirmSlug: slug } }),
-    // The response is a 202 — the cascade has not run yet, so there are no counts to report.
-    // `name` is threaded through mutate() rather than read off the response, and every `r.` access
-    // is guarded: this used to dereference r.organization.name and Object.entries(r.counts)
-    // unguarded, which throws a TypeError INSIDE onSuccess (react-query does not route that to
-    // onError) the moment the shape changes.
-    onSuccess: (r, vars) => {
-      const shownName = r?.organization?.name || vars?.name || 'organization';
-      setDeleteMsg(
-        `Deleting '${shownName}'… this runs in the background; the row disappears when it finishes.`
-      );
-      setDeleteOrg(null);
-      setConfirmSlug('');
-      qc.invalidateQueries({ queryKey: ['super-admin', 'organizations'] });
-      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
-    },
-    onError: (err) => setDeleteMsg(err.message),
-  });
-
-  function onCreate(e) {
-    e.preventDefault();
+  const submit = () => {
     setError(null);
     const wantsAdmin = adminEmail.trim() !== '';
     if (wantsAdmin) {
@@ -169,547 +671,137 @@ export default function OrganizationsPage() {
       }
       if (adminPassword !== '') {
         const problem = tempPasswordProblem(adminPassword);
-        if (problem) {
-          setError(problem);
-          return;
-        }
+        if (problem) { setError(problem); return; }
       }
     }
     const days = Math.max(1, Math.min(90, parseInt(trialDays, 10) || 7));
     const body = { name: name.trim(), slug: slug.trim() || undefined, trialDays: days };
     if (wantsAdmin) {
       body.admin = { firstName: firstName.trim(), lastName: lastName.trim(), email: adminEmail.trim() };
-      // Only send a password when the super admin typed one; otherwise the server auto-generates.
       if (adminPassword !== '') body.admin.password = adminPassword;
     }
     createMut.mutate(body);
-  }
+  };
 
-  async function copyCreds() {
-    if (!createdCreds) return;
-    const text = `Email: ${createdCreds.email}\nTemporary password: ${createdCreds.tempPassword}\nYou'll be asked to reset it on first login.`;
+  const copyCreds = async () => {
+    if (!created?.tempPassword) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(
+        `Email: ${created.email}\nTemporary password: ${created.tempPassword}\nYou'll be asked to reset it on first login.`
+      );
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       setError('Could not copy — select the credentials manually.');
     }
+  };
+
+  if (created) {
+    return (
+      <Modal
+        size="lg"
+        onClose={onClose}
+        title={`Admin created${created.orgName ? ` — ${created.orgName}` : ''}`}
+        footer={<Button variant="primary" onClick={onClose}>Done</Button>}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-fg-muted">
+            {created.tempPassword
+              ? 'Hand these to the client — they’ll reset the password on first login. This is the only time the temporary password is shown.'
+              : 'A set-password invite was emailed to them — they follow the link to choose their own password (valid 72 hours). No credential to hand over.'}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Email</div>
+              <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{created.email}</div>
+            </div>
+            {created.tempPassword && (
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Temporary password</div>
+                <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{created.tempPassword}</div>
+              </div>
+            )}
+          </div>
+          {created.tempPassword && (
+            <Button variant="secondary" onClick={copyCreds}>{copied ? 'Copied ✓' : 'Copy credentials'}</Button>
+          )}
+        </div>
+      </Modal>
+    );
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-fg">Organizations</h1>
-        <p className="text-sm text-fg-muted">Platform-wide. Visible to super admins only.</p>
-      </div>
-
-      <form
-        onSubmit={onCreate}
-        className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm"
-      >
-        <div>
-          <h2 className="text-sm font-semibold text-fg">New client</h2>
-          <p className="text-xs text-fg-muted">
-            Create the org, start its trial clock, and optionally seat the first admin in one step.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+    <Modal
+      size="2xl"
+      onClose={onClose}
+      title="New organization"
+      subtitle="Creates the org, starts its trial clock, and optionally seats the first admin."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={createMut.isPending} disabled={!name.trim()} onClick={submit}>
+            {adminEmail.trim() ? 'Create client & admin' : 'Create org'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
           <div>
-            <label className="block text-xs font-semibold text-fg-muted">Name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Acme Campaigns LLC"
-              required
-              className={fieldCls}
-            />
+            <label className={fieldLabel} htmlFor="new-name">Name</label>
+            <Input id="new-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Campaigns LLC" autoFocus />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-fg-muted">Slug (optional)</label>
-            <input
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="acme-campaigns"
-              className={fieldCls}
-            />
+            <label className={fieldLabel} htmlFor="new-slug">Slug (optional)</label>
+            <Input id="new-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="acme-campaigns" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-fg-muted">Trial length (days)</label>
-            <input
-              type="number"
-              min="1"
-              max="90"
-              value={trialDays}
-              onChange={(e) => setTrialDays(e.target.value)}
-              placeholder="7"
-              className={fieldCls}
-            />
+            <label className={fieldLabel} htmlFor="new-trial">Trial length (days)</label>
+            <Input id="new-trial" type="number" min="1" max="90" value={trialDays} onChange={(e) => setTrialDays(e.target.value)} />
           </div>
         </div>
 
-        {/* Optional first admin — filled all-or-nothing; email presence triggers seating. */}
-        <div className="rounded-lg border border-border bg-surface p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
-            First admin (optional)
-          </h3>
+        <div className="rounded-lg bg-sunken p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">First admin (optional)</h3>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Leave blank to add admins later from the Users page. When filled, they get a set-password
-            invite by email and choose their own password — leave the temp password blank for that
-            (recommended). Type one only to hand over manually if they can’t receive email. They get
-            billing access either way.
+            Leave blank to add admins later. When filled, they get a set-password invite by email and choose their own
+            password — leave the temporary password blank for that (recommended). They get billing access either way.
           </p>
-          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
             <div>
-              <label className="block text-xs font-semibold text-fg-muted">First name</label>
-              <input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Ada"
-                className={fieldCls}
-              />
+              <label className={fieldLabel} htmlFor="new-first">First name</label>
+              <Input id="new-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ada" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-fg-muted">Last name</label>
-              <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Lovelace"
-                className={fieldCls}
-              />
+              <label className={fieldLabel} htmlFor="new-last">Last name</label>
+              <Input id="new-last" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Lovelace" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-fg-muted">Email</label>
-              <input
-                type="email"
-                value={adminEmail}
-                onChange={(e) => setAdminEmail(e.target.value)}
-                placeholder="ada@acme-campaigns.com"
-                className={fieldCls}
-              />
+              <label className={fieldLabel} htmlFor="new-email">Email</label>
+              <Input id="new-email" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="ada@acme-campaigns.com" />
             </div>
           </div>
           <div className="mt-3">
-            <label className="block text-xs font-semibold text-fg-muted">
-              Temporary password{' '}
-              <span className="font-normal text-fg-subtle">(optional)</span>
+            <label className={fieldLabel} htmlFor="new-temp">
+              Temporary password <span className="font-normal text-fg-subtle">(optional)</span>
             </label>
-            <input
+            <Input
+              id="new-temp"
               type="text"
+              autoComplete="off"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
               placeholder="Leave blank to email a set-password invite"
-              autoComplete="off"
-              className={fieldCls}
             />
             <p className="mt-1 text-xs text-fg-subtle">
-              Leave blank to email them a set-password invite (recommended). Type one only to hand
-              over manually if they can’t receive email — a simple one is fine, they choose a strong
-              password on first login.
+              Type one only to hand over out-of-band if they can&apos;t receive email — a simple one is fine, they
+              choose a strong password on first login.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={createMut.isPending || !name.trim()}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
-          >
-            {createMut.isPending ? 'Creating…' : adminEmail.trim() ? 'Create client & admin' : 'Create org'}
-          </button>
-          {error && (
-            <div className="flex-1 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-              {error}
-            </div>
-          )}
-        </div>
-      </form>
-
-      {createdCreds && (
-        <div className="rounded-xl border border-success/30 bg-success-tint p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-success-fg">
-                Admin created{createdCreds.orgName ? ` — ${createdCreds.orgName}` : ''}
-              </h2>
-              <p className="mt-1 text-xs text-success-fg/90">
-                {createdCreds.tempPassword
-                  ? 'Hand these to the client — they’ll reset the password on first login. This is the only time the temp password is shown.'
-                  : 'A set-password invite was emailed to them — they follow the link to choose their own password (link valid 72 hours). No credential to hand over.'}
-              </p>
-            </div>
-            <button
-              onClick={() => setCreatedCreds(null)}
-              className="text-xs font-semibold text-fg-muted hover:text-fg"
-            >
-              Dismiss ✕
-            </button>
-          </div>
-          {createdCreds.tempPassword ? (
-            <>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Email</div>
-                  <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.email}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Temp password</div>
-                  <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.tempPassword}</div>
-                </div>
-              </div>
-              <button
-                onClick={copyCreds}
-                className="mt-3 rounded-md border border-success/40 bg-card px-3 py-2 text-sm font-semibold text-success-fg shadow-sm hover:bg-success-tint"
-              >
-                {copied ? 'Copied ✓' : 'Copy credentials'}
-              </button>
-            </>
-          ) : (
-            <div className="mt-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Invite emailed to</div>
-              <div className="mt-0.5 select-all break-all font-mono text-sm text-fg">{createdCreds.email}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* This month's revenue across every customer org — the aggregate the per-org panels can't
-          answer. "Billable" = statement lines with billable === true (first knock before month end,
-          not archived before month start); internal orgs are excluded entirely. */}
-      {rollupQ.data && (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div className="text-sm text-fg-muted">
-              <span className="text-lg font-semibold text-fg">{fmtUsd(rollupQ.data.totalCents)}</span>{' '}
-              this month ({rollupQ.data.month}) · {rollupQ.data.billableCampaigns} billable campaign
-              {rollupQ.data.billableCampaigns === 1 ? '' : 's'}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              {Object.entries(rollupQ.data.byStatus).map(([s, n]) => (
-                <span key={s} className="rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted">
-                  {n} {s.replace('_', ' ')}
-                </span>
-              ))}
-              {/* This strip is the LIVE running month; closing a past month is the other job. */}
-              <button
-                onClick={() => navigate('/super-admin/billing')}
-                className="font-semibold text-brand-accent underline decoration-dotted underline-offset-2 hover:opacity-80"
-              >
-                Close a month →
-              </button>
-            </div>
-          </div>
-          {rollupQ.data.organizations.some((r) => r.totalCents > 0) && (
-            <div className="mt-2 text-xs text-fg-muted">
-              Top:{' '}
-              {rollupQ.data.organizations
-                .filter((r) => r.totalCents > 0)
-                .slice(0, 3)
-                .map((r, i, arr) => (
-                  <span key={r.organizationId}>
-                    <button
-                      onClick={() => setBillingOrg({ id: r.organizationId, name: r.name })}
-                      className="font-semibold text-fg underline decoration-dotted underline-offset-2 hover:opacity-80"
-                    >
-                      {r.name}
-                    </button>{' '}
-                    ({fmtUsd(r.totalCents)}){i < arr.length - 1 ? ' · ' : ''}
-                  </span>
-                ))}
-            </div>
-          )}
-          <p className="mt-1 text-xs text-fg-subtle">
-            Billable = first knock before the month ended and not archived before it began. Internal orgs excluded.
-          </p>
-        </div>
-      )}
-
-      {(atRiskQ.data?.items?.length || 0) > 0 && (
-        <div className="rounded-md border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
-          <span className="font-semibold">Needs attention: </span>
-          {atRiskQ.data.items.map((it, i, arr) => (
-            <span key={`${it.organizationId}-${it.type}`}>
-              <button
-                onClick={() => setBillingOrg({ id: it.organizationId, name: it.name })}
-                className="font-semibold underline underline-offset-2 hover:opacity-80"
-              >
-                {it.name}
-              </button>
-              {' ('}
-              {atRiskLabel(it)}
-              {')'}
-              {i < arr.length - 1 ? ' · ' : ''}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSkip(0);
-          setQ(searchText.trim());
-        }}
-        className="flex flex-wrap items-center gap-2"
-      >
-        <input
-          type="search"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search name or slug…"
-          className="flex-1 min-w-[220px] rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        />
-        <button type="submit" className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-          Search
-        </button>
-      </form>
-
-      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-        <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="bg-sunken text-left text-xs font-semibold uppercase tracking-wide text-fg-muted">
-            <tr>
-              {[
-                { key: 'name', label: 'Name', sortable: true },
-                // Members counts ACTIVE memberships; campaigns are split so the bases are labeled.
-                { key: 'members', label: 'Active members' },
-                { key: 'campaigns', label: 'Campaigns' },
-                { key: 'created', label: 'Created', sortable: true },
-                { key: 'trialEnds', label: 'Trial ends', sortable: true },
-                // "Org default" — individual campaigns can carry a negotiated override
-                // (services/billing/rate.js), so this column never implies rate × campaigns.
-                { key: 'rate', label: 'Org rate' },
-                { key: 'month', label: 'This month' },
-                { key: 'billing', label: 'Billing' },
-                { key: 'actions', label: '' },
-              ].map((c) => (
-                <th key={c.key} className="px-3 py-3">
-                  {c.sortable ? (
-                    <button
-                      onClick={() => { setSkip(0); setSort(c.key); }}
-                      className={`uppercase tracking-wide hover:text-fg ${sort === c.key ? 'text-fg' : ''}`}
-                    >
-                      {c.label}
-                      {sort === c.key && ' ▾'}
-                    </button>
-                  ) : (
-                    c.label
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {orgsQ.isLoading && (
-              <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-fg-muted">
-                  Loading…
-                </td>
-              </tr>
-            )}
-            {/* Organizations whose delete is running (or failed). They arrive in their own array
-                so every other consumer of `organizations` — this table's normal rows, the org
-                switcher, the mobile pickers — treats them as gone; here they render inert, with
-                Retry as the only action on a failure. */}
-            {orgsQ.data?.deletingOrganizations?.map((o) => (
-              <tr key={o.id} className="bg-sunken/40">
-                <td className="px-3 py-3">
-                  <div className="font-medium text-fg">
-                    {o.name}
-                    {o.deletionStatus === 'failed' ? (
-                      <span className="ml-2 inline-flex rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger-fg">
-                        Delete failed
-                      </span>
-                    ) : (
-                      <span className="ml-2 inline-flex rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-fg">
-                        Deleting…
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-fg-subtle">{o.slug}</div>
-                  {o.deletionStatus === 'failed' && o.deletionError && (
-                    <div className="mt-1 text-xs text-danger">{o.deletionError}</div>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-fg-subtle" colSpan={7}>
-                  {o.deletionStatus === 'failed'
-                    ? 'Removal stopped partway — the organization stays locked until a retry finishes it.'
-                    : `Removing all data in the background${o.deletionSource && o.deletionSource !== 'break_glass' ? ` (${o.deletionSource.replace('_', '-')})` : ''}…`}
-                </td>
-                <td className="px-3 py-3 text-right">
-                  {o.deletionStatus === 'failed' && (
-                    <button
-                      onClick={() => {
-                        setDeleteMsg(null);
-                        setConfirmSlug('');
-                        setDeleteOrg({ id: o.id, name: o.name, slug: o.slug, retry: true });
-                      }}
-                      className="text-xs font-semibold text-danger hover:opacity-80"
-                    >
-                      Retry delete…
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {orgsQ.data?.organizations?.map((o) => {
-              const money = rollupQ.data?.organizations?.find((r) => r.organizationId === o.id);
-              return (
-                <tr key={o.id}>
-                  <td className="px-3 py-3">
-                    <div className="font-medium text-fg">
-                      <button
-                        onClick={() => navigate(`/organizations/${o.id}`)}
-                        className="underline decoration-dotted underline-offset-2 hover:text-brand-accent"
-                        title="Open this organization's detail page (roster, campaigns, access log)"
-                      >
-                        {o.name}
-                      </button>
-                      {/* Flag marker (tamper-proof isInternal), distinct from the Billing pill's
-                          billing STATE — this row can show both. */}
-                      {o.isInternal && <InternalBadge label="Internal" className="ml-2" />}
-                      {!o.isActive && (
-                        <span className="ml-2 inline-flex rounded-full bg-sunken px-2 py-0.5 text-xs font-medium text-fg-muted">
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-fg-subtle">{o.slug}</div>
-                  </td>
-                  <td className="px-3 py-3 text-fg-muted">{o.memberCount}</td>
-                  <td className="px-3 py-3 text-fg-muted">
-                    {o.campaignsActive}
-                    {o.campaignsArchived > 0 && (
-                      <span className="text-fg-subtle"> · {o.campaignsArchived} archived</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
-                    {o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
-                    {o.billing?.trialEndsAt ? new Date(o.billing.trialEndsAt).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
-                    {money ? `${fmtUsd(money.rateCents)}/cmp` : '—'}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-fg-muted">
-                    {money ? fmtUsd(money.totalCents) : '—'}
-                  </td>
-                  <td className="px-3 py-3">
-                    <button
-                      onClick={() => setBillingOrg({ id: o.id, name: o.name })}
-                      className="inline-flex items-center gap-1.5"
-                      title="Manage billing"
-                    >
-                      <BillingPill effective={o.billing?.effective} />
-                      <span className="text-xs font-semibold text-brand-accent hover:opacity-80">Manage</span>
-                    </button>
-                  </td>
-                  <td className="px-3 py-3 text-right">
-                    <div className="flex flex-col items-end gap-1">
-                      <button
-                        onClick={() =>
-                          toggleActiveMut.mutate({ id: o.id, isActive: !o.isActive })
-                        }
-                        className="text-xs font-semibold text-brand-accent hover:text-brand-accent"
-                      >
-                        {o.isActive ? 'Deactivate' : 'Reactivate'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setDeleteMsg(null);
-                          setConfirmSlug('');
-                          setDeleteOrg({ id: o.id, name: o.name, slug: o.slug });
-                        }}
-                        className="text-xs font-semibold text-danger hover:opacity-80"
-                      >
-                        Delete…
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {orgsQ.data?.organizations?.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-fg-muted">
-                  {q ? 'No organizations match.' : 'No organizations yet.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {error && <div className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger-fg">{error}</div>}
       </div>
-
-      {(orgsQ.data?.total || 0) > LIMIT && (
-        <Pager skip={skip} limit={LIMIT} total={orgsQ.data.total} onChange={setSkip} />
-      )}
-
-      {billingOrg && (
-        <OrgBillingPanel orgId={billingOrg.id} orgName={billingOrg.name} onClose={() => setBillingOrg(null)} />
-      )}
-
-      {deleteMsg && (
-        <div className="rounded-md border border-info/30 bg-info-tint px-4 py-2 text-sm text-info-fg">{deleteMsg}</div>
-      )}
-
-      {deleteOrg && (
-        <div className="rounded-xl border border-danger/30 bg-danger-tint p-4">
-          <h2 className="text-sm font-semibold text-danger">
-            {deleteOrg.retry ? `Retry deleting ${deleteOrg.name}?` : `Permanently delete ${deleteOrg.name}?`}
-          </h2>
-          <p className="mt-1 text-sm text-danger">
-            {deleteOrg.retry ? (
-              <>
-                A previous attempt stopped partway, so this organization is <strong>already partly
-                destroyed</strong> and stays locked to everyone until a retry finishes it. Retrying
-                resumes the same removal.{' '}
-              </>
-            ) : (
-              <>
-                This hard-deletes the org and <strong>everything in it</strong> — campaigns, doors, voters,
-                canvass history, surveys, books, imports, reports, and share links. It cannot be undone.
-                User accounts survive (people in other orgs keep that access; this org&apos;s memberships are
-                removed).{' '}
-              </>
-            )}
-            Removal runs in the background and can take several minutes for a large organization; the org
-            is locked to everyone the moment you confirm. Type the slug{' '}
-            <span className="font-mono font-semibold">{deleteOrg.slug}</span> to confirm.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <input
-              value={confirmSlug}
-              onChange={(e) => setConfirmSlug(e.target.value)}
-              placeholder={deleteOrg.slug}
-              className="rounded-md border border-danger/40 bg-card px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
-            />
-            <button
-              onClick={() =>
-                deleteMut.mutate({
-                  id: deleteOrg.id,
-                  slug: confirmSlug.trim().toLowerCase(),
-                  name: deleteOrg.name,
-                })
-              }
-              disabled={confirmSlug.trim().toLowerCase() !== deleteOrg.slug || deleteMut.isPending}
-              className="rounded-md bg-danger px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
-            >
-              {deleteMut.isPending ? 'Queueing…' : deleteOrg.retry ? 'Retry delete' : 'Delete forever'}
-            </button>
-            <button
-              onClick={() => {
-                setDeleteOrg(null);
-                setConfirmSlug('');
-              }}
-              className="text-sm font-semibold text-fg-muted hover:text-fg"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    </Modal>
   );
 }

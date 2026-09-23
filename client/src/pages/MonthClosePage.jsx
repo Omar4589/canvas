@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import { BillingPill, fmtUsd, currentMonthStr } from '../lib/billingStatus.jsx';
-import { Segmented } from '../components/ui/index.js';
+import { BillingPill, fmtUsd } from '../lib/billingStatus.jsx';
+import { Badge, Segmented } from '../components/ui/index.js';
+import { addMonths } from '../lib/months.js';
+import { formatDate } from '../lib/dates.js';
+import { stateMeta } from '../lib/invoicing.js';
+import { orgPagePath } from '../lib/orgPageTabs.js';
 
 // CLOSING THE MONTH: /super-admin/billing.
 //
@@ -12,39 +16,24 @@ import { Segmented } from '../components/ui/index.js';
 // — which is unanswerable by clicking through thirty orgs one at a time, and is exactly how a
 // month gets missed. Super-admin only; internal orgs never appear.
 
-// 'YYYY-MM' for the month before the current one — the month you are almost always closing.
-function lastMonthStr() {
-  const [y, m] = currentMonthStr().split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 2, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-// 'YYYY-MM' minus n months.
-function monthsAgo(m, n) {
-  const [y, mo] = String(m).split('-').map(Number);
-  const total = y * 12 + (mo - 1) - n;
-  const y2 = Math.floor(total / 12);
-  const m2 = total - y2 * 12 + 1;
-  return `${String(y2).padStart(4, '0')}-${String(m2).padStart(2, '0')}`;
-}
-
-function fmtDate(d) {
-  return d ? new Date(d).toLocaleDateString() : '—';
-}
-
 export default function MonthClosePage() {
-  const [month, setMonth] = useState(lastMonthStr());
+  // The month comes from the SERVER, not the browser. `currentMonth` is UTC on the server and is
+  // the clock the MONTH_NOT_ENDED gate reads; picking it locally meant that for several hours
+  // around each boundary a US account manager could be offered a month the server would refuse.
+  // The request starts with no month at all and adopts the one the response names.
+  const [month, setMonth] = useState('');
   // Range mode answers the other shape of the job: "who still owes me an invoice for July AND
   // August". Single month stays the default — it is the ordinary end-of-month pass.
   const [mode, setMode] = useState('one');
-  const [from, setFrom] = useState(() => monthsAgo(lastMonthStr(), 1));
-  const [to, setTo] = useState(lastMonthStr());
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   // Live recompute is O(orgs × campaigns) round-trips, so it is opt-in behind a button and never
   // auto-refetches. Without it the board is three queries and answers the main question anyway.
   const [live, setLive] = useState(false);
 
   const range = mode === 'range';
-  const qs = range ? `from=${from}&to=${to}` : `month=${month}`;
+  // No month on the first request: the server answers with the last CLOSED month and says so.
+  const qs = range ? `from=${from}&to=${to}` : month ? `month=${month}` : '';
   const boardQ = useQuery({
     queryKey: ['super-admin', 'month-close', qs, live],
     queryFn: () => api(`/super-admin/billing/statements?${qs}${live ? '&live=1' : ''}`),
@@ -53,6 +42,15 @@ export default function MonthClosePage() {
 
   const data = boardQ.data;
   const rows = data?.organizations || [];
+
+  // Adopt the server's month once, then leave the picker to the operator.
+  useEffect(() => {
+    if (!month && data?.month) {
+      setMonth(data.month);
+      setTo((t) => t || data.month);
+      setFrom((f) => f || addMonths(data.month, -1));
+    }
+  }, [data?.month, month]);
 
   return (
     <div className="space-y-4">
@@ -121,7 +119,14 @@ export default function MonthClosePage() {
               value={data.issuedCount}
               hint={range ? `Across ${data.months.length} months` : undefined}
             />
-            <Stat label="Not yet issued" value={data.unissuedCount} tone={data.unissuedCount > 0 ? 'warn' : undefined} />
+            {/* Counts the months that actually need an invoice. A closed $0 month has no statement
+                either, and folding those in told you to chase 35 when there were 5. */}
+            <Stat
+              label="Not yet issued"
+              value={data.unissuedCount}
+              tone={data.unissuedCount > 0 ? 'warn' : undefined}
+              hint={data.zeroCount > 0 ? `${data.zeroCount} more had nothing to bill` : undefined}
+            />
             <Stat
               label={range ? 'Range total' : 'Issued total'}
               value={fmtUsd(range ? data.rangeTotalCents : data.issuedTotalCents)}
@@ -153,7 +158,7 @@ export default function MonthClosePage() {
                     key={r.organizationId}
                     className={
                       (range ? r.months.some((m) => m.drift?.material) : r.drift?.material)
-                        ? 'bg-amber-50/60'
+                        ? 'bg-warning-tint/60'
                         : ''
                     }
                   >
@@ -171,15 +176,23 @@ export default function MonthClosePage() {
                               key={m.month}
                               title={
                                 m.issued
-                                  ? `Issued ${fmtDate(m.issuedAt)}${m.issuedBy ? ` by ${m.issuedBy}` : ''}${m.externalRef ? ` · ${m.externalRef}` : ''}`
-                                  : 'Not issued'
+                                  ? `Issued ${formatDate(m.issuedAt)}${m.issuedBy ? ` by ${m.issuedBy}` : ''}${m.externalRef ? ` · ${m.externalRef}` : ''}${m.paidAt ? ` · paid ${formatDate(m.paidAt)}` : m.dueAt ? ` · due ${formatDate(m.dueAt)}` : ''}`
+                                  : m.state === 'zero'
+                                    ? 'Nothing to bill — not an outstanding invoice'
+                                    : 'Not issued'
                               }
                               className={`rounded px-1.5 py-0.5 text-xs font-medium ${
                                 m.drift?.material
-                                  ? 'bg-amber-100 text-amber-900'
-                                  : m.issued
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-sunken text-amber-700'
+                                  ? 'bg-warning-tint text-warning-fg'
+                                  : m.paymentState === 'paid'
+                                    ? 'bg-success-tint text-success-fg'
+                                    : m.paymentState === 'overdue'
+                                      ? 'bg-danger-tint text-danger-fg'
+                                      : m.issued
+                                        ? 'bg-info-tint text-info-fg'
+                                        : m.state === 'zero'
+                                          ? 'bg-sunken text-fg-subtle'
+                                          : 'bg-sunken text-warning-fg'
                               }`}
                             >
                               {m.month.slice(2)}
@@ -188,16 +201,23 @@ export default function MonthClosePage() {
                           ))}
                         </span>
                       ) : r.issued ? (
-                        <span className="text-fg-muted">
-                          Issued {fmtDate(r.issuedAt)}
-                          {r.issuedBy ? ` by ${r.issuedBy}` : ''}
-                          {r.externalRef ? ` · ${r.externalRef}` : ''}
-                          {r.drift?.material && (
-                            <span className="ml-1 font-semibold text-amber-700">· drifted</span>
-                          )}
+                        <span className="inline-flex flex-wrap items-center gap-1.5 text-fg-muted">
+                          <Badge variant={stateMeta(r.paymentState === 'outstanding' ? 'issued' : r.paymentState, { ...r, asOf: data?.asOf }).variant}>
+                            {stateMeta(r.paymentState === 'outstanding' ? 'issued' : r.paymentState, { ...r, asOf: data?.asOf }).label}
+                          </Badge>
+                          <span>
+                            {formatDate(r.issuedAt)}
+                            {r.issuedBy ? ` by ${r.issuedBy}` : ''}
+                            {r.externalRef ? ` · ${r.externalRef}` : ''}
+                          </span>
+                          {r.drift?.material && <Badge variant="warning">drifted</Badge>}
                         </span>
+                      ) : r.state === 'zero' ? (
+                        // A closed month with nothing to bill owes nobody anything. Calling it
+                        // "Not issued" turned thirty of these into a to-do list of busywork.
+                        <span className="text-fg-subtle">Nothing to bill</span>
                       ) : (
-                        <span className="font-semibold text-amber-700">Not issued</span>
+                        <Badge variant="warning">Needs invoice</Badge>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -212,7 +232,7 @@ export default function MonthClosePage() {
                       {/* Issuing and voiding live on the org's own Billing panel — one place that
                           owns the write, so this board stays a read-only overview. */}
                       <Link
-                        to={`/organizations?billing=${r.organizationId}`}
+                        to={orgPagePath(r.organizationId, { tab: 'statements', month: range ? undefined : month })}
                         className="text-xs font-semibold text-brand-accent hover:opacity-80"
                       >
                         Open billing →
@@ -240,7 +260,7 @@ function Stat({ label, value, hint, tone }) {
   return (
     <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${tone === 'warn' ? 'text-amber-700' : 'text-fg'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-semibold ${tone === 'warn' ? 'text-warning-fg' : 'text-fg'}`}>{value}</p>
       {hint && <p className="mt-0.5 text-xs text-fg-subtle">{hint}</p>}
     </div>
   );

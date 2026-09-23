@@ -109,7 +109,7 @@ export default function SupportAccessPage() {
   const [recordIdText, setRecordIdText] = useState('');
 
   // Deep link from the org detail page: ?organizationId=<id> pre-fills the log's org filter, then
-  // consumes the param (same consume-once pattern as OrganizationsPage's ?billing=).
+  // consumes the param, so closing the panel doesn't reopen it.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const target = searchParams.get('organizationId');

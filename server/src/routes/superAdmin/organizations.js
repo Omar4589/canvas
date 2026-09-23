@@ -6,12 +6,16 @@ import { Membership } from '../../models/Membership.js';
 import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Household } from '../../models/Household.js';
 import { requireAuth, requireSuperAdmin, requireBreakGlass } from '../../middleware/auth.js';
 import { slugSchema, emailSchema, nameSchema, passwordSchema } from '../../utils/validators.js';
 import { Subscription } from '../../models/Subscription.js';
 import { SubscriptionEvent } from '../../models/SubscriptionEvent.js';
+import { Statement } from '../../models/Statement.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
-import { currentUsage, currentMonth } from '../../services/billing/statement.js';
+import { currentMonth } from '../../services/billing/statement.js';
+import { orgInvoicing } from '../../services/billing/invoicing.js';
+import { foldIssuedRows, nextActionFor, termsDaysFor } from '../../services/billing/invoicingState.js';
 import { idleZeroDollarOrgs } from '../../services/billing/idleOrgs.js';
 import { createOrgMember, MemberError } from '../../services/memberships/createMember.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
@@ -103,10 +107,47 @@ router.get('/', async (req, res, next) => {
     // Billing summary per org — status pill + "needs attention" strip data.
     const subs = await Subscription.find({ organizationId: { $in: ids } }).lean();
     const subMap = new Map(subs.map((s) => [String(s.organizationId), s]));
+
+    // THE CHASE SIGNAL, cheaply. One Statement read for every org on the page — no recompute, no
+    // range walk — folded into per-org outstanding/overdue totals. The desk asks for it so the
+    // "who owes us money" column paints immediately and still shows something if the expensive
+    // rollup times out or fails.
+    //
+    // OPT-IN (`?invoicing=1`) rather than always-on, because the PARAMETERLESS list is mounted by
+    // the org switcher on every super-admin page load, plus Support access, Imports, Select org and
+    // the mobile org picker. None of them want a Statement query, and the default response staying
+    // byte-identical is what keeps this additive for the shipped mobile builds.
+    let invoicingByOrg = new Map();
+    if (req.query.invoicing) {
+      const issued = await Statement.find(
+        { organizationId: { $in: ids }, status: 'issued' },
+        { lines: 0 }
+      ).lean();
+      invoicingByOrg = foldIssuedRows(issued, {
+        now: new Date(),
+        termsByOrg: new Map(subs.map((s) => [String(s.organizationId), termsDaysFor(s)])),
+      });
+    }
+
     let rows = orgs.map((o) => {
       const sub = subMap.get(String(o._id)) || null;
       const ent = entitlementFor(sub);
       const camp = campaignMap.get(String(o._id));
+      // Null for an internal org rather than zeros: "never billed" and "billed, owes nothing" are
+      // different facts and the desk renders them differently.
+      const internal = !!o.isInternal || sub?.status === 'internal';
+      const inv =
+        internal
+          ? null
+          : invoicingByOrg.get(String(o._id)) || {
+              outstandingCount: 0,
+              outstandingCents: 0,
+              overdueCount: 0,
+              overdueCents: 0,
+              maxDaysOverdue: 0,
+              oldestDueAt: null,
+              lastPaidAt: null,
+            };
       return {
         id: String(o._id),
         name: o.name,
@@ -127,7 +168,15 @@ router.get('/', async (req, res, next) => {
           effective: ent.effective,
           trialEndsAt: sub?.trialEndsAt ?? null,
           trialDaysLeft: ent.trialDaysLeft,
+          // An EXPIRED trial resolves to effective 'suspended', which reads identically to a
+          // manual suspension on a pill. The banner is what tells them apart, and it already
+          // exists — it simply never reached this row.
+          banner: ent.banner ?? null,
         },
+        // The KEY ITSELF is omitted unless asked for, not merely set to null: the parameterless
+        // response has to stay byte-identical for the shipped mobile builds and the four web
+        // callers that mount this route for a plain org picker.
+        ...(req.query.invoicing ? { invoicing: inv } : {}),
       };
     });
 
@@ -187,15 +236,24 @@ router.get('/billing-rollup', async (req, res, next) => {
   try {
     // NOT_DELETING: never walk a statement for a tenant we are destroying — the numbers are
     // meaningless mid-cascade and Statement is swept moments later anyway.
-    const orgs = await Organization.find(NOT_DELETING, 'name slug isActive').sort({ name: 1 }).lean();
+    const now = new Date();
+    // `createdAt` and `isInternal` are load-bearing here, not decoration: the invoicing window
+    // starts at the org's creation month, and internal is checked on BOTH signals.
+    const orgs = await Organization.find(NOT_DELETING, 'name slug isActive isInternal createdAt')
+      .sort({ name: 1 })
+      .lean();
     const subs = await Subscription.find({}).lean();
     const subMap = new Map(subs.map((s) => [String(s.organizationId), s]));
     const rows = [];
     for (const o of orgs) {
       const sub = subMap.get(String(o._id)) || null;
-      if (sub?.status === 'internal') continue;
+      if (sub?.status === 'internal' || o.isInternal) continue;
       const ent = entitlementFor(sub);
-      const usage = await currentUsage(o._id);
+      // ONE walk per org, answering both questions: this month's meter (the legacy keys below,
+      // whose numbers are unchanged — a range's running month is the same object monthlyStatement
+      // returns for it, pinned by statementRange.int.test.js) and the whole invoicing picture.
+      const state = await orgInvoicing(o, { now });
+      const usage = state.usage;
       rows.push({
         organizationId: String(o._id),
         name: o.name,
@@ -209,17 +267,38 @@ router.get('/billing-rollup', async (req, res, next) => {
         billableCampaigns: usage.billableCampaigns,
         totalCents: usage.totalCents,
         setupCount: usage.setupCount,
+        // ── everything below is additive ──
+        banner: ent.banner ?? null,
+        statusChangedAt: sub?.statusChangedAt ?? null,
+        paymentTermsDays: state.termsDays,
+        // The figure an account manager asks about first on a $0 line: campaigns that DID go out
+        // this month but are free on the start grace. currentUsage has always computed it.
+        graceCount: usage.graceCount,
+        invoicing: state.invoicing,
+        nextAction: nextActionFor({ invoicing: state.invoicing, entitlement: ent, sub }),
       });
     }
     rows.sort((a, b) => b.totalCents - a.totalCents);
     const byStatus = {};
     for (const r of rows) byStatus[r.effective] = (byStatus[r.effective] || 0) + 1;
+    const sumBy = (pick) => rows.reduce((s, r) => s + pick(r), 0);
     res.json({
-      month: currentMonth(),
+      month: currentMonth(now),
       totalCents: rows.reduce((s, r) => s + r.totalCents, 0),
       billableCampaigns: rows.reduce((s, r) => s + r.billableCampaigns, 0),
       byStatus,
       organizations: rows,
+      // ── additive platform totals: the KPI strip on the desk ──
+      asOf: now,
+      currentMonth: currentMonth(now),
+      awaitingTotalCents: sumBy((r) => r.invoicing.awaiting.totalCents),
+      awaitingMonths: sumBy((r) => r.invoicing.awaiting.months.length),
+      awaitingOrgs: rows.filter((r) => r.invoicing.awaiting.months.length > 0).length,
+      outstandingTotalCents: sumBy((r) => r.invoicing.outstanding.totalCents),
+      outstandingCount: sumBy((r) => r.invoicing.outstanding.count),
+      overdueTotalCents: sumBy((r) => r.invoicing.overdue.totalCents),
+      overdueCount: sumBy((r) => r.invoicing.overdue.count),
+      overdueOrgs: rows.filter((r) => r.invoicing.overdue.count > 0).length,
     });
   } catch (err) {
     next(err);
@@ -268,6 +347,45 @@ router.get('/at-risk', async (req, res, next) => {
         lastActivityAt: z.lastActivityAt,
       });
     }
+
+    // OVERDUE INVOICES, built from its own read rather than the loop above — deliberately.
+    // That loop walks `isActive: true` orgs and skips any without a Subscription row, and both
+    // exclusions are wrong for money: a DEACTIVATED customer can still owe you for the months
+    // they canvassed, and so can an org whose subscription record was never created. What is
+    // shared with the loop is what should be: internal orgs and mid-delete tenants never appear.
+    const now = new Date();
+    const unpaid = await Statement.find(
+      { status: 'issued', paidAt: null, totalCents: { $gt: 0 } },
+      { lines: 0 }
+    ).lean();
+    if (unpaid.length) {
+      const overdueOrgIds = [...new Set(unpaid.map((s) => String(s.organizationId)))];
+      const overdueOrgs = await Organization.find(
+        { _id: { $in: overdueOrgIds }, isInternal: { $ne: true }, ...NOT_DELETING },
+        'name slug'
+      ).lean();
+      const byId = new Map(overdueOrgs.map((o) => [String(o._id), o]));
+      const folded = foldIssuedRows(unpaid, {
+        now,
+        termsByOrg: new Map(subs.map((s) => [String(s.organizationId), termsDaysFor(s)])),
+      });
+      for (const [orgId, agg] of folded) {
+        const org = byId.get(orgId);
+        if (!org || agg.overdueCount === 0) continue;
+        if (subMap.get(orgId)?.status === 'internal') continue;
+        items.push({
+          organizationId: orgId,
+          name: org.name,
+          slug: org.slug,
+          type: 'invoice_overdue',
+          count: agg.overdueCount,
+          totalCents: agg.overdueCents,
+          oldestDueAt: agg.oldestDueAt,
+          maxDaysOverdue: agg.maxDaysOverdue,
+        });
+      }
+    }
+
     res.json({ days, idleMonths: idle.months, items });
   } catch (err) {
     next(err);
@@ -303,6 +421,9 @@ router.get('/:orgId', async (req, res, next) => {
     const lastByCampaign = await Promise.all(
       campaigns.map((c) => CanvassActivity.findOne({ campaignId: c._id }, 'timestamp').sort({ timestamp: -1 }).lean())
     );
+    const householdCounts = await Promise.all(
+      campaigns.map((c) => Household.countDocuments({ campaignId: c._id, isActive: true }))
+    );
 
     const ent = entitlementFor(sub);
     res.json({
@@ -333,6 +454,13 @@ router.get('/:orgId', async (req, res, next) => {
         // 'internal' silently exempts an org from BOTH retention sweeps (triggers.js isExempt +
         // DORMANCY_PROTECTED_STATUSES) — surfaced so the consequence is legible, not folklore.
         internal: sub?.status === 'internal',
+        // The org page header reads these: which notice the org sees, when the state last moved,
+        // who moved it, the rate, and the payment terms the next invoice will carry.
+        banner: ent.banner ?? null,
+        statusChangedAt: sub?.statusChangedAt ?? null,
+        source: sub?.source ?? null,
+        pricePerCampaignCents: sub?.pricePerCampaignCents ?? null,
+        paymentTermsDays: termsDaysFor(sub),
       },
       lastActivityAt: lastActivity?.timestamp || null,
       members: memberships
@@ -358,6 +486,9 @@ router.get('/:orgId', async (req, res, next) => {
         archivedAt: c.archivedAt || null,
         createdAt: c.createdAt,
         lastActivityAt: lastByCampaign[i]?.timestamp || null,
+        // Universe size, REPORTED and never priced (the flat per-campaign rate does not depend on
+        // it — docs/BILLING.md). Rides the {campaignId, isActive} index.
+        households: householdCounts[i],
       })),
     });
   } catch (err) {

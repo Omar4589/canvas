@@ -77,6 +77,25 @@ Universe size is **not** priced and never enforced by the software. The "up to ~
 per campaign" figure some contracts carry is a sales guideline; bigger universes are a
 conversation and, if agreed, a negotiated rate — nothing in the app blocks them.
 
+### "Billing since", and what a campaign bills from
+
+Two different dates, and the difference matters when someone asks why an invoice starts where it
+does.
+
+A **campaign** shows its **first field visit** and the month it **bills from**. They are usually
+the same month; the start grace separates them when the first knock lands in the last week (first
+knock September 28 means the campaign bills from October).
+
+An **organization** shows **billing since**: the first month that actually carried a billable
+campaign. That is almost always the earliest campaign's bills-from month, with one corner where it
+is not. When both graces fire on a short campaign — first knock October 29, archived November 2,
+nobody out in November — the **floor** makes October bill even though the campaign's bills-from
+month is November. Billing since reads **October**, because October is where the money was, while
+the campaign row still says it bills from November. Both are true, and both are shown.
+
+Neither date is stored. They are derived from the ledger each time, which is why a correction to
+the underlying activity moves them rather than leaving a stale field behind.
+
 ### Issued statements — what you actually invoiced
 
 Every other number in this system is computed **live**, which is right for a running meter and wrong
@@ -94,11 +113,11 @@ closing several at once.
 ### Invoicing several months at once
 
 Invoicing a client for July *and* August is one job, and doing it as two passes over a month picker
-is how the second month gets forgotten. The org's Billing panel has a **History** tab: every month
-in one ledger, each showing what it came to, whether it was issued, its invoice number, and a
-**drifted** flag where reality has moved since. Tick the months you're billing together and the
-footer gives you their combined total, a **single CSV** covering all of them, and **Issue** for the
-ones not yet frozen — under one invoice number.
+is how the second month gets forgotten. The org page's **Statements** tab is one ledger of every
+month, each showing what it came to, whether it was issued, its invoice number, when it falls due,
+whether it was paid, and a **drifted** flag where reality has moved since. Tick the months you're
+billing together and the footer gives you their combined total, a **single CSV** covering all of
+them, and **Issue** for the ones not yet frozen — under one invoice number, with one due date.
 
 Each month still becomes its **own** statement, with its own audit entry. Nothing about the record
 changes; only the clicking does. A month that's already issued is skipped rather than failing the
@@ -138,16 +157,90 @@ buttons disable, with a notice).
 
 ## Who manages this, and where
 
-Account managers are **super admins**. The Organizations page gets a Billing column (status pill +
-Manage) and a "Needs attention" strip (trials ending within 48 hours, past-due, suspended); the
-Control Room shows the same pills on its org cards. Clicking Manage opens the org's **Billing
-panel**: change status (suspend/cancel require a written reason — every change is kept in a
-history), set a **custom trial length**, set the org's rate, and keep an internal billing contact +
-notes (both **super-admin-only** now — org admins no longer see or edit the billing contact),
-see a **"this month" usage meter** (billable campaigns × rate), and read the **monthly statement**
-— one line per campaign with households, first knock, the month's knocks, and the amount —
-exportable as CSV for invoicing. Payment itself happens outside the app (send an invoice — Stripe
-Invoicing works well); the app tracks *entitlement*, not money.
+Account managers are **super admins**, and they work from two screens: the **Organizations desk**
+(every customer at once) and an **organization's own page** (one customer, in full).
+
+### The desk — `/organizations`
+
+Every customer account, its billing state, and what still needs invoicing. Four figures across the
+top — **Running month**, **Awaiting invoice**, **Outstanding**, **Overdue** — and clicking one
+filters the table to the orgs behind it. Filter chips (needs invoice, overdue, trial expired, past
+due, wind-down, idle, not started) carry their own counts and live in the URL, so a filtered desk
+is a link you can send. The table sorts by **what needs doing first**: chase overdue money, rescue
+an expiring trial, issue an invoice, then everything already fine.
+
+Two things the desk is careful about. An **expired trial** gets its own red badge rather than
+reading as a deliberate suspension — the two look identical underneath but need opposite actions.
+And an org you have **deactivated is never hidden while it owes money**: switching off sign-in does
+not settle an invoice.
+
+Creating a client is a button, not a permanent form: **New organization** opens a dialog that
+creates the org, starts its trial clock and optionally seats the first admin, and shows the
+one-time credentials inside that same dialog so they cannot be lost behind it.
+
+### The organization page — `/organizations/:id`
+
+One page for one customer, in five tabs. The header answers the dating questions in a line:
+**customer since** (when they signed up), **billing since** (the first month that actually carried
+a billable campaign, which can be months later), the rate, and the payment terms.
+
+- **Overview** — *Next up*: every open item in the order to deal with them, then the running month,
+  the invoice backlog and what is still unpaid.
+- **Campaigns** — one row per campaign: first field visit, the month it **bills from** (the start
+  grace can put that one month later), what it is doing this month or why it is free, and chips for
+  how many of its months are awaiting, overdue, issued or paid. Expand a row for a month-by-month
+  strip. Per-campaign rates are set here.
+- **Statements** — the month ledger and the invoicing work. Below.
+- **Members** — the roster, read-only.
+- **Account** — status and trial, rate and payment terms, billing contact, internal notes, rename,
+  the full change history, and the danger zone.
+
+The tab and the month you are looking at are part of the address, so reloading, sharing a link and
+pressing Back all land where you were.
+
+### Getting paid: due dates, marking paid, unmarking
+
+Doorline still does not collect money — you invoice outside the app (a PDF) and the payment arrives
+wherever it arrives. What the app now does is **record that it happened**, so "which invoices are
+still out" stops living in someone's memory.
+
+**Every issued statement gets a due date**, frozen at the moment you issue it from the org's
+payment terms (**net 30** by default; set per org on the Account tab, and 0 means due on issue).
+Frozen for the same reason the rate is: renegotiating terms must never move the due date of an
+invoice you already sent. Change the terms and the *next* invoice uses them.
+
+**Mark paid** takes the date the money arrived and an optional reference — your invoice number, a
+check number, a transfer id. A reference number only: never a person's name, and never card or bank
+details. **Unmark paid** reverses it and asks why; the date and reference you are clearing are kept
+in the history, because that event is the only remaining record that the money came in.
+
+An invoice you have sent and not been paid for is **outstanding**; once its due date passes it is
+**overdue**, and overdue orgs are what the desk sorts to the top and the needs-attention strip
+names. Overdue is a *signal*, not a status: **past due** stays an account state a human sets when
+they decide to act on it, exactly as before. There are **no partial payments** — a half-paid
+invoice is a conversation, not a data structure.
+
+### Awaiting invoice, outstanding, overdue — what each means
+
+These three are counted differently on purpose, and the distinction is the whole feature:
+
+| | What it means |
+|---|---|
+| **Awaiting invoice** | A month that has **closed**, comes to **more than $0**, and has **no statement**. This is the backlog. |
+| **Outstanding** | A statement you **have** issued and have **not** been paid for. |
+| **Overdue** | An outstanding statement whose **due date has passed**. |
+
+The trap that definition avoids: a closed month with nothing to bill — a trial org still in setup,
+an org whose campaigns are all archived — also has no statement, but owes nobody anything. Those
+months read **"Nothing to bill"** and are never counted as a backlog. Treating every unissued month
+as owed would have turned an empty to-do list into thirty items of busywork.
+
+What is owed is **what was sent**: outstanding and overdue always total the FROZEN figures from the
+statements themselves, never a fresh recompute. If a recompute later disagrees, that shows up
+beside the month as **drifted**, for a human to void and reissue — never silently.
+
+Payment itself still happens outside the app; the app tracks *entitlement*, and now also keeps the
+bookkeeping of what you invoiced and what came back.
 
 When an invoice needs the knock detail *behind* a campaign's line — which walk list and which pass
 the work landed in — the campaign dashboard's **By pass** section exports exactly that
@@ -177,11 +270,11 @@ changes, and statements are deliberately not theirs to see or touch.
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `Subscription` | [models/Subscription.js](../server/src/models/Subscription.js) | One per org (`organizationId` unique). `status` (`trial`/`active`/`past_due`/`suspended`/`canceled`/`internal`), `statusChangedAt` (the offline-grace boundary), `trialEndsAt`, `pricePerCampaignCents` (default 30000 — per-org override), `billingContact{name,email}`, `notes` (internal, super-admin-only), `source` (`manual`/`stripe` — webhooks may only write when `stripe`, so manual wins), `stripeCustomerId` (dormant). |
+| `Subscription` | [models/Subscription.js](../server/src/models/Subscription.js) | One per org (`organizationId` unique). `status` (`trial`/`active`/`past_due`/`suspended`/`canceled`/`internal`), `statusChangedAt` (the offline-grace boundary), `trialEndsAt`, `pricePerCampaignCents` (default 30000 — per-org override), `paymentTermsDays` (default 30, 0..365 — net-N, read only at ISSUE time), `billingContact{name,email}`, `notes` (internal, super-admin-only), `source` (`manual`/`stripe` — webhooks may only write when `stripe`, so manual wins), `stripeCustomerId` (dormant). |
 | `SubscriptionEvent` | [models/SubscriptionEvent.js](../server/src/models/SubscriptionEvent.js) | Append-only audit: `fromStatus`/`toStatus` or `changes` (Mixed), `byUserId`, `reason` (required by the route for suspend/cancel). Indexed `{organizationId, createdAt}`. |
 | `Campaign.archivedAt` | [models/Campaign.js](../server/src/models/Campaign.js) | Set when `isActive` flips false (route: [admin/campaigns.js](../server/src/routes/admin/campaigns.js)), cleared on reactivate. The statement's "bills through the archive month" boundary. `migrate:billing` backfills `updatedAt` for legacy archived campaigns. |
 | `Campaign.pricePerCampaignCents` | [models/Campaign.js](../server/src/models/Campaign.js) | Tri-state per-campaign rate: `null` = inherit the org rate, a number = negotiated override, **`0` is legal** (a comped campaign). **`select: false`** — see the privilege note below. |
-| `Statement` | [models/Statement.js](../server/src/models/Statement.js) | A **frozen** issued month. `organizationId` + `month` + `status` (`issued`/`void`), frozen `rateCents` / `rulesVersion` / `totalCents` / `lines[]`, `issuedAt`/`issuedByUserId`, `externalRef`, `voidedAt`/`voidedByUserId`/`voidReason`, `supersededByStatementId`. Indexes: `{organizationId, month}` **unique with `partialFilterExpression: {status:'issued'}`** (one live issued row per org-month, unlimited voids) and `{organizationId, month:-1}`. |
+| `Statement` | [models/Statement.js](../server/src/models/Statement.js) | A **frozen** issued month. `organizationId` + `month` + `status` (`issued`/`void`), frozen `rateCents` / `rulesVersion` / `totalCents` / `lines[]`, `issuedAt`/`issuedByUserId`, `externalRef`, `termsDays`/`dueAt` (frozen at issue), the payment trio `paidAt`/`paidByUserId`/`paymentRef`, `voidedAt`/`voidedByUserId`/`voidReason`, `supersededByStatementId`. Each line also carries `billingStartMonth`. **Paid is orthogonal to `status`**, not a status value: the partial unique index filters on `status:'issued'`, and a paid invoice is still an issued one. The model's "rows are never edited" rule has three sanctioned exceptions, listed in its header — the superseded back-stamp, the payment trio, and the one-shot due-date backfill; `lines`/`totalCents`/`rateCents`/`rulesVersion` are never touched. Indexes: `{organizationId, month}` **unique with `partialFilterExpression: {status:'issued'}`** (one live issued row per org-month, unlimited voids) and `{organizationId, month:-1}`. |
 
 ### Billing rules — `billingMonths.js`
 
@@ -287,6 +380,118 @@ anyway), and void-vs-reissue stays an account-manager call.
 default is three queries and no statement walks; `live=1` recomputes every org and is
 `O(orgs × campaigns)` round-trips — strictly worse than `billing-rollup` — so it is opt-in behind a
 button with no auto-refetch.
+
+## Invoicing state — `invoicingState.js` / `invoicing.js`
+
+The same split as `billingMonths.js` (the rule) versus `statement.js` (the queries).
+
+**[services/billing/invoicingState.js](../server/src/services/billing/invoicingState.js) decides.**
+Pure: no database, and **no clock** — `now` and `currentMonth` are arguments, which is what makes
+the truth table testable without a fixture that goes stale on the 1st. It exports the two
+partitions, both **exhaustive and exclusive** and both asserted as such by
+[test/invoicingState.test.js](../server/test/invoicingState.test.js):
+
+`paymentStateOf(statement, {now, termsDays})` — one of:
+
+| | Condition |
+|---|---|
+| `settled` | `totalCents === 0`. Nothing was ever owed; the route refuses to mark it paid (`409 NOT_PAYABLE`). |
+| `paid` | `paidAt` is set. Beats overdue — a late payment that arrived is not still late. |
+| `overdue` | unpaid and `effectiveDueAt < now`, **strictly** (due exactly now is not yet late). |
+| `outstanding` | unpaid, not yet due. |
+
+`classifyMonth({month, currentMonth, frozen, liveTotalCents, internal, now, termsDays})` — one of
+`internal` · `open` (the running month, or later) · `awaiting` (**closed, `liveTotalCents > 0`, no
+issued statement**) · `zero` (closed, no statement, nothing to bill) · then the frozen statement's
+payment state projected onto the month (`issued` where that is `outstanding`, else
+`overdue`/`paid`/`settled`).
+
+The `zero` case is load-bearing. Every earlier design for this feature treated "closed and
+unissued" as the backlog, which counts a trial org's empty setup months as money owed.
+
+A **force-issued current month** is deliberately `open` — the running card must keep showing a live
+meter for a month still accumulating — while its frozen row independently counts toward
+`outstanding`, because it carries a real due date.
+
+`deriveInvoicing(...)` folds a range plus every issued statement into the block the desk row, the
+org page and the board all read: `asOf` (the instant it was computed — it rides the BLOCK, not just
+the response envelope, so a consumer handed the block cannot silently fall back to the browser
+clock), `billingSince` (**the oldest month with a billable line, or the earliest issued statement**
+— see the floor corner in Part 1), `firstVisitAt`, `running`, `awaiting`, `outstanding`, `overdue`,
+`paid`, `drifting`, `window`, `monthStates`. `nextActionFor` reduces it to one value the desk sorts
+by (`chase` → `rescue_trial` → `issue` → `wind_down` → `await_payment` → `none`). `foldIssuedRows`
+is the cheap path: a flat `Statement.find` folded per org, with no recompute at all.
+
+**[services/billing/invoicing.js](../server/src/services/billing/invoicing.js) fetches.** The ONE
+place that picks a window and answers "what does this org owe":
+
+- `canonicalWindow(org, now)` — from the later of the org's **creation month** and 36 months back,
+  to the current month. Activity cannot predate the organization, so the creation month is an exact
+  floor: for any org younger than the cap the window is complete, and its **age**, not the
+  constant, bounds the cost. Older orgs set `truncated` and every surface says so, because a
+  silently narrowed window is a wrong number wearing a right one's clothes.
+  `INVOICING_LOOKBACK_MAX_MONTHS = 36` is deliberately separate from `BILLING_HISTORY_MAX_MONTHS =
+  24`, which still caps an explicitly-requested history range.
+- `orgInvoicing(org, {now, includeLines, fullWindow})` — one `monthlyStatementRange` plus **one
+  `Statement.find` for every issued row, NOT window-bound**, so a four-year-old unpaid invoice is
+  still chased. It uses `Subscription.findOne().lean()` and never `loadOrgSub`: that helper
+  **creates** a missing subscription as a side effect, and a read path must not write.
+
+  ⚠️ **The recompute is narrowed to the BACKLOG unless `fullWindow` is set**, and that is a
+  correctness-preserving performance decision worth understanding before touching it. Round trips
+  are three per campaign for *any* range length — but the knocks aggregation READS every activity
+  row in the window, per campaign, so a three-year window over a 250k-door campaign examines
+  ~500,000 documents where one month examines ~10,000. Measured: **0.05s for one month, 3.1s for
+  thirty-seven**, per campaign. The desk fires this for every org on every page load; left
+  unbounded it would have blown Heroku's 30s router limit on a platform of any size.
+
+  The narrowing is exact, not a sample. A month with an issued statement can never be *awaiting* —
+  it bills from the frozen row — so only CLOSED months with no statement need a live answer, and
+  `scanSpan` subtracts the issued set from the window. For an org invoiced up to date that leaves
+  nothing and the walk collapses to the running month alone; for a neglected one it is the real
+  backlog, which is exactly the org where the number matters. `outstanding`/`overdue`/`paid` never
+  needed the walk at all. The org page passes `includeLines` (which implies `fullWindow`) because a
+  ledger must render every month. `invoicingState.int.test.js` asserts the two paths agree on every
+  figure.
+
+  One consequence to keep in mind: because the desk's `months` array may start long after the org
+  began billing, `billingSince` cannot be read from those months alone — `deriveInvoicing` also
+  takes the earliest ISSUED statement as a lower bound, since a statement is itself proof its month
+  billed. Without that the column named the first UNINVOICED month for every customer who is up to
+  date, i.e. the opposite of the answer.
+- `historyRows(...)` — the month-row projection, shared by `GET …/billing/history` and the org
+  page, so the same month cannot render two ways. It resolves a month's `state` from the frozen
+  statement wherever one exists, rather than from `classifyMonth`: a LEDGER row is about the
+  invoice, and classifyMonth deliberately keeps a force-issued current month `open` for the running
+  meter's sake — which on the table would render a sent, possibly paid, invoice as "Open" and drop
+  it out of the Paid and Outstanding filters entirely.
+
+**Why one owner matters:** before this, "what does this org owe" was answered three times over —
+the rollup ran a one-month usage walk, the history route ran its own range, and the month-close
+board read `Statement` rows directly. Three answers to one question is how a desk ends up saying
+"needs invoicing" about a month the org page calls issued.
+
+### Due dates and payment
+
+`dueAt`/`termsDays` are stamped inside `issueStatementForMonth` from one `issuedAt` computed once,
+so `dueAt - issuedAt` is exactly the terms to the millisecond. Both the single-month and batch
+routes inherit it — one call site.
+
+Statements issued before this existed have no `dueAt`. `effectiveDueAt` resolves those as
+`issuedAt + the org's CURRENT terms`, which is **exactly** what
+[migrations/backfillStatementDueDates.js](../server/src/migrations/backfillStatementDueDates.js)
+persists — so the read path and the migration agree by construction and the code is correct before
+it runs. The migration is hygiene (it *freezes* the date), not a gate.
+
+`POST …/paid` and `POST …/unpaid` are single-document atomic claims, the same idiom as void; there
+are no transactions in this codebase, so that atomicity is the race guard. **Voiding a paid
+statement is refused** (`409 STATEMENT_PAID`) — unmark it first, so recording the money and
+correcting the invoice are two separately audited decisions and a void row never carries payment
+fields.
+
+**No new index.** The cross-org unpaid scan rides the existing single-field `status` index and
+every per-org read rides `{organizationId, month}`, so `migrate:build-indexes` stays a dry run. A
+test pins the exact index set, so if that ever changes the deploy knows it has acquired a gate.
 
 ## Effective state — `entitlementFor()`
 
@@ -452,9 +657,11 @@ absorbing it silently.
 [drift](#issuing-voiding-drift) against it rather than quietly changing what you invoiced. Months
 you never issued still have no snapshot to reconcile against — issue the ones you bill from.
 
-`firstKnockAt` is surfaced as the **"Billing started"** indicator on both billing surfaces (the
-super-admin `OrgBillingPanel` statement table and the org admin's own Billing page), reading
-"Not started" when null — previously it was computed and returned but never shown.
+`firstKnockAt` is surfaced as the **"First visit"** indicator on both billing surfaces (the
+super-admin org page's Campaigns and Statements tabs, and the org admin's own Billing page),
+reading "Not started" when null. Beside it, `billingStartMonth` — the month that visit actually
+starts billing, which the start grace can push one later — is now frozen onto each statement line
+rather than left for the reader to derive from the rule.
 
 ### Billable doors — the customer's OWN invoicing (not ours)
 
@@ -480,19 +687,23 @@ pricing stays flat per campaign per month.
 | Route | Behavior |
 |---|---|
 | `GET /super-admin/organizations/:orgId/billing` | Subscription (full, incl. notes) + entitlement + events. History is paged (`eventsSkip`/`eventsLimit` + exact `eventsTotal`; parameterless keeps the legacy newest-50); the panel renders the stored before→after values from `SubscriptionEvent.changes`, plus `source` (manual vs stripe) and a canceled org's `windDownEndsAt`. Creates a default `active` record for pre-migration orgs on first touch. |
-| `GET /super-admin/organizations/billing-rollup` | **This month's revenue across every customer org** in one response: per-org `{rate, totalCents, billableCampaigns, effective, trialEndsAt, windDownEndsAt}` (ranked by revenue) + the aggregate header (`totalCents`, `billableCampaigns`, `byStatus`). N+1 statement walk per org (fine at platform scale). Count contract: billable = statement lines with `billable === true`; **internal orgs excluded entirely** — they are not revenue. Powers the Organizations page's revenue bar and per-row dollars. |
-| `GET /super-admin/organizations/at-risk` | The one server-side needs-attention definition (replacing the old client-only ≤2-day heuristic): trials expiring within `days` (default 7), `past_due`, `suspended`, `canceled` in wind-down (with the deletion date), and idle $0 zombies (`idleZeroDollarOrgs`). Feeds the Organizations strip AND the Control Room's billing strip. |
-| `PATCH …/billing` | Rate / contact / notes; diffs logged as a `SubscriptionEvent`. Status is NOT patchable here. |
+| `GET /super-admin/organizations/billing-rollup` | **This month's revenue across every customer org** in one response: per-org `{rate, totalCents, billableCampaigns, effective, trialEndsAt, windDownEndsAt}` (ranked by revenue) + the aggregate header (`totalCents`, `billableCampaigns`, `byStatus`). **Additive since Sep 2026:** each row also carries `invoicing` (the whole `deriveInvoicing` block), `nextAction`, `banner`, `statusChangedAt`, `paymentTermsDays` and `graceCount`, and the header gains `asOf`, `currentMonth` and the four platform totals the desk's KPI strip spends. Every legacy key is byte-identical and pinned by a snapshot test; internally it now runs `orgInvoicing` (a range walk) instead of `currentUsage` (a one-month walk) — the same query COUNT, and the running month of a range is provably the same object `monthlyStatement` returns for it. N+1 statement walk per org (fine at platform scale). Count contract: billable = statement lines with `billable === true`; **internal orgs excluded entirely** — they are not revenue. Powers the Organizations page's revenue bar and per-row dollars. |
+| `GET /super-admin/organizations/at-risk` | The one server-side needs-attention definition (replacing the old client-only ≤2-day heuristic): trials expiring within `days` (default 7), `past_due`, `suspended`, `canceled` in wind-down (with the deletion date), and idle $0 zombies (`idleZeroDollarOrgs`). Feeds the Organizations strip AND the Control Room's billing strip. **`invoice_overdue`** (Sep 2026) is built from its OWN `Statement` read rather than that loop, deliberately: the loop walks `isActive: true` orgs and skips any without a subscription row, and both exclusions are wrong for money — a deactivated customer can still owe you. Internal and mid-delete orgs are excluded from both. |
+| `GET /super-admin/organizations?invoicing=1` | The desk's opt-in. Adds a cheap per-org `{outstandingCount, outstandingCents, overdueCount, overdueCents, maxDaysOverdue, oldestDueAt, lastPaidAt}` block from ONE `Statement.find`, so the chase signal paints before the rollup lands and survives it failing. **Opt-in, and the key is ABSENT without it**: the parameterless list is mounted by the org switcher on every super-admin page, by Select org, Support access, Imports and the mobile org picker, and its shape is a contract with shipped mobile builds. |
+| `PATCH …/billing` | Rate / **payment terms** (`paymentTermsDays`, 0..365) / contact / notes; diffs logged as a `SubscriptionEvent`. Status is NOT patchable here. Changing terms never moves an already-issued `dueAt`. |
 | `POST …/billing/status` `{to, reason}` | The status chokepoint: any → any, reason **required** for `suspended`/`canceled`, sets `statusChangedAt`, reclaims `source:'manual'`, logs the event. 400 on a no-op. **`internal` is coupled to `Organization.isInternal` both ways** (see below): `to:'internal'` on an un-flagged org **403 `INTERNAL_FLAG_REQUIRED`**; a flagged org can never leave `internal` (**403 `INTERNAL_LOCKED`**) — the flag checks run *before* the same-status 400, so `to:'internal'` can heal a flagged org whose sub drifted. Idle $0 orgs (active, no live campaign, long silent) are surfaced on the **Control Room's Idle organizations queue**, which deep-links here — setting `canceled` is what starts their 60-day wind-down (see [PLATFORM.md](PLATFORM.md)). |
 | `POST …/billing/extend-trial` `{days?\|until?}` | Trial-status only. `+days` from max(now, current end) — extending an *expired* trial un-suspends with no separate step. |
 | `GET …/billing/statement?month=YYYY-MM` | `{...live, statement, drift}` — the live recompute at the top level (unchanged shape), the frozen `Statement` if that month is issued, and the diff between them. CSV is built client-side from whichever is authoritative. |
 | `POST …/billing/statement/:month/issue` `{externalRef?, force?}` | **Freezes** the month into a `Statement`. 400 malformed · 403 `INTERNAL_NOT_BILLABLE` (checks both `org.isInternal` and `sub.status`) · 422 `MONTH_NOT_ENDED` unless `force` · 409 `ALREADY_ISSUED`, from the pre-check **and** from catching duplicate-key `11000` (the actual race guard). Back-stamps `supersededByStatementId` on the newest voided row, best-effort. Logs a `SubscriptionEvent`. |
-| `POST …/billing/statement/:statementId/void` `{reason}` | Voids an issued statement. `reason` **required** (400 without). Atomic `findOneAndUpdate` scoped by `organizationId` + `status:'issued'` → 409 if already void or another org's. Logs a `SubscriptionEvent`. |
+| `POST …/billing/statement/:statementId/void` `{reason}` | Voids an issued statement. `reason` **required** (400 without). Atomic `findOneAndUpdate` scoped by `organizationId` + `status:'issued'` **+ `paidAt: null`** → `409 NOT_ISSUED` if already void or another org's, **`409 STATEMENT_PAID`** if it is marked paid (unmark it first). Logs a `SubscriptionEvent`. |
+| `POST …/billing/statement/:statementId/paid` `{paidAt?, paymentRef?}` | **Records that an invoice was paid.** `paidAt` defaults to now, may **precede** `issuedAt` (prepay), and is refused more than 24h ahead (`400 PAID_AT_FUTURE` — the slack covers a date picker's local midnight). Atomic claim on `status:'issued'` + `paidAt: null` + `totalCents > 0` → `409 ALREADY_PAID` · `409 NOT_ISSUED` (void or foreign) · **`409 NOT_PAYABLE`** ($0 statement). `paymentRef` is a staff-typed reference number only. Logs `statementPaid`. |
+| `POST …/billing/statement/:statementId/unpaid` `{reason}` | Reverses it. `reason` **required**; the event carries `previousPaidAt`/`previousPaymentRef`, because the fields being cleared are the only record the money arrived. `409 NOT_PAID` otherwise. |
 | `GET …/billing/statements` | Every statement ever issued or voided for this org, newest first, without `lines`. Rendered as **Every statement** on the panel's History tab — the voided rows are the half the ledger can't show, since it only knows what currently stands per month. |
-| `GET …/billing/history?from=&to=` | **The month ledger.** One `monthlyStatementRange` pass: per month `{totalCents (frozen where issued, else live), liveTotalCents, billableCampaigns, issued, issuedAt/By, externalRef, rulesVersion, drift, lines}`, newest first. Defaults to the last 12 months. Carries each month's `lines` so a combined export never re-fetches month by month. |
-| `POST …/billing/statements/issue` `{months[], externalRef?, force?}` | **Issues several months under one invoice number.** De-duplicates and sorts oldest-first, then calls `issueStatementForMonth` per month — one `Statement` and one `SubscriptionEvent` each. Always **200** with `{ok, issuedCount, totalCents, results[]}`; a per-month `{ok:false, code}` (e.g. `ALREADY_ISSUED`) is a normal outcome and never aborts the rest. Capped at `BILLING_HISTORY_MAX_MONTHS`. |
+| `GET …/billing/history?from=&to=` | **The month ledger.** One `monthlyStatementRange` pass: per month `{totalCents (frozen where issued, else live), liveTotalCents, billableCampaigns, issued, issuedAt/By, externalRef, rulesVersion, drift, lines}` plus the payment vocabulary `{state, dueAt, termsDays, paidAt, paidBy, paymentRef, paymentState, overdue}`, newest first. Defaults to the last 12 months. Carries each month's `lines` so a combined export never re-fetches month by month. |
+| `GET …/billing/history?from=origin` | **The canonical window** — what the org page sends. Resolves `from` server-side to `canonicalWindow(org)` and additionally returns `{currentMonth, asOf, paymentTermsDays, window{from,to,truncated}, invoicing, campaigns[]}`. One request answers all five tabs. |
+| `POST …/billing/statements/issue` `{months[], externalRef?, force?}` | **Issues several months under one invoice number.** De-duplicates and sorts oldest-first, then calls `issueStatementForMonth` per month — one `Statement` and one `SubscriptionEvent` each. Always **200** with `{ok, issuedCount, totalCents, results[]}`; a per-month `{ok:false, code}` (e.g. `ALREADY_ISSUED`) is a normal outcome and never aborts the rest. Capped at `INVOICING_LOOKBACK_MAX_MONTHS` (36, raised from 24 with the ledger's window — a backlog you can see must be a backlog you can clear in one go). |
 | `GET …/billing/campaigns` · `PATCH …/billing/campaigns/:campaignId` | Per-campaign negotiated rate. `pricePerCampaignCents` is `.nullable()` — **`null` restores "inherit the org rate"**, `0` is a legal comped rate. Org-scoped lookup (a foreign `campaignId` 404s). Super-admin only, by design: this must never be reachable from `admin/campaigns.js`. |
-| `GET /super-admin/billing/statements?month=&live=0\|1` | **The month-close board.** Every non-internal org's issued / not-issued state for one month + issued totals. `live=1` also recomputes each org and reports drift — `O(orgs × campaigns)` round-trips, so it is opt-in behind a button. Mounted **before** the `/super-admin` catch-all. |
+| `GET /super-admin/billing/statements?month=&live=0\|1` | **The month-close board.** `month` is now optional and defaults to the **last closed month** server-side; the response carries `currentMonth` and `asOf`, and each row gains `{dueAt, paidAt, paidBy, paymentRef, paymentState, state}`, with the header gaining `paidCount`/`overdueCount` and `zeroCount`. `unissuedCount` counts the ALARM, not the absence — it excludes `zero` months, because folding thirty $0 setup months into it told an operator to chase 35 invoices when there were 5. In live mode a closed $0 month reports `state: 'zero'` instead of reading as an unissued alarm; without `live` an unissued month's `state` is **null**, because without a live total there is no way to tell "owes $600" from "owes nothing". Every non-internal org's issued / not-issued state for one month + issued totals. `live=1` also recomputes each org and reports drift — `O(orgs × campaigns)` round-trips, so it is opt-in behind a button. Mounted **before** the `/super-admin` catch-all. |
 | `GET /super-admin/billing/statements?from=&to=` | **Range mode** on the same board — "who still owes me an invoice for July *and* August". Each org row keeps its single-month fields at the top level (additive, so the existing board is unaffected) and gains `months[]` plus `rangeTotalCents` (frozen where issued, live where not) and `unissuedMonths[]`. `live=1` costs **one** `monthlyStatementRange` per org rather than one statement walk per org per month. Inverted or malformed ranges 400. |
 | `GET /admin/billing/history?months=N` | The customer month ledger, same bill-payer gate. `publicMonthHistory` output: per month `{month, billableCampaigns, setupCount, graceCount, knocks, doors, campaigns[]}`, newest first, plus `maxMonths`. `months` is clamped to 1..`BILLING_HISTORY_MAX_MONTHS` (garbage falls back to 12) rather than trusted. **No dollar figure at any depth** — asserted by walking the response body. |
 | `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, **`usage`** via `publicUsage` (billable-campaign count, `setupCount`, `graceCount`, and the campaign breakdown), and the org's `billRestrictedDoors` default. **No dollar amounts at all** — no rate, no total, no per-campaign amount — and no billing contact / notes / source / Stripe ids. |
@@ -557,9 +768,9 @@ Web: [BillingBanner.jsx](../client/src/components/BillingBanner.jsx) (global, in
 the last 3 days; the canceled banner renders from the entitlement payload — reads no longer 402
 while canceled), org-admin
 [BillingPage.jsx](../client/src/pages/BillingPage.jsx) at `/billing` (ORG_NAV, not lead-visible),
-super-admin [OrgBillingPanel.jsx](../client/src/components/OrgBillingPanel.jsx) opened from
-[OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx) (Billing column + needs-attention
-strip), pills + strip on the Control Room ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx));
+the super-admin **desk** ([OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx)) and
+**org page** ([OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx) + `components/org/**`),
+pills + strip on the Control Room ([SuperAdminHomePage.jsx](../client/src/pages/SuperAdminHomePage.jsx));
 shared meta in [lib/billingStatus.jsx](../client/src/lib/billingStatus.jsx).
 
 Added with the statement work:
@@ -568,25 +779,16 @@ Added with the statement work:
   month-close board, linked from the Organizations revenue strip. A separate page rather than another
   section on `OrganizationsPage`, which already carries the org table, revenue strip, at-risk strip,
   create-org flow and the embedded panel.
-- **`OrgBillingPanel` statement section** — Issue / Void controls, an "Issued … · rules vN" badge, the
-  drift banner, an inline per-campaign **Rate** column (disabled once the month is issued — a frozen
+- **The statement section** — Issue / Void controls, an "Issued … · rules vN" badge, the drift
+  banner, an inline per-campaign **Rate** control (disabled once the month is issued — a frozen
   statement must not be retypeable), a **Reason** annotation per line, and a CSV that names itself
-  `-issued` or `-live` and carries a provenance header row. `changeText()` renders the new
-  `campaignRate` / `statementIssued` / `statementVoided` events.
+  `-issued` or `-live` and carries a provenance header row. (This lived on `OrgBillingPanel` until
+  the Sep 2026 rebuild below; it is now the **Statements** tab.)
 Added with the month-ledger work (Sep 2026):
 
-- **`OrgBillingPanel` is now three tabs** (`Segmented`): **Statement** (the existing single-month
-  section, and the tab it opens on — closing a month is what the panel is opened for), **History**,
-  and **Account** (status/trial, plan/contact/notes, rename, and the `SubscriptionEvent` audit list).
-  Nothing was removed; the panel simply stopped being one long scroll. Tab state is component state,
-  not the URL — the panel opens inline against an org selected on `OrganizationsPage`, and a URL
-  param would fight that selection.
 - **The History tab** — the month ledger with a checkbox per row, a sticky footer showing the
-  selected months' combined total, **Export combined CSV** (one sheet: month column, per-campaign
-  lines, per-month subtotals, grand total, each line carrying the same ISSUED/LIVE provenance the
-  single-month CSV stamps), and **Issue N months** under one invoice number. A partial batch reports
-  per month and leaves the failures ticked so a retry is one click. The history queries are
-  `enabled: tab === 'history'` so opening the panel costs nothing extra.
+  selected months' combined total, **Export combined CSV**, and **Issue N months** under one invoice
+  number. A partial batch reports per month and leaves the failures ticked so a retry is one click.
 - **[BillingPage.jsx](../client/src/pages/BillingPage.jsx) rebuilt** — the status card now renders
   the per-campaign breakdown the server always sent and the page never showed, followed by a
   **Month by month** table (Month · Billing · Doors · Knocks) whose rows expand to their campaigns,
@@ -615,6 +817,58 @@ Older installed builds are safe: the server 402 is the backstop and `api.js` alr
 `err.message`; a fresh (post-suspension) submission hard-rejects with the friendly copy, while
 queued pre-suspension work flushes under the grace rule.
 
+### The desk and the org page (Sep 2026) — `OrgBillingPanel` RETIRED
+
+`components/OrgBillingPanel.jsx` (1,099 lines) is **deleted**. It rendered INLINE at the bottom of
+the Organizations list, below the table and the pager, opened from four entry points with no
+scroll-into-view — so clicking Manage on a top row appeared to do nothing — while a separate slim
+org detail page held the roster and campaigns with no billing facts at all. Neither page could
+answer "look into an org and see which campaigns need invoicing".
+
+- **[OrganizationsPage.jsx](../client/src/pages/OrganizationsPage.jsx)** — the desk. Full width
+  (the `max-w-5xl` cap was the page's own; the shell never capped anything), a `StatCard` KPI strip,
+  filter chips with counts, `DataTable` + `RowMenu`, and create-org behind a `Modal`. It fetches the
+  **full** list unpaged and pages client-side, because its default order and three of its chips key
+  on rollup money the server cannot sort by — and the route loads every org for any request anyway.
+  Two-phase render: rows paint from the list (with overdue from its cheap `invoicing` block) and the
+  rollup columns fill in when the walk lands, so a slow or failed rollup never blanks the desk.
+- **[OrgDetailPage.jsx](../client/src/pages/OrgDetailPage.jsx)** — the org page, rewritten as five
+  tabs over `components/org/{OrgHeader,OverviewTab,CampaignsTab,StatementsTab,MembersTab,AccountTab}`
+  and `components/org/modals/*`, so no file returns to 1,099 lines. **Tab and month live in the
+  URL** (`?tab=&month=`), reversing the earlier deliberate choice: that reasoning held while the
+  panel was opened against a selection on *another* page, and stops holding once the page IS the org.
+- **`?billing=<orgId>` is a redirect.** Six surfaces linked that way
+  (CrossOrgActivityFeed, the Control Room ×2, SuperAdminUsersPage, MonthClosePage, the old detail
+  page); all are repointed at `orgPagePath()`, and the desk still answers the old URL with a
+  `<Navigate>` to the Statements tab so nothing bookmarked breaks.
+- **Seven pure libs carry the logic**, each with its own `node --test` file:
+  [lib/months.js](../client/src/lib/months.js) (month math with **no wall clock** — it replaces
+  three private copies and `currentMonthStr`, which read the BROWSER's month while every server gate
+  reads UTC), [lib/invoicing.js](../client/src/lib/invoicing.js) (the state vocabulary, the ledger
+  filter, the campaign pivot), [lib/orgDesk.js](../client/src/lib/orgDesk.js) (join, chips, filter,
+  sort, URL), [lib/statementCsv.js](../client/src/lib/statementCsv.js),
+  [lib/subscriptionEventText.js](../client/src/lib/subscriptionEventText.js),
+  [lib/orgPageTabs.js](../client/src/lib/orgPageTabs.js), [lib/money.js](../client/src/lib/money.js)
+  (`fmtUsd`, split out of `billingStatus.jsx` because `node --test` cannot load a `.jsx` file and
+  the libs that need it must stay testable).
+- **The current month always comes from the server** — `history.currentMonth`, `rollup.currentMonth`,
+  or the board's `data.month` — never from `new Date()`. The server's month is UTC and is the clock
+  `MONTH_NOT_ENDED` reads, so a client can no longer offer a month the server would refuse.
+- **`window.confirm` / `window.prompt` are gone.** Issue (with a required "issue anyway" tick when a
+  month has not finished), Void (reason), Mark paid, Unmark paid, Set rate, Rename, Deactivate and
+  Delete are all `ui/Modal` dialogs that state their consequence. A render smoke test asserts none
+  of those browser primitives return to these files.
+- **New `ui/Tabs.jsx`** — a real `tablist` with `aria-selected` and arrow-key roving, for
+  page-level tabs. `Segmented` stays for in-panel filters.
+- **`BILLING_STATUS_META` moved to Badge variants.** The `active` pill hard-coded a raw green
+  palette pair while every other state used tokens, so it never flipped in dark mode. `BillingPill`
+  keeps its signature (the Control Room, MonthClosePage and the customer page all import it);
+  `accountStateMeta`/`AccountStateBadge` add the **Trial expired** state, which `effective` alone
+  cannot express because an expired trial resolves to `suspended`.
+- **[MonthClosePage.jsx](../client/src/pages/MonthClosePage.jsx)** takes its month from the server,
+  renders the payment states, stops calling a $0 month "Not issued", and links to the org page.
+  **SUPER_NAV gains "Month close"** — it had been reachable only via one text link.
+
 ## Migration & deploy
 
 Order: **server → `npm run migrate:billing -- --apply` → web → mobile OTA.** The migration gives
@@ -627,6 +881,44 @@ simply never render the banners. New orgs self-provision (`trial`, +7 days) in t
 `seed:demo` upserts its org to `internal`. Tests:
 [test/billing.int.test.js](../server/test/billing.int.test.js) (status × method matrix, trial
 expiry, grace, super-admin bypass, statement windows) — run with `MONGODB_URI_TEST`.
+
+### The invoicing desk + payment records (Sep 2026)
+
+Order: **server → web.** No mobile (nothing under `mobile/` calls any billing route; the org picker
+reads only `id`/`name` from the org list, whose parameterless shape is unchanged), and **no
+client-version gate** — every server change is additive.
+
+Then, from the **Heroku dashboard → More → Run console**:
+
+```
+npm run migrate:build-indexes          # dry run — expect "already present". NO new index was added.
+npm run migrate:statement-due          # dry run — read the last line
+npm run migrate:statement-due -- --apply
+```
+
+> **`migrate:statement-due` is hygiene, not a gate.** Readers already resolve a missing `dueAt` as
+> `issuedAt + the org's current terms`, and the migration persists exactly that value — so the app
+> is correct before, during and after it. What the run buys is *freezing*: once persisted, a later
+> change to an org's payment terms stops moving the due date of an invoice already sent.
+
+**Expect the dry run's last line to name statements that will read OVERDUE.** Every legacy invoice
+whose due date has already passed becomes visible the moment this ships, which is true but
+startling if half of them were paid months ago. Marking those paid — from each org's **Statements**
+tab under the **Outstanding** filter — is the expected first-day chore, not a bug.
+
+Tests: [test/invoicingState.test.js](../server/test/invoicingState.test.js) (pure, the two
+partitions and both truth tables), [test/invoicingState.int.test.js](../server/test/invoicingState.int.test.js)
+(the window, the floor corner, a $0 month, an internal org, an org with no subscription row, a
+deactivated org that still owes, an unpaid statement older than the window, and the one-owner
+invariant that every month equals `monthlyStatement` for that month), and
+[test/statementPayment.int.test.js](../server/test/statementPayment.int.test.js) (due-date
+stamping, the two payment routes and every refusal, the void-while-paid guard, and the canonical
+history shape), plus [test/backfillStatementDue.int.test.js](../server/test/backfillStatementDue.int.test.js),
+which runs the migration as a real process and asserts the value it persists equals exactly what
+`effectiveDueAt` returned beforehand — per org's terms, skipping void rows, never re-dating a row
+that already has one, and a no-op on a second run. `billing.int.test.js` gains the contract pins: the parameterless list shape, the
+rollup's legacy keys, `invoice_overdue` for a deactivated org, and a walk of the customer responses
+asserting no payment field reaches them.
 
 ### Grace rules + issued statements (Jul 2026)
 

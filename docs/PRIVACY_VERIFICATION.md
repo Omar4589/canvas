@@ -1179,6 +1179,27 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     their fields; none was touched). Adding it to an export later is its own disclosure-review
     moment.
 
+    ***[v6 2026-09-06 — GATE CLOSED. The owner made the `privacy.html` edit; the production mobile
+    OTA is no longer blocked by this item.]*** The "Voter and constituent information" paragraph
+    (`client/public/privacy.html`) now answers both problems above, in the owner's own words and
+    applied verbatim at their instruction. **(a) Provenance:** the paragraph gained a second
+    channel — *"A customer's canvassers may also add a person at the door — someone who answers but
+    is not on the uploaded list — by entering their first and last name, together with a telephone
+    number and email address if that person volunteers them so the campaign can follow up"* — so
+    upload is no longer described as the only way a record arrives. **(b) Category:** **email
+    addresses** joined the enumerated list beside telephone numbers. Nothing else in the paragraph
+    moved: the purpose limitation and the access-limitation sentence stand as written, and the
+    exposure posture recorded above is unchanged — email remains admin-console-only, stripped by
+    `MOBILE_VOTER_PROJECTION`, so it still never reaches a phone's offline cache. The only
+    editorial liberty was typographic: the apostrophe and both dashes are written as `&rsquo;` and
+    `&mdash;` to match every other entity in the document. `client/dist/privacy.html` is gitignored
+    build output that regenerates from this source, so there is no second copy to drift.
+    **Deliberately left open as an owner judgment call, NOT an outstanding gate:** the same
+    paragraph still reads *"Voters do not interact with the Services directly."* Someone
+    volunteering an email to a canvasser who types it in is closer to interacting than a name
+    pulled from a voter file, though they still never touch the app. The sentence is defensible as
+    written; the owner may soften it in a later pass.
+
 17. **[v6 2026-09-01 — NEW export type `notes`: a new DERIVED LINKAGE (opt-in, audited) and a
     ROLE WIDENING. No new data, no new recipient, no new subprocessor — but two of this
     document's own sentences needed amending, and they are amended below.]** The Export Center
@@ -1326,10 +1347,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     is both the feature's purpose and a narrower disclosure than a pin would be. **Assessment: no
     Privacy Policy / ToS / DPA text edit required.** If the link is ever automated, or an embedded
     map or server-side geocoding replaces it, THAT is the §6 event — the same boundary item 15
-    draws. Owner to confirm before the production OTA. **Note the unrelated gate:** item 16's
-    `privacy.html` edit is still open and still blocks the production mobile OTA, so this ships to
-    staging only until the owner makes it (§B.8 of
-    [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md)).
+    draws. Owner to confirm before the production OTA. **The unrelated gate that blocked this is
+    now CLOSED:** item 16's `privacy.html` edit landed 2026-09-06 (stamped there), so a production
+    mobile OTA is no longer held by it.
 
     *Housekeeping, folded in here rather than left to drift: the §C9(a) grep contract reads
     "`watchPositionAsync` → exactly one match". As of 2026-09-05 it matches **one call site**
@@ -1338,6 +1358,62 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     sites, not lines; the background terms (`startLocationUpdatesAsync | TaskManager | defineTask |
     ACCESS_BACKGROUND_LOCATION | requestBackgroundPermissionsAsync`) return **zero**, re-verified
     2026-09-05, and must stay zero. Directions adds no location read of any kind.*
+
+21. **[v6 2026-09-23 — Invoice payment records: STAFF bookkeeping on an existing staff-only record.
+    No customer data, no new recipient, nothing new reaches a customer.]** The super-admin
+    Organizations page became an invoicing desk and each org gained a five-tab page, and
+    `Statement` gained due dates and a record of payment. Checked against all five triggers in
+    `CLAUDE.md`:
+
+    **What we collect** — four fields on `Statement`, all **staff** data about **our own invoices**,
+    none of it about a canvasser, a voter or an org's members: `termsDays` and `dueAt` (dates),
+    `paidAt` (a date), `paidByUserId` (a Doorline staff id, the same class as the existing
+    `issuedByUserId`/`voidedByUserId`), and `paymentRef` — free text, ≤200 chars, typed by staff.
+    `Subscription` gained `paymentTermsDays` (a number). Each statement line gained
+    `billingStartMonth` (a 'YYYY-MM' string derived from data already on the line). **No field
+    holds personal information about any data subject the DPA covers.**
+
+    ⚠️ **`paymentRef` is the one to watch.** It is free text on a model whose header has always
+    said it carries no customer personal data. That claim now holds **by discipline, not by
+    construction**: the field's helper text, its help article, `docs/BILLING.md` and the model's own
+    header all say *a reference number only — never a person's name, never card or bank details*,
+    and the model header was updated in this change to state the boundary explicitly. A
+    server-side character whitelist would make it a guarantee rather than a convention; that is the
+    owner's call, and until then this line is the watchlist entry. Nothing in the app writes to the
+    field except a super admin typing into it.
+
+    **Retention / deletion** — unchanged. `Statement` is swept with the organization by the same
+    cascade (`services/platform/deleteOrganization.js` imports and deletes it), so the "no invoice
+    retention beyond the org" line stays true — **including for an unpaid statement**, which the
+    delete confirmation now says out loud so nobody destroys the record of a balance by accident.
+    No TTL, no purge, no backup change.
+
+    **Who can access customer data** — narrower than the surfaces it sits beside, not wider. Both
+    new routes (`POST …/statement/:id/paid`, `…/unpaid`) are `requireSuperAdmin`, pinned by a test
+    asserting an org admin gets 403 on each; every filter is scoped by `organizationId`, so a
+    statement id from one org cannot be touched through another's URL (asserted). The org page
+    shows the member roster as metadata with **no support grant and no AccessLog row**, exactly as
+    the page it replaced did — that boundary is unchanged, not relaxed.
+
+    **Sharing / subprocessors** — **none.** No third party receives anything. Payment still happens
+    entirely outside the app; Doorline records *that it happened*, and takes no card, bank or
+    processor data. The dormant Stripe phase remains designed-not-built; wiring it would be the
+    §6 event, unchanged by this work.
+
+    **What we expose** — to the **same gated audience that already saw statements**. A super admin
+    now sees paid/overdue signals across orgs; super admins could already read every statement,
+    every rate and every dollar. Customers see **nothing new**: `publicUsage` and
+    `publicMonthHistory` build their own objects and were not touched, and `billing.int.test.js`
+    now walks the actual `GET /admin/billing` and `/admin/billing/history` response bodies asserting
+    that no key matching `Cents$|paidAt|dueAt|paymentRef|termsDays|paymentState|paidByUserId`
+    survives at any depth — the money boundary and the new payment boundary enforced by the same
+    walk. The one new export column (Payment, on a staff CSV) is staff-only and carries no personal
+    data.
+
+    **Assessment: no Privacy Policy / ToS / DPA text edit required.** Nothing collected is personal
+    information, nothing is shared, no retention changed, and the audience is unchanged. Owner to
+    confirm before the production deploy, as item 19 was. `client/public/privacy.html` needs **no
+    edit** for this change.
 
 ---
 

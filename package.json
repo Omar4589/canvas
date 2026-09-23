@@ -30,6 +30,7 @@
     "audit:orphaned-reviews": "npm --prefix server run audit:orphaned-reviews --",
     "cleanup:test-campaigns": "npm --prefix server run cleanup:test-campaigns --",
     "migrate:build-indexes": "npm --prefix server run migrate:build-indexes --",
+    "migrate:statement-due": "npm --prefix server run migrate:statement-due --",
     "migrate:multitenant": "npm --prefix server run migrate:multitenant",
     "migrate:timezones": "npm --prefix server run migrate:timezones --",
     "migrate:fbtime-shifts": "npm --prefix server run migrate:fbtime-shifts --",

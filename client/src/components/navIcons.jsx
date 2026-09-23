@@ -424,6 +424,7 @@ export const NAV_ICONS = {
   '/super-admin/access': IconKey,
   '/super-admin/emails': IconMail,
   '/organizations': IconBuilding,
+  '/super-admin/billing': IconBilling,
   '/queues': IconLayers,
 };
 

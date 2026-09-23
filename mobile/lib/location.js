@@ -1,5 +1,13 @@
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
+// The gate's decisions live in a pure sibling so node --test can pin them without RN.
+import {
+  IOS_REDUCED_ACCURACY_MIN_M,
+  EMPTY_RUN,
+  foldCoarseRun,
+  isCoarseGrant,
+  isReducedAccuracyFix,
+} from './locationGate.js';
 
 // Concurrent calls share ONE in-flight request. On a cold `undetermined` start the
 // map's initial-camera helper and the location feed both land here in the same tick,
@@ -22,12 +30,6 @@ export function ensureLocationPermission() {
   })();
   return permissionInFlight;
 }
-
-// iOS "Precise Location" off fallback heuristic: expo-location v19 exposes no
-// accuracyAuthorization, so reduced accuracy can only be inferred from the fix itself —
-// reduced fixes cluster at 2–5 km accuracy, while genuine full-accuracy fixes never
-// approach 1 km outdoors. Replace with the real API when expo-location exposes it.
-const IOS_REDUCED_ACCURACY_MIN_M = 1000;
 
 // Reused fixes older than this can't prove where the canvasser is standing NOW — a
 // stale fix stamped as current is exactly the fraud the location gate exists to stop.
@@ -55,7 +57,7 @@ function toStamp(pos) {
 }
 
 function assertPrecise(stamp) {
-  if (Platform.OS === 'ios' && stamp.accuracy != null && stamp.accuracy > IOS_REDUCED_ACCURACY_MIN_M) {
+  if (isReducedAccuracyFix(Platform.OS, stamp.accuracy)) {
     throw gateError('PRECISE_OFF');
   }
   return stamp;
@@ -89,7 +91,7 @@ export async function getLocationGateStatus() {
   const resp = await Location.getForegroundPermissionsAsync();
   if (resp.status === 'undetermined') return null;
   if (resp.status !== 'granted') return 'PERMISSION_DENIED';
-  if (resp.android?.accuracy === 'coarse') return 'PRECISE_OFF';
+  if (isCoarseGrant(resp)) return 'PRECISE_OFF';
   return null;
 }
 
@@ -112,34 +114,24 @@ export function promptEnableServices() {
 // fix to trip it — so readings only count within a rolling window, and the run
 // must span real seconds.
 // iOS-only: Android's permission API reports coarse directly.
-const PRECISE_OFF_MIN_COUNT = 6;
-const PRECISE_OFF_MIN_SPAN_MS = 15 * 1000;
-const PRECISE_OFF_MAX_GAP_MS = 30 * 1000;
-let coarseCount = 0;
-let coarseFirstAt = 0;
-let coarseLastAt = 0;
+// The run state; the decision itself is foldCoarseRun in locationGate.js, so the rule
+// this probe enforces is the one node --test exercises rather than a copy of it.
+let coarseRun = EMPTY_RUN;
 
 export const reportFixAccuracy = (accuracy) => {
   if (Platform.OS !== 'ios' || accuracy == null) return;
-  const now = Date.now();
-  if (accuracy > IOS_REDUCED_ACCURACY_MIN_M) {
-    if (!coarseCount || now - coarseLastAt > PRECISE_OFF_MAX_GAP_MS) {
-      coarseCount = 0;
-      coarseFirstAt = now;
-    }
-    coarseCount += 1;
-    coarseLastAt = now;
-    // setGateBlock dedups identical codes, and a coarse stream can't co-occur with
-    // the blocks that gate fixes off entirely (services off / permission denied) —
-    // no fixes reach the feed in those states — so no guard on the current code.
-    if (coarseCount >= PRECISE_OFF_MIN_COUNT && now - coarseFirstAt >= PRECISE_OFF_MIN_SPAN_MS) {
-      setGateBlock('PRECISE_OFF');
-    }
-  } else {
-    coarseCount = 0;
-    // Only clear what this probe (or a coarse tap-time fix) set — a precise fix
-    // is proof the Precise toggle is on again.
-    if (lastGateBlock === 'PRECISE_OFF') setGateBlock(null);
+  const { state, tripped } = foldCoarseRun(coarseRun, { accuracy, now: Date.now() });
+  coarseRun = state;
+
+  // setGateBlock dedups identical codes, and a coarse stream can't co-occur with
+  // the blocks that gate fixes off entirely (services off / permission denied) —
+  // no fixes reach the feed in those states — so no guard on the current code.
+  if (tripped) {
+    setGateBlock('PRECISE_OFF');
+  } else if (state.count === 0 && lastGateBlock === 'PRECISE_OFF') {
+    // count 0 here means a precise fix cleared the run — proof the Precise toggle is on
+    // again. Only clear what this probe (or a coarse tap-time fix) set.
+    setGateBlock(null);
   }
 };
 
@@ -171,7 +163,7 @@ async function acquire(freshTimeoutMs, maxFixAgeMs) {
   let resp = await Location.getForegroundPermissionsAsync();
   if (resp.status !== 'granted') resp = await Location.requestForegroundPermissionsAsync();
   if (resp.status !== 'granted') throw gateError('PERMISSION_DENIED', { canAskAgain: resp.canAskAgain !== false });
-  if (resp.android?.accuracy === 'coarse') throw gateError('PRECISE_OFF');
+  if (isCoarseGrant(resp)) throw gateError('PRECISE_OFF');
 
   const recent = await Location.getLastKnownPositionAsync({
     maxAge: 15000, // only reuse a fix from the last 15s

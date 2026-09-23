@@ -222,6 +222,21 @@ it can't reach the server (with how old that copy is), and a **red storage notic
 is too full to save map data for offline use — free up space, or the next signal-less cold start
 will show older houses than you expect.
 
+**Precise Location has to be on, and this is enforced rather than suggested.** Approximate location
+puts your fix kilometres wide, which makes the distance between you and the door meaningless, so
+the app refuses the knock rather than recording one that can't be verified. Two things happen:
+
+- **Before you waste a tap**, a red notice appears reading "Precise Location is off for Doorline",
+  as soon as the app has seen a sustained run of coarse readings. One accurate reading clears it.
+- **If you tap anyway**, the door is not recorded at all. Nothing is saved, nothing is queued for
+  later, and nothing changes colour. You get an alert naming the exact setting to turn on, and a
+  retry button.
+
+There is no way around it by going offline: the check runs before anything reaches the offline
+queue, so a shift walked with Precise off records nothing rather than syncing later. It is also
+re-checked at every door, not once when you sign in, so turning it off mid-shift stops you at the
+next house.
+
 ### Refused (someone answered, but said no)
 
 **Refused** is for when a person comes to the door but declines to participate — different from **Not
@@ -756,6 +771,43 @@ nothing — the snapshot carries no `note`, so restoring is a deliberate decisio
 **Not covered by this guard** (deliberate): the location-correction path
 (`/mobile/households/:id/location`) is a coordinate write with no disposition semantics and must stay
 replayable verbatim.
+
+### The precise-location gate
+
+`lib/location.js` is the wiring and [`lib/locationGate.js`](../mobile/lib/locationGate.js) is the
+pure policy, split so `node --test` can exercise the decisions without RN or expo imports (same
+pattern as `locationFeed.js`). Two rules, one per platform:
+
+- **Android** reports the grant directly. Android 12+ "Approximate" arrives as a **granted**
+  permission whose `android.accuracy` is `coarse`, so anything checking only `status === 'granted'`
+  waves it through. `isCoarseGrant` closes that, and it runs in `acquire` **before the first fix is
+  even requested**.
+- **iOS** exposes no `accuracyAuthorization` in expo-location v19, so reduced accuracy is inferred
+  from the fix: worse than `IOS_REDUCED_ACCURACY_MIN_M` (1000 m) is treated as Precise-off, because
+  reduced fixes cluster at 2–5 km while a genuine full-accuracy fix never approaches a kilometre
+  outdoors. A **null** accuracy is deliberately not treated as reduced — unknown is not bad, and
+  blocking it would refuse honest knocks. Replace the heuristic when expo-location exposes the real
+  API.
+
+The proactive banner uses `foldCoarseRun`: a run of `PRECISE_OFF_MIN_COUNT` (6) coarse readings
+spanning at least `PRECISE_OFF_MIN_SPAN_MS` (15 s), with any gap over `PRECISE_OFF_MAX_GAP_MS`
+(30 s) discarding the run. Both floors exist to stop a cold GPS warming up indoors from tripping it,
+and the gap rule stops this morning's coarse readings combining with one fix now. `reportFixAccuracy`
+delegates to that fold rather than repeating it, so the tested rule is the shipped one.
+
+[`lib/locationGate.test.js`](../mobile/lib/locationGate.test.js) pins all of it, plus three
+invariants that live in modules too RN-bound to import: both gates run on the knock path with the
+Android check ahead of any fix, all three fix sources pass through `assertPrecise`, and the gate
+precedes both the optimistic patch and `submitOrQueue` so a blocked tap leaves **zero trace**.
+Those three are structural source checks, weaker than running the code and noted as such in the
+file; they were mutation-tested (five deliberate regressions, each caught) so they are not
+decorative.
+
+**The server does not check accuracy.** It requires coordinates and rejects a knock without them,
+but never inspects how accurate they are, so enforcement is client-side. The compensating control
+is the audit: a fix worse than 100 m flags `weak_gps` at medium and worse than 250 m at high
+([AUDIT.md](AUDIT.md)), so a coarse stamp from a bypassed client surfaces for review rather than
+passing silently.
 
 ## The at-door survey
 

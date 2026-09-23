@@ -34,6 +34,12 @@ const subscriptionSchema = new mongoose.Schema(
     // campaigns — with no code change. Universe size is NEVER enforced in code;
     // the household soft cap is a contract-level guideline only.
     pricePerCampaignCents: { type: Number, default: 30000 },
+    // NET-N: how long after an invoice is issued it falls due. Read at ISSUE TIME only — the
+    // resulting date is frozen onto the Statement (`dueAt`/`termsDays`), so changing this never
+    // moves an invoice already sent, only the next one. 0 is legal ("due on issue") and is why
+    // every reader uses invoicingState.termsDaysFor rather than `||`. Existing orgs read as 30
+    // with no migration.
+    paymentTermsDays: { type: Number, default: 30, min: 0, max: 365 },
     billingContact: {
       name: { type: String, default: '', trim: true },
       email: { type: String, default: '', trim: true },

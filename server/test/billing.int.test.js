@@ -539,3 +539,143 @@ test('org detail: roster + campaigns as plain metadata (no grant, no audit row),
   await new Promise((r) => setTimeout(r, 120));
   assert.strictEqual(await AccessLog.countDocuments({}), 0, 'reading org METADATA writes no audit row');
 });
+
+// ── Batch 4: the invoicing desk's contracts — what must NOT change, and what is newly true. ──
+
+// The list route is mounted by the org switcher on every super-admin page, by Select org, Support
+// access, Imports, and by the mobile org picker. Its parameterless shape is a contract with
+// shipped mobile builds: additive only, never a changed default.
+test('the parameterless org list keeps every key it shipped with, and costs no extra query', { skip }, async () => {
+  const res = await call('GET', '/super-admin/organizations', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  const row = res.json.organizations.find((r) => r.name === 'Billing Org');
+  assert.ok(row, 'the org is present');
+  for (const k of [
+    'id', 'name', 'slug', 'isActive', 'isInternal', 'memberCount', 'campaignCount',
+    'campaignsActive', 'campaignsArchived', 'createdAt', 'updatedAt', 'billing',
+  ]) {
+    assert.ok(k in row, `legacy key ${k} must survive`);
+  }
+  for (const k of ['status', 'effective', 'trialEndsAt', 'trialDaysLeft']) {
+    assert.ok(k in row.billing, `legacy billing key ${k} must survive`);
+  }
+  assert.ok('organizations' in res.json && 'deletingOrganizations' in res.json && 'total' in res.json);
+  assert.ok(
+    !('invoicing' in row),
+    'the key is ABSENT, not null — the Statement read is opt-in and the default shape is unchanged'
+  );
+  // Internal orgs stay in the default list: the mobile picker is how staff reach the demo org.
+  // (This fixture's internal org carries the status, not the born-immutable flag — the route
+  // checks BOTH signals, which is the point.)
+  assert.ok(
+    res.json.organizations.some((r) => r.name === 'Doorline Internal'),
+    'internal orgs are never filtered out server-side — hiding them is a client-side desk choice'
+  );
+});
+
+test('?invoicing=1 adds the chase signal, and null (not zeros) for an internal org', { skip }, async () => {
+  const res = await call('GET', '/super-admin/organizations?invoicing=1', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  const row = res.json.organizations.find((r) => r.name === 'Billing Org');
+  assert.ok(row.invoicing, 'the block is present when asked for');
+  for (const k of ['outstandingCount', 'outstandingCents', 'overdueCount', 'overdueCents', 'oldestDueAt', 'lastPaidAt']) {
+    assert.ok(k in row.invoicing, `${k} rides the cheap path`);
+  }
+  const internal = res.json.organizations.find((r) => r.name === 'Doorline Internal');
+  assert.strictEqual(internal.invoicing, null, '"never billed" and "owes nothing" are different facts');
+});
+
+test('the rollup keeps every legacy key and adds the desk totals', { skip }, async () => {
+  const res = await call('GET', '/super-admin/organizations/billing-rollup', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  for (const k of ['month', 'totalCents', 'billableCampaigns', 'byStatus', 'organizations']) {
+    assert.ok(k in res.json, `legacy header key ${k} must survive the swap to a range walk`);
+  }
+  const row = res.json.organizations[0];
+  for (const k of [
+    'organizationId', 'name', 'isActive', 'status', 'effective', 'trialEndsAt', 'trialDaysLeft',
+    'windDownEndsAt', 'rateCents', 'billableCampaigns', 'totalCents', 'setupCount',
+  ]) {
+    assert.ok(k in row, `legacy row key ${k} must survive`);
+  }
+  // Additive: the whole invoicing picture, computed from the SAME walk.
+  assert.ok(row.invoicing && row.nextAction, 'each row carries its verdict and what to do about it');
+  assert.ok('awaiting' in row.invoicing && 'outstanding' in row.invoicing && 'overdue' in row.invoicing);
+  for (const k of ['asOf', 'currentMonth', 'awaitingTotalCents', 'outstandingTotalCents', 'overdueTotalCents']) {
+    assert.ok(k in res.json, `${k} feeds the KPI strip`);
+  }
+  // The header is still exactly the sum of its rows.
+  assert.strictEqual(
+    res.json.awaitingTotalCents,
+    res.json.organizations.reduce((s, r) => s + r.invoicing.awaiting.totalCents, 0)
+  );
+});
+
+test('at-risk flags an overdue invoice, including for a DEACTIVATED org', { skip }, async () => {
+  const { Statement } = await import('../src/models/Statement.js');
+  const late = await Organization.create({ name: 'Late Payer', slug: 'late-payer', isActive: false });
+  await Subscription.create({ organizationId: late._id, status: 'active', statusChangedAt: new Date() });
+  await Statement.create({
+    organizationId: late._id,
+    month: '2026-01',
+    status: 'issued',
+    rateCents: 30000,
+    rulesVersion: 3,
+    totalCents: 30000,
+    lines: [],
+    issuedAt: new Date('2026-02-01T00:00:00Z'),
+    dueAt: new Date('2026-03-03T00:00:00Z'),
+  });
+
+  const res = await call('GET', '/super-admin/organizations/at-risk', { token: ctx.superTok });
+  assert.strictEqual(res.status, 200);
+  const item = res.json.items.find((i) => i.type === 'invoice_overdue' && i.name === 'Late Payer');
+  assert.ok(item, 'switching off sign-in does not settle an invoice — the old loop skipped inactive orgs');
+  assert.strictEqual(item.count, 1);
+  assert.strictEqual(item.totalCents, 30000);
+  assert.ok(item.oldestDueAt && item.maxDaysOverdue > 0);
+});
+
+test('an internal org never appears as overdue, whatever its statements say', { skip }, async () => {
+  const { Statement } = await import('../src/models/Statement.js');
+  const internal = await Organization.findOne({ slug: 'dl-internal' });
+  await Statement.create({
+    organizationId: internal._id,
+    month: '2026-02',
+    status: 'issued',
+    rateCents: 30000,
+    rulesVersion: 3,
+    totalCents: 30000,
+    lines: [],
+    issuedAt: new Date('2026-03-01T00:00:00Z'),
+    dueAt: new Date('2026-04-01T00:00:00Z'),
+  });
+  const res = await call('GET', '/super-admin/organizations/at-risk', { token: ctx.superTok });
+  assert.ok(
+    !res.json.items.some((i) => i.type === 'invoice_overdue' && i.organizationId === String(internal._id)),
+    'internal orgs are never chased'
+  );
+  await Statement.deleteMany({ organizationId: internal._id });
+});
+
+test('PAYMENT STATE NEVER REACHES THE CUSTOMER — walked, not assumed', { skip }, async () => {
+  // The customer's own billing page is dollar-free by construction (publicUsage /
+  // publicMonthHistory build their own objects). Paid, due and terms are the same class of fact
+  // and must not have slipped in behind them.
+  const forbidden = /Cents$|^paidAt$|^dueAt$|^paymentRef$|^termsDays$|^paymentTermsDays$|^paymentState$|^paidByUserId$/;
+  for (const path of ['/admin/billing', '/admin/billing/history?months=6']) {
+    const res = await call('GET', path, { token: ctx.adminTok, orgId: ctx.org._id });
+    assert.strictEqual(res.status, 200, path);
+    const leaked = [];
+    (function walk(v, at) {
+      if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+      if (v && typeof v === 'object') {
+        for (const [k, val] of Object.entries(v)) {
+          if (forbidden.test(k)) leaked.push(`${at}.${k}`);
+          walk(val, `${at}.${k}`);
+        }
+      }
+    })(res.json, '$');
+    assert.deepStrictEqual(leaked, [], `no money or payment state on ${path}`);
+  }
+});

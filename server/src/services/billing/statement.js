@@ -6,7 +6,7 @@ import { Organization } from '../../models/Organization.js';
 import { BILLABLE_WITH_RESTRICTED, knocksPipeline, billableDoorsOf } from '../reports/aggregations.js';
 import { resolveBillRestricted } from '../reports/billRestricted.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
-import { addMonths, decideMonth, needsStartMonthVisitCount } from './billingMonths.js';
+import { addMonths, billingStartMonth, decideMonth, needsStartMonthVisitCount } from './billingMonths.js';
 import { resolveRateCents } from './rate.js';
 
 // Which generation of the billing rules produced a statement. Frozen into every issued Statement
@@ -65,7 +65,7 @@ function statementLine({
   // which collapses to the knock count when the org hasn't opted in. A month whose only activity
   // was non-bulk restricted marks is a month someone walked, and must not win the end grace.
   const visitsThisMonth = agg?.billableDoors || 0;
-  const { billable, reason } = decideMonth({
+  const { billable, reason, startMonth } = decideMonth({
     month,
     firstVisitDay,
     archivedDay,
@@ -91,6 +91,11 @@ function statementLine({
     // WHY this line is (or isn't) on the invoice — 'billable' | 'start-grace' | 'end-grace' |
     // 'floor' | 'before-start' | 'archived-earlier' | 'no-field-visit'. See billingMonths.js.
     reason,
+    // The first month this campaign COULD bill — the first-visit month, or the next one when the
+    // start grace applied. decideMonth has always computed it; this line used to discard it, which
+    // left "first knock Sep 28 but the invoice starts in October" for the reader to derive from the
+    // grace rule. Null until the campaign has been to the field.
+    billingStartMonth: startMonth,
     // This campaign's resolved rate, which may differ from the statement's `rateCents`.
     rateCents: lineRate,
     // The raw override, so the UI can tell "negotiated" from "inherits the org rate".
@@ -254,8 +259,12 @@ export function monthsBetween(from, to, max = BILLING_HISTORY_MAX_MONTHS) {
 //
 // Campaigns are walked SERIALLY, like monthlyStatement and /billing-rollup: an org with fifty
 // campaigns firing 150 concurrent queries is a worse neighbour than one that takes a moment.
-export async function monthlyStatementRange(organizationId, { from, to }) {
-  const months = monthsBetween(from, to);
+// `maxMonths` widens the cap for the invoicing walk (services/billing/invoicing.js, which reaches
+// back to the org's creation month) without moving BILLING_HISTORY_MAX_MONTHS, the payload cap an
+// explicitly-requested history range keeps. monthsBetween already truncates from the front, so the
+// month you asked about always survives either way.
+export async function monthlyStatementRange(organizationId, { from, to, maxMonths = BILLING_HISTORY_MAX_MONTHS }) {
+  const months = monthsBetween(from, to, maxMonths);
   const first = months[0];
   const last = months[months.length - 1];
   const [sub, campaigns, org] = await Promise.all([
@@ -339,7 +348,28 @@ export async function monthlyStatementRange(organizationId, { from, to }) {
     };
   });
 
-  return { from: first, to: last, rateCents, rulesVersion: RULES_VERSION, statements };
+  // The per-campaign facts BEHIND the lines, once each rather than repeated on every month. The
+  // org page's Campaigns tab reads this for "first visit / bills from / universe size", so the
+  // grace rule stays owned by billingMonths.js and is never re-derived in a browser.
+  const campaignFacts = perCampaign.map((pc) => ({
+    campaignId: String(pc.campaign._id),
+    name: pc.campaign.name,
+    isActive: pc.campaign.isActive,
+    createdAt: pc.campaign.createdAt,
+    archivedAt: pc.archivedAt,
+    timeZone: pc.campaign.timeZone || 'America/New_York',
+    firstKnockAt: pc.firstKnockAt,
+    firstVisitDay: pc.firstVisitDay,
+    // Null until the campaign has been to the field; the month AFTER the first visit when the
+    // start grace applied. The floor can still make the first-visit month bill — that shows up as
+    // a line with reason 'floor', which is why the org-level "billing since" reads the LINES.
+    billingStartMonth: billingStartMonth(pc.firstVisitDay),
+    households: pc.households,
+    rateCents: pc.lineRate,
+    pricePerCampaignCents: pc.campaign.pricePerCampaignCents ?? null,
+  }));
+
+  return { from: first, to: last, rateCents, rulesVersion: RULES_VERSION, statements, campaigns: campaignFacts };
 }
 
 // The customer-facing projection of `currentUsage`: which campaigns are canvassing and which are
