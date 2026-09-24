@@ -26,6 +26,7 @@ const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { User } = await import('../src/models/User.js');
 const { RetentionRun } = await import('../src/models/RetentionRun.js');
+const { processOrgDeleteJob } = await import('../src/services/platform/deleteOrgProcessor.js');
 const {
   runRetentionTriggers, warnWindDownOrgs, warnDormantOrgs, purgeWoundDownOrgs, purgeDormantOrgs,
   WIND_DOWN_DAYS, DORMANCY_MONTHS, WARN_LEAD_DAYS, WARN_GRACE_DAYS,
@@ -98,6 +99,31 @@ let server;
 let base;
 let superTok;
 
+// Since 3b9a07a the sweeps no longer delete inline: they stamp each due org and hand it to
+// org-delete-queue. This harness has no Redis, so `stubEnqueue` does what stampAndEnqueueOrgDelete
+// does minus the enqueue — which is what makes the sweep's DECISION observable — and `runStamped()`
+// then runs the real processor, so every "org is gone" assertion below stays exact instead of
+// degrading into "it was handed off". Together they prove the decision AND the execution, which is
+// stronger than the pre-3b9a07a inline call was. Ported from retentionTriggers.int.test.js:97-115,
+// the sibling suite that WAS updated by that commit while this one was missed for 50 days.
+let stamped = [];
+const stubEnqueue = async ({ orgId, source, requestedBy = null, requestId = null }) => {
+  const org = await Organization.findById(orgId, 'deletion').lean();
+  if (!org) return { gone: true };
+  if (org.deletion?.requestedAt) return { alreadyDeleting: true };
+  await Organization.updateOne(
+    { _id: orgId },
+    { $set: { deletion: { requestedAt: new Date(), requestedBy, source, requestId, status: 'pending', heartbeatAt: null, error: null } } }
+  );
+  stamped.push({ organizationId: String(orgId), source, requestId: requestId ? String(requestId) : null });
+  return { queued: true, organization: { id: String(orgId) } };
+};
+const runStamped = async () => {
+  const queue = stamped;
+  stamped = [];
+  for (const st of queue) await processOrgDeleteJob({ data: st, id: `t-${st.organizationId}` });
+};
+
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
@@ -112,6 +138,7 @@ after(async () => {
 });
 beforeEach(async () => {
   if (!URI) return;
+  stamped = [];
   for (const M of [Organization, Subscription, Campaign, Household, Voter, CanvassActivity, User, RetentionRun]) {
     await M.deleteMany({});
   }
@@ -162,9 +189,9 @@ test('NEVER DELETE UNWARNED: dormant mail cannot stamp; delivery stamps with ful
   // fresh deploy with no RESEND_API_KEY): the sweep must neither stamp nor delete.
   const overdue = await makeOrg('Overdue Org', 'overdue', 'canceled', new Date(Date.now() - (WIND_DOWN_DAYS + 5) * DAY));
 
-  let sweep = await runRetentionTriggers({ apply: true });
+  let sweep = await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   assert.strictEqual(sweep.warnWindDown.warned, 0, 'dormant mailer → no delivery → no stamp');
-  assert.strictEqual(sweep.windDown.purged, 0, 'unwarned → NOT purged, however overdue');
+  assert.strictEqual(sweep.windDown.enqueued, 0, 'unwarned → NOT purged, however overdue');
   assert.ok(await orgFresh(overdue), 'org survives the dormant-mail window');
   assert.strictEqual((await subOf(overdue)).windDownWarnedAt, null);
   assert.ok(outbox.some((m) => m.kind === 'windDownWarning'), 'the attempt is visible (dormant outbox), just not binding');
@@ -172,9 +199,9 @@ test('NEVER DELETE UNWARNED: dormant mail cannot stamp; delivery stamps with ful
   // Mail goes live → the warning is delivered and stamped, promising max(banner date, now+grace):
   // the banner date is in the past, so the customer gets the FULL grace, not a same-day purge.
   setMail('accept');
-  sweep = await runRetentionTriggers({ apply: true });
+  sweep = await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   assert.strictEqual(sweep.warnWindDown.warned, 1);
-  assert.strictEqual(sweep.windDown.purged, 0, 'freshly warned → grace not elapsed → still not purged');
+  assert.strictEqual(sweep.windDown.enqueued, 0, 'freshly warned → grace not elapsed → still not purged');
   const sub = await subOf(overdue);
   assert.ok(sub.windDownWarnedAt);
   const graceMs = new Date(sub.windDownDeleteNotBefore).getTime() - Date.now();
@@ -193,9 +220,10 @@ test('NEVER DELETE UNWARNED: dormant mail cannot stamp; delivery stamps with ful
       },
     }
   );
-  sweep = await runRetentionTriggers({ apply: true });
-  assert.strictEqual(sweep.windDown.purged, 1, 'warned + grace elapsed + overdue → purged');
-  assert.strictEqual(await Organization.countDocuments({ _id: overdue._id }), 0);
+  sweep = await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(sweep.windDown.enqueued, 1, 'warned + grace elapsed + overdue → handed to the delete queue');
+  await runStamped();
+  assert.strictEqual(await Organization.countDocuments({ _id: overdue._id }), 0, '…and the worker really destroys it');
 });
 
 test('a FAILED send never stamps — retried on every sweep until it actually delivers', { skip }, async () => {
@@ -266,8 +294,8 @@ test('a billing status change CLEARS both markers — the canceled→warned→co
     { organizationId: org._id },
     { $set: { statusChangedAt: new Date(Date.now() - (WIND_DOWN_DAYS + 5) * DAY) } }
   );
-  const purge = await purgeWoundDownOrgs({ apply: true });
-  assert.strictEqual(purge.purged, 0, 're-canceled but re-warned never → must not purge');
+  const purge = await purgeWoundDownOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(purge.enqueued, 0, 're-canceled but re-warned never → must not purge');
   assert.ok(await orgFresh(org));
 });
 
@@ -299,11 +327,28 @@ test('DORMANCY: warn inside the lead window only; purge honors the promised date
 
   // Warned, then the org knocks a door — exactly what the email says cancels the deletion.
   await knockAt(closing, new Date());
-  const purge = await purgeDormantOrgs({ apply: true });
-  assert.strictEqual(purge.purged, 0);
+  const purge = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(purge.enqueued, 0);
   const cleared = await orgFresh(closing);
   assert.strictEqual(cleared.dormancyWarnedAt, null, 'activity after the warning clears the marker');
   assert.strictEqual(cleared.dormancyDeleteNotBefore, null);
+});
+
+// GUARD. Every count assertion in this file reads a key off the purge stages, and a missing key
+// compares `undefined` against a number — which is how this suite sat red for 50 days after 3b9a07a
+// renamed `purged` to `enqueued` while updating only the sibling suite. This test fails BY NAME on
+// the next rename, before the arithmetic ones fail by accident.
+test('GUARD: the purge stages still report the keys these assertions read', { skip }, async () => {
+  for (const [name, fn] of [['windDown', purgeWoundDownOrgs], ['dormancy', purgeDormantOrgs]]) {
+    const stage = await fn({ apply: false, enqueue: stubEnqueue });
+    for (const key of ['due', 'enqueued']) {
+      assert.ok(
+        key in stage,
+        `${name} purge stopped reporting '${key}' — every count assertion in this file now compares undefined, silently. Update them together, and check test/retentionTriggers.int.test.js too.`
+      );
+    }
+    assert.ok(!('purged' in stage), `${name} purge reports BOTH 'purged' and 'enqueued' — one of them is a lie about whether anything was destroyed`);
+  }
 });
 
 test('DORMANCY: warned + past boundary + past promised date → purged; before the promised date → held', { skip }, async () => {
@@ -317,8 +362,8 @@ test('DORMANCY: warned + past boundary + past promised date → purged; before t
   const warned = await orgFresh(gone);
   assert.ok(warned.dormancyWarnedAt, 'overdue org warned on first live sweep');
 
-  let purge = await purgeDormantOrgs({ apply: true });
-  assert.strictEqual(purge.purged, 0, 'promised date (warn + grace) not reached → held');
+  let purge = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(purge.enqueued, 0, 'promised date (warn + grace) not reached → held');
 
   await Organization.updateOne(
     { _id: gone._id },
@@ -329,9 +374,10 @@ test('DORMANCY: warned + past boundary + past promised date → purged; before t
       },
     }
   );
-  purge = await purgeDormantOrgs({ apply: true });
-  assert.strictEqual(purge.purged, 1, 'warned + grace elapsed → purged');
-  assert.strictEqual(await Organization.countDocuments({ _id: gone._id }), 0);
+  purge = await purgeDormantOrgs({ apply: true, enqueue: stubEnqueue });
+  assert.strictEqual(purge.enqueued, 1, 'warned + grace elapsed → handed to the delete queue');
+  await runStamped();
+  assert.strictEqual(await Organization.countDocuments({ _id: gone._id }), 0, '…and the worker really destroys it');
 });
 
 test('INTERNAL orgs are never warned — no scare email to our own demo tenant', { skip }, async () => {
@@ -339,7 +385,7 @@ test('INTERNAL orgs are never warned — no scare email to our own demo tenant',
   const demo = await makeOrg('Demo Org', 'demo-internal', 'internal', new Date(Date.now() - (WIND_DOWN_DAYS + 400) * DAY));
   await ageOrg(demo, new Date(Date.now() - (DORMANCY_MONTHS * 30 + 400) * DAY));
 
-  const sweep = await runRetentionTriggers({ apply: true });
+  const sweep = await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   assert.strictEqual(sweep.warned, 0);
   assert.strictEqual(outbox.length, 0);
   assert.ok(await orgFresh(demo));
@@ -360,7 +406,7 @@ test('DRY RUN: counts the due, sends nothing, stamps nothing', { skip }, async (
 test('every applied sweep receipts its warns — RetentionRun.warned', { skip }, async () => {
   setMail('accept');
   await makeOrg('Receipt Org', 'receipt', 'canceled', new Date(Date.now() - (WIND_DOWN_DAYS - 5) * DAY));
-  await runRetentionTriggers({ apply: true });
+  await runRetentionTriggers({ apply: true, enqueue: stubEnqueue });
   const run = await RetentionRun.findOne({}).sort({ startedAt: -1 }).lean();
   assert.strictEqual(run.warned, 1, 'the receipt records that a warning went out');
 });

@@ -25,4 +25,4 @@ Admins can also add people org-wide from the **Users** page — same idea, and y
 
 **"Their account is switched off."** That's a colleague whose Door Line account has been deactivated. They can't be added until an **org admin** switches it back on, because that switch affects every campaign in the organization, not just yours.
 
-Once the account exists, assign them a book so they can start knocking. See [Assigning canvassers](assigning-canvassers) and [User roles and your team](roles-and-team).
+Once the account exists, assign them a book so they can start knocking. See [Assigning canvassers](assigning-canvassers).

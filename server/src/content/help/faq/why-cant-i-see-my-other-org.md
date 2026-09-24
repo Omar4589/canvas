@@ -23,4 +23,4 @@ A few related things worth knowing:
 - **Switching organizations always lands you on the new org's home page** — never on a page that belonged to the org you just left.
 - **Landed on an "access required" notice?** Your navigation is still there. Use **Go to Overview** (or **Go to Campaigns**), or **Switch organization**, to get back.
 
-See [User roles and your team](roles-and-team) and [What can a team lead do vs. an admin?](team-lead-vs-admin).
+See [What can a team lead do vs. an admin?](team-lead-vs-admin).

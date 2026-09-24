@@ -1544,12 +1544,49 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     puts the voter-file licence warranty on the Customer, so the AUP is not breached by an export we
     built for that purpose — but neither page says a word to the **voter** about a report of their
     address, their door's outcome and their answers being handed to a third party at the
-    organization's direction. **Owner decision required:** whether the Privacy Policy's "With whom we
-    share information" section (or the "Canvassing activity" paragraph) should name customer-directed
-    reporting to the organization's own clients, and whether the ToS should say anything about the
-    Customer's obligations for an exported file once it leaves. Until that is decided, this is the
-    one part of this change that is NOT settled; the code side is. The static legal pages are edited
-    by the owner deliberately, never as a side effect of this change.
+    organization's direction.
+
+    **[RULED 2026-09-24 — both pages edited, by the owner, on the wording they chose.]** Two things
+    that this item as first written did not say sharpened the decision, and both are recorded here
+    because the reasoning matters more than the edit.
+
+    **The case was never falsity, but it was stronger than completeness.** `privacy.html:101` is the
+    ONLY place the published Policy describes reporting to a customer's clients, and it describes it
+    as the channel that EXCLUDES identity: *"Published reports exclude voter names, canvasser
+    identities, and action timestamps."* That sentence is scoped to **published** reports and stays
+    true. But a voter reading the Policy end to end concludes that client reporting is name-free, at
+    exactly the moment a second client-reporting channel exists that carries their name, address,
+    door outcome and political answers — and the product's own help article is titled *"Which file do
+    I send my client?"* (`server/src/content/help/faq/which-file-to-send-a-client.md`, `audience:
+    lead`). Misleading-by-omission risk, not a false sentence. That is what was closed, and it is why
+    "say nothing, the Customer owes the notice" — defensible on `DPA.md:17` §2, `terms.html:97` and
+    `privacy.html:134` — was not chosen.
+
+    **The ToS carve-out did not carry the weight this item put on it.** The sentence above claims
+    the AUP is not breached; `terms.html:106` excepted the Customer **exporting** its own data, and
+    the onward hand-off is most naturally the **redistributing** the same clause prohibits. A literal
+    reading of our own acceptable-use rule forbade the act the product instructs. Now closed in the
+    text rather than by intent.
+
+    **The edits, both owner-directed:**
+    (1) `client/public/privacy.html` "Within your organization." — now states that an organization
+    may report on its own canvassing to its own clients, including by exporting records and sending
+    them on, and that the organization decides what to report and to whom and controls that
+    information, this Policy covering our handling of it rather than the recipient's. Deliberately
+    general: it names the channel and the responsibility, never what a report contains.
+    (2) `client/public/terms.html:106` — the carve-out now reads *"…other than the Customer
+    exporting its own data through features we provide and providing it to its own clients and
+    service providers, for which the Customer remains responsible under Section 3"*, which attaches
+    the Customer's existing §3 warranties to the forwarded file.
+
+    **Not a DPA event, proven rather than asserted.** `DPA.md:49` §6 governs subprocessors *Doorline*
+    engages; the client is engaged by the Customer and no data reaches it through us — the mechanism
+    is the same 7-day artifact every export type uses, downloaded by an authenticated member. In the
+    hand-off the Customer is the disclosing Controller (`DPA.md:17` §2) and Doorline is not a party.
+    §6's own FbTime sentence is the in-document precedent, and this case is weaker still, because
+    unlike FbTime we exchange nothing with the recipient. No subprocessor-list change, no customer
+    notice, no §6 edit. Verified after the edits: `test/staticPages.int.test.js` 11/11, including its
+    mojibake guard.
 
 23. **[v6 2026-09-24 — Survey answers on the Canvassing activity export
     (`params.includeSurveyAnswers`): a file the product calls *"Every door result"* now also carries

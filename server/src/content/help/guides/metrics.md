@@ -84,7 +84,7 @@ Coverage is always for the whole campaign — it can't be narrowed to one team, 
 
 ## Doors per hour
 
-Time actually spent on doors. If your organization has connected **FbTime** (see [Measured hours from FbTime](fbtime-hours)), this divides by measured clock time — those figures are marked **FbTime** on the canvasser tables (or **measured** on mobile), and an estimated row says *why* it's estimated — see [Why does doors-per-hour say "estimated"?](why-does-doors-per-hour-say-estimated). Otherwise it's estimated from each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
+Time actually spent on doors. If your organization has connected **FbTime**, this divides by measured clock time — those figures are marked **FbTime** on the canvasser tables (or **measured** on mobile), and an estimated row says *why* it's estimated, in the row itself. Otherwise it's estimated from each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
 
 Measured and estimated hours are never mixed into one team rate: a team figure only says "measured" when every canvasser in it is fully measured.
 
@@ -102,7 +102,7 @@ If you invoice your client per door, you may want the restricted homes on the bi
 
 Everything else stays exactly where it was. Doors, contact rate, survey rate, and the coverage bar don't move — nobody answered a locked gate, so counting it as a contact would make those numbers wrong. Two homes never count: one your team marked restricted from the office — a whole book or a single home (that's not a walk, and nobody's work), and one that a second canvasser later knocked (it's one door, counted once, as a knock).
 
-This is **off** unless you turn it on, and it has no effect on what Doorline charges you. See [Can I bill for restricted doors?](bill-restricted-doors).
+This is **off** unless you turn it on, and it has no effect on what Doorline charges you.
 
 ## Door goal and pace
 

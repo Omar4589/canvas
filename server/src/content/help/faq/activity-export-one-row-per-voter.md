@@ -26,8 +26,8 @@ Two things to keep straight:
   declined, not that each of the three did; *no soliciting* is a sign on the property. Neither
   is a do-not-contact request.
 - **Rows are not knocks.** The columns are identical but the row count isn't, so the file is
-  named **activity-log-by-voter** — never use it for an invoice (see [How do I export knocks by
-  pass for an invoice?](export-knocks-for-invoicing)). Every row of one knock shares the same
+  named **activity-log-by-voter** — never use it for an invoice — an admin can pull the
+  per-round knock totals for that. Every row of one knock shares the same
   **Activity DB id**.
 
 Want to drop restricted-access or wrong-address entries at the same time? The same dialog has

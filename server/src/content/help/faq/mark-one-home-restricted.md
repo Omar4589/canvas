@@ -43,4 +43,4 @@ A mark your crew has **worked past** is still removable in exactly the same plac
 
 Two things worth knowing: the first mark on a draft cut switches the Turf Cutting map to status colors (uncheck **Door status** under **Layers** to go back), and a desk mark counts as work on the round — the Discard dialog will mention it, and a walk list whose draft round holds one can't be deleted until you unmark. Re-cutting or discarding drafts never undoes a mark — it follows the door.
 
-See also [The Turf Cutting page](page-turf-cutting), [The Map page](page-map), [Can I bill for restricted doors?](bill-restricted-doors) and [Restricted vs. refused](restricted-vs-refused).
+See also [The Turf Cutting page](page-turf-cutting), [The Map page](page-map) and [Restricted vs. refused](restricted-vs-refused).

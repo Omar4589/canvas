@@ -16,4 +16,4 @@ The field app has two refresh speeds, and which one applies depends on what you 
 
 So if you reshuffle books or reassign people mid-shift, **tell them to pull-to-refresh** so the losing canvasser drops the door and the new one picks it up. Nothing is miscounted in the meantime — a door briefly visible in two places still bills once per pass.
 
-See [Using the maps](maps).
+See the maps guide, or ask your campaign manager.

@@ -33,7 +33,7 @@ The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archi
 - **Key dates** — admins only. As a lead you can see them but not change them (see [Team lead vs admin](team-lead-vs-admin)).
 - **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target. Every change is recorded with your name in the campaign's [History](#history--who-changed-what).
 - **Name, survey, timezone** — admins and leads. As a lead you open the same edit drawer; the admin-only fields show but are greyed out.
-- **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back. See [Can I bill for restricted doors?](bill-restricted-doors).
+- **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back.
 - **Door outcomes** — admins **and leads**, from the campaign's **App Customization** page (see below).
 
 ## Door outcomes — which buttons canvassers see

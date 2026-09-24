@@ -14,7 +14,7 @@ tags: do not knock, address, door, never come back, suppress, complaint, dnk, sk
 A resident tells a canvasser: *never come to this door again.* Not "don't talk to me" — don't come
 here at all.
 
-[Do not contact](do-not-contact) can't honor that on its own. It's a fact about a **person**, so
+Do not contact can't honor that on its own. It's a fact about a **person**, so
 the door only disappears once every registered voter there is flagged — and until then canvassers
 are still routed to that address for the housemates. But the knock IS the contact: you can't ring
 the bell for a housemate without summoning whoever asked to be left alone.
