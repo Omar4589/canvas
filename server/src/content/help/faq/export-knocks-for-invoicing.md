@@ -26,8 +26,21 @@ Three things to know:
 **Exports** page can queue the same per-round numbers inside a full backup, plus a
 **Doors by round** file that reconciles to this table door by door — and exports keep working
 during the read-only wind-down after a subscription ends. See [Exporting your data](exports).
-One caution: a Canvassing activity export queued with **One row per voter at the door** arrives
-named `activity-log-by-voter` and repeats each knock once per voter — never invoice from that
-file; the name is the tell.
+
+One caution, and it now has two halves: **never invoice from a Canvassing activity export**, and
+check its name before you use it for anything. Two opt-ins move what its rows are, and the file
+name is the tell. **One row per voter at the door** repeats each knock once per registered voter
+at the address (`activity-log-by-voter`). **Include survey answers** adds rows that are not knocks
+at all (`activity-log-with-surveys`): surveying three people at one door in one round is one knock
+and three surveys, so the surveys with no knock row of their own arrive as extra rows marked **Row
+source: survey** with no **Activity DB id** — see [My export says a survey was submitted but not
+what they said](survey-answers-in-my-export). With both on it is
+`activity-log-by-voter-with-surveys`. Even a plain `activity-log` is finer than a billable door:
+it is one row per door event, and billing counts a door once per round however many times it was
+visited.
+
+And if a client asks why **Results by voter** doesn't agree with your invoice: its **Address
+visits** counts visits, not billable doors, and it has no row for a visited door with nobody
+registered at it. See [Which file do I send my client?](which-file-to-send-a-client).
 
 See [Understanding the numbers](metrics) and [Billing and your account](billing).

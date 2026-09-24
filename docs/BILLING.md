@@ -604,8 +604,20 @@ figure removed. [admin/billing.js](../server/src/routes/admin/billing.js) return
 page; [test/billingAccess.int.test.js](../server/test/billingAccess.int.test.js) asserts its absence
 negatively so a regression fails loudly.
 
+
 **First field visit** (revised Jul 2026) = the earliest `KNOCK_ACTIONS` row **or** the earliest
-**non-bulk** `restricted` mark, whichever came first (`BILLABLE_WITH_RESTRICTED` + `NOT_BULK`). A
+**non-desk** `restricted` mark, whichever came first. The predicate is
+**`fieldVisitMatch(campaignId)`** = `BILLABLE_WITH_RESTRICTED` + the restricted-scoped
+**`NOT_DESK_MARK`** clause — **not** a blanket `NOT_BULK`, which would also drop a `via:'bulk'` row
+on a real knock action and delete a door from the invoice. Since the Export Center's **Results by
+voter** file shipped (2026-09) it lives in
+[reports/aggregations.js](../server/src/services/reports/aggregations.js) beside those constants
+rather than in `statement.js`, which now imports it: that export defines its universe with the same
+sentence ([EXPORTS.md](EXPORTS.md)), and a second copy would be a second definition of when a
+customer starts being charged. A caller that must also honour user-chosen outcome chips intersects
+via `fieldVisitActionTypes(chips)` instead of spreading the match, because both own the `actionType`
+key; an empty intersection returns `null`, meaning zero rows, never "no filter". Pinned by
+[test/fieldVisitPredicate.test.js](../server/test/fieldVisitPredicate.test.js). A
 canvasser who walks to a gated community and finds it locked made the trip, so the clock starts.
 Two things this is *not*:
 

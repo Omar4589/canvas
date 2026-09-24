@@ -20,6 +20,39 @@ export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_su
 // flag-independent (services/billing/statement.js).
 export const BILLABLE_WITH_RESTRICTED = [...KNOCK_ACTIONS, 'restricted'];
 
+// The desk-mark exclusion, as ONE clause. Scoped to `restricted`, deliberately NOT a blanket
+// NOT_BULK: a via:'bulk' row on a KNOCK action is a real billable knock that round totals are
+// contractually required to include, while an admin desk-marking a whole book or a single home
+// restricted (services/canvass/deskRestrict.js, whose DESK_RESTRICT_MATCH is the write-side owner
+// of the same pair) is desk work, not a visit.
+//
+// `$nor` rather than a top-level `$or` so it can never clobber an `$or` a CALLER put in its match.
+// It still owns the `$nor` KEY, so spread it into a filter that has its own `$nor` and one of them
+// silently disappears — put it in `$and` there, or give it its own $match stage as knocksPipeline
+// does below.
+export const NOT_DESK_MARK = Object.freeze({ $nor: [{ actionType: 'restricted', via: 'bulk' }] });
+
+// "A canvasser was at a door" — the match that starts a campaign's billing clock, answers "did
+// anyone go out this month" (services/billing/statement.js, which owned this until the Results by
+// voter export needed the same sentence), and defines the universe of that export. Notes never
+// count. A field `restricted` DOES: the walk was made, which is also why it starts the clock.
+export const fieldVisitMatch = (campaignId) => ({
+  campaignId,
+  actionType: { $in: BILLABLE_WITH_RESTRICTED },
+  ...NOT_DESK_MARK,
+});
+
+// The composable half, for a caller that ALSO takes user-chosen outcome chips. NEVER spread
+// fieldVisitMatch into such a filter: both own the `actionType` key, so the later spread silently
+// wins — either the chips vanish or the billing set does (and `note_added` becomes a visit).
+// Intersect instead. Returns null when the chips intersect to nothing, which means ZERO ROWS and
+// never "no filter" — a caller that treats null as absent inverts its own filter.
+export const fieldVisitActionTypes = (chips) => {
+  if (!chips?.length) return [...BILLABLE_WITH_RESTRICTED];
+  const kept = chips.filter((a) => BILLABLE_WITH_RESTRICTED.includes(a));
+  return kept.length ? kept : null;
+};
+
 // Apply the billable-door POLICY to a knocksPipeline row. Callers run the pipeline with
 // includeRestricted so `restrictedDoors` always reports how many inaccessible doors are there —
 // the same number whether or not the org bills for them, which is what lets the UI say "you have
@@ -171,7 +204,7 @@ export function knocksPipeline(
     //
     // $nor rather than a top-level $or so it can never clobber an $or the CALLER put in `match`
     // (the team/crew filters do). Adjacent $match stages are coalesced by the query planner.
-    ...(includeRestricted ? [{ $match: { $nor: [{ actionType: 'restricted', via: 'bulk' }] } }] : []),
+    ...(includeRestricted ? [{ $match: { ...NOT_DESK_MARK } }] : []),
     {
       $group: {
         _id: inner,

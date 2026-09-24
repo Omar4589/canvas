@@ -1306,7 +1306,11 @@ synchronous per-door path.
 answers Mongo yielded first on a multi-round campaign); per-row **`deskEntered`** on
 `/admin/reports/voters-by-answer` and a per-canvasser **`deskEntered` count** on
 `/admin/reports/answer-canvassers`; and two export columns (**Desk entered**, **Desk entered by**)
-on `survey-results` plus **Desk entered** on `survey-answers`. All additive.
+
+on `survey-results`, **Desk entered** on `survey-answers`, **Desk entered** on `canvass-activity`
+when **Include survey answers** is on, and — because `results-by-voter` gives each (survey, round) a
+single **Survey** cell rather than a column per fact — the words **"(desk entered)"** inside that
+cell. All additive.
 
 The answer-drill pair matters most and is the easiest to skip: `/voters-by-answer` is where someone
 reads *"12 people said Yes"* and acts on it, and `/answer-canvassers` is an audit surface answering

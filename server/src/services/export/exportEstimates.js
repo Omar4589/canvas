@@ -11,11 +11,16 @@ import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import {
   canvassActivityQuery,
   countCanvassActivityRows,
+  countActivityRowsWithLayer,
+  countUncoveredResponses,
   canvassActivityFloorRows,
   surveyBaseQuery,
   voterNotesQuery,
   resolveDoorsByRoundRounds,
   notesScopeOf,
+  resolveVoterResultsUniverse,
+  countVoterResultsRows,
+  countVoterResultsWithheld,
 } from './exportBuilders.js';
 import { doorNotesMatch, surveyNotesMatch, adminNotesMatch } from '../notes/notesQuery.js';
 
@@ -56,22 +61,28 @@ const flaggedOids = (ctx) => [...ctx.dnc].map(oid);
 //
 // dncWithheld counts rows whose OWN voterId is flagged. The fan never touches those (it runs
 // only where voterId is null) and roster omissions are deliberately uncounted — exportScope.js
-// rule (b): a per-door omission count on a one-door export would BE the marker — so this
-// number is IDENTICAL with the option on and off.
+// rule (b): a per-door omission count on a one-door export would BE the marker — so the fan does
+// not move this number. includeSurveyAnswers DOES: an uncovered response is a voter-unit row, so a
+// flagged voter's survey row is dropped WHOLE rather than blanked, and that drop is counted here.
 const estimateCanvassActivity = async (ctx) => {
   const q = canvassActivityQuery(ctx);
   const flagged = flaggedOids(ctx);
   const dncWithheld = flagged.length
     ? await CanvassActivity.countDocuments({ ...q, voterId: { $in: flagged } })
     : 0;
+  // Dropped survey-source rows are withheld too — same universe, different unit.
+  const withheldSurveys = await countUncoveredResponses(ctx, { onlyFlagged: true });
   try {
     // Read at call time so a test (or an operator) can move the cap without a restart.
     const maxTimeMS = Number(process.env.EXPORT_ESTIMATE_MAX_MS || 8000);
-    const rows = await countCanvassActivityRows(ctx, { maxTimeMS });
-    return { rows, dncWithheld, approx: false };
+    const rows = await countActivityRowsWithLayer(ctx, { maxTimeMS });
+    return { rows, dncWithheld: dncWithheld + withheldSurveys, approx: false };
   } catch (err) {
     if (!err?.isEstimateTimeout) throw err;
-    return { rows: await canvassActivityFloorRows(ctx), dncWithheld, approx: false, rowsAreFloor: true };
+    // The FLOOR is one row per knock. The uncovered-response term is a separate aggregation that did
+    // not time out, so it stays exact — the floor is only ever short by fanned rows.
+    const floor = (await canvassActivityFloorRows(ctx)) + (await countUncoveredResponses(ctx));
+    return { rows: floor, dncWithheld: dncWithheld + withheldSurveys, approx: false, rowsAreFloor: true };
   }
 };
 
@@ -274,6 +285,20 @@ const estimateNotes = async (ctx) => {
   return { rows, dncWithheld, approx: true };
 };
 
+// results-by-voter — EXACT, and approx stays false: the roster cursor IS the row set, so there is
+// nothing the builder drops that the count cannot see. Both numbers come off ONE universe
+// resolution, so the preview cannot count a different set than the file contains, and dncWithheld is
+// universe-scoped rather than campaign-wide (a flagged voter at a door nobody visited was never a
+// row this export withheld).
+const estimateVoterResults = async (ctx) => {
+  const universe = await resolveVoterResultsUniverse(ctx);
+  const [rows, dncWithheld] = await Promise.all([
+    countVoterResultsRows(ctx, universe),
+    countVoterResultsWithheld(ctx, universe),
+  ]);
+  return { rows, dncWithheld, approx: false };
+};
+
 // Keyed like EXPORT_TYPES; full-backup deliberately has no estimate (the endpoint 400s).
 export const EXPORT_ESTIMATES = {
   'canvass-activity': estimateCanvassActivity,
@@ -284,4 +309,5 @@ export const EXPORT_ESTIMATES = {
   'voters-filtered': estimateVotersFiltered,
   'voter-notes': estimateVoterNotes,
   notes: estimateNotes,
+  'results-by-voter': estimateVoterResults,
 };

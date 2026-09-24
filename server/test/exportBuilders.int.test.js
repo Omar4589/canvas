@@ -328,7 +328,7 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
   // Control: the sweep can actually SEE content (level-0 ZIP included). voters-filtered's
   // control is Dave — Alice's hand-edit (party DEM→IND in the fixture) correctly drops her
   // from the DEM saved search.
-  for (const type of ['canvass-activity', 'survey-results', 'survey-answers', 'voter-file', 'full-backup']) {
+  for (const type of ['canvass-activity', 'survey-results', 'survey-answers', 'results-by-voter', 'voter-file', 'full-backup']) {
     assert.ok(ctx.artifacts[type].text.includes('Able'), `${type}: control voter visible`);
   }
   assert.ok(ctx.artifacts['voters-filtered'].text.includes('Doorman'), 'voters-filtered: control voter visible');
@@ -789,4 +789,343 @@ test('doors-by-round passId:legacy exports ONLY the null-pass bucket', { skip },
   assert.strictEqual(doc.rowCount, 1, 'the one pre-turf door (h3) — real rounds are skipped, not merely un-filtered');
   assert.match(lines[1], /Legacy \/ no pass/, 'the emitted row is the legacy pseudo-round');
   assert.ok(!text.includes('First knock') && !text.includes('Re-knock'), 'no real-round rows leak in');
+});
+
+// ---- results-by-voter (the client deliverable) ------------------------------------------
+// The fixture is unusually well suited to this type: Alice was surveyed in BOTH p1 and p2, which is
+// the whole reason the answer columns are grouped by round; h5's only row is a DESK restriction, so
+// it is not a visit; and h6 was knocked but has nobody registered, so it can produce no row at all.
+
+test('results-by-voter: one row per voter at a visited door, sorted, with the door described as a door', { skip }, async () => {
+  const { doc, text } = await runExport('results-by-voter');
+  const lines = csvLines(text);
+  const header = cellsOf(lines[0]);
+  const rows = lines.slice(1).map(cellsOf);
+  const col = (name) => {
+    const i = header.indexOf(name);
+    assert.ok(i >= 0, `no '${name}' column — header is ${header.join(' | ')}`);
+    return i;
+  };
+  const rowOf = (lastName) => {
+    const r = rows.find((c) => c[col('Voter last name')] === lastName);
+    assert.ok(r, `no row for ${lastName}`);
+    return r;
+  };
+
+  // h1, h2, h3, h4 were field-visited; h6 was visited but has no roster; h5's only row is a desk
+  // mark. Donna is flagged. So: Alice, Bea, Carol, Dave, Frank.
+  assert.strictEqual(doc.rowCount, 5);
+  assert.deepStrictEqual(
+    rows.map((c) => c[col('Voter last name')]),
+    ['Able', 'Beeson', 'Doorman', 'Errorson', 'Formula'],
+    'ONE globally sorted cursor — not 5000-row alphabetical blocks'
+  );
+  assert.match(doc.artifact.filename, /-results-by-voter-\d{4}-\d{2}-\d{2}\.csv$/);
+
+  // A desk-restricted door was never walked, and a door with nobody registered cannot produce a
+  // person-shaped row. Both absences are load-bearing, and both are documented limits.
+  assert.ok(!text.includes('5 Oak St'), 'a desk-restricted-only door is not a visit');
+  assert.ok(!text.includes('6 Oak St'), 'a visited door with no registered voters yields no row');
+
+  // The Address columns describe the DOOR. h1 carries four field visits across two rounds and a
+  // sticky completion, so it reads Surveyed even though the LAST row there was a refusal.
+  const alice = rowOf('Able');
+  assert.strictEqual(alice[col('Address outcome')], 'Surveyed', 'completion is sticky');
+  assert.strictEqual(alice[col('Address visits')], '4');
+  assert.strictEqual(alice[col('Rounds worked')], '2');
+  assert.strictEqual(alice[col('Address first visited (CDT)')], '2026-07-01');
+  assert.strictEqual(alice[col('Address last visited (CDT)')], '2026-07-11');
+  assert.strictEqual(alice[col('Last visited by first name')], 'Ada');
+  assert.strictEqual(alice[col('Last visited by last name')], 'Knocks');
+  assert.strictEqual(alice[col('Last visited by status')], 'active', 'three cells, so a departed canvasser reads as departed');
+
+  // h3's single row is a pre-turf knock, so its one "round" is the legacy bucket.
+  const carol = rowOf('Errorson');
+  assert.strictEqual(carol[col('Address outcome')], 'Not home');
+  assert.strictEqual(carol[col('Address visits')], '1');
+  assert.strictEqual(carol[col('Rounds worked')], '1', 'the legacy null-pass bucket is a round');
+
+  // Plain English, this type only — the one export built to be read rather than re-imported.
+  assert.ok(!text.includes('not_home'), 'no raw enum slugs anywhere in a client-sendable file');
+  assert.ok(!text.includes('survey_submitted'));
+
+  // Do-not-contact is UNIVERSE-scoped: Donna (flagged, at a visited door) is withheld; Edna is
+  // flagged too but lives at the desk-restricted door, which was never in the universe to withhold
+  // her from. Campaign-wide counting would report 2 and overstate what this file held back.
+  assert.strictEqual(doc.excludedDncCount, 1);
+  const est = await estimateFor('results-by-voter');
+  assert.strictEqual(est.rows, 5);
+  assert.strictEqual(est.dncWithheld, 1);
+  assert.strictEqual(est.approx, false, 'the roster IS the row set — nothing is dropped unseen');
+});
+
+test('results-by-voter: answers are grouped by ROUND, so a voter surveyed twice shows both', { skip }, async () => {
+  const { text } = await runExport('results-by-voter');
+  const lines = csvLines(text);
+  const header = cellsOf(lines[0]);
+  const rows = lines.slice(1).map(cellsOf);
+  const col = (name) => {
+    const i = header.indexOf(name);
+    assert.ok(i >= 0, `no '${name}' column — header is ${header.join(' | ')}`);
+    return i;
+  };
+
+  // Three (template, pass) pairs occur in scope, so blocks are prefixed — and the prefix names the
+  // WALK LIST as well as the round, because roundNumber resets per effort: "R1" alone would name two
+  // different rounds here (North Side R1 and South Side R1).
+  for (const label of ['North Side R1', 'North Side R2', 'South Side R1']) {
+    assert.ok(header.includes(`${label} — Survey`), `missing the ${label} block`);
+    assert.ok(header.includes(`${label} — Do you support?`), `missing ${label}'s question column`);
+  }
+  assert.ok(
+    header.indexOf('North Side R1 — Survey') < header.indexOf('North Side R2 — Survey'),
+    'blocks are ordered walk list, then round'
+  );
+  assert.ok(
+    header.indexOf('North Side R2 — Survey') < header.indexOf('South Side R1 — Survey'),
+    'and the second walk list follows the first'
+  );
+
+  const alice = rows.find((c) => c[col('Voter last name')] === 'Able');
+  assert.strictEqual(alice[col('Surveys taken')], '2');
+  assert.strictEqual(alice[col('North Side R1 — Survey')], 'Door Survey');
+  assert.strictEqual(alice[col('North Side R1 — Do you support?')], 'Yes');
+  assert.strictEqual(alice[col('North Side R1 — Anything else?')], 'love it');
+  // The second round is the point of the whole layout: the same question, a different answer, on the
+  // same row. And 'No' is a RETIRED option — it still resolves to its current text rather than
+  // falling back to the snapshot.
+  assert.strictEqual(alice[col('North Side R2 — Do you support?')], 'No');
+  assert.strictEqual(alice[col('South Side R1 — Do you support?')], '', 'a round she was not in stays blank');
+
+  // Dave was surveyed in the other walk list's first round only.
+  const dave = rows.find((c) => c[col('Voter last name')] === 'Doorman');
+  assert.strictEqual(dave[col('Surveys taken')], '1');
+  assert.strictEqual(dave[col('South Side R1 — Do you support?')], 'Yes');
+  assert.strictEqual(dave[col('North Side R1 — Do you support?')], '');
+
+  // Carol's door was knocked and nobody there was ever surveyed.
+  const carol = rows.find((c) => c[col('Voter last name')] === 'Errorson');
+  assert.strictEqual(carol[col('Surveys taken')], '0');
+
+  // The flagged voter's survey NOTE and her answers are both gone with her row (voter-unit rule).
+  assert.ok(!text.includes('DNCSURVEYNOTE-SENTINEL'));
+});
+
+test('results-by-voter: the survey note is opt-in, and the contact block reuses the shared toggle', { skip }, async () => {
+  const off = await runExport('results-by-voter');
+  assert.ok(!cellsOf(csvLines(off.text)[0]).some((h) => h.endsWith('— Note')), 'no note columns by default');
+
+  const on = await runExport('results-by-voter', { includeSurveyNote: true, includeVoterDetail: true });
+  const header = cellsOf(csvLines(on.text)[0]);
+  assert.ok(header.includes('North Side R1 — Note'), 'one note cell per block, not one merged cell');
+  // The same opt-in block the two survey exports carry — same columns, same order, no new variant.
+  for (const h of ['Date of birth', 'Phone', 'Cell phone', 'Precinct', 'Latitude']) {
+    assert.ok(header.includes(h), `missing '${h}' from the shared detail block`);
+  }
+  // Both choices are frozen onto the history row: this file leaves the tenant, so which copy carried
+  // a date of birth and which carried canvasser prose has to be answerable later.
+  assert.strictEqual(on.doc.params.includeSurveyNote, true);
+  assert.strictEqual(on.doc.params.includeVoterDetail, true);
+});
+
+test('results-by-voter: the outcome chips narrow the DOORS, never how a door reads', { skip }, async () => {
+  // Only not-home doors: h1 (re-knock), h2, h3, h6(no roster) qualify; h4's only row is a survey.
+  const { doc, text } = await runExport('results-by-voter', { actionTypes: ['not_home'] });
+  const lines = csvLines(text);
+  const header = cellsOf(lines[0]);
+  const rows = lines.slice(1).map(cellsOf);
+  const col = (name) => header.indexOf(name);
+  assert.ok(!rows.some((c) => c[col('Voter last name')] === 'Doorman'), 'h4 has no not-home row, so Dave is out');
+
+  // ...but Alice's door still reads Surveyed. Resolving the outcome over only the ticked rows would
+  // make every row in every chip-filtered file read back whatever was ticked.
+  const alice = rows.find((c) => c[col('Voter last name')] === 'Able');
+  assert.strictEqual(alice[col('Address outcome')], 'Surveyed');
+  assert.strictEqual(alice[col('Address visits')], '2', 'visits DO narrow: h1 has two not-home rows');
+
+  const est = await estimateFor('results-by-voter', { actionTypes: ['not_home'] });
+  assert.strictEqual(est.rows, doc.rowCount, 'estimate==build under a chip filter');
+});
+
+test('results-by-voter: a chip this export cannot honour is refused, never silently ignored', { skip }, async () => {
+  await assert.rejects(
+    () =>
+      EXPORT_TYPES['results-by-voter'].validateParams(
+        { actionTypes: ['note_added'] },
+        { organizationId: ctx.org._id, campaignId: ctx.camp._id }
+      ),
+    /cannot be narrowed to note_added/,
+    'intersecting to nothing would hand back an empty file for a plausible request'
+  );
+});
+
+// ---- canvass-activity: the survey-answer layer (includeSurveyAnswers) -------------------
+// The fixture's decisive shape: Alice holds responses in p1 AND p2, but h1's p2 rows are a not_home
+// and a refusal — so her p2 survey has NO activity row naming it. That is the household-dedup gap in
+// miniature, and it is the row the layer has to add.
+
+const layerCols = (text) => {
+  const lines = csvLines(text);
+  const header = cellsOf(lines[0]);
+  return {
+    header,
+    rows: lines.slice(1).map(cellsOf),
+    col: (name) => {
+      const i = header.indexOf(name);
+      assert.ok(i >= 0, `no '${name}' column — header is ${header.join(' | ')}`);
+      return i;
+    },
+  };
+};
+
+test('survey answers: columns on the knock rows, and a row for the survey the ledger cannot show', { skip }, async () => {
+  const { doc, text } = await runExport('canvass-activity', { includeSurveyAnswers: true });
+  const { header, rows, col } = layerCols(text);
+
+  // 34 base columns + five metadata cells and Row source + one per question + Response DB id.
+  assert.strictEqual(header.length, 43, `header is ${header.join(' | ')}`);
+  assert.deepStrictEqual(header.slice(31, 37), [
+    'Row source', 'Survey', 'Survey version', 'Survey submitted (ISO)', 'Survey taken by', 'Desk entered',
+  ]);
+  assert.strictEqual(header[header.length - 1], 'Response DB id');
+  assert.match(doc.artifact.filename, /-canvass-activity-with-surveys-\d{4}-\d{2}-\d{2}\.csv$/);
+
+  // UNFANNED_ROWS knock rows plus TWO uncovered responses: Alice's p2 survey, and the fixture's
+  // import-undo orphan whose Voter row is gone. Donna's p1 response is uncovered too and dropped
+  // whole, because she is flagged and this row would BE her.
+  assert.strictEqual(doc.rowCount, UNFANNED_ROWS + 2);
+  const bySource = rows.reduce((m, r) => ({ ...m, [r[col('Row source')]]: (m[r[col('Row source')]] || 0) + 1 }), {});
+  assert.deepStrictEqual(bySource, { knock: UNFANNED_ROWS, survey: 2 });
+
+  // The knock row that DOES name a survey carries its answers.
+  const aliceKnock = rows.find(
+    (r) => r[col('Row source')] === 'knock' && r[col('Action')] === 'survey_submitted' && r[col('Voter last name')] === 'Able'
+  );
+  assert.ok(aliceKnock, 'Alice’s p1 survey_submitted row');
+  assert.strictEqual(aliceKnock[col('Survey')], 'Door Survey');
+  assert.strictEqual(aliceKnock[col('Do you support?')], 'Yes');
+  assert.strictEqual(aliceKnock[col('Anything else?')], 'love it');
+  assert.strictEqual(aliceKnock[col('Survey taken by')], 'Ada Knocks');
+  assert.ok(aliceKnock[col('Response DB id')], 'the joined response is identified');
+  assert.ok(aliceKnock[col('Activity DB id')], 'and it is still a ledger row');
+
+  // The added row: a real survey, deliberately NOT shaped like a knock.
+  const added = rows.find((r) => r[col('Row source')] === 'survey' && r[col('Voter last name')] === 'Able');
+  assert.strictEqual(added[col('Action')], 'survey_submitted');
+  assert.strictEqual(added[col('Voter last name')], 'Able');
+  assert.strictEqual(added[col('Do you support?')], 'No', 'her second-round answer, the one nothing else in this file can show');
+  assert.strictEqual(added[col('Activity DB id')], '', 'no knock row exists — never count this as a knock');
+  assert.ok(added[col('Response DB id')]);
+  assert.strictEqual(added[col('Timestamp (ISO)')], '2026-07-10T15:05:00.000Z');
+
+  // A knock row whose voter is gone (the fixture's dangling voterId) joins nothing rather than
+  // borrowing somebody else's answers.
+  const dangling = rows.find(
+    (r) => r[col('Action')] === 'survey_submitted' && r[col('Row source')] === 'knock' && !r[col('Voter last name')]
+  );
+  assert.ok(dangling, 'the dangling-voterId survey row survives');
+  assert.strictEqual(dangling[col('Do you support?')], '');
+
+  // The orphan response — Voter row removed by an import undo — is KEPT with blank identity and
+  // counted, exactly as a dangling KNOCK row is in this same file. That is the one rule for a
+  // dangling response, chosen over survey-results' drop-and-count so this file stays internally
+  // consistent AND the estimate stays exact rather than `approx`.
+  const orphanRow = rows.find((r) => r[col('Row source')] === 'survey' && !r[col('Voter last name')]);
+  assert.ok(orphanRow, 'the orphan response still records that a survey happened at that door');
+  assert.strictEqual(orphanRow[col('Voter DB id')], '');
+  assert.strictEqual(orphanRow[col('Do you support?')], 'Yes', 'what was recorded is still recorded');
+  assert.strictEqual(doc.orphanedRows, 2, 'the dangling knock row and the dangling response');
+
+  // Chronological across BOTH ledgers: the merge is what keeps the file readable as a timeline.
+  const stamps = rows.map((r) => r[col('Timestamp (ISO)')]);
+  assert.deepStrictEqual(stamps, [...stamps].sort(), 'rows are non-decreasing in time');
+
+  // Estimate==build with the option on, including the second dncWithheld term: Donna's blanked knock
+  // row AND her dropped survey row.
+  assert.strictEqual(doc.excludedDncCount, 2);
+  const est = await estimateFor('canvass-activity', { includeSurveyAnswers: true });
+  assert.strictEqual(est.rows, doc.rowCount);
+  assert.strictEqual(est.dncWithheld, doc.excludedDncCount);
+  assert.strictEqual(est.approx, false, 'a dangling response is KEPT blank, so nothing is dropped unseen');
+
+  // A flagged voter's survey note travels with her answers, and neither reaches the file.
+  assert.ok(!text.includes('DNCSURVEYNOTE-SENTINEL'));
+});
+
+test('survey answers: a flagged voter’s knock row keeps the row but loses answers AND the note', { skip }, async () => {
+  // The fixture has no survey_submitted row naming a FLAGGED voter — adding one permanently would
+  // move UNFANNED_ROWS and every count built on it, so this test owns the row and removes it.
+  const extra = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, householdId: ctx.h1._id,
+    userId: ctx.uAda._id, actionType: 'survey_submitted', timestamp: new Date('2026-07-01T15:20:00Z'),
+    location: { lat: 30.27, lng: -97.74, accuracy: 5 },
+    passId: ctx.p1._id, effortId: ctx.h1.effortId, voterId: ctx.donna._id,
+    note: 'DNC-SURVEY-ROW-NOTE-SENTINEL',
+  });
+  try {
+    const { text } = await runExport('canvass-activity', { includeSurveyAnswers: true });
+    const { rows, col } = layerCols(text);
+    const row = rows.find((r) => r[col('Timestamp (ISO)')] === '2026-07-01T15:20:00.000Z');
+    assert.ok(row, 'the knock itself is a record of work performed — the ROW stays');
+    assert.strictEqual(row[col('Voter last name')], '', 'identity blanked');
+    assert.strictEqual(row[col('Voter DB id')], '');
+    assert.strictEqual(row[col('Do you support?')], '', 'her answers are identity too');
+    assert.strictEqual(row[col('Survey')], '');
+    assert.strictEqual(row[col('Note')], '', 'and so is the survey note this row carries');
+    assert.ok(!text.includes('DNC-SURVEY-ROW-NOTE-SENTINEL'));
+    // No marker of any kind: a door that contains an opt-out must look exactly like one that does not.
+    assert.ok(!text.includes('withheld') && !text.includes('redacted'));
+  } finally {
+    await CanvassActivity.deleteOne({ _id: extra._id });
+  }
+});
+
+test('survey answers: the chips gate the layer, and a canvasser filter never manufactures rows', { skip }, async () => {
+  // Narrowed to not-home: no survey_submitted row can be in the file, so EVERY response would read as
+  // uncovered. The layer switches off entirely rather than filling a re-knock list with surveys.
+  const chipped = await runExport('canvass-activity', { includeSurveyAnswers: true, actionTypes: ['not_home'] });
+  assert.ok(!cellsOf(csvLines(chipped.text)[0]).includes('Row source'), 'no layer at all');
+  assert.match(chipped.doc.artifact.filename, /-canvass-activity-\d{4}-\d{2}-\d{2}\.csv$/, 'and the name does not claim one');
+
+  // Filtered to one canvasser: the covering rows of OTHER canvassers are filtered out, so keeping the
+  // add-rows rule would hand back their surveys under this filter. Columns stay, rows do not.
+  const mine = await runExport('canvass-activity', { includeSurveyAnswers: true, userId: String(ctx.uAda._id) });
+  const { rows, col, header } = layerCols(mine.text);
+  assert.ok(header.includes('Row source'), 'answers still attach to her own survey rows');
+  assert.ok(!rows.some((r) => r[col('Row source')] === 'survey'), 'but no manufactured survey rows');
+  assert.match(mine.doc.artifact.filename, /-canvass-activity-\d{4}-\d{2}-\d{2}\.csv$/, 'the grain never moved, so neither did the name');
+  const est = await estimateFor('canvass-activity', { includeSurveyAnswers: true, userId: String(ctx.uAda._id) });
+  assert.strictEqual(est.rows, mine.doc.rowCount);
+});
+
+test('survey answers compose with the per-voter fan, and all four file names are distinct', { skip }, async () => {
+  const both = await runExport('canvass-activity', { includeSurveyAnswers: true, perVoterRows: true });
+  assert.strictEqual(both.doc.rowCount, FANNED_ROWS + 2, 'the fan multiplies knocks; the layer adds the two uncovered surveys');
+  assert.match(both.doc.artifact.filename, /-canvass-activity-by-voter-with-surveys-\d{4}-\d{2}-\d{2}\.csv$/);
+  const { rows, col } = layerCols(both.text);
+  // A fanned row is a neighbour's copy of a door-level knock. Attaching the named voter's answers to
+  // it would attribute one person's survey to everyone at the address.
+  const fannedBea = rows.find((r) => r[col('Voter last name')] === 'Beeson' && r[col('Action')] === 'not_home');
+  assert.ok(fannedBea, 'Bea gets a fanned copy of h2’s not-home knock');
+  assert.strictEqual(fannedBea[col('Do you support?')], '');
+  assert.strictEqual(fannedBea[col('Row source')], 'knock');
+
+  const est = await estimateFor('canvass-activity', { includeSurveyAnswers: true, perVoterRows: true });
+  assert.strictEqual(est.rows, both.doc.rowCount, 'estimate==build with BOTH row options on');
+
+  const names = await Promise.all(
+    [
+      {},
+      { perVoterRows: true },
+      { includeSurveyAnswers: true },
+      { perVoterRows: true, includeSurveyAnswers: true },
+    ].map(async (p) => (await runExport('canvass-activity', p)).doc.artifact.filename.replace(/-\d{4}-\d{2}-\d{2}\.csv$/, ''))
+  );
+  assert.strictEqual(new Set(names).size, 4, `four combinations, four names: ${names.join(', ')}`);
+});
+
+test('survey answers: the full backup stays un-layered by construction', { skip }, async () => {
+  const { text } = ctx.artifacts['full-backup'];
+  assert.ok(text.includes('/activity-log.csv'), 'the bundle carries the plain activity log');
+  assert.ok(!text.includes('activity-log-with-surveys'), 'params: {} in buildFullBackup — the bundle has its own survey files');
 });

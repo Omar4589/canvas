@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator, Switch, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,6 +12,7 @@ import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { paramsFor, ROUND_STATUSES } from '../lib/exportTypes';
 import DateRangeBar from './DateRangeBar';
 import TabSwitcher from './TabSwitcher';
+import { loadExportOptions } from '../lib/cache';
 import SourceChips from './SourceChips';
 import { SHEET_TIMING } from './PullableSheet';
 
@@ -65,6 +66,26 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   // Off by default too — and unlike the detail toggle this one changes the ROW COUNT and the file
   // name, so the live estimate below reads it (lib/exportTypes paramsFor).
   const [perVoterRows, setPerVoterRows] = useState(false);
+  // The one REMEMBERED option (lib/cache exportOptions, the web page's rule). The estimate is gated
+  // on prefsLoaded below so the live count is never computed for a state the sheet is about to
+  // replace — otherwise the number visibly changes under the user a beat after the sheet opens.
+  const [includeSurveyAnswers, setIncludeSurveyAnswers] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  useEffect(() => {
+    let ignore = false;
+    loadExportOptions(campaignId)
+      .then((opts) => {
+        if (ignore) return;
+        setIncludeSurveyAnswers(!!opts.includeSurveyAnswers);
+        setPrefsLoaded(true);
+      })
+      .catch(() => {
+        if (!ignore) setPrefsLoaded(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [campaignId]);
 
   // The web page's rule: a round belongs to a walk list, so changing the list resets it.
   function pickEffort(id) {
@@ -106,7 +127,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const imports = (importsQ.data?.jobs || []).filter((j) => j.status === 'completed' && !j.undone);
 
-  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows });
+  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows, includeSurveyAnswers });
   // Debouncing the SERIALIZED params gives a stable query key and kills object-identity
   // churn in one move; api() threads react-query's abort signal, so a superseded count
   // stops on the wire.
@@ -119,7 +140,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
         body: { type: meta.id, campaignId, params: JSON.parse(wireKey) },
         signal,
       }),
-    enabled: !!campaignId,
+    enabled: !!campaignId && prefsLoaded,
     placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
     retry: false,
@@ -313,6 +334,29 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                   <Switch
                     value={perVoterRows}
                     onValueChange={setPerVoterRows}
+                    trackColor={{ true: colors.brand }}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            {wants('surveyAnswers') ? (
+              <View style={styles.filterBlock}>
+                <Text style={styles.filterLabel}>Survey answers</Text>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchText}>
+                    <Text style={styles.switchLabel}>Include survey answers</Text>
+                    <Text style={styles.switchSub}>
+                      What each survey recorded, one column per question, beside the knock that took
+                      it — plus a row for every survey this file cannot otherwise show, because
+                      surveying three people at one door in one round is one knock and three
+                      surveys. Those rows say Row source: survey; never count them as knocks.
+                      Remembered for this campaign.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={includeSurveyAnswers}
+                    onValueChange={setIncludeSurveyAnswers}
                     trackColor={{ true: colors.brand }}
                   />
                 </View>

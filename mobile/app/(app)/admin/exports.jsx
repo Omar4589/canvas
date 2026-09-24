@@ -4,7 +4,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { loadActiveCampaign } from '../../../lib/cache';
+import { saveExportOptions, loadActiveCampaign } from '../../../lib/cache';
 import { downloadArtifact } from '../../../lib/artifactDownload';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { deviceTimezone } from '../../../lib/dateRanges';
@@ -43,6 +43,9 @@ const TYPE_LABEL = {
   'voters-filtered': 'Filtered voters',
   'voter-notes': 'Voter profile notes',
   notes: 'Notes',
+  // Web-only to QUEUE (lib/exportTypes' four-card scope is deliberate), but the history list on this
+  // screen renders every job the org has, so a missing key here shows a raw slug on the phone.
+  'results-by-voter': 'Results by voter',
   'full-backup': 'Full backup',
 };
 const STATUS_LABEL = {
@@ -312,7 +315,18 @@ export default function AdminExports() {
           campaignId={cId}
           tz={tz}
           queueing={createMut.isPending}
-          onQueue={(params) => createMut.mutate({ type: sheetMeta.id, campaignId: cId, params })}
+          onQueue={(params) =>
+            createMut.mutate(
+              { type: sheetMeta.id, campaignId: cId, params },
+              {
+                // Remembered from THIS path only. The retry button below re-posts an OLD job's
+                // frozen params through the same mutation, so persisting inside the mutation would
+                // adopt somebody else's choice as the default for this phone.
+                onSuccess: () =>
+                  saveExportOptions(cId, { includeSurveyAnswers: !!params.includeSurveyAnswers }),
+              }
+            )
+          }
           onClose={() => setSheetType(null)}
         />
       ) : null}

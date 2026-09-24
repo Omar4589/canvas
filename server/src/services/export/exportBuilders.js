@@ -10,16 +10,21 @@ import { Turf } from '../../models/Turf.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { CANONICAL_FIELDS } from '../import/canonicalFields.js';
-import { NOT_BULK, BILLABLE_WITH_RESTRICTED } from '../reports/aggregations.js';
+import { NOT_BULK, BILLABLE_WITH_RESTRICTED, NOT_DESK_MARK, fieldVisitActionTypes } from '../reports/aggregations.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
-import { ACTION_TO_STATUS } from '../../utils/statusPrecedence.js';
+import {
+  ACTION_TO_STATUS,
+  STATUS_ROW_MATCH,
+  DOOR_STATUS_LABELS,
+  resolveStatusFromSummary,
+} from '../../utils/statusPrecedence.js';
 import { hydrateCanvassers } from '../reports/canvasserIdentity.js';
 import { resolveWalkList } from '../walklist/resolveWalkList.js';
 import { buildKnocksByPassData } from '../reports/knocksByPass.js';
 import { zonedDayRange, tzAbbrev } from '../../utils/timezone.js';
 import { DNC_FILTER } from './exportScope.js';
 import { ExportUserError, EstimateTimeout } from './exportErrors.js';
-import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
+import { templateAnswerPlan, snapshotAnswerText } from './surveyColumns.js';
 import {
   resolveNoteScope,
   doorNotesMatch,
@@ -63,14 +68,6 @@ const dayRangeOf = (params, tz) => {
 };
 
 const passLabel = (p) => (p ? `Pass ${p.roundNumber}` : 'Legacy / no pass');
-
-// The snapshot rendering of one answers[] entry — what was actually recorded at the door
-// (the voters-by-answer.csv answerText contract, honest across option renames).
-const snapshotAnswerText = (a) => {
-  const base = Array.isArray(a.answer) ? a.answer.join('; ') : a.answer ?? '';
-  const embedded = Array.isArray(a.answer) ? a.answer.includes(a.otherText) : a.answer === a.otherText;
-  return a.otherText && !embedded ? `${base} — ${a.otherText}` : base;
-};
 
 const chunk = (arr, n) => {
   const out = [];
@@ -185,10 +182,10 @@ export const fanPlan = (ctx) => {
   const on = !!ctx.params.perVoterRows;
   return {
     on,
-    // Identical 34 headers either way — the NAME is the only signal the grain moved, so a
-    // downstream pivot cannot silently absorb fanned rows as knocks. exportTypes' fileSlug
-    // renames the download to match.
-    fileName: on ? 'activity-log-by-voter' : 'activity-log',
+    // The NAME is the only signal the grain moved, so a downstream pivot cannot silently absorb
+    // fanned rows as knocks. Both names now come from activityFileNames, because the answer layer
+    // moves the grain too and the two options are independent.
+    fileName: activityFileNames(ctx.params).file,
     // Who "a voter at this door" is: campaign-scoped (Voter rows are per-campaign) and read
     // through the SAME DNC clause voterfile-current.csv publishes through, so the roster this
     // file repeats over is exactly the roster that file already hands the same audience.
@@ -281,27 +278,176 @@ export const countCanvassActivityRows = async (ctx, opts = {}) => {
 // The honest floor when the exact fanned count times out: every knock is at least one row.
 export const canvassActivityFloorRows = (ctx) => CanvassActivity.countDocuments(canvassActivityQuery(ctx));
 
+// ── the opt-in answer layer (params.includeSurveyAnswers) ────────────────────────────────
+// Two things at once, and the second is the reason the first is honest:
+//
+//  COLUMNS on a survey_submitted row, joined on the SurveyResponse unique key {voterId, passId}.
+//  ROWS for every in-scope response the knock ledger cannot represent — because a survey knock is
+//  household-deduped: surveying three people at one door in one pass leaves ONE survey_submitted row
+//  (naming whoever was surveyed last) and THREE responses. Columns alone would show one of the three
+//  and look complete.
+//
+// The join deliberately does NOT match on userId (owner ruling 2026-09-23). Two canvassers who
+// surveyed the same person in one round keep one activity row each, while the live response is the
+// later one's, so both rows carry the answers OF RECORD and the disclosure columns say whose survey
+// it is. The alternative — blanking the superseded row — reads as "no survey taken", which is false.
+const ANSWER_HEADERS = ['Row source', 'Survey', 'Survey version', 'Survey submitted (ISO)', 'Survey taken by', 'Desk entered'];
+
+// Responses in scope for the layer. NOT surveyBaseQuery: that one applies params.userId, which would
+// defeat the ruling above by hiding the very row whose answers belong to somebody else.
+const activityResponseQuery = (ctx) => {
+  const q = { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId) };
+  const range = dayRangeOf(ctx.params, ctx.anchorTz);
+  if (range) q.submittedAt = range;
+  if (ctx.params.effortId) q.effortId = oid(ctx.params.effortId);
+  if (ctx.params.passId === 'legacy') q.passId = null;
+  else if (ctx.params.passId) q.passId = oid(ctx.params.passId);
+  if (ctx.params.coordinatorId) q.coordinatorId = oid(ctx.params.coordinatorId);
+  return q;
+};
+
+// (voterId, passId) — the SurveyResponse unique key, and therefore the join key AND the coverage key.
+// A pipe rather than the codebase's NUL convention so this file stays greppable; both halves are hex
+// or the literal 'legacy', so nothing can collide.
+const respKey = (voterId, passId) => `${voterId}|${passId ? String(passId) : 'legacy'}`;
+
+// Is the survey layer on at all, and does it get to add rows?
+// Takes PARAMS, not a ctx, so exportTypes' fileSlug (which only ever sees params) resolves the same
+// layer the builder does — the file name and the columns cannot disagree about whether it is on.
+export const answerLayerPlan = (params = {}) => {
+  const asked = !!params.includeSurveyAnswers;
+  // The chips gate the layer: a file narrowed to "not home" has no survey_submitted rows, so EVERY
+  // response would read as uncovered and a re-knock list would fill with survey rows.
+  const chipsAllow = !params.actionTypes?.length || params.actionTypes.includes('survey_submitted');
+  // Columns, and therefore the whole layer. With surveys chipped out there is nothing to attach, so
+  // the file is byte-identical to one queued without the option rather than gaining empty columns.
+  const on = asked && chipsAllow;
+  return {
+    on,
+    joinAnswers: on,
+    // Rows are suppressed under a canvasser filter (owner ruling): the filter REMOVES the covering
+    // rows, so keeping the rule would manufacture survey rows for work that canvasser never did — a
+    // measured 9-row file, 8 of them somebody else's.
+    addRows: on && !params.userId,
+  };
+};
+
+// One plan per template in scope, plus the flat column list. Column identity is (templateId,
+// questionKey) and never the key alone: keys are per-template label slugs, so two surveys asking the
+// same question collide (surveyColumns.js).
+const loadAnswerColumns = async (ctx, rq) => {
+  const ids = (await SurveyResponse.distinct('surveyTemplateId', rq)).filter(Boolean).map(String);
+  const templates = ids.length
+    ? await SurveyTemplate.find({ _id: { $in: ids }, organizationId: ctx.organizationId }).lean()
+    : [];
+  const byId = new Map(templates.map((t) => [String(t._id), t]));
+  const plans = new Map();
+  for (const tid of ids) {
+    const orphanAgg = await SurveyResponse.aggregate([
+      { $match: { ...rq, surveyTemplateId: oid(tid) } },
+      { $unwind: '$answers' },
+      { $group: { _id: '$answers.questionKey', label: { $last: '$answers.questionLabel' } } },
+    ]);
+    plans.set(tid, templateAnswerPlan(byId.get(tid), orphanAgg.map((o) => ({ key: o._id, label: o.label }))));
+  }
+  // Several surveys in scope → the survey name prefixes its questions, because two templates can
+  // legitimately carry the same question LABEL as well as the same key.
+  const many = ids.length > 1;
+  const cols = [];
+  for (const tid of ids) {
+    const plan = plans.get(tid);
+    for (const c of plan.cols) {
+      cols.push({
+        templateId: tid,
+        key: c.key,
+        header: many ? `${plan.templateName || 'Survey'} — ${plan.columnOf(c)}` : plan.columnOf(c),
+      });
+    }
+  }
+  return { plans, cols };
+};
+
+// Uncovered in-scope responses: the ones no survey_submitted row in this file names. ONE aggregation
+// on the composite key — the $unionWith shape countCanvassActivityRows already uses — so the estimate
+// and the builder agree on a set neither can enumerate cheaply.
+export const countUncoveredResponses = async (ctx, { onlyFlagged = false } = {}) => {
+  const plan = answerLayerPlan(ctx.params);
+  if (!plan.addRows) return 0;
+  const rq = activityResponseQuery(ctx);
+  const flagged = [...ctx.dnc].map(oid);
+  if (onlyFlagged && !flagged.length) return 0;
+  const match = onlyFlagged
+    ? { ...rq, voterId: { $in: flagged } }
+    : flagged.length
+      ? { ...rq, voterId: { $nin: flagged } }
+      : rq;
+  const agg = await SurveyResponse.aggregate([
+    { $match: match },
+    { $group: { _id: { v: '$voterId', p: '$passId' }, r: { $sum: 1 } } },
+    {
+      $unionWith: {
+        coll: CanvassActivity.collection.name,
+        pipeline: [
+          { $match: { ...canvassActivityQuery(ctx), actionType: 'survey_submitted', voterId: { $ne: null } } },
+          { $group: { _id: { v: '$voterId', p: '$passId' }, a: { $sum: 1 } } },
+        ],
+      },
+    },
+    { $group: { _id: '$_id', r: { $sum: '$r' }, a: { $sum: '$a' } } },
+    // a === 0 is "no activity row in this file names this (voter, pass)". Keys the activity branch
+    // contributed alone carry r === 0 and drop out of the sum below anyway.
+    { $match: { a: 0 } },
+    { $group: { _id: null, n: { $sum: '$r' } } },
+  ]).allowDiskUse(true);
+  return agg[0]?.n || 0;
+};
+
+// BOTH names for this file, from ONE function. The two options are independent, so there are four
+// combinations — and the pair must never disagree: csvSink discards sink.file()'s name
+// (exportProcessor.js) and neither client renders ExportJob.files[].name, so the DOWNLOAD name is the
+// only one a human sees, while the entry name is what the backup bundle lists.
+export const activityFileNames = (params = {}) => {
+  // `-with-surveys` tracks addRows, not the raw tick: columns never rename a file (includeVoterDetail
+  // does not), and a name that claimed a moved grain the file does not have would be worse than none.
+  const suffix = `${params.perVoterRows ? '-by-voter' : ''}${answerLayerPlan(params).addRows ? '-with-surveys' : ''}`;
+  return { file: `activity-log${suffix}`, slug: `canvass-activity${suffix}` };
+};
+
+// Rows this FILE contains: the ledger rows (fan-aware) plus the responses the ledger cannot
+// represent. ONE function for the estimate and the builder's progress denominator.
+export const countActivityRowsWithLayer = async (ctx, opts = {}) => {
+  const ledger = await countCanvassActivityRows(ctx, opts);
+  return ledger + (await countUncoveredResponses(ctx));
+};
+
 export const buildCanvassActivity = async (ctx, sink) => {
   const { anchorTz } = ctx;
   const fmts = instantFmts(anchorTz);
   const q = canvassActivityQuery(ctx);
   const plan = fanPlan(ctx);
+  const layer = answerLayerPlan(ctx.params);
+  const rq = layer.on ? activityResponseQuery(ctx) : null;
+  const answers = layer.on ? await loadAnswerColumns(ctx, rq) : { plans: new Map(), cols: [] };
 
-  // The progress denominator is the SAME counter the estimate returns — under the fan a plain
-  // countDocuments would pin the bar at 99% for the whole run.
-  const [{ passById, effortNameById }, userIds, coordIds, total] = await Promise.all([
+  // The progress denominator is the SAME counter the estimate returns — under the fan or the answer
+  // layer a plain countDocuments would pin the bar at 99% for the whole run.
+  const [{ passById, effortNameById }, userIds, coordIds, respUserIds, total] = await Promise.all([
     loadPassEffortMaps(ctx),
     CanvassActivity.distinct('userId', q),
     CanvassActivity.distinct('coordinatorId', q),
-    countCanvassActivityRows(ctx),
+    // The canvasser who took a survey may be nobody the ledger scope names — that is the whole point
+    // of the disclosure columns — so hydrate them too or 'Survey taken by' exports blank.
+    layer.on ? SurveyResponse.distinct('userId', rq) : [],
+    countActivityRowsWithLayer(ctx),
   ]);
   const people = await hydrateCanvassers(
-    [...userIds, ...coordIds].filter(Boolean).map(String),
+    [...userIds, ...coordIds, ...respUserIds].filter(Boolean).map(String),
     ctx.organizationId,
   );
   ctx.setTotalEstimate(total);
 
-  const writer = await sink.file(plan.fileName, [
+  const names = activityFileNames(ctx.params);
+  const writer = await sink.file(names.file, [
     'Timestamp (ISO)', 'Date', `Time (${fmts.tzLabel})`, 'Action',
     'Address', 'Address line 2', 'City', 'State', 'Zip', 'County',
     'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
@@ -309,28 +455,146 @@ export const buildCanvassActivity = async (ctx, sink) => {
     'Walk list', 'Pass', 'Pass name', 'Via', 'Offline submission',
     'Latitude', 'Longitude', 'GPS accuracy (m)', 'Distance from house (m)',
     'Replaces earlier action', 'Replaced at (ISO)', 'Note',
+    ...(layer.on ? [...ANSWER_HEADERS, ...answers.cols.map((c) => c.header)] : []),
     'Household DB id', 'Voter DB id', 'Activity DB id',
+    ...(layer.on ? ['Response DB id'] : []),
   ]);
 
-  const cursor = CanvassActivity.find(q).sort({ timestamp: 1 }).lean().cursor({ batchSize: BATCH });
+  // The answer cells for one response — or the same number of empty cells, so every row is the same
+  // width whether or not a survey is attached to it.
+  const answerCellsOf = (r) => {
+    if (!layer.on) return [];
+    // ANSWER_HEADERS[0] is 'Row source', which the caller writes — so both branches yield FIVE
+    // metadata cells plus one per question column, and every row stays the same width.
+    if (!r) return [...ANSWER_HEADERS.slice(1).map(() => ''), ...answers.cols.map(() => '')];
+    const plan = answers.plans.get(String(r.surveyTemplateId));
+    return [
+      '', // Row source is written by the caller, which knows which stream the row came from
+      plan?.templateName || '',
+      r.surveyTemplateVersion ?? '',
+      r.submittedAt ? new Date(r.submittedAt).toISOString() : '',
+      nameOf(people.get(String(r.userId))),
+      r.deskEntry ? 'yes' : '',
+      ...answers.cols.map((c) =>
+        c.templateId === String(r.surveyTemplateId) ? answers.plans.get(c.templateId).renderAnswer(c.key, r.answers) : ''
+      ),
+    ].slice(1);
+  };
+
+  // Streams: the ledger always, plus the responses when the layer may add rows. The ACTIVITY stream
+  // is index 0 deliberately — mergeByTime's equal-instant tie-break is emergent (strict `<` keeps the
+  // lowest index) and equal instants are the NORM here, because a field submit writes one `ts` to
+  // both ledgers (routes/mobile/canvass.js). Reordering these pushes silently reorders the file.
+  const tagged = async function* (cursor, source, tsField) {
+    for await (const d of cursor) yield { ...d, _source: source, _t: d[tsField] };
+  };
+  const streams = [
+    tagged(CanvassActivity.find(q).sort({ timestamp: 1 }).lean().cursor({ batchSize: BATCH }), 'knock', 'timestamp'),
+  ];
+  if (layer.addRows) {
+    streams.push(
+      tagged(SurveyResponse.find(rq).sort({ submittedAt: 1 }).lean().cursor({ batchSize: BATCH }), 'survey', 'submittedAt')
+    );
+  }
+
   let batch = [];
   const flush = async () => {
     if (!batch.length) return;
-    const hhIds = [...new Set(batch.map((a) => String(a.householdId)))];
-    const vIds = [...new Set(batch.map((a) => a.voterId && String(a.voterId)).filter(Boolean))];
-    const [homes, voters, rosterByHome] = await Promise.all([
+    const knocks = batch.filter((d) => d._source === 'knock');
+    const resps = batch.filter((d) => d._source === 'survey');
+
+    const hhIds = [...new Set(batch.map((d) => String(d.householdId)))];
+    const vIds = [
+      ...new Set([
+        ...knocks.map((a) => a.voterId && String(a.voterId)),
+        ...resps.map((r) => String(r.voterId)),
+      ].filter(Boolean)),
+    ];
+    const knockVoterIds = knocks.map((a) => a.voterId).filter(Boolean);
+    const respVoterIds = resps.map((r) => r.voterId);
+
+    const [homes, voters, rosterByHome, joined, coveredRows] = await Promise.all([
       Household.find({ _id: { $in: hhIds } }, 'addressLine1 addressLine2 city state zipCode county').lean(),
       vIds.length ? Voter.find({ _id: { $in: vIds } }, ACTIVITY_VOTER_PROJ).lean() : [],
-      loadFanRoster(plan, batch),
+      loadFanRoster(plan, knocks),
+      // Answers for the knock rows: the unique key is {voterId, passId}, so this is a point seek per
+      // row on an index that exists.
+      layer.joinAnswers && knockVoterIds.length
+        ? SurveyResponse.find({ ...rq, voterId: { $in: knockVoterIds } }).lean()
+        : [],
+      // Coverage decided from the RESPONSE side: for the responses in THIS batch, does any
+      // survey_submitted row in the file's scope name their (voter, pass)? Deciding it from the
+      // activity side instead double-prints answers at BATCH=500, because a covering row can sit in a
+      // different batch than the response it covers.
+      layer.addRows && respVoterIds.length
+        ? CanvassActivity.find(
+            { ...q, actionType: 'survey_submitted', voterId: { $in: respVoterIds } },
+            'voterId passId',
+          ).lean()
+        : [],
     ]);
     const homeById = new Map(homes.map((h) => [String(h._id), h]));
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
-    for (const a of batch) {
+    const joinedByKey = new Map(joined.map((r) => [respKey(String(r.voterId), r.passId), r]));
+    const covered = new Set(coveredRows.map((a) => respKey(String(a.voterId), a.passId)));
+
+    for (const doc of batch) {
+      if (doc._source === 'survey') {
+        const r = doc;
+        const vid = String(r.voterId);
+        // Already represented by a knock row in this file — its answers are on that row.
+        if (covered.has(respKey(vid, r.passId))) continue;
+        // Voter-unit: this row IS the person, so a flagged voter's row goes entirely.
+        if (ctx.dnc.has(vid)) {
+          ctx.countDnc(1);
+          continue;
+        }
+        const v = voterById.get(vid);
+        // Dangling voterId (an import undo): the row is kept with blank identity, exactly as a
+        // dangling KNOCK row is — this file's door-unit habit — and counted as orphaned. Keeping it
+        // is also what lets the estimate stay exact rather than `approx`.
+        if (!v) ctx.countOrphaned(1);
+        else ctx.subjects.add(vid);
+        const h = homeById.get(String(r.householdId));
+        const p = r.passId ? passById.get(String(r.passId)) : null;
+        const canv = people.get(String(r.userId)) || null;
+        const team = r.coordinatorId ? people.get(String(r.coordinatorId)) : null;
+        const plan2 = answers.plans.get(String(r.surveyTemplateId));
+        await writer.writeRow([
+          ...instantCells(r.submittedAt, fmts), 'survey_submitted',
+          h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '', h?.county || '',
+          v?.stateVoterId || '', v?.uid || '', v?.firstName || '', v?.lastName || '', v?.party || '',
+          ...canvasserCells(canv),
+          team ? `${team.firstName} ${team.lastName}`.trim() : '',
+          p ? effortNameById.get(String(p.effortId)) || '' : '',
+          p ? p.roundNumber : '', p ? p.name : passLabel(p),
+          'field',
+          r.wasOfflineSubmission ? 'yes' : 'no',
+          r.location?.lat ?? '', r.location?.lng ?? '', r.location?.accuracy ?? '',
+          r.distanceFromHouseMeters ?? '',
+          '', '',
+          r.note || '',
+          // Row source = survey: this row came from the survey ledger, NOT the knock ledger. Never
+          // count these as knocks — which is also why the file is renamed when the option is on.
+          'survey', plan2?.templateName || '', r.surveyTemplateVersion ?? '',
+          r.submittedAt ? new Date(r.submittedAt).toISOString() : '',
+          nameOf(people.get(String(r.userId))),
+          r.deskEntry ? 'yes' : '',
+          ...answers.cols.map((c) =>
+            c.templateId === String(r.surveyTemplateId) ? answers.plans.get(c.templateId).renderAnswer(c.key, r.answers) : ''
+          ),
+          String(r.householdId), v ? vid : '', '',
+          String(r._id),
+        ]);
+        continue;
+      }
+
+      const a = doc;
       const h = homeById.get(String(a.householdId));
       const vid = a.voterId ? String(a.voterId) : null;
-      // Door-unit DNC rule: the knock is a record of work performed (and billed), so the
-      // ROW stays; the PERSON does not appear. Blank identity, no marker (a marker would
-      // itself flag the household as containing an opt-out).
+      // Door-unit DNC rule: the knock is a record of work performed (and billed), so the ROW stays;
+      // the PERSON does not appear. Blank identity, no marker (a marker would itself flag the
+      // household as containing an opt-out).
       const dncHit = vid && ctx.dnc.has(vid);
       if (dncHit) ctx.countDnc(1);
       const v = !dncHit && vid ? voterById.get(vid) : null;
@@ -339,18 +603,21 @@ export const buildCanvassActivity = async (ctx, sink) => {
       const p = a.passId ? passById.get(String(a.passId)) : null;
       const canv = people.get(String(a.userId)) || null;
       const team = a.coordinatorId ? people.get(String(a.coordinatorId)) : null;
-      // Fan ONLY on a stored null voterId. A DNC-blanked row and a dangling-voterId row also
-      // print blank identity and are deliberately NOT fanned: fanning either would attribute
-      // one person's knock to their neighbours, and neither is visible to the query-level
-      // null/non-null partition the estimate counts.
+      // The joined survey, and NOT for a flagged voter: their answers and their survey note are
+      // identity too, so a row that blanks the name must blank those as well or the export hands over
+      // what a do-not-contact person said, beside their full address.
+      const joinedResp = !dncHit && vid && layer.joinAnswers ? joinedByKey.get(respKey(vid, a.passId)) : null;
       const fan = !vid && plan.on ? rosterByHome.get(String(a.householdId)) || [] : [];
-      // `[null]` is the row exactly as it has always been written — and it is ALSO the fallback
-      // when the kept roster is empty (no registered voters, OR every one of them flagged), so
-      // an all-flagged door is byte-identical to an empty one and the ABSENCE of rows can never
-      // become the marker the door-unit rule forbids. Do not optimize this row away.
+      // `[null]` is the row exactly as it has always been written — and it is ALSO the fallback when
+      // the kept roster is empty (no registered voters, OR every one of them flagged), so an
+      // all-flagged door is byte-identical to an empty one and the ABSENCE of rows can never become
+      // the marker the door-unit rule forbids. Do not optimize this row away.
       for (const fv of fan.length ? fan : [null]) {
         const rv = fv || v;
         if (fv) ctx.subjects.add(String(fv._id)); // only identities that actually shipped
+        // A fanned row is a neighbour's copy of a door-level knock; attaching the named voter's
+        // answers to it would attribute one person's survey to everyone at the address.
+        const rowResp = fv ? null : joinedResp;
         await writer.writeRow([
           ...instantCells(a.timestamp, fmts), a.actionType,
           h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '', h?.county || '',
@@ -365,20 +632,25 @@ export const buildCanvassActivity = async (ctx, sink) => {
           a.distanceFromHouseMeters ?? '',
           a.replaced?.actionType || '',
           a.replaced?.timestamp ? new Date(a.replaced.timestamp).toISOString() : '',
-          a.note || '',
+          // The note on a survey_submitted row is the SURVEY's note (canvass.js writes it to both
+          // ledgers), so it is identity for the same reason the answers are.
+          dncHit && a.actionType === 'survey_submitted' ? '' : a.note || '',
+          ...(layer.on ? ['knock', ...answerCellsOf(rowResp)] : []),
           String(a.householdId), fv ? String(fv._id) : dncHit ? '' : vid || '', String(a._id),
+          ...(layer.on ? [rowResp ? String(rowResp._id) : ''] : []),
         ]);
       }
     }
     ctx.progress(writer.rowsWritten);
     batch = [];
   };
-  for await (const doc of cursor) {
+
+  for await (const doc of mergeByTime(streams)) {
     batch.push(doc);
     if (batch.length >= BATCH) await flush();
   }
   await flush();
-  return { files: [{ name: plan.fileName, rows: writer.rowsWritten }] };
+  return { files: [{ name: names.file, rows: writer.rowsWritten }] };
 };
 
 // ---------------------------------------------------------------------------------------
@@ -605,38 +877,16 @@ export const buildSurveyResultsWide = async (ctx, sink) => {
       { $unwind: '$answers' },
       { $group: { _id: '$answers.questionKey', label: { $last: '$answers.questionLabel' } } },
     ]);
-    const questions = (template?.questions || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
-    const known = new Set(questions.map((x) => x.key));
-    const orphans = orphanAgg.filter((o) => o._id && !known.has(o._id)).map((o) => ({ key: o._id, label: o.label || o._id }));
-    const labelCounts = new Map();
-    for (const x of [...questions, ...orphans]) labelCounts.set(x.label, (labelCounts.get(x.label) || 0) + 1);
-    const columnOf = (x) => ((labelCounts.get(x.label) || 0) > 1 ? `${x.label} (${x.key})` : x.label);
-    const optionTextById = new Map();
-    for (const question of questions) {
-      for (const opt of question.options || []) optionTextById.set(`${question.key}:${opt.id}`, opt.text);
-      // The write-in has no option row, so without this its ids resolve to nothing and the cell
-      // falls back to the bare snapshot — a write-in of "potholes" printing byte-identically to a
-      // canonical option named "potholes". Seeded, it reads "Other — potholes".
-      if (question.otherOption) optionTextById.set(`${question.key}:${OTHER_OPTION_ID}`, 'Other');
-    }
-    const cols = [...questions, ...orphans];
+    // Columns and the renderer come from the shared per-template factory
+    // (services/export/surveyColumns.js), so this file and Results by voter can never disagree
+    // about what a question is called or what an option id means. Per-template by construction:
+    // option ids are unique only within a question and question keys only within a template, and
+    // the duplicate route clones both verbatim.
+    const { cols, columnOf, renderAnswer } = templateAnswerPlan(
+      template,
+      orphanAgg.map((o) => ({ key: o._id, label: o.label })),
+    );
 
-    // Id-native with snapshot fallback: stable option ids survive renames, so current
-    // option text is the honest "what this answer means today"; entries with no
-    // resolvable ids (legacy rows, deleted options) fall back to the recorded snapshot,
-    // which already embeds otherText.
-    const renderAnswer = (qk, answers) => {
-      const entries = (answers || []).filter((a) => a.questionKey === qk);
-      if (!entries.length) return '';
-      return entries
-        .map((a) => {
-          const texts = (a.optionIds || []).map((id) => optionTextById.get(`${qk}:${id}`)).filter(Boolean);
-          if (!texts.length) return snapshotAnswerText(a);
-          const base = texts.join('; ');
-          return a.otherText ? `${base} — ${a.otherText}` : base;
-        })
-        .join(' | ');
-    };
 
     const slug = (template?.name || 'survey').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 40).toLowerCase();
     const name = templateIds.length > 1 ? `survey-${slug}` : 'survey-results';
@@ -814,6 +1064,385 @@ export const buildSurveyAnswersLong = async (ctx, sink) => {
   }
   await flush();
   return { files: [{ name: 'survey-answers', rows: writer.rowsWritten }] };
+};
+
+// ---------------------------------------------------------------------------------------
+// results-by-voter — the client deliverable. One row per registered voter at a door with a
+// surviving FIELD VISIT, union anyone surveyed in scope. Read docs/EXPORTS.md "What one row of
+// Results by voter is" before changing any of the four definitions below; they are what let this
+// file be reconciled against Doors by round and against an invoice.
+//
+// FOUR DEFINITIONS, each a decision rather than an implementation detail:
+//  1. A VISIT is a field-visit row — fieldVisitMatch, the same sentence that starts a campaign's
+//     billing clock. A desk mark is not a visit; a field Restricted IS (the walk was made).
+//  2. ADDRESS OUTCOME resolves over the door's non-note rows (STATUS_ROW_MATCH), which INCLUDES
+//     desk restricts — so this column says what the map, Books and Door Outcomes say. Resolving it
+//     over visits instead would print "Not home" for a door the rest of the product calls
+//     "Restricted".
+//  3. The FILTERS narrow the work columns: a "last week, canvasser Ada" file prints Ada's visits in
+//     that window, not the door's lifetime. The outcome CHIPS are the exception — they narrow which
+//     doors are in the file, never how a door's outcome reads, or every row's outcome would be
+//     whatever was ticked.
+//  4. A ROUND is a passId, never a round number: roundNumber resets per effort (models/Pass.js), so
+//     "R2" names a different round in every walk list. Blocks carry the walk-list name.
+//
+// WHAT IT CANNOT SAY, stated here because the row count invites the question: a field-visited door
+// with NO registered voters, and one whose whole roster is do-not-contact, both produce ZERO rows
+// and are indistinguishable by design (exportScope.js). So the rows are not "the doors you worked"
+// — doors-by-round is the file that accounts for every door. Unknock and pass-discard hard-delete
+// rows, which is why the universe is doors with a SURVIVING visit.
+
+const VOTER_RESULTS_PROJ = 'stateVoterId uid firstName lastName party';
+
+// The base ledger scope: campaign + the narrowing filters, with NO actionType opinion, so the two
+// row sets below can each state their own. Two actionType keys in one object literal is a silent
+// overwrite — the hazard fieldVisitActionTypes exists to remove.
+const voterResultsBase = (ctx) => {
+  const { params, anchorTz } = ctx;
+  const q = { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId) };
+  const range = dayRangeOf(params, anchorTz);
+  if (range) q.timestamp = range;
+  if (params.effortId) q.effortId = oid(params.effortId);
+  if (params.passId === 'legacy') q.passId = null;
+  else if (params.passId) q.passId = oid(params.passId);
+  if (params.userId) q.userId = oid(params.userId);
+  if (params.coordinatorId) q.coordinatorId = oid(params.coordinatorId);
+  return q;
+};
+
+// Which ledger rows count as a visit here. null means the chips intersected to nothing, which is
+// ZERO ROWS — never "no filter" (fieldVisitActionTypes' contract).
+export const voterResultsVisitQuery = (ctx) => {
+  const types = fieldVisitActionTypes(ctx.params.actionTypes);
+  if (!types) return null;
+  // fieldVisitMatch's own actionType is REPLACED, deliberately and visibly, by the intersection.
+  return { ...voterResultsBase(ctx), ...NOT_DESK_MARK, actionType: { $in: types } };
+};
+
+// Status rows: every non-note row at the door, desk marks included (definition 2).
+const voterResultsStatusQuery = (ctx) => ({ ...voterResultsBase(ctx), ...STATUS_ROW_MATCH });
+
+// The responses in scope. No actionType concept — a SurveyResponse has none — and the outcome chips
+// deliberately do not reach here: an answer is a fact about the PERSON, so narrowing the file to
+// not-home doors still shows what the people at those doors said in another round.
+export const voterResultsResponseQuery = (ctx) => {
+  const { params, anchorTz } = ctx;
+  const q = { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId) };
+  const range = dayRangeOf(params, anchorTz);
+  if (range) q.submittedAt = range;
+  if (params.effortId) q.effortId = oid(params.effortId);
+  if (params.passId === 'legacy') q.passId = null;
+  else if (params.passId) q.passId = oid(params.passId);
+  if (params.userId) q.userId = oid(params.userId);
+  if (params.coordinatorId) q.coordinatorId = oid(params.coordinatorId);
+  return q;
+};
+
+// The universe, resolved once and shared by the builder and the estimate so a preview can never
+// count a different set than the file contains.
+//
+// Streamed through an aggregation cursor rather than `distinct`: distinct returns ONE reply and dies
+// at the 16MB BSON cap (~840k ids), while the Set itself is affordable — measured 193 B/entry, so
+// ~20MB at the largest campaign on record (107k doors) and ~45MB at the 250k design target, against
+// the worker's 384MB heap with EXPORT_CONCURRENCY 1.
+//
+// The SURVEYED half is not redundant with the door half: a re-import moves Voter.householdId while
+// SurveyResponse.householdId stays frozen at submit time (services/import/csvImporter.js), so a
+// voter we surveyed who has since re-housed to an unknocked door would otherwise vanish from their
+// own results file.
+export const resolveVoterResultsUniverse = async (ctx) => {
+  const visitQuery = voterResultsVisitQuery(ctx);
+  const workedDoors = new Set();
+  if (visitQuery) {
+    const cursor = CanvassActivity.aggregate([{ $match: visitQuery }, { $group: { _id: '$householdId' } }])
+      .allowDiskUse(true)
+      .cursor({ batchSize: 1000 });
+    for await (const doc of cursor) workedDoors.add(String(doc._id));
+  }
+  // The surveyed half follows the outcome chips, because it is a REPAIR for the re-housing case
+  // rather than a second universe: a response implies a survey_submitted visit, so asking for
+  // not-home work only and still receiving everyone ever surveyed would make the chips cosmetic.
+  // No chips means every field visit, so the default is unaffected.
+  const visitTypes = fieldVisitActionTypes(ctx.params.actionTypes) || [];
+  const surveyedVoters = new Set(
+    visitTypes.includes('survey_submitted')
+      ? (await SurveyResponse.distinct('voterId', voterResultsResponseQuery(ctx))).filter(Boolean).map(String)
+      : [],
+  );
+  return { visitQuery, workedDoors, surveyedVoters };
+};
+
+const inUniverse = (universe, voter) =>
+  universe.workedDoors.has(String(voter.householdId)) || universe.surveyedVoters.has(String(voter._id));
+
+// Voters in the universe, counted per 5000-id chunk like its neighbour emitVoterRows — a single $in
+// of every worked door is both a huge query and a planner hazard. `extraOf` is the surveyed-half
+// remainder, resolved THROUGH Voter so a response pointing at a deleted voter (an import undo)
+// cannot count a row the roster cursor can never emit.
+const countUniverseVoters = async (ctx, universe, extra = {}) => {
+  const base = { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId), ...extra };
+  let n = 0;
+  for (const part of chunk([...universe.workedDoors], 5000)) {
+    n += await Voter.countDocuments({ ...base, householdId: { $in: part.map(oid) } });
+  }
+  for (const part of chunk([...universe.surveyedVoters], 5000)) {
+    const rows = await Voter.find({ ...base, _id: { $in: part.map(oid) } }, 'householdId').lean();
+    n += rows.filter((v) => !universe.workedDoors.has(String(v.householdId))).length;
+  }
+  return n;
+};
+
+// Rows this file will contain — the estimate's `rows` AND the builder's progress denominator, one
+// code path. Exact: the roster IS the row set, so there is nothing the count cannot see.
+export const countVoterResultsRows = async (ctx, universe) =>
+  countUniverseVoters(ctx, universe || (await resolveVoterResultsUniverse(ctx)), DNC_FILTER);
+
+// What the do-not-contact promise withheld, over the SAME universe as the rows (buildVoterFile's
+// pattern). It has to be a second query rather than a per-row tally: DNC_FILTER lives inside the
+// roster cursor, so a flagged voter never reaches a row for ctx.countDnc to count.
+export const countVoterResultsWithheld = (ctx, universe) =>
+  countUniverseVoters(ctx, universe, { 'doNotContact.flagged': true });
+
+// Per-batch door facts. ONE aggregation, no $sort — there is no {campaignId, householdId, timestamp}
+// index, so sorting would make the planner drop the householdId bound and read the whole campaign
+// once per batch (measured: 280,000 docs examined instead of 7,500). The composite $max is the house
+// idiom (services/reports/overlaps.js) and is also what keeps an equal-instant tie deterministic,
+// which $last after a $sort would not be.
+const loadDoorFacts = async (ctx, doorIds) => {
+  if (!doorIds.length) return new Map();
+  const visitTypes = fieldVisitActionTypes(ctx.params.actionTypes) || [];
+  // A visit is a field-visit row: in the (possibly chip-narrowed) set AND not a desk mark.
+  const isVisit = {
+    $and: [
+      { $in: ['$actionType', visitTypes] },
+      { $not: [{ $and: [{ $eq: ['$actionType', 'restricted'] }, { $eq: ['$via', 'bulk'] }] }] },
+    ],
+  };
+  const rows = await CanvassActivity.aggregate([
+    { $match: { ...voterResultsStatusQuery(ctx), householdId: { $in: doorIds.map(oid) } } },
+    {
+      $group: {
+        _id: '$householdId',
+        // Definition 2 — the status ladder's inputs, over every non-note row.
+        actions: { $addToSet: '$actionType' },
+        latest: { $max: { at: '$timestamp', action: '$actionType' } },
+        // Definition 1 — the visit-only cells.
+        visits: { $sum: { $cond: [isVisit, 1, 0] } },
+        firstVisit: { $min: { $cond: [isVisit, '$timestamp', null] } },
+        lastVisit: { $max: { $cond: [isVisit, { at: '$timestamp', by: '$userId' }, null] } },
+        visitPasses: { $addToSet: { $cond: [isVisit, '$passId', '$$REMOVE'] } },
+      },
+    },
+    // Emit the field name the ladder READS. The composite exists for the deterministic tie-break,
+    // but handing resolveStatusFromSummary a shape it does not recognise returns 'unknocked' — a
+    // legal-looking constant, and one that only shows up on non-completion doors (a surveyed door
+    // still reads correctly off `actions`). Mapping it here rather than at the call site is what
+    // stops that from being a hand-copied field name again.
+    { $addFields: { latestActionType: '$latest.action' } },
+  ]).allowDiskUse(true);
+  return new Map(rows.map((r) => [String(r._id), r]));
+};
+
+// Deterministic block order: walk list, then round, legacy bucket last. NOT pass.activatedAt — the
+// archive path never sets it and time order interleaves walk lists. SINK keeps a null last.
+const SINK = '￿';
+
+const orderAnswerBlocks = (pairs, { passById, effortNameById }) =>
+  pairs
+    .map((p) => {
+      const pass = p.passId ? passById.get(String(p.passId)) : null;
+      return {
+        ...p,
+        pass,
+        effortName: pass ? effortNameById.get(String(pass.effortId)) || '' : '',
+        roundNumber: pass ? pass.roundNumber ?? 0 : Number.MAX_SAFE_INTEGER,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.pass ? a.effortName || SINK : SINK).localeCompare(b.pass ? b.effortName || SINK : SINK) ||
+        a.roundNumber - b.roundNumber ||
+        String(a.templateName || '').localeCompare(String(b.templateName || '')) ||
+        String(a.templateId).localeCompare(String(b.templateId)),
+    );
+
+// (templateId, passId) → the voter's response for that block. A pipe is a safe separator because
+// both halves are hex ids or the literal 'legacy'; the codebase's NUL convention is deliberately
+// NOT used here, so this file stays greppable (see CLAUDE.md on the NUL-bearing files).
+const blockKey = (templateId, passId) => `${templateId}|${passId || 'legacy'}`;
+
+export const buildVoterResults = async (ctx, sink) => {
+  const { anchorTz } = ctx;
+  const fmts = instantFmts(anchorTz);
+  const detail = detailPlan(ctx);
+  const wantNotes = !!ctx.params.includeSurveyNote;
+
+  const universe = await resolveVoterResultsUniverse(ctx);
+  const { passById, effortNameById } = await loadPassEffortMaps(ctx);
+  const rq = voterResultsResponseQuery(ctx);
+
+  // Column discovery: the (template, pass) pairs that ACTUALLY occur in scope. A voter can hold at
+  // most one response per pass ({voterId, passId} is unique and DB-enforced), so a template x round
+  // cross product would be mostly columns no row can ever fill — and blank reads as "not surveyed".
+  const pairAgg = await SurveyResponse.aggregate([
+    { $match: rq },
+    { $group: { _id: { templateId: '$surveyTemplateId', passId: '$passId' } } },
+  ]);
+  const templateIds = [...new Set(pairAgg.map((p) => p._id.templateId).filter(Boolean).map(String))];
+  const templates = templateIds.length
+    ? await SurveyTemplate.find({ _id: { $in: templateIds }, organizationId: ctx.organizationId }).lean()
+    : [];
+  const templateById = new Map(templates.map((t) => [String(t._id), t]));
+
+  // One answer plan per template — per-template by construction, see surveyColumns.js.
+  const planByTemplate = new Map();
+  for (const tid of templateIds) {
+    const orphanAgg = await SurveyResponse.aggregate([
+      { $match: { ...rq, surveyTemplateId: oid(tid) } },
+      { $unwind: '$answers' },
+      { $group: { _id: '$answers.questionKey', label: { $last: '$answers.questionLabel' } } },
+    ]);
+    planByTemplate.set(
+      tid,
+      templateAnswerPlan(
+        templateById.get(tid),
+        orphanAgg.map((o) => ({ key: o._id, label: o.label })),
+      ),
+    );
+  }
+
+  const blocks = orderAnswerBlocks(
+    pairAgg
+      .filter((p) => p._id.templateId)
+      .map((p) => ({
+        templateId: String(p._id.templateId),
+        passId: p._id.passId ? String(p._id.passId) : null,
+        templateName: planByTemplate.get(String(p._id.templateId))?.templateName || '',
+      })),
+    { passById, effortNameById },
+  );
+
+  // One block needs no prefix — the file then reads like Survey results with a door block in front.
+  // Several do, and the prefix names the WALK LIST as well as the round, because round numbers reset
+  // per effort. Uniquified, because two efforts may legitimately share a name (Effort has no unique
+  // name index) and two templates can occur in one pass if the survey was switched mid-round.
+  const rawLabel = (b) => (b.pass ? `${b.effortName ? `${b.effortName} ` : ''}R${b.pass.roundNumber}` : 'Legacy / no pass');
+  const labelCounts = new Map();
+  for (const b of blocks) labelCounts.set(rawLabel(b), (labelCounts.get(rawLabel(b)) || 0) + 1);
+  const seen = new Map();
+  for (const b of blocks) {
+    const base = rawLabel(b);
+    if ((labelCounts.get(base) || 0) > 1) {
+      const n = (seen.get(base) || 0) + 1;
+      seen.set(base, n);
+      b.label = `${base} · ${b.templateName || `survey ${n}`}`;
+    } else {
+      b.label = base;
+    }
+  }
+  const prefixed = blocks.length > 1;
+  const colName = (b, base) => (prefixed ? `${b.label} — ${base}` : base);
+
+  const [total, withheld] = await Promise.all([
+    countVoterResultsRows(ctx, universe),
+    countVoterResultsWithheld(ctx, universe),
+  ]);
+  ctx.setTotalEstimate(total);
+  if (withheld) ctx.countDnc(withheld);
+
+  const writer = await sink.file('results-by-voter', [
+    'State voter ID', 'UID', 'Voter first name', 'Voter last name', 'Party',
+    ...detail.voterHeaders,
+    'Address', 'Address line 2', 'City', 'State', 'Zip',
+    ...detail.geoHeaders,
+    'Address outcome', 'Address visits', 'Rounds worked',
+    `Address first visited (${fmts.tzLabel})`, `Address last visited (${fmts.tzLabel})`,
+    'Last visited by first name', 'Last visited by last name', 'Last visited by status',
+    'Surveys taken',
+    ...blocks.flatMap((b) => {
+      const plan = planByTemplate.get(b.templateId);
+      return [
+        colName(b, 'Survey'),
+        ...plan.cols.map((c) => colName(b, plan.columnOf(c))),
+        ...(wantNotes ? [colName(b, 'Note')] : []),
+      ];
+    }),
+    'Household DB id', 'Voter DB id',
+  ]);
+
+  const cursor = Voter.find(
+    { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId), ...DNC_FILTER },
+    `${detail.on ? detail.voterProj : VOTER_RESULTS_PROJ} householdId`,
+  )
+    .sort({ lastName: 1, firstName: 1 })
+    .lean()
+    .cursor({ batchSize: BATCH });
+
+  let batch = [];
+  const flush = async () => {
+    if (!batch.length) return;
+    const kept = batch.filter((v) => inUniverse(universe, v));
+    batch = [];
+    if (!kept.length) return;
+
+    const doorIds = [...new Set(kept.map((v) => String(v.householdId)).filter(Boolean))];
+    const [homes, doorFacts, responses] = await Promise.all([
+      Household.find({ _id: { $in: doorIds } }, detail.hhProj).lean(),
+      loadDoorFacts(ctx, doorIds),
+      SurveyResponse.find({ ...rq, voterId: { $in: kept.map((v) => v._id) } }).lean(),
+    ]);
+    const homeById = new Map(homes.map((h) => [String(h._id), h]));
+    const byVoter = new Map();
+    for (const r of responses) {
+      const k = String(r.voterId);
+      if (!byVoter.has(k)) byVoter.set(k, new Map());
+      byVoter.get(k).set(blockKey(String(r.surveyTemplateId), r.passId && String(r.passId)), r);
+    }
+
+    const canvIds = [
+      ...new Set([...doorFacts.values()].map((d) => d.lastVisit?.by && String(d.lastVisit.by)).filter(Boolean)),
+    ];
+    const people = canvIds.length ? await hydrateCanvassers(canvIds, ctx.organizationId) : new Map();
+
+    for (const v of kept) {
+      const h = homeById.get(String(v.householdId));
+      const facts = doorFacts.get(String(v.householdId));
+      const mine = byVoter.get(String(v._id)) || new Map();
+      ctx.subjects.add(String(v._id));
+
+      await writer.writeRow([
+        v.stateVoterId || '', v.uid || '', v.firstName || '', v.lastName || '', v.party || '',
+        ...detail.voterCells(v),
+        h?.addressLine1 || '', h?.addressLine2 || '', h?.city || '', h?.state || '', h?.zipCode || '',
+        ...detail.geoCells(v, h),
+        DOOR_STATUS_LABELS[resolveStatusFromSummary(ctx.campaign?.type, facts)] || '',
+        facts?.visits ?? 0,
+        facts?.visitPasses?.length ?? 0,
+        facts?.firstVisit ? fmts.dateFmt.format(new Date(facts.firstVisit)) : '',
+        facts?.lastVisit?.at ? fmts.dateFmt.format(new Date(facts.lastVisit.at)) : '',
+        ...canvasserCells(facts?.lastVisit?.by ? people.get(String(facts.lastVisit.by)) : null),
+        mine.size,
+        ...blocks.flatMap((b) => {
+          const plan = planByTemplate.get(b.templateId);
+          const r = mine.get(blockKey(b.templateId, b.passId));
+          return [
+            r ? `${plan.templateName}${r.deskEntry ? ' (desk entered)' : ''}` : '',
+            ...plan.cols.map((c) => (r ? plan.renderAnswer(c.key, r.answers) : '')),
+            ...(wantNotes ? [r?.note || ''] : []),
+          ];
+        }),
+        String(v.householdId || ''), String(v._id),
+      ]);
+    }
+    ctx.progress(writer.rowsWritten);
+  };
+
+  for await (const doc of cursor) {
+    batch.push(doc);
+    if (batch.length >= BATCH) await flush();
+  }
+  await flush();
+  return { files: [{ name: 'results-by-voter', rows: writer.rowsWritten }] };
 };
 
 // ---------------------------------------------------------------------------------------

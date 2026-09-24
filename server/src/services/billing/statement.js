@@ -3,7 +3,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Household } from '../../models/Household.js';
 import { Subscription } from '../../models/Subscription.js';
 import { Organization } from '../../models/Organization.js';
-import { BILLABLE_WITH_RESTRICTED, knocksPipeline, billableDoorsOf } from '../reports/aggregations.js';
+import { knocksPipeline, billableDoorsOf, fieldVisitMatch } from '../reports/aggregations.js';
 import { resolveBillRestricted } from '../reports/billRestricted.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 import { addMonths, billingStartMonth, decideMonth, needsStartMonthVisitCount } from './billingMonths.js';
@@ -28,19 +28,10 @@ export function monthDayBounds(month) {
   return { first: `${m[1]}-${m[2]}-01`, last: `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}` };
 }
 
-// "A canvasser was at a door" — the match that both starts the billing clock and answers "did
-// anyone go out this month". Scoped to `restricted`, NOT a blanket NOT_BULK: a via:'bulk' row on a
-// KNOCK action is a real knock and must still count (same reasoning as knocksPipeline), while an
-// admin desk-marking a whole book or a single home restricted (services/canvass/deskRestrict.js,
-// behind the Turf Cutting / Map pages) is desk work and must never start an org's billing clock
-// before anyone has walked. Notes never count.
-function fieldVisitMatch(campaignId) {
-  return {
-    campaignId,
-    actionType: { $in: BILLABLE_WITH_RESTRICTED },
-    $nor: [{ actionType: 'restricted', via: 'bulk' }],
-  };
-}
+// fieldVisitMatch — "a canvasser was at a door", the match that starts this campaign's billing
+// clock — now lives beside BILLABLE_WITH_RESTRICTED in reports/aggregations.js, because the
+// Results by voter export defines its universe with the same sentence, and a second copy would
+// be a second definition of when a customer starts being charged.
 
 // ONE owner for a statement line, shared by the single-month path (monthlyStatement) and the range
 // path (monthlyStatementRange) so the two can never drift into different SHAPES — the range view and

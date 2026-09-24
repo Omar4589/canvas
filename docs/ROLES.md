@@ -76,6 +76,13 @@ Export Center, and see all the reporting — map, timeline, insights, early voti
   so a lead *can* export voter-profile note bodies through it — they already read them on the
   Notes hub for campaigns they manage. Recorded in
   [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 17.
+
+  A second ruling in the same seam (owner, 2026-09-23): **a lead is sometimes the client** — an
+  external stakeholder paying for the one campaign they hold a grant for, with no access to the org
+  — so the lead-visible **Results by voter** type also lets a lead tick its opt-ins (contact &
+  demographic details, the note from each survey) exactly as an admin can. "Can a lead export this"
+  is the same question as "is this fit to hand the customer". Recorded in
+  [EXPORTS.md](EXPORTS.md) and [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md).
 - **Org settings or the org voter directory.** Those stay admin-only.
 - **The org-WIDE Users view.** Since 2026-07-23 a lead **does** get the Users page — but scoped:
   their list is exactly the people rostered on campaigns they manage, deduped, never the whole

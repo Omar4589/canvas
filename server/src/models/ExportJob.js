@@ -18,6 +18,7 @@ export const EXPORT_TYPE_KEYS = [
   'voters-filtered',
   'voter-notes',
   'notes',
+  'results-by-voter',
   'full-backup',
 ];
 

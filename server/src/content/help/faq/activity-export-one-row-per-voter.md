@@ -34,6 +34,14 @@ Want to drop restricted-access or wrong-address entries at the same time? The sa
 the **Door outcome** chips — leave those two unticked and they stay out of the file, fanned or
 not.
 
+Ticking **Include survey answers** at the same time is fine, and the two options don't overlap. A
+survey row already names the person it surveyed, so it is never repeated; a repeated row never
+carries the named voter's answers, because attaching them would credit one person's survey to
+everyone at the address; and the rows that option adds — the surveys a door-level knock row can't
+show, marked **Row source: survey** — aren't repeated either. With both on the file is named
+`activity-log-by-voter-with-surveys` and the history row says both. See [My export says a survey
+was submitted but not what they said](survey-answers-in-my-export).
+
 People who have asked not to be contacted are never listed, and an address with nobody to list
 keeps its single blank row. The export history says **one row per voter at the door** on any
 file that carried it. See [Exporting your data](exports).

@@ -17,8 +17,8 @@ export const EXPORT_TYPE_META = [
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit drop) are door-level records and leave them blank. Flip "One row per voter at the door" and those knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each — in a file named activity-log-by-voter.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
     contents:
-      'Timestamps in the campaign’s time zone, address, voter identity (State voter ID, UID, name, party — when a survey named the voter, or every registered voter with "One row per voter" on), canvasser and team, walk list and round, GPS, and the note.',
-    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
+      'Timestamps in the campaign’s time zone, address, voter identity (State voter ID, UID, name, party — when a survey named the voter, or every registered voter with "One row per voter" on), canvasser and team, walk list and round, GPS, and the note. With "Include survey answers" on it also carries what each survey recorded, one column per question, plus a row for every survey the knock ledger cannot show.',
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows', 'surveyAnswers'],
   },
   {
     id: 'doors-by-round',
@@ -77,7 +77,7 @@ export function mergeTypeMeta(serverTypes) {
 // Mirror of the web page's paramsForCreate: only non-empty filters go on the wire, and the
 // SAME params feed both POST /admin/exports/estimate and POST /admin/exports — what the
 // preview counted is what the queue builds.
-export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows }) {
+export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows, includeSurveyAnswers }) {
   const wants = (f) => (meta.filters || []).includes(f);
   const p = {};
   if (wants('date') && range && (range.from || range.to)) {
@@ -97,5 +97,8 @@ export function paramsFor(meta, { range, effortId, passId, userId, roundStatus, 
   // ROWS — the one option that DOES move the row count (and renames the file), which is exactly
   // why it rides the same wire: the sheet's live estimate reads it and shows the fanned count.
   if (wants('perVoterRows') && perVoterRows) p.perVoterRows = true;
+  // Also ROWS — it attaches answers AND adds a row for every survey the household-deduped knock
+  // ledger cannot represent, so the live estimate reads it exactly like the fan.
+  if (wants('surveyAnswers') && includeSurveyAnswers) p.includeSurveyAnswers = true;
   return p;
 }

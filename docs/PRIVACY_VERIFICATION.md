@@ -142,6 +142,16 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `routes/mobile/canvass.js`. **The policy now names it** (privacy.html "Canvassing activity" —
   contact preferences: recorded with the reason, used to "exclude that person from the
   organization's future canvassing lists and exports") — that published sentence anchors here.
+  *[v6 2026-09-24: **the single-injection-point framing was NOT sufficient, and a shipped file proved
+  it.** `services/export/exportScope.js` governs the roster QUERY and the identity COLUMNS; it has
+  nothing to say about a free-text cell. A field survey writes one note to BOTH ledgers
+  (`routes/mobile/canvass.js:797` and `:875`), so on a door-unit export — where the DNC rule keeps
+  the row and blanks the person — a flagged voter's own survey note rode their `survey_submitted` row
+  in `activity-log.csv` beside their full street address, name blanked. The published sentence was
+  therefore not kept for that cell. Closed at `services/export/exportBuilders.js:637`; full account
+  in item 23 of "What changed". **The rule to carry forward: on a door-unit row, do-not-contact
+  enforcement is per-CELL, not per-row — any new free-text column on a door-unit export has to be
+  classified as identity or not before it ships.**]*
 - *(v4 2026-07-17)* **Warnings-before-deletion is now a CHECKABLE claim.** Any future policy/DPA
   sentence of the form *"we notify you before scheduled deletion"* anchors here: true only while
   (a) `purgeWoundDownOrgs`/`purgeDormantOrgs` keep their never-delete-unwarned gates (marker +
@@ -1414,6 +1424,225 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     information, nothing is shared, no retention changed, and the audience is unchanged. Owner to
     confirm before the production deploy, as item 19 was. `client/public/privacy.html` needs **no
     edit** for this change.
+
+22. **[v6 2026-09-24 — NEW export type `results-by-voter` ("Results by voter"): the FIRST export
+    type whose stated PURPOSE is that its rows leave the tenant, and it is LEAD-VISIBLE by a ruling
+    that makes it CLIENT-VISIBLE BY DESIGN. No new field, no new retention, no new subprocessor, no
+    DPA change — what is new is that data this same audience can already download in pieces now
+    arrives pre-joined, in a file built to be handed on. ONE sentence is left for the owner before
+    the production deploy.]** One row is one registered voter at a door with a surviving FIELD VISIT,
+    union anyone surveyed in scope (the four definitions the file rests on are stated at
+    `services/export/exportBuilders.js:1070`; builder `buildVoterResults` at `:1274`; registry entry
+    `services/export/exportTypes.js:298`). Each row carries that person's identity (State voter ID,
+    UID, first and last name, party), their door's address, **the door's outcome spelled in plain
+    English** (`DOOR_STATUS_LABELS`, `utils/statusPrecedence.js:89` — the 8-value `Household.status`
+    domain, resolved by `resolveStatusFromSummary` at `:74`), that door's visit count, rounds worked,
+    first and last visit and who visited it last, and then **one block per (survey template, round)
+    pair that actually occurred in scope**: what that person answered, the block's "Survey" cell
+    reading `… (desk entered)` where an admin typed the answers rather than a canvasser. Two things
+    are optional and both are off by default — the existing contact/demographic block
+    (`includeVoterDetail`) and the canvasser's survey note (`includeSurveyNote`, one cell per block,
+    `exportBuilders.js:1431`). Docs: [EXPORTS.md](EXPORTS.md).
+
+    **(a) The purpose is external hand-off, and that part IS new.** Every existing type is a
+    re-import file, an audit file or a backup; this one's registry copy is *"The file to send a
+    client"* and it is the only type that prints outcomes as prose rather than slugs, *"because this
+    is the one built to be read rather than re-imported"* (`exportTypes.js:300`). Nothing in the code
+    changes when a CSV is forwarded — the mechanism is the same 7-day GridFS artifact every type
+    uses — but a document that records what we promise should say once, plainly, that the product now
+    ships a feature whose success condition is that a file of named voters, their home addresses,
+    their door's outcome and their political answers is handed to somebody outside the organization
+    that collected it. **That is the owner sentence at the end of this item.**
+
+    **(b) Lead-visible means CLIENT-visible, and the owner ruled it deliberately.** `adminOnly:
+    false` (`exportTypes.js:308`), and the two opt-ins stay lead-usable. The owner ruled
+    (2026-09-23), in their words: *"its okay for the lead to be able to export just like an admin.
+    leads could be clients that just wont have access to the org but will have access to a campaign
+    they are paying for through the org thats running the canvassing."* So the `lead` tier is not
+    only the customer's own campaign staff: it is **deliberately also an external paying stakeholder
+    with access to the one campaign they fund and none to the organization** — which is why "may a
+    lead export this" and "is this fit to hand the customer" are the same question here. The ruling
+    is restated at the registry (`exportTypes.js:302 + :304-307`) so the next reader of `adminOnly: false`
+    finds the reason beside the flag. Both opt-ins are frozen into `ExportJob.params`
+    (`exportTypes.js:333-336`) and printed in the web history's Scope column
+    (`client/src/pages/ExportsPage.jsx:194`, `:199`), so the export history is the permanent record
+    of which client files carried a date of birth and which carried canvasser prose.
+
+    **Neither opt-in is a new lead capability — stating that is what keeps the ruling narrow.** The
+    contact/demographic block is the EXISTING toggle (phone, cell, phone type, gender, **date of
+    birth**, precinct and the three districts, plus the household's county and coordinates —
+    `exportBuilders.js:127-130`), which `survey-results` has offered leads since the Export Center
+    shipped (`exportTypes.js:255-256`, `adminOnly: false`) and which `voter-file` — also `adminOnly:
+    false` — already prints for **every** voter in the campaign, date of birth included
+    (`exportBuilders.js:1456`). The survey note is *more* restricted here than where a lead already
+    gets it: `survey-results` carries an unconditional `Note` column (`exportBuilders.js:904`) and
+    `notes` exports all three note stores to a lead by the 2026-09-01 ruling recorded in item 17(b),
+    whereas here it must be asked for and is recorded per download. **What is genuinely new is the
+    pre-joining**: identity, the door's outcome and the answers on one line, for people **who were
+    never identified at the door**. That is item 18's derived-linkage class, except that here it is
+    not an option — it is the file. Every surface says so in the same words the code does (*"Refused
+    on a three-voter house means somebody there declined, not that all three did"*,
+    `exportTypes.js:300`).
+
+    **It does NOT add a third exception to the door-unit blanking rule.** This export is
+    **voter-unit**: a flagged voter is dropped WHOLE by `DNC_FILTER` inside the one roster cursor
+    (`exportBuilders.js:1374`), never blanked, so `services/export/exportScope.js`'s count of two
+    opt-in exceptions (items 17(a) and 18) stands unamended and that file needed no edit.
+
+    **(c) Do-not-contact: the voter-unit drop, with a counter scoped to the universe.** A flagged
+    voter is absent from the file entirely — no blanked row, no placeholder, no ordinal — which is
+    the strict reading of the published sentence (privacy.html "Canvassing activity": *"exclude that
+    person from the organization's future canvassing lists and exports"*). `excludedDncCount` is
+    deliberately **universe-scoped** rather than campaign-wide: `countVoterResultsWithheld`
+    (`exportBuilders.js:1203`) counts flagged voters over the SAME door/voter universe the rows come
+    from, because a flagged voter at a door nobody visited was never a row this export withheld.
+    Rows and withheld count come off ONE universe resolution shared with the count-only preview
+    (`services/export/exportEstimates.js:288`), so the estimate can never describe a different set
+    than the file contains, and it is EXACT (`approx: false`). **The file's stated limits are what
+    keep that counter honest**, and they are written down in [EXPORTS.md](EXPORTS.md): a visited door
+    with no registered voters and a visited door whose whole roster is flagged both produce ZERO rows
+    and are indistinguishable by design, so the row count is not "the doors you worked" —
+    `doors-by-round` remains the file that accounts for every door.
+
+    **(d) Record-level audit: a capped sample, inherited and stated knowingly.** Every voter that
+    actually reaches a row is added to the job's subject set (`exportBuilders.js:1411`), which the
+    worker persists and the download tags onto its AccessLog row
+    (`services/export/exportProcessor.js`; `routes/admin/exports.js:338`). The collector stops at
+    **DEDUPE_CAP 100,000** distinct ids (`exportProcessor.js:32`) and the stored list at
+    **SUBJECT_CAP 20,000** (`services/access/supportAccess.js:144`), with `subjectsTruncated` and
+    `subjectsTotal` recording the honest remainder. So for any campaign with more than 20,000 voters
+    in scope — the normal case for the campaigns this file exists to report on — **the record-level
+    audit row for the download that names the most people is a capped sample, not a complete list.**
+    Inherited from `voter-file` and unchanged by this work (item 18 recorded the same effect for
+    fanned activity exports); restated here because this is the type most likely to name everybody,
+    and "we can tell you exactly whose records were in that export" must not be claimed beyond the
+    cap.
+
+    **(e) Nothing else moves — checked against all five triggers in `CLAUDE.md`.** **What we
+    collect** — nothing. No field was added to any model; the only schema edit is the new key in
+    `EXPORT_TYPE_KEYS` (`models/ExportJob.js:21`). Every column is read from `Voter`, `Household`,
+    `CanvassActivity` and `SurveyResponse` rows that already exist, through the answer-column factory
+    the existing survey exports share (`services/export/surveyColumns.js`). **Retention / deletion**
+    — unchanged: the same `EXPORT_TTL_DAYS` (7) artifact under the same `sweep-expired-exports`, the
+    same `ORG_SCOPED`/`CAMPAIGN_SCOPED` cascades over `ExportJob` and the GridFS bucket. **Who can
+    access customer data** — the same `canManageCampaign` scope as every other campaign-scoped type;
+    no route was added, `POST /admin/exports` is unchanged and its entitlement carve-out stays
+    path-based; `isInternal` orgs still write no AccessLog rows. **Sharing / subprocessors — none.**
+    No third party receives anything, so **DPA §6 is not triggered and there is no customer-notice
+    event.** **What we expose** — a new file, to an audience that could already assemble it, and
+    deliberately **not** added to the full-backup ZIP (the bundle already carries the survey files).
+    No migration, no index build, no client-version bump.
+
+    **Assessment: no published sentence becomes FALSE. One is INCOMPLETE — and it is the owner's to
+    rule on BEFORE the production deploy.** `client/public/privacy.html:105` says information is
+    available *"to authorized users of the customer organization you belong to, according to their
+    role"* and that customer data is not visible to other customer organizations: both stay true,
+    because a lead — client or not — is a member of that organization holding that role, and nothing
+    here moves data between tenants. What no published text addresses is what happens to the file
+    afterwards. `client/public/terms.html:106` already carves *"the Customer exporting its own data
+    through features we provide"* out of the no-resell / no-redistribute rule, and `terms.html:95-96`
+    puts the voter-file licence warranty on the Customer, so the AUP is not breached by an export we
+    built for that purpose — but neither page says a word to the **voter** about a report of their
+    address, their door's outcome and their answers being handed to a third party at the
+    organization's direction. **Owner decision required:** whether the Privacy Policy's "With whom we
+    share information" section (or the "Canvassing activity" paragraph) should name customer-directed
+    reporting to the organization's own clients, and whether the ToS should say anything about the
+    Customer's obligations for an exported file once it leaves. Until that is decided, this is the
+    one part of this change that is NOT settled; the code side is. The static legal pages are edited
+    by the owner deliberately, never as a side effect of this change.
+
+23. **[v6 2026-09-24 — Survey answers on the Canvassing activity export
+    (`params.includeSurveyAnswers`): a file the product calls *"Every door result"* now also carries
+    what named people said about politics, plus an opt-in extra row per survey. Audience unchanged,
+    no new data, no new recipient, no new subprocessor. AND IT CLOSES A PRE-EXISTING LEAK: a
+    do-not-contact voter's survey NOTE ships in today's production file beside their full street
+    address. Defect found in this work, fixed in it, pinned.]** With the option on, a
+    `survey_submitted` row gains, after its `Note` column: `Row source` (knock|survey), `Survey`,
+    `Survey version`, `Survey submitted (ISO)`, `Survey taken by`, `Desk entered`, one column per
+    question (unioned across the templates in scope, prefixed with the survey name when there is more
+    than one), and `Response DB id` last (`services/export/exportBuilders.js:281` for the layer's
+    contract, `:294` for the disclosure headers, `answerLayerPlan` at `:317`). It **also adds rows**:
+    a survey knock is household-deduped, so surveying three people at one door in one round leaves
+    ONE `survey_submitted` row and THREE responses; every in-scope response that no activity row in
+    the file names becomes its own row — `Row source: survey`, blank `Activity DB id`, and never to
+    be counted as a knock (`countUncoveredResponses` at `:373`, writer branch at `:542`). Because
+    rows are added, the file and the download are renamed `activity-log-with-surveys` /
+    `…-canvass-activity-with-surveys-<date>.csv` from ONE function (`activityFileNames` at `:409`),
+    and the suffix tracks whether rows were actually added rather than the raw tick — so a human can
+    tell from the filename that a file of knocks carries answers.
+
+    **(a) The audience is unchanged; the co-location is the change.** `canvass-activity` is
+    `adminOnly: false` and so is `survey-results` (`exportTypes.js:194`, `:256`), so everyone who can
+    tick this box could already download the same answers, for the same scope, as a second file. The
+    join is the `SurveyResponse` unique key `{voterId, passId}` and deliberately does NOT match on
+    `userId` (owner ruling 2026-09-23, reasoning at `exportBuilders.js:290-293`): two canvassers who
+    surveyed the same person in one round keep one activity row each while the live response is the
+    later one's, so BOTH rows carry the answers of record and the `Survey taken by` / `Desk entered`
+    columns say whose survey it is — blanking the superseded row would read as "no survey taken",
+    which is false. The only thing the answers now sit beside that `survey-results` does not carry is
+    the recording canvasser's own GPS, accuracy and distance-from-house: facts about the
+    **canvasser**, already in this file, unchanged. The option is frozen into `ExportJob.params`
+    (`exportTypes.js:222`) and printed in the history's Scope column
+    (`client/src/pages/ExportsPage.jsx:200`), so the history records which activity files carried
+    political opinions.
+
+    **(b) The chips gate the whole layer, and a canvasser filter adds no rows.** With
+    `survey_submitted` unticked there are no answer columns at all and the file is byte-identical to
+    one queued without the option (`answerLayerPlan` at `:317`) — not empty columns. With a canvasser
+    filter the columns stay but rows are not added (`addRows: on && !params.userId`), because that
+    filter removes the covering rows and the rule would otherwise manufacture other people's surveys
+    into a file about one person's work. A response whose `Voter` document is gone (an import undo) is
+    KEPT with blank identity and counted in `orphanedRows` — this file's existing habit for a
+    dangling knock row — which is what lets the estimate stay `approx: false`.
+
+    **(c) DNC: a term added to `excludedDncCount`, and a stale comment corrected rather than left.**
+    A flagged voter's KNOCK row keeps the row and blanks identity (the door-unit rule: the knock is
+    billed work), and now also blanks their answers and their survey note (`exportBuilders.js:606-608`,
+    `:637`). A flagged voter's SURVEY-source row is voter-unit and is dropped whole (`:548`), so
+    `excludedDncCount` gains a term — which is why the comment in
+    `services/export/exportEstimates.js:63-67` that said the number is *"IDENTICAL with the option on
+    and off"* was corrected in this change: it was true of `perVoterRows` (item 18) and is not true
+    of this option.
+
+    **(d) ⚠️ THE PRE-EXISTING LEAK — a defect, in the production file today, not a hypothetical.** A
+    field survey writes ONE `data.note` to BOTH ledgers: `SurveyResponse.note`
+    (`routes/mobile/canvass.js:797`) and the `survey_submitted` `CanvassActivity.note` (`:875`). The
+    Export Center's door-unit DNC rule blanks a flagged voter's identity columns on their activity row
+    but kept the `Note` cell — correctly for every other `actionType`, where the note is about the
+    DOOR, and **wrongly for `survey_submitted`, where it is the person's own survey note**: the same
+    class of content that makes `voter-notes` admin-only because it *"frequently contains the opt-out
+    request itself"* (`exportBuilders.js:1580-1582`). So the currently shipped `activity-log.csv`
+    prints a do-not-contact person's survey note beside their full street address with their name and
+    voter ids blanked — a re-identifiable free-text disclosure about exactly the person privacy.html
+    promises is excluded from exports. **Verified against `HEAD`, not inferred:** the pre-change cell
+    is an unconditional `a.note || ''` on a row whose identity columns are already blanked.
+    **Fixed at `exportBuilders.js:637`**, on the flagged-voter branch, **option on or off**, with the
+    reasoning at `:606-608` (a row that blanks the name must blank what the person said). No existing
+    test covered it; `server/test/exportBuilders.int.test.js` now does.
+    **Two things checked rather than assumed, both reported as found:** (i) the blank keys on
+    `actionType`, so a desk-CONVERTED row is blanked too although its note is the original DOOR note
+    (`services/canvass/surveyConversion.js` sets `actionType`/`voterId` on the stamp and never
+    rewrites `note`) — an over-blank, in the safe direction, where the alternative would be comparing
+    cell text; (ii) **`notes.csv` does not carry the same leak** — its survey source is voter-unit and
+    drops a flagged voter's row whole (`exportBuilders.js:1826`), and its door source deliberately
+    excludes plain `survey_submitted` rows, admitting only the desk-converted ones
+    (`services/notes/notesQuery.js:148-166`), whose note is that original door note. The activity file
+    was the only place this shipped.
+
+    **(e) One negative, recorded so it is not re-derived: the remembered tick is not stored data.**
+    The option is remembered per campaign, per browser/device — `client/src/lib/exportOptions.js` on
+    `localStorage`; `saveExportOptions`/`loadExportOptions` in `mobile/lib/cache.js:373`, `:381` — and
+    holds one boolean under a key containing the campaign id, nothing else. It is written only after a
+    queue SUCCEEDS from the sheet's own path, never from the retry path, which re-posts an old job's
+    frozen params through the same mutation. No personal data reaches device storage through this
+    change, and the durable record of what a file contained remains `ExportJob.params`.
+
+    **Assessment: no Privacy Policy / ToS / DPA text edit is required, and one published sentence
+    stops being false.** Nothing new is collected, no new recipient, no retention change, and the
+    audience is identical to `survey-results`. The do-not-contact sentence privacy.html publishes is
+    **more** true after this change than before it — see the stamp on that watchlist bullet above.
+    Owner to confirm before the production deploy, as items 19 and 21 were; the leak fix itself
+    should not wait on that confirmation, because it corrects a live file.
 
 ---
 

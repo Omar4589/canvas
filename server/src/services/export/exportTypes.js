@@ -19,8 +19,11 @@ import {
   buildVoterNotes,
   buildNotes,
   buildKnocksByRound,
+  buildVoterResults,
+  activityFileNames,
 } from './exportBuilders.js';
 import { ACTION_TYPES, NOTE_SOURCES } from '../notes/notesQuery.js';
+import { BILLABLE_WITH_RESTRICTED } from '../reports/aggregations.js';
 import { EXPORT_ESTIMATES } from './exportEstimates.js';
 
 // The Export Center type registry — the anti-drift spine. The route validates from it, the
@@ -181,13 +184,13 @@ const buildFullBackup = async (ctx, sink) => {
 export const EXPORT_TYPES = {
   'canvass-activity': {
     label: 'Canvassing activity',
-    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks.',
+    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks. Tick "Include survey answers" and every survey row gains the answers that were recorded, one column per question \u2014 plus a row for each survey the knock ledger cannot show, because surveying three people at one door in one round is ONE knock and three surveys. Those rows say Row source: survey and carry no Activity DB id; never count them as knocks either.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
     // `outcome` renders the same Door-outcome chip row the notes type has and feeds the same
     // actionTypes param below — a narrowing filter, so canvassActivityQuery applies it and the
     // estimate follows for free. Leaving Restricted / Wrong address unticked is how a client
     // drops desk marks and bad addresses from the file.
-    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows', 'surveyAnswers'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
@@ -197,7 +200,9 @@ export const EXPORT_TYPES = {
     // sink.file()'s name (exportProcessor.js) and neither client renders ExportJob.files[].name,
     // so renaming the sink entry alone would be invisible to every human. The processor
     // optional-chains this, so no other type needs one.
-    fileSlug: (params) => (params?.perVoterRows ? 'canvass-activity-by-voter' : 'canvass-activity'),
+    // Both names come from ONE function in exportBuilders — two independent options, four
+    // combinations, and the sink entry and the download must never disagree.
+    fileSlug: (params) => activityFileNames(params).slug,
     validateParams: async (params, scope) => {
       const out = await normalizeCommon(params, scope);
       if (params.actionTypes != null) {
@@ -211,6 +216,10 @@ export const EXPORT_TYPES = {
       // is the permanent record of which downloads carried a knock attached to people nobody
       // named. Unlike those two this is a ROW option, so the estimate reads it (exportEstimates).
       if (params.perVoterRows) out.perVoterRows = true;
+      // A ROW option like perVoterRows, not a column one: it attaches answers to the survey rows AND
+      // adds a row for every survey the household-deduped ledger cannot represent. Frozen into
+      // ExportJob.params, so the history row records which activity files carried political opinions.
+      if (params.includeSurveyAnswers) out.includeSurveyAnswers = true;
       return out;
     },
     build: buildCanvassActivity,
@@ -285,6 +294,49 @@ export const EXPORT_TYPES = {
     validateParams: async (params, scope) =>
       EXPORT_TYPES['survey-results'].validateParams(params, scope),
     build: buildSurveyAnswersLong,
+  },
+  'results-by-voter': {
+    label: 'Results by voter',
+    desc: 'The file to send a client: one row per person at the doors you worked, with what happened at their address and what they said. Every registered voter at a door with a field visit gets a row — plus anyone you surveyed, even if they have since moved to a door nobody knocked. The Address columns describe the DOOR, not the person: "Refused" on a three-voter house means somebody there declined, not that all three did. Answers are grouped by round, so a voter surveyed twice shows both sets side by side. Outcomes are spelled in plain English here, unlike every other export, because this is the one built to be read rather than re-imported.',
+    oneRowIs: 'one voter at a door you visited, with the door\u2019s outcome and their answers',
+    // `outcome` narrows WHICH DOORS are in the file, never how a door's outcome column reads.
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'voterDetail', 'surveyNote'],
+    // Lead-visible, and the opt-in columns stay lead-usable: owner ruling 2026-09-23 — a lead is
+    // sometimes the CLIENT, an external stakeholder paying for that campaign, so "can a lead export
+    // this" is the same question as "is this fit to hand the customer". Recorded in
+    // PRIVACY_VERIFICATION.md.
+    adminOnly: false,
+    requiresCampaign: true,
+    subjectType: 'voter',
+    estimate: EXPORT_ESTIMATES['results-by-voter'],
+    // Always ONE file, even with several surveys in scope: the row unit is the PERSON, and splitting
+    // by template (as Survey results does) would split one person across files — the opposite of
+    // what this export exists for.
+    contentKind: async () => 'csv',
+    validateParams: async (params, scope) => {
+      const out = await normalizeCommon(params, scope);
+      if (params.actionTypes != null) {
+        if (!Array.isArray(params.actionTypes) || params.actionTypes.some((a) => !ACTION_TYPES.includes(a))) {
+          throw new ExportUserError('actionTypes contains an unknown action.');
+        }
+        // This export's universe is field VISITS, so a chip outside that set cannot narrow it — and
+        // silently intersecting to nothing would hand back an empty file for a plausible-looking
+        // request. Refuse with the reason instead.
+        const outside = params.actionTypes.filter((a) => !BILLABLE_WITH_RESTRICTED.includes(a));
+        if (outside.length) {
+          throw new ExportUserError(
+            `This export lists the people at doors that were visited, so it cannot be narrowed to ${outside.join(', ')}.`
+          );
+        }
+        if (params.actionTypes.length) out.actionTypes = params.actionTypes;
+      }
+      // Both frozen into ExportJob.params, so the history row is the permanent record of which
+      // client files carried a date of birth and a phone number, and which carried canvasser prose.
+      if (params.includeVoterDetail) out.includeVoterDetail = true;
+      if (params.includeSurveyNote) out.includeSurveyNote = true;
+      return out;
+    },
+    build: buildVoterResults,
   },
   'voter-file': {
     label: 'Voter file',

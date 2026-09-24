@@ -56,3 +56,36 @@ test('actionLabel falls back to the raw type rather than rendering blank', () =>
   assert.strictEqual(mobile.actionLabel('some_future_action'), 'some_future_action');
   assert.strictEqual(web.actionLabel(undefined), '—');
 });
+
+// ── door STATUS labels (the same gate, one domain over) ───────────────────────────────────────
+// A status is not an action: `surveyed` and `unknocked` are statuses no actionType is named for,
+// and `note_added` is an action with no status. The server needs its own status→label map because
+// a client-sendable CSV prints the words rather than the slugs (services/export), and this is what
+// stops it drifting from what the web console shows for the same door.
+//
+// Keys come off Household's own enum, like ACTION_TYPES above comes off CanvassActivity's — a
+// renamed status fails here rather than shipping a raw slug to a customer. deepStrictEqual against
+// the web map is impossible and should not be attempted: that map also carries voted / dnc /
+// doNotKnock, which are VOTER facts, not door statuses. Subset, therefore, in both directions that
+// matter — every door status has a label, and every label matches the web wording.
+const { Household } = await import('../src/models/Household.js');
+const { DOOR_STATUS_LABELS } = await import('../src/utils/statusPrecedence.js');
+const DOOR_STATUSES = Household.schema.path('status').enumValues;
+
+test('the server door-status labels cover exactly Household.status', () => {
+  assert.deepStrictEqual(
+    Object.keys(DOOR_STATUS_LABELS).sort(),
+    [...DOOR_STATUSES].sort(),
+    'server/src/utils/statusPrecedence.js DOOR_STATUS_LABELS has drifted from the Household.status enum'
+  );
+});
+
+test('server door-status wording is identical to the web console', () => {
+  for (const status of DOOR_STATUSES) {
+    assert.strictEqual(
+      DOOR_STATUS_LABELS[status],
+      web.STATUS_LABELS[status],
+      `'${status}' reads differently in an export than on the web map`
+    );
+  }
+});

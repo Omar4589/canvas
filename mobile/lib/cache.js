@@ -34,6 +34,7 @@ const SELECTED_BOOKS_KEY = 'canvass.selectedBooks';
 const CURRENT_EFFORT_KEY = 'canvass.currentEffort';
 const VIEW_MODE_KEY = 'canvass.viewMode';
 const MAP_STYLE_KEY = 'canvass.mapStyle';
+const EXPORT_OPTIONS_KEY = 'canvass.exportOptions';
 const SERVER_META_KEY = 'canvass.serverMeta';
 const THEME_KEY = 'canvass.themePreference';
 
@@ -362,6 +363,30 @@ export async function loadViewMode(campaignId) {
     return parsed.mode === 'list' ? 'list' : 'map';
   } catch {
     return null;
+  }
+}
+
+// Remembered Export Center options for ONE campaign (the web page's lib/exportOptions.js, same
+// scope and same last-choice-wins rule). Only the survey-answers toggle lives here: it is the one
+// option whose whole point is not having to ask twice. Never the row-multiplying or
+// identity-widening toggles — those stay a fresh decision every time.
+export async function saveExportOptions(campaignId, options) {
+  if (!campaignId) return;
+  await AsyncStorage.setItem(
+    EXPORT_OPTIONS_KEY,
+    JSON.stringify({ campaignId: String(campaignId), options: options || {} })
+  );
+}
+
+export async function loadExportOptions(campaignId) {
+  const raw = await readItem(EXPORT_OPTIONS_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (String(parsed.campaignId) !== String(campaignId)) return {};
+    return parsed.options || {};
+  } catch {
+    return {};
   }
 }
 

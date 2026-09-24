@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -11,6 +11,7 @@ import Pager from '../components/Pager.jsx';
 import { Button, Select, EmptyState, SkeletonRows, Modal } from '../components/ui/index.js';
 import { downloadFile } from '../lib/downloadFile.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
+import { loadExportOptions, saveExportOptions } from '../lib/exportOptions.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
 // The Export Center: queue background CSV/ZIP exports (built on the worker dyno), then
@@ -54,6 +55,12 @@ const TYPES = [
     label: 'Survey answers (detailed)',
     desc: 'One row per recorded answer, exactly as captured at the door — the audit-grade record.',
     filters: ['date', 'effort', 'pass', 'canvasser', 'voterDetail'],
+  },
+  {
+    id: 'results-by-voter',
+    label: 'Results by voter',
+    desc: 'The file to send a client: one row per person at the doors you worked, with what happened at their address and what they said, round by round.',
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'voterDetail', 'surveyNote'],
   },
   {
     id: 'voter-file',
@@ -106,7 +113,7 @@ const OUTCOME_OPTIONS = Object.keys(ACTION_LABELS);
 // filters. A type carrying one gets a dialog between the Queue button and the POST (today
 // canvass-activity: the outcome chips and the per-voter checkbox), so those choices are made
 // deliberately on their own screen rather than scrolled past among the pickers.
-const OPTION_TOKENS = ['outcome', 'perVoterRows'];
+const OPTION_TOKENS = ['outcome', 'perVoterRows', 'surveyAnswers'];
 
 const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
@@ -189,6 +196,8 @@ function scopeLabel(job, { effortName, passName, canvasserName }) {
   // at the door, are both linkages the row has to own up to.
   if (p.includeDoorVoters) bits.push('voters listed at each door');
   if (p.perVoterRows) bits.push('one row per voter at the door');
+  if (p.includeSurveyNote) bits.push('survey notes');
+  if (p.includeSurveyAnswers) bits.push('survey answers');
   return bits.join(' · ') || 'Everything';
 }
 
@@ -218,7 +227,21 @@ export default function ExportsPage() {
   const [includeDoorVoters, setIncludeDoorVoters] = useState(false);
   // Off by default like the two above — and unlike them this one changes the ROW COUNT and the
   // file name (services/export/exportBuilders.js fanPlan). Frozen into ExportJob.params.
+  // Off by default for the same reason as the two above, and it matters more here: this is the one
+  // export built to be SENT onward, and a survey note is free writing about a named person.
+  const [includeSurveyNote, setIncludeSurveyNote] = useState(false);
+  // The one remembered option (lib/exportOptions.js): once you have wanted answers on an activity
+  // export you want them every time, and the whole point is not queueing a second export to read
+  // them. Still frozen onto every job row, so the history remains the record.
+  const [includeSurveyAnswers, setIncludeSurveyAnswers] = useState(() => loadExportOptions(campaignId).includeSurveyAnswers);
   const [perVoterRows, setPerVoterRows] = useState(false);
+  // Re-seed when the campaign changes: this page does not remount on a route param change, so
+  // without it a remembered choice would follow you into another campaign. Synchronous read, nothing
+  // started, nothing to tear down.
+  useEffect(() => {
+    setIncludeSurveyAnswers(loadExportOptions(campaignId).includeSurveyAnswers);
+  }, [campaignId]);
+
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [backupScope, setBackupScope] = useState('campaign');
   const [skip, setSkip] = useState(0);
@@ -354,10 +377,18 @@ export default function ExportsPage() {
     if (wants('noteSource') && noteSources.length) p.noteSources = noteSources;
     // One chip row, two tokens: `noteOutcome` (Notes) and `outcome` (Canvassing activity) both
     // feed the server's actionTypes param, with the same include semantics.
-    if ((wants('noteOutcome') || wants('outcome')) && actionTypes.length) p.actionTypes = actionTypes;
+    if ((wants('noteOutcome') || wants('outcome')) && actionTypes.length) {
+      // Narrowed to what THIS type offers: no state resets when the type changes, so a chip ticked
+      // on another type can still be in `actionTypes` while its own chip is no longer on screen —
+      // unticked-able, and a 400 if it rides along.
+      const offered = actionTypes.filter((a) => chipOutcomes.includes(a));
+      if (offered.length) p.actionTypes = offered;
+    }
     if (wants('noteAuthor') && userId) p.userId = userId;
     if (wants('noteSearch') && noteQ.trim()) p.q = noteQ.trim();
     if (wants('doorVoters') && includeDoorVoters) p.includeDoorVoters = true;
+    if (wants('surveyNote') && includeSurveyNote) p.includeSurveyNote = true;
+    if (wants('surveyAnswers') && includeSurveyAnswers) p.includeSurveyAnswers = true;
     if (wants('perVoterRows') && perVoterRows) p.perVoterRows = true;
     return p;
   }
@@ -365,16 +396,30 @@ export default function ExportsPage() {
   function queueExport(mutateOpts) {
     const body = { type: type.id, params: paramsForCreate() };
     if (!(type.id === 'full-backup' && backupScope === 'org')) body.campaignId = campaignId;
-    createMut.mutate(body, mutateOpts);
+    createMut.mutate(body, {
+      ...mutateOpts,
+      onSuccess: (...args) => {
+        // Remembered from THIS path only. retryJob re-POSTs an old job's frozen params through the
+        // same mutation, so persisting in the mutation's own onSuccess would quietly adopt somebody
+        // else's choice — including one made months ago — as your default.
+        if (wants('surveyAnswers')) saveExportOptions(campaignId, { includeSurveyAnswers });
+        mutateOpts?.onSuccess?.(...args);
+      },
+    });
   }
 
   const hasOptionsDialog = type.filters.some((f) => OPTION_TOKENS.includes(f));
 
   // The Door-outcome chip row — inline for Notes (a narrowing filter beside the others), inside
   // the options dialog for Canvassing activity. One element, two homes.
+  // A note is not a visit, so Results by voter — whose universe IS field visits — never offers that
+  // chip. The server refuses it outright rather than intersecting to an empty file, and presenting a
+  // choice that 400s is worse than not presenting it.
+  const chipOutcomes = type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS;
+
   const outcomeChipRow = (
     <div className="flex flex-wrap items-center gap-1.5">
-      {OUTCOME_OPTIONS.map((a) => (
+      {chipOutcomes.map((a) => (
         <Chip
           key={a}
           active={actionTypes.includes(a)}
@@ -610,6 +655,26 @@ export default function ExportsPage() {
               </label>
             </div>
           )}
+          {wants('surveyNote') && (
+            <div className="w-full rounded-md border border-border bg-sunken px-3 py-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={includeSurveyNote}
+                  onChange={(e) => setIncludeSurveyNote(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-fg">Include the note from each survey</span>
+                  <span className="block text-xs text-fg-muted">
+                    Adds what the canvasser typed beside the answers, one cell per round. Off by
+                    default because this is the export built to be sent onward: the answers are what
+                    someone clicked, a note is a canvasser writing freely about a named person.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
           {/* w-full so it wraps onto its own line: the toggle reads as a decision about the
               file, not as one more narrowing filter beside the pickers. */}
           {wants('voterDetail') && (
@@ -697,6 +762,29 @@ export default function ExportsPage() {
                       columns are the same but the row count is not, so the file is named
                       activity-log-by-voter — never count its rows as knocks. Do-not-contact voters are
                       never listed, and an address with nobody to list keeps its single blank row.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {wants('surveyAnswers') && (
+                <label className="flex items-start gap-2 rounded-md border border-border bg-sunken px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={includeSurveyAnswers}
+                    onChange={(e) => setIncludeSurveyAnswers(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-fg">Include survey answers</span>
+                    <span className="block text-xs text-fg-muted">
+                      Adds what each survey recorded, one column per question, beside the knock that
+                      took it. It also adds a row for every survey this file otherwise cannot show:
+                      surveying three people at one door in one round is <em>one</em> knock and three
+                      surveys, so two of them have no knock row of their own. Those rows say{' '}
+                      <strong>Row source: survey</strong> and carry no Activity DB id — never count
+                      them as knocks. The file is named activity-log-with-surveys to say so. Your
+                      choice is remembered for this campaign, and recorded on every export in the
+                      history below.
                     </span>
                   </span>
                 </label>

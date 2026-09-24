@@ -14,8 +14,11 @@ Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a "pass"/round is the billing
 passes), [EFFORTS.md](EFFORTS.md) (reports can be scoped to one effort via `effortId`; "All efforts" =
 the whole-campaign totals below), [SURVEYS.md](SURVEYS.md) (what "Surveys" / "Surveyed voters" count),
 [DATE_FILTERS.md](DATE_FILTERS.md) (the date-range control that scopes these numbers — presets,
+
 defaults, and boundary math), [EXPORTS.md](EXPORTS.md) (the export files carry these same three
-survey units and the Σ-rounds invariant), [TIMEZONES.md](TIMEZONES.md) (these counts are windowed and bucketed in
+survey units and the Σ-rounds invariant — plus three counts that exist only in a file and reconcile
+with nothing on this page: **Results by voter**'s per-person *Surveys taken*, its *Address visits* /
+*Rounds worked*, and the activity log's survey-source rows), [TIMEZONES.md](TIMEZONES.md) (these counts are windowed and bucketed in
 the campaign's timezone — what "a day" means here).
 
 ---
@@ -75,6 +78,17 @@ Knocks honor the date filter. We bill **per knock**, not per house. Field: `knoc
 > Legacy / no-pass data: knocks recorded before turf/passes existed (`passId = null`) collapse
 > to **one knock per house**. Use passes to get per-pass billing.
 
+> **An export's visit columns are EVENTS, not knocks — never reconcile one with an invoice.** The
+> **Results by voter** file ([EXPORTS.md](EXPORTS.md)) prints **Address visits** — every field visit
+> at that door inside the file's range / walk list / round / canvasser scope, so a door worked twice
+> in one round reads **2** — and **Rounds worked**, the distinct rounds with a field visit (the
+> legacy no-pass bucket counts as one). Billing groups on `{householdId, passId}`, so that same door
+> is **1 knock**. A **field** Restricted mark counts as a visit there (the walk was made, which is
+> also what starts the billing clock — [BILLING.md](BILLING.md)) while an admin's **desk** mark does
+> not, and neither is a knock (see **Restricted access** below). **Doors by round**'s *Door visits
+> this round* is a third number again: per-round, and with no desk-mark guard at all. Three honest
+> columns answering three different questions; only `knocksPipeline` answers "what do we bill".
+
 ### Surveys
 Total survey responses submitted — one per voter per pass. A **volume** number: a house with
 3 voters all surveyed in one visit is **3 surveys but 1 knock**, so Surveys can exceed Knocks.
@@ -87,6 +101,15 @@ Field: `surveysSubmitted`.
 > is not arithmetic**, and no metric here filters on it. Every such conversion is priced in these
 > same figures before it runs, and is revertible. See
 > [SURVEYS.md §K](SURVEYS.md#k-desk-entered-responses-outcome-conversion).
+
+> **"3 surveys but 1 knock" is also why an activity export can hold rows the knock ledger does not.**
+> The knock ledger is household-deduped — surveying three people at one door in one round writes
+> **one** `survey_submitted` row and **three** `SurveyResponse` documents — so the Canvassing
+> activity export's **Include survey answers** option emits a row for every response that no knock
+> row in the file names. Those rows say **Row source: survey**, carry no **Activity DB id**, and must
+> never be counted as knocks; the file is renamed `activity-log-with-surveys` whenever they can
+> appear (not when the option is merely ticked — a canvasser filter keeps the answer columns and adds
+> no rows). See [EXPORTS.md](EXPORTS.md).
 
 ### Surveyed voters
 Distinct voters who have a survey — i.e. **how many people we actually reached** (not how many
@@ -1094,6 +1117,17 @@ redundant.)
 > two rounds and one repeat voter; it also pins that a distinct-voter *team* column would break
 > `Σ(teams) === campaign`, because `teamFoldStage` puts each response on exactly one team while a
 > voter can belong to two.
+
+>
+> **A column in the `results-by-voter` export also reads "Surveys taken", and it is none of the
+> three above.** That file is one row per PERSON, and the cell is that voter's own responses in scope
+> — equivalently, the rounds in which we surveyed them, since `{voterId, passId}` is unique. The
+> label is right (it counts responses); the **scope** is what differs, so the column reconciles with
+> nothing: summing it gives the in-scope responses of only the voters that file contains — a
+> do-not-contact voter is dropped whole, a response whose voter an import undo removed has no row to
+> sit on, and the outcome chips decide which doors are present at all. Treat it as a fourth number
+> that must never be added to, or compared with, **Survey doors**, **Voters surveyed** or the
+> campaign's **Surveys taken**.
 >
 > **The TAG units add a fourth axis: state.** A tag row carries `voterCount` ("identified" —
 > distinct voters EVER giving a tagged answer; the R1+R2 voter counts **1**) and
