@@ -1,0 +1,104 @@
+# Automated test runs, on GitHub's machines, every time code reaches GitHub.
+#
+# Why this exists: running the WHOLE test set takes ~6.5 minutes locally and needs a database, so in
+# practice everybody runs the suites that look related to what they just changed. That is sensible,
+# and it is also exactly how commit 3b9a07a (2026-08-05) left four assertions in
+# retentionWarnings.int.test.js reading a renamed key: it updated one of the two suites covering the
+# change and nothing ran the other for 50 days. The checks that had gone quiet were the ones guarding
+# a published promise — that an organization is warned before its data is deleted. Nothing was wrong
+# in the product, but nothing told anyone the alarm was disconnected either.
+#
+# Two jobs, deliberately split:
+#   checks       — the two unit suites + the web build. ~2-3 min, no services. EVERY push.
+#   integration  — all 109 integration suites. ~12 min. Only main, or on demand.
+#
+# The slow one is kept off feature branches on purpose. A long job in front of every commit gets
+# ignored, and an ignored red build is worse than no build. Since deploys are triggered by hand from
+# the Heroku dashboard, a main-only run still finishes long before anyone clicks deploy.
+#
+# NOTE: this only runs when code is pushed to GITHUB (the `origin` remote). Pushing straight to the
+# `heroku` remote does not reach GitHub, so nothing would run.
+
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # adds a "Run workflow" button, for running the slow job on demand
+
+jobs:
+  checks:
+    name: unit tests and web build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # root package.json: engines.node = 20.x
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      # The server's unit suite reads two CLIENT/MOBILE source files directly (test/actionLabels.test.js
+      # compares the action- and status-label maps across all three platforms). They are plain ESM with
+      # no React or React Native imports, so a full checkout is all it needs — no mobile install.
+      - run: npm ci
+        working-directory: server
+      - name: server unit tests
+        run: npm test # node --test; the integration suites self-skip with no MONGODB_URI_TEST
+        working-directory: server
+
+      - run: npm ci
+        working-directory: client
+      - name: client unit tests
+        run: npm test
+        working-directory: client
+      - name: web build
+        run: npm run build
+        working-directory: client
+
+  integration:
+    name: integration suites (main only)
+    # Feature branches get the fast job only. `workflow_dispatch` is the manual escape hatch.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # server/scripts/test-int.sh starts and SUPERVISES its own mongod: it drops each suite's
+      # database as that suite passes, caps the WiredTiger cache, and restarts mongod on a fresh
+      # datadir if it dies mid-marathon. So CI installs the mongod BINARY and then runs the exact
+      # command a developer runs. The alternative — a MongoDB service container — would mean this
+      # file reimplements the harness, and the two would drift; that class of drift is the reason
+      # this workflow exists at all.
+      #
+      # Pinned to 7.0 to match the version developed against, and to jammy (hence the 22.04 runner)
+      # because that pairing is known to exist in MongoDB's apt repo.
+      - name: install mongod
+        run: |
+          set -euo pipefail
+          curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
+            | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+          echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" \
+            | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+          sudo apt-get update
+          sudo apt-get install -y mongodb-org-server
+          mongod --version | head -1
+
+      - run: npm ci
+        working-directory: server
+
+      # No Redis service, and that is measured rather than assumed: the full marathon passes with
+      # Redis refusing every connection (the queue errors are logged and tolerated).
+      - name: integration suites
+        run: npm run test:int
+        working-directory: server
+        timeout-minutes: 25
