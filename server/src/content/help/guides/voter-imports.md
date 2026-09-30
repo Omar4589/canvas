@@ -20,7 +20,18 @@ tags: import, voters, intake
 - A row matches an existing **door by its address** (after light normalization). A different or misspelled address becomes a separate door.
 - A row matches a **voter by their state Voter ID, within the campaign you're importing into**. Re-uploading the same voter updates them in place — imports are safe to repeat.
 - **Running more than one campaign?** Each campaign gets its **own copy** of every voter and door it imports. Two campaigns can upload overlapping — even identical — files and neither disturbs the other: separate doors, separate books, separate counts. The person stays one person to your organization (a **Do not contact** set anywhere applies everywhere, and they appear once in the org-wide Voters directory), but each campaign works its own copy.
+- **Apartment numbers can be in either place.** Some files keep the unit in its own column (map it to **Address Line 2**); others put it on the end of the street address, like `4055 Northside Dr NW Apt 25` — L2 files do this, so leave Address Line 2 unmapped for them. Either way, every unit is its own door. Just don't mix the two in one campaign: the same apartment written both ways becomes two doors, and nothing warns you.
 - **Rows are people; doors are addresses.** Several voters usually share an address, every apartment unit is its own door, and a second file reuses the doors an earlier file already created — so an import always reports fewer doors than the file has rows. In the **Recent imports** table, **Voters** is rows imported, **Households** is distinct addresses in the file, **New** is what *this* file created, **Moved / Emptied** is voters who changed address and doors left empty, and **Errors** is skipped rows. See [My file has more rows than the doors the import reports](fewer-doors-than-file-rows).
+
+## Mapping the columns
+
+After you pick a file, the **Map columns** step suggests which of your file's columns holds each field. **Check the suggestions against the values, not the column names.** Under every mapped field you'll see a few values from the top of your file — *e.g. 4055 Northside Dr NW Apt 25 · 900 Club Station Dr NE* — because a column can have the right name and the wrong contents:
+
+- An **L2** file has a column called `City` that holds the city-council district ("ATLANTA CITY"). The city you want is `Residence_Addresses_City` ("Atlanta").
+- **State** is part of every door's address. If State pointed at a column of voter IDs, every voter would become their own door — and the import would still finish without a single error. So State and ZIP show a warning when none of their sample values look like states or ZIP codes.
+- A required field whose column is **blank in the first rows** is flagged as well — those rows would be skipped.
+
+For **State Voter ID**, pick the state's registration number when your file has one. Early-vote lists only match voters imported under the same ID, and campaigns' lists usually carry the state's number — on an L2 file that's `Voters_StateVoterID`, not `LALVOTERID`. The suggestions already prefer it. When a mapping looks right, **save it as a profile** named after the vendor, so the next file from them is one click.
 
 ## Preview before you commit
 

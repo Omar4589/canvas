@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { columnSamples, sampleWarning } from '../lib/columnSamples.js';
 import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 
@@ -431,6 +432,29 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
   );
 }
 
+// What the picked column actually holds, from the 5-row peek — so a column whose name looks
+// right but whose values don't (an L2 export's `City` is a council district; a voter ID in State
+// makes every voter their own door) is caught while mapping, not after the import. Indented to
+// sit under the select: the label is w-40 and the row's gap-2.
+const ColumnSample = ({ field, column, rows }) => {
+  if (!column || !rows?.length) return null;
+  const values = columnSamples(rows, column);
+  if (!values.length) {
+    return (
+      <p className={`mt-0.5 pl-[10.5rem] text-[11px] italic ${field.required ? 'text-warning-fg' : 'text-fg-subtle'}`}>
+        Blank in the first {rows.length} row{rows.length === 1 ? '' : 's'}
+      </p>
+    );
+  }
+  const warning = sampleWarning(field.key, values);
+  return (
+    <div className="mt-0.5 pl-[10.5rem] text-[11px]">
+      <p className="truncate text-fg-subtle" title={values.join(' · ')}>e.g. {values.join(' · ')}</p>
+      {warning && <p className="text-warning-fg">{warning}</p>}
+    </div>
+  );
+};
+
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const orgTz = useOrgTimeZone();
@@ -471,7 +495,7 @@ export default function ImportPage() {
   const [uidSource, setUidSource] = useState(''); // per-vendor namespace for cross-org uid matching
   const [revisitNewVoters, setRevisitNewVoters] = useState(false); // collect already-worked homes that gain a new voter into a revisit walk list
   const [overwriteHandEdits, setOverwriteHandEdits] = useState(false); // let this file replace values the team hand-corrected (default: keep the edits)
-  const [sampleRows, setSampleRows] = useState([]); // preview-headers' 5-row peek — powers the mapping-step error-literal warning
+  const [sampleRows, setSampleRows] = useState([]); // preview-headers' 5-row peek — powers the mapping step's sample values + error-literal warning
   const [ackSkip, setAckSkip] = useState(false); // explicit "import anyway" consent when most of the file would be skipped
 
   const campaignsQ = useQuery({
@@ -844,23 +868,26 @@ export default function ImportPage() {
               {fields.map((f) => {
                 const isReqUnmapped = f.required && !mapping[f.key];
                 return (
-                  <div key={f.key} className="flex items-center gap-2 text-sm">
-                    <label className="w-40 shrink-0 text-fg-muted">
-                      {f.label}
-                      {f.required && <span className="text-danger"> *</span>}
-                    </label>
-                    <select
-                      value={mapping[f.key] || ''}
-                      onChange={(e) => { setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined })); dropReview(); }}
-                      className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${
-                        isReqUnmapped ? 'border-danger/40 bg-danger-tint' : 'border-border-strong bg-card text-fg'
-                      }`}
-                    >
-                      <option value="">— not mapped —</option>
-                      {columns.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                  <div key={f.key} className="text-sm">
+                    <div className="flex items-center gap-2">
+                      <label className="w-40 shrink-0 text-fg-muted">
+                        {f.label}
+                        {f.required && <span className="text-danger"> *</span>}
+                      </label>
+                      <select
+                        value={mapping[f.key] || ''}
+                        onChange={(e) => { setMapping((m) => ({ ...m, [f.key]: e.target.value || undefined })); dropReview(); }}
+                        className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${
+                          isReqUnmapped ? 'border-danger/40 bg-danger-tint' : 'border-border-strong bg-card text-fg'
+                        }`}
+                      >
+                        <option value="">— not mapped —</option>
+                        {columns.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <ColumnSample field={f} column={mapping[f.key]} rows={sampleRows} />
                   </div>
                 );
               })}

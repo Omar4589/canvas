@@ -49,7 +49,11 @@ were folded onto their addresses:
   rows where most homes hold two registered voters is roughly 2,000 doors.
 - **Each apartment unit is its own door** — "Apt 2" and "Apt 3" at one building are two doors (and one
   map pin, because vendors place every unit of a building at the same rooftop). A building is never
-  counted as one door.
+  counted as one door. It doesn't matter where the file keeps the unit: in its own column (map that
+  column to **Address Line 2**) or on the end of the street address — `4055 Northside Dr NW Apt 25`,
+  the way L2 files do it (leave Address Line 2 unmapped; L2's `Residence_Addresses_ExtraAddressLine`
+  only repeats the address line's last word, like `Bsmt`). Either way each unit is its own door. The
+  one thing to avoid is mixing the two within a campaign — see *Things to watch*.
 - A second file that overlaps the first **reuses** the doors it already created rather than making new
   ones. Vendors often split one precinct into two files by target (say a "strong" file and a "swing"
   file); a home with one voter in each file is **one** door, created by the first file and simply
@@ -196,6 +200,29 @@ across organizations. The preview forecasts it: *"links to N existing people · 
 people."* For a single-org customer the first import is all new; once another org imports the
 same voters they show up as existing-person matches. Full details: [PERSONS.md](PERSONS.md).
 
+## Mapping the columns
+
+After you pick a file, the **Map columns** step suggests which of your file's columns holds each
+field. **Check the suggestions against the values, not the column names.** Under every mapped field
+the page shows a few values from the top of your file (*e.g. 4055 Northside Dr NW Apt 25 · 900 Club
+Station Dr NE*), because a column can be named right and hold the wrong thing:
+
+- An **L2** export has a column called `City` that holds the city-council *district*
+  ("ATLANTA CITY"). The city to map is `Residence_Addresses_City` ("Atlanta").
+- **State** is part of every door's address. Map State to a column of voter IDs and every voter
+  becomes their own door — the import runs green with zero errors, and a building of 40 voters shows
+  up as 40 doors. That is why **State** and **ZIP** get a warning when none of the sample values look
+  like states or ZIP codes.
+- A required field whose column is **blank in the first rows** is flagged too — those rows would be
+  skipped.
+
+The suggestions know several vendors' column names (L2's included), and they prefer the
+**residence** address over a mailing one and the **state's voter number** over a vendor's own ID.
+The second one matters for early voting: an early-vote list only matches voters imported under the
+same ID, and the lists campaigns send are usually keyed on the state's registration number. On an L2
+file that is `Voters_StateVoterID`, not `LALVOTERID`. Once a mapping is right, **save it as a
+profile** named for the vendor, and the next file from that vendor is one click.
+
 ## Preview before you import
 
 Picking a file no longer applies it straight away. After you map the columns, click **Preview changes**
@@ -286,6 +313,12 @@ walkthrough — including when to use **Claim all Intake** vs. a saved search �
   phantom door).
 - **Near-duplicate addresses are flagged, not merged.** "123 N Main St" vs "123 North Main Street" stay
   two doors; the preview lists the pairs so you can fix the file first if you want.
+- **Two vendors' files in one campaign can double an apartment — silently.** Doors match on the exact
+  address, so `4055 Northside Dr NW Apt 25` (unit on the address line, as L2 sends it) and
+  `4055 Northside Dr NW` + `Apt 25` in Address Line 2 (a separate unit column) are two doors for one
+  apartment. The near-duplicate check above does **not** pair them — it compares the unit column
+  separately — so nothing warns you. Keep to one vendor's file per campaign, or reshape the second
+  file to match the first before uploading.
 - **A new voter at an already-knocked door doesn't re-open it.** The door keeps its status, so a
   canvasser won't be sent back automatically.
 - **Bad/odd addresses aren't validated** beyond requiring coordinates; a coordinate-less row is skipped
@@ -399,6 +432,14 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   **Confirm & import** behind an explicit "Import anyway" checkbox (`ackSkip`, reset by
   `dropReview`/`resetSelection`). The mapping step also warns early when the 5-row peek shows an error
   literal in the column mapped to State Voter ID (best-effort; the full-file preview is authoritative).
+- **The mapping step shows each mapped column's values.** Under every mapped field, `ColumnSample`
+  (ImportPage) renders up to three distinct non-blank values from that same 5-row peek, via
+  [columnSamples.js](../client/src/lib/columnSamples.js). `sampleWarning` adds a shape check for the
+  two fields whose wrong column breaks doors without an error — **State** (part of `normalizedAddress`)
+  and **ZIP** (a non-5-digit ZIP fails `zipEligible` and the door is dropped at geocoding) — and fires
+  only when *none* of the samples fit (a US state code or name from `US_STATES`; `^\d{5}(-?\d{4})?$`),
+  so one odd value never nags. A required field blank in every peeked row reads in the warning color.
+  Display only: the `sample` rows were already in the preview-headers response.
 - **On apply**, `importProcessor` captures each incoming voter's prior household, then after `applyImport`
   runs `recomputeHouseholdActive` over the touched (source ∪ destination) households and stamps
   `movedVoters`/`deactivatedDoors` onto the `ImportJob` (shown in the Recent-imports history).
@@ -678,13 +719,47 @@ fraction of a file is nearer an error than a note, yet a file the operator knows
 one-voter-per-row may still proceed.
 
 **Mapping auto-suggest is deliberately narrow**
-([canonicalFields.js](../server/src/services/import/canonicalFields.js)). Exact normalized alias
-matches win, and a header that *is* some field's alias can never be substring-claimed by a different
-field — the unrestricted bidirectional substring it replaced once suggested `stateVoterId → STATE`
-(`'statevoterid' ⊇ 'state'`), which would have collapsed an entire file to **one voter**. Substring
-fallbacks are gated both ways: alias-inside-header needs the alias ≥ 4 chars (so `cd`/`sd`/`hd` can't
-hit inside unrelated headers), header-inside-alias needs the header ≥ 6 chars (so short generic
-headers like `state` can't claim a longer alias of an unrelated field).
+([canonicalFields.js](../server/src/services/import/canonicalFields.js)). Three passes per field —
+exact, alias-inside-header, header-fragment-of-alias — and in each the field's names are tried **in
+priority order** (the first name to find a header wins; headers are tried in file order), so the most
+specific name leads: residence before bare (`residentialcity` before `city`), state-issued IDs before a
+generic `voterid`, `landline` before `phone` (which also sits inside `Telephones` on a cell column).
+Every guard answers a real wrong suggestion:
+
+- A header that *is* some field's name is never substring-claimed by another field
+  (`exactlyClaimed`) — the unrestricted bidirectional substring it replaced once suggested
+  `stateVoterId → STATE` (`'statevoterid' ⊇ 'state'`), which would have collapsed an entire file to
+  **one voter**.
+- **Exact-only names** (`EXACT_ALIASES`) rank first and never take part in the substring or fragment
+  passes. Two kinds: one vendor's exact headers (L2's `Residence_Addresses_*`, `Voters_StateVoterID`,
+  `Parties_Description`, `Voters_Active`, its two formatted phone columns), and phrases that mean
+  something else as *part* of a header (`voterregistration`, `registrationnumber` — `Voter
+  Registration Date` is not an ID).
+- **Shadows.** A substring hit that exists only inside a longer name of *another* field doesn't count:
+  `SHADOWS` blanks those names out before looking. `state` in `Voters_StateVoterID` is part of
+  `statevoterid`; `state` in `Official State Senate Districts` is part of `statesenatedistricts`.
+- **Word alignment.** Alias-inside-header needs the alias ≥ 4 chars (so `cd`/`sd`/`hd` can't hit
+  inside unrelated headers), and a 4-char alias must be whole words of the header — `wordsOf` splits at
+  separators, case changes and letter/digit edges. `unit` is not in `Hamlet_Community_Area`, `city`
+  not in `Ethnicity`, `town` not in `Township`; `Unit Number` and `Res_City` still match.
+- **Fragments.** Header-inside-alias needs the header ≥ 6 chars and a fragment of **one** field's
+  aliases only — `Residence` is part of four fields' names and is claimed by none.
+
+Measured on a real L2 `CSV_SIMPLE` export (Fulton County, GA, 12,324 rows): the old suggester proposed
+State → `Voters_StateVoterID`, City → `City` (the council-district column), Address Line 2 →
+`Hamlet_Community_Area`, and no ZIP. Accepted with ZIP mapped by hand, the validator passed all 12,324
+rows with **zero errors as 12,324 one-voter doors** (the right mapping gives 10,184). The new
+suggestion is the right mapping, field for field, pinned in
+[canonicalFields.test.js](../server/test/canonicalFields.test.js).
+
+**The suggester also picks the ID column of every Voter-ID list upload.** `parseVoterIdList` (early
+voting, walk list from CSV, do-not-contact) uses the request's `idColumn` when it names one, else
+`suggestMapping(columns).stateVoterId`, else the first header matching `/voter\s*id/i`. Only the Walk
+lists page offers a column picker; Early voting and Do-not-contact send no `idColumn`, so there the
+suggester's pick is final. Two consequences of the rules above: a registration-number header
+(`Voter Registration #`, `REGISTRATION_NUMBER`) now resolves instead of failing with "Could not detect
+a Voter ID column", and an L2-format list (`LALVOTERID` + `Voters_StateVoterID`) now matches on
+`Voters_StateVoterID` — the column an L2 voter import now maps — where it used to pick `LALVOTERID`.
 
 ## H. Geocoding (when `GEOCODE_ENABLED`)
 
