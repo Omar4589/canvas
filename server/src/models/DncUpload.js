@@ -14,6 +14,15 @@ const dncUploadSchema = new mongoose.Schema(
     alreadyFlagged: { type: Number, default: 0 }, // matched but already flagged (skipped)
     notFound: { type: Number, default: 0 }, // ids with no voter anywhere in the org (→ pending)
     doorsDropped: { type: Number, default: 0 }, // households that became fully-DNC (all campaigns)
+    // The state the list was declared for: the lookup runs inside that state's campaigns only,
+    // because two states can issue the same digits (services/import/parseVoterIdList.js). Voters the
+    // file named OUTSIDE that state were reported, not flagged — `outsideState` counts them.
+    state: { type: String, default: null, uppercase: true, trim: true },
+    outsideState: { type: Number, default: 0 },
+    // Which column the list was matched on, and how many of its IDs matched a voter only under
+    // another spelling (leading zeros ignored). Strict schema: undeclared fields drop silently.
+    idColumn: { type: String, default: null },
+    matchedViaZeros: { type: Number, default: 0 },
     undone: { type: Boolean, default: false },
     undoneAt: { type: Date, default: null },
   },

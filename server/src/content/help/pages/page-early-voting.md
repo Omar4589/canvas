@@ -9,6 +9,6 @@ summary: Upload voters who already voted so their doors drop off canvassers' boo
 tags: early voting, voted, page
 ---
 
-The **Early Voting** page is where you upload a list of voters who have already cast a ballot (matched by Voter ID). Their doors then drop off canvassers' books so nobody wastes a knock on someone who's already voted. You can preview the match before importing and undo it if needed.
+The **Early Voting** page is where you upload a list of voters who have already cast a ballot (matched by Voter ID, with or without leading zeros). Their doors then drop off canvassers' books so nobody wastes a knock on someone who's already voted. The preview names the column it matched on and lets you change it; you can preview the match before importing and undo it if needed.
 
 For the full walkthrough, see [Dropping voters who already voted](early-voting).

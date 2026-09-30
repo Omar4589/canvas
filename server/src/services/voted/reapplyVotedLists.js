@@ -1,14 +1,21 @@
-import { Voter } from '../../models/Voter.js';
 import { Household } from '../../models/Household.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
+import { canonicalVoterId } from '../../utils/voterIdKey.js';
+import { findVotersByVoterIds, clearParkedByCanonical } from '../voters/voterIdLookup.js';
 
 // "Sticky" early voting. A voted-list upload records each unmatched id as a VotedPendingId (the
 // voter wasn't in the universe yet). When that voter is later imported, this graduates the pending
 // id into a real VotedVoter row — so a door whose occupants all actually voted doesn't wrongly
 // re-open on a universe re-import. Returns the affected householdIds for the caller to recompute.
 // Idempotent; only non-undone uploads' pending ids re-apply.
+//
+// A parked id is an OUTSIDE id (it came from a list), so it is matched the way the upload matched
+// it: leading zeros ignored, inside this campaign (services/voters/voterIdLookup.js). A list that
+// lost its zeros in Excel, uploaded before the padded voter file arrived, still graduates. The
+// do-not-contact twin (services/dnc/reapplyDncLists.js) is deliberately still exact — it is
+// org-wide, and two states can issue the same digits; see docs/PROPOSAL_VOTER_ID_KEYS.md.
 export async function reapplyVotedLists(campaignId) {
   const liveUploadIds = (
     await VotedUpload.find({ campaignId, undone: { $ne: true } }, { _id: 1 }).lean()
@@ -22,20 +29,22 @@ export async function reapplyVotedLists(campaignId) {
   if (!pending.length) return { marked: 0, householdIds: [] };
 
   const org = pending[0].organizationId;
-  // stateVoterId -> uploadId to attribute the eventual mark to (first upload wins).
-  const uploadBySvid = new Map();
+  // canonical id -> uploadId to attribute the eventual mark to (first upload wins).
+  const uploadByCanonical = new Map();
   for (const p of pending) {
-    if (!uploadBySvid.has(p.stateVoterId)) uploadBySvid.set(p.stateVoterId, p.uploadId);
+    const c = canonicalVoterId(p.stateVoterId);
+    if (c != null && !uploadByCanonical.has(c)) uploadByCanonical.set(c, p.uploadId);
   }
-  const svids = [...uploadBySvid.keys()];
+  if (!uploadByCanonical.size) return { marked: 0, householdIds: [] };
 
-  // Voters now present, matched org-wide by stateVoterId then filtered to this campaign's households.
-  const voters = await Voter.find(
-    { organizationId: org, stateVoterId: { $in: svids } },
-    { _id: 1, stateVoterId: 1, householdId: 1 }
-  ).lean();
-  if (!voters.length) return { marked: 0, householdIds: [] };
-
+  // Voters now present in THIS campaign (rows are per-campaign, so the campaign scope is the whole
+  // question), whatever spelling the file parked them under.
+  const { voters } = await findVotersByVoterIds({
+    scopeFilter: { campaignId },
+    ids: pending.map((p) => p.stateVoterId),
+    projection: { _id: 1, stateVoterId: 1, householdId: 1 },
+  });
+  // Defensive: a row whose household is not this campaign's is not this campaign's voter.
   const hhIds = [...new Set(voters.map((v) => String(v.householdId)))];
   const inCampaignHh = new Set(
     (await Household.find({ _id: { $in: hhIds }, campaignId }, { _id: 1 }).lean()).map((h) => String(h._id))
@@ -45,7 +54,7 @@ export async function reapplyVotedLists(campaignId) {
 
   // These ids have graduated (their voter is now in the campaign) — drop them regardless of
   // whether a VotedVoter row already existed.
-  const gradSvids = [...new Set(present.map((v) => v.stateVoterId))];
+  const gradCanonicals = new Set(present.map((v) => canonicalVoterId(v.stateVoterId)));
 
   const already = new Set(
     (
@@ -70,7 +79,7 @@ export async function reapplyVotedLists(campaignId) {
             householdId: v.householdId,
             stateVoterId: v.stateVoterId,
             votedAt: new Date(),
-            uploadId: uploadBySvid.get(v.stateVoterId),
+            uploadId: uploadByCanonical.get(canonicalVoterId(v.stateVoterId)),
           },
         },
         upsert: true,
@@ -84,7 +93,7 @@ export async function reapplyVotedLists(campaignId) {
     // Keep each upload's `matched` count honest.
     const byUpload = new Map();
     for (const v of toMark) {
-      const k = String(uploadBySvid.get(v.stateVoterId));
+      const k = String(uploadByCanonical.get(canonicalVoterId(v.stateVoterId)));
       byUpload.set(k, (byUpload.get(k) || 0) + 1);
     }
     for (const [uid, n] of byUpload) {
@@ -92,6 +101,6 @@ export async function reapplyVotedLists(campaignId) {
     }
   }
 
-  await VotedPendingId.deleteMany({ campaignId, stateVoterId: { $in: gradSvids } });
+  await clearParkedByCanonical(VotedPendingId, { campaignId }, gradCanonicals);
   return { marked: toMark.length, householdIds: [...affected] };
 }

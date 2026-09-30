@@ -13,6 +13,11 @@ const votedUploadSchema = new mongoose.Schema(
     alreadyVoted: { type: Number, default: 0 }, // matched but already marked (skipped)
     notFound: { type: Number, default: 0 }, // ids not in this campaign's pool
     doorsDropped: { type: Number, default: 0 }, // households that became fully-voted
+    // Which column the list was matched on, and how many of its IDs matched a voter only under
+    // another spelling (leading zeros ignored). Declared here on purpose: the schema is strict, so an
+    // undeclared field would be dropped at save with no error.
+    idColumn: { type: String, default: null },
+    matchedViaZeros: { type: Number, default: 0 },
     undone: { type: Boolean, default: false },
     undoneAt: { type: Date, default: null },
   },

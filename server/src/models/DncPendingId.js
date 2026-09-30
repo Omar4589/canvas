@@ -14,6 +14,13 @@ const dncPendingIdSchema = new mongoose.Schema(
     // null = admin-set flag preserved across a campaign delete (no upload to attribute to).
     uploadId: { type: mongoose.Schema.Types.ObjectId, ref: 'DncUpload', default: null, index: true },
     stateVoterId: { type: String, required: true, trim: true },
+    // The state the list that parked this ID was declared for (null for admin-set flags preserved
+    // across a campaign delete, and for rows parked before the state scope existed). The graduation
+    // job (services/dnc/reapplyDncLists.js) honors it: a parking stamped GA graduates only onto voters
+    // in Georgia campaigns, because two states can issue the same digits; an unstamped one graduates
+    // anywhere, as before. Recorded so the zero-insensitive graduation planned for after the 2026
+    // election needs no backfill (docs/PROPOSAL_VOTER_ID_KEYS.md).
+    state: { type: String, default: null, uppercase: true, trim: true },
     // Admin's original reason, carried so graduation restores it (uploads have none).
     reason: { type: String, default: null, trim: true },
   },

@@ -48,8 +48,11 @@ Open a campaign and pick **Early Voting** from its sidebar — the campaign in t
 uploading to (shown as a read-only label, no dropdown to pick).
 
 1. Confirm the **campaign** label matches the election you mean (switch campaigns from the sidebar if not).
-2. Choose your **voted-voters CSV** (any column that looks like a Voter ID is auto-detected). A
-   **preview** runs immediately — no changes yet.
+2. Choose your **voted-voters CSV**. Any column that looks like a Voter ID is detected, and the preview
+   names it (**Matched on column**) with a few of its values, so you can see what was matched on — and
+   change the column from that dropdown if the app picked the wrong one. IDs match **with or without
+   leading zeros** (Georgia writes `08719967`; Excel turns it into `8719967`; either finds the voter),
+   and the preview says how many matched only that way. A **preview** runs immediately — no changes yet.
 3. The preview shows: **Will mark voted**, **Already voted** (skipped), **Doors that will drop**,
    and **Not in this campaign** (IDs that don't belong to this campaign's list).
 4. Click **Mark these voters voted** to apply. You'll see how many were marked and how many doors
@@ -69,7 +72,8 @@ Those IDs aren't thrown away — they're **remembered**. The next time you **imp
 them lands in the campaign, they're **automatically marked voted**, and their door drops once everyone
 there has voted (this is the "sticky" behavior — see the Lifecycle below). So a normal flow is: upload
 the voted list now (some land in *Not found*), import the new voters later, and the overlap gets marked
-on that import — no re-upload needed.
+on that import — no re-upload needed. This works however the import spells the ID: a list that lost its
+leading zeros still marks the voters when the zero-padded voter file arrives.
 
 You can upload **as many voted lists as you want** to the same campaign. **Each upload remembers its
 own unmatched IDs**, so the remembered set **grows** — it's the union across all your (non-undone)
@@ -156,10 +160,19 @@ Notes:
 ## B. Pipeline ([voted.js](../server/src/routes/admin/voted.js))
 
 1. **`parseAndMatch(campaign, buffer, idColumn)`** — PapaParse the CSV; pick the ID column
-   (explicit `idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → fail). Match **by
-   `stateVoterId`** across the org's `Voter`s, then **filter to voters whose household is in this
-   campaign**. Returns `{ col, totalRows, csvCount, inCampaign, notFound, notFoundIds }` (the
-   unmatched IDs power the "Download unmatched" button).
+   (explicit `idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → fail). Match **inside
+   this campaign** through the one outside-ID lookup,
+   [`findVotersByVoterIds`](../server/src/services/voters/voterIdLookup.js): each file ID is reduced to
+   its canonical form ([`canonicalVoterId`](../server/src/utils/voterIdKey.js): digits lose leading
+   zeros, anything with a letter is exact, all-zero is no ID) and searched under every spelling a
+   stored row could carry — the bare number and each zero-padded width up to the widest numeric ID the
+   campaign holds — in one `$in` on the existing `{campaignId, stateVoterId}` index. Symmetric: a
+   stripped list finds a padded campaign, a padded list finds an unpadded one. Returns
+   `{ col, totalRows, csvCount (distinct IDs), spellings, noId, inCampaign, notFound, notFoundIds (the
+   file's spellings), matchedViaZeros, zeroMatchExample, sampleIds }`; the unmatched IDs power the
+   "Download unmatched" button. A structural test
+   ([`voterIdChokePoint.test.js`](../server/test/voterIdChokePoint.test.js)) fails the build if any
+   other file looks up an outside ID by exact string.
 2. **`classify(campaign, inCampaign)`** — split into `newly` (no existing `VotedVoter`) vs
    `alreadyCount`, and the `affected` household ids.
 3. **`previewDrops(...)`** — dry-run union: how many `affected` households would become fully-voted
@@ -181,7 +194,10 @@ Notes:
    `VotedVoter` (pending row deleted). Then `recomputeFullyVoted` runs over the union of those doors
    and the currently-dropped doors. So a voter who was on a prior list stays marked (the door doesn't
    wrongly re-open, and a brand-new all-voted household drops), while a **genuinely new, un-voted**
-   voter still re-opens its door.
+   voter still re-opens its door. Graduation matches the way the upload matched — leading zeros
+   ignored, inside the campaign — and clears parked rows by canonical ID, whatever spelling they were
+   parked under. (Its do-not-contact twin, `reapplyDncLists`, is deliberately exact: it is org-wide,
+   and two states can issue the same digits; see [VOTERS.md](VOTERS.md).)
 
 ## C. Endpoint reference
 
@@ -190,11 +206,11 @@ admin-only, campaign loaded/validated per request.
 
 | Method · path | Body | Returns |
 |---|---|---|
-| `POST /preview` | `multipart/form-data`: `file` (+ optional `idColumn`) | `{ idColumn, columns, totalRows, idsInFile, matched, willMark, alreadyVoted, notFound, notFoundIds, doorsWillDrop }` — no writes |
-| `POST /import` | same | `{ uploadId, matched, marked, alreadyVoted, notFound, notFoundIds, doorsDropped, totalRows }` |
+| `POST /preview` | `multipart/form-data`: `file` (+ optional `idColumn`) | `{ idColumn, columns, sampleIds, totalRows, idsInFile, spellings, noId, matched, matchedViaZeros, zeroMatchExample, willMark, alreadyVoted, notFound, notFoundIds, doorsWillDrop }` — no writes. `idsInFile` counts distinct IDs (two spellings of one ID once); `noId` rows (blank, all-zero) are never looked up or parked, so `idsInFile = matched + notFound` when the campaign holds each person once |
+| `POST /import` | same | `{ uploadId, idColumn, matched, matchedViaZeros, zeroMatchExample, noId, marked, alreadyVoted, notFound, notFoundIds, doorsDropped, totalRows }`; the `VotedUpload` records `idColumn` and `matchedViaZeros` |
 | `GET /` | — | `{ uploads:[…last 50…], totalVoted, fullyVotedDoors }` |
 | `POST /undo` | `{ uploadId }` | `{ ok, removed }` — un-marks a whole upload |
-| `POST /unmark` | `{ stateVoterId }` | `{ ok, removed, reopened }` — un-marks one voter, re-opens the door if needed |
+| `POST /unmark` | `{ stateVoterId }` | `{ ok, removed, reopened }` — un-marks one voter, typed with or without leading zeros; every row the ID names in this campaign is un-marked (`removed` counts them) and their doors recomputed |
 
 `notFoundIds` is capped at 10k and powers the web "Download unmatched" button.
 
@@ -251,6 +267,15 @@ Resolved (kept here so the history is clear):
   who was on a prior list and is imported later is still marked — the door doesn't wrongly re-open,
   and a brand-new all-voted household drops. Only a genuinely **new, un-voted** voter re-opens a door.
   Undoing an upload also clears its pending ids so they never re-apply.
+- **Leading zeros are ignored, in both directions (2026-09-30).** Georgia pads IDs to eight digits
+  (`08719967`) and Excel strips the zeros the moment a file is saved; Nebraska, Connecticut and Kentucky
+  files number voters without padding, so the state's own padded file would miss them. Every outside
+  ID (uploaded, typed, parked) now goes through `services/voters/voterIdLookup.js`, which searches every
+  spelling at once; the preview reports `matchedViaZeros` with an example pair, and the page shows
+  the column it matched on with a dropdown to change it. Stored IDs keep the spelling their file used;
+  only the matching changed. The import side is a **gate**, not a match: a voter file whose IDs name
+  existing voters only by zeros is refused by the worker (see [IMPORTS.md](IMPORTS.md)). Background and
+  the deferred parts (adoption or a stored key, the do-not-contact job): [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 - **Multiple uploads accumulate pending ids.** `VotedPendingId`'s `{campaignId, stateVoterId}` index is
   **non-unique**, so each upload banks its **own** unmatched ids (one row per upload); the pending pool
   is the **union** across non-undone uploads, so re-uploading another list grows it. `reapplyVotedLists`

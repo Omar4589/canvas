@@ -5,6 +5,7 @@ import { Person } from '../../models/Person.js';
 import { normalizeAddress, looseAddressKey } from '../../utils/normalizeAddress.js';
 import { forecast as geocodeForecast } from './geocode/geocodeService.js';
 import { IDENTITY_FIELDS, identityEq } from '../person/propagateIdentity.js';
+import { zeroOnlyMatchesForMisses } from '../voters/voterIdLookup.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const SAMPLE_CAP = 100;
@@ -111,6 +112,16 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
   const existingBySvid = new Map(existingVoters.map((v) => [v.stateVoterId, v]));
   const updatedVoters = existingBySvid.size;
   const newVoters = Math.max(0, validRows.length - updatedVoters);
+
+  // Of the "new" voters, how many are existing voters under another spelling of the same ID (a
+  // file that went through Excel and lost its leading zeros, or the reverse)? The upsert is exact,
+  // so each of these would be inserted a SECOND time. The worker refuses such an import outright
+  // (importProcessor.js); the preview shows the count and an example pair first so the file can be
+  // fixed before anyone waits on a job.
+  const zeroOnly = await zeroOnlyMatchesForMisses(
+    campaignId,
+    svids.filter((s) => !existingBySvid.has(s))
+  );
 
   // Current address of each existing voter's household (this campaign only).
   const fromHhIds = [...new Set(existingVoters.map((v) => String(v.householdId)).filter((s) => s && s !== 'null'))];
@@ -277,6 +288,8 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       movedVoters,
       orphanedDoors,
       nearDuplicates,
+      // Counted inside newVoters: file IDs naming an existing voter under another spelling.
+      zeroOnlyMatches: zeroOnly.count,
     },
     // coordConflicts: addresses whose rows asserted DIFFERENT pins (beyond rooftop-vs-parcel
     // noise). `ties` is the subset the file couldn't settle by majority or state bounds —
@@ -298,6 +311,8 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       orphans,
       nearDups,
       dupValues,
+      // { file, stored } pairs — the direction tells which side lost (or gained) the zeros.
+      zeroOnly: zeroOnly.examples,
       // No errors sample: the client never read it, and the preview path persisted
       // the whole diff to ImportJob.diff — raw per-row error objects (with voter
       // ids) were being stored twice for nothing (ImportJob.errors already has them).

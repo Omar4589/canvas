@@ -110,7 +110,16 @@ statuses above it isn't about what happened; it's a standing request:
   recorded as a note on the voter, so the history lives in the profile and the Notes hub. You can
   also upload a whole **do-not-contact list** (a CSV of Voter IDs) from the Voters page — it works
   like the Early Voting upload, with a preview, per-upload undo, and "sticky" ids that flag voters
-  who enter your universe later.
+  who enter your universe later. **The list is for one state, and the upload asks which:** IDs are
+  matched inside that state's campaigns only (leading zeros ignored, either way round), because two
+  states can issue the same digits. Anything the file names outside that state is **reported with a
+  download, never flagged**; a list covering two states is two uploads. A remembered id is stamped
+  with the state and only ever flags a voter in that state's campaigns, when they arrive under the
+  exact id the list carried (the do-not-contact graduation stays exact on purpose; re-upload the list
+  after the import if it was spelled differently). Technical detail:
+  [`parseAndMatchState`](../server/src/services/import/parseVoterIdList.js) and
+  [`reapplyDncLists`](../server/src/services/dnc/reapplyDncLists.js); the reasoning in
+  [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 - **What it does**: the voter drops out of every walk-list voter set and **walk-list CSV export**
   (even lists saved before the flag), canvassers see a "Do not contact" badge on the voter and the
   survey is disabled for them (the server refuses one regardless), and once **every** voter at a

@@ -84,6 +84,19 @@ before(async () => {
     voter(org._id, campA._id, dPre._id, 'UP-PRE', 'Pat'),
     voter(org._id, campB._id, dB1._id, 'UP-B1', 'Bob'),
   ]);
+  // Numeric IDs for the leading-zero cases (tests 14+): a padded Floridian, an unpadded one whose
+  // digits a GEORGIA voter shares, and a Georgia-only voter. Their doors are their own, so the
+  // door-drop counts in tests 9-13 are untouched.
+  const campG = await Campaign.create({ organizationId: org._id, name: 'Camp G', type: 'survey', state: 'GA', isActive: true });
+  const [dNum, dFlo] = await Household.insertMany([hh(org._id, campA._id), hh(org._id, campA._id)]);
+  const [dGa1, dGa2] = await Household.insertMany([hh(org._id, campG._id, { state: 'GA' }), hh(org._id, campG._id, { state: 'GA' })]);
+  await Voter.insertMany([
+    voter(org._id, campA._id, dNum._id, '00097985', 'Brian'),
+    voter(org._id, campA._id, dFlo._id, '1234', 'Flo'),
+    voter(org._id, campG._id, dGa1._id, '0001234', 'Alice'),
+    voter(org._id, campG._id, dGa2._id, '55555', 'Gus'),
+  ]);
+  Object.assign(ctx, { campG });
 
   // The pre-existing ADMIN flag (uploadId null) the upload must count as alreadyFlagged and
   // whose stamp apply/undo must never touch.
@@ -121,10 +134,12 @@ async function call(method, path, { token, orgId, body } = {}) {
   return { status: res.status, json };
 }
 
-// Real multipart upload (field name 'file'), exactly as the web console sends it.
-async function uploadCsv(path, csv) {
+// Real multipart upload (field name 'file'), exactly as the web console sends it. A do-not-contact
+// list is declared for ONE state (both seeded campaigns are in Florida).
+async function uploadCsv(path, csv, fields = { state: 'FL' }) {
   const fd = new FormData();
   fd.append('file', new Blob([csv], { type: 'text/csv' }), 'dnc-list.csv');
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   const res = await fetch(`${base}/api${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
@@ -297,4 +312,105 @@ test('13. undoImport keep-guards: DNC voters and fully-DNC doors survive an impo
   assert.strictEqual(result.doorsSkipped, 2);
   assert.strictEqual(result.votersSkipped, 2);
   assert.strictEqual(result.skipReasons['fully do-not-contact'], 1, 'the fully-DNC door records its keep reason');
+});
+
+// ── Leading zeros and the state scope (2026-09-30) ─────────────────────────────────────────────
+// The lookup ignores leading zeros in both directions but runs INSIDE the declared state's
+// campaigns only: a stripped Georgia 1234 and a genuine Florida 1234 are the same bytes, so the
+// upload says which state it is for. Outside-state matches are reported, never flagged.
+
+test('14. the state is required, and the 400 lists the states the picker should offer', { skip }, async () => {
+  const r = await uploadCsv('/admin/dnc/preview', 'Voter ID\n97985\n', {});
+  assert.strictEqual(r.status, 400);
+  assert.strictEqual(r.json.code, 'STATE_REQUIRED');
+  assert.deepStrictEqual(r.json.states, ['FL', 'GA']);
+  const bad = await uploadCsv('/admin/dnc/preview', 'Voter ID\n97985\n', { state: 'TX' });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(bad.json.code, 'STATE_UNKNOWN');
+  const hist = await call('GET', '/admin/dnc', { token: ctx.adminTok, orgId: ctx.org._id });
+  assert.deepStrictEqual(hist.json.states, ['FL', 'GA'], 'the history payload carries the states too');
+});
+
+test('15. inside the state, a stripped ID matches the padded voter; outside-state hits are reported, not flagged', { skip }, async () => {
+  // 97985 → Brian (FL, stored 00097985) by zeros. 1234 → Flo (FL, exact) AND Alice (GA, 0001234):
+  // reported as outside-state, also-in-state. 55555 → Gus (GA only): not in FL, reported, parked for
+  // FL like any unmatched id (the admin declared the list Floridian). 0 → no ID.
+  const r = await uploadCsv('/admin/dnc/preview', 'Voter ID\n97985\n1234\n55555\n0\n');
+  assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+  assert.strictEqual(r.json.state, 'FL');
+  assert.strictEqual(r.json.noId, 1);
+  assert.strictEqual(r.json.idsInFile, 3);
+  assert.strictEqual(r.json.matched, 2, 'Brian and Flo');
+  assert.strictEqual(r.json.matchedViaZeros, 1);
+  assert.deepStrictEqual(r.json.zeroMatchExample, { file: '97985', stored: '00097985' });
+  assert.strictEqual(r.json.notFound, 1);
+  assert.deepStrictEqual(r.json.notFoundIds, ['55555']);
+  assert.strictEqual(r.json.idsInFile, r.json.matched + r.json.notFound);
+  assert.strictEqual(r.json.outsideState.count, 2);
+  const byId = Object.fromEntries(r.json.outsideState.samples.map((s) => [s.id, s]));
+  assert.deepStrictEqual(byId['1234'], { id: '1234', states: ['GA'], exact: false, alsoInState: true });
+  assert.deepStrictEqual(byId['55555'], { id: '55555', states: ['GA'], exact: true, alsoInState: false });
+  assert.deepStrictEqual(r.json.outsideState.ids.sort(), ['1234', '55555']);
+
+  const applied = await uploadCsv('/admin/dnc/import', 'Voter ID\n97985\n1234\n55555\n0\n');
+  assert.strictEqual(applied.status, 200, JSON.stringify(applied.json));
+  assert.strictEqual(applied.json.flagged, 2);
+  assert.strictEqual(await Voter.countDocuments({ stateVoterId: { $in: ['00097985', '1234'] }, 'doNotContact.flagged': true }), 2);
+  assert.strictEqual(await Voter.countDocuments({ campaignId: ctx.campG._id, 'doNotContact.flagged': true }), 0, 'nothing outside the state was flagged');
+  const upl = await DncUpload.findOne({ _id: applied.json.uploadId }).lean();
+  assert.deepStrictEqual(
+    { state: upl.state, outsideState: upl.outsideState, idColumn: upl.idColumn, matchedViaZeros: upl.matchedViaZeros },
+    { state: 'FL', outsideState: 2, idColumn: 'Voter ID', matchedViaZeros: 1 },
+    'read back from the record'
+  );
+  const parked = await DncPendingId.findOne({ stateVoterId: '55555' }).lean();
+  assert.strictEqual(parked.state, 'FL', 'parked for the declared state');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '0' }), 0, 'an all-zero value is never parked');
+});
+
+test('16. parked IDs are cleared by canonical ID, but only for the declared state (or legacy rows without one)', { skip }, async () => {
+  await DncPendingId.insertMany([
+    { organizationId: ctx.org._id, uploadId: null, stateVoterId: '000123456', state: 'GA' }, // Georgia's own parking of these digits
+    { organizationId: ctx.org._id, uploadId: null, stateVoterId: '0123456', state: null }, // parked before states were recorded
+  ]);
+  const d = await Household.create(hh(ctx.org._id, ctx.campA._id));
+  await Voter.create(voter(ctx.org._id, ctx.campA._id, d._id, '123456', 'Six'));
+  const r = await uploadCsv('/admin/dnc/import', 'Voter ID\n00123456\n');
+  assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+  assert.strictEqual(r.json.flagged, 1, 'the Floridian, matched by zeros from a padded list');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '0123456' }), 0, 'the legacy parking of the same digits is cleared');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '000123456', state: 'GA' }), 1, 'Georgia\'s parking survives an FL upload');
+  await DncPendingId.deleteMany({ stateVoterId: '000123456' });
+});
+
+test('17. the sticky job stays exact but honors the declared state; spellings still do not graduate', { skip }, async () => {
+  // Test 15 parked 55555 for FLORIDA. Georgia's Gus holds 55555 exactly. The org-wide job must
+  // NOT flag him — that would be the wrong state's voter, the very thing the state scope forbids.
+  const first = await reapplyDncLists(ctx.org._id);
+  assert.strictEqual(first.flagged, 0, 'a Florida parking never graduates onto a Georgia voter');
+  assert.strictEqual(await Voter.countDocuments({ campaignId: ctx.campG._id, 'doNotContact.flagged': true }), 0);
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '55555', state: 'FL' }), 1, 'still parked, still waiting for a Floridian');
+
+  // Exact only, on purpose: a padded voter does not graduate a stripped parking.
+  const r = await uploadCsv('/admin/dnc/import', 'Voter ID\n88888\n');
+  assert.strictEqual(r.json.notFound, 1);
+  const d = await Household.create(hh(ctx.org._id, ctx.campA._id));
+  await Voter.create(voter(ctx.org._id, ctx.campA._id, d._id, '00088888', 'Eight'));
+  const g = await reapplyDncLists(ctx.org._id);
+  assert.strictEqual(g.flagged, 0, 'exact only: the padded voter does not graduate the stripped parking');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '88888' }), 1);
+  // The recovery the help text describes: re-upload the list after the import, and it matches.
+  const again = await uploadCsv('/admin/dnc/import', 'Voter ID\n88888\n');
+  assert.strictEqual(again.json.flagged, 1);
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '88888' }), 0, 'and the old parking is cleared');
+
+  // An UNSTAMPED parking (an admin flag preserved across a campaign delete, or a row parked before
+  // states were recorded) graduates anywhere, as it always has — and only it is cleared.
+  await DncPendingId.create({ organizationId: ctx.org._id, uploadId: null, stateVoterId: '55555', state: null, reason: 'asked at the door' });
+  const legacy = await reapplyDncLists(ctx.org._id);
+  assert.strictEqual(legacy.flagged, 1, 'Gus, via the unstamped parking');
+  const gus = await Voter.findOne({ campaignId: ctx.campG._id, stateVoterId: '55555' }).lean();
+  assert.strictEqual(gus.doNotContact.reason, 'asked at the door');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '55555', state: null }), 0, 'the unstamped parking graduated');
+  assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '55555', state: 'FL' }), 1, 'the Florida parking is untouched');
 });

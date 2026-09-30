@@ -980,6 +980,24 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    has no account, no access/correction/deletion route; a DSAR is still a manual process that an
    admin tools through the console. The flag is per-org (dies with the org's data — a
    platform-sticky DNC would be a new cross-org retention promise; deliberately out).
+   *[v5 2026-09-30: **mechanism changed, no published sentence changes.** The do-not-contact list
+   upload now (a) requires the STATE the list is for and matches only inside that state's campaigns,
+   because two states can issue the same digits and a stripped Georgia id is byte-identical to a
+   genuine Nebraska one; (b) matches with leading zeros ignored (both directions) inside that state,
+   so a list that went through Excel still honors the request; (c) reports — with a downloadable id
+   list — any voter the file names OUTSIDE the state, and never flags or remembers them for that
+   state; (d) stamps each remembered `DncPendingId` with the state, and the exact graduation job
+   (`reapplyDncLists`) now honors that stamp: a Georgia parking can only ever flag a voter in a
+   Georgia campaign (an unstamped parking — an admin flag preserved across a campaign delete, rows
+   parked before the stamp — graduates anywhere, as before). `DncUpload` records `state`,
+   `outsideState`, `idColumn`, `matchedViaZeros` (file metadata, not personal data). Net effect on
+   the promise: strictly narrower — wider matching can only reach the same voter under another
+   spelling, and the state scope removes a way the old org-wide exact match could flag a stranger.
+   The early-voting upload and its graduation job gained the same zero-insensitive matching
+   (campaign-scoped, so no cross-state question). Nothing new is collected, no new recipient; the
+   Privacy Policy's voter-identification-number sentence already covers the field. Code:
+   `services/import/parseVoterIdList.js`, `services/voters/voterIdLookup.js`,
+   `services/dnc/reapplyDncLists.js`; tests `dncUpload.int.test.js` 14–17, `votedUpload.int.test.js`.]*
 2. **Grants are self-issued.** No approver; `break_glass` can list all live grants (visibility, not
    approval). The policy carefully does not claim otherwise — keep it that way. *[v4 2026-07-17:
    narrowed — customers are now NOTIFIED automatically on every new grant (see E12 stamp). The

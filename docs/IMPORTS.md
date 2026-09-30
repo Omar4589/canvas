@@ -244,6 +244,17 @@ explicit *"Import anyway — skip N rows"* acknowledgment — the escape hatch w
 re-exported is to map a different column that uniquely identifies each person (a vendor ID) as State
 Voter ID.
 
+**A file that lost its leading zeros is refused, not doubled.** Some states pad voter IDs with zeros
+(Georgia: `08719967`) and Excel strips them the moment a file is saved. The importer matches an existing
+voter by the exact ID, so a re-sent file that lost its zeros would import every voter a **second time**.
+The preview now says, in red, how many of the "new" voters are really existing voters under another
+spelling of the same ID, with an example pair that shows which side has the zeros (`file 8719967 → stored
+08719967`, or the reverse for a campaign whose IDs are plain numbers, like Nebraska's), and **Confirm &
+import** stays off. There is no "import anyway": inside one campaign the same digits are always the
+same person, so confirming could only create duplicates. The fix is the file: ask for an untouched
+export, or make the ID column match the campaign's spelling, and upload again. The import worker checks
+the same thing before writing, so nothing gets past the button either.
+
 ## File size & large files
 
 Uploads are capped at **50 MB and 300,000 rows** (a 50 MB file is roughly 150k–250k voter rows). An
@@ -432,6 +443,17 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   **Confirm & import** behind an explicit "Import anyway" checkbox (`ackSkip`, reset by
   `dropReview`/`resetSelection`). The mapping step also warns early when the 5-row peek shows an error
   literal in the column mapped to State Voter ID (best-effort; the full-file preview is authoritative).
+- **The zero gate (2026-09-30).** After the exact existing-voter lookup, `computeImportDiff` hands the
+  misses to [`zeroOnlyMatchesForMisses`](../server/src/services/voters/voterIdLookup.js), which looks
+  them up under every zero-padded spelling inside the campaign; `totals.zeroOnlyMatches` (counted
+  *inside* `newVoters`, which the exact forecast cannot tell apart) and `samples.zeroOnly` (`{ file,
+  stored }` pairs, capped) reach the review panel, which shows the red callout (`zeroGateText` in
+  [idListPreview.js](../client/src/lib/idListPreview.js)) and disables Confirm. The worker enforces it
+  regardless of the browser: [`importProcessor`](../server/src/services/import/importProcessor.js) runs
+  the same check on the linked rows right before `applyImport` and fails the job with
+  `errors[0].code === 'ZERO_ONLY_MATCHES'` (an `UnrecoverableError`, so BullMQ does not retry — the
+  file will not change on its own). Only the preview and the write path know about it; the upsert stays
+  exact. Test: [`importZeroGate.int.test.js`](../server/test/importZeroGate.int.test.js), both directions.
 - **The mapping step shows each mapped column's values.** Under every mapped field, `ColumnSample`
   (ImportPage) renders up to three distinct non-blank values from that same 5-row peek, via
   [columnSamples.js](../client/src/lib/columnSamples.js). `sampleWarning` adds a shape check for the
@@ -754,9 +776,10 @@ suggestion is the right mapping, field for field, pinned in
 
 **The suggester also picks the ID column of every Voter-ID list upload.** `parseVoterIdList` (early
 voting, walk list from CSV, do-not-contact) uses the request's `idColumn` when it names one, else
-`suggestMapping(columns).stateVoterId`, else the first header matching `/voter\s*id/i`. Only the Walk
-lists page offers a column picker; Early voting and Do-not-contact send no `idColumn`, so there the
-suggester's pick is final. Two consequences of the rules above: a registration-number header
+`suggestMapping(columns).stateVoterId`, else the first header matching `/voter\s*id/i`. All three
+pages show the pick (**Matched on column**, with sample values) and let the admin change it through the
+shared [`IdColumnPicker`](../client/src/components/IdColumnPicker.jsx); the apply always sends the
+column the preview matched on. Two consequences of the rules above: a registration-number header
 (`Voter Registration #`, `REGISTRATION_NUMBER`) now resolves instead of failing with "Could not detect
 a Voter ID column", and an L2-format list (`LALVOTERID` + `Voters_StateVoterID`) now matches on
 `Voters_StateVoterID` — the column an L2 voter import now maps — where it used to pick `LALVOTERID`.

@@ -5,32 +5,35 @@ audience: lead
 kind: faq
 order: 74
 sourceDoc: EARLY_VOTING.md
-summary: The list has probably lost its leading zeros in Excel — how to tell, and how to put them back before you upload.
-tags: early voting, do not contact, walk list, voter id, leading zeros, excel, not found, not in this campaign
+summary: Leading zeros no longer matter — so if a list still matches almost nothing, it's the column, the state, or a file that isn't a list of this campaign's voters.
+tags: early voting, do not contact, walk list, voter id, leading zeros, excel, not found, not in this campaign, matched on column
 ---
 
-Almost always, the list **lost its leading zeros**. Some states (Georgia, for one) write voter IDs a
-fixed width with zeros in front, like `08719967`. Excel reads that as a number and shows `8719967`,
-and the moment someone saves the file, the zero is gone for good. The app matches IDs exactly, so
-`8719967` and `08719967` don't match, and the preview says **Not in this campaign** (or **Not found**)
-for most of the file.
+**Leading zeros are not the reason any more.** Some states write voter IDs with zeros in front
+(Georgia: `08719967`), and Excel turns that into `8719967` the moment a file is saved. Uploads now match
+IDs **with or without** those zeros, in either direction, and the preview tells you how many matched that
+way (*"1,190 matched only after ignoring leading zeros"*). Nothing to fix in the file.
 
-**How to tell.** Open a voter in the app and look at their Voter ID: if it starts with `0` and the IDs
-in your file don't, that's it. The few that *did* match are usually the newest voters, whose IDs happen
-not to start with a zero. Also check **Matched on column** in the preview; if it names the wrong
-column, that's the other reason a list matches nothing.
+So if a list still matches almost nothing, check these, in order:
 
-**How to fix the file.**
+1. **Matched on column.** The preview names the column it matched on and shows a few of its values. If
+   it picked the wrong one (a vendor's own ID instead of the state's number, say), choose the right
+   column from that dropdown; the preview re-runs on it.
+2. **The state**, for a do-not-contact list. The upload only looks inside the campaigns of the state you
+   picked, because two states can issue the same digits. If the preview reports IDs *outside* that
+   state, they belong to another state's list.
+3. **The campaign.** "Not in this campaign" means those voters were never imported into *this*
+   campaign's universe — the list covers the whole county, the campaign a targeted slice. That's normal;
+   those IDs are remembered and marked automatically if the voters are imported later.
 
-1. In a spreadsheet, add a column next to the IDs with `=TEXT(A2,"00000000")`, using as many zeros as
-   the IDs in the app are digits wide (eight for Georgia). Fill it down.
-2. Copy that column and paste it **as values** over the original ID column.
-3. Save as CSV and upload again. The preview should now show most IDs matching.
+**A voter file, not a list?** If it's the **Voter Import** page refusing a file with a red note about
+leading zeros, that's a different thing: the file names voters already in the campaign under another
+spelling of their ID, and importing it would add each of them a second time. The note shows a pair
+(*file 8719967 → stored 08719967*) and says which side has the zeros; ask for an untouched export, or
+make the ID column match the campaign's spelling, and upload again.
 
-Or ask whoever sent the list for a fresh export with the ID column as **text**.
+Two habits still help: don't open a voter file in Excel before uploading it, and know that *Save As
+CSV* strips the zeros too. The upload copes; the Voter Import page will tell you.
 
-**How to avoid it.** Don't open a voter list in Excel before uploading it. If you have to, format the ID
-column as **Text** first, and know that *Save As CSV* strips the zeros too.
-
-The same applies to a [walk list from CSV](saved-searches), and to the do-not-contact lists admins upload.
-The full walkthrough for the upload itself is in [Dropping voters who already voted](early-voting).
+The upload walkthrough is in [Dropping voters who already voted](early-voting); walk lists from a CSV
+are in [Saved searches](saved-searches).

@@ -8,8 +8,10 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { DncUpload } from '../../models/DncUpload.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
-import { parseAndMatchOrg, NOT_FOUND_CAP } from '../../services/import/parseVoterIdList.js';
+import { parseAndMatchState, NOT_FOUND_CAP } from '../../services/import/parseVoterIdList.js';
 import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
+import { canonicalVoterId } from '../../utils/voterIdKey.js';
+import { clearParkedByCanonical } from '../../services/voters/voterIdLookup.js';
 
 // Do-not-contact list uploads. ORG-LEVEL on purpose, twice over: the flag is an org-wide fact on
 // the Voter (there is no campaignId to nest under — a nested route would falsely imply campaign
@@ -88,25 +90,39 @@ async function previewDrops(orgId, affected, newlyVoterIds) {
   return { doorsWillDrop, dropsByCampaign };
 }
 
+// The list is for ONE state, and the upload must say which: the lookup runs inside that state's
+// campaigns only, because two states can issue the same digits and nothing in the file can tell a
+// stripped Georgia id from a genuine Nebraska one (services/import/parseVoterIdList.js). Anything
+// the file names outside the state is reported, never flagged.
+const stateOf = (req) => String(req.body?.state || '').trim().toUpperCase();
+const matchFailure = (res, m) => res.status(400).json({ error: m.error, code: m.code || null, columns: m.columns, states: m.states || [] });
+
 // Dry run — no writes.
 router.post('/preview', upload.single('file'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const m = await parseAndMatchOrg(activeOrgId(req), req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    const m = await parseAndMatchState(activeOrgId(req), stateOf(req), req.file.buffer, req.body?.idColumn);
+    if (m.error) return matchFailure(res, m);
     const { newly, alreadyCount, affected, matchedPeople, willFlagPeople } = classify(m.matched);
     const { doorsWillDrop, dropsByCampaign } = await previewDrops(activeOrgId(req), affected, newly.map((v) => v._id));
     res.json({
+      state: m.state,
       idColumn: m.col,
       columns: m.columns,
+      sampleIds: m.sampleIds,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,
+      spellings: m.spellings,
+      noId: m.noId,
       matched: matchedPeople,
+      matchedViaZeros: m.matchedViaZeros,
+      zeroMatchExample: m.zeroMatchExample,
       willFlag: willFlagPeople,
       alreadyFlagged: alreadyCount,
       notFound: m.notFound,
       notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
+      outsideState: m.outsideState,
       doorsWillDrop,
       dropsByCampaign,
     });
@@ -120,8 +136,8 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const m = await parseAndMatchOrg(activeOrgId(req), req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    const m = await parseAndMatchState(activeOrgId(req), stateOf(req), req.file.buffer, req.body?.idColumn);
+    if (m.error) return matchFailure(res, m);
     const { newly, alreadyCount, affected, matchedPeople, willFlagPeople } = classify(m.matched);
 
     const uploadDoc = await DncUpload.create({
@@ -131,6 +147,10 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
       totalRows: m.totalRows,
       alreadyFlagged: alreadyCount,
       notFound: m.notFound,
+      state: m.state,
+      outsideState: m.outsideState.count,
+      idColumn: m.col,
+      matchedViaZeros: m.matchedViaZeros,
     });
 
     if (newly.length) {
@@ -174,23 +194,34 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
         organizationId: activeOrgId(req),
         uploadId: uploadDoc._id,
         stateVoterId,
+        state: m.state,
       }));
       for (let i = 0; i < pendingDocs.length; i += 2000) {
         await DncPendingId.insertMany(pendingDocs.slice(i, i + 2000), { ordered: false });
       }
     }
-    const matchedSvids = m.matched.map((v) => v.stateVoterId);
-    if (matchedSvids.length) {
-      await DncPendingId.deleteMany({ organizationId: activeOrgId(req), stateVoterId: { $in: matchedSvids } });
-    }
+    // Whatever spelling an earlier list parked them under, these people are flagged now — but only
+    // rows parked for THIS state (or before states were recorded); a sibling state's parking of the
+    // same digits is somebody else's request.
+    await clearParkedByCanonical(
+      DncPendingId,
+      { organizationId: activeOrgId(req), $or: [{ state: m.state }, { state: null }] },
+      m.matched.map((v) => canonicalVoterId(v.stateVoterId))
+    );
 
     res.json({
       uploadId: String(uploadDoc._id),
+      state: m.state,
+      idColumn: m.col,
       matched: matchedPeople,
+      matchedViaZeros: m.matchedViaZeros,
+      zeroMatchExample: m.zeroMatchExample,
+      noId: m.noId,
       flagged: willFlagPeople,
       alreadyFlagged: alreadyCount,
       notFound: m.notFound,
       notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
+      outsideState: m.outsideState,
       doorsDropped,
       totalRows: m.totalRows,
     });
@@ -240,7 +271,7 @@ router.post('/undo', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    const [uploads, flaggedAgg, fullyDncDoors] = await Promise.all([
+    const [uploads, flaggedAgg, fullyDncDoors, states] = await Promise.all([
       DncUpload.find({ organizationId: activeOrgId(req) })
         .sort({ createdAt: -1 })
         .limit(50)
@@ -254,11 +285,15 @@ router.get('/', async (req, res, next) => {
         { $count: 'n' },
       ]),
       Household.countDocuments({ organizationId: activeOrgId(req), fullyDnc: true }),
+      // The states the upload's State picker offers: every state this organization runs a campaign
+      // in (archived ones included — their voters still exist and can still be flagged).
+      Campaign.distinct('state', { organizationId: activeOrgId(req) }),
     ]);
     const totalFlagged = flaggedAgg[0]?.n || 0;
     res.json({
       totalFlagged,
       fullyDncDoors,
+      states: states.filter(Boolean).sort(),
       uploads: uploads.map((u) => ({
         id: String(u._id),
         fileName: u.fileName,
@@ -269,6 +304,10 @@ router.get('/', async (req, res, next) => {
         alreadyFlagged: u.alreadyFlagged,
         notFound: u.notFound,
         doorsDropped: u.doorsDropped,
+        state: u.state || null,
+        outsideState: u.outsideState || 0,
+        idColumn: u.idColumn || null,
+        matchedViaZeros: u.matchedViaZeros || 0,
         undone: u.undone,
         undoneAt: u.undoneAt,
       })),

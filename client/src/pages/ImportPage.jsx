@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { columnSamples, sampleWarning } from '../lib/columnSamples.js';
+import { zeroGateText } from '../lib/idListPreview.js';
 import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 
@@ -126,6 +127,20 @@ function ReviewPanel({ diff }) {
       <p className="mt-2 text-xs text-fg-muted">
         {fmt(totals.validCount)} of {fmt(totals.totalRows)} rows in the file will import.
       </p>
+
+      {/* The zero gate. "New voters" above counts these as new — the exact forecast cannot see
+          that 8719967 and 08719967 are one person — but importing them would add each a second
+          time, so the worker refuses the import outright. Said here first, with the pair and
+          which side has the zeros, so the file gets fixed before anyone waits on a job. */}
+      {totals.zeroOnlyMatches > 0 && (() => {
+        const gate = zeroGateText({ zeroOnlyMatches: totals.zeroOnlyMatches, newVoters: totals.newVoters, example: samples.zeroOnly?.[0] || null });
+        return (
+          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
+            <p className="text-sm font-semibold">{gate.title}</p>
+            <p className="mt-1">{gate.body}</p>
+          </div>
+        );
+      })()}
 
       {/* A broken ID column (spreadsheet error literals) or a heavy skip share is a
           file problem, not routine cleanup — say so in red, with the repeated values
@@ -731,6 +746,10 @@ export default function ImportPage() {
   const skippedRows = diff ? skippedRowCount(diff.rowIssues) : 0;
   const skipShare = diff?.totals?.totalRows ? skippedRows / diff.totals.totalRows : 0;
   const needsSkipAck = skipShare > SKIP_ACK_SHARE;
+  // The zero gate has no "anyway": the worker would refuse the job regardless (importProcessor),
+  // and inside one campaign a zero-only match is always the same person, so confirming could only
+  // ever create duplicates. The review panel's red callout says what to fix.
+  const zeroBlocked = (diff?.totals?.zeroOnlyMatches || 0) > 0;
   const previewPending =
     enqueuePreview.isPending ||
     Boolean(previewJobId && previewAsyncJob?.status !== 'completed' && previewAsyncJob?.status !== 'failed');
@@ -1017,7 +1036,8 @@ export default function ImportPage() {
               </button>
               <button
                 onClick={() => upload.mutate({ file, campaignId, mapping, explode })}
-                disabled={upload.isPending || (needsSkipAck && !ackSkip)}
+                disabled={upload.isPending || (needsSkipAck && !ackSkip) || zeroBlocked}
+                title={zeroBlocked ? 'This file names voters already in the campaign under another spelling of their ID — fix the file first (see the red note above).' : undefined}
                 className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
               >
                 {upload.isPending ? 'Importing…' : 'Confirm & import'}

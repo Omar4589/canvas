@@ -30,14 +30,22 @@ it, when, and why. Removing the flag works the same way and is also recorded.
 ## Uploading a whole list
 
 Have a suppression list from a client or a prior cycle? On the **Voters** page, open
-**Do-not-contact list** and upload a CSV of Voter IDs. It works like the Early Voting upload:
+**Do-not-contact list**, pick the **state the list is for**, and upload a CSV of Voter IDs. It works
+like the Early Voting upload:
 
 1. A preview runs first — how many voters match, how many are already flagged, and how many doors
-   would drop off the map, campaign by campaign. Nothing changes yet.
+   would drop off the map, campaign by campaign. It names the column it matched on (and lets you
+   change it), and IDs match with or without leading zeros. Nothing changes yet.
 2. Apply to flag them. Every upload appears in the history below with an **Undo** button that
    reverts exactly the voters that upload flagged — voters you flagged by hand are never touched.
-3. IDs that don't match anyone yet are remembered: if that voter shows up in a later import,
-   they're flagged automatically.
+3. IDs that don't match anyone yet are remembered for that state: if that voter shows up in a later
+   import under the same ID, they're flagged automatically. (If the later import spells the ID
+   differently — zeros added or dropped — upload the list again afterwards; it will match then.)
+
+**Why the state matters.** Two states can issue the same digits, so the app only looks inside the
+campaigns of the state you picked. If the file names voters in other states' campaigns, the preview
+says so and offers those IDs as a download; nothing outside the state is flagged. A list that covers
+two states is two uploads, one per state.
 
 ## What changes in the field
 

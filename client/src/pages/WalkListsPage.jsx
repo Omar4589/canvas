@@ -5,8 +5,10 @@ import { api } from '../api/client.js';
 import { downloadFile, saveTextFile } from '../lib/downloadFile.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
+import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
+import { describeIdsInFile, zeroMatchLine } from '../lib/idListPreview.js';
 
 const STATUSES = ['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'wrong_address', 'lit_dropped'];
 const STATUS_LABEL = {
@@ -485,31 +487,33 @@ export default function WalkListsPage() {
               {csvPreview.isPending && <p className="mt-2 text-xs text-fg-muted">Matching…</p>}
 
               {colError && (
-                <div className="mt-3 rounded border border-warning/30 bg-warning-tint p-3 text-xs text-warning-fg">
-                  Couldn't auto-detect a Voter ID column. Pick the column that holds Voter IDs:
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <select value={idColumn} onChange={(e) => setIdColumn(e.target.value)} className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg">
-                      <option value="">— Choose column —</option>
-                      {colError.columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => idColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn })}
-                      disabled={!idColumn}
-                      className="rounded border border-border-strong px-2 py-1 text-sm font-medium hover:bg-card disabled:opacity-50"
-                    >
-                      Match column
-                    </button>
-                  </div>
-                </div>
+                <IdColumnPicker
+                  undetected
+                  columns={colError.columns}
+                  value={idColumn}
+                  onChange={setIdColumn}
+                  onMatch={() => idColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn })}
+                  busy={csvPreview.isPending}
+                />
               )}
               {csvPreview.error && !colError && <p className="mt-2 text-xs text-danger">{csvPreview.error.message}</p>}
 
               {csvPreview.data && (
                 <div className="mt-3 rounded border border-border bg-sunken p-4 text-sm">
-                  <div className="mb-2 text-xs text-fg-muted">
-                    Matched on column <span className="font-mono font-medium">{csvPreview.data.idColumn}</span> · {csvPreview.data.idsInFile?.toLocaleString()} IDs in file
+                  <div className="mb-1 text-xs text-fg-muted">
+                    <IdColumnPicker
+                      columns={csvPreview.data.columns || []}
+                      value={csvPreview.data.idColumn}
+                      onChange={(col) => { setIdColumn(col); if (col && csvFile) csvPreview.mutate({ file: csvFile, idColumn: col }); }}
+                      busy={csvPreview.isPending}
+                    />
+                    {' · '}
+                    {describeIdsInFile(csvPreview.data)}
                   </div>
+                  {csvPreview.data.sampleIds?.length > 0 && (
+                    <p className="mb-2 text-[11px] text-fg-subtle">e.g. {csvPreview.data.sampleIds.join(' · ')}</p>
+                  )}
+                  {zeroMatchLine(csvPreview.data) && <p className="mb-2 text-xs text-fg-muted">{zeroMatchLine(csvPreview.data)}</p>}
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <div><span className="text-fg-muted">Matched voters</span><div className="text-lg font-semibold text-success">{csvPreview.data.matched?.toLocaleString()}</div></div>
                     <div><span className="text-fg-muted">Doors (households)</span><div className="text-lg font-semibold text-fg">{csvPreview.data.householdCount?.toLocaleString()}</div></div>
@@ -537,7 +541,7 @@ export default function WalkListsPage() {
               <div className="mt-4 flex items-center gap-2">
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Saved search name (e.g. First-election voters)" className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
                 <button
-                  onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: idColumn || undefined })}
+                  onClick={() => name && csvFile && csvSave.mutate({ file: csvFile, name, idColumn: csvPreview.data?.idColumn || undefined })}
                   disabled={!name || !csvFile || !csvPreview.data?.householdCount || csvSave.isPending}
                   className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
                 >

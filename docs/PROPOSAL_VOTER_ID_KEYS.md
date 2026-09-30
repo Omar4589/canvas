@@ -1,12 +1,19 @@
 # Proposal: Voter ID spellings (leading zeros) — decision record and plan
 
-> **Status: DEFERRED until after the 2026-11-03 election.** Decided 2026-09-30, with eight live
-> campaigns (CT, TX, NE, FL, GA, TN) on one deploy and one operator. **Built so far: only the
-> read-only audit (§F) and the ID rule it reads with** ([`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js)),
-> neither of which changes any behavior. Everything else here is a plan. The two related things
-> built on 2026-09-29 are separate and already in the tree: the import mapping suggester recognizes L2
-> files, and the Import page shows sample values under each mapped column ([IMPORTS.md](IMPORTS.md)).
-> Read this before touching anything that compares voter IDs.
+> **Status: the upload half SHIPPED 2026-09-30; the importer's own identity (adoption or a stored
+> key) is DEFERRED until after the 2026-11-03 election.** Decided with eight live campaigns (CT, TX, NE,
+> FL, GA, TN) on one deploy and one operator. **Built:** the ID rule and the one outside-ID lookup
+> ([`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js),
+> [`services/voters/voterIdLookup.js`](../server/src/services/voters/voterIdLookup.js)); zero-insensitive
+> matching for early voting, do-not-contact and walk list from CSV, the un-mark box and the
+> early-voting graduation job; the column picker on all three pages; the state-scoped do-not-contact
+> upload; the import zero gate (preview callout + worker refusal); the structural test that fails the
+> build on a new exact lookup; the read-only audit (§F). See *What shipped before the election*.
+> **Still a plan:** everything in §D (the stored key), import-time adoption, do-not-contact graduation
+> by zeros, the Excel-safe export column, the directory search boxes, the raw-string people counters.
+> The two related things built on 2026-09-29 are separate and in the tree: the import mapping suggester
+> recognizes L2 files, and the Import page shows sample values under each mapped column
+> ([IMPORTS.md](IMPORTS.md)). Read this before touching anything that compares voter IDs.
 
 What this covers: why the same voter ID can arrive spelled two ways, which campaigns that exposes,
 what it looks like when it bites, what to do about it *today* by hand, the two designs that fix it
@@ -34,11 +41,26 @@ a **second time**: the app sees `8719967` and `08719967` as two people at the sa
 
 ## Which campaigns are exposed
 
-| State | Exposed? | Why |
+**Exposure runs both ways.** A campaign is exposed whenever a list from another source could spell
+its IDs differently: because the stored IDs are *padded* with zeros (a list that lost them fails), or
+because they are *unpadded* plain numbers (a list that pads them, such as the state's own file, fails).
+Only a campaign whose IDs are all one width with no zeros, or carry letters, is safe in both directions.
+
+**Production audit, 2026-09-30** (`npm run audit:voter-id-spellings`; 339,467 voter rows across the
+customer organization):
+
+| State (campaigns) | What the stored IDs look like | Exposed? |
 |---|---|---|
-| GA | **Yes** | 8-digit IDs, 83% start with 0 (measured on the Fulton file). |
-| FL | No | Florida IDs are nine digits and never start with 0. |
-| CT, TX, NE, TN | **Unknown, check** | Run `npm run audit:voter-id-spellings` from the Heroku Run console: its **Exposure per campaign** table gives the share of IDs starting with 0 for every campaign, from the data. (By hand: open the campaign's original vendor file and scan the ID column.) |
+| GA | Not imported yet. The Fulton L2 file is 8 digits, 83% starting with 0. | **Yes, padded**, the moment it is imported. |
+| NE (2), CT, KY (archived) | Plain numbers of 3 to 7 digits, none starting with 0: sequential numbering without padding. Not damage. | **Yes, unpadded**: a padded list would not match. |
+| FL (3), TX (2, archived) | One width (9 for Florida, 10 for Texas), no zeros. | No. |
+| IN (2, archived), OH | Every ID carries letters. Immune to Excel. | No. |
+| FL CD22 (archived) | 1,146 eight-digit IDs among 164,734 nine-digit ones, none starting with 0. Odd but archived; worth a look only if that campaign is ever revived. | No action. |
+
+Nothing had gone wrong: no voter stored under two spellings, no campaign holding the same person
+twice, no person-directory collisions, and none of the 1,389 parked early-vote IDs was waiting on a
+zero (they are simply voters outside the campaigns' universes, which is normal). Re-run the audit after
+the Georgia import and after any early-vote upload; the exposure table is built from the data.
 
 The exposure only matters when a *second* file arrives: an early-vote list, a do-not-contact list, a
 walk-list CSV, or a re-sent voter file. The first import of a file is always fine.
@@ -77,36 +99,41 @@ walk-list CSV, or a re-sent voter file. The first import of a file is always fin
 - **For leads:** the Help Center FAQ *My early-vote list says most IDs aren't in this campaign* says the
   same in their words.
 
-## Why we waited
+## What shipped before the election (2026-09-30)
 
-- The election is five weeks out; all eight campaigns share one deploy; one person runs every
-  operational step from the Heroku dashboard.
-- No mixed data exists yet. The first L2 file has not been imported and the other campaigns each came
-  from a single vendor. There is nothing to repair, only something to prevent.
-- The durable fix touches the importer's write path. The strongest version (Part 2 §D) also touches the
-  largest table, needs a migration, an index build, and a maintenance window. A regression there during
-  get-out-the-vote costs more than the problem does.
-- The exposure is one campaign, and the runbook above covers it by hand.
-- A smaller, upload-only fix (Part 2 §C, the upload half) was on the table and was declined in favor
-  of waiting. It is the first thing to build after the election.
-
-## What we will build after the election (plain English)
+The decision was to keep the change away from the importer's write path and the biggest table during
+get-out-the-vote, and to ship the part that pays off the first time a stripped list arrives:
 
 1. **One rule for "same ID":** an all-digits ID is the same voter with or without leading zeros; an ID
-   with letters is only ever the same as itself.
-2. **Uploads use the rule** (early voting, do-not-contact, walk list from CSV), and so do the un-mark
-   box and the "remembered" IDs that get marked when a voter is imported later. The preview says how
-   many matched only because zeros were ignored. Early Voting and Do Not Contact get the column
-   picker Walk lists already has.
-3. **Voter Import refuses a re-import whose IDs only match by zeros** instead of doubling the campaign;
-   later, it can adopt the spelling the organization already stores.
-4. **Undoing an import gives back the parked early-vote and do-not-contact requests** it consumed.
-   Today they are lost, and a lost "never contact me" request is a privacy problem, not just a bug.
-5. **Exports write the ID so Excel keeps the zeros.**
-6. **An audit you can run from the dashboard** that says, per campaign, whether any of this has
-   happened, and how wide the IDs are. **Built 2026-09-30:** `npm run audit:voter-id-spellings`.
-7. **A stored, normalized ID key** on every voter, only if the audit finds mixed data or two vendors per
-   organization becomes normal. It is the strongest fix and the most expensive to deploy.
+   with letters is only ever the same as itself; an all-zero value is no ID.
+2. **Uploads use the rule, both ways** (early voting, do-not-contact, walk list from CSV), and so do the
+   un-mark box and the "remembered" early-vote IDs that get marked when a voter is imported later. The
+   preview names the column it matched on, shows a few of its values, lets you change the column, and
+   says how many matched only because zeros were ignored (with an example pair).
+3. **Do Not Contact asks which state the list is for**, matches only inside that state's campaigns, and
+   reports (never flags) anything the file names outside it. Its remembered IDs are stamped with the
+   state, and the exact graduation job honors the stamp. Why: a stripped Georgia `123456` and a genuine
+   Nebraska `123456` are the same bytes, and no rule can tell them apart — only the admin knows.
+4. **Voter Import refuses a re-import whose IDs only match by zeros** — in the preview (red note,
+   Confirm off) and on the worker (the job fails with the count and an example pair) — instead of
+   doubling the campaign. No "import anyway".
+5. **A structural test** fails the build if a new exact-string lookup of an outside ID appears.
+6. **The read-only audit** (§F), run on production the same day: nothing wrong anywhere.
+
+## What waits until after the election
+
+- **The importer's own identity.** Its upsert, in-file dedupe and shields still key on the exact
+  spelling; the gate keeps that from doubling a campaign but does not make a re-sent file *update* the
+  campaign. Either import-time adoption of the organization's stored spelling (§C) or the stored key
+  (§D). Both are migrations of behavior on the write path; §D is a data migration too.
+- **Do-not-contact graduation by zeros.** Its job is exact and state-aware today; with the state stamp
+  on every parking it can safely ignore zeros later (the rule: inside the parking's state only).
+- **Exports that keep the zeros** when opened in Excel (the app's own CSV writer emits the ID bare).
+- **The two directory search boxes** (web and phone) compare a typed ID exactly.
+- **People counters** (`totalFlagged`, the directory total, platform counters) group on the raw string —
+  correct while the audit finds no person under two spellings, which the gate now protects.
+- **All-zero placeholder IDs in voter files** still import as one voter per campaign; the audit reports them.
+- **Undoing an import** still does not give back the parked requests it graduated (pre-existing).
 
 ---
 
@@ -171,6 +198,24 @@ The sites that decide behavior. Everything else is display, projection, or copyi
 
 ## C. Design A: query-time matching plus import-time adoption (no schema change)
 
+> **Amended and partly built 2026-09-30, after a three-reviewer design review.** The upload half below
+> is what shipped, with these changes from the first draft: (1) the do-not-contact upload takes a
+> required `state` and matches inside that state's campaigns only — the "exact wins / ambiguous" rule
+> was wrong, because a stripped id from a padding state is byte-identical to a genuine id from an
+> unpadded one; outside-state hits are reported, never flagged; `DncPendingId.state` is stamped and the
+> exact graduation job honors it (a Florida parking never flags a Georgian; a test proved the hole
+> before the fix). (2) The import side is a *refusal*, not adoption: `computeImportDiff` counts
+> `zeroOnlyMatches` for the review panel and the worker fails the apply (`ZERO_ONLY_MATCHES`) before
+> `applyImport`; there is no "import anyway". (3) The early-voting graduation job went through the
+> helper (campaign-scoped, ~10 lines); the do-not-contact one stayed exact. (4) Blank and all-zero
+> values are a `noId` count, never looked up or parked; `idsInFile` is canonical-distinct;
+> `matchedViaZeros` means no matched row's stored spelling equals the file's. (5) No stale-response
+> guard on the new pages (the query library discards superseded mutations); the apply sends the
+> column the preview matched on, which also fixed Walk lists sending a stale local choice. (6) The
+> width scan runs lazily after the .xls refusal and the column pick (a DB-less unit test depends on
+> that order), capped at 24. (7) Fields declared in the three strict schemas. Adoption itself (below)
+> is still deferred.
+
 - **Helper** (`server/src/utils/voterIdKey.js`): `canonicalVoterId` and `voterIdVariants(ids)`, which expands each canonical ID to every zero-padded spelling up to the organization's widest numeric ID. Lookups use `stateVoterId: { $in: variants }` on the **existing** indexes, chunked at 2,000 IDs per query (the importer's own lookups already chunk at 10,000 and 5,000; the shared matcher and the sticky jobs do not chunk at all).
 - **Applied to:** the shared matcher, un-mark, both sticky jobs, and the parked-ID deletes. Preview and apply responses gain `matchedViaZeros`, one example pair, and sample IDs from the chosen column. `VotedUpload`/`DncUpload` record `idColumn` and `matchedViaZeros`.
 - **Column picker** on Early Voting and Do Not Contact, always visible after a preview; Walk lists switches to the same component. Apply sends the column the preview used; a stale-response guard mirrors the Import page's `latestFileRef`.
@@ -210,8 +255,13 @@ npm run audit:voter-id-spellings -- --json          # machine-readable; samples 
 Per organization it reports:
 
 1. **Exposure per campaign**: voters, share numeric, share starting with 0, a histogram of numeric ID
-   widths, letter-bearing IDs, all-zero placeholders. **MIXED WIDTHS** flags a campaign holding two
-   numeric widths, the doubled-import tell. `widestNumeric` is the width the matching would use.
+   widths, letter-bearing IDs, all-zero placeholders, and a `padding` class with an `exposed` verdict:
+   `padded` (IDs start with 0), `unpadded` (several widths, no zeros: plain numbering, exposed the other
+   way), `uniform` (one width, no zeros: safe), `none` (letters: safe), `empty` (no voters yet; listed so
+   the campaign about to be imported is visible), and `mixed` (zeros present *and* shorter rows, the
+   doubled-import tell, with `shorterRows` counted). `widestNumeric` is the width the matching would use.
+   The first production run (2026-09-30) is what taught the report that mixed widths without zeros are
+   numbering, not damage: Nebraska, Connecticut and Kentucky all look that way.
 2. **Same person under two spellings across campaigns** (grouped by organization and canonical ID),
    with **CHECK** when names or birth dates differ within the group and **STOP** when the group's
    campaigns are in different states (two states can issue the same digits; never merge across states).
@@ -222,7 +272,8 @@ Per organization it reports:
 5. **Parked early-vote and do-not-contact IDs** classified three ways: *by zeros* (the voter is here under
    the other spelling: a list uploaded stripped and waiting), *exact* (the voter is here under this very
    spelling, so the parking should already have graduated: a sign the sticky job did not run, check),
-   *unmatched* (normal). Early-vote parkings are matched inside their campaign; do-not-contact org-wide.
+   *unmatched* (normal). Early-vote parkings are matched inside their campaign and tallied per campaign
+   (`byCampaign`) so the report says which lists are waiting; do-not-contact parkings are org-wide.
 
 The comparable form of an ID is computed inside MongoDB by `CANON_EXPR`, the aggregation twin of
 `canonicalVoterId`; the integration test seeds both shapes and asserts they agree. Whole-collection
@@ -234,7 +285,13 @@ this output first.
 
 ## G. Sequencing after 2026-11-03
 
-1. Audit (§F). 2. Design A's upload half: the rule, the helper, the shared matcher, un-mark, sticky jobs, parked-ID deletes, the column picker, undo re-parking, the export column, the grep test. No write-path change. 3. Import side: refuse-in-preview first; adoption or the stored key chosen from the audit. 4. The stored key only with a reason (mixed data found, or multi-vendor organizations become normal), staged: key field non-unique first, raw-driver backfill, switch the `$group` sites, then the partial unique index once the audit is empty.
+Steps 1–3 of the original order shipped on 2026-09-30 (the audit, the upload half, the refusal gate).
+What remains, in order: 1. Re-run the audit; it must still be clean. 2. Do-not-contact graduation by
+zeros, inside the parking's state. 3. Undo re-parking graduated requests, and the Excel-safe export
+column. 4. The importer's identity: adoption (§C) or the stored key (§D), chosen from the audit —
+the stored key only with a reason (mixed data found, or multi-vendor organizations become normal),
+staged: key field non-unique first, raw-driver backfill, switch the `$group` sites and the two search
+boxes, then the partial unique index once the audit is empty.
 
 ## H. Verification when built
 

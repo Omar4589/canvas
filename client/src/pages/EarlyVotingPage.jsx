@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { saveTextFile } from '../lib/downloadFile.js';
 import { formatInTz } from '../lib/datetime.js';
+import { describeIdsInFile, zeroMatchLine, historySubtitle } from '../lib/idListPreview.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -26,6 +28,9 @@ export default function EarlyVotingPage() {
   const { campaignId } = useParams();
   const { selected, isLoading: campaignLoading } = useCampaignSelection(campaignId);
   const [file, setFile] = useState(null);
+  // The admin's column override ('' = let the server detect). The APPLY never sends this: it
+  // sends the column the last preview RESPONSE matched on, so what was previewed is what runs.
+  const [idColumn, setIdColumn] = useState('');
   const [unmarkId, setUnmarkId] = useState('');
 
   // Early-voting uploads belong to this campaign → show times in its tz (fallback org).
@@ -37,22 +42,23 @@ export default function EarlyVotingPage() {
     enabled: !!campaignId,
   });
 
+  const formOf = (f, col) => {
+    const fd = new FormData();
+    fd.append('file', f);
+    if (col) fd.append('idColumn', col);
+    return fd;
+  };
   const preview = useMutation({
-    mutationFn: async (f) => {
-      const fd = new FormData();
-      fd.append('file', f);
-      return api(`/admin/campaigns/${campaignId}/voted/preview`, { method: 'POST', formData: fd });
-    },
+    mutationFn: ({ file: f, idColumn: col }) =>
+      api(`/admin/campaigns/${campaignId}/voted/preview`, { method: 'POST', formData: formOf(f, col) }),
   });
 
   const apply = useMutation({
-    mutationFn: async (f) => {
-      const fd = new FormData();
-      fd.append('file', f);
-      return api(`/admin/campaigns/${campaignId}/voted/import`, { method: 'POST', formData: fd });
-    },
+    mutationFn: ({ file: f, idColumn: col }) =>
+      api(`/admin/campaigns/${campaignId}/voted/import`, { method: 'POST', formData: formOf(f, col) }),
     onSuccess: () => {
       setFile(null);
+      setIdColumn('');
       preview.reset();
       qc.invalidateQueries({ queryKey: ['voted', campaignId] });
     },
@@ -74,9 +80,15 @@ export default function EarlyVotingPage() {
 
   function onPickFile(f) {
     setFile(f);
+    setIdColumn('');
     apply.reset();
-    if (f && campaignId) preview.mutate(f);
+    if (f && campaignId) preview.mutate({ file: f, idColumn: '' });
     else preview.reset();
+  }
+  // Changing the column re-runs the preview on it; the preview's response then owns the value.
+  function onChangeColumn(col) {
+    setIdColumn(col);
+    if (file && col) preview.mutate({ file, idColumn: col });
   }
 
   function downloadUnmatched() {
@@ -86,6 +98,8 @@ export default function EarlyVotingPage() {
   }
 
   const pv = preview.data;
+  // The server could not detect a column: it 400s with the column list, so the admin can pick one.
+  const undetected = preview.error?.data?.columns?.length ? preview.error.data : null;
   const canApply = file && campaignId && pv && pv.willMark > 0 && !apply.isPending;
 
   if (!campaignLoading && !selected) return <Navigate to="/campaigns" replace />;
@@ -94,9 +108,10 @@ export default function EarlyVotingPage() {
     <div className="max-w-4xl">
       <h1 className="mb-2 text-2xl font-semibold">Early Voting</h1>
       <p className="mb-6 text-sm text-fg-muted">
-        Upload a list of voters who have <strong>already voted</strong> (matched by Voter ID). They get a ✓ next to
-        their name in the app, and a door drops off the books only once <strong>everyone</strong> there has voted.
-        Nothing is re-cut — every upload is reversible.
+        Upload a list of voters who have <strong>already voted</strong>. They&apos;re matched by Voter ID, with or
+        without leading zeros, so a list that went through Excel still matches. They get a ✓ next to their name in
+        the app, and a door drops off the books only once <strong>everyone</strong> there has voted. Nothing is
+        re-cut — every upload is reversible.
       </p>
 
       <section className="mb-8 rounded-lg border border-border bg-card p-5">
@@ -119,15 +134,31 @@ export default function EarlyVotingPage() {
               className="block w-full text-sm disabled:opacity-50"
             />
             {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Matching…</p>}
-            {preview.error && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
+            {undetected && (
+              <IdColumnPicker
+                undetected
+                columns={undetected.columns}
+                value={idColumn}
+                onChange={setIdColumn}
+                onMatch={() => file && idColumn && preview.mutate({ file, idColumn })}
+                busy={preview.isPending}
+              />
+            )}
+            {preview.error && !undetected && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
           </div>
         </div>
 
         {pv && (
           <div className="mb-4 rounded border border-border bg-sunken p-4 text-sm">
-            <div className="mb-2 text-xs text-fg-muted">
-              Matched on column <span className="font-mono font-medium">{pv.idColumn}</span> · {fmt(pv.idsInFile)} IDs in file
+            <div className="mb-1 text-xs text-fg-muted">
+              <IdColumnPicker columns={pv.columns || []} value={pv.idColumn} onChange={onChangeColumn} busy={preview.isPending} />
+              {' · '}
+              {describeIdsInFile(pv)}
             </div>
+            {pv.sampleIds?.length > 0 && (
+              <p className="mb-2 text-[11px] text-fg-subtle">e.g. {pv.sampleIds.join(' · ')}</p>
+            )}
+            {zeroMatchLine(pv) && <p className="mb-3 text-xs text-fg-muted">{zeroMatchLine(pv)}</p>}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div><span className="text-fg-muted">Will mark voted</span><div className="text-lg font-semibold text-success">{fmt(pv.willMark)}</div></div>
               <div><span className="text-fg-muted">Already voted</span><div className="text-lg font-semibold text-fg-muted">{fmt(pv.alreadyVoted)}</div></div>
@@ -138,7 +169,8 @@ export default function EarlyVotingPage() {
               <div className="mt-3">
                 <p className="text-xs text-fg-muted">
                   Not in this campaign yet — these are <strong>saved</strong>. If those voters get imported into this
-                  campaign later, they're marked voted automatically (and their door drops once everyone there has voted).
+                  campaign later, they&apos;re marked voted automatically, however the import spells their ID (and
+                  their door drops once everyone there has voted).
                 </p>
                 <button
                   type="button"
@@ -153,7 +185,7 @@ export default function EarlyVotingPage() {
         )}
 
         <button
-          onClick={() => canApply && apply.mutate(file)}
+          onClick={() => canApply && apply.mutate({ file, idColumn: pv.idColumn })}
           disabled={!canApply}
           className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
         >
@@ -166,9 +198,14 @@ export default function EarlyVotingPage() {
           <div className="mt-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">
             Marked {fmt(apply.data.marked)} voters voted · {fmt(apply.data.doorsDropped)} doors dropped
             {apply.data.notFound ? ` · ${fmt(apply.data.notFound)} not in this campaign` : ''}.
+            {apply.data.matchedViaZeros ? (
+              <span className="mt-1 block text-xs text-success">
+                {fmt(apply.data.matchedViaZeros)} matched only after ignoring leading zeros.
+              </span>
+            ) : null}
             {apply.data.notFound ? (
               <span className="mt-1 block text-xs text-success">
-                The {fmt(apply.data.notFound)} not in this campaign are saved — they'll be marked automatically when
+                The {fmt(apply.data.notFound)} not in this campaign are saved — they&apos;ll be marked automatically when
                 those voters are imported into this campaign.
               </span>
             ) : null}
@@ -200,7 +237,10 @@ export default function EarlyVotingPage() {
                 {(historyQ.data?.uploads || []).map((u) => (
                   <tr key={u._id} className={`border-t border-border ${u.undone ? 'text-fg-subtle' : ''}`}>
                     <td className="px-4 py-2">{formatInTz(u.createdAt, tz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
-                    <td className="px-4 py-2">{u.fileName || '—'}</td>
+                    <td className="px-4 py-2">
+                      {u.fileName || '—'}
+                      {historySubtitle(u) && <div className="text-[11px] text-fg-subtle">{historySubtitle(u)}</div>}
+                    </td>
                     <td className="px-4 py-2 text-right">{fmt(u.matched)}</td>
                     <td className="px-4 py-2 text-right">{fmt(u.doorsDropped)}</td>
                     <td className="px-4 py-2 text-right">{fmt(u.notFound)}</td>
@@ -226,15 +266,15 @@ export default function EarlyVotingPage() {
             </table>
           </div>
           <p className="mt-2 text-xs text-fg-muted">
-            <strong>Not found</strong> voters aren't lost — they're saved and marked automatically if those voters are
+            <strong>Not found</strong> voters aren&apos;t lost — they&apos;re saved and marked automatically if those voters are
             later imported into this campaign.
           </p>
 
           <section className="mt-6 rounded-lg border border-border bg-card p-4">
             <h2 className="mb-1 text-base font-medium">Un-mark a voter</h2>
             <p className="mb-3 text-xs text-fg-muted">
-              Marked someone voted by mistake? Enter their Voter ID to un-mark them — the door
-              re-opens if everyone there is no longer voted.
+              Marked someone voted by mistake? Enter their Voter ID (with or without its leading zeros) to un-mark
+              them — the door re-opens if everyone there is no longer voted.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <input

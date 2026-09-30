@@ -18,6 +18,7 @@ import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { reapplyVotedLists } from '../voted/reapplyVotedLists.js';
 import { recomputeFullyDnc } from '../dnc/recomputeFullyDnc.js';
 import { reapplyDncLists } from '../dnc/reapplyDncLists.js';
+import { zeroOnlyMatchesForMisses } from '../voters/voterIdLookup.js';
 import { reapplyDoNotKnock } from '../dnc/doNotKnock.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 import { collectRevisitHomes } from './collectRevisitHomes.js';
@@ -272,6 +273,28 @@ export async function processImportJob(job) {
       }
     }
 
+    // The zero gate. A file ID that matches no stored voter exactly but names one this campaign
+    // already holds under another spelling (08719967 vs 8719967 — Excel strips the zeros) would be
+    // inserted a SECOND time by applyImport's exact upsert: every door gets its residents twice and
+    // undo cannot cleanly reverse it once anything is touched. Inside one campaign the same digits
+    // are always the same person, so there is no legitimate "import anyway" — the file is fixed
+    // (re-exported, or its ID column padded or stripped to match) and uploaded again. Enforced HERE,
+    // on the worker, because POST /admin/imports/csv parses nothing; the preview shows the same count
+    // (computeImportDiff) so this is rarely the first anyone hears of it. Unrecoverable on purpose:
+    // a retry would find the same file.
+    const zeroOnly = await zeroOnlyMatchesForMisses(campaign._id, svids.filter((s) => !priorHhBySvid.has(s)));
+    if (zeroOnly.count > 0) {
+      const ex = zeroOnly.examples[0];
+      const direction = ex && ex.file.length < ex.stored.length ? 'the file lost leading zeros the campaign has' : 'the file carries leading zeros the campaign does not';
+      const err = new UnrecoverableError(
+        `${zeroOnly.count.toLocaleString()} of this file's voter IDs match voters already in this campaign only after ignoring leading zeros` +
+          (ex ? ` (e.g. file ${ex.file} → stored ${ex.stored}: ${direction})` : '') +
+          '. Importing would add each of them a second time. Ask for an untouched export, or make the ID column match the campaign\'s spelling, and upload again.'
+      );
+      err.code = 'ZERO_ONLY_MATCHES';
+      throw err;
+    }
+
     // Write phase — switch the status off "linking" so the UI shows the real stage, and
     // floor progress at 20% (geocode is 0–20%) even when geocoding was all cache hits.
     await ImportJob.updateOne(
@@ -433,7 +456,7 @@ export async function processImportJob(job) {
       { _id: importJobId },
       {
         status: 'failed',
-        errors: [{ reason: err.message }],
+        errors: [{ reason: err.message, ...(err?.code ? { code: err.code } : {}) }],
         errorCount: 1,
         lastError: String(err?.message || err),
         completedAt: new Date(),

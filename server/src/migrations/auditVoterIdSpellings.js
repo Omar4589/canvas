@@ -117,12 +117,44 @@ async function exposure(scope) {
       c.letters += r.count;
     }
   }
-  for (const c of byCampaign.values()) {
-    c.mixedWidths = Object.keys(c.widths).length > 1;
-    c.widestNumeric = Object.keys(c.widths).reduce((m, w) => Math.max(m, Number(w)), 0);
-  }
+  for (const c of byCampaign.values()) classify(c);
   return byCampaign;
 }
+
+// How a campaign's IDs are spelled — and therefore how a list from ANOTHER source could spell them
+// differently. Measured on production 2026-09-30: Nebraska, Connecticut and Kentucky files number
+// voters without padding (a smooth spread of 3–7 digit IDs, none starting with 0), which is not
+// damage; Florida and Texas files are one width with no zeros; Indiana and Ohio IDs carry letters.
+//   padded   — IDs start with 0: a fixed-width numbering. A list that lost its zeros fails.
+//   mixed    — IDs start with 0 AND some rows are shorter: rows that already lost their zeros (a
+//              doubled-import tell), or two sources with different padding. The one real finding.
+//   unpadded — several widths, no leading zeros: plain sequential numbers. A list that PADS them
+//              (the state's own file, say) fails.
+//   uniform  — one width, no leading zeros: nothing to strip and nothing to add. Safe.
+//   none     — no numeric IDs at all: letter-bearing formats are exact and immune to Excel. Safe.
+//   empty    — no voters yet.
+function classify(c) {
+  const widths = Object.keys(c.widths).map(Number);
+  c.widestNumeric = widths.length ? Math.max(...widths) : 0;
+  c.mixedWidths = widths.length > 1;
+  c.shorterRows = widths.filter((w) => w < c.widestNumeric).reduce((s, w) => s + c.widths[w], 0);
+  if (!c.voters) c.padding = 'empty';
+  else if (!c.numeric) c.padding = 'none';
+  else if (c.startsWithZero) c.padding = c.mixedWidths ? 'mixed' : 'padded';
+  else c.padding = c.mixedWidths ? 'unpadded' : 'uniform';
+  c.exposed = c.padding === 'padded' || c.padding === 'mixed' || c.padding === 'unpadded';
+  return c;
+}
+
+const PADDING_NOTE = {
+  padded: 'exposed: IDs are padded with zeros — a list that lost them would not match',
+  mixed: (c) => `CHECK: IDs are padded, but ${n(c.shorterRows)} row(s) are shorter — they may have lost their zeros`,
+  unpadded: 'exposed: IDs are numbered without padding — a list that pads them (the state\'s own file, say) would not match',
+  uniform: 'safe: one width, no leading zeros — a spelling cannot differ',
+  none: 'safe: IDs carry letters — a spelling cannot differ',
+  empty: 'no voters yet',
+};
+const paddingNote = (c) => (typeof PADDING_NOTE[c.padding] === 'function' ? PADDING_NOTE[c.padding](c) : PADDING_NOTE[c.padding]);
 
 // ── 2. One person, two spellings (across the organization) ────────────────────────────────────
 async function mixedSpellings(scope) {
@@ -239,17 +271,23 @@ async function parked(Model, scope, campaignScoped) {
         hits.get(r._id.canon).push({ campaign: String(r._id.campaign), spellings: r.spellings });
       }
     }
-    const stat = { parked: list.length, byZeros: 0, exact: 0, unmatched: 0, samples: [] };
+    const stat = { parked: list.length, byZeros: 0, exact: 0, unmatched: 0, samples: [], byCampaign: {} };
     for (const p of list) {
       const canon = canonicalVoterId(p.stateVoterId);
       const candidates = (canon && hits.get(canon)) || [];
       const inScope = campaignScoped ? candidates.filter((h) => h.campaign === String(p.campaignId)) : candidates;
+      // Early-vote parkings belong to a campaign; a per-campaign tally says WHICH lists are waiting.
+      const bucket = campaignScoped ? (stat.byCampaign[String(p.campaignId)] ||= { parked: 0, byZeros: 0, exact: 0, unmatched: 0 }) : null;
+      if (bucket) bucket.parked += 1;
       if (!inScope.length) {
         stat.unmatched += 1;
+        if (bucket) bucket.unmatched += 1;
       } else if (inScope.some((h) => h.spellings.includes(String(p.stateVoterId).trim()))) {
         stat.exact += 1; // the voter is here under this very spelling — should already have graduated
+        if (bucket) bucket.exact += 1;
       } else {
         stat.byZeros += 1;
+        if (bucket) bucket.byZeros += 1;
         if (stat.samples.length < SAMPLES) {
           stat.samples.push({
             parked: p.stateVoterId,
@@ -299,6 +337,13 @@ async function main() {
     parked(VotedPendingId, orgFilter, true),
     parked(DncPendingId, orgFilter, false),
   ]);
+  // A campaign with no voters yet has no rows to fold, so it would vanish from the table — and the
+  // campaign you are about to import into is exactly the one you want to see listed.
+  for (const c of campaigns) {
+    if (!expo.has(String(c._id))) {
+      expo.set(String(c._id), classify({ campaignId: String(c._id), organizationId: String(c.organizationId), voters: 0, numeric: 0, startsWithZero: 0, letters: 0, allZero: 0, widths: {} }));
+    }
+  }
 
   const report = { generatedAt: new Date().toISOString(), scope: ORG_SLUG || 'all organizations', organizations: [] };
   for (const org of orgs) {
@@ -361,19 +406,23 @@ async function main() {
     const voters = o.campaigns.reduce((s, c) => s + c.voters, 0);
     console.log(`== ${o.name} (${o.slug}) — ${n(o.campaigns.length)} campaign(s), ${n(voters)} voter row(s)\n`);
 
-    console.log('  Exposure per campaign (a campaign is exposed when its IDs start with 0):');
-    if (!o.campaigns.length) console.log('    (no voters)');
+    console.log('  Exposure per campaign (could a list from another source spell these IDs differently?):');
+    if (!o.campaigns.length) console.log('    (no campaigns)');
     for (const c of o.campaigns) {
       const widths = Object.entries(c.widths)
         .sort((a, b) => Number(a[0]) - Number(b[0]))
         .map(([w, k]) => `${w}: ${n(k)}`)
         .join(' · ');
-      const note = c.mixedWidths ? '  MIXED WIDTHS — some rows may have lost their zeros' : c.startsWithZero ? '  exposed' : '';
       console.log(`    ${campaignLabel(c.campaignId)}`);
+      if (c.padding === 'empty') {
+        console.log(`      ${paddingNote(c)}`);
+        continue;
+      }
       console.log(
         `      ${n(c.voters)} voters · numeric ${pct(c.numeric, c.voters)} · start with 0: ${pct(c.startsWithZero, c.numeric)} · widths ${widths || '—'}` +
-          `${c.letters ? ` · letters ${n(c.letters)}` : ''}${c.allZero ? ` · ALL-ZERO IDS ${n(c.allZero)}` : ''}${note}`
+          `${c.letters ? ` · letters ${n(c.letters)}` : ''}${c.allZero ? ` · ALL-ZERO IDS ${n(c.allZero)}` : ''}`
       );
+      console.log(`      ${paddingNote(c)}`);
     }
 
     console.log(`\n  Same person stored under two spellings (across campaigns): ${n(o.mixedSpellings.count)}`);
@@ -396,20 +445,31 @@ async function main() {
     const pv = o.parked.voted;
     const pd = o.parked.dnc;
     console.log(`\n  Parked early-vote IDs matching a voter only after ignoring zeros: ${n(pv.byZeros)} of ${n(pv.parked)} parked` + (pv.exact ? ` (${n(pv.exact)} match exactly and should have graduated — check)` : ''));
+    const parkedByCampaign = Object.entries(pv.byCampaign || {});
+    if (parkedByCampaign.length) {
+      console.log(`    parked by campaign: ${parkedByCampaign.map(([id, b]) => `${campaignLabel(id)}: ${n(b.parked)}${b.byZeros ? ` (${n(b.byZeros)} by zeros)` : ''}`).join(' · ')}`);
+    }
     for (const s of pv.samples) console.log(`    ${s.parked} → ${s.matches.map((m) => m.spellings.join('/')).join(', ')} in ${campaignLabel(s.campaignId)}`);
     console.log(`  Parked do-not-contact IDs matching a voter only after ignoring zeros: ${n(pd.byZeros)} of ${n(pd.parked)} parked` + (pd.exact ? ` (${n(pd.exact)} match exactly and should have graduated — check)` : ''));
     for (const s of pd.samples) console.log(`    ${s.parked} → ${s.matches.map((m) => `${m.spellings.join('/')} in ${campaignLabel(m.campaignId)}`).join(', ')}`);
 
-    const findings = o.mixedSpellings.count + o.inCampaignTwins.count + o.personClashes.count + pv.byZeros + pd.byZeros + o.campaigns.filter((c) => c.mixedWidths || c.allZero).length;
+    const findings = o.mixedSpellings.count + o.inCampaignTwins.count + o.personClashes.count + pv.byZeros + pd.byZeros + o.campaigns.filter((c) => c.padding === 'mixed' || c.allZero).length;
     if (findings) anyFinding = true;
     console.log('');
   }
 
+  const exposed = report.organizations.flatMap((o) => o.campaigns).filter((c) => c.exposed);
   console.log(
     anyFinding
       ? 'FINDINGS above. Nothing was changed; docs/PROPOSAL_VOTER_ID_KEYS.md says what each one means and what to do.'
       : 'Clean: no voter is stored under two spellings, no campaign holds the same person twice, no parked ID is\n' +
-          'waiting on a zero. Campaigns marked exposed are the ones a stripped list or a re-sent file could hurt.'
+          'waiting on a zero.'
+  );
+  console.log(
+    exposed.length
+      ? `${n(exposed.length)} campaign(s) marked exposed above: a list or a re-sent file from a source that pads the IDs\n` +
+          'differently would not match them today. Nothing to repair — that is what the matching fix is for.'
+      : 'No campaign is exposed: every ID is one width with no leading zeros, or carries letters.'
   );
   await mongoose.disconnect();
 }

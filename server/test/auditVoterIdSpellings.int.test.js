@@ -76,11 +76,12 @@ before(async () => {
   const orgA = await Organization.create({ name: 'Audit Org', slug: 'audit-org', isActive: true });
   const orgB = await Organization.create({ name: 'Clean Org', slug: 'clean-org', isActive: true });
   const mk = (o, name, state) => Campaign.create({ organizationId: o._id, name, type: 'survey', state, isActive: true });
-  const [ga1, ga2, tx1, fl1, cleanFl] = await Promise.all([
-    mk(orgA, 'GA One', 'GA'), mk(orgA, 'GA Two', 'GA'), mk(orgA, 'TX One', 'TX'), mk(orgA, 'FL One', 'FL'), mk(orgB, 'Clean FL', 'FL'),
+  const [ga1, ga2, tx1, fl1, ne1, gaEmpty, cleanFl] = await Promise.all([
+    mk(orgA, 'GA One', 'GA'), mk(orgA, 'GA Two', 'GA'), mk(orgA, 'TX One', 'TX'), mk(orgA, 'FL One', 'FL'),
+    mk(orgA, 'NE One', 'NE'), mk(orgA, 'GA Empty', 'GA'), mk(orgB, 'Clean FL', 'FL'),
   ]);
   const door = async (c) => (await Household.create(hh(orgA._id, c._id, c.state)))._id;
-  const [dGa1, dGa2, dTx1, dFl1] = await Promise.all([door(ga1), door(ga2), door(tx1), door(fl1)]);
+  const [dGa1, dGa2, dTx1, dFl1, dNe1] = await Promise.all([door(ga1), door(ga2), door(tx1), door(fl1), door(ne1)]);
   const dClean = (await Household.create(hh(orgB._id, cleanFl._id, 'FL')))._id;
 
   await Voter.insertMany([
@@ -103,6 +104,12 @@ before(async () => {
     // FL One: nine digits, never a leading zero.
     voter(orgA._id, fl1._id, dFl1, '100123456', 'Flo', 'Rida'),
     voter(orgA._id, fl1._id, dFl1, '100123457', 'Sunny', 'Beach'),
+    // NE One: plain sequential numbers, no padding — several widths and not one leading zero. That is
+    // NOT damage (production's Nebraska, Connecticut and Kentucky files look like this); it is
+    // exposure the other way round: a list that pads these would not match.
+    voter(orgA._id, ne1._id, dNe1, '12345', 'Corn', 'Husker'),
+    voter(orgA._id, ne1._id, dNe1, '234567', 'Big', 'Red'),
+    voter(orgA._id, ne1._id, dNe1, '3456789', 'Platte', 'River'),
     // The clean organization.
     voter(orgB._id, cleanFl._id, dClean, '100999001', 'Neat', 'Tidy'),
     voter(orgB._id, cleanFl._id, dClean, '100999002', 'Spick', 'Span'),
@@ -129,7 +136,7 @@ before(async () => {
     { organizationId: orgA._id, uploadId: null, stateVoterId: '424242' }, // nobody
   ]);
 
-  Object.assign(ctx, { orgA, orgB, ga1, ga2, tx1, fl1, cleanFl, votersBefore: await Voter.countDocuments({}) });
+  Object.assign(ctx, { orgA, orgB, ga1, ga2, tx1, fl1, ne1, gaEmpty, cleanFl, votersBefore: await Voter.countDocuments({}) });
 });
 
 after(async () => {
@@ -152,11 +159,30 @@ test('exposure per campaign: numeric share, widths, leading zeros, letters, plac
   assert.deepStrictEqual(ga1.widths, { 7: 1, 8: 5 });
   assert.strictEqual(ga1.mixedWidths, true, 'one 7-wide row among 8-wide rows is the doubled-import tell');
   assert.strictEqual(ga1.widestNumeric, 8);
+  assert.strictEqual(ga1.shorterRows, 1);
+  assert.strictEqual(ga1.padding, 'mixed', 'zeros present AND a shorter row: the one real finding');
+  assert.strictEqual(ga1.exposed, true);
 
   const fl1 = campaign(a, 'FL One');
   assert.strictEqual(fl1.startsWithZero, 0);
   assert.strictEqual(fl1.mixedWidths, false);
   assert.deepStrictEqual(fl1.widths, { 9: 2 });
+  assert.strictEqual(fl1.padding, 'uniform');
+  assert.strictEqual(fl1.exposed, false, 'one width, no zeros: a spelling cannot differ');
+
+  const ne1 = campaign(a, 'NE One');
+  assert.deepStrictEqual(ne1.widths, { 5: 1, 6: 1, 7: 1 });
+  assert.strictEqual(ne1.startsWithZero, 0);
+  assert.strictEqual(ne1.padding, 'unpadded', 'several widths and no zeros is plain numbering, not damage');
+  assert.strictEqual(ne1.exposed, true, 'a list that pads these would not match');
+
+  const empty = campaign(a, 'GA Empty');
+  assert.ok(empty, 'a campaign with no voters yet is still listed');
+  assert.strictEqual(empty.voters, 0);
+  assert.strictEqual(empty.padding, 'empty');
+  assert.strictEqual(empty.exposed, false);
+
+  assert.strictEqual(campaign(a, 'GA Two').padding, 'mixed', '08719967 (8 wide) next to 005187273 (9 wide)');
 });
 
 test('one person under two spellings across campaigns, with the CHECK and STOP flags', { skip }, async () => {
@@ -207,6 +233,9 @@ test('parked ids: by-zeros vs exact vs unmatched, early-vote per campaign, do-no
   const txSample = a.parked.voted.samples.find((s) => s.parked === '01234567');
   assert.strictEqual(txSample.campaignId, String(ctx.tx1._id));
   assert.deepStrictEqual(txSample.matches, [{ campaignId: String(ctx.tx1._id), spellings: ['1234567'] }], 'campaign-scoped: Bob, never Alice in GA One');
+  assert.deepStrictEqual(a.parked.voted.byCampaign[String(ctx.ga1._id)], { parked: 2, byZeros: 1, exact: 0, unmatched: 1 });
+  assert.deepStrictEqual(a.parked.voted.byCampaign[String(ctx.tx1._id)], { parked: 1, byZeros: 1, exact: 0, unmatched: 0 });
+  assert.deepStrictEqual(a.parked.voted.byCampaign[String(ctx.ga2._id)], { parked: 1, byZeros: 1, exact: 0, unmatched: 0 });
 
   assert.deepStrictEqual(
     { parked: a.parked.dnc.parked, byZeros: a.parked.dnc.byZeros, exact: a.parked.dnc.exact, unmatched: a.parked.dnc.unmatched },
@@ -225,6 +254,8 @@ test('a clean organization reports nothing, and the unscoped run covers every or
   assert.strictEqual(b.parked.voted.parked, 0);
   assert.strictEqual(b.parked.dnc.parked, 0);
   assert.strictEqual(campaign(b, 'Clean FL').startsWithZero, 0);
+  assert.strictEqual(campaign(b, 'Clean FL').padding, 'uniform');
+  assert.strictEqual(b.campaigns.some((c) => c.exposed), false);
 });
 
 test('the aggregation twin of canonicalVoterId agrees with it on every seeded spelling', { skip }, async () => {

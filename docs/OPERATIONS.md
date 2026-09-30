@@ -342,6 +342,17 @@ want to wait.
 > stuck-import timeout query). Indexes never build themselves in production, so the deploy needs
 > `npm run migrate:build-indexes -- --apply` (next section).
 
+### Deploying the leading-zero matching release (October 2026)
+
+Server plus web in the one deploy, as always; no migration, no index build, nothing for the phones.
+Before: `npm run audit:mobile-api` from the repo root (expect the three changed routers to read
+"mobile calls 0 endpoints"). After: `npm run audit:voter-id-spellings` from the Run console once, as
+the baseline. Rollback is a plain dashboard rollback; the new fields on upload records are inert under
+the previous code. What changes for admins, in one line each: uploads match voter IDs with or without
+leading zeros; Early Voting and Do Not Contact show and let you change the matched column; Do Not
+Contact asks which state the list is for; a voter file that lost its zeros is refused at import instead
+of doubling the campaign.
+
 ### Check voter IDs for leading-zero trouble (read-only, safe any time)
 
 Some states write voter IDs with zeros in front (Georgia: `08719967`), and Excel strips them the
@@ -354,12 +365,16 @@ npm run audit:voter-id-spellings                    # every organization
 npm run audit:voter-id-spellings -- --org <slug>    # one organization
 ```
 
-Reading it: **Exposure per campaign** says what share of a campaign's IDs start with 0 (those
-campaigns are the ones a stripped list can hurt) and flags **MIXED WIDTHS** when one campaign holds
-IDs of two different lengths, the sign that some rows already lost their zeros. The sections below it
-are findings, and a clean run says so in one line. **STOP** marks the same digits in campaigns in two
-different states (two people; never merge), **CHECK** marks a name or birth date that differs. What
-each finding means and what to do about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
+Reading it: **Exposure per campaign** says how each campaign's IDs are spelled, and so whether a
+list from another source could spell them differently. **exposed: padded** means the IDs start with 0
+(a list that lost its zeros would not match); **exposed: unpadded** means plain sequential numbers of
+several lengths with no zeros (a list that pads them, such as the state's own file, would not match);
+**safe** means one width with no zeros, or IDs that carry letters, so a spelling cannot differ;
+**CHECK** means padded IDs with some shorter rows, the sign that rows already lost their zeros. A
+campaign with no voters yet is listed as such. The sections below are findings, and a clean run says
+so in one line. **STOP** marks the same digits in campaigns in two different states (two people; never
+merge), **CHECK** marks a name or birth date that differs. What each finding means and what to do
+about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 
 ### Build database indexes (after a deploy that added one)
 

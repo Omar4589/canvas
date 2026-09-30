@@ -94,6 +94,8 @@ const savedSearchSchema = new mongoose.Schema(
       idsInFile: { type: Number, default: 0 },
       matchedVoters: { type: Number, default: 0 },
       notFound: { type: Number, default: 0 },
+      // File IDs that matched a voter only under another spelling (leading zeros ignored).
+      matchedViaZeros: { type: Number, default: 0 },
       importJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ImportJob', default: null },
     },
   },

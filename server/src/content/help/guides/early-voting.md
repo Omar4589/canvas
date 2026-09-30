@@ -20,7 +20,7 @@ The app matches your list **by Voter ID** and marks each person as voted. Nothin
 Open the campaign you're working in and pick **Early Voting** from its sidebar. The campaign shown at the top is the one you're uploading to, so double-check it matches the election you mean before you start.
 
 1. Choose your voted-voters CSV. Any column that looks like a Voter ID is found automatically, and a preview runs right away, no changes yet.
-2. The preview tells you how many will be marked, how many already were, how many doors will drop, and how many IDs aren't in this campaign's list.
+2. The preview names the column it matched on, with a few of its values, and lets you pick a different one from the dropdown if the app chose wrong. IDs match **with or without leading zeros** (a list that went through Excel still matches), and the preview says how many matched that way. It also tells you how many will be marked, how many already were, how many doors will drop, and how many IDs aren't in this campaign's list.
 3. Click **Mark these voters voted** to apply. You'll see the totals, and an upload history builds up below with an **Undo** button on each one.
 
 ## Voted person vs. finished door
@@ -33,7 +33,7 @@ Every upload is logged. Hit **Undo** and it un-marks the voters that upload adde
 
 ## "Not found" is remembered
 
-Some IDs won't match yet, usually because those voters haven't been imported into this campaign. That's fine. The app remembers them, and the next time you [import voters](voter-imports), any that now match are marked automatically, no re-upload needed.
+Some IDs won't match yet, usually because those voters haven't been imported into this campaign. That's fine. The app remembers them, and the next time you [import voters](voter-imports), any that now match are marked automatically, no re-upload needed, however the import spells the ID. If a list matches almost nothing, check the column it matched on first: [My early-vote list says most IDs aren't in this campaign](early-vote-list-not-matching).
 
 > Tip: Upload one campaign at a time. A person can be voted in one election but not another, so marks stay tied to the campaign you uploaded to.
 

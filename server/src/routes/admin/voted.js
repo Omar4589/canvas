@@ -12,6 +12,8 @@ import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
 import { parseAndMatch, NOT_FOUND_CAP } from '../../services/import/parseVoterIdList.js';
 import { recomputeFullyVoted } from '../../services/voted/recomputeFullyVoted.js';
+import { canonicalVoterId } from '../../utils/voterIdKey.js';
+import { findVotersByVoterIds, clearParkedByCanonical } from '../../services/voters/voterIdLookup.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -88,9 +90,14 @@ router.post('/preview', upload.single('file'), async (req, res, next) => {
     res.json({
       idColumn: m.col,
       columns: m.columns,
+      sampleIds: m.sampleIds,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,
+      spellings: m.spellings,
+      noId: m.noId,
       matched: m.inCampaign.length,
+      matchedViaZeros: m.matchedViaZeros,
+      zeroMatchExample: m.zeroMatchExample,
       willMark: newly.length,
       alreadyVoted: alreadyCount,
       notFound: m.notFound,
@@ -118,6 +125,8 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
       totalRows: m.totalRows,
       alreadyVoted: alreadyCount,
       notFound: m.notFound,
+      idColumn: m.col,
+      matchedViaZeros: m.matchedViaZeros,
     });
 
     if (newly.length) {
@@ -164,14 +173,20 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
         await VotedPendingId.insertMany(pendingDocs.slice(i, i + 2000), { ordered: false });
       }
     }
-    const matchedSvids = m.inCampaign.map((v) => v.stateVoterId);
-    if (matchedSvids.length) {
-      await VotedPendingId.deleteMany({ campaignId: req.campaign._id, stateVoterId: { $in: matchedSvids } });
-    }
+    // Whatever spelling an earlier list parked them under, these people are matched now.
+    await clearParkedByCanonical(
+      VotedPendingId,
+      { campaignId: req.campaign._id },
+      m.inCampaign.map((v) => canonicalVoterId(v.stateVoterId))
+    );
 
     res.json({
       uploadId: String(uploadDoc._id),
+      idColumn: m.col,
       matched: m.inCampaign.length,
+      matchedViaZeros: m.matchedViaZeros,
+      zeroMatchExample: m.zeroMatchExample,
+      noId: m.noId,
       marked: newly.length,
       alreadyVoted: alreadyCount,
       notFound: m.notFound,
@@ -232,22 +247,27 @@ router.post('/unmark', async (req, res, next) => {
     const stateVoterId = String(req.body?.stateVoterId || '').trim();
     if (!stateVoterId) return res.status(400).json({ error: 'stateVoterId required' });
 
-    // Direct per-campaign row — an org-wide findOne could land on a SIBLING campaign's row
-    // of the same person and falsely 404 the in-campaign check below.
-    const voter = await Voter.findOne(
-      { campaignId: req.campaign._id, stateVoterId },
-      { _id: 1, householdId: 1 }
-    ).lean();
-    if (!voter) return res.status(404).json({ error: 'That voter is not in this campaign' });
+    // A typed ID is an OUTSIDE id: matched inside this campaign with leading zeros ignored, so
+    // 8719967 finds 08719967 and the reverse. Per-campaign on purpose — an org-wide lookup could
+    // land on a SIBLING campaign's row of the same person and falsely 404 the in-campaign check.
+    // Every matching row is un-marked (a campaign already holding one person twice under two
+    // spellings gets both rows cleared, which is what re-opens the door).
+    const { voters } = await findVotersByVoterIds({
+      scopeFilter: { campaignId: req.campaign._id },
+      ids: [stateVoterId],
+      projection: { _id: 1, householdId: 1 },
+    });
+    if (!voters.length) return res.status(404).json({ error: 'That voter is not in this campaign' });
 
-    const del = await VotedVoter.deleteMany({ campaignId: req.campaign._id, voterId: voter._id });
+    const del = await VotedVoter.deleteMany({ campaignId: req.campaign._id, voterId: { $in: voters.map((v) => v._id) } });
     if (!del.deletedCount) return res.status(404).json({ error: 'That voter was not marked voted' });
 
-    const wasFully = await Household.exists({ _id: voter.householdId, fullyVoted: true });
-    await recomputeFullyVoted(req.campaign._id, [String(voter.householdId)]);
-    const stillFully = await Household.exists({ _id: voter.householdId, fullyVoted: true });
+    const hhIds = [...new Set(voters.map((v) => String(v.householdId)))];
+    const wasFully = await Household.countDocuments({ _id: { $in: hhIds }, fullyVoted: true });
+    await recomputeFullyVoted(req.campaign._id, hhIds);
+    const stillFully = await Household.countDocuments({ _id: { $in: hhIds }, fullyVoted: true });
 
-    res.json({ ok: true, removed: del.deletedCount, reopened: !!wasFully && !stillFully });
+    res.json({ ok: true, removed: del.deletedCount, reopened: wasFully > stillFully });
   } catch (err) {
     next(err);
   }

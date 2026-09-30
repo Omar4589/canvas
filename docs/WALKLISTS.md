@@ -203,10 +203,13 @@ filter or re-reads the CSV.
 - **CSV →
   [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)** — two functions:
   - `parseAndMatch(campaign, buffer, idColumn)` — PapaParse the CSV, auto-detect the ID column
-    (`idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → fail), match **org-wide by
-    `stateVoterId`** then filter to voters whose household is in this campaign. Returns
-    `{ columns, col, totalRows, csvCount, inCampaign, notFound, notFoundIds }`. **This is the exact
-    matcher early voting uses** ([voted.js](../server/src/routes/admin/voted.js) imports it).
+    (`idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → fail), match **inside this
+    campaign with leading zeros ignored** through
+    [`findVotersByVoterIds`](../server/src/services/voters/voterIdLookup.js) (the one lookup for IDs
+    that come from outside the database; see [EARLY_VOTING.md](EARLY_VOTING.md) Part 2 §B). Returns
+    `{ columns, col, totalRows, csvCount, spellings, noId, inCampaign, notFound, notFoundIds,
+    matchedViaZeros, zeroMatchExample, sampleIds }`. **This is the same matcher early voting uses**
+    ([voted.js](../server/src/routes/admin/voted.js) imports it).
   - `resolveHouseholdsFromVoterMatch(campaign, inCampaign)` — distinct households of the matched voters,
     intersected with **cuttable** (active, coordinate-bearing) doors; `voterIds` = **all** voters at
     those doors (whole-door semantics, mirroring the filter resolver). Returns
@@ -222,8 +225,8 @@ Mounted at `/admin/campaigns/:campaignId/walklists`, admin-only.
 | `GET /` | — | `{ walkLists }` (id arrays projected out; includes `source`/`sourceMeta`) |
 | `POST /preview` | `{ filter }` | `{ householdCount, voterCount, sample }` — filter dry-run, no save |
 | `POST /` | `{ name, filter }` | `201 { walkList }` — save a filter saved search |
-| `POST /from-csv/preview` | `multipart`: `file` (+ optional `idColumn`) | `{ idColumn, columns, totalRows, idsInFile, matched, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
-| `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save a CSV saved search (`source: 'csv'`) |
+| `POST /from-csv/preview` | `multipart`: `file` (+ optional `idColumn`) | `{ idColumn, columns, sampleIds, totalRows, idsInFile, spellings, noId, matched, matchedViaZeros, zeroMatchExample, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
+| `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save a CSV saved search (`source: 'csv'`; `sourceMeta` records `idColumn` and `matchedViaZeros`). The page sends the column the preview matched on |
 | `GET /distinct` | — | filter-value pickers (genders, parties, precincts, …) |
 | `GET /:id/export.csv` | — | downloads the saved search's frozen voters as an **authenticated** CSV (`text/csv` + `Content-Disposition` attachment). Columns: **Voter ID, First Name, Last Name, Party, Age, Phone, Precinct, Address, City, State, ZIP**. |
 | `GET /:id` · `DELETE /:id` | — | fetch / delete a saved search (delete never touches door ownership) |
