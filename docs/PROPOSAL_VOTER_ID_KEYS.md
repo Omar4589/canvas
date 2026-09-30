@@ -1,10 +1,12 @@
 # Proposal: Voter ID spellings (leading zeros) — decision record and plan
 
 > **Status: DEFERRED until after the 2026-11-03 election.** Decided 2026-09-30, with eight live
-> campaigns (CT, TX, NE, FL, GA, TN) on one deploy and one operator. **Nothing in this document is
-> built.** The two things that *are* built (2026-09-29) are separate and already in the tree: the
-> import mapping suggester recognizes L2 files, and the Import page shows sample values under each
-> mapped column ([IMPORTS.md](IMPORTS.md)). Read this before touching anything that compares voter IDs.
+> campaigns (CT, TX, NE, FL, GA, TN) on one deploy and one operator. **Built so far: only the
+> read-only audit (§F) and the ID rule it reads with** ([`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js)),
+> neither of which changes any behavior. Everything else here is a plan. The two related things
+> built on 2026-09-29 are separate and already in the tree: the import mapping suggester recognizes L2
+> files, and the Import page shows sample values under each mapped column ([IMPORTS.md](IMPORTS.md)).
+> Read this before touching anything that compares voter IDs.
 
 What this covers: why the same voter ID can arrive spelled two ways, which campaigns that exposes,
 what it looks like when it bites, what to do about it *today* by hand, the two designs that fix it
@@ -36,7 +38,7 @@ a **second time**: the app sees `8719967` and `08719967` as two people at the sa
 |---|---|---|
 | GA | **Yes** | 8-digit IDs, 83% start with 0 (measured on the Fulton file). |
 | FL | No | Florida IDs are nine digits and never start with 0. |
-| CT, TX, NE, TN | **Unknown, check** | Open the campaign's original vendor file and scan the ID column, or open a handful of voters on the Voters page. If any ID starts with 0, that campaign is exposed. The audit script in Part 2 §F reports this per campaign once it exists. |
+| CT, TX, NE, TN | **Unknown, check** | Run `npm run audit:voter-id-spellings` from the Heroku Run console: its **Exposure per campaign** table gives the share of IDs starting with 0 for every campaign, from the data. (By hand: open the campaign's original vendor file and scan the ID column.) |
 
 The exposure only matters when a *second* file arrives: an early-vote list, a do-not-contact list, a
 walk-list CSV, or a re-sent voter file. The first import of a file is always fine.
@@ -102,7 +104,7 @@ walk-list CSV, or a re-sent voter file. The first import of a file is always fin
    Today they are lost, and a lost "never contact me" request is a privacy problem, not just a bug.
 5. **Exports write the ID so Excel keeps the zeros.**
 6. **An audit you can run from the dashboard** that says, per campaign, whether any of this has
-   happened, and how wide the IDs are.
+   happened, and how wide the IDs are. **Built 2026-09-30:** `npm run audit:voter-id-spellings`.
 7. **A stored, normalized ID key** on every voter, only if the audit finds mixed data or two vendors per
    organization becomes normal. It is the strongest fix and the most expensive to deploy.
 
@@ -194,9 +196,41 @@ B's real strengths are just as real: the database itself refuses a duplicate per
 
 1. State scoping (§A). 2. Undo re-parks graduated early-vote and do-not-contact requests; the do-not-contact half is privacy-relevant, so reconcile [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) when built. 3. Excel-safe ID column in exports. 4. All-zero placeholder IDs: today one voter with ID `0` can exist per campaign ([csvImporter.js:122](../server/src/services/import/csvImporter.js#L122) is a truthiness check); treating all-zero as "no ID" turns those rows into visible errors on the next import, so the audit reports them first. 5. The FAQ must say "Save As CSV" strips zeros too.
 
-## F. The audit script: build this first
+## F. The audit script (BUILT 2026-09-30)
 
-`npm run audit:voter-id-spellings` (root `package.json` proxy with a trailing `--`, runnable from the dashboard Run console; **run it from the repo root before handing it over**). Read-only. Per organization it reports: (1) canonical IDs stored under two or more spellings; (2) two rows in one campaign with one canonical ID; (3) canonical collisions where name or date of birth differ (a **stop**, never a merge); (4) all-zero IDs; (5) per campaign, the widest numeric ID and the share of IDs starting with 0 (the exposure table in Part 1, from data); (6) canonical IDs shared across campaigns in different states; (7) organizations whose stored spelling is the stripped one. Every decision in §G reads this output first.
+[`migrations/auditVoterIdSpellings.js`](../server/src/migrations/auditVoterIdSpellings.js), proxied in the
+root `package.json` so the dashboard Run console reaches it. Read-only; it never writes.
+
+```
+npm run audit:voter-id-spellings                    # every organization
+npm run audit:voter-id-spellings -- --org <slug>    # one organization
+npm run audit:voter-id-spellings -- --json          # machine-readable; samples capped by --samples N (10)
+```
+
+Per organization it reports:
+
+1. **Exposure per campaign**: voters, share numeric, share starting with 0, a histogram of numeric ID
+   widths, letter-bearing IDs, all-zero placeholders. **MIXED WIDTHS** flags a campaign holding two
+   numeric widths, the doubled-import tell. `widestNumeric` is the width the matching would use.
+2. **Same person under two spellings across campaigns** (grouped by organization and canonical ID),
+   with **CHECK** when names or birth dates differ within the group and **STOP** when the group's
+   campaigns are in different states (two states can issue the same digits; never merge across states).
+3. **Same person twice inside one campaign**: the unique index forbids the same string twice, so two rows
+   per canonical ID always means two spellings.
+4. **Person-directory keys that would collide** once zeros are ignored, tombstones excluded: the exact
+   pairs a stored-key migration (§D) would have to merge before its index could build.
+5. **Parked early-vote and do-not-contact IDs** classified three ways: *by zeros* (the voter is here under
+   the other spelling: a list uploaded stripped and waiting), *exact* (the voter is here under this very
+   spelling, so the parking should already have graduated: a sign the sticky job did not run, check),
+   *unmatched* (normal). Early-vote parkings are matched inside their campaign; do-not-contact org-wide.
+
+The comparable form of an ID is computed inside MongoDB by `CANON_EXPR`, the aggregation twin of
+`canonicalVoterId`; the integration test seeds both shapes and asserts they agree. Whole-collection
+passes run with `allowDiskUse`; the parked-ID lookup chunks 5,000 canonical IDs per query. Test:
+[`test/auditVoterIdSpellings.int.test.js`](../server/test/auditVoterIdSpellings.int.test.js) runs the
+real script as a child process (the way the operator does) over a seeded organization carrying every
+shape above plus a clean organization, and locks that nothing is written. Every decision in §G reads
+this output first.
 
 ## G. Sequencing after 2026-11-03
 

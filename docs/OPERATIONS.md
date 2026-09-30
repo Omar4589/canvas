@@ -342,6 +342,25 @@ want to wait.
 > stuck-import timeout query). Indexes never build themselves in production, so the deploy needs
 > `npm run migrate:build-indexes -- --apply` (next section).
 
+### Check voter IDs for leading-zero trouble (read-only, safe any time)
+
+Some states write voter IDs with zeros in front (Georgia: `08719967`), and Excel strips them the
+moment a file is opened and saved. The app compares IDs as exact text, so a list that lost its zeros
+matches nobody and a re-sent voter file that lost them imports everyone a second time. This tells you,
+per campaign, whether that has happened and which campaigns it *could* happen to. It changes nothing.
+
+```
+npm run audit:voter-id-spellings                    # every organization
+npm run audit:voter-id-spellings -- --org <slug>    # one organization
+```
+
+Reading it: **Exposure per campaign** says what share of a campaign's IDs start with 0 (those
+campaigns are the ones a stripped list can hurt) and flags **MIXED WIDTHS** when one campaign holds
+IDs of two different lengths, the sign that some rows already lost their zeros. The sections below it
+are findings, and a clean run says so in one line. **STOP** marks the same digits in campaigns in two
+different states (two people; never merge), **CHECK** marks a name or birth date that differs. What
+each finding means and what to do about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -537,7 +556,7 @@ changing the env var later only affects future deletions.
 
 Without this on a schedule, the retention promise made in
 [`DeleteAccountSheet`](../mobile/components/DeleteAccountSheet.jsx), on
-[`/delete-account`](../client/src/pages/DeleteAccountPage.jsx) and in the privacy policy is not kept. See
+[`/delete-account`](../client/public/delete-account.html) and in the privacy policy is not kept. See
 [USERS.md § Account deletion](USERS.md) for why the snapshot exists at all (short version: scrubbing the
 `User` row destroys the GPS audit's only join key, so a canvasser could otherwise delete their way out of a
 fraud audit).
@@ -564,6 +583,7 @@ fraud audit).
 | `npm run repair:import-pins -- --apply --user=<userId>` | Commits the confirmed corrections. **`--user` is mandatory** — the audit row's `userId` is required, and without it a door would save and then fail its audit write |
 | `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
+| `npm run audit:voter-id-spellings` | **Read-only.** Per campaign: share of voter IDs starting with 0, ID widths (mixed widths = rows already lost zeros); per organization: one person stored under two spellings, the same person twice in one campaign, Person-directory keys that would collide once zeros are ignored, parked early-vote / do-not-contact IDs matching a voter only after ignoring zeros. `--org <slug>`, `--json`, `--samples N`. Rule in [`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js); test `auditVoterIdSpellings.int.test.js` runs it as a child process over the real script |
 
 Five notes on `repair:import-pins` specifically, because they surprise people:
 

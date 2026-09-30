@@ -43,6 +43,7 @@
     "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",
     "audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
+    "audit:voter-id-spellings": "node src/migrations/auditVoterIdSpellings.js",
     "remirror:pass": "node src/migrations/remirrorPass.js",
     "sweep:raw-imports": "node src/migrations/sweepRawImports.js",
     "recompute:territories": "node src/migrations/recomputeTerritories.js",
