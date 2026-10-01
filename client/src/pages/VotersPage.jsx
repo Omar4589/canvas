@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
+import { shouldRetryDirectory } from '../lib/directoryRetry.js';
 import Pager from '../components/Pager.jsx';
 
 const PAGE_SIZE = 25;
@@ -81,6 +82,10 @@ export default function VotersPage() {
     queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, doorAdded, skip }],
     queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
     placeholderData: keepPreviousData,
+    // One retry for a dropped connection, none for an HTTP answer: the org-wide read of a
+    // multi-campaign org can use the server's whole time budget, and the console's global
+    // `retry: 1` would run it twice before admitting anything (see lib/directoryRetry.js).
+    retry: shouldRetryDirectory,
   });
 
   const data = votersQ.data || { voters: [], total: 0 };
@@ -91,7 +96,16 @@ export default function VotersPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-fg">Voters</h1>
+          <h1 className="inline text-2xl font-semibold text-fg">Voters</h1>
+          {/* keepPreviousData holds the last page on screen while a new filter loads, so clearing
+              a campaign would otherwise show that campaign's rows — and its total — as if they
+              were the whole org's. Say so, and dim them, until the new page lands. A sibling of
+              the heading, not inside it, so the page's accessible name stays "Voters". */}
+          {votersQ.isPlaceholderData && (
+            <span aria-live="polite" className="ml-2 align-middle text-xs font-normal text-fg-muted">
+              Updating…
+            </span>
+          )}
           <p className="mt-1 text-sm text-fg-muted">
             Everyone in your organization's voter database. Click a voter to see their full profile.
             (For canvassers — the people you assign books to — see <strong>Users</strong>.)
@@ -169,12 +183,23 @@ export default function VotersPage() {
         />
       </div>
 
-      {votersQ.error ? (
+      {votersQ.error?.code === 'DIRECTORY_TIMEOUT' ? (
+        /* The server gave up on the read inside its own time budget rather than let Heroku's
+           30 s router cut it off as a bare 503 (the 2026-09-30 incident), and said what to do
+           about it — the sentence is the server's. The filter row above stays live, so "pick a
+           campaign" is one click away; Try again re-runs the same key, no page reload. */
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-warning-fg">
+          <span>{votersQ.error.message}</span>
+          <button type="button" onClick={() => votersQ.refetch()} className="font-medium text-brand-accent hover:underline">
+            Try again
+          </button>
+        </div>
+      ) : votersQ.error ? (
         <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
           Error loading voters: {votersQ.error.message}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className={'overflow-hidden rounded-lg border border-border bg-card' + (votersQ.isPlaceholderData ? ' opacity-60' : '')}>
           <table className="min-w-full divide-y divide-border text-sm">
             <thead className="bg-sunken text-left text-xs uppercase tracking-wide text-fg-muted">
               <tr>
@@ -259,7 +284,7 @@ export default function VotersPage() {
       )}
 
       <div className="mt-3">
-        <Pager skip={skip} limit={PAGE_SIZE} total={total} onChange={setSkip} />
+        <Pager skip={skip} limit={PAGE_SIZE} total={total} onChange={setSkip} className={votersQ.isPlaceholderData ? 'opacity-60' : ''} />
       </div>
     </div>
   );

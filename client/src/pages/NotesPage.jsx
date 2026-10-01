@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import DateRangeSelector, { RANGE_PRESETS } from '../components/DateRangeSelector.jsx';
 import { defaultRange, labelForRange } from '../lib/datePresets.js';
 import { formatInTz } from '../lib/datetime.js';
@@ -37,7 +37,8 @@ const LIMIT = 50;
 
 // Centralized campaign notes hub: every field door note, survey note, and admin/profile note in one
 // searchable, filterable, VIEW-ONLY list. Campaign-scoped (like Timeline/Audit). Voter-scoped notes
-// link to the voter profile; household-only notes link to the map focused on that household.
+// link to the voter profile (org admins only — see NoteCard); household-only notes link to the map
+// focused on that household.
 export default function NotesPage() {
   const { campaignId } = useParams();
   const orgTz = useOrgTimeZone();
@@ -390,9 +391,13 @@ export default function NotesPage() {
 }
 
 function NoteCard({ note, campaignId, tz }) {
+  const { isOrgAdmin } = useAuth();
   const src = SOURCES.find((s) => s.key === note.source) || SOURCES[0];
   const when = formatInTz(note.timestamp, tz, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }, true) || '—';
-  const link = note.voter
+  // /voters/:id sits behind the orgAdmin RoleGate — a lead who clicked "Open voter" landed on
+  // Forbidden. Until the campaign-scoped voter profile (release two) gives a lead somewhere to
+  // go, their voter notes fall back to the household on the map, like a door note.
+  const link = note.voter && isOrgAdmin
     ? { to: `/voters/${note.voter.id}`, label: 'Open voter →' }
     : note.household
       ? { to: `/campaigns/${campaignId}/map?household=${note.household.id}`, label: 'View on map →' }

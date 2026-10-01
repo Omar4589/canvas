@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { createRedis } from './connection.js';
+import { getSharedRedis, closeSharedRedis } from './connection.js';
 
 // One queue per logical job type so concurrency/retry are isolated and a slow
 // turf job can't head-of-line-block imports.
@@ -42,10 +42,17 @@ const DEFAULT_JOB_OPTIONS = {
 
 const queues = new Map();
 
-/** Lazily construct (and cache) a producer-side Queue. Used by the web dyno. */
+/**
+ * Lazily construct (and cache) a producer-side Queue. Used by the web dyno, and by the worker
+ * when a processor enqueues follow-on work (the retention triggers hand each condemned org to
+ * org-delete-queue).
+ */
 export function getQueue(name) {
   if (!queues.has(name)) {
-    const queue = new Queue(name, { connection: createRedis(), defaultJobOptions: DEFAULT_JOB_OPTIONS });
+    // Every producer Queue in this process rides the ONE shared connection — a Queue handed an
+    // ioredis instance uses it as-is and does not close it. A connection per Queue was what put
+    // the web dyno at 2-7 of the 18 the dashboard counted on the Mini plan (connection.js has the budget).
+    const queue = new Queue(name, { connection: getSharedRedis(), defaultJobOptions: DEFAULT_JOB_OPTIONS });
     // A Queue is an EventEmitter that re-emits Redis errors; an unobserved
     // 'error' would throw and crash the web process. Log and move on.
     queue.on('error', (err) => console.error(`[queue:${name}] error:`, err?.message || err));
@@ -54,7 +61,19 @@ export function getQueue(name) {
   return queues.get(name);
 }
 
+/**
+ * Close every cached producer Queue, then the shared connection — in that order, and this is
+ * the one place the connection is closed. Closing a Queue built on a handed-in connection only
+ * detaches that Queue's listeners (bullmq's RedisConnection.close() skips quit() when `shared`),
+ * so without the last step the connection would leak; closing it first would pull the socket
+ * out from under Queues still detaching. The worker's shutdown calls this after its Workers
+ * close, for the same reason.
+ */
 export async function closeQueues() {
-  await Promise.all([...queues.values()].map((q) => q.close()));
-  queues.clear();
+  try {
+    await Promise.all([...queues.values()].map((q) => q.close()));
+  } finally {
+    queues.clear();
+    await closeSharedRedis();
+  }
 }

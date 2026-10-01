@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { Worker } from 'bullmq';
 import { connectDb } from './config/db.js';
-import { createRedis, assertNoeviction } from './queues/connection.js';
-import { QUEUE_NAMES } from './queues/index.js';
+import { createRedis, getSharedRedis, assertNoeviction } from './queues/connection.js';
+import { QUEUE_NAMES, closeQueues } from './queues/index.js';
 import { processImportJob } from './services/import/importProcessor.js';
 import { processTurfJob } from './services/turf/turfProcessor.js';
 import { processExportJob } from './services/export/exportProcessor.js';
@@ -103,13 +103,18 @@ async function main() {
     new Promise((resolve) => setTimeout(resolve, 20000).unref()),
   ]); // proceed to construct Workers either way; the retry loop keeps running if needed
 
+  // Every Worker rides the ONE shared base connection (queues/connection.js has the budget:
+  // this dyno used to open 15 Redis connections, now 8). A Worker uses the instance for its
+  // ordinary commands and duplicates it exactly once, for the blocking fetch; that duplicate is
+  // the only connection it owns and closes. The probe above stays on its own createRedis()
+  // because it quits itself before any Worker exists.
   const workers = [
     new Worker(QUEUE_NAMES.IMPORT, processImportJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: IMPORT_CONCURRENCY,
     }),
     new Worker(QUEUE_NAMES.TURF, processTurfJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: TURF_CONCURRENCY,
       // Belt-and-braces for the 2026-08 stall incident: the cut/claim pipeline now
       // yields (balancedKMeans + computeTerritories + per-book loops), so the lock
@@ -124,23 +129,23 @@ async function main() {
       maxStalledCount: 2,
     }),
     new Worker(QUEUE_NAMES.MAINTENANCE, processMaintenanceJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: 1, // housekeeping; never compete with real work
     }),
     new Worker(QUEUE_NAMES.EXPORT, processExportJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: EXPORT_CONCURRENCY,
     }),
     new Worker(QUEUE_NAMES.CAMPAIGN_DELETE, processCampaignDeleteJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: CAMPAIGN_DELETE_CONCURRENCY,
     }),
     new Worker(QUEUE_NAMES.ORG_DELETE, processOrgDeleteJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: ORG_DELETE_CONCURRENCY,
     }),
     new Worker(QUEUE_NAMES.OUTCOME_CONVERT, processConversionJob, {
-      connection: createRedis(),
+      connection: getSharedRedis(),
       concurrency: OUTCOME_CONVERT_CONCURRENCY,
       // One stall redelivery is safe: the processor re-reads its work set and convertibleMatch
       // excludes rows it already stamped, so a resumed job skips finished doors on its own.
@@ -271,7 +276,16 @@ async function main() {
       // turf/import job is mid-flight; an abandoned job becomes stalled and is
       // retried (processors are idempotent), so this is safe.
       await Promise.race([
-        Promise.all(workers.map((w) => w.close())),
+        (async () => {
+          await Promise.all(workers.map((w) => w.close()));
+          // Only now, with every Worker off it, the shared connection — plus any producer Queue a
+          // processor opened on it through getQueue (the retention triggers enqueue org deletes).
+          // A Worker handed a connection never closes it, so this is the one place it is quit;
+          // doing it before the Workers close would yank the socket from under a draining job.
+          // The maintenance schedule's Queue (scheduler.js) is not referenced here and stays
+          // unclosed, which on a shared connection costs nothing.
+          await closeQueues();
+        })(),
         new Promise((resolve) => setTimeout(resolve, 25000)),
       ]);
     } catch (err) {

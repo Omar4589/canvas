@@ -382,6 +382,11 @@ about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 It's harmless to run when nothing changed (it just finishes instantly), so "run it after every deploy" is
 a fine habit if you'd rather not keep track.
 
+**2026-09-30 — the voters-directory release adds two `Voter` indexes:** right after that deploy, in a
+quiet moment, run `npm run migrate:build-indexes` once as the dry run and then
+`npm run migrate:build-indexes -- --apply`, because until they exist the Voters page of an organization
+with more than one campaign keeps doing the slow work that release was meant to end.
+
 ```
 npm run migrate:build-indexes -- --apply
 ```

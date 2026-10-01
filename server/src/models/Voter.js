@@ -133,6 +133,29 @@ const voterSchema = new mongoose.Schema(
 voterSchema.index({ householdId: 1, surveyStatus: 1 });
 // Paginated, name-sorted org-wide directory listing.
 voterSchema.index({ organizationId: 1, lastName: 1, firstName: 1 });
+// The org-wide DEDUPE view's covering index (routes/admin/voters.js, multi-campaign orgs). Key
+// order is load-bearing: organizationId is the equality prefix; lastName, firstName, _id provide
+// the pre-group sort INCLUDING the _id tie-break the index above lacks (without it every plan
+// carried a blocking SORT over every org document — the 2026-09-30 H12); the rest make the scan
+// COVERED, so the page pipeline reads index keys only (0 documents) — the dropdown filters that
+// would otherwise force a fetch are in the key for that reason. Prod autoIndex is OFF — exists
+// only after `migrate:build-indexes --apply`. Measured 37.5 MB at 462k rows.
+voterSchema.index({
+  organizationId: 1,
+  lastName: 1,
+  firstName: 1,
+  _id: 1,
+  stateVoterId: 1,
+  campaignId: 1,
+  surveyStatus: 1,
+  party: 1,
+  'doNotContact.flagged': 1,
+});
+// The campaign-scoped directory (`?campaignId=` today; the campaign Voters tab next): index-provided
+// name order within one campaign and a COUNT_SCAN for its total — without it
+// countDocuments({organizationId, campaignId}) fetched every org document on every page load
+// (276 ms warm at 462k rows locally, ~0.8 s on Atlas). Prod autoIndex is OFF — `migrate:build-indexes --apply`.
+voterSchema.index({ organizationId: 1, campaignId: 1, lastName: 1, firstName: 1 });
 // Voter rows are unique per CAMPAIGN (campaignId is globally unique, so org isolation —
 // decision 13 — holds transitively). Replaces the old per-org unique
 // {organizationId, stateVoterId} index; migrate:voter-campaigns drops that one.

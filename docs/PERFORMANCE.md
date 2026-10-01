@@ -232,8 +232,12 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   connections = sum over web + worker dynos; the tuned defaults keep it well under a dedicated tier.
 - **Indexes** — new org-wide + map indexes: `CanvassActivity {organizationId,timestamp}`,
   `SurveyResponse {organizationId,submittedAt}`, `Household {campaignId,isActive}`, `ImportJob
-  {organizationId,campaignId,createdAt}` + `{createdAt}`. `autoIndex` is **off in production**, so
-  build them after deploy: `npm run migrate:build-indexes -- --apply` (idempotent + additive;
+  {organizationId,campaignId,createdAt}` + `{createdAt}`; and, since 2026-09-30, the two
+  voter-directory indexes on `Voter` — the covering `{organizationId, lastName, firstName, _id,
+  stateVoterId, campaignId, surveyStatus, party, 'doNotContact.flagged'}` and the campaign-scoped
+  `{organizationId, campaignId, lastName, firstName}` (key order is load-bearing — the next bullet
+  says why). `autoIndex` is **off in production**, so build them after deploy:
+  `npm run migrate:build-indexes -- --apply` (idempotent + additive;
   [buildIndexes.js](../server/src/migrations/buildIndexes.js)).
 - **Bounded the heavy reads** — the `/flags` GPS audit
   ([flagDetection.js](../server/src/services/audit/flagDetection.js)) loaded the whole matched
@@ -242,6 +246,31 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   range". `campaignSummaries` ([campaignSummaries.js](../server/src/services/reports/campaignSummaries.js))
   stopped **counting** the two largest collections all-time just to test `hasCanvassed>0` — now an
   indexed `distinct('campaignId', …)` (DISTINCT_SCAN).
+
+  **The voter directory — the 2026-09-30 incident, the measured record.** The org-wide Voters page
+  of a multi-campaign org (325k+ people, ~462k `Voter` rows) took **24.6 s** in production and often
+  crossed Heroku's 30 s router — an H12 the console showed as "Request failed: 503". `explain` on the
+  dedupe aggregation in [routes/admin/voters.js](../server/src/routes/admin/voters.js) showed a
+  **blocking SORT over every org document** (no index carried the `_id` tie-break of its
+  `{lastName, firstName, _id}` pre-group sort) feeding a **whole-document `$group`**
+  (`$first: '$$ROOT'`), both spilling to disk — three whole-org passes per page load, with an
+  abandoned request running on until `socketTimeoutMS` (120 s) while the client's automatic retry
+  stacked a second set on top. The fix is the two `Voter` indexes above plus the route: the pre-group
+  sort rides the covering index; the `$group` keeps three small fields; a **bounded prefix** —
+  `$limit (skip + limit) × campaignCount` before the group — makes the page O(page), not O(org),
+  exactly because unique `{campaignId, stateVoterId}` caps a person at `campaignCount` rows (a
+  short-page guard re-runs unbounded should a half-deleted campaign's orphan rows ever break that
+  bound); chips and surveyed-in-any come from a sibling lookup of the page's people under the same
+  filter; and every DB call carries `maxTimeMS` (`VOTER_DIRECTORY_MAX_MS`, default 15 s), with
+  expiry answering a coded 503 (`DIRECTORY_TIMEOUT`) instead of Heroku's HTML one. Measured locally
+  at 330k people / 462k rows (Apple M1, mongod 7.0.2, warm): old pipeline **9.7 s** → new
+  **0.53 s** for page + count, of which the page stage alone is **0.6 ms** (50 index keys read, 0
+  documents) and the count is a covered DISTINCT_SCAN (~0.5 s); a deep page (`skip` 50,000)
+  **0.49 s**; four concurrent requests **0.63 s** wall; the campaign-filtered count **276 ms →
+  63 ms** (a FETCH of every org document became a COUNT_SCAN on the 4-key index). Two honest limits:
+  the **count stays linear in people** (~0.5 s per 330k people locally — it is now the directory's
+  whole cost), and **name search is still an unanchored regex over documents** — unchanged, only
+  capped by the budget now. Full mechanism: [VOTERS.md](VOTERS.md) § C.
 - **Denormalized rollup counters (Phase 2)** — the "All time" dashboards no longer re-aggregate the
   ledger at all: `Campaign.stats` carries maintained all-time counters (knocks quadruple, survey +
   lit volume, activity count, last-activity, canvasser set), applied write-side by
@@ -292,6 +321,24 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
 - **Atlas tier** — M0 (512 MB, no backups, 500-conn) is undersized for real use: ~1–2 GB per busy
   org per cycle. Move to **M10 with auto-scaling** (backups/PITR, dedicated CPU/RAM, 1500 conn); the
   storage ceiling + no-backups are the risks that bite before load does.
+- **Redis connections** — every BullMQ `Worker` and producer `Queue` used to open its own ioredis
+  client: the worker dyno held **15** (7 Workers × 2 — the base client plus the blocking duplicate
+  BullMQ makes for its wait-for-job call — + 1 for the maintenance schedule's producer Queue) and
+  the web dyno **2–7** (one per lazily created producer Queue; Bull Board opens IMPORT and TURF at
+  boot). On 2026-09-30 the Heroku Key-Value Store add-on read **18/18 — "Database connections over
+  limit"** — the **Mini** plan's usable ceiling (Heroku lists Mini at 20), so a deploy overlap, a
+  second web dyno, or the first use of a queue type after a restart tipped it: a job that would not
+  enqueue, a Worker that would not start (Redis's refusal, "max number of clients reached", lands in
+  the worker log as a Worker `error` event, not a crash — [worker.js](../server/src/worker.js)). Two
+  changes the same day: the add-on moved to **Premium 0** (40 connections, 50 MB), and each process
+  now shares **one** ioredis base connection — `getSharedRedis()` in
+  [queues/connection.js](../server/src/queues/connection.js), used by every Worker, by `getQueue()`
+  and by the maintenance schedule (`createRedis()` survives only for the worker's self-closing boot
+  probe). A Queue handed an instance uses it as-is and never closes it; a Worker duplicates it exactly
+  once, for its blocking fetch, and owns only that duplicate — so the baseline is **8** on the worker
+  (1 + 7 blocking duplicates) and **1** on the web dyno, and `closeQueues()` quits the shared
+  connection last. A deploy overlap still counts old and new dynos together, and each extra dyno adds
+  its own baseline; that is what the headroom is for, not a client per Queue again.
 - **Running the suites** — `npm run test:int` ([scripts/test-int.sh](../server/scripts/test-int.sh))
   boots a throwaway `mongod`, runs every `*.int.test.js` (one DB per file), and tears it down; the
   int suites skip without `MONGODB_URI_TEST`.

@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { createRedis } from '../../queues/connection.js';
+import { getSharedRedis } from '../../queues/connection.js';
 import { QUEUE_NAMES } from '../../queues/index.js';
 import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
@@ -102,7 +102,13 @@ export const MAINTENANCE_JOBS = [
 
 /** Producer side: declare the repeatable schedule. Idempotent — BullMQ dedupes on (name, cron). */
 export async function registerMaintenanceJobs() {
-  const queue = new Queue(QUEUE_NAMES.MAINTENANCE, { connection: createRedis() });
+  // On the process-wide shared connection (queues/connection.js has the budget). This Queue
+  // object is never closed — the worker discards it once the declaration lands — and with a
+  // shared connection that is harmless: a Queue handed an ioredis instance does not own it, so
+  // an unclosed Queue is a few listeners, not a leaked connection. (On its own createRedis() it
+  // was one of the worker's 15, and the worker's retry loop after an outage opened one more per
+  // attempt; now each attempt is a fresh Queue object on the same connection.)
+  const queue = new Queue(QUEUE_NAMES.MAINTENANCE, { connection: getSharedRedis() });
   queue.on('error', (err) => console.error('[queue:maintenance] error:', err?.message || err));
 
   for (const job of MAINTENANCE_JOBS) {
