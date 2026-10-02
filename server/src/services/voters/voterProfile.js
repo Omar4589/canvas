@@ -15,14 +15,26 @@ import { Organization } from '../../models/Organization.js';
 const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
 const hasText = (s) => typeof s === 'string' && s.trim() !== '';
 
-// Build the full profile payload for one voter. Shared by the admin and mobile voter routes.
-// orgId scopes the lookup (admin: active org; mobile: active org). Returns null if not found.
-export async function buildVoterProfile(voterId, { orgId } = {}) {
+// Build the full profile payload for one voter. Three callers share it:
+//   routes/admin/voters.js         — the org directory: org-wide (admins see the person across campaigns)
+//   routes/admin/campaignVoters.js — the campaign directory: scoped for leads, org-wide for admins
+//   routes/mobile/voters.js        — the mobile profile: scoped for leads, org-wide for admins
+// orgId scopes the lookup (the active org). scopeCampaignId NARROWS the payload to one campaign —
+// a lead's view (owner rulings 4 and 5, 2026-09-30): the person-level unions below (surveys,
+// archived overwrites, field notes, admin notes) collapse to this row and otherCampaigns is empty,
+// while an admin passes null and keeps the org-wide union. A voter whose campaignId differs from
+// the scope reads as absent, so a mismatched scope can never widen a read. Deliberately NOT named
+// campaignId: the local below is the household's campaign and drives the voted lookups. The scope
+// removes nothing else — email and the do-not-contact reason/who/when stay in the payload for every
+// caller (rulings 1 and 2: the flag is org-wide by design, and a lead may be the paying client).
+// Returns null if not found (or outside the scope).
+export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null } = {}) {
   if (!mongoose.isValidObjectId(voterId)) return null;
   const voter = await Voter.findOne(
     orgId ? { _id: voterId, organizationId: orgId } : { _id: voterId }
   ).lean();
   if (!voter) return null;
+  if (scopeCampaignId && String(voter.campaignId) !== String(scopeCampaignId)) return null;
 
   const household = voter.householdId ? await Household.findById(voter.householdId).lean() : null;
   const campaignId = household?.campaignId || null;
@@ -31,10 +43,14 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   // Sibling rows — the same person's row in each OTHER campaign of this org (rows are
   // per-campaign). The person-level histories below (surveys, notes) union over them; the
   // door-level pieces (household, members, activity, voted) stay this row's on purpose.
-  const siblings = await Voter.find(
-    { organizationId: voter.organizationId, stateVoterId: voter.stateVoterId, _id: { $ne: voter._id } },
-    'campaignId householdId surveyStatus'
-  ).lean();
+  // Under a campaign scope there are no siblings to union: every personRowIds lookup below
+  // (surveys, archived overwrites, field notes, admin notes) and otherCampaigns collapse to this row.
+  const siblings = scopeCampaignId
+    ? []
+    : await Voter.find(
+        { organizationId: voter.organizationId, stateVoterId: voter.stateVoterId, _id: { $ne: voter._id } },
+        'campaignId householdId surveyStatus'
+      ).lean();
   const personRowIds = [voter._id, ...siblings.map((s) => s._id)];
 
   const [voted, surveys, overwrites, activity, voterNotesRaw, members, adminNotes] = await Promise.all([
@@ -160,6 +176,7 @@ export async function buildVoterProfile(voterId, { orgId } = {}) {
   }
 
   // The person's presence in other campaigns (additive — clients that don't know it ignore it).
+  // Empty under a campaign scope — a lead is never told which other campaigns hold the person.
   let otherCampaigns = [];
   if (siblings.length) {
     const sibCamps = await Campaign.find(

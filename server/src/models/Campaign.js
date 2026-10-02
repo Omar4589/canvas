@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { TOGGLEABLE_OUTCOMES } from '../services/canvass/outcomeToggles.js';
+import { TOGGLEABLE_OUTCOMES, OPT_IN_OUTCOMES } from '../services/canvass/outcomeToggles.js';
 
 const campaignSchema = new mongoose.Schema(
   {
@@ -42,6 +42,18 @@ const campaignSchema = new mongoose.Schema(
     // (OUTCOME_DISABLED, with offline-replay tolerance); this is a recording policy only —
     // no aggregation reads it, and rows recorded before a toggle flip keep counting.
     disabledOutcomes: { type: [{ type: String, enum: TOGGLEABLE_OUTCOMES }], default: [] },
+    // Opt-in door outcomes this campaign has turned ON (subset of OPT_IN_OUTCOMES — off by default,
+    // survey campaigns only). An ALLOW-list on purpose, the inverse of disabledOutcomes: empty or
+    // missing = off on lean and hydrated reads alike, so legacy docs need no migration, and a lost
+    // update fails CLOSED. Set only by the campaign PATCH, which is org-admin-only for this field
+    // and audited (routes/admin/campaigns.js); never at create. Like disabledOutcomes, a recording
+    // policy only — and it acts only while Doorline has released the outcome (availableOptInOutcomes).
+    enabledOutcomes: { type: [{ type: String, enum: OPT_IN_OUTCOMES }], default: [] },
+    // Every opt-in outcome this campaign has EVER had on — server-maintained by the PATCH, never
+    // client-set, never in zod. Invariant: enabledOutcomes ⊆ everEnabledOutcomes. Read by the replay
+    // rule (a phone could only ever have shown a button the campaign enabled — routes/mobile/canvass.js)
+    // and by outcomeInUse, which decides where the outcome's columns, tiles and filters appear.
+    everEnabledOutcomes: { type: [{ type: String, enum: OPT_IN_OUTCOMES }], default: [] },
     // Who may add a walk-up voter at a door in the canvasser app: 'all' (default — every
     // rostered canvasser) or 'leads' (only leads with a CampaignManager grant + admins).
     // Enforcement lives in routes/mobile/canvass.js (ADD_VOTER_RESTRICTED, with the same
@@ -135,12 +147,24 @@ const campaignSchema = new mongoose.Schema(
     // `reconciledAt` is the trust marker: readers fall back to live aggregation when it's null
     // (legacy docs pre-backfill), and the counter bump no-ops until the reconcile seeds it —
     // stats are either exact or absent, never partial. Repair/backfill: migrate:campaign-stats.
+    // ONE EXCEPTION, by design (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §F): contactKnockCount arrived
+    // after campaigns already had contacts, so on a trusted campaign it is ABSENT (lean reads skip
+    // defaults) or partial — even negative — until the one-time migrate:campaign-stats --apply after
+    // the deploy (or the nightly reconcile) seeds it. The only reader is the campaign-level
+    // contactRate on /overview and /campaign-rollup, which no screen renders, and both copies
+    // default it with `|| 0`. notTargetKnockCount is exact from day one: no not_target rows predate it.
     stats: {
       activityCount: { type: Number, default: 0 },
       knockCount: { type: Number, default: 0 },
       surveyedKnockCount: { type: Number, default: 0 },
       litKnockCount: { type: Number, default: 0 },
       refusedKnockCount: { type: Number, default: 0 },
+      // Distinct household×pass with a not_target row (knocksPipeline notTargetKnocks).
+      notTargetKnockCount: { type: Number, default: 0 },
+      // Distinct household×pass where someone answered — any CONTACT_ACTIONS row (knocksPipeline
+      // contactKnocks): the contact-rate numerator, counted ONCE per door per round however many
+      // canvassers recorded a contact there. Default 0, never null — $inc on null throws.
+      contactKnockCount: { type: Number, default: 0 },
       restrictedDoorCount: { type: Number, default: 0 },
       litDroppedCount: { type: Number, default: 0 },
       surveyCount: { type: Number, default: 0 },

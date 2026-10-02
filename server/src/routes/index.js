@@ -22,6 +22,7 @@ import adminWalkListsRouter from './admin/walklists.js';
 import adminPacketsRouter from './admin/packets.js';
 import adminVotedRouter from './admin/voted.js';
 import adminVotersRouter from './admin/voters.js';
+import adminCampaignVotersRouter from './admin/campaignVoters.js';
 import adminDncRouter from './admin/dnc.js';
 import adminDoNotKnockRouter from './admin/doNotKnock.js';
 import adminPassesRouter from './admin/passes.js';
@@ -133,6 +134,9 @@ router.use('/admin/campaigns/:campaignId/assignments', adminAssignmentsRouter);
 router.use('/admin/campaigns/:campaignId/households', adminCampaignHouseholdsRouter);
 router.use('/admin/campaigns/:campaignId/walklists', adminWalkListsRouter);
 router.use('/admin/campaigns/:campaignId/voted', adminVotedRouter);
+// A campaign's Voters tab + profile for its managers, leads included (a lead may be the paying
+// client); the org-wide /admin/voters above stays admin-only, every write included.
+router.use('/admin/campaigns/:campaignId/voters', adminCampaignVotersRouter);
 router.use('/admin/campaigns/:campaignId/efforts', adminEffortsRouter);
 router.use('/admin/campaigns/:campaignId/passes', adminPassesRouter);
 router.use('/admin/campaigns/:campaignId/setup-status', adminSetupStatusRouter);

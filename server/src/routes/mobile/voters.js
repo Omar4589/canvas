@@ -12,8 +12,8 @@ import { Turf } from '../../models/Turf.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
-import { VoterNote } from '../../models/VoterNote.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
+import { createVoterNote } from '../../services/voters/voterNotes.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 
@@ -35,6 +35,14 @@ function isAdminOrSuper(req) {
 }
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// A domain refusal, not a role one: the caller's role is fine, the voter just isn't in the
+// campaign they resolved. Stays a 403 (the shipped app inspects 403 codes) but never
+// FORBIDDEN_ROLE — that code means "your role is too low", and the app answers it by
+// refetching the role.
+function notInCampaign(res) {
+  return res.status(403).json({ error: 'Voter not in this campaign', code: 'VOTER_NOT_IN_CAMPAIGN' });
 }
 
 // Managers pass without a roster row: super/admin, or a lead granted THIS campaign.
@@ -96,12 +104,6 @@ async function scopeHouseholdIds(req, campaign) {
   return [...new Set(books.flatMap((b) => (b.householdIds || []).map(String)))];
 }
 
-async function campaignHouseholdIds(req, campaign, scope) {
-  const filter = { organizationId: activeOrgId(req), campaignId: campaign._id };
-  if (scope) filter._id = { $in: scope.map((id) => new mongoose.Types.ObjectId(id)) };
-  return (await Household.find(filter, '_id').lean()).map((h) => h._id);
-}
-
 // GET /mobile/voters?campaignId=&search= — campaign-scoped search (read).
 router.get('/voters', async (req, res, next) => {
   try {
@@ -111,15 +113,29 @@ router.get('/voters', async (req, res, next) => {
     const scope = await scopeHouseholdIds(req, campaign);
     if (Array.isArray(scope) && scope.length === 0) return res.json({ voters: [] });
 
-    const campHhIds = await campaignHouseholdIds(req, campaign, scope);
-    const voterFilter = { organizationId: orgId, householdId: { $in: campHhIds } };
+    // A manager's scope is the campaign itself, so the filter rides Voter.campaignId (rows are
+    // per-campaign) on the {organizationId, campaignId, lastName, firstName} index. It used to
+    // fetch EVERY household id of the campaign to build a householdId $in — measured on a large
+    // campaign at 150,000 ids / 2.9 MB / 0.4-0.9 s per keystroke, against 2.6 ms through
+    // campaignId. A canvasser's scope is their books' household ids, already in hand from the
+    // Turf rows, so the whole-campaign Household round trip that re-validated them is gone too.
+    // Same rows either way.
+    const bookHhIds = scope ? scope.map((id) => new mongoose.Types.ObjectId(id)) : null;
+    const voterFilter = bookHhIds
+      ? { organizationId: orgId, householdId: { $in: bookHhIds } }
+      : { organizationId: orgId, campaignId: campaign._id };
 
     const search = (req.query.search || '').trim();
     if (search) {
       const rx = new RegExp(escapeRegex(search), 'i');
+      // The address match narrows the same way — the campaign's households for a manager, the
+      // books' for a canvasser — never a $in of the whole campaign.
       const addrHh = (
         await Household.find(
-          { _id: { $in: campHhIds }, $or: [{ addressLine1: rx }, { city: rx }, { zipCode: rx }] },
+          {
+            ...(bookHhIds ? { _id: { $in: bookHhIds } } : { organizationId: orgId, campaignId: campaign._id }),
+            $or: [{ addressLine1: rx }, { city: rx }, { zipCode: rx }],
+          },
           '_id'
         )
           .limit(2000)
@@ -185,20 +201,26 @@ router.get('/voters/:voterId', async (req, res, next) => {
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
     // A lead's grant is per-campaign: the entry voter must belong to the campaign the
-    // grant covers (admins/super stay org-wide, as before). The profile itself still
-    // shows the person's cross-campaign history — that's its documented design.
-    if (!isAdminOrSuper(req) && String(voter.campaignId) !== String(campaign._id)) {
-      return res.status(403).json({ error: 'Voter not in this campaign' });
-    }
-    const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
-    if (!profile) return res.status(404).json({ error: 'Voter not found' });
+    // grant covers (admins/super stay org-wide, as before — ruling 5, 2026-09-30: an admin
+    // opening a voter through a campaign still sees the person's other campaigns).
+    if (!isAdminOrSuper(req) && String(voter.campaignId) !== String(campaign._id)) return notInCampaign(res);
+    // A lead's profile narrows to THIS campaign (ruling 4): surveys, archived overwrites, field
+    // notes and admin notes are this row's only and otherCampaigns is empty — the same scope the
+    // web campaign profile applies, so the two surfaces disclose alike. Admins pass no scope and
+    // keep the org-wide union. The builder re-checks the scope itself (a mismatched scope can
+    // never widen), so a null under a scope is that same refusal; without one it can only be a
+    // voter deleted between the two reads.
+    const scopeCampaignId = isAdminOrSuper(req) ? null : campaign._id;
+    const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req), scopeCampaignId });
+    if (!profile) return scopeCampaignId ? notInCampaign(res) : res.status(404).json({ error: 'Voter not found' });
     res.json(profile);
   } catch (err) {
     next(err);
   }
 });
 
-// POST /mobile/voters/:voterId/notes { campaignId, body } — canvasser adds a field note.
+// POST /mobile/voters/:voterId/notes { campaignId, body } — adds a note to the voter (a
+// VoterNote: org-level, it follows the person — services/voters/voterNotes.js).
 router.post('/voters/:voterId/notes', async (req, res, next) => {
   try {
     const campaign = await resolveCampaign(req, res);
@@ -208,16 +230,20 @@ router.post('/voters/:voterId/notes', async (req, res, next) => {
     }
     const voter = await Voter.findOne(
       { _id: req.params.voterId, organizationId: activeOrgId(req) },
-      'householdId'
+      'householdId campaignId'
     ).lean();
     if (!voter) return res.status(404).json({ error: 'Voter not found' });
     const scope = await scopeHouseholdIds(req, campaign);
+    // A lead annotates through the campaign they resolved: their grant is per-campaign and must
+    // not reach another campaign's row through it. Org admins are org-wide here as on the
+    // profile read (ruling 5). Canvassers stay book-scoped.
+    if (!scope && !isAdminOrSuper(req) && String(voter.campaignId) !== String(campaign._id)) return notInCampaign(res);
     if (scope && !scope.includes(String(voter.householdId))) {
       return res.status(403).json({ error: 'Voter not in your assigned books' });
     }
     const body = z.string().trim().min(1).max(5000).parse(req.body?.body);
-    const note = await VoterNote.create({
-      organizationId: activeOrgId(req),
+    const note = await createVoterNote({
+      orgId: activeOrgId(req),
       voterId: voter._id,
       authorId: req.user._id,
       body,

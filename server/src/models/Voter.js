@@ -95,7 +95,8 @@ const voterSchema = new mongoose.Schema(
     cellPhone: { type: String, default: null, trim: true },
     // Volunteered at the door (walk-up voters) or admin-entered — voter files don't carry one.
     // NOT identity: never in PERSON_IDENTITY_FIELDS / propagateIdentity (Person has no email
-    // path), and never in any mobile wire projection — admin-console-only, like phone.
+    // path). Never in a canvasser wire (MOBILE_VOTER_PROJECTION) and in no export; it rides only
+    // the management-only profile routes (web org + campaign, mobile profile), like phone.
     email: { type: String, default: null, trim: true, lowercase: true },
 
     party: { type: String, default: null, trim: true },

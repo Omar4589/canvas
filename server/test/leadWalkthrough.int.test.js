@@ -10,8 +10,9 @@ import mongoose from 'mongoose';
 //
 // teamLead.int.test.js pins the authorization MATRIX (who may call what); this file pins
 // the JOURNEY — config, survey authoring, field setup, self-assignment, the mobile walk,
-// every report the mobile admin app calls, exports, client reports, packets, and the
-// Users surface — in dependency order, as one lead, so a regression that walls any step
+// every report the mobile admin app calls, the campaign Voters tab, exports, client
+// reports, packets, and the Users surface — in dependency order, as one lead, so a
+// regression that walls any step
 // of the real workflow fails here even when every router gate is individually correct.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-lead-walkthrough';
 // Exports enqueue against Redis, which tests don't run; without this bound the ioredis
@@ -320,6 +321,23 @@ test('8. every report surface the mobile admin app calls answers for the lead', 
   for (const path of gets) expectOk(await asLead('GET', path), `GET ${path}`);
 });
 
+test('8b. the campaign Voters tab: list this campaign\'s voters, open a profile, leave a note', { skip }, async () => {
+  const A = ctx.A._id;
+  // The lead-visible twin of the org directory (routes/admin/campaignVoters.js): the whole
+  // campaign, counted exactly — never a wall, and never the org-wide list (test 13).
+  const list = await asLead('GET', `/admin/campaigns/${A}/voters`);
+  expectOk(list, 'campaign voter directory');
+  const inA = await Voter.countDocuments({ organizationId: ctx.org._id, campaignId: A });
+  assert.strictEqual(list.json.total, inA, 'every voter of the campaign, counted exactly');
+  assert.strictEqual(list.json.voters.length, inA, 'and all on the first page');
+  const vid = list.json.voters[0].id;
+  const profile = await asLead('GET', `/admin/campaigns/${A}/voters/${vid}`);
+  expectOk(profile, 'campaign voter profile');
+  assert.strictEqual(profile.json.voter.id, vid);
+  assert.deepStrictEqual(profile.json.otherCampaigns, [], 'a lead\'s profile is this campaign\'s only');
+  expectOk(await asLead('POST', `/admin/campaigns/${A}/voters/${vid}/notes`, { body: 'Follow up by phone' }), 'campaign voter note');
+});
+
 test('9. packets print for the lead', { skip }, async () => {
   const sources = await asLead('GET', `/admin/campaigns/${ctx.A._id}/packets/sources`);
   expectOk(sources, 'packet sources');
@@ -382,4 +400,5 @@ test('13. and the walls that SHOULD be walls still are', { skip }, async () => {
   assert.strictEqual((await asLead('POST', '/admin/campaigns', { name: 'Nope', type: 'survey', state: 'KY' })).status, 403, 'campaign create');
   assert.strictEqual((await asLead('POST', '/admin/client-reports/shares/revoke-legacy')).status, 403, 'org-wide share sweep');
   assert.strictEqual((await asLead('GET', '/admin/voters')).status, 403, 'org voter directory');
+  assert.strictEqual((await asLead('GET', `/admin/campaigns/${ctx.B._id}/voters`)).status, 403, 'ungranted campaign voters');
 });

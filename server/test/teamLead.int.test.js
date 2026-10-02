@@ -6,9 +6,10 @@ import mongoose from 'mongoose';
 // Authorization matrix for the team-lead (campaign-scoped admin) role, exercised over the
 // REAL Express app + a throwaway mongod (no Redis — we test the Redis-free authz paths):
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/lead_test node --test test/teamLead.int.test.js
-// Seed: one org, an admin, and a lead granted campaign A only (with a campaign B they do NOT
-// manage). Assert a lead can run A but is 403 on B, on campaign CRUD, on the org survey/tag
-// mutations and the org Users admin — while allowed to read libraries + run their crew.
+// Seed: one org, an admin, a canvasser, and a lead granted campaign A only (with a campaign B
+// they do NOT manage). Assert a lead can run A but is 403 on B, on campaign CRUD, on the org
+// survey/tag mutations and the org Users admin — while allowed to read libraries, run their
+// crew, and read A's voters (never B's, and never the org-wide directory).
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-team-lead';
 
 const { createApp } = await import('../src/app.js');
@@ -24,6 +25,9 @@ const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
+const { Voter } = await import('../src/models/Voter.js');
+const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { VoterNote } = await import('../src/models/VoterNote.js');
 const bcrypt = (await import('bcryptjs')).default;
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -36,13 +40,16 @@ const ctx = {}; // { org, A, B, adminTok, leadTok }
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, CanvassActivity, ReportShareLink, SurveyTemplate, Effort]) await M.deleteMany({});
+  for (const M of [Organization, User, Membership, Campaign, CampaignManager, Household, CanvassActivity, ReportShareLink, SurveyTemplate, Effort, Voter, SurveyResponse, VoterNote]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Test Org', slug: 'test-org-lead', isActive: true });
   const admin = await User.create({ firstName: 'Ada', lastName: 'Admin', email: 'admin@t.co', passwordHash: 'x', isActive: true });
   const lead = await User.create({ firstName: 'Lee', lastName: 'Lead', email: 'lead@t.co', passwordHash: 'x', isActive: true });
   await Membership.create({ userId: admin._id, organizationId: org._id, role: 'admin', isActive: true });
   await Membership.create({ userId: lead._id, organizationId: org._id, role: 'lead', isActive: true });
+  // A canvasser: no admin surface at all, campaign Voters tab included.
+  const canv = await User.create({ firstName: 'Cy', lastName: 'Walker', email: 'walker@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: canv._id, organizationId: org._id, role: 'canvasser', isActive: true });
   const A = await Campaign.create({ organizationId: org._id, name: 'Campaign A', type: 'survey', state: 'KY', isActive: true });
   const B = await Campaign.create({ organizationId: org._id, name: 'Campaign B', type: 'survey', state: 'KY', isActive: true });
   await CampaignManager.create({ campaignId: A._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
@@ -68,6 +75,39 @@ before(async () => {
     { _id: hhB, campaignId: B._id, organizationId: org._id, isActive: true },
   ]);
 
+  // Voter rows for the campaign Voters tab test. A SHARED person — one row per campaign, the
+  // sibling pair the profile unions for an admin and must NOT union for a lead — plus an A-only
+  // row so A's directory has a count worth checking. One survey and one admin note per sibling
+  // (on a template attached to nothing and authored by the admin, so it never enters the lead's
+  // survey list); a do-not-contact flag on both siblings (the org-wide invariant) and an email on
+  // the A row — owner rulings 1 and 2: both are shown to a lead. Real documents, not raw
+  // inserts: the directory and the profile read every identity field.
+  const survFixture = await SurveyTemplate.create({ organizationId: org._id, name: 'Responses fixture', createdBy: admin._id, version: 1 });
+  const dnc = { flagged: true, at: new Date(), byUserId: admin._id, reason: 'Asked us to stop calling', source: 'admin' };
+  const voterA = await Voter.create({
+    organizationId: org._id, campaignId: A._id, householdId: hhA, stateVoterId: 'KY-SHARED-1',
+    firstName: 'Ann', lastName: 'Alpha', fullName: 'Ann Alpha', email: 'ann@example.com', doNotContact: dnc,
+  });
+  const voterB = await Voter.create({
+    organizationId: org._id, campaignId: B._id, householdId: hhB, stateVoterId: 'KY-SHARED-1',
+    firstName: 'Ann', lastName: 'Alpha', fullName: 'Ann Alpha', doNotContact: dnc,
+  });
+  const voterA2 = await Voter.create({
+    organizationId: org._id, campaignId: A._id, householdId: hhA, stateVoterId: 'KY-A-ONLY-2',
+    firstName: 'Bob', lastName: 'Beta', fullName: 'Bob Beta',
+  });
+  const response = (campaign, voter, householdId) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId, voterId: voter._id, userId: admin._id,
+    surveyTemplateId: survFixture._id, surveyTemplateVersion: 1,
+    location: { lat: 38.19, lng: -84.87 }, submittedAt: new Date(),
+    answers: [{ questionKey: 'support', questionLabel: 'Support?', answer: 'Yes' }],
+  });
+  await SurveyResponse.create([response(A, voterA, hhA), response(B, voterB, hhB)]);
+  await VoterNote.create([
+    { organizationId: org._id, voterId: voterA._id, authorId: admin._id, body: 'Note on the A row' },
+    { organizationId: org._id, voterId: voterB._id, authorId: admin._id, body: 'Note on the B row' },
+  ]);
+
   // A password-protected share link for the unlock rate-limit test.
   const shareToken = 'ratelimit-test-token';
   await ReportShareLink.collection.insertOne({
@@ -88,10 +128,12 @@ before(async () => {
   ]);
 
   Object.assign(ctx, {
-    org, A, B, hhA, hhB, actA, actB, shareToken, admin,
+    org, A, B, hhA, hhB, actA, actB, shareToken, admin, lead,
     survOverrideA, survDefaultB, survLeadDraft,
+    voterA, voterB, voterA2,
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
+    canvTok: signUserToken(canv),
   });
 
   const app = createApp();
@@ -233,6 +275,9 @@ test('libraries: lead reads surveys/tags but cannot mutate them, and cannot reac
   // pinned since 2026-08 because the mobile Duplicate surveys screen puts a lead one render
   // condition away from it. The report itself IS lead-readable, so hiding the button is a UI
   // courtesy; this is the actual gate. (Random ids: the router guard fires before any lookup.)
+  // The campaign-scoped READ a lead does get — a campaign's Voters tab and its profile — lives on
+  // its own router, /admin/campaigns/:campaignId/voters (routes/admin/campaignVoters.js), pinned
+  // in the campaign Voters tab test below; this org router gained no per-route carve-out for it.
   const vid = new mongoose.Types.ObjectId();
   const rid = new mongoose.Types.ObjectId();
   assert.strictEqual(
@@ -258,6 +303,109 @@ test('a role 403 carries code FORBIDDEN_ROLE', { skip }, async () => {
   const campaignLevel = await call('GET', `/api/admin/campaigns/${B._id}/turfs`, opt);
   assert.strictEqual(campaignLevel.status, 403);
   assert.strictEqual(campaignLevel.json.code, 'FORBIDDEN_ROLE');
+});
+
+test('the campaign Voters tab: a lead reads a managed campaign\'s directory and profiles, read-only — never B\'s, never through the org router', { skip }, async () => {
+  const { leadTok, adminTok, canvTok, org, A, B, admin, lead, voterA, voterB, voterA2 } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  const adminOpt = { token: adminTok, orgId: org._id };
+  const canvOpt = { token: canvTok, orgId: org._id };
+  const tab = (campaign, rest = '') => `/api/admin/campaigns/${campaign._id}/voters${rest}`;
+
+  // The directory (routes/admin/campaignVoters.js — the URL is the scope): this campaign's rows,
+  // counted exactly, in name order, with no `campaigns` chips — inside one campaign rows and
+  // people are the same thing.
+  const list = await call('GET', tab(A), opt);
+  assert.strictEqual(list.status, 200, 'lead lists A');
+  assert.strictEqual(list.json.total, 2, 'the shared person\'s A row and the A-only row');
+  assert.deepStrictEqual(list.json.voters.map((v) => v.id), [String(voterA._id), String(voterA2._id)], 'A\'s rows, Alpha before Beta');
+  assert.ok(list.json.voters.every((v) => !('campaigns' in v)), 'no campaign chips on a campaign-scoped row');
+  assert.strictEqual(list.json.voters[0].dnc, true, 'the do-not-contact flag shows on the row');
+  // An ungranted campaign is the ROLE refusal (requireCampaignManager); a canvasser likewise
+  // (the campaigns router's own gate, before this router is even reached).
+  const onB = await call('GET', tab(B), opt);
+  assert.strictEqual(onB.status, 403, 'lead on B');
+  assert.strictEqual(onB.json.code, 'FORBIDDEN_ROLE');
+  const asCanv = await call('GET', tab(A), canvOpt);
+  assert.strictEqual(asCanv.status, 403, 'canvasser on A');
+  assert.strictEqual(asCanv.json.code, 'FORBIDDEN_ROLE');
+  assert.strictEqual((await call('GET', tab(A, `/${voterA._id}`), canvOpt)).json.code, 'FORBIDDEN_ROLE', 'canvasser on a profile');
+
+  // The profile, as a lead: THIS row only. The same person has a B row with its own survey and
+  // note; a lead is told about neither (otherCampaigns empty, A's survey and note only) — while
+  // the do-not-contact reason, who flagged and when, and the email ARE shown (owner rulings 1
+  // and 2, 2026-09-30: the flag is org-wide by design, and a lead may be the paying client).
+  const profile = await call('GET', tab(A, `/${voterA._id}`), opt);
+  assert.strictEqual(profile.status, 200, 'lead opens an A profile');
+  assert.strictEqual(profile.json.voter.id, String(voterA._id));
+  assert.deepStrictEqual(profile.json.otherCampaigns, [], 'no sibling campaigns for a lead');
+  assert.strictEqual(profile.json.surveys.length, 1, 'only the A survey');
+  assert.ok(profile.json.surveys.every((s) => s.campaignId === String(A._id)), 'every survey is A\'s');
+  assert.deepStrictEqual(profile.json.notes.admin.map((n) => n.body), ['Note on the A row'], 'only the A note');
+  assert.strictEqual(profile.json.voter.email, 'ann@example.com', 'email is shown to a lead');
+  assert.strictEqual(profile.json.voter.doNotContact.flagged, true);
+  assert.strictEqual(profile.json.voter.doNotContact.reason, 'Asked us to stop calling', 'the reason is shown to a lead');
+  assert.strictEqual(profile.json.voter.doNotContact.by?.id, String(admin._id), 'and who flagged');
+  assert.ok(profile.json.voter.doNotContact.at, 'and when');
+
+  // A voter outside this campaign is a DOMAIN refusal: 404 VOTER_NOT_IN_CAMPAIGN for EVERY role
+  // (admins included) — never FORBIDDEN_ROLE, which means only "your role is too low", and a 404
+  // like an unknown id, so a client-lead cannot probe which ids exist in campaigns they do not
+  // manage.
+  const leadCross = await call('GET', tab(A, `/${voterB._id}`), opt);
+  assert.strictEqual(leadCross.status, 404, 'lead: B\'s row through A');
+  assert.strictEqual(leadCross.json.code, 'VOTER_NOT_IN_CAMPAIGN');
+  assert.notStrictEqual(leadCross.json.code, 'FORBIDDEN_ROLE');
+  const adminCross = await call('GET', tab(A, `/${voterB._id}`), adminOpt);
+  assert.strictEqual(adminCross.status, 404, 'admin: B\'s row through A');
+  assert.strictEqual(adminCross.json.code, 'VOTER_NOT_IN_CAMPAIGN');
+  const unknown = await call('GET', tab(A, `/${new mongoose.Types.ObjectId()}`), opt);
+  assert.strictEqual(unknown.status, 404, 'an unknown id');
+  assert.strictEqual(unknown.json.error, 'Voter not found');
+
+  // The same profile as an ADMIN keeps the org-wide union (ruling 5): the B sibling is linked,
+  // its survey and its note are in.
+  const asAdmin = await call('GET', tab(A, `/${voterA._id}`), adminOpt);
+  assert.strictEqual(asAdmin.status, 200, 'admin opens the same profile through the campaign tab');
+  assert.deepStrictEqual(
+    asAdmin.json.otherCampaigns.map((c) => [c.campaignId, c.voterId]),
+    [[String(B._id), String(voterB._id)]],
+    'admin: the B row is linked'
+  );
+  assert.strictEqual(asAdmin.json.surveys.length, 2, 'admin: both surveys');
+  assert.deepStrictEqual(asAdmin.json.notes.admin.map((n) => n.body).sort(), ['Note on the A row', 'Note on the B row'], 'admin: both notes');
+
+  // The one write a lead has here: a note on a voter of this campaign — and only of this one.
+  const noted = await call('POST', tab(A, `/${voterA._id}/notes`), { ...opt, body: { body: 'Lead left a note' } });
+  assert.strictEqual(noted.status, 201, 'lead adds a note');
+  const stored = await VoterNote.findById(noted.json.id).lean();
+  assert.ok(stored, 'the note exists');
+  assert.strictEqual(String(stored.voterId), String(voterA._id), 'on the A row');
+  assert.strictEqual(String(stored.authorId), String(lead._id), 'by the lead');
+  assert.strictEqual(String(stored.organizationId), String(org._id), 'in the org');
+  const blank = await call('POST', tab(A, `/${voterA._id}/notes`), { ...opt, body: { body: '   ' } });
+  assert.strictEqual(blank.status, 400, 'a blank note is refused');
+  assert.strictEqual(blank.json.error, 'Note body required');
+  const crossNote = await call('POST', tab(A, `/${voterB._id}/notes`), { ...opt, body: { body: 'nope' } });
+  assert.strictEqual(crossNote.status, 404, 'a note on B\'s row through A');
+  assert.strictEqual(crossNote.json.code, 'VOTER_NOT_IN_CAMPAIGN');
+  assert.strictEqual(await VoterNote.countDocuments({ voterId: voterB._id }), 1, 'and nothing was written to the B row');
+  // Removing it goes through the org router, which did not move: admin-only, every write.
+  const del = await call('DELETE', `/api/admin/voters/${voterA._id}/notes/${noted.json.id}`, opt);
+  assert.strictEqual(del.status, 403, 'note delete stays on the admin-only org router');
+  assert.strictEqual(del.json.code, 'FORBIDDEN_ROLE');
+
+  // PARITY: one resolver behind both lists (services/voters/voterDirectory.js) — the org
+  // directory narrowed to A answers exactly what A's tab answers, rows and total; and the tab
+  // ignores a stray ?campaignId (the URL is the scope).
+  const viaOrg = await call('GET', `/api/admin/voters?campaignId=${A._id}`, adminOpt);
+  const viaTab = await call('GET', tab(A), adminOpt);
+  assert.strictEqual(viaOrg.status, 200);
+  assert.strictEqual(viaTab.status, 200);
+  assert.deepStrictEqual(viaTab.json.voters, viaOrg.json.voters, 'same rows');
+  assert.strictEqual(viaTab.json.total, viaOrg.json.total, 'same total');
+  const stray = await call('GET', tab(A, `?campaignId=${B._id}`), adminOpt);
+  assert.deepStrictEqual(stray.json.voters, viaTab.json.voters, 'A\'s tab with ?campaignId=B is still A');
 });
 
 test('lead survey edit/duplicate is scoped: own or managed-attached yes, unmanaged no', { skip }, async () => {

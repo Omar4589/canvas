@@ -41,6 +41,7 @@ const ALLOWED = new Map([
   ['services/dnc/reapplyDncLists.js', 'sticky DNC graduation — exact by choice (org-wide; honors the declared state)'],
   // Sibling rows of a voter the admin is already looking at: a stored ID compared to stored IDs.
   ['routes/admin/voters.js', 'stored-ID sibling propagation of the do-not-contact flag'],
+  ['services/voters/voterDirectory.js', 'stored-ID sibling rows of the page (the org view\'s campaign chips + surveyed-in-any)'],
   ['services/voters/voterProfile.js', 'stored-ID sibling rows on the profile'],
   ['services/campaigns/deleteCampaign.js', 'stored-ID survivor check and parking on campaign delete'],
   // The Person layer keys on (registeredState, stateVoterId) exactly, by its own design (PERSONS.md).
@@ -54,7 +55,7 @@ const ALLOWED = new Map([
 ]);
 
 // KNOWN LIMIT: the detector sees a filter LITERAL within WINDOW lines of the call. A filter built
-// into a variable first and passed later (the two directory search boxes, routes/admin/voters.js
+// into a variable first and passed later (the two directory search boxes, services/voters/voterDirectory.js
 // and routes/mobile/voters.js, which take a TYPED id and compare it exactly) is not seen. Those are
 // on the post-election worklist in docs/PROPOSAL_VOTER_ID_KEYS.md; a `$group` on '$stateVoterId'
 // is deliberately not a hit (a count is not a lookup).

@@ -67,6 +67,10 @@ export const CAMPAIGN_NAV = [
   { slug: 'team', label: 'Team', icon: '/users', group: 'field' },
   { slug: 'timeline', label: 'Timeline', icon: '/timeline', group: 'field' },
   { slug: 'map', label: 'Map', icon: '/map', group: 'field' },
+  // This campaign's voter directory and profiles. Lead-allowed like Map/Pin Fixes — the server's
+  // requireCampaignManager gate on /admin/campaigns/:id/voters is the wall (a lead's profile is
+  // read-only in-page). The org-wide /voters item above stays admin-only.
+  { slug: 'voters', label: 'Voters', icon: '/voters', group: 'field' },
   { slug: 'audit', label: 'Audit', icon: '/audit', group: 'quality' },
   // Data repair, so it sits with the other inspect-and-fix surfaces rather than with the
   // canvasser-app settings. Org-admin-only server-side; the page itself walls a lead.

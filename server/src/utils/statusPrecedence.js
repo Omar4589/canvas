@@ -11,6 +11,10 @@ export const ACTION_TO_STATUS = {
   survey_submitted: 'surveyed',
   restricted: 'restricted', // home is inaccessible — a marker, NOT billable / NOT a knock
   no_soliciting: 'no_soliciting', // reached the door, a sign forbade the knock — a knock, NOT a contact
+  // someone answered who isn't on the list and wouldn't give a name — a knock AND a contact, NOT a
+  // completion. A missing entry here is silent and splits the product: resolveStatus would skip the
+  // row (keeping the prior status) while every per-round ladder read 'unknocked'.
+  not_target: 'not_target',
   // note_added has no effect on door status
 };
 
@@ -24,6 +28,7 @@ export const STATUS_RANK = {
   surveyed: 5,
   restricted: 6, // non-completion; last-write-wins governs resolveStatus, so rank is cosmetic
   no_soliciting: 7, // ditto — cosmetic
+  not_target: 8, // ditto — cosmetic
 };
 
 const COMPLETION_ACTION = { survey: 'survey_submitted', lit_drop: 'lit_dropped' };
@@ -81,7 +86,7 @@ export const resolveStatusFromSummary = (campaignType, summary) => {
   return ACTION_TO_STATUS[summary?.latestActionType] || 'unknocked';
 };
 
-// Door status → display label, the 8-value domain of Household.status. Deliberately NOT a copy of
+// Door status → display label, the 9-value domain of Household.status. Deliberately NOT a copy of
 // the web map: that one carries three extra keys (voted / dnc / doNotKnock) that are voter facts,
 // not door statuses, so the two can only be compared as a subset — which is what
 // test/actionLabels.test.js does, against Household's own enum, so a renamed status fails there
@@ -95,4 +100,7 @@ export const DOOR_STATUS_LABELS = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  // Printed beside every registered voter's name in Results by voter's Address outcome column —
+  // a fact about the door, as that column is documented (docs/EXPORTS.md).
+  not_target: 'Not a target voter',
 };

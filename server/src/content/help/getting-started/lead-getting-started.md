@@ -27,12 +27,13 @@ On any campaign you've been granted, you're as powerful as an admin:
 - [Print walk packets](printing-walk-packets) for a paper canvass
 - [Export your campaign's data](exports) — org-wide exports and a few admin-only types stay with admins
 - See all the reporting: map, timeline, insights, early voting, and client reports
+- Look up any voter in your campaigns and read their profile — the campaign's **Voters** tab. It's read-only for you (contact details, the household, this campaign's survey answers and notes, and any do-not-contact flag with its reason), and you can add a note
 
 ## What stays with admins
 
 - Creating, archiving, or deleting a campaign
 - Billing and org settings
-- The org voter directory
+- The org-wide voter directory (every campaign at once) — your campaign's **Voters** tab is yours, but changing a voter's details stays with admins
 - Changing anyone's **role**, name, or email — and managing admins or fellow leads
 - Archiving or deleting survey templates, and the **tag library** (you build and edit surveys for your campaigns; tags you can use, not edit)
 - **Do-not-contact flags** — flagging someone reaches every campaign in the organization at once, so it's admin-only

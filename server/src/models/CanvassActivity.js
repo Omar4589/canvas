@@ -57,7 +57,10 @@ const canvassActivitySchema = new mongoose.Schema(
 
     actionType: {
       type: String,
-      enum: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted', 'no_soliciting'],
+      // not_target — someone answered who isn't on the list and wouldn't give a name: a knock and a
+      // contact, never a survey; opt-in per campaign (services/canvass/outcomeToggles.js). Added in
+      // the SAME change as Household.status's value: a mismatch 500s after the replace's deletes.
+      enum: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'note_added', 'lit_dropped', 'restricted', 'no_soliciting', 'not_target'],
       required: true,
       index: true,
     },

@@ -1193,7 +1193,13 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     provenance sentence is false). **Exposure posture, code-verified:** phone/email are
     admin-console-only — the mobile wire re-reads every voter through the shared
     `MOBILE_VOTER_PROJECTION` (bootstrap, `/changes`, and the create response), so neither field
-    ever reaches a phone's offline cache, preserving the §C "strict subset" claim verbatim.
+    ever reaches a phone's offline cache, preserving the §C "strict subset" claim verbatim. *[v6
+    2026-10-01: "admin-console-only" was too strong on the day it was written and is corrected here:
+    both fields ride the **management-only profile routes** — `buildVoterProfile` returns
+    `voter.email` beside the phones, and `GET /mobile/voters/:voterId` has served that payload to
+    admins AND granted team leads since 2026-07-30 — and since 2026-10-01 also the campaign-scoped
+    web profile a lead opens (item 24). What stays exactly true: neither field is in any canvasser
+    wire (`MOBILE_VOTER_PROJECTION`) nor in a phone's offline cache, and email is in no export.]*
     `Voter.doorAdded.byUserId/at` is staff attribution on a customer record (same class as the
     pin-stamp items 15/v6-08-22; joins the §A3 pseudonymity list). The create tags its record
     for the staff-under-grant audit (`addAuditSubjects`), so a support-session add is visible in
@@ -1218,7 +1224,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     addresses** joined the enumerated list beside telephone numbers. Nothing else in the paragraph
     moved: the purpose limitation and the access-limitation sentence stand as written, and the
     exposure posture recorded above is unchanged — email remains admin-console-only, stripped by
-    `MOBILE_VOTER_PROJECTION`, so it still never reaches a phone's offline cache. The only
+    `MOBILE_VOTER_PROJECTION`, so it still never reaches a phone's offline cache *[v6 2026-10-01:
+    read "management-only" for "admin-console-only" — see the stamp above and item 24; the
+    offline-cache half is untouched]*. The only
     editorial liberty was typographic: the apostrophe and both dashes are written as `&rsquo;` and
     `&mdash;` to match every other entity in the document. `client/dist/privacy.html` is gitignored
     build output that regenerates from this source, so there is no second copy to drift.
@@ -1698,6 +1706,109 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     **more** true after this change than before it — see the stamp on that watchlist bullet above.
     Owner to confirm before the production deploy, as items 19 and 21 were; the leak fix itself
     should not wait on that confirmation, because it corrects a live file.
+
+24. **[v6 2026-10-01 — Campaign-scoped Voters tab + read-only campaign profile on the WEB for team
+    leads: a widening of a web READ surface to an audience that already holds the identical read on
+    mobile and in exports, plus a NARROWING of the mobile read. No new data, no new recipient, no new
+    subprocessor, no write moved. This is a "who can access customer data" change and is said out
+    loud here, as the repo invariant requires.]** What shipped: a new campaign-nested router
+    `/admin/campaigns/:campaignId/voters` (`routes/admin/campaignVoters.js`; `requireAuth,
+    orgContext, requireCampaignManager, loadCampaign`) with three routes — the campaign's directory,
+    one profile, add-note — and a web **Voters** tab in every campaign's console nav (`CAMPAIGN_NAV`,
+    Field group) with routes `/campaigns/:campaignId/voters[/:voterId]` **outside** the `orgAdmin`
+    RoleGate. The org router `/admin/voters` is untouched (`requireOrgRole('admin')` router-wide, no
+    carve-outs — the "no per-route carve-outs" sentence in `docs/ROLES.md` stays literally true). ONE
+    list resolver, `listVoters` (`services/voters/voterDirectory.js`, extracted verbatim from the org
+    handler), feeds both the org page and the campaign tab; the campaign route passes
+    `req.campaign._id` as the scope and ignores any `?campaignId`. ONE profile builder,
+    `buildVoterProfile(voterId, { orgId, scopeCampaignId })`: when `scopeCampaignId` is set the
+    person-level unions collapse to the opened row (`personRowIds = [voter._id]`) and
+    `otherCampaigns = []`, and the builder returns `null` when the voter's `campaignId` differs — a
+    mismatched scope can never widen a read. The campaign route passes
+    `scopeCampaignId: isOrgAdmin(req) ? null : req.campaign._id`. ONE note writer, `createVoterNote`
+    (`services/voters/voterNotes.js`), shared by the org, campaign and mobile routes.
+
+    **(a) Who gains what.** A **team lead**, on a campaign they hold a `CampaignManager` grant for,
+    can now on the web: list that campaign's voters (name, state voter id, party, survey status,
+    the do-not-contact boolean, the door-added marker, voted, address — the row fields the org
+    directory already shows admins, minus the dedupe-only `campaigns[]` chips); open a **read-only**
+    profile carrying the full identity block — **phone, cell, email, date of birth**, gender,
+    registration, districts and precinct — the household and its members with their statuses,
+    **this campaign's** survey answers including preserved (overwritten) responses and their template
+    question text, **this campaign's** admin and field notes, the household's canvass activity, voted
+    status, and the **do-not-contact flag WITH its reason, who flagged and when** (owner ruling
+    2026-09-30, rulings 1 and 2: the flag is org-wide by design and the reason is shown to a lead
+    exactly as to an admin; the voter's email is shown); and **add a note** — the router's only
+    write. A lead cannot edit identity, flag or clear DNC, edit/delete/restore a survey response,
+    delete a walk-up voter, or delete a note: none of those routes moved off the admin-only org
+    router. The **"Doorline staff access" card stays hidden** from leads (ruling 3) —
+    `GET /admin/voters/:id/staff-access` remains on the org router, admin-only, with no campaign twin.
+
+    **(b) Why this is disclosure PARITY, not a new exposure.** Every field above already reaches the
+    same person through shipped, code-verified channels: (i) the **mobile profile**
+    `GET /mobile/voters/:voterId` has been management-only — lead-reachable with the FULL profile:
+    phone, DOB, the DNC reason and `voter.email` (returned by `buildVoterProfile` since the field
+    existed) — since 2026-07-30 (the stamp on the §H16(b) paragraph below; pinned by
+    `test/perRoundVoterView.int.test.js`); (ii) the lead-visible **exports** — the voter-file
+    reconstruction (`voterValueOf` in `services/export/exportBuilders.js` renders `dateOfBirth` and
+    the phone keys) and the `includeVoterDetail` opt-in on the two survey exports
+    (`VOTER_DETAIL_HEADERS`: gender, date of birth, phone, phone type, cell phone — lead-tickable on
+    `results-by-voter` under the 2026-09-23 ruling, item 22) carry phone and DOB, and `notes` carries
+    profile-note bodies including the auto-generated DNC-reason notes (item 17); (iii) the **Notes
+    hub** already shows a lead every note source for campaigns they manage. The owner's standing
+    ruling that **a team lead may be the paying CLIENT** (lead-visible = client-visible; items 17 and
+    22) is the basis: the web page gives the same reader the same record in a browser instead of a
+    phone or a CSV. **Email, said plainly:** it is NOT in any export's column set (re-verified:
+    `services/export/` has no `email` reference) and NOT in any canvasser wire
+    (`MOBILE_VOTER_PROJECTION`, `routes/mobile/bootstrap.js`), but it HAS been in the management-only
+    mobile profile payload all along, so a lead could already read it; item 16's two
+    "admin-console-only" sentences are stamped below rather than left standing.
+
+    **(c) The NARROWING — on web AND mobile.** Until now a lead's mobile profile carried the person's
+    **cross-campaign** history: survey answers, notes and the names of every campaign the org holds
+    that person in — other clients' campaigns, when the lead is a client (the sibling-union design
+    recorded in VOTERS.md §D). Ruling 4: a lead sees ONLY their own campaign's answers and notes.
+    `GET /mobile/voters/:voterId` now passes `scopeCampaignId` for every non-org-admin, so the
+    shipped app receives a campaign-scoped payload with `otherCampaigns: []` — **no app update
+    needed**, the server narrows. The web campaign profile is born scoped the same way. An **org
+    admin** opening a voter from the campaign tab still sees the person's other campaigns with links
+    (ruling 5 — the org-wide union, as today). Net for a client-lead: strictly less of other clients'
+    data than yesterday.
+
+    **(d) Audit posture — same class, verified.** The new router is mounted in `routes/index.js`
+    with the other campaign-nested routers, i.e. **after `accessLog`**, so every request under a
+    support grant logs; `RESOURCE_LABELS` (`services/access/supportAccess.js`) gains a rule so
+    `/admin/campaigns/:id/voters…` classifies as `voters` rather than `other` (an unrecognized route
+    is still logged — the failure the design forbids is an unlogged read, not a mislabeled one); and
+    the router carries the same `router.param('voterId') → addAuditSubjects(res, 'voter', id)` hook
+    as the org router, so a single-record open under a grant lands in that voter's staff-access
+    panel. Refusal codes, recorded because they are a concealment decision: a campaign the caller
+    does not manage → 403 `FORBIDDEN_ROLE` (middleware; "your role is too low", and nothing else is
+    ever that code); a voter in the org but **not in this campaign** → **404 `VOTER_NOT_IN_CAMPAIGN`
+    for every role** on the web, so a client-lead cannot probe other campaigns' voter ids and learn
+    that they exist; an unknown id → 404 `Voter not found`. Mobile keeps the **403** status for the
+    same case (the shipped app inspects 403 codes) and gains `code: 'VOTER_NOT_IN_CAMPAIGN'`; it
+    refuses a manager's note on an out-of-campaign voter the same way. One data-handling change,
+    recorded for completeness: the mobile manager-scope search used to build a `$in` of **every
+    household id in the campaign** (150,000 ids, 2.9 MB per request); it now filters
+    `{ organizationId, campaignId }` — fewer ids in flight, the same rows out.
+
+    **(e) Negatives, so nothing is re-derived.** No write moved: the identity PATCH, DNC flag/clear,
+    survey edit/delete/restore, walk-up delete and note delete stay on the admin-only org router,
+    and the web admin's campaign-mode profile calls those org routes. No new field, no new
+    collection channel, no retention change, no new export (the campaign tab has no CSV), no new
+    third party — **not a DPA §6 event**. The Help Center gains a lead-visible page guide
+    (`pages/page-voters.md`), written from VOTERS.md Part 1.
+
+    **Assessment: no Privacy Policy / ToS / DPA text edit is required.** `privacy.html` never names
+    roles — its access-limitation sentence is about the customer organization's authorized users —
+    and it already contemplates the organization sending records to its own clients, which is
+    exactly what a client-lead reading their campaign's voters in a browser is. What changes is this
+    code-verified record: a lead's web reach now matches their mobile and export reach, and their
+    mobile reach is narrower than it was. **Owner to confirm before the production deploy**, as
+    items 17, 19, 21, 22 and 23 were — specifically that rulings 1 and 2 (the DNC reason and the
+    email shown to a lead) are as intended, since those are the two fields where "already on the
+    phone" is the only prior disclosure.
 
 ---
 
@@ -2826,7 +2937,7 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 `app.use(morgan(isProd ? 'combined' : 'dev'))` (`server/src/app.js:72` *[v3: was :52 — line drift only]*), mounted app-wide with no `skip`, **before** everything. `app.set('trust proxy', 1)` (`:50`) makes `:remote-addr` resolve to the **real client IP**. The `combined` format logs `":method :url HTTP/:http-version"`, and morgan's `:url` token is **`req.originalUrl` — which INCLUDES THE QUERY STRING.**
 
 **Therefore Heroku's log stream receives, in cleartext:**
-- **Voter names and street addresses**, whenever anyone uses a search box: `/admin/voters?search=John%20Smith` (`routes/admin/voters.js:71` — regex-matched against `fullName`, `stateVoterId`, `addressLine1`, `city`, `zipCode`), `/mobile/voters?search=` (`routes/mobile/voters.js:89-100`), `/super-admin/persons?q=` (`routes/superAdmin/persons.js:35`), household address search (`reports.js:2797`).
+- **Voter names and street addresses**, whenever anyone uses a search box: `/admin/voters?search=John%20Smith` (`routes/admin/voters.js:71` — regex-matched against `fullName`, `stateVoterId`, `addressLine1`, `city`, `zipCode`), `/mobile/voters?search=` (`routes/mobile/voters.js:89-100`), `/super-admin/persons?q=` (`routes/superAdmin/persons.js:35`), household address search (`reports.js:2797`). *[v6 2026-10-01: plus `/admin/campaigns/:campaignId/voters?search=` — the campaign Voters tab (item 24), the same `listVoters` regex and the same query-string exposure, now reachable by team leads; the `voters.js:71` pin on this bullet has rotted (the org search lives in `services/voters/voterDirectory.js`), cite by module.]*
 - **Free-text search over what canvassers wrote about voters** — `/admin/reports/notes?q=` (`reports.js:3415`).
 - **Every public report capability token**, because it is a **path segment**: `/api/share/:token` (`routes/public/share.js:27`). **The token is a credential, and it is written to a log.**
 - The client IP and user-agent of every request, including the continuous foreground polling from canvassers' phones.
@@ -2866,11 +2977,11 @@ The **documented, intended and shipped purpose** is support/persuasion identific
 *Precision:* the **schema** does not mandate political questions — question text is customer-authored free text. What is verified is that (i) the linkage to an identified individual is **structural and required**, and (ii) the shipped, documented use is support ID. **Treat as Art. 9 special-category data.** And note it is exposed **pinned to street addresses on unauthenticated public links** (D11).
 
 ### (b) DATE OF BIRTH. **VERIFIED, with a real protection you should credit.**
-Raw `dateOfBirth` is stored (`Voter.js:45`, `Person.js:80`) and returned in full to the **web console** for org admins.
+Raw `dateOfBirth` is stored (`Voter.js:45`, `Person.js:80`) and returned in full to the **web console** for org admins *[v6 2026-10-01: and to granted team leads, through the campaign-scoped profile — item 24; already true on the phone since 2026-07-30, see the next paragraph]*.
 
 **The mobile bootstrap deliberately strips it and sends only a derived integer age** (`routes/mobile/bootstrap.js:22-38`), on the stated reasoning that *"a DOB is the most identity-theft-useful field in a voter file"* and must not sit in a volunteer's offline cache. **I verified this protection is intact: DOB is not in the offline file.** *[2026-07-31: the protection was route-scoped in a second way — `POST /mobile/voters/:voterId/survey` returned the **raw Voter doc (dateOfBirth, phone, phoneType, the full doNotContact subdoc)** in its response body on every survey submit, since the route existed. It never reached the offline file (the client's reconcile reads only `response.household.status`, verified against every shipped bundle's code history) — but it left the server and crossed the wire to canvasser phones on each submit. **CLOSED:** all action responses (5 disposition routes, survey, location, both superseded early-returns) now return a minimal wire shape via `toWireHousehold` — household `_id`/`status`/`lastActionAt` only, per-round — with no voter/surveyResponse/activity objects at all; pinned by `server/test/actionResponsePerRound.int.test.js` (asserts no `dateOfBirth` and no phone digits anywhere in the serialized response). Deferred, recorded here: `GET /mobile/voters` (the admin voter-search list) still ships the campaign-global `surveyStatus` boolean to any rostered caller — a cross-round tell, not PII; the chosen follow-up is a per-round rewrite for non-manager callers if that screen is ever re-exposed to canvassers.]*
 
-**But the protection is route-scoped, not role-scoped.** `GET /mobile/voters/:voterId` returns raw `dateOfBirth` **plus `phone` and `cellPhone`** (`services/voters/voterProfile.js:141-146`; `routes/mobile/voters.js:151`), and **that route has no role gate** — the `isAdminOrSuper` check only *widens* scope. In the shipped app the only screen calling it is inside the **admin tab** (`mobile/app/(app)/voters/[id].jsx`, whose only two entry points from outside its own subtree are the **"Voter search"** row in `mobile/app/(app)/admin/more.jsx` — which opens the voter list, and the list opens the detail — and the tapped-voter link on `mobile/app/(app)/admin/notes.jsx`; both sit under `admin/_layout.jsx`, which redirects anyone who is not a super-admin and fails its `isConsoleRole(activeMembership?.role)` check), so **no canvasser-facing screen requests it**. But a canvasser's own credentials calling that endpoint directly, for a voter inside their assigned books, **would receive raw DOB and phone.** That is an authorization gap, not a product data flow. *[2026-07-30: **CLOSED.** `GET /mobile/voters/:voterId` is now management-only — `canManageCampaign` (super / org admin / lead with a grant for the campaign, and for leads the entry voter must belong to the granted campaign) or 403 `FORBIDDEN_ROLE`; the canvasser book-scope read path was removed (`routes/mobile/voters.js`). A canvasser's credentials can no longer retrieve DOB, phone, or cross-round survey answers through this route. The search list (`GET /mobile/voters`) stays canvasser-reachable but ships identity + status booleans only. Pinned by `server/test/perRoundVoterView.int.test.js` (canvasser 403 / lead 200 / cross-campaign 403 / admin 200).]* *[2026-07-29: this sentence used to pin three MOBILE line numbers (`more.jsx:131`, `notes.jsx:184`, `_layout.jsx:102-103`); every one of them had rotted — the rows and the gate had moved. **Cite a mobile entry point by its row LABEL and a gate by its predicate, never by line number.** The server-side pins in this paragraph are left as-is: they name a function in a service, which is stable. Re-verify by grepping `(app)/voters` outside `app/(app)/voters/` (two hits, both listed above) and `isConsoleRole` in the admin layout.]*
+**But the protection is route-scoped, not role-scoped.** `GET /mobile/voters/:voterId` returns raw `dateOfBirth` **plus `phone` and `cellPhone`** (`services/voters/voterProfile.js:141-146`; `routes/mobile/voters.js:151`), and **that route has no role gate** — the `isAdminOrSuper` check only *widens* scope. In the shipped app the only screen calling it is inside the **admin tab** (`mobile/app/(app)/voters/[id].jsx`, whose only two entry points from outside its own subtree are the **"Voter search"** row in `mobile/app/(app)/admin/more.jsx` — which opens the voter list, and the list opens the detail — and the tapped-voter link on `mobile/app/(app)/admin/notes.jsx`; both sit under `admin/_layout.jsx`, which redirects anyone who is not a super-admin and fails its `isConsoleRole(activeMembership?.role)` check), so **no canvasser-facing screen requests it**. But a canvasser's own credentials calling that endpoint directly, for a voter inside their assigned books, **would receive raw DOB and phone.** That is an authorization gap, not a product data flow. *[2026-07-30: **CLOSED.** `GET /mobile/voters/:voterId` is now management-only — `canManageCampaign` (super / org admin / lead with a grant for the campaign, and for leads the entry voter must belong to the granted campaign) or 403 `FORBIDDEN_ROLE`; the canvasser book-scope read path was removed (`routes/mobile/voters.js`). A canvasser's credentials can no longer retrieve DOB, phone, or cross-round survey answers through this route. The search list (`GET /mobile/voters`) stays canvasser-reachable but ships identity + status booleans only. Pinned by `server/test/perRoundVoterView.int.test.js` (canvasser 403 / lead 200 / cross-campaign 403 / admin 200).]* *[2026-07-29: this sentence used to pin three MOBILE line numbers (`more.jsx:131`, `notes.jsx:184`, `_layout.jsx:102-103`); every one of them had rotted — the rows and the gate had moved. **Cite a mobile entry point by its row LABEL and a gate by its predicate, never by line number.** The server-side pins in this paragraph are left as-is: they name a function in a service, which is stable. Re-verify by grepping `(app)/voters` outside `app/(app)/voters/` (two hits, both listed above) and `isConsoleRole` in the admin layout.]* *[v6 2026-10-01: **NARROWED for leads, and coded.** The route now passes `scopeCampaignId = campaign._id` to `buildVoterProfile` for every non-org-admin, so a lead's payload carries this campaign's survey answers and notes only and `otherCampaigns: []` — the cross-campaign union the 2026-07-30 stamp left in place for leads (other clients' campaign names, answers and notes, when the lead is a client) no longer reaches them; an org admin's payload is unchanged. The out-of-campaign refusal keeps its 403 status (the shipped app inspects 403 codes) and gains `code: 'VOTER_NOT_IN_CAMPAIGN'`; the add-note route refuses a manager's note on an out-of-campaign voter the same way. The same payload is now also served on the web at `GET /admin/campaigns/:campaignId/voters/:voterId` (404 `VOTER_NOT_IN_CAMPAIGN` there, for every role). Item 24 has the whole picture.]*
 
 > **Do NOT write:** *"Dates of birth are never sent to canvasser devices"* (the API path is not blocked) **and do NOT write** *"canvassers' phones receive dates of birth"* (no canvasser screen requests them). **Write:** *"Dates of birth are stored and are visible to administrators and team leads. They are deliberately excluded from the offline data downloaded to a canvasser's device, which carries only a derived age."*
 

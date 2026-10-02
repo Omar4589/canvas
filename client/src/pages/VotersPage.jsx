@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 import { shouldRetryDirectory } from '../lib/directoryRetry.js';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 import Pager from '../components/Pager.jsx';
 
 const PAGE_SIZE = 25;
@@ -31,7 +34,13 @@ function StatusPill({ status }) {
   );
 }
 
+// One page, two scopes. ORG mode (/voters, org admins only) is the whole directory with a campaign
+// filter. CAMPAIGN mode (/campaigns/:campaignId/voters, team leads too) is the same list with the
+// URL as the scope — same filters minus the campaign select, same columns minus Campaign, and the
+// same server resolver behind a campaign-nested route a lead's grant admits. `cid` decides.
 export default function VotersPage() {
+  const { campaignId: cid } = useParams();
+  const { isOrgAdmin } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [campaignId, setCampaignId] = useState('');
@@ -42,12 +51,17 @@ export default function VotersPage() {
   const [doorAdded, setDoorAdded] = useState('');
   const [skip, setSkip] = useState(0);
 
-  const campaignsQ = useQuery({
-    queryKey: ['admin', 'campaigns'],
-    queryFn: () => api('/admin/campaigns'),
-    staleTime: 60 * 1000,
-  });
-  const campaigns = campaignsQ.data?.campaigns || [];
+  // The same ['admin','campaigns'] cache the select has always read; in campaign mode it also
+  // resolves :campaignId for the header (lib/useCurrentCampaign.js names the three states).
+  const { campaigns, campaign: current, resolving, notFound } = useCurrentCampaign(cid);
+
+  // One mounted element serves every campaign (the sidebar switcher changes only the URL): back to
+  // page 1 on a switch, or the old skip could sit past the end of the new campaign's list.
+  const [prevCid, setPrevCid] = useState(cid);
+  if (prevCid !== cid) {
+    setPrevCid(cid);
+    setSkip(0);
+  }
 
   // Any filter change resets to the first page. Search is excluded here: it's
   // debounced, so resetting the page on the raw keystroke would desync skip
@@ -69,7 +83,8 @@ export default function VotersPage() {
   }
   const query = buildQuery({
     search: debouncedSearch,
-    campaignId,
+    // Campaign mode: the URL is the scope, so no campaignId param (the campaign route ignores one).
+    campaignId: cid ? '' : campaignId,
     party,
     surveyStatus,
     voted,
@@ -78,9 +93,14 @@ export default function VotersPage() {
     limit: PAGE_SIZE,
     skip,
   });
+  // Both keys share the ['admin','voters'] prefix, so the one invalidation (a walk-up delete on the
+  // profile) refreshes either mode. The org key is pinned verbatim by
+  // lib/votersDirectoryRender.smoke.test.js, the campaign key by campaignVotersRender.smoke.test.js.
   const votersQ = useQuery({
-    queryKey: ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, doorAdded, skip }],
-    queryFn: ({ signal }) => api(`/admin/voters${query}`, { signal }),
+    queryKey: cid
+      ? ['admin', 'voters', 'campaign', cid, { search: debouncedSearch, party, surveyStatus, voted, dnc, doorAdded, skip }]
+      : ['admin', 'voters', { search: debouncedSearch, campaignId, party, surveyStatus, voted, dnc, doorAdded, skip }],
+    queryFn: ({ signal }) => api(`${cid ? `/admin/campaigns/${cid}/voters` : '/admin/voters'}${query}`, { signal }),
     placeholderData: keepPreviousData,
     // One retry for a dropped connection, none for an HTTP answer: the org-wide read of a
     // multi-campaign org can use the server's whole time budget, and the console's global
@@ -88,15 +108,21 @@ export default function VotersPage() {
     retry: shouldRetryDirectory,
   });
 
+  // The drill-in's two non-page states, after every hook (the NotesPage/MapPage shape).
+  if (cid && resolving) return <CampaignLoading />;
+  if (cid && notFound) return <CampaignMissing />;
+
   const data = votersQ.data || { voters: [], total: 0 };
   const total = data.total || 0;
   const rows = data.voters || [];
+  // Where a row opens: this campaign's profile, or the org one.
+  const profilePath = (id) => (cid ? `/campaigns/${cid}/voters/${id}` : `/voters/${id}`);
 
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="inline text-2xl font-semibold text-fg">Voters</h1>
+          <h1 className="inline text-2xl font-semibold text-fg">{cid ? current?.name || 'Campaign' : 'Voters'}</h1>
           {/* keepPreviousData holds the last page on screen while a new filter loads, so clearing
               a campaign would otherwise show that campaign's rows — and its total — as if they
               were the whole org's. Say so, and dim them, until the new page lands. A sibling of
@@ -106,40 +132,73 @@ export default function VotersPage() {
               Updating…
             </span>
           )}
-          <p className="mt-1 text-sm text-fg-muted">
-            Everyone in your organization's voter database. Click a voter to see their full profile.
-            (For canvassers — the people you assign books to — see <strong>Users</strong>.)
-          </p>
+          {cid ? (
+            <p className="mt-1 text-sm text-fg-muted">
+              Voters — everyone in this campaign's voter file. Click a voter to see their profile.
+              (For canvassers — the people you assign books to — see <strong>Team</strong>.)
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-fg-muted">
+              Everyone in your organization's voter database. Click a voter to see their full profile.
+              (For canvassers — the people you assign books to — see <strong>Users</strong>.)
+            </p>
+          )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <Link to="/voters/dnc" className="text-sm font-medium text-brand-accent hover:underline">
-            Do-not-contact list →
-          </Link>
-          {/* The address-level sibling. Named "addresses" here so the two are not read as the
-              same list: one suppresses a person, the other a door. */}
-          <Link to="/voters/do-not-knock" className="text-sm font-medium text-brand-accent hover:underline">
-            Do-not-knock addresses →
-          </Link>
-        </div>
+        {cid ? (
+          /* The org-wide directory and its DNC / do-not-knock registers sit behind the orgAdmin
+             RoleGate, so a lead gets no link there — the console would wall them. */
+          isOrgAdmin && (
+            <Link to="/voters" className="shrink-0 text-sm font-medium text-brand-accent hover:underline">
+              Org-wide directory →
+            </Link>
+          )
+        ) : (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <Link to="/voters/dnc" className="text-sm font-medium text-brand-accent hover:underline">
+              Do-not-contact list →
+            </Link>
+            {/* The address-level sibling. Named "addresses" here so the two are not read as the
+                same list: one suppresses a person, the other a door. */}
+            <Link to="/voters/do-not-knock" className="text-sm font-medium text-brand-accent hover:underline">
+              Do-not-knock addresses →
+            </Link>
+          </div>
+        )}
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-8">
+      {/* items-start: the campaign cell grows a line when its link appears, and the other
+          controls must not stretch to match. */}
+      <div className={'mb-4 grid grid-cols-1 items-start gap-3 sm:grid-cols-2 ' + (cid ? 'lg:grid-cols-7' : 'lg:grid-cols-8')}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name, Voter ID, or address"
           className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:col-span-2"
         />
-        <select
-          value={campaignId}
-          onChange={(e) => onFilter(setCampaignId)(e.target.value)}
-          className="rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
-        >
-          <option value="">All campaigns</option>
-          {campaigns.map((c) => (
-            <option key={c._id} value={c._id}>{c.name}</option>
-          ))}
-        </select>
+        {!cid && (
+          <div>
+            <select
+              value={campaignId}
+              onChange={(e) => onFilter(setCampaignId)(e.target.value)}
+              className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
+            >
+              <option value="">All campaigns</option>
+              {campaigns.map((c) => (
+                <option key={c._id} value={c._id}>{c.name}</option>
+              ))}
+            </select>
+            {/* The chosen campaign's own directory — this same page in campaign mode, the one a
+                team lead on that campaign also has. */}
+            {campaignId && (
+              <Link
+                to={`/campaigns/${campaignId}/voters`}
+                className="mt-1 block text-xs font-medium text-brand-accent hover:underline"
+              >
+                Open in campaign →
+              </Link>
+            )}
+          </div>
+        )}
         <select
           value={surveyStatus}
           onChange={(e) => onFilter(setSurveyStatus)(e.target.value)}
@@ -207,7 +266,8 @@ export default function VotersPage() {
                 <th className="px-4 py-2 font-medium">Voter ID</th>
                 <th className="px-4 py-2 font-medium">Party</th>
                 <th className="px-4 py-2 font-medium">Address</th>
-                <th className="px-4 py-2 font-medium">Campaign</th>
+                {/* Campaign mode: every row is this campaign's — the column would say one thing. */}
+                {!cid && <th className="px-4 py-2 font-medium">Campaign</th>}
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 text-center font-medium">Voted</th>
               </tr>
@@ -215,7 +275,7 @@ export default function VotersPage() {
             <tbody className="divide-y divide-border">
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-4 py-8 text-center text-fg-muted">
+                  <td colSpan={cid ? 6 : 7} className="px-4 py-8 text-center text-fg-muted">
                     {votersQ.isLoading ? 'Loading…' : 'No voters match these filters.'}
                   </td>
                 </tr>
@@ -223,12 +283,17 @@ export default function VotersPage() {
                 rows.map((v) => (
                   <tr
                     key={v.id}
-                    onClick={() => navigate(`/voters/${v.id}`)}
+                    onClick={() => navigate(profilePath(v.id))}
                     className="cursor-pointer transition-colors hover:bg-sunken"
                   >
                     <td className="px-4 py-2 font-medium text-fg">
                       <span className="inline-flex items-center gap-1.5">
-                        {v.fullName}
+                        {/* A real link under the row click: keyboard-reachable, open-in-new-tab
+                            works, and the href says which profile (org or campaign) the row opens.
+                            stopPropagation keeps the row handler from pushing the same URL twice. */}
+                        <Link to={profilePath(v.id)} onClick={(e) => e.stopPropagation()} className="hover:underline">
+                          {v.fullName}
+                        </Link>
                         {v.doorAdded && (
                           <span
                             className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg"
@@ -248,22 +313,24 @@ export default function VotersPage() {
                     <td className="px-4 py-2 text-fg-muted">
                       {v.household ? `${v.household.addressLine1}, ${v.household.city} ${v.household.state}` : '—'}
                     </td>
-                    <td className="px-4 py-2 text-fg-muted">
-                      {/* Deduped org view of a multi-campaign org: one row per person, a chip
-                          per campaign they're in. Single-campaign (or campaign-filtered) rows
-                          have no `campaigns` and keep the plain name. */}
-                      {v.campaigns?.length ? (
-                        <span className="inline-flex flex-wrap items-center gap-1">
-                          {v.campaigns.map((c) => (
-                            <span key={c.id} className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">
-                              {c.name || '—'}
-                            </span>
-                          ))}
-                        </span>
-                      ) : (
-                        v.household?.campaignName || '—'
-                      )}
-                    </td>
+                    {!cid && (
+                      <td className="px-4 py-2 text-fg-muted">
+                        {/* Deduped org view of a multi-campaign org: one row per person, a chip
+                            per campaign they're in. Single-campaign (or campaign-filtered) rows
+                            have no `campaigns` and keep the plain name. */}
+                        {v.campaigns?.length ? (
+                          <span className="inline-flex flex-wrap items-center gap-1">
+                            {v.campaigns.map((c) => (
+                              <span key={c.id} className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">
+                                {c.name || '—'}
+                              </span>
+                            ))}
+                          </span>
+                        ) : (
+                          v.household?.campaignName || '—'
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-2">
                       <span className="inline-flex items-center gap-1.5">
                         <StatusPill status={v.surveyStatus} />

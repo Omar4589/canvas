@@ -29,8 +29,10 @@ campaign:
 
 - **Do not contact** — set it once, it applies in every campaign, current and future.
 - **Admin notes** on a voter follow them everywhere.
-- The org-wide **Voters** directory shows each person once, with a chip for every campaign
-  they're in; filter by a campaign to see that campaign's own records.
+- The org-wide **Voters** directory (admins) shows each person once, with a chip for every campaign
+  they're in; filter by a campaign to see that campaign's own records. Inside a campaign, its own
+  **Voters** tab shows just that campaign's records — and that's the view team leads get, with only
+  that campaign's survey answers and notes on each profile.
 
 There's nothing to configure — this is just how imports work. See
 [Importing voter files](voter-imports).

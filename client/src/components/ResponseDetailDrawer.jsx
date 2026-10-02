@@ -232,9 +232,15 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
             ) : (
               <span />
             )}
-            {/* /voters/:id sits behind the orgAdmin RoleGate — never offer it to a lead. */}
-            {isOrgAdmin && voter && (
-              <Link to={`/voters/${voter.id}`} className="text-sm font-medium text-brand-accent hover:underline">
+            {/* The campaign voter profile, open to every console user — the campaign id is always
+                in scope here (the query itself requires it). Only the org /voters/:id profile sits
+                behind the orgAdmin RoleGate, so it stays the admin-only fallback for a caller
+                that somehow has no campaign. */}
+            {voter && (campaignId || isOrgAdmin) && (
+              <Link
+                to={campaignId ? `/campaigns/${campaignId}/voters/${voter.id}` : `/voters/${voter.id}`}
+                className="text-sm font-medium text-brand-accent hover:underline"
+              >
                 Voter record →
               </Link>
             )}

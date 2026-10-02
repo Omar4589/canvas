@@ -10,7 +10,9 @@ import esbuild from 'esbuild';
 // `npm test` instead of in the field. Unlike the loading-state smokes, this one SEEDS the
 // react-query cache with a directory page so the walk-up branches actually run: the
 // "Added at the door" badge, the masked `manual:` voter id, and the new source filter.
-// A second seed is a FAILED directory query, so the timeout band renders too.
+// A second seed is a FAILED directory query, so the timeout band renders too. This file is ORG
+// mode only; the campaign mode of the same component (/campaigns/:id/voters) and the lead/admin
+// split on the profile are pinned in campaignVotersRender.smoke.test.js.
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
@@ -25,6 +27,13 @@ async function render(seed) {
   // resolves them from the bundle's own location at import time.
   const dir = mkdtempSync(join(here, '../../.smoke-'));
   try {
+    // SSR has no session, so the auth hooks are stubbed — an org admin, which is the only role the
+    // orgAdmin RoleGate lets reach /voters; everything else is the real page.
+    writeFileSync(
+      join(dir, 'authStub.jsx'),
+      `export const useAuth = () => ({ homePath: '/admin', isOrgAdmin: true, isSuperAdmin: false, isLead: false, managedCampaignIds: [], user: { id: 'u1' } });
+       export const useOrgTimeZone = () => 'America/Chicago';`
+    );
     writeFileSync(
       join(dir, 'entry.jsx'),
       `import React from 'react';
@@ -56,6 +65,14 @@ async function render(seed) {
       jsx: 'automatic',
       logLevel: 'silent',
       packages: 'external',
+      plugins: [
+        {
+          name: 'stub-auth',
+          setup(b) {
+            b.onResolve({ filter: /auth\/AuthContext\.jsx$/ }, () => ({ path: join(dir, 'authStub.jsx') }));
+          },
+        },
+      ],
     });
     const { html } = await import(pathToFileURL(out).href);
     // React splits adjacent text nodes with <!-- --> markers, which would make an assertion
@@ -97,6 +114,8 @@ test('VotersPage renders a seeded page: door-added badge shown, manual: svid mas
   assert.match(html, /Any source/, 'the new source filter select is present');
   assert.match(html, /FL123/, 'a real state voter id still shows');
   assert.doesNotMatch(html, /manual:6a/, 'the synthetic manual: id never renders — masked as a dash');
+  assert.match(html, /href="\/voters\/v1"/, 'org mode rows open the ORG profile — the campaign twin is the other smoke');
+  assert.match(html, /All campaigns/, 'org mode keeps the campaign select');
 });
 
 test('a directory timeout renders the warning band: the server sentence, a Try again, filters still on screen', async () => {

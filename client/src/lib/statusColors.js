@@ -12,6 +12,9 @@ export const STATUS_COLORS = {
   lit_dropped: '#a855f7', // purple-500
   restricted: '#475569', // slate-600 — inaccessible/blocked home
   no_soliciting: '#db2777', // pink-600 — a posted sign ended the visit
+  not_target: '#a21caf', // fuchsia-700 — someone answered who isn't on the list; chosen as the most
+  // distinct hue from every status that can share a survey map, under color blindness too (its
+  // nearest, lit_dropped purple, never shares a campaign with it)
   voted: '#14b8a6', // teal-500
   dnc: '#9f1239', // rose-800 — do not contact
   doNotKnock: '#4c0519', // rose-950 — address-level "never come back"; darker than dnc on purpose
@@ -26,6 +29,7 @@ export const STATUS_LABELS = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
   voted: 'Voted',
   dnc: 'Do not contact',
   doNotKnock: 'Do not knock',
@@ -58,6 +62,7 @@ export const ACTION_LABELS = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
   note_added: 'Note added',
 };
 

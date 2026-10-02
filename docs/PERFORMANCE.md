@@ -270,7 +270,11 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
   63 ms** (a FETCH of every org document became a COUNT_SCAN on the 4-key index). Two honest limits:
   the **count stays linear in people** (~0.5 s per 330k people locally — it is now the directory's
   whole cost), and **name search is still an unanchored regex over documents** — unchanged, only
-  capped by the budget now. Full mechanism: [VOTERS.md](VOTERS.md) § C.
+  capped by the budget now. Full mechanism: [VOTERS.md](VOTERS.md) § C. The 2026-10-01 follow-up
+  moved the daily traffic off this view altogether: the campaign **Voters** tab (and `?campaignId=`)
+  is the plain indexed find on the 4-key index, and the mobile **Voter search** stopped loading every
+  household id of the campaign into a `$in` (measured 150,000 ids / 2.9 MB / 0.4–0.9 s per search)
+  — it now filters on `Voter.campaignId` (2.6 ms, same rows).
 - **Denormalized rollup counters (Phase 2)** — the "All time" dashboards no longer re-aggregate the
   ledger at all: `Campaign.stats` carries maintained all-time counters (knocks quadruple, survey +
   lit volume, activity count, last-activity, canvasser set), applied write-side by

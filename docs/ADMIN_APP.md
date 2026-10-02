@@ -567,7 +567,11 @@ where relevant a grey line of explanation.
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";
   **Duplicate surveys** — voters with more than one response, where an admin deletes the extra one
-  (below; Delete is hidden on an archived campaign); Voter search; Switch to canvass mode.
+  (below; Delete is hidden on an archived campaign); **Voter search** — finds anyone in the chip's
+  campaign (admins and team leads; canvassers have no lookup) and opens a read-only profile with
+  add-note — a lead's profile is scoped to that campaign (this campaign's answers and notes only),
+  an admin's shows the person's every campaign ([VOTERS.md](VOTERS.md) → *On mobile*); Switch to
+  canvass mode.
 - **On the web:** CSV import, Early voting, Turf cutting — these open a short note (managed on the web
   dashboard; file uploads / turf drawing aren't mobile-friendly).
 - **Support:** Help center.
@@ -602,6 +606,16 @@ Canvassers can add a person at a door (someone who lives there but isn't on the 
   voters can volunteer one for follow-up), and — for door-added entries only — a **Delete this
   person** action: their survey answers and notes are permanently removed, while the door visit
   itself stays recorded (the knock genuinely happened and stays billed).
+
+### The campaign Voters tab (admins and team leads)
+
+The campaign console's nav gains **Voters** (Field group, after Map): one row per voter in **that
+campaign**, the directory's search and filters minus the campaign dropdown, each row opening the
+campaign's profile. It is lead-visible — a team lead gets it on every campaign they manage, as a
+**read-only** profile (this campaign's survey answers and notes, contact details, the do-not-contact
+reason; they can add a note) — while an admin keeps every edit control and sees the person's other
+campaigns with links. The org-wide **Voters** directory (every campaign at once, deduped) stays
+admin-only. [VOTERS.md](VOTERS.md) → *The campaign Voters tab*.
 
 ### The survey builder does more than plain questions
 On the **Surveys** page, beyond wording/type/required/options, a question can now carry:
@@ -911,6 +925,7 @@ map is complete; full server/data depth is in the linked docs, not duplicated.
 | Saved searches: **By tag** filter + status filter incl. **Refused** / **Restricted** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`/`'restricted'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
 | **Refused** door outcome in admin numbers | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) amber `refused` segment; [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) / [OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) coverage; [reportDerive.js](../client/src/lib/reportDerive.js) `CONTACT_LABELS.refused = 'Declined to participate'` | `refused` (coverage + events), `refusedKnocks`, `contactRate` on `/overview` · `/campaign-rollup` · `/canvassers`; `Refused` column in `/admin/reports/canvassers.csv` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [METRICS.md](METRICS.md) |
 | **Restricted access** door outcome (all campaign types; **not** billable) — and the **desk marks** (a whole book, a lassoed map selection, or a single home) | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) slate `restricted` segment; [statusColors.js](../client/src/lib/statusColors.js) `restricted: '#475569'`; [CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) `dayRestricted` column; single-home mark/unmark in [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) (`RestrictSection` in the house popup, building popup counts) and [HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) (`RestrictedSection`), classifier [lib/restrictMark.js](../client/src/lib/restrictMark.js); **web-only** many-door "Select doors" mode on both web maps ([MapSelectModeControl.jsx](../client/src/components/MapSelectModeControl.jsx) + [DoorSelectionBar.jsx](../client/src/components/DoorSelectionBar.jsx) over [lib/lassoSelect.js](../client/src/lib/lassoSelect.js) / [lib/useLassoDraw.js](../client/src/lib/useLassoDraw.js) — [MAPS.md](MAPS.md) §K); mobile: the admin Map door sheet row + the book house pop-up (not web-only — listed here for the file map) | `restricted` (coverage + events + per-canvasser tally), excluded from `KNOCK_ACTIONS`/`homesKnocked`/rates; `Restricted` column in `/admin/reports/canvassers.csv`; `dayRestricted` on `/canvasser-timeline`; `excludeRestricted` cut option ([turfs.js](../server/src/routes/admin/turfs.js) → [generateTurf.js](../server/src/services/turf/generateTurf.js)); desk marks via `restrict-bulk` / `unrestrict-bulk` + `restrict-doors` / `unrestrict-doors` → [services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) (`via:'bulk'`, never billed, never anyone's work) | [METRICS.md](METRICS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) |
+| **Campaign Voters tab** (Field group, after Map; lead-visible) + the campaign-relative profile | [VotersPage.jsx](../client/src/pages/VotersPage.jsx) / [VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) in campaign mode (`useParams().campaignId`); `voters` in `CAMPAIGN_NAV` ([navItems.js](../client/src/components/navItems.js)); routes `/campaigns/:campaignId/voters[/:voterId]` in the campaign block of [App.jsx](../client/src/App.jsx) | `GET /admin/campaigns/:campaignId/voters[/:voterId]` + `POST …/:voterId/notes` ([routes/admin/campaignVoters.js](../server/src/routes/admin/campaignVoters.js), `requireCampaignManager`); the ONE list resolver `listVoters` ([services/voters/voterDirectory.js](../server/src/services/voters/voterDirectory.js)) and `buildVoterProfile(…, { scopeCampaignId })` | [VOTERS.md](VOTERS.md) §B–C, [ROLES.md](ROLES.md) |
 
 > Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**
 > (`question.refusalOption` is reserved and unwired). "Refused" is a **door-level disposition** on

@@ -13,7 +13,7 @@ tags: roles, team lead, permissions, canvasser, admin, coordinator
 
 Everyone on your organization has one of three roles, and there's a platform-wide super admin above all of it.
 
-- **Admin** — runs the whole organization: every campaign, all org settings, the voter directory, surveys, tags, and users.
+- **Admin** — runs the whole organization: every campaign, all org settings, the org-wide voter directory, surveys, tags, and users.
 - **Team lead** — a campaign-scoped admin. Runs only the specific campaigns you grant them, and nothing outside them.
 - **Canvasser** — walks doors in the mobile app for the campaigns they're on. No console access.
 
@@ -35,7 +35,7 @@ A team lead doesn't have to be someone from your own organization. If you run a 
 
 Inside a campaign you grant them, a team lead is as powerful as an admin: import the voter file, build and attach a survey (leads author their own templates, from their own library), build [walk lists](walk-lists), cut [turf and books](turf-and-books), run [passes](passes), [assign canvassers](assigning-canvassers) — including putting *themselves* on a book, so a lead who also walks doesn't have to ask you for one — build the crew (including creating new canvasser accounts), print walk packets, export the campaign's data, and see all the reporting.
 
-What they *can't* do: create, archive, or delete a campaign; archive or delete survey templates, or touch the **tag library** (leads build and edit surveys for the campaigns they manage, and can read tags); flag voters **do-not-contact** (that reaches every campaign at once, so it stays with you); or touch org settings or the voter directory. They also can't change anyone's role, grant the lead role, or see any campaign you didn't hand them — and while they can fix a **canvasser's** name, email, or phone, admins and fellow leads are entirely out of their reach. A lead with no grants sees an empty console.
+What they *can't* do: create, archive, or delete a campaign; archive or delete survey templates, or touch the **tag library** (leads build and edit surveys for the campaigns they manage, and can read tags); flag voters **do-not-contact** (that reaches every campaign at once, so it stays with you); or touch org settings or the org-wide voter directory — inside a campaign they manage, the campaign's own **Voters** tab is theirs, as read-only profiles (this campaign's answers and notes, contact details, the do-not-contact reason) plus the ability to add a note. They also can't change anyone's role, grant the lead role, or see any campaign you didn't hand them — and while they can fix a **canvasser's** name, email, or phone, admins and fellow leads are entirely out of their reach. A lead with no grants sees an empty console.
 
 They build their crew from their campaign's own **Team** tab instead — and that isn't a lesser version of the org Users page. A crew belongs to a campaign, so the Team tab is where *everyone* sets one, admins included.
 
@@ -55,7 +55,7 @@ You can change the checked campaigns anytime — unchecking one revokes it right
 
 ## Where a team lead works
 
-- **In the console**, they sign in the same way you do and land on **Campaigns**, showing only the campaigns they manage. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, Voters, Users — simply aren't in their nav.
+- **In the console**, they sign in the same way you do and land on **Campaigns**, showing only the campaigns they manage. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, the org-wide Voters directory, Users — simply aren't in their nav; the campaign **Voters** tab is.
 - **In the mobile app**, they get the same admin view, scoped to their campaigns — and **More → Users** is one shared surface: a lead sees it too, filtered to the people on *their* campaigns, never the whole organization. There they create canvassers, set temporary passwords, switch canvasser accounts off and on, and edit a canvasser's name, email, or phone; roles and account deletion stay with you. A campaign's **Team** tile opens that same Users view pre-filtered to the campaign.
 
 ## Coordinators and crews

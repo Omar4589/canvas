@@ -160,6 +160,12 @@ export default function App() {
           {/* Lead-allowed like Map/Turfs — no in-page wall; the server's requireCampaignManager
               gate on the pin routes is the wall (the MapPage/TurfsPage precedent). */}
           <Route path="/campaigns/:campaignId/pin-fixes" element={<PinFixesPage />} />
+          {/* The campaign-scoped voter directory + profile. Lead-allowed like Map/Pin Fixes — no
+              in-page wall; the server's requireCampaignManager gate on /admin/campaigns/:id/voters
+              is the wall. The two pages detect :campaignId and render their campaign mode (a lead's
+              profile is read-only there). The org-wide /voters pages stay in the orgAdmin group. */}
+          <Route path="/campaigns/:campaignId/voters" element={<VotersPage />} />
+          <Route path="/campaigns/:campaignId/voters/:voterId" element={<VoterDetailPage />} />
           <Route path="/campaigns/:campaignId/survey" element={<CampaignSurveyPage />} />
           {/* The in-campaign survey builder is reachable by campaign managers (leads too);
               the server (canManageSurvey) enforces per-survey scope. The org /surveys

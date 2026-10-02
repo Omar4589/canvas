@@ -3,8 +3,9 @@ import assert from 'node:assert';
 import http from 'node:http';
 import mongoose from 'mongoose';
 
-// The org-wide voter directory after the 2026-09-30 incident fix (routes/admin/voters.js GET /),
-// over the REAL Express app + a throwaway mongod:
+// The voter directory after the 2026-09-30 incident fix — services/voters/voterDirectory.js
+// (listVoters), the ONE query behind GET /admin/voters and the campaign-nested
+// GET /admin/campaigns/:campaignId/voters — over the REAL Express app + a throwaway mongod:
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/voters_dir_test node --test test/votersDirectory.int.test.js
 // A multi-campaign org's directory used to sort and $group EVERY org document per page load
 // (24.6 s on a 325k-person org — Heroku's 30 s router answered 503). The fix is a BOUNDED
@@ -23,6 +24,8 @@ import mongoose from 'mongoose';
 //   5. Both new indexes are declared with the exact key order buildIndexes.js diffs on.
 //   6. The plan — the page pipeline rides the covering index: no SORT stage, zero documents.
 //   7. The campaign-scoped branch stays a plain find — no chips, exact total.
+//   8. Campaign parity — the campaign-nested route answers exactly what ?campaignId= answers,
+//      and both are the campaign's own truth, for every filter.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-voters-directory';
 
 const { createApp } = await import('../src/app.js');
@@ -183,6 +186,32 @@ const byDirectoryOrder = (a, b) =>
   cmp(a.lastName, b.lastName) || cmp(a.firstName, b.firstName) || cmp(String(a._id), String(b._id));
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// The resolver's filter semantics, row by row — ONE predicate for both oracles below (the org one
+// dedupes what it keeps; the campaign one counts rows). `households` and `votedIds` are the
+// scope's doors and voted row ids: the resolver narrows its address lookup and its VotedVoter
+// distinct to the campaign under a campaign scope, so each oracle hands in its own.
+const rowFilter = (q, { households, votedIds }) => {
+  const rx = q.search ? new RegExp(escapeRegex(q.search), 'i') : null;
+  const addrHits = new Set(
+    rx
+      ? households
+          .filter((h) => rx.test(h.addressLine1) || rx.test(h.city) || rx.test(h.zipCode))
+          .map((h) => String(h._id))
+      : []
+  );
+  return (r) => {
+    if (q.party && r.party !== q.party) return false;
+    if (q.surveyStatus && r.surveyStatus !== q.surveyStatus) return false;
+    if (q.dnc === 'true' && r.doNotContact?.flagged !== true) return false;
+    if (q.dnc === 'false' && r.doNotContact?.flagged === true) return false;
+    if (q.doorAdded === 'true' && !(r.doorAdded && r.doorAdded.at !== undefined)) return false;
+    if (q.voted === 'true' && !votedIds.has(String(r._id))) return false;
+    if (q.voted === 'false' && votedIds.has(String(r._id))) return false;
+    if (rx && !(rx.test(r.fullName) || r.stateVoterId === q.search || addrHits.has(String(r.householdId)))) return false;
+    return true;
+  };
+};
+
 // Mirrors the route's filter semantics row by row, then dedupes: per stateVoterId among the
 // MATCHING rows, the primary is the min by (lastName, firstName, _id); people sort by that key;
 // chips are the campaigns of the matching rows; surveyed means surveyed in one of them; total is
@@ -194,25 +223,7 @@ const oracle = async (q) => {
     VotedVoter.find({ organizationId: ctx.org._id }).lean(),
   ]);
   const votedIds = new Set(voted.map((r) => String(r.voterId)));
-  const rx = q.search ? new RegExp(escapeRegex(q.search), 'i') : null;
-  const addrHits = new Set(
-    rx
-      ? households
-          .filter((h) => rx.test(h.addressLine1) || rx.test(h.city) || rx.test(h.zipCode))
-          .map((h) => String(h._id))
-      : []
-  );
-  const matching = rows.filter((r) => {
-    if (q.party && r.party !== q.party) return false;
-    if (q.surveyStatus && r.surveyStatus !== q.surveyStatus) return false;
-    if (q.dnc === 'true' && r.doNotContact?.flagged !== true) return false;
-    if (q.dnc === 'false' && r.doNotContact?.flagged === true) return false;
-    if (q.doorAdded === 'true' && !(r.doorAdded && r.doorAdded.at !== undefined)) return false;
-    if (q.voted === 'true' && !votedIds.has(String(r._id))) return false;
-    if (q.voted === 'false' && votedIds.has(String(r._id))) return false;
-    if (rx && !(rx.test(r.fullName) || r.stateVoterId === q.search || addrHits.has(String(r.householdId)))) return false;
-    return true;
-  });
+  const matching = rows.filter(rowFilter(q, { households, votedIds }));
   const bySvid = new Map();
   for (const r of matching) {
     if (!bySvid.has(r.stateVoterId)) bySvid.set(r.stateVoterId, []);
@@ -232,6 +243,22 @@ const oracle = async (q) => {
     })
     .sort((a, b) => cmp(a.lastName, b.lastName) || cmp(a.firstName, b.firstName) || cmp(a.id, b.id));
   return { people, total: bySvid.size };
+};
+
+// The campaign view's truth: the campaign's MATCHING rows, no dedupe — total is a ROW count —
+// against the campaign's own doors and its own VotedVoter rows. Ids come back sorted: the plain
+// branch orders by name alone, so two rows of one name (A's two Max Kims) have no pinned order
+// between them; the parity lock compares the two ROUTES' pages exactly and the oracle's
+// membership as a set.
+const campaignOracle = async (q, campaign) => {
+  const [rows, households, voted] = await Promise.all([
+    Voter.find({ organizationId: ctx.org._id, campaignId: campaign._id }).lean(),
+    Household.find({ organizationId: ctx.org._id, campaignId: campaign._id }).lean(),
+    VotedVoter.find({ organizationId: ctx.org._id, campaignId: campaign._id }).lean(),
+  ]);
+  const votedIds = new Set(voted.map((r) => String(r.voterId)));
+  const matching = rows.filter(rowFilter(q, { households, votedIds }));
+  return { ids: matching.map((r) => String(r._id)).sort(), total: matching.length };
 };
 
 // One page of the wire against one slice of the oracle: ids in order, total, chips, surveyStatus.
@@ -287,6 +314,24 @@ const withAggregateStub = async (settle, fn) => {
   } finally {
     if (own) Voter.aggregate = orig;
     else delete Voter.aggregate;
+  }
+};
+
+// The same stand-in for Voter.countDocuments — the plain branch's page count, the one capped
+// Voter call a campaign-scoped page makes that a test can make expire (that branch never
+// aggregates). A thenable with the `.maxTimeMS()` chain the resolver uses.
+const withCountStub = async (settle, fn) => {
+  const own = Object.prototype.hasOwnProperty.call(Voter, 'countDocuments');
+  const orig = Voter.countDocuments;
+  Voter.countDocuments = () => {
+    const fake = { maxTimeMS: () => fake, then: (res, rej) => settle().then(res, rej) };
+    return fake;
+  };
+  try {
+    return { result: await fn() };
+  } finally {
+    if (own) Voter.countDocuments = orig;
+    else delete Voter.countDocuments;
   }
 };
 
@@ -381,31 +426,34 @@ after(async () => {
   if (URI) await mongoose.disconnect();
 });
 
+// The filter matrix both parity locks walk (tests 1 and 8): [query, expected ORG total where the
+// fixture makes it hand-countable — a self-check that the case exercises what it claims, since
+// oracle and route could agree on an empty page]. The totals are the org-wide, deduped ones; the
+// campaign lock takes its truth from campaignOracle instead.
+const ORACLE_CASES = [
+  [{}, PEOPLE.length + WALKUPS],
+  [{ surveyStatus: 'surveyed' }, 7],
+  [{ surveyStatus: 'not_surveyed' }, 36],
+  [{ party: 'D' }, 16],
+  [{ party: 'R' }, 12],
+  [{ dnc: 'true' }, 3],
+  [{ dnc: 'false' }, 36],
+  [{ voted: 'false' }, PEOPLE.length + WALKUPS - 1], // Quinn's only row voted; the shared voters keep their B row
+  [{ voted: 'true' }, 4],
+  [{ doorAdded: 'true' }, WALKUPS],
+  [{ search: 'Kim' }, 2], // a last-name fragment: both Max Kims
+  [{ search: 'Elm' }, 7], // an address fragment: six Elm St doors across both campaigns
+  [{ search: 'er' }], // names AND an address (River Rd) through the same $or
+  [{ search: 'VD013' }, 1], // exact svid
+  [{ party: 'D', surveyStatus: 'not_surveyed' }],
+  [{ dnc: 'false', voted: 'false', search: 'Elm' }],
+];
+
 // ── 1. Parity ───────────────────────────────────────────────────────────────────
 
 test('1. parity: the bounded page equals a whole-org recompute for every filter, three pages deep, guard silent', { skip }, async () => {
-  // [query, expected total where the fixture makes it hand-countable — a self-check that the
-  // case exercises what it claims, since oracle and route could agree on an empty page].
-  const cases = [
-    [{}, PEOPLE.length + WALKUPS],
-    [{ surveyStatus: 'surveyed' }, 7],
-    [{ surveyStatus: 'not_surveyed' }, 36],
-    [{ party: 'D' }, 16],
-    [{ party: 'R' }, 12],
-    [{ dnc: 'true' }, 3],
-    [{ dnc: 'false' }, 36],
-    [{ voted: 'false' }, PEOPLE.length + WALKUPS - 1], // Quinn's only row voted; the shared voters keep their B row
-    [{ voted: 'true' }, 4],
-    [{ doorAdded: 'true' }, WALKUPS],
-    [{ search: 'Kim' }, 2], // a last-name fragment: both Max Kims
-    [{ search: 'Elm' }, 7], // an address fragment: six Elm St doors across both campaigns
-    [{ search: 'er' }], // names AND an address (River Rd) through the same $or
-    [{ search: 'VD013' }, 1], // exact svid
-    [{ party: 'D', surveyStatus: 'not_surveyed' }],
-    [{ dnc: 'false', voted: 'false', search: 'Elm' }],
-  ];
   const { warns } = await spyWarns(async () => {
-    for (const [query, expectedTotal] of cases) {
+    for (const [query, expectedTotal] of ORACLE_CASES) {
       const label = JSON.stringify(query);
       const { people, total } = await oracle(query);
       assert.strictEqual(people.length, total, `${label}: oracle is self-consistent`);
@@ -602,10 +650,25 @@ test('3. timeout mapping: MaxTimeMSExpired → 503 DIRECTORY_TIMEOUT; an unrelat
   assert.strictEqual(r3.json.code, undefined, 'no DIRECTORY_TIMEOUT code on an unrelated failure');
   assert.strictEqual(r3.json.error, 'boom');
 
-  // The stub is gone: the real directory answers again.
+  // The campaign-nested route shares the mapping (same code, so the client renders the same band)
+  // but sends its own sentence: the org one says "pick a campaign", and here one already is. Its
+  // plain branch never aggregates, so the expiry is planted on the page's count instead.
+  const { result: tab } = await withCountStub(() => Promise.reject(expired), () =>
+    call('GET', `/admin/campaigns/${ctx.campA._id}/voters`, asAdmin())
+  );
+  assert.strictEqual(tab.status, 503);
+  assert.strictEqual(tab.json.code, 'DIRECTORY_TIMEOUT');
+  assert.ok(typeof tab.json.error === 'string' && tab.json.error.length > 0, 'a sentence to show');
+  assert.notStrictEqual(tab.json.error, r.json.error, 'its own sentence, not the org page\'s pick-a-campaign one');
+  assert.ok(!/pick a campaign/i.test(tab.json.error), 'never tells a campaign tab to pick a campaign');
+
+  // The stubs are gone: the real directory answers again, on both routes.
   const real = await call('GET', '/admin/voters?limit=1', asAdmin());
   assert.strictEqual(real.status, 200);
   assert.strictEqual(real.json.total, PEOPLE.length + WALKUPS);
+  const realTab = await call('GET', `/admin/campaigns/${ctx.campA._id}/voters?limit=1`, asAdmin());
+  assert.strictEqual(realTab.status, 200);
+  assert.strictEqual(realTab.json.total, await Voter.countDocuments({ organizationId: ctx.org._id, campaignId: ctx.campA._id }));
 });
 
 test('4. budget plumbing: VOTER_DIRECTORY_MAX_MS is read per request and handed to BOTH aggregations', { skip }, async () => {
@@ -639,6 +702,13 @@ test('4. budget plumbing: VOTER_DIRECTORY_MAX_MS is read per request and handed 
     assert.strictEqual(scoped.result.status, 200);
     assert.deepStrictEqual(scoped.optionCalls, []);
     assert.strictEqual(scoped.result.json.voters.length, 5);
+    // The campaign-nested route is that same plain branch: never an aggregation either.
+    const tab = await withAggregateStub(() => Promise.reject(new Error('must not be called')), () =>
+      call('GET', `/admin/campaigns/${ctx.campA._id}/voters?limit=5`, asAdmin())
+    );
+    assert.strictEqual(tab.result.status, 200);
+    assert.deepStrictEqual(tab.optionCalls, []);
+    assert.deepStrictEqual(tab.result.json, scoped.result.json, 'and it answers the same page');
   } finally {
     if (hadEnv) process.env.VOTER_DIRECTORY_MAX_MS = prevEnv;
     else delete process.env.VOTER_DIRECTORY_MAX_MS;
@@ -667,7 +737,7 @@ test('6. plan pin: the page pipeline rides the covering index — no SORT stage,
   const limit = 25;
   const campaignCount = 2;
   const prefix = (skipN + limit) * campaignCount; // 50
-  // The exact dedupe page pipeline from routes/admin/voters.js, unfiltered.
+  // The exact dedupe page pipeline from services/voters/voterDirectory.js, unfiltered.
   const pipeline = [
     { $match: { organizationId: ctx.planOrgId } },
     { $sort: { lastName: 1, firstName: 1, _id: 1 } },
@@ -784,4 +854,45 @@ test('7. plain branch: ?campaignId is a campaign-scoped find — that campaign\'
   assert.strictEqual(b.json.voters.find((v) => v.stateVoterId === 'VD001').surveyStatus, 'not_surveyed');
   assert.strictEqual(b.json.voters.find((v) => v.stateVoterId === 'VD017').lastName, 'Smith');
   assert.strictEqual(b.json.voters.find((v) => v.stateVoterId === 'VD021'), undefined, 'Quinn is A only');
+});
+
+// ── 8. Campaign parity ──────────────────────────────────────────────────────────
+
+test('8. campaign parity: GET /admin/campaigns/:id/voters answers exactly what ?campaignId= answers — and both are the campaign\'s own truth — for every filter', { skip }, async () => {
+  // One resolver behind both lists (services/voters/voterDirectory.js): the campaign Voters tab
+  // (routes/admin/campaignVoters.js, lead-visible) and the org directory narrowed by a validated
+  // ?campaignId must never drift apart, page for page. Both are held to the campaign oracle too,
+  // so "equal" can never mean "equally wrong".
+  for (const campaign of [ctx.campA, ctx.campB]) {
+    const cid = String(campaign._id);
+    for (const [query] of ORACLE_CASES) {
+      const label = `${campaign.name} ${JSON.stringify(query)}`;
+      const truth = await campaignOracle(query, campaign);
+      for (const skipN of [0, 5, 10]) {
+        const qs = new URLSearchParams({ ...query, limit: '5', skip: String(skipN) }).toString();
+        const org = await call('GET', `/admin/voters?campaignId=${cid}&${qs}`, asAdmin());
+        const tab = await call('GET', `/admin/campaigns/${cid}/voters?${qs}`, asAdmin());
+        assert.strictEqual(org.status, 200, `${label} skip ${skipN}: org route`);
+        assert.strictEqual(tab.status, 200, `${label} skip ${skipN}: campaign route`);
+        assert.deepStrictEqual(tab.json, org.json, `${label} skip ${skipN}: the two routes answer identically (rows, total, limit, skip)`);
+        assert.strictEqual(tab.json.total, truth.total, `${label}: total is the campaign's matching-row count`);
+        assert.strictEqual(tab.json.voters.length, Math.max(0, Math.min(5, truth.total - skipN)), `${label} skip ${skipN}: page length`);
+      }
+      const whole = await call('GET', `/admin/campaigns/${cid}/voters?${new URLSearchParams({ ...query, limit: '200' })}`, asAdmin());
+      assert.strictEqual(whole.status, 200, `${label}: whole`);
+      assert.deepStrictEqual(whole.json.voters.map((v) => v.id).sort(), truth.ids, `${label}: exactly the campaign's matching rows`);
+      for (const v of whole.json.voters) {
+        assert.ok(!('campaigns' in v), `${label}: no chips on a campaign-scoped row`);
+        assert.strictEqual(v.household.campaignId, cid, `${label}: housed in the campaign's own door`);
+      }
+    }
+  }
+  // The URL is the scope: a ?campaignId on the campaign route is ignored, not honored.
+  const A = String(ctx.campA._id);
+  const B = String(ctx.campB._id);
+  const stray = await call('GET', `/admin/campaigns/${A}/voters?campaignId=${B}&limit=200`, asAdmin());
+  const plain = await call('GET', `/admin/campaigns/${A}/voters?limit=200`, asAdmin());
+  assert.deepStrictEqual(stray.json, plain.json, 'A\'s tab with a stray ?campaignId=B is still A');
+  const other = await call('GET', `/admin/campaigns/${B}/voters?limit=200`, asAdmin());
+  assert.notStrictEqual(stray.json.total, other.json.total, 'and the fixture keeps the two campaigns distinguishable');
 });

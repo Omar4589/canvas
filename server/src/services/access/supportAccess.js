@@ -75,6 +75,10 @@ const AUDIT_EXEMPT = [
 // we cannot tolerate is an unlogged read, not a mislabeled one.
 const RESOURCE_LABELS = [
   [/^\/admin\/voters/, 'voters'],
+  // The campaign-nested directory + profile (routes/admin/campaignVoters.js) — the same voter
+  // content as the org router, so the same label. ANCHORED to the real mount, and above the
+  // substring rules so a voter path is never read as its door or its turf.
+  [/^\/admin\/campaigns\/[^/]+\/voters(\/|$)/, 'voters'],
   [/\/households/, 'map'],
   [/^\/admin\/reports/, 'reports'],
   [/^\/admin\/activities/, 'activity'],

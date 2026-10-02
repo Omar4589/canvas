@@ -180,6 +180,7 @@ test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is
   const C = '652f000000000000000000aa'; // a stand-in campaign id
   const W = '652f000000000000000000bb'; // a stand-in walklist id
   const H = '652f000000000000000000cc'; // a stand-in household id
+  const V = '652f000000000000000000dd'; // a stand-in voter id
 
   // These are the routes that hand back names, addresses, phones, GPS or survey answers. Each MUST be
   // logged for a vendor — none may be audit-exempt. The walk-list CSV export is the one the dead-prefix
@@ -201,6 +202,11 @@ test('STRUCTURAL: every known voter-data URL shape is loggable; only metadata is
     ['/admin/exports/estimate', 'exports'],
     ['/admin/exports/types', 'exports'],
     ['/admin/voters', 'voters'],
+    // The campaign-nested twin of the directory + profile (routes/admin/campaignVoters.js, the
+    // lead-visible one): the same voter content, so the same label — anchored to the real mount,
+    // never read as its door or its turf.
+    [`/admin/campaigns/${C}/voters`, 'voters'],
+    [`/admin/campaigns/${C}/voters/${V}`, 'voters'],
     ['/admin/households', 'map'],
     ['/admin/reports', 'reports'],
     ['/admin/activities', 'activity'],
@@ -266,6 +272,27 @@ test('RECORD-LEVEL: a vendor voter-profile read carries the voter as its subject
     [`voter:${ctx.voter._id}`]
   );
   assert.strictEqual(logs[0].subjectsTruncated, false);
+});
+
+test('RECORD-LEVEL: a vendor read of the CAMPAIGN voter profile carries the voter as its subject', { skip }, async () => {
+  // The campaign-nested voters router (routes/admin/campaignVoters.js) is the lead-visible twin of
+  // GET /admin/voters/:voterId — the same content, so the same audit posture: mounted after
+  // accessLog, classified 'voters' (the structural list above), and its own router.param hook tags
+  // the voter. A staff open through the campaign tab must answer "was my record accessed?" exactly
+  // like one through the org directory.
+  await grantFor(ctx.support.token);
+  const read = await call('GET', `/admin/campaigns/${ctx.camp._id}/voters/${ctx.voter._id}`, ctx.support);
+  assert.ok(read.status < 400, `expected a successful read, got ${read.status}`);
+
+  const logs = await pollLogs({ organizationId: ctx.org._id, 'subjects.id': ctx.voter._id });
+  assert.strictEqual(logs.length, 1, 'the campaign profile read row carries the voter subject');
+  assert.deepStrictEqual(
+    logs[0].subjects.map((s) => `${s.type}:${s.id}`),
+    [`voter:${ctx.voter._id}`]
+  );
+  assert.strictEqual(logs[0].resource, 'voters', 'labelled like the org directory, never as its door or turf');
+  assert.strictEqual(logs[0].subjectsTruncated, false);
+  assert.strictEqual(await AccessLog.countDocuments({ organizationId: ctx.org._id }), 1, 'exactly one row for the request');
 });
 
 test('RECORD-LEVEL: a vendor walk-list export logs exactly the voters written to the file', { skip }, async () => {
@@ -359,12 +386,13 @@ test('LOOKUP: /super-admin/access/log?subjectId returns exactly the rows that to
 test('CUSTOMER-FACING: the voter staff-access panel answers from the org side, first-name-only', { skip }, async () => {
   await grantFor(ctx.support.token);
   await call('GET', `/admin/voters/${ctx.voter._id}`, ctx.support); // a direct open
+  await call('GET', `/admin/campaigns/${ctx.camp._id}/voters/${ctx.voter._id}`, ctx.support); // the same open, through the campaign tab
   await call('GET', `/admin/campaigns/${ctx.camp._id}/walklists/${ctx.walklist._id}/export.csv`, ctx.support); // an export sweep
-  await pollLogs({ organizationId: ctx.org._id }, 2);
+  await pollLogs({ organizationId: ctx.org._id }, 3);
 
   const panel = await call('GET', `/admin/voters/${ctx.voter._id}/staff-access`, ctx.member);
   assert.strictEqual(panel.status, 200);
-  assert.strictEqual(panel.json.count, 2, 'both the direct open and the export touched this record');
+  assert.strictEqual(panel.json.count, 3, 'both direct opens (org directory and campaign tab) and the export touched this record');
   for (const e of panel.json.entries) {
     assert.strictEqual(e.staffFirstName, 'Sam', 'first name only');
     assert.ok(e.reason, 'the grant reason is shown');
@@ -372,8 +400,8 @@ test('CUSTOMER-FACING: the voter staff-access panel answers from the org side, f
   }
   assert.deepStrictEqual(
     panel.json.entries.map((e) => e.export).sort(),
-    [false, true],
-    'the export entry is marked as an export; the direct open is not'
+    [false, false, true],
+    'the export entry is marked as an export; the direct opens are not'
   );
 
   // The untouched voter reads clean — "never accessed" is a real answer, not a default.

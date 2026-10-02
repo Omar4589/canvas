@@ -19,7 +19,12 @@ import mongoose from 'mongoose';
 // Also pinned: GET /mobile/voters/:voterId (the full profile with cross-round answers,
 // raw DOB, phone) is MANAGEMENT-ONLY — the authorization gap PRIVACY_VERIFICATION.md
 // recorded against this route is closed: canvasser 403, lead-with-grant 200,
-// lead-on-wrong-campaign 403, admin 200.
+// lead-on-wrong-campaign 403, admin 200. Since 2026-10-01 a lead's profile is NARROWED to
+// the campaign (otherCampaigns empty, this campaign's surveys and notes only — the scope the
+// web campaign profile applies too) while an admin's keeps the org-wide union; the
+// wrong-campaign 403 carries code VOTER_NOT_IN_CAMPAIGN, never FORBIDDEN_ROLE; and the
+// manager search list rides Voter.campaignId (no more $in of every household id of the
+// campaign) — the same rows, pinned row for row.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-perround';
 
 const { createApp } = await import('../src/app.js');
@@ -40,6 +45,7 @@ const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
+const { VoterNote } = await import('../src/models/VoterNote.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -48,9 +54,15 @@ let server;
 let base;
 const ctx = {};
 
-async function call(path, token) {
+async function call(path, token, { method = 'GET', body } = {}) {
   const res = await fetch(`${base}/api${path}`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Org-Id': String(ctx.org._id) },
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Org-Id': String(ctx.org._id),
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let json = null;
   try { json = await res.json(); } catch { /* empty */ }
@@ -65,7 +77,7 @@ before(async () => {
   await mongoose.connect(URI);
   for (const M of [Organization, User, Membership, Subscription, Campaign, CampaignAssignment,
     CampaignManager, Effort, Pass, Turf, TurfAssignment, Household, Voter, CanvassActivity,
-    SurveyResponse, SurveyTemplate]) {
+    SurveyResponse, SurveyTemplate, VoterNote]) {
     await M.deleteMany({});
   }
 
@@ -148,6 +160,10 @@ before(async () => {
   const vA = await voter(h1, 1, { surveyStatus: 'surveyed' }); // surveyed in p1 → stored global stays 'surveyed'
   const vB = await voter(h2, 2, { surveyStatus: 'surveyed' }); // surveyed in p2 (this round)
   const vC = await voter(h3, 3); // never surveyed
+  // A fourth door of the campaign that sits in NO book: the manager search lists its voter
+  // (campaign scope) and the canvasser search does not (book scope) — tests 4 and 5.
+  const [h4] = await Household.insertMany([mk(4)]);
+  const vD = await voter(h4, 4);
 
   const knock = (home, pass, at) => CanvassActivity.create({
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: pass._id,
@@ -200,6 +216,23 @@ before(async () => {
     organizationId: org._id, campaignId: campaign2._id, householdId: h9._id,
     stateVoterId: 'RV9', firstName: 'V9', lastName: 'Test', fullName: 'V9 Test',
   });
+  // vA's SIBLING: the same person (svid RV1) as campaign2's row, with a survey and an admin
+  // note of its own there — the cross-campaign history an admin's profile unions and a lead's
+  // must not (test 3). Its door is campaign2's, so no canvasser wire of `campaign` sees it.
+  const vA2 = await Voter.create({
+    organizationId: org._id, campaignId: campaign2._id, householdId: h9._id,
+    stateVoterId: 'RV1', firstName: 'V1', lastName: 'Test', fullName: 'V1 Test', surveyStatus: 'surveyed',
+  });
+  await SurveyResponse.create({
+    organizationId: org._id, campaignId: campaign2._id, householdId: h9._id, voterId: vA2._id, userId: canv._id,
+    surveyTemplateId: template._id, surveyTemplateVersion: 1,
+    location: { lat: 28.35, lng: -81.5 }, submittedAt: P2_AT,
+    answers: [{ questionKey: 'support', questionLabel: 'Can we count on your support?', answer: 'Opposed', optionIds: ['opt_no'] }],
+  });
+  await VoterNote.create([
+    { organizationId: org._id, voterId: vA._id, authorId: admin._id, body: 'Note in Round View' },
+    { organizationId: org._id, voterId: vA2._id, authorId: admin._id, body: 'Note in Other Race' },
+  ]);
 
   const app = createApp();
   server = http.createServer(app);
@@ -207,7 +240,7 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
     org, admin, canv, lead, lead2, campaign, campaign2, effort, p1, p2,
-    h1, h2, h3, vA, vB, vC, v9,
+    h1, h2, h3, h4, vA, vB, vC, vD, vA2, v9,
     adminToken: signUserToken(admin), canvToken: signUserToken(canv), leadToken: signUserToken(lead),
     lead2Token: signUserToken(lead2),
   });
@@ -297,50 +330,104 @@ test("2b. a TEAMMATE's bootstrap reads the same voter as surveyed + surveyedByMe
   assert.ok(!('surveyedByMe' in vv.get(String(vA._id))), 'round-fresh voter still carries no flag');
 });
 
-test('3. voter profile is management-only: canvasser 403, lead 200, wrong-campaign 403, admin 200', { skip }, async () => {
-  const { campaign, campaign2, vA, v9, canvToken, leadToken, adminToken } = ctx;
+test('3. voter profile is management-only: canvasser 403, lead 200 (campaign-scoped), wrong-campaign 403 VOTER_NOT_IN_CAMPAIGN, admin 200 (org-wide)', { skip }, async () => {
+  const { campaign, campaign2, vA, vA2, v9, canvToken, leadToken, adminToken } = ctx;
 
   // The canvasser at the door gets NO cross-round history (answers, DOB, phone).
   const asCanv = await call(`/mobile/voters/${vA._id}?campaignId=${campaign._id}`, canvToken);
   assert.equal(asCanv.status, 403, 'the PRIVACY_VERIFICATION authorization gap is closed');
   assert.equal(asCanv.json.code, 'FORBIDDEN_ROLE');
 
-  // A lead WITH a grant for this campaign sees the full profile, prior answers included.
+  // A lead WITH a grant for this campaign sees the full profile, prior answers included —
+  // narrowed to THIS campaign (owner ruling 4, 2026-09-30, the scope the web campaign profile
+  // applies too): the person's campaign2 row holds a survey and an admin note of its own, and
+  // the lead is told about neither; otherCampaigns is empty.
   const asLead = await call(`/mobile/voters/${vA._id}?campaignId=${campaign._id}`, leadToken);
   assert.equal(asLead.status, 200);
   assert.ok(Array.isArray(asLead.json.surveys) && asLead.json.surveys.length >= 1, 'lead sees survey history');
+  assert.deepStrictEqual(asLead.json.otherCampaigns, [], 'a lead is never told which other campaigns hold the person');
+  assert.strictEqual(asLead.json.surveys.length, 1, 'this campaign\'s survey only');
+  assert.ok(asLead.json.surveys.every((s) => s.campaignId === String(campaign._id)), 'every survey is this campaign\'s');
+  assert.deepStrictEqual(asLead.json.notes.admin.map((n) => n.body), ['Note in Round View'], 'this campaign\'s admin notes only');
 
   // The grant is per-campaign: it cannot be used as a skeleton key into another
   // campaign's voters (the lead holds no grant for campaign2).
   const crossGrant = await call(`/mobile/voters/${v9._id}?campaignId=${campaign2._id}`, leadToken);
   assert.equal(crossGrant.status, 403, 'no grant for campaign2 → no profile');
-  // And even THROUGH the granted campaign, a foreign-campaign voter is refused.
+  // And even THROUGH the granted campaign, a foreign-campaign voter is refused — a DOMAIN
+  // refusal with its own code, never FORBIDDEN_ROLE (the role is fine; the app answers that
+  // code by refetching the role). Still a 403 here: the shipped app inspects 403 codes.
   const crossVoter = await call(`/mobile/voters/${v9._id}?campaignId=${campaign._id}`, leadToken);
   assert.equal(crossVoter.status, 403, 'granted campaign cannot fetch another campaign\'s voter');
+  assert.strictEqual(crossVoter.json.code, 'VOTER_NOT_IN_CAMPAIGN');
+  assert.notStrictEqual(crossVoter.json.code, 'FORBIDDEN_ROLE');
+  // The person's own campaign2 row is no exception: the sibling of a voter the lead CAN read
+  // is still another campaign's row.
+  const sibling = await call(`/mobile/voters/${vA2._id}?campaignId=${campaign._id}`, leadToken);
+  assert.equal(sibling.status, 403, 'the sibling row is out of scope through the granted campaign');
+  assert.strictEqual(sibling.json.code, 'VOTER_NOT_IN_CAMPAIGN');
 
-  // Admins stay org-wide, as before.
+  // Admins stay org-wide, as before (ruling 5): the campaign2 sibling is linked, and its survey
+  // and note are unioned into the profile.
   const asAdmin = await call(`/mobile/voters/${vA._id}?campaignId=${campaign._id}`, adminToken);
   assert.equal(asAdmin.status, 200);
   assert.ok(Array.isArray(asAdmin.json.surveys) && asAdmin.json.surveys.length >= 1);
+  assert.deepStrictEqual(
+    asAdmin.json.otherCampaigns.map((c) => [c.campaignId, c.voterId]),
+    [[String(campaign2._id), String(vA2._id)]],
+    'admin: the sibling campaign is linked'
+  );
+  assert.strictEqual(asAdmin.json.surveys.length, 2, 'admin: the union across the person\'s rows');
+  assert.deepStrictEqual(asAdmin.json.notes.admin.map((n) => n.body).sort(), ['Note in Other Race', 'Note in Round View'], 'admin: both notes');
+
+  // A manager's note goes through the campaign they resolved, the same way: this campaign's
+  // row lands, another campaign's is the same domain refusal and writes nothing.
+  const ownNote = await call(`/mobile/voters/${vA._id}/notes?campaignId=${campaign._id}`, leadToken, { method: 'POST', body: { body: 'Lead note' } });
+  assert.equal(ownNote.status, 201, 'a note on this campaign\'s row lands');
+  const crossNote = await call(`/mobile/voters/${v9._id}/notes?campaignId=${campaign._id}`, leadToken, { method: 'POST', body: { body: 'nope' } });
+  assert.equal(crossNote.status, 403);
+  assert.strictEqual(crossNote.json.code, 'VOTER_NOT_IN_CAMPAIGN');
+  assert.ok(!(await VoterNote.exists({ voterId: v9._id })), 'and nothing was written');
+  // An org admin is org-wide on mobile as on the web (ruling 5): the same cross-campaign note lands.
+  const adminCross = await call(`/mobile/voters/${v9._id}/notes?campaignId=${campaign._id}`, adminToken, { method: 'POST', body: { body: 'Admin note across campaigns' } });
+  assert.equal(adminCross.status, 201, 'an org admin may annotate any voter in the org');
+  assert.ok(await VoterNote.exists({ voterId: v9._id, body: 'Admin note across campaigns' }), 'and it was written');
 });
 
 test('4. the canvasser search list still works (scoped, unchanged)', { skip }, async () => {
-  const { campaign, canvToken } = ctx;
+  const { campaign, vA, vB, vC, canvToken } = ctx;
   // The list endpoint keeps its book-scope behavior — it ships identity + status
   // booleans only (no answers), so it is not part of the profile gate.
   const r = await call(`/mobile/voters?campaignId=${campaign._id}&search=Test`, canvToken);
   assert.equal(r.status, 200);
   assert.ok(r.json.voters.length >= 3, 'canvasser still finds their book\'s voters');
   assert.ok(r.json.voters.every((v) => v.fullName && !('answers' in v)), 'no answer content in the list');
+  // Exactly the book's voters, in name order: the campaign's fourth door (h4 / vD) is in no
+  // book, so it is not theirs — book scope, not campaign scope. The address search narrows the
+  // same way ('Round St' is every door of the campaign; the canvasser gets their three).
+  const bookIds = [String(vA._id), String(vB._id), String(vC._id)];
+  assert.deepStrictEqual(r.json.voters.map((v) => v.id), bookIds, 'the book\'s three voters and nobody else');
+  const byAddress = await call(`/mobile/voters?campaignId=${campaign._id}&search=Round`, canvToken);
+  assert.equal(byAddress.status, 200);
+  assert.deepStrictEqual(byAddress.json.voters.map((v) => v.id), bookIds, 'the address search stays book-scoped');
 });
 
 test('5. a granted lead needs NO roster row, and searches campaign-wide (manager scope)', { skip }, async () => {
-  const { campaign, campaign2, vA, lead2Token, leadToken } = ctx;
+  const { campaign, campaign2, vA, vB, vC, vD, lead2Token, leadToken } = ctx;
   // Unrostered-but-granted: both routes pass on the grant alone. This is the common
   // real-world lead — they manage the campaign, nobody rostered them as a walker.
   const search = await call(`/mobile/voters?campaignId=${campaign._id}&search=Test`, lead2Token);
   assert.equal(search.status, 200, 'unrostered lead passes the campaign gate');
   assert.ok(search.json.voters.length >= 3, 'and sees the whole campaign, not empty books');
+  // The whole campaign, exactly: every row of it — the unbooked fourth door included — and NOT
+  // the person's campaign2 row (vA2 is a 'V1 Test' too). The filter rides Voter.campaignId now
+  // instead of a $in of every household id of the campaign; the rows are the same ones.
+  const campaignIds = [String(vA._id), String(vB._id), String(vC._id), String(vD._id)];
+  assert.deepStrictEqual(search.json.voters.map((v) => v.id), campaignIds, 'manager scope is the campaign, row for row');
+  const byAddress = await call(`/mobile/voters?campaignId=${campaign._id}&search=Round`, lead2Token);
+  assert.deepStrictEqual(byAddress.json.voters.map((v) => v.id), campaignIds, 'the address match covers every door of the campaign');
+  const foreignDoor = await call(`/mobile/voters?campaignId=${campaign._id}&search=Other`, lead2Token);
+  assert.deepStrictEqual(foreignDoor.json.voters, [], 'and never another campaign\'s door (9 Other St is campaign2\'s)');
   const profile = await call(`/mobile/voters/${vA._id}?campaignId=${campaign._id}`, lead2Token);
   assert.equal(profile.status, 200, 'unrostered lead reads the profile (management-only route)');
 

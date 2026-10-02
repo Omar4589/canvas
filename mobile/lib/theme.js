@@ -38,6 +38,7 @@ const status = {
   lit_dropped: '#A855F7',
   restricted: '#475569', // slate — inaccessible/blocked home; distinct from grey unknocked
   no_soliciting: '#DB2777', // pink — a posted sign ended the visit; clear of amber refused / purple lit
+  not_target: '#A21CAF', // fuchsia-700 — someone answered who isn't on the list; most distinct from every survey-map status
   voted: '#14B8A6',
   dnc: '#9F1239', // deep rose — do-not-contact; distinct from wrong_address red
   doNotKnock: '#4C0519', // darkest rose — address-level "never come back"; reads as stronger than dnc
@@ -51,6 +52,7 @@ const statusLabels = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
   voted: 'Voted',
   dnc: 'Do not contact',
   doNotKnock: 'Do not knock',
@@ -77,6 +79,7 @@ export const ACTION_LABELS = {
   lit_dropped: 'Lit dropped',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
   note_added: 'Note added',
 };
 

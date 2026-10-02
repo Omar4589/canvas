@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
 import { Badge } from '../components/ui/index.js';
@@ -45,7 +45,7 @@ const PROTECTED_FIELD_LABELS = Object.fromEntries([
   ['dateOfBirth', 'Date of birth'],
 ]);
 
-function VoterFields({ voter, person, onSave, saving, tz }) {
+function VoterFields({ voter, person, onSave, saving, canEdit, tz }) {
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({});
   // There used to be a "🔒 This person's identity is managed by {Other Customer Ltd}" banner here.
@@ -76,9 +76,11 @@ function VoterFields({ voter, person, onSave, saving, tz }) {
       <Section
         title="Identity & contact"
         right={
-          <button onClick={startEdit} className="text-sm font-medium text-brand-accent hover:underline">
-            Edit
-          </button>
+          canEdit && (
+            <button onClick={startEdit} className="text-sm font-medium text-brand-accent hover:underline">
+              Edit
+            </button>
+          )
         }
       >
         {lockNote}
@@ -243,10 +245,19 @@ function HouseholdDoNotKnockControl({ household, voterId }) {
   );
 }
 
-function DncSection({ dnc, onFlag, onUnflag, busy, tz }) {
+function DncSection({ dnc, onFlag, onUnflag, busy, canEdit, tz }) {
   const [reason, setReason] = useState('');
 
   if (!dnc?.flagged) {
+    // Read-only (a team lead on the campaign profile): every flag route is org-admin-only, so no
+    // form — just the state, so the section reads the same in every mode.
+    if (!canEdit) {
+      return (
+        <Section title="Do not contact">
+          <p className="text-sm text-fg-muted">Not flagged. Only an organization admin can flag a voter.</p>
+        </Section>
+      );
+    }
     return (
       <Section title="Do not contact">
         <p className="mb-3 text-sm text-fg-muted">
@@ -281,19 +292,23 @@ function DncSection({ dnc, onFlag, onUnflag, busy, tz }) {
         <p className="mt-1 text-xs text-fg-muted">
           {dnc.by ? `${dnc.by.name} · ` : ''}{fmtDate(dnc.at, tz)}
         </p>
-        <button
-          onClick={onUnflag}
-          disabled={busy}
-          className="mt-3 text-xs font-semibold text-danger hover:underline disabled:opacity-50"
-        >
-          {busy ? 'Removing…' : 'Remove flag'}
-        </button>
+        {/* The reason, who and when stay visible to a lead — the flag is org-wide by design (owner
+            ruling 2026-09-30); only the clear control is admin-only. */}
+        {canEdit && (
+          <button
+            onClick={onUnflag}
+            disabled={busy}
+            className="mt-3 text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+          >
+            {busy ? 'Removing…' : 'Remove flag'}
+          </button>
+        )}
       </div>
     </Section>
   );
 }
 
-function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
+function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
   const [edit, setEdit] = useState(false);
   const [vals, setVals] = useState({});
   const [otherTexts, setOtherTexts] = useState({});
@@ -361,7 +376,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
         <div className="text-sm font-medium text-fg">
           {survey.templateName || 'Survey'} <span className="text-xs font-normal text-fg-subtle">· {fmtDate(survey.submittedAt, tz)}{survey.by ? ` · ${survey.by.name}` : ''}</span>
         </div>
-        {!edit && (
+        {!edit && canEdit && (
           <div className="flex gap-3 text-sm">
             <button onClick={startEdit} className="font-medium text-brand-accent hover:underline">Edit</button>
             <button onClick={() => onDelete()} disabled={busy} className="font-medium text-danger hover:underline disabled:opacity-50">Delete</button>
@@ -478,7 +493,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, tz }) {
 // A PRESERVED (overwritten) response — read-only, visually muted, restorable. The restore is a
 // lossless swap: these answers become current and the current ones land here the same way, so
 // flipping back and forth destroys nothing.
-function OverwrittenSurveyCard({ survey, onRestore, busy, tz }) {
+function OverwrittenSurveyCard({ survey, onRestore, busy, canRestore, tz }) {
   // An 'outcome_convert' row was REMOVED by an admin converting this door away from Surveyed, not
   // overwritten by another canvasser. The default copy ("was X's · replaced by Y") would read as an
   // accusation against the canvasser for something an admin did, so this direction says so plainly.
@@ -508,13 +523,15 @@ function OverwrittenSurveyCard({ survey, onRestore, busy, tz }) {
           <Badge variant={removedByConversion ? 'neutral' : 'danger'}>
             {removedByConversion ? 'Removed' : 'Overwritten'}
           </Badge>
-          <button
-            onClick={onRestore}
-            disabled={busy}
-            className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-50"
-          >
-            Restore this response…
-          </button>
+          {canRestore && (
+            <button
+              onClick={onRestore}
+              disabled={busy}
+              className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-50"
+            >
+              Restore this response…
+            </button>
+          )}
         </div>
       </div>
       <dl className="space-y-1.5 text-sm">
@@ -588,8 +605,16 @@ function StaffAccessCard({ voterId, tz }) {
   );
 }
 
+// One page, two scopes. ORG mode (/voters/:voterId, org admins only) reads the org profile: the
+// person's surveys, notes and campaigns unioned across the org. CAMPAIGN mode
+// (/campaigns/:campaignId/voters/:voterId) reads the campaign-nested route, which a team lead's
+// grant admits: for a lead the server narrows those unions to THIS campaign's row, and the page is
+// read-only — every write below calls an org-admin-only route, so its control is not offered. An
+// org admin gets the same org-wide profile there and every control. `cid` picks the mode,
+// `canManage` the controls.
 export default function VoterDetailPage() {
-  const { voterId } = useParams();
+  const { voterId, campaignId: cid } = useParams();
+  const { isOrgAdmin } = useAuth();
   const orgTz = useOrgTimeZone();
   const { state } = useLocation(); // referrer (e.g. { from: 'notes', campaignId }) for a contextual back
   const navigate = useNavigate();
@@ -597,10 +622,23 @@ export default function VoterDetailPage() {
   const [newNote, setNewNote] = useState('');
   const [err, setErr] = useState('');
 
-  const key = ['admin', 'voter', voterId];
-  const profileQ = useQuery({ queryKey: key, queryFn: () => api(`/admin/voters/${voterId}`) });
+  // Org mode sits behind the orgAdmin RoleGate, so this is only ever false for a lead in campaign mode.
+  const canManage = isOrgAdmin;
+  // Where this page's links go: the campaign-relative twin of each org path in campaign mode.
+  const listPath = cid ? `/campaigns/${cid}/voters` : '/voters';
+  const profilePath = (id) => (cid ? `/campaigns/${cid}/voters/${id}` : `/voters/${id}`);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: key });
+  // The campaign key EXTENDS the org key, so one prefix invalidation on ['admin','voter',voterId]
+  // (react-query's partial matching) refreshes both after a write — an admin editing from the
+  // campaign tab never leaves the org profile stale, nor the other way round. The household
+  // do-not-knock control below invalidates the same prefix.
+  const key = cid ? ['admin', 'voter', voterId, { campaignId: cid }] : ['admin', 'voter', voterId];
+  const profileQ = useQuery({
+    queryKey: key,
+    queryFn: () => api(cid ? `/admin/campaigns/${cid}/voters/${voterId}` : `/admin/voters/${voterId}`),
+  });
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'voter', voterId] });
   const onErr = (e) => setErr(e.message);
 
   const saveVoter = useMutation({
@@ -608,8 +646,15 @@ export default function VoterDetailPage() {
     onSuccess: () => { setErr(''); invalidate(); },
     onError: onErr,
   });
+  // The one write a lead may make. In campaign mode it goes to the campaign-nested route for every
+  // role — the URL is the scope, and the server refuses a voter outside it; the org route is
+  // admin-only. Every other write below stays on the org routes (admin-only, controls gated).
   const addNote = useMutation({
-    mutationFn: (body) => api(`/admin/voters/${voterId}/notes`, { method: 'POST', body: { body } }),
+    mutationFn: (body) =>
+      api(cid ? `/admin/campaigns/${cid}/voters/${voterId}/notes` : `/admin/voters/${voterId}/notes`, {
+        method: 'POST',
+        body: { body },
+      }),
     onSuccess: () => { setNewNote(''); invalidate(); },
     onError: onErr,
   });
@@ -642,13 +687,33 @@ export default function VoterDetailPage() {
     mutationFn: () => api(`/admin/voters/${voterId}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'voters'] });
-      navigate('/voters');
+      navigate(listPath);
     },
     onError: onErr,
   });
 
+  const fromNotes = state?.from === 'notes' && !!state.campaignId;
+  const back = (
+    <Link
+      to={fromNotes ? `/campaigns/${state.campaignId}/notes` : listPath}
+      className="text-sm font-medium text-brand-accent hover:underline"
+    >
+      {fromNotes ? '‹ Notes' : '‹ Voters'}
+    </Link>
+  );
+
   if (profileQ.isLoading) return <div className="p-6 text-sm text-fg-muted">Loading…</div>;
-  if (profileQ.error) return <div className="p-6 text-sm text-danger">Error: {profileQ.error.message}</div>;
+  if (profileQ.error) {
+    // Keep the way back on screen. In campaign mode the server answers 404 VOTER_NOT_IN_CAMPAIGN
+    // for a voter outside this campaign, for every role (a lead cannot probe other campaigns'
+    // ids), and its sentence is the one shown.
+    return (
+      <div className="max-w-4xl">
+        {back}
+        <div className="mt-4 text-sm text-danger">Error: {profileQ.error.message}</div>
+      </div>
+    );
+  }
 
   const p = profileQ.data;
   const v = p.voter;
@@ -656,12 +721,7 @@ export default function VoterDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <Link
-        to={state?.from === 'notes' && state.campaignId ? `/campaigns/${state.campaignId}/notes` : '/voters'}
-        className="text-sm font-medium text-brand-accent hover:underline"
-      >
-        {state?.from === 'notes' && state.campaignId ? '‹ Notes' : '‹ Voters'}
-      </Link>
+      {back}
       <div className="mb-6 mt-1 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold text-fg">{v.fullName}</h1>
         {!v.stateVoterId?.startsWith('manual:') && (
@@ -687,6 +747,7 @@ export default function VoterDetailPage() {
         person={p.person}
         saving={saveVoter.isPending}
         onSave={(body, done) => saveVoter.mutate(body, { onSuccess: done })}
+        canEdit={canManage}
         tz={orgTz}
       />
 
@@ -695,6 +756,7 @@ export default function VoterDetailPage() {
         busy={flagDnc.isPending || unflagDnc.isPending}
         onFlag={(reason) => flagDnc.mutate(reason)}
         onUnflag={() => { if (window.confirm('Remove the do-not-contact flag from this voter?')) unflagDnc.mutate(); }}
+        canEdit={canManage}
         tz={orgTz}
       />
 
@@ -710,14 +772,21 @@ export default function VoterDetailPage() {
               {h.doNotKnock && <span className="ml-2 font-semibold text-danger">· ⛔ do not knock</span>}
             </p>
             <HouseholdDoNotKnockControl household={h} voterId={voterId} />
-            {/* The same person's record in each other campaign of this org (sibling rows). */}
+            {/* The same person's record in each other campaign of this org (sibling rows). In
+                campaign mode each link opens THAT campaign's profile; a lead never sees this list
+                (the server narrows their profile to this campaign and sends []). */}
             {p.otherCampaigns?.length > 0 && (
               <p className="mt-1 text-fg-muted">
                 Also in:{' '}
                 {p.otherCampaigns.map((oc, i) => (
                   <span key={oc.voterId}>
                     {i > 0 && ', '}
-                    <Link to={`/voters/${oc.voterId}`} className="text-brand-accent hover:underline">{oc.name || 'campaign'}</Link>
+                    <Link
+                      to={cid ? `/campaigns/${oc.campaignId}/voters/${oc.voterId}` : `/voters/${oc.voterId}`}
+                      className="text-brand-accent hover:underline"
+                    >
+                      {oc.name || 'campaign'}
+                    </Link>
                     <span className="text-fg-subtle"> ({oc.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'})</span>
                   </span>
                 ))}
@@ -729,7 +798,7 @@ export default function VoterDetailPage() {
                 <ul className="mt-1 space-y-1">
                   {h.members.map((m) => (
                     <li key={m.id}>
-                      <Link to={`/voters/${m.id}`} className="text-brand-accent hover:underline">{m.fullName}</Link>
+                      <Link to={profilePath(m.id)} className="text-brand-accent hover:underline">{m.fullName}</Link>
                       <span className="text-fg-subtle"> · {m.surveyStatus === 'surveyed' ? 'surveyed' : 'not surveyed'}{m.voted ? ' · voted' : ''}</span>
                       {m.dnc && <span className="text-danger"> · do not contact</span>}
                     </li>
@@ -755,6 +824,7 @@ export default function VoterDetailPage() {
                 busy={editSurvey.isPending || delSurvey.isPending}
                 onSave={(body, done) => editSurvey.mutate({ responseId: s.id, body }, { onSuccess: done })}
                 onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate(s.id); }}
+                canEdit={canManage}
                 tz={orgTz}
               />
             ))}
@@ -763,6 +833,7 @@ export default function VoterDetailPage() {
                 key={s.id}
                 survey={s}
                 busy={restoreSurvey.isPending}
+                canRestore={canManage}
                 onRestore={() => {
                   const loser = s.by?.name || 'the earlier canvasser';
                   const when = fmtDate(s.submittedAt, orgTz);
@@ -806,7 +877,9 @@ export default function VoterDetailPage() {
               <li key={n.id} className="rounded border border-border bg-sunken p-3 text-sm">
                 <div className="flex items-start justify-between gap-2">
                   <p className="whitespace-pre-wrap text-fg">{n.body}</p>
-                  <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
+                  {canManage && (
+                    <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-fg-subtle">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, orgTz)}{n.editedAt ? ' · edited' : ''}</p>
               </li>
@@ -844,11 +917,13 @@ export default function VoterDetailPage() {
         )}
       </Section>
 
-      <StaffAccessCard voterId={voterId} tz={orgTz} />
+      {/* Admin-only (owner ruling 2026-09-30): its route is on the org router, which would 403 a
+          lead — so the card is not mounted for them, not merely hidden on error. */}
+      {canManage && <StaffAccessCard voterId={voterId} tz={orgTz} />}
 
       {/* Only door-added (walk-up) rows can be deleted — a mistaken or fraudulent entry typed
           at a door. Imported voters leave via re-import/undo-import or campaign deletion. */}
-      {v.doorAdded && (
+      {v.doorAdded && canManage && (
         <Section title="Remove this entry">
           <p className="text-sm text-fg-muted">
             This person was added at the door{v.doorAdded.by ? ` by ${v.doorAdded.by.name}` : ''} and
