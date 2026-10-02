@@ -1895,13 +1895,16 @@ export const buildKnocksByRound = async (ctx, sink) => {
   });
   const doorCols = built.billRestricted ? ['Restricted doors', 'Billable doors'] : [];
   const doorVals = (r) => (built.billRestricted ? [r.restrictedDoors, r.billableDoors] : []);
+  // The off-by-default outcome's column, under the same in-use flag the CSV route reads.
+  const ntCols = built.notTargetInUse ? ['Not a target'] : [];
+  const ntVals = (r) => (built.notTargetInUse ? [r.notTargetKnocks] : []);
   // Column order mirrors /admin/reports/knocks-by-pass.csv exactly — 'Surveys taken' (the
   // response unit) directly after 'Survey doors' (the door unit the rates are built from).
   // The two files are read side by side; a divergence here reads as a data difference.
   const writer = await sink.file('knocks-by-round', [
     'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
     'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
-    ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
+    ...ntCols, ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
   ]);
   for (const r of built.rounds) {
     await writer.writeRow([
@@ -1909,7 +1912,7 @@ export const buildKnocksByRound = async (ctx, sink) => {
       r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
       r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
       r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
-      r.noSolicitingKnocks,
+      r.noSolicitingKnocks, ...ntVals(r),
       ...doorVals(r), r.connectionRate, r.contactRate, r.coverageGained,
     ]);
   }
@@ -1917,7 +1920,7 @@ export const buildKnocksByRound = async (ctx, sink) => {
   await writer.writeRow([
     'TOTAL', '', '', '', '', '',
     t.knocks, t.surveyedKnocks, t.surveysTaken, t.litKnocks, t.refusedKnocks,
-    t.noSolicitingKnocks,
+    t.noSolicitingKnocks, ...ntVals(t),
     ...doorVals(t), t.connectionRate, t.contactRate, t.coverageGained,
   ]);
   return { files: [{ name: 'knocks-by-round', rows: writer.rowsWritten }] };

@@ -14,7 +14,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { formatExact, timeAgo } from '../../../lib/datetime';
-import { radius, spacing } from '../../../lib/theme';
+import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import DirectionsButton from '../../../components/DirectionsButton';
@@ -190,7 +190,7 @@ export default function VoterProfile() {
               <View key={`${n.source}-${n.id}`} style={[styles.noteItem, { borderColor: colors.border }]}>
                 <Text style={styles.noteBody}>{n.note}</Text>
                 <Text style={styles.noteMeta}>
-                  {n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {timeAgo(n.timestamp)}
+                  {n.source === 'survey' ? 'Survey' : actionLabel(n.actionType)} · {n.by ? n.by.name : 'Unknown'} · {timeAgo(n.timestamp)}
                 </Text>
               </View>
             ))}

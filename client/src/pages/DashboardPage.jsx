@@ -24,6 +24,7 @@ import { todayInTz, shiftDays } from '../lib/datePresets.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
@@ -328,6 +329,9 @@ export default function DashboardPage() {
   const canvass = overview.canvass || {};
   const rangeStats = rollupQ.data?.cumulative || {};
   const isLitDrop = selectedCampaign?.type === 'lit_drop';
+  // The off-by-default outcome's tile, table column and By-pass column — only on a campaign that
+  // has ever had it on, so a customer who never turns it on never sees the words.
+  const notTargetInUse = !isLitDrop && outcomeInUse(selectedCampaign, 'not_target');
   // Mock-GPS nudge: prefer the 30s-polled rollup row (fresh) over the lazier campaigns
   // list. The count is campaign-wide over the audit window, independent of the
   // dashboard's selected date range.
@@ -374,6 +378,7 @@ export default function DashboardPage() {
       // `dayRestricted`, and nothing mapped between them.
       dayRestricted: r.restricted ?? 0,
       dayNoSoliciting: r.noSoliciting ?? 0,
+      dayNotTarget: r.notTarget ?? 0,
       // doorsPerHour now comes from the SERVER (sum of per-day working spans). It used to be
       // re-derived here from lastActivityAt − firstActivityAt — a CALENDAR span — which divided a
       // week's doors by a week of wall-clock and under-reported pace roughly threefold.
@@ -589,11 +594,12 @@ export default function DashboardPage() {
           </div>
         ) : (
           /* Three tiles on a lit-drop campaign, FIVE on a survey one (the three survey units
-             plus Knocks and the rate) — so the column count can't be a constant. 3-up at md
-             wraps 5 as 3+2 rather than starving every tile; 5-up only once there's room. */
+             plus Knocks and the rate), SIX when the campaign uses Not a target voter — so the
+             column count can't be a constant. 3-up at md wraps 5 as 3+2 rather than starving
+             every tile; 5-up (or 6-up) only once there's room. */
           <div
             className={`grid grid-cols-2 gap-4 md:grid-cols-3 ${
-              isLitDrop ? '' : 'xl:grid-cols-5'
+              isLitDrop ? '' : notTargetInUse ? 'xl:grid-cols-6' : 'xl:grid-cols-5'
             }`}
           >
             <StatCard
@@ -649,6 +655,18 @@ export default function DashboardPage() {
               accent={rateAccent(rangeStats.connectionRate)}
               help={metricHelp.connectionRate}
             />
+            {notTargetInUse && (
+              <StatCard
+                label="Not a target"
+                value={(rangeStats.notTargetKnocks || 0).toLocaleString()}
+                hint={
+                  rangeStats.knocks
+                    ? `${Math.round(((rangeStats.notTargetKnocks || 0) / rangeStats.knocks) * 100)}% of knocks`
+                    : 'of knocks'
+                }
+                help={metricHelp.notTarget}
+              />
+            )}
           </div>
         )}
       </section>
@@ -690,6 +708,14 @@ export default function DashboardPage() {
                       </span>
                     </th>
                   )}
+                  {notTargetInUse && (
+                    <th className="px-4 py-2 text-right">
+                      <span className="inline-flex items-center gap-1">
+                        Not a target
+                        <InfoHint label="About not a target">{metricHelp.notTarget}</InfoHint>
+                      </span>
+                    </th>
+                  )}
                   <th className="px-4 py-2 text-right">Conn %</th>
                   <th className="px-4 py-2 text-right">
                     <span className="inline-flex items-center gap-1">
@@ -722,6 +748,11 @@ export default function DashboardPage() {
                         {(r.surveysTaken || 0).toLocaleString()}
                       </td>
                     )}
+                    {notTargetInUse && (
+                      <td className="px-4 py-2 text-right tabular-nums text-fg">
+                        {(r.notTargetKnocks || 0).toLocaleString()}
+                      </td>
+                    )}
                     <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{ratePct(r.connectionRate)}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.coverageGained || 0).toLocaleString()}</td>
                   </tr>
@@ -738,6 +769,11 @@ export default function DashboardPage() {
                     {!isLitDrop && (
                       <td className="px-4 py-2 text-right tabular-nums">
                         {(byRoundQ.data.totals.surveysTaken || 0).toLocaleString()}
+                      </td>
+                    )}
+                    {notTargetInUse && (
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        {(byRoundQ.data.totals.notTargetKnocks || 0).toLocaleString()}
                       </td>
                     )}
                     <td className="px-4 py-2 text-right tabular-nums">{ratePct(byRoundQ.data.totals.connectionRate)}</td>
@@ -965,6 +1001,7 @@ export default function DashboardPage() {
             tz={tz}
             singleDay={singleDayRange}
             litMode={isLitDrop}
+            notTargetInUse={notTargetInUse}
             onRowClick={setSelectedCanvasser}
           />
         )}

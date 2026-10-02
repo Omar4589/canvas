@@ -54,6 +54,7 @@ export default function DayDetail() {
     refused: colors.status.refused,
     restricted: colors.status.restricted,
     no_soliciting: colors.status.no_soliciting,
+    not_target: colors.status.not_target,
     lit_dropped: colors.status.lit_dropped,
     note_added: colors.textMuted,
   };
@@ -222,6 +223,7 @@ export default function DayDetail() {
                       'wrong_address', ACTION_COLOR.wrong_address,
                       'refused', ACTION_COLOR.refused,
                       'no_soliciting', ACTION_COLOR.no_soliciting,
+                      'not_target', ACTION_COLOR.not_target,
                       'restricted', ACTION_COLOR.restricted,
                       'lit_dropped', ACTION_COLOR.lit_dropped,
                       colors.textMuted,

@@ -38,6 +38,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
 import { foldDeltaVoters } from '../../lib/deltaFold';
+import { isOutcomeOn } from '../../lib/outcomeToggles';
 import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
 import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
@@ -122,6 +123,7 @@ const SURVEY_FILTER_OPTIONS = [
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  { key: 'not_target', label: 'Not target' },
   { key: 'no_soliciting', label: 'No solicit' },
   { key: 'restricted', label: 'Restricted' },
 ];
@@ -325,9 +327,14 @@ export default function MapScreen() {
   // status. History must stay filterable: doors recorded before the toggle flipped keep
   // their color, so the chip stays until they leave the loaded set. Read from the live
   // bootstrap campaign, never the AsyncStorage activeCampaign cache (its shape is frozen).
+  //
+  // Not a target voter is the inverse — off unless the campaign turned it on — so it counts as
+  // "disabled" here whenever the phone's gate says off (isOutcomeOn fails closed). Same rule
+  // after that: its chip and legend entry show while it is on, or while a door still wears it.
+  const notTargetOn = isOutcomeOn(data?.campaign, 'not_target');
   const disabledSet = useMemo(
-    () => new Set(data?.campaign?.disabledOutcomes || []),
-    [data?.campaign?.disabledOutcomes]
+    () => new Set([...(data?.campaign?.disabledOutcomes || []), ...(notTargetOn ? [] : ['not_target'])]),
+    [data?.campaign?.disabledOutcomes, notTargetOn]
   );
   const presentStatuses = useMemo(() => {
     const s = new Set();
@@ -520,7 +527,13 @@ export default function MapScreen() {
     queryFn: async () => {
       if (!sinceRef.current || !activeCampaign?.id) return null;
       const since = encodeURIComponent(sinceRef.current);
-      return api(`/mobile/changes?campaignId=${activeCampaign.id}&since=${since}`);
+      // The door-settings fingerprint from the bootstrap (read at fetch time, not part of the key):
+      // the server answers with `doorConfig` only when it no longer matches. ALWAYS encoded — it
+      // contains '|' and ',', and a raw '|' makes iOS 15/16 re-encode the whole URL, turning
+      // `since` into garbage the server 400s on every poll (teammates' results stop, silently).
+      const stamp = qc.getQueryData(['bootstrap'])?.campaign?.doorConfigStamp;
+      const stampParam = stamp ? `&doorConfigStamp=${encodeURIComponent(stamp)}` : '';
+      return api(`/mobile/changes?campaignId=${activeCampaign.id}&since=${since}${stampParam}`);
     },
     enabled: !!activeCampaign?.id && !!data,
     refetchInterval: 30 * 1000,
@@ -571,6 +584,10 @@ export default function MapScreen() {
                   ...h,
                   status: c.status,
                   lastActionAt: c.lastActionAt,
+                  // Per-round provenance of a Restricted mark ('desk' = the office's). Copied every
+                  // fold — a stale value would let the change confirmation skip a worked door, and
+                  // it is what shows the "Marked restricted by the office" card mid-shift.
+                  restrictedFrom: c.restrictedFrom ?? null,
                   // Unconditional, not inside the location spread: a Pin Fixes confirm/undo
                   // changes the stamp without moving the pin, and the badge must follow.
                   locationConfirmedAt: c.locationConfirmedAt ?? null,
@@ -592,6 +609,18 @@ export default function MapScreen() {
             new Set(foldedHouseholds.map((h) => String(h._id)))
           ),
         };
+        saveBootstrap(next);
+        return next;
+      });
+    }
+    // Door settings changed (an outcome switched on or off, the Add-person policy): fold them into
+    // the cached campaign — no refetch, so nothing can be cancelled or fail, optimistic voters
+    // survive, and the next poll sends the new stamp. saveBootstrap persists asynchronously and
+    // returns a promise, never the data — so it is called beside the return, not as it.
+    if (result.doorConfig) {
+      qc.setQueryData(['bootstrap'], (prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, campaign: { ...prev.campaign, ...result.doorConfig } };
         saveBootstrap(next);
         return next;
       });
@@ -700,7 +729,7 @@ export default function MapScreen() {
   // sorted. Buildings show if any unit matches the filter.
   const listEntries = useMemo(() => {
     if (viewMode !== 'list') return []; // don't compute while on the map
-    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, no_soliciting: 4, restricted: 5, lit_dropped: 6, surveyed: 7 };
+    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, not_target: 4, no_soliciting: 5, restricted: 6, lit_dropped: 7, surveyed: 8 };
     const matches = (s) => activeFilters.size === 0 || activeFilters.has(s || 'unknocked');
     const entries = [];
     for (const h of singles) {
@@ -966,6 +995,7 @@ export default function MapScreen() {
             'house-refused': require('../../assets/icons/house-refused.png'),
             'house-restricted': require('../../assets/icons/house-restricted.png'),
             'house-no_soliciting': require('../../assets/icons/house-no_soliciting.png'),
+            'house-not_target': require('../../assets/icons/house-not_target.png'),
             'house-lit_dropped': require('../../assets/icons/house-surveyed.png'),
             'building-grey': require('../../assets/icons/building-grey.png'),
             'building-yellow': require('../../assets/icons/building-yellow.png'),
@@ -1007,6 +1037,7 @@ export default function MapScreen() {
                 'refused', 'house-refused',
                 'restricted', 'house-restricted',
                 'no_soliciting', 'house-no_soliciting',
+                'not_target', 'house-not_target',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -1326,7 +1357,7 @@ function RecenterButton({
   );
 }
 
-const SURVEY_LEGEND = ['unknocked', 'surveyed', 'refused', 'not_home', 'wrong_address', 'no_soliciting', 'restricted'];
+const SURVEY_LEGEND = ['unknocked', 'surveyed', 'refused', 'not_target', 'not_home', 'wrong_address', 'no_soliciting', 'restricted'];
 const LIT_DROP_LEGEND = ['unknocked', 'lit_dropped', 'wrong_address', 'no_soliciting', 'restricted'];
 
 // Connection rate = surveyed homes ÷ knocked homes (DISTINCT homes), so it's bounded ≤100% and

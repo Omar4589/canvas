@@ -16,7 +16,8 @@ const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 // Every door-level knock the platform counts + feeds. `refused` is a first-class,
 // billable knock (a person answered but declined) — include it so the Control Room
 // "Today" doorsKnocked and the cross-org activity feed don't undercount it.
-const ACTION_DOOR = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+// A hand copy of KNOCK_ACTIONS (services/reports/aggregations.js): every knock outcome belongs here.
+const ACTION_DOOR = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 
 function startOfTodayUTC() {
   const d = new Date();

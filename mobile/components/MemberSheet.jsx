@@ -43,6 +43,9 @@ function initials(name) {
 export default function MemberSheet({
   member, // { role, isActive, status, coordinatorId, coordinatorName, assigned, user: {id,firstName,lastName,email} }
   campaign, // { id, name, type } — the selected campaign context (required)
+  // Has this campaign used the off-by-default "Not a target voter" outcome? Resolved by the caller
+  // (lib/useOutcomeInUse.js) — this sheet's { id, name, type } campaign does not carry the fields.
+  notTargetInUse = false,
   coordinators, // [{ id, name }] active admins+leads, for the dropdown
   viewerRole, // 'super' | 'admin' | 'lead'
   onClose,
@@ -285,6 +288,12 @@ export default function MemberSheet({
                   <Text style={styles.kpiValue}>{(kpi.daysActive ?? 0).toLocaleString()}</Text>
                   <Text style={styles.kpiLabel}>days</Text>
                 </View>
+                {isSurvey && notTargetInUse ? (
+                  <View style={styles.kpiTile}>
+                    <Text style={styles.kpiValue}>{(kpi.notTarget ?? 0).toLocaleString()}</Text>
+                    <Text style={styles.kpiLabel}>not target</Text>
+                  </View>
+                ) : null}
               </View>
             )}
 

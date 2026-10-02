@@ -1129,3 +1129,64 @@ test('survey answers: the full backup stays un-layered by construction', { skip 
   assert.ok(text.includes('/activity-log.csv'), 'the bundle carries the plain activity log');
   assert.ok(!text.includes('activity-log-with-surveys'), 'params: {} in buildFullBackup — the bundle has its own survey files');
 });
+
+// ---- "Not a target voter" (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §G) ---------------------------
+// Its own campaign, so the main fixture's exact counts stay what they are. Ward 4 never turned the
+// outcome on; Ward 5 has.
+
+test('not_target: plain-English door outcome for the client, and the per-round column only where used', { skip }, async () => {
+  const c5 = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Ward 5', type: 'survey', state: 'TX', timeZone: TZ,
+    enabledOutcomes: ['not_target'], everEnabledOutcomes: ['not_target'],
+  });
+  const e5 = await Effort.create({ organizationId: ctx.org._id, campaignId: c5._id, name: 'East Side' });
+  const p5 = await Pass.create({ organizationId: ctx.org._id, campaignId: c5._id, effortId: e5._id, roundNumber: 1, name: 'East first', status: 'active', activatedAt: new Date('2026-06-20T00:00:00Z') });
+  const home = (n, status) => Household.create({
+    organizationId: ctx.org._id, campaignId: c5._id, effortId: e5._id,
+    addressLine1: `${n} Elm St`, city: 'Austin', state: 'TX', zipCode: '78701', county: 'Travis',
+    normalizedAddress: `${n} elm st austin tx 78701`,
+    location: { type: 'Point', coordinates: [-97.74 + n / 1000, 30.28] }, status,
+  });
+  const h51 = await home(51, 'not_target');
+  const h52 = await home(52, 'refused');
+  for (const [h, sv, first, last] of [[h51, 'SV51', 'Nina', 'Listed'], [h52, 'SV52', 'Rex', 'Declined']]) {
+    await Voter.create({
+      organizationId: ctx.org._id, campaignId: c5._id, householdId: h._id,
+      stateVoterId: sv, firstName: first, lastName: last, fullName: `${first} ${last}`, party: 'DEM',
+    });
+  }
+  const loc = { lat: 30.28, lng: -97.74, accuracy: 5 };
+  for (const [h, actionType] of [[h51, 'not_target'], [h52, 'refused']]) {
+    await CanvassActivity.create({
+      organizationId: ctx.org._id, campaignId: c5._id, householdId: h._id, userId: ctx.uAda._id,
+      actionType, timestamp: new Date('2026-07-02T15:00:00Z'), location: loc, passId: p5._id, effortId: e5._id,
+    });
+  }
+
+  // Results by voter: a field visit, so the listed voter is in the universe — and the Address
+  // outcome says what happened at the DOOR (someone else answered), in the client's words.
+  const rbv = await runExport('results-by-voter', {}, { campaignId: c5._id });
+  const lines = csvLines(rbv.text);
+  const header = cellsOf(lines[0]);
+  const nina = lines.slice(1).map(cellsOf).find((c) => c[header.indexOf('Voter last name')] === 'Listed');
+  assert.ok(nina, 'the listed voter at a Not-a-target door has a row');
+  assert.strictEqual(nina[header.indexOf('Address outcome')], 'Not a target voter');
+  assert.ok(!rbv.text.includes('not_target'), 'no raw slug in a client-sendable file');
+  // estimate == build, through the same ctx slice estimateFor hands the registry (for Ward 5).
+  const def = EXPORT_TYPES['results-by-voter'];
+  const est = await def.estimate({
+    organizationId: ctx.org._id,
+    campaignId: c5._id,
+    campaign: await Campaign.findById(c5._id).lean(),
+    params: await def.validateParams({}, { organizationId: ctx.org._id, campaignId: c5._id }),
+    anchorTz: TZ,
+    dnc: await loadDncVoterIdSet(ctx.org._id),
+  });
+  assert.strictEqual(est.rows, rbv.doc.rowCount, 'estimate == build');
+
+  // The full backup's knocks-by-round mirrors /knocks-by-pass.csv column for column — the
+  // Not a target column after No soliciting here, and absent from Ward 4, which never used it.
+  const used = await runExport('full-backup', {}, { campaignId: c5._id });
+  assert.ok(used.text.includes('Lit knocks,Refused,No soliciting,Not a target,'), 'the column, in its place');
+  assert.ok(!ctx.artifacts['full-backup'].text.includes('No soliciting,Not a target'), 'Ward 4 keeps its file shape');
+});

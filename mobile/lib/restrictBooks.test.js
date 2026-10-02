@@ -28,13 +28,13 @@ import {
 // fingerprint. (--experimental-default-type=module because mobile is CommonJS-default for
 // Metro; the flag scopes ESM to the test run only.)
 
-test('restrictCounts: reached = not_home + wrong_address + refused + no_soliciting; completed/restricted excluded', () => {
+test('restrictCounts: reached = not_home + wrong_address + refused + no_soliciting + not_target; completed/restricted excluded', () => {
   const counts = restrictCounts([
     'unknocked', 'unknocked', // 2 untouched
-    'not_home', 'wrong_address', 'refused', 'no_soliciting', // 4 reached
+    'not_home', 'wrong_address', 'refused', 'no_soliciting', 'not_target', // 5 reached
     'surveyed', 'lit_dropped', 'restricted', // completed / already marked — in neither bucket
   ]);
-  assert.deepEqual(counts, { unknocked: 2, reached: 4, incomplete: 6 });
+  assert.deepEqual(counts, { unknocked: 2, reached: 5, incomplete: 7 });
 });
 
 test('restrictCountsFromStatusCounts sums per-book progress shapes (missing entries safe)', () => {
@@ -44,6 +44,15 @@ test('restrictCountsFromStatusCounts sums per-book progress shapes (missing entr
     { unknocked: 5, wrong_address: 3, surveyed: 99 },
   ]);
   assert.deepEqual(counts, { unknocked: 15, reached: 6, incomplete: 21 });
+});
+
+test('restrictCountsFromStatusCounts counts EVERY reached status — no_soliciting and not_target too', () => {
+  // The statusCounts path once summed three statuses by hand: a book of no-soliciting doors read
+  // "nothing reached", and the prompt offered a one-tap restrict that skipped the second confirm.
+  const counts = restrictCountsFromStatusCounts([{ unknocked: 4, no_soliciting: 2, not_target: 3, surveyed: 1, restricted: 1 }]);
+  assert.deepEqual(counts, { unknocked: 4, reached: 5, incomplete: 9 });
+  const p = buildMarkPrompt({ label: '“Book 9”', counts });
+  assert.ok(p.buttons.some((b) => b.scope === 'incomplete' && b.confirm), 'so the reached-inclusive scope keeps its confirm');
 });
 
 test('reached > 0: the scope choice is offered, safe option first and plain — the parity rule', () => {

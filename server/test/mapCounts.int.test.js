@@ -55,7 +55,12 @@ const DAY2 = '2026-06-11';
 const DAY3 = '2026-06-12';
 const DAY5 = '2026-06-14';
 
-const ZERO = { unknocked: 0, not_home: 0, wrong_address: 0, refused: 0, lit_dropped: 0, surveyed: 0, restricted: 0, no_soliciting: 0 };
+// Hand-listed on purpose (not imported from emptyStatusCounts): this is the shape both clients
+// read, so a status added there must be added here too — deliberately.
+const ZERO = {
+  unknocked: 0, not_home: 0, wrong_address: 0, refused: 0, lit_dropped: 0, surveyed: 0, restricted: 0, no_soliciting: 0,
+  not_target: 0,
+};
 const counts = (partial) => ({ ...ZERO, ...partial });
 const sumOf = (o) => Object.values(o).reduce((a, b) => a + b, 0);
 

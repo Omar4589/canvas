@@ -182,18 +182,21 @@ test('team-averages applies the aggregate rule server-side and says which it use
   assert.strictEqual(pure.body.avg.hoursOnDoors, 5.5);
 });
 
-test('canvassers.csv opens with the stamp preamble and ends rows with Hours source', { skip }, async () => {
+test('canvassers.csv opens with the stamp preamble; Hours source then Not a target close each row', { skip }, async () => {
   const { status, body } = await get(`/admin/reports/canvassers.csv?from=${DAY_A}&to=${DAY_B}`, true);
   assert.strictEqual(status, 200);
   const lines = body.split('\n');
   assert.ok(lines[0].startsWith('Canvasser export,'), 'row 1 names the artifact');
   assert.match(lines[0], /hours as of \d{4}-\d{2}-\d{2}T/, 'the in-file generatedAt stamp');
   assert.strictEqual(lines[1], '', 'blank row between preamble and header');
-  assert.ok(lines[2].endsWith('Hours source'), 'the provenance column is appended LAST');
+  // Both appended, in this order, so no column a saved import script reads ever moved. The
+  // not-target count is present for every org — 0 here — because a conditional column is a
+  // different file shape.
+  assert.ok(lines[2].endsWith('Hours source,Not a target'), lines[2]);
   const mariaRow = lines.find((l) => l.includes('Maria'));
-  assert.ok(mariaRow.endsWith('Measured'));
+  assert.ok(mariaRow.endsWith('Measured,0'), mariaRow);
   const samRow = lines.find((l) => l.includes('Sam'));
-  assert.ok(samRow.endsWith('Estimated'));
+  assert.ok(samRow.endsWith('Estimated,0'), samRow);
 });
 
 test('per-canvasser summary + daily label their hours', { skip }, async () => {

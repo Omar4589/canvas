@@ -17,7 +17,9 @@ import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilte
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+// Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here,
+// or a canvasser's own stats screen silently stops counting that door.
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -98,6 +100,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
   const surveyedHomeSet = new Set();
   const litHomeSet = new Set();
   const refusedHomeSet = new Set();
+  const notTargetHomeSet = new Set();
   const restrictedHomeSet = new Set();
   for (const a of activities) {
     // Keyed on (household, PASS), matching knocksPipeline. Household alone was the only key in the
@@ -133,6 +136,7 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     }
     if (a.actionType === 'survey_submitted') surveyedHomeSet.add(hid);
     if (a.actionType === 'refused') refusedHomeSet.add(hid);
+    if (a.actionType === 'not_target') notTargetHomeSet.add(hid);
   }
 
   let answerBreakdown = [];
@@ -207,10 +211,12 @@ async function computeDailyStats({ orgId, userId, campaignId, start, end }) {
     surveyedHomes: surveyedHomeSet.size,
     litHomes: litHomeSet.size,
     refusedHomes: refusedHomeSet.size,
+    notTargetHomes: notTargetHomeSet.size,
     restrictedHomes: restrictedHomeSet.size,
-    // "Reached a person" = surveyed OR refused homes (distinct). Per-day display value only —
-    // never sum across days (a home refused day 1 + surveyed day 2 would double-count).
-    reachedHomes: new Set([...surveyedHomeSet, ...refusedHomeSet]).size,
+    // "Reached a person" = surveyed, refused OR not-a-target homes (distinct — a Set union, so a
+    // home is counted once). Per-day display value only — never sum across days (a home refused
+    // day 1 + surveyed day 2 would double-count).
+    reachedHomes: new Set([...surveyedHomeSet, ...refusedHomeSet, ...notTargetHomeSet]).size,
     firstDoorAt: firstDoorAt ? firstDoorAt.toISOString() : null,
     lastDoorAt: lastDoorAt ? lastDoorAt.toISOString() : null,
     distanceMeters: Math.round(distanceMeters),
@@ -375,6 +381,7 @@ router.get('/history', async (req, res, next) => {
           _surveyedHomes: new Set(),
           _litHomes: new Set(),
           _refusedHomes: new Set(),
+          _notTargetHomes: new Set(),
           _restrictedHomes: new Set(),
         });
       }
@@ -411,6 +418,7 @@ router.get('/history', async (req, res, next) => {
       }
       if (a.actionType === 'survey_submitted') day._surveyedHomes.add(hid);
       if (a.actionType === 'refused') day._refusedHomes.add(hid);
+      if (a.actionType === 'not_target') day._notTargetHomes.add(hid);
     }
     for (const r of responses) {
       ensureDay(dayStr(r.submittedAt)).responses++;
@@ -427,8 +435,9 @@ router.get('/history', async (req, res, next) => {
         surveyedHomes: d._surveyedHomes.size,
         litHomes: d._litHomes.size,
         refusedHomes: d._refusedHomes.size,
+        notTargetHomes: d._notTargetHomes.size,
         restrictedHomes: d._restrictedHomes.size,
-        reachedHomes: new Set([...d._surveyedHomes, ...d._refusedHomes]).size,
+        reachedHomes: new Set([...d._surveyedHomes, ...d._refusedHomes, ...d._notTargetHomes]).size,
         firstDoorAt: d.firstDoorAt,
         lastDoorAt: d.lastDoorAt,
         distanceMeters: Math.round(d.distanceMeters),

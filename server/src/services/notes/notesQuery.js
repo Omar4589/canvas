@@ -24,6 +24,9 @@ export const ACTION_TYPES = [
   'lit_dropped',
   'restricted',
   'no_soliciting',
+  // Must be listed: picked() turns a chip list of ONLY unknown keys into null = no filter, so a
+  // missing outcome here makes the Notes hub answer "Not a target voter" with every note.
+  'not_target',
 ];
 
 export const NOTE_NONEMPTY = { $exists: true, $ne: null, $not: /^\s*$/ };

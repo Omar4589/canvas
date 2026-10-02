@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
+import { useOutcomeInUse } from '../../../../../lib/useOutcomeInUse';
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../../lib/dateRanges';
 import { formatRange, timeAgo } from '../../../../../lib/datetime';
 import { formatDistance } from '../../../../../lib/geo';
@@ -98,6 +99,7 @@ export default function CanvasserOverview() {
   }
 
   const cId = campaign?.id;
+  const notTargetInUse = useOutcomeInUse(cId);
   const isLitDrop = campaign?.type === 'lit_drop';
 
   const qsBase = useMemo(() => {
@@ -226,8 +228,19 @@ export default function CanvasserOverview() {
         label: 'Not home / wrong',
         value: `${k.notHome || 0} / ${k.wrongAddress || 0}`,
       },
+      // The off-by-default outcome: count and share of this person's doors — the figure an admin
+      // compares across a crew. No team delta: /team-averages carries none.
+      ...(!isLitDrop && notTargetInUse
+        ? [
+            {
+              label: 'Not a target',
+              value: (k.notTarget || 0).toLocaleString(),
+              sub: k.homesKnocked ? `${Math.round(((k.notTarget || 0) / k.homesKnocked) * 100)}% of knocks` : null,
+            },
+          ]
+        : []),
     ];
-  }, [s, team, isLitDrop]);
+  }, [s, team, isLitDrop, notTargetInUse]);
 
   const hourData = useMemo(() => {
     if (!s) return [];

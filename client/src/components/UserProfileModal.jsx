@@ -19,6 +19,7 @@ const ACTION_DOT_CLS = {
   refused: 'bg-amber-500',
   restricted: 'bg-slate-600',
   no_soliciting: 'bg-pink-600',
+  not_target: 'bg-fuchsia-700',
   lit_dropped: 'bg-purple-500',
 };
 

@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
+import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { loadActiveCampaign, saveActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../../../lib/dateRanges';
 import { spacing, radius, actionLabel, ACTION_LABELS } from '../../../lib/theme';
@@ -69,6 +70,7 @@ export default function AdminNotes() {
   );
 
   const cId = campaign?.id ? String(campaign.id) : null;
+  const notTargetInUse = useOutcomeInUse(cId);
   const tz = campaign?.timeZone || deviceTimezone();
 
   // Filters
@@ -270,7 +272,10 @@ export default function AdminNotes() {
   const sourcesWithCounts = SOURCES.map((s) => ({ ...s, count: counts[s.key] ?? 0 }));
   // No color and no count on purpose: the endpoint reports totals per SOURCE, not per outcome,
   // so a badge here could only ever show a misleading 0.
-  const outcomeChips = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
+  // Not a target voter is offered only on a campaign that has used it (lib/useOutcomeInUse.js).
+  const outcomeChips = Object.keys(ACTION_LABELS)
+    .filter((a) => a !== 'not_target' || notTargetInUse)
+    .map((a) => ({ key: a, label: actionLabel(a) }));
 
   // One note as an inset row. A note with a target NAVIGATES (voter note → voter profile;
   // household-only note → the map focused on that door); a note with neither is INERT — the

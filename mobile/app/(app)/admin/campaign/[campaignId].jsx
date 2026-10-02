@@ -32,6 +32,7 @@ import ElectionCountdownChip from '../../../../components/ElectionCountdownChip'
 import { rangeFor, deviceTimezone, labelForRange } from '../../../../lib/dateRanges';
 import { rateFromPct, makeRateColors, tierWord } from '../../../../lib/rates';
 import { metricHelp } from '../../../../lib/metricHelp';
+import { outcomeInUse } from '../../../../lib/outcomeToggles';
 import { daysLeftLabel } from '../../../../lib/goalPace';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
@@ -56,6 +57,9 @@ export default function CampaignDetail() {
   });
   const campaign = (campaignsQ.data?.campaigns || []).find((c) => String(c._id) === String(cId)) || null;
   const isLitDrop = campaign?.type === 'lit_drop';
+  // The off-by-default outcome's KPI, By-pass figure and card line — only on a survey campaign that
+  // has ever had it on. This screen holds the full ['admin','campaigns'] row, so it asks directly.
+  const notTargetInUse = !isLitDrop && outcomeInUse(campaign, 'not_target');
   const isArchived = campaign && campaign.isActive === false;
 
   // Device tz fallback so the screen loads immediately; refined to the campaign tz (and to
@@ -253,6 +257,17 @@ export default function CampaignDetail() {
           : null,
       help: metricHelp.connectionRate,
     });
+    if (notTargetInUse) {
+      const n = rangeStats.notTargetKnocks || 0;
+      m.push({
+        key: 'notTarget',
+        label: 'Not a target',
+        value: n.toLocaleString(),
+        unit: 'doors',
+        sub: rangeKnocks ? `${Math.round((n / rangeKnocks) * 100)}% of knocks` : null,
+        help: metricHelp.notTarget,
+      });
+    }
     return m;
   }, [
     isLitDrop,
@@ -260,7 +275,9 @@ export default function CampaignDetail() {
     rangePrimary,
     rangeStats.surveysSubmitted,
     rangeStats.surveyedVoters,
+    rangeStats.notTargetKnocks,
     rangeRate,
+    notTargetInUse,
   ]);
 
   // The Top-canvassers column key. Same shape as activityMetrics minus the live values —
@@ -349,6 +366,7 @@ export default function CampaignDetail() {
         // number printed beside it.
         daySurveys: c.surveyKnocks ?? 0,
         dayLit: c.litDropped ?? 0,
+        dayNotTarget: c.notTarget ?? 0,
         // The SERVER's figures, not a local derivation. This card used to compute
         // (lastActivityAt − firstActivityAt) — a CALENDAR span, the exact anti-pattern
         // docs/METRICS.md forbids ("clients must not re-derive"), under-reporting pace
@@ -684,7 +702,10 @@ export default function CampaignDetail() {
                     <InsetRow
                       key={r.passId || `legacy-${i}`}
                       label={r.effortName || r.roundLabel}
-                      sub={r.effortName ? `${r.roundLabel} · ` : ''}
+                      sub={
+                        (r.effortName ? `${r.roundLabel} · ` : '') +
+                        (notTargetInUse ? `${(r.notTargetKnocks || 0).toLocaleString()} not target · ` : '')
+                      }
                       subAccent={`${isLitDrop ? 'Lit' : 'Conn'} ${r.connectionRate ?? 0}%`}
                       accentColor={rate ? rateColors[rate.level].deep : null}
                       value={(r.knocks || 0).toLocaleString()}
@@ -744,6 +765,7 @@ export default function CampaignDetail() {
                   tz={tz}
                   rank={i + 1}
                   litMode={isLitDrop}
+                  notTargetInUse={notTargetInUse}
                   onPress={() =>
                     router.push({
                       pathname: `/(app)/admin/canvasser/${c.userId}`,

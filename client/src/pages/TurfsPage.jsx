@@ -7,6 +7,7 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { api } from '../api/client.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import BookAssignmentPanel from '../components/BookAssignmentPanel.jsx';
 import DoorSelectionBar from '../components/DoorSelectionBar.jsx';
 import MapSelectModeControl from '../components/MapSelectModeControl.jsx';
@@ -541,7 +542,7 @@ function RestrictModal({ mode, books, progressByTurf, pending, error, onCancel, 
   // new non-completion status automatically. A status missing here doesn't change what gets
   // marked; it makes this preview under-report it, which is worse than a visible error.
   const unknockedCount = sumStatus(books, progressByTurf, ['unknocked']);
-  const incompleteCount = sumStatus(books, progressByTurf, ['unknocked', 'not_home', 'wrong_address', 'refused', 'no_soliciting']);
+  const incompleteCount = sumStatus(books, progressByTurf, ['unknocked', 'not_home', 'wrong_address', 'refused', 'no_soliciting', 'not_target']);
   const reachedCount = Math.max(0, incompleteCount - unknockedCount);
   const hasProgress = progressByTurf && progressByTurf.size > 0;
   const showScope = marking && hasProgress && reachedCount > 0;
@@ -912,7 +913,7 @@ function RoundActivity({ householdId, passId, status, tz }) {
 
 // Statuses a canvasser left the door in without completing it — the server's mark ladder
 // marks these (the field knock stays on file and counted); surveyed/lit_dropped are skipped.
-const REACHED_STATUSES = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting']);
+const REACHED_STATUSES = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting', 'not_target']);
 const COMPLETED_STATUSES = new Set(['surveyed', 'lit_dropped']);
 
 // Single-home desk mark: restrict / un-restrict THIS door for THIS round from the popup —
@@ -1370,6 +1371,13 @@ export default function TurfsPage() {
   const orgTz = useOrgTimeZone();
   const { campaignId } = useParams();
   const { selected } = useCampaignSelection(campaignId);
+  // The Target / Exclude status lists. Not a target voter is offered only on a campaign that has
+  // used it — a customer who never turns it on never sees the words. Labels come from the shared
+  // STATUS_LABELS ("not_target".replace would read "not target").
+  const cutStatuses = [
+    'unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address',
+    ...(outcomeInUse(selected, 'not_target') ? ['not_target'] : []),
+  ];
   // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
   const tz = selected?.timeZone || orgTz;
   // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark), independent of the
@@ -3121,10 +3129,10 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address'].map((s) => (
-                      <label key={s} className="flex items-center gap-1 capitalize">
+                    {cutStatuses.map((s) => (
+                      <label key={s} className="flex items-center gap-1">
                         <input type="checkbox" checked={targetFilter.priorPassStatuses.includes(s)} onChange={() => toggleTargetStatus(s)} />
-                        {s.replace('_', ' ')}
+                        {STATUS_LABELS[s]}
                       </label>
                     ))}
                   </div>
@@ -3193,14 +3201,14 @@ export default function TurfsPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
-                    {['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address'].map((s) => (
-                      <label key={s} className="flex items-center gap-1 capitalize">
+                    {cutStatuses.map((s) => (
+                      <label key={s} className="flex items-center gap-1">
                         <input
                           type="checkbox"
                           checked={(targetFilter.exclude?.priorPassStatuses || []).includes(s)}
                           onChange={() => toggleExcludeStatus(s)}
                         />
-                        {s.replace('_', ' ')}
+                        {STATUS_LABELS[s]}
                       </label>
                     ))}
                   </div>

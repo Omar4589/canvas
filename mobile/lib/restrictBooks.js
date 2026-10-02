@@ -6,7 +6,7 @@
 // presentation lives in restrictBooksConfirm.js.
 //
 // The rule this file exists to hold (mirrors web's RestrictModal): when the crew has REACHED
-// doors (not-home / wrong-address / refused / no-soliciting), the SAFE scope — 'unknocked', leave reached
+// doors (not-home / wrong-address / refused / no-soliciting / not-a-target), the SAFE scope — 'unknocked', leave reached
 // doors alone — is the default path, and the reached-inclusive 'incomplete' scope always
 // costs a second, explicit confirm. The server defaults an omitted scope to 'incomplete',
 // so every mark call built here carries an explicit scope.
@@ -17,7 +17,7 @@
 // The server writes that clause as an EXCLUSION, so it picks up each new non-completion status
 // automatically. This set does NOT — a status missing here doesn't change what the server marks,
 // it just makes the confirm prompt under-report it. Add every new one.
-const REACHED = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting']);
+const REACHED = new Set(['not_home', 'wrong_address', 'refused', 'no_soliciting', 'not_target']);
 
 // Per-door statuses (this round) → the three counts the prompts speak in.
 export const restrictCounts = (statuses) => {
@@ -38,7 +38,10 @@ export const restrictCountsFromStatusCounts = (statusCountsList) => {
   for (const sc of statusCountsList || []) {
     if (!sc) continue;
     unknocked += sc.unknocked || 0;
-    reached += (sc.not_home || 0) + (sc.wrong_address || 0) + (sc.refused || 0);
+    // Every REACHED status, summed by the set itself — this line once listed three by hand and
+    // missed no_soliciting, so the prompt under-counted reached doors and could offer a one-tap
+    // restrict of doors the crew had already worked, skipping the second confirm.
+    for (const s of REACHED) reached += sc[s] || 0;
   }
   return { unknocked, reached, incomplete: unknocked + reached };
 };
@@ -81,7 +84,7 @@ export const buildMarkPrompt = ({ label, counts, totalDoors }) => {
           title: 'Also mark reached doors?',
           message:
             `This also marks the ${reached.toLocaleString()} door${reached === 1 ? '' : 's'} your crew already ` +
-            `reached (not-home / wrong address / refused). Completed doors keep their result.`,
+            `reached this round (not home, refused and the like). Completed doors keep their result.`,
           confirmText: `Restrict ${incomplete.toLocaleString()} door${incomplete === 1 ? '' : 's'}`,
         },
       },

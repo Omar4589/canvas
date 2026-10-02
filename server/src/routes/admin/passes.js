@@ -83,6 +83,7 @@ router.get('/', async (req, res, next) => {
           surveyedKnocks: k?.surveyedKnocks || 0,
           litKnocks: k?.litKnocks || 0,
           refusedKnocks: k?.refusedKnocks || 0,
+          notTargetKnocks: k?.notTargetKnocks || 0,
           connectionRate: k ? connectionRate(k) : 0,
           contactRate: k ? contactRate(k) : 0,
         };

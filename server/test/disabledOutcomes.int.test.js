@@ -197,11 +197,18 @@ test('both mobile wires carry the field', { skip }, async () => {
   const boot = await call('GET', `/mobile/bootstrap?campaignId=${ctx.campaign._id}`, { token: ctx.canvTok, orgId: ctx.org._id });
   assert.equal(boot.status, 200);
   assert.deepEqual([...boot.json.campaign.disabledOutcomes].sort(), ['refused', 'restricted']);
+  // The opt-in list rides beside it, effective and empty here, with the stamp the phone sends back
+  // on /mobile/changes. The stamp's first segment is this deny-list, sorted.
+  assert.deepEqual(boot.json.campaign.enabledOutcomes, []);
+  assert.equal(boot.json.campaign.doorConfigStamp, 'refused,restricted||all');
 
   const picker = await call('GET', '/mobile/campaigns', { token: ctx.canvTok, orgId: ctx.org._id });
   assert.equal(picker.status, 200);
   const row = picker.json.campaigns.find((c) => c.id === String(ctx.campaign._id));
   assert.deepEqual([...row.disabledOutcomes].sort(), ['refused', 'restricted']);
+  // Deliberately NOT on the picker: nothing on the phone reads outcome config from it, and a copy
+  // there would be frozen into the persisted active-campaign blob.
+  assert.equal(row.enabledOutcomes, undefined);
 });
 
 test('the admin bulk-restrict desk path is deliberately unaffected by the toggle', { skip }, async () => {

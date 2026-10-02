@@ -55,6 +55,8 @@ export const EXPORT_TYPE_META = [
   },
 ];
 
+// not_target (the off-by-default outcome) is appended per campaign by the export sheet — offered
+// only where the campaign has used it, like the web Exports page.
 export const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 // Lay the server registry's copy over the local fallback, keyed by id. Server label /

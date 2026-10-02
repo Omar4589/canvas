@@ -751,3 +751,127 @@ test('run detail itemizes the exact rows, and honestly loses them on revert', { 
   await CanvassActivity.deleteOne({ _id: row._id });
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Not a target voter" — the off-by-default outcome (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §H)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const withRelease = async (released, fn) => {
+  const saved = process.env.OPT_IN_OUTCOMES;
+  if (released) process.env.OPT_IN_OUTCOMES = 'not_target';
+  else delete process.env.OPT_IN_OUTCOMES;
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) delete process.env.OPT_IN_OUTCOMES;
+    else process.env.OPT_IN_OUTCOMES = saved;
+  }
+};
+
+test('not_target entries are listed and exported, each marked when it was queued offline', { skip }, async () => {
+  // Its own door, so the earlier tests' doors keep their statuses. Recorded offline: the evidence
+  // an admin needs for entries an offline phone made after the outcome was switched off.
+  const door = await Household.create(makeHousehold(ctx.org._id, ctx.campaign._id, ctx.effort._id, 6));
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: door._id,
+    userId: ctx.canv._id, actionType: 'not_target', effortId: ctx.effort._id, passId: ctx.pass._id,
+    location: { lat: 30.26, lng: -97.74, accuracy: 5 }, timestamp: new Date('2026-08-01T16:00:00Z'),
+    wasOfflineSubmission: true,
+  });
+  await Household.updateOne({ _id: door._id }, { $set: { status: 'not_target' } });
+  await recomputeCampaignStats(ctx.campaign._id);
+  Object.assign(ctx, { ntDoor: door, ntRow: row });
+
+  // Listed even while the outcome is withdrawn — cleanup must never depend on the release.
+  await withRelease(false, async () => {
+    const list = await call('GET', entriesUrl('?outcomes=not_target'), asAdmin());
+    assert.equal(list.status, 200, JSON.stringify(list.json));
+    assert.equal(list.json.total, 1);
+    assert.equal(list.json.entries[0].wasOfflineSubmission, true);
+    const live = await call('GET', entriesUrl('?outcomes=refused'), asAdmin());
+    assert.ok(live.json.entries.every((e) => e.wasOfflineSubmission === false), 'a live entry reads false, never undefined');
+
+    const res = await fetch(`${base}/api/admin/campaigns/${ctx.campaign._id}/outcome-entries.csv?outcomes=not_target,refused`, {
+      headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) },
+    });
+    assert.equal(res.status, 200);
+    const lines = (await res.text()).replace(/^﻿/, '').trim().split('\r\n');
+    assert.ok(lines[0].endsWith(',Offline'), `the column is appended: ${lines[0]}`);
+    const ntLine = lines.find((l) => l.includes(',not_target,'));
+    assert.ok(ntLine.endsWith(',Offline'), ntLine);
+    assert.ok(lines.filter((l) => l.includes(',refused,')).every((l) => l.endsWith(',')), 'blank on a live entry');
+  });
+});
+
+test('not_target is never rate-neutral: changing it is priced, and the preview is what happens', { skip }, async () => {
+  await withRelease(false, async () => {
+    const ov = await call('GET', `/admin/reports/overview?campaignId=${ctx.campaign._id}`, asAdmin());
+    const { knocks, contactKnocks, contactRate: liveRate } = ov.json.totals;
+    assert.ok(contactKnocks > 0 && knocks > contactKnocks, JSON.stringify(ov.json.totals));
+
+    const preview = await call('POST', url(), {
+      ...asAdmin(), body: { to: 'not_home', scope: { outcomes: ['not_target'] }, dryRun: true },
+    });
+    assert.equal(preview.status, 200, `a withdrawn outcome is still a legal SOURCE: ${JSON.stringify(preview.json)}`);
+    assert.equal(preview.json.rateNeutral, false);
+    assert.equal(preview.json.impact.before.contactRate, liveRate, 'priced from the same numbers the dashboard shows');
+    assert.equal(preview.json.impact.after.contactRate, Math.round(((contactKnocks - 1) / knocks) * 100));
+    assert.equal(preview.json.impact.after.knocks, knocks, 'still a knock either way');
+
+    const run = await call('POST', url(), { ...asAdmin(), body: { to: 'not_home', scope: { outcomes: ['not_target'] } } });
+    assert.equal(run.status, 201, JSON.stringify(run.json));
+    const actual = await moneyShot();
+    assert.equal(actual.contactRate, preview.json.impact.after.contactRate, 'the previewed rate is the real one');
+    const stats = (await Campaign.findById(ctx.campaign._id).lean()).stats;
+    assert.deepEqual({ nt: stats.notTargetKnockCount, ck: stats.contactKnockCount }, { nt: 0, ck: contactKnocks - 1 }, 'counters recomputed');
+
+    await call('POST', url('/revert'), { ...asAdmin(), body: { runId: run.json.run.id } });
+    assert.equal((await moneyShot()).contactRate, liveRate, 'revert puts it back');
+    assert.equal((await CanvassActivity.findById(ctx.ntRow._id).lean()).actionType, 'not_target');
+  });
+});
+
+test('not_target is a TARGET only on a survey campaign that has it on, while it is released', { skip }, async () => {
+  const toNotTarget = (campaignId) =>
+    call('POST', `/admin/campaigns/${campaignId}/reclassify-outcomes`, {
+      ...asAdmin(), body: { to: 'not_target', scope: { outcomes: ['refused'] }, dryRun: true },
+    });
+
+  await withRelease(true, async () => {
+    const off = await toNotTarget(ctx.campaign._id);
+    assert.equal(off.status, 400);
+    assert.equal(off.json.code, 'TARGET_DISABLED', 'off on this campaign');
+  });
+
+  await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { enabledOutcomes: ['not_target'], everEnabledOutcomes: ['not_target'] } });
+  try {
+    await withRelease(false, async () => {
+      const unreleased = await toNotTarget(ctx.campaign._id);
+      assert.equal(unreleased.json.code, 'TARGET_DISABLED', 'on, but withdrawn by Doorline');
+    });
+    await withRelease(true, async () => {
+      const ok = await toNotTarget(ctx.campaign._id);
+      assert.equal(ok.status, 200, JSON.stringify(ok.json));
+      assert.equal(ok.json.rateNeutral, false, 'refused → not_target is still priced');
+      // And the App Customization card never offers it: its targets are the rate-neutral ones.
+      const card = await call('GET', url(), asAdmin());
+      assert.ok(!card.json.targets.includes('not_target'));
+    });
+
+    // A lit-drop campaign can never take it, whatever its stored setting says.
+    const lit = await Campaign.create({
+      organizationId: ctx.org._id, name: 'Reclass Lit', type: 'lit_drop', state: 'TX', isActive: true,
+      enabledOutcomes: ['not_target'], everEnabledOutcomes: ['not_target'],
+    });
+    await withRelease(true, async () => {
+      const r = await call('POST', `/admin/campaigns/${lit._id}/reclassify-outcomes`, {
+        ...asAdmin(), body: { from: 'not_home', to: 'not_target', dryRun: true },
+      });
+      assert.equal(r.status, 400);
+      assert.equal(r.json.code, 'TARGET_DISABLED');
+    });
+    await Campaign.deleteOne({ _id: lit._id });
+  } finally {
+    await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { enabledOutcomes: [] } });
+  }
+});

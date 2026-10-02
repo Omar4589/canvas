@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Alert, View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { loadRoleContext } from '../../../lib/role';
 import { OUTCOME_HINTS } from '../../../lib/outcomeToggles';
 import { spacing, radius, ACTION_LABELS } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -18,6 +19,13 @@ import InsetGroup, { InsetRow, InsetSwitchRow, GroupFooter } from '../../../comp
 // doors already recorded keep their status and keep counting. Reads the RAW
 // ['admin','campaigns'] row — useAdminCampaign's shape() strips everything but
 // id/name/type/state/timeZone, so it can't carry this field.
+//
+// "Off until you turn it on" (Campaign.enabledOutcomes — docs/PROPOSAL_NOT_TARGET_OUTCOME.md) is
+// the exception to all of the above: an outcome nobody can verify, off on every campaign until an
+// ORG ADMIN turns it on (the server 403s a lead; leads see the switch disabled), and turning it on
+// asks first. Shown only once Doorline has released it (optInOutcomesAvailable on the campaigns
+// response), plus the "paused" state — withdrawn by Doorline but still set on here — where only
+// the turn-off works. Survey campaigns only.
 
 // Door-screen order, and type-aware: wrong-address and refused don't exist in the lit-drop
 // door UI (their routes are survey-gated), so a lit-drop campaign only gets the two
@@ -117,6 +125,69 @@ export default function AdminAppCustomization() {
     savePolicy.mutate(all ? 'all' : 'leads');
   };
 
+  // Off-by-default outcomes (Campaign.enabledOutcomes). Org admins only — default false until the
+  // role loads, so a lead can never flip it even for a frame.
+  const [isOrgAdmin, setIsOrgAdmin] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadRoleContext()
+      .then((r) => {
+        if (alive) setIsOrgAdmin(!!r?.isOrgAdmin);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const released = campaignsQ.data?.optInOutcomesAvailable || [];
+  const serverEnabled = campaign?.enabledOutcomes || [];
+  const [enabledList, setEnabledList] = useState(serverEnabled);
+  useEffect(() => {
+    setEnabledList(campaign?.enabledOutcomes || []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cId, serverEnabled.join(',')]);
+  const saveEnabled = useMutation({
+    mutationFn: (next) => api(`/admin/campaigns/${cId}`, { method: 'PATCH', body: { enabledOutcomes: next } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      flash('success', 'Outcome buttons updated.');
+    },
+    onError: (err) => {
+      const rows = qc.getQueryData(['admin', 'campaigns'])?.campaigns || [];
+      const row = rows.find((c) => String(c._id) === String(cId));
+      setEnabledList(row?.enabledOutcomes || []);
+      flash('error', err.message);
+    },
+  });
+  const notTargetOn = enabledList.includes('not_target');
+  const notTargetState =
+    kind !== 'survey' ? null : released.includes('not_target') ? 'released' : notTargetOn ? 'paused' : null;
+  const writeEnabled = (on) => {
+    const next = on ? [...enabledList.filter((k) => k !== 'not_target'), 'not_target'] : enabledList.filter((k) => k !== 'not_target');
+    setEnabledList(next);
+    saveEnabled.mutate(next);
+  };
+  // Turning it ON asks first (Cancel first — the Android order); turning it off is the safe
+  // direction and needs no confirmation.
+  const setNotTarget = (on) => {
+    if (!on) {
+      writeEnabled(false);
+      return;
+    }
+    Alert.alert(
+      `Turn on "${ACTION_LABELS.not_target}" for ${campaign?.name || 'this campaign'}?`,
+      'Everyone canvassing this campaign sees the button once their app is up to date — including anyone a team lead adds to the crew later.\n\n' +
+        '• It counts as a knock and as reaching a person (Contact %), never as a survey. Connection rate is unaffected.\n' +
+        "• No name is recorded, so an entry can't be verified. Turn it on only for crews you trust.\n" +
+        "• Each entry is GPS-stamped and shows on that canvasser's row.\n" +
+        "• This change is recorded in the campaign's History with your name.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Turn on', onPress: () => writeEnabled(true) },
+      ]
+    );
+  };
+
   if (campaignsQ.data && !campaign) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -177,6 +248,34 @@ export default function AdminAppCustomization() {
           Turning an outcome off hides its button in the field app and blocks new submissions. Doors
           already recorded keep their status and keep counting in every report.
         </GroupFooter>
+
+        {notTargetState && (
+          <>
+            <SectionHeader title="Off until you turn it on" caption />
+            <InsetGroup>
+              <InsetSwitchRow
+                label={ACTION_LABELS.not_target}
+                sub={
+                  notTargetState === 'paused'
+                    ? 'Paused by Doorline — no phone shows this button right now. You can still turn it off for this campaign.'
+                    : OUTCOME_HINTS.not_target
+                }
+                value={notTargetOn}
+                // A lead sees the state but can't change it; while paused only the turn-off works.
+                disabled={!isOrgAdmin || saveEnabled.isPending || !campaign || (notTargetState === 'paused' && !notTargetOn)}
+                onValueChange={setNotTarget}
+              />
+            </InsetGroup>
+            <GroupFooter>
+              These outcomes can't be verified, so they start off on every campaign. When one is on, everyone on this
+              campaign gets the button.{' '}
+              {isOrgAdmin ? 'Only org admins can change this.' : 'Only org admins can turn this on or off.'}
+              {notTargetOn
+                ? ' Entries already recorded keep counting. A phone that is offline keeps the button until it reconnects.'
+                : ''}
+            </GroupFooter>
+          </>
+        )}
 
         <SectionHeader title="Always available" caption />
         <InsetGroup>

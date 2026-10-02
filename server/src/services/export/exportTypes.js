@@ -37,7 +37,7 @@ import { EXPORT_ESTIMATES } from './exportEstimates.js';
 // from here, never the other way around. `filters` names UI filter groups, not param keys.
 // `estimate` (absent only on full-backup) is the pre-queue count from exportEstimates.js.
 
-const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
+const DOOR_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting', 'not_target'];
 
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s));
 const isId = (s) => mongoose.isValidObjectId(s);
@@ -87,7 +87,7 @@ const BACKUP_NOTES = [
   'voterfile-current.csv is a RECONSTRUCTION from the data currently in Doorline, not the originally uploaded file: unmapped vendor columns were never stored, rows that failed import are absent, and edits made since the upload are reflected.',
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
-  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file. The bundle\u2019s activity-log.csv is ALWAYS one row per door event; repeating a door-level knock once per registered voter is an opt-in on a standalone Canvassing activity export (activity-log-by-voter).',
+  'activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (not home, refused, no soliciting, not a target voter, lit drop) leave the voter columns blank — doors-by-round.csv is the per-door file. The bundle\u2019s activity-log.csv is ALWAYS one row per door event; repeating a door-level knock once per registered voter is an opt-in on a standalone Canvassing activity export (activity-log-by-voter).',
   'notes.csv carries every note in one file, one row per note; voter-profile notes therefore appear in BOTH notes.csv and voter-notes.csv. The bundle\u2019s notes.csv never lists the voters registered at a door \u2014 that is an opt-in column on a standalone Notes export.',
   'The survey files here use the default columns (name, party, address). For phone, date of birth, districts, precinct and coordinates beside each answer, queue Survey results on its own with "Include contact & demographic details" — voterfile-current.csv in this bundle already carries all of those, keyed by State Voter ID.',
 ];
@@ -184,7 +184,7 @@ const buildFullBackup = async (ctx, sink) => {
 export const EXPORT_TYPES = {
   'canvass-activity': {
     label: 'Canvassing activity',
-    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks. Tick "Include survey answers" and every survey row gains the answers that were recorded, one column per question \u2014 plus a row for each survey the knock ledger cannot show, because surveying three people at one door in one round is ONE knock and three surveys. Those rows say Row source: survey and carry no Activity DB id; never count them as knocks either.',
+    desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, no soliciting, not a target voter, lit drop) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks. Tick "Include survey answers" and every survey row gains the answers that were recorded, one column per question \u2014 plus a row for each survey the knock ledger cannot show, because surveying three people at one door in one round is ONE knock and three surveys. Those rows say Row source: survey and carry no Activity DB id; never count them as knocks either.',
     oneRowIs: 'one door event — who knocked, when, and the outcome',
     // `outcome` renders the same Door-outcome chip row the notes type has and feeds the same
     // actionTypes param below — a narrowing filter, so canvassActivityQuery applies it and the
@@ -297,7 +297,7 @@ export const EXPORT_TYPES = {
   },
   'results-by-voter': {
     label: 'Results by voter',
-    desc: 'The file to send a client: one row per person at the doors you worked, with what happened at their address and what they said. Every registered voter at a door with a field visit gets a row — plus anyone you surveyed, even if they have since moved to a door nobody knocked. The Address columns describe the DOOR, not the person: "Refused" on a three-voter house means somebody there declined, not that all three did. Answers are grouped by round, so a voter surveyed twice shows both sets side by side. Outcomes are spelled in plain English here, unlike every other export, because this is the one built to be read rather than re-imported.',
+    desc: 'The file to send a client: one row per person at the doors you worked, with what happened at their address and what they said. Every registered voter at a door with a field visit gets a row — plus anyone you surveyed, even if they have since moved to a door nobody knocked. The Address columns describe the DOOR, not the person: "Refused" on a three-voter house means somebody there declined, not that all three did, and "Not a target voter" means someone who is not on the list answered, so none of the listed voters was reached. Answers are grouped by round, so a voter surveyed twice shows both sets side by side. Outcomes are spelled in plain English here, unlike every other export, because this is the one built to be read rather than re-imported.',
     oneRowIs: 'one voter at a door you visited, with the door\u2019s outcome and their answers',
     // `outcome` narrows WHICH DOORS are in the file, never how a door's outcome column reads.
     filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'voterDetail', 'surveyNote'],

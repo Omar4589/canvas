@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
+import { useOutcomeInUse } from '../../../../../lib/useOutcomeInUse';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
 import { radius, spacing } from '../../../../../lib/theme';
 import { useTheme } from '../../../../../lib/ThemeContext';
@@ -28,6 +29,8 @@ const ACTION_TABS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  // Offered only on a campaign that has used the off-by-default outcome (filtered below).
+  { key: 'not_target', label: 'Not target' },
   { key: 'no_soliciting', label: 'No solicit' },
   { key: 'restricted', label: 'Restricted' },
   { key: 'lit_dropped', label: 'Lit drop' },
@@ -48,6 +51,8 @@ export default function ActivityFeed() {
   // left every query disabled and the screen blank).
   const campaign = useAdminCampaign(params.campaignId);
   const tz = campaign?.timeZone || deviceTimezone();
+  const notTargetInUse = useOutcomeInUse(campaign?.id);
+  const actionTabs = ACTION_TABS.filter((t) => t.key !== 'not_target' || notTargetInUse);
 
   const [range, setRange] = useState(() => {
     if (params.from || params.to) {
@@ -143,7 +148,7 @@ export default function ActivityFeed() {
       <FilterBar
         filters={[
           { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
-          { key: 'action', title: 'Action', options: ACTION_TABS, selected: actionTab, onSelect: onTabChange },
+          { key: 'action', title: 'Action', options: actionTabs, selected: actionTab, onSelect: onTabChange },
         ]}
       />
 

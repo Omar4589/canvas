@@ -1203,7 +1203,10 @@ test('the CSV export is the TABLE as a file — same scope machinery, evidence i
   // so the file cannot disagree with the table that previewed it.
   assert.equal(lines.length - 1, json.json.total);
   assert.match(lines[0], /Matched voters/);
+  // The appended Offline column: this file runs its own find, so its projection must carry the flag.
+  assert.ok(lines[0].endsWith(',Offline'), lines[0]);
   const row = lines[1];
+  assert.ok(row.endsWith(','), 'a live entry leaves Offline blank');
   assert.match(row, /201 Detail Dr/);
   assert.match(row, /D1 Probe/);   // the matched voter, by name
   assert.match(row, /undecided/);  // and the answer that matched
@@ -1223,6 +1226,51 @@ test('the CSV export is the TABLE as a file — same scope machinery, evidence i
     headers: { Authorization: `Bearer ${ctx.leadTok}`, 'X-Org-Id': String(ctx.org._id) },
   });
   assert.equal(lead.status, 403);
+});
+
+test('to_survey from Not a target voter: the remedy for a wrong button — contact holds, the survey rate rises', { skip }, async () => {
+  // A canvasser tapped Not a target voter after really surveying a listed voter. The desk composes
+  // the answers for that listed voter; the entry stays a knock and a contact either way, so only
+  // the survey (connection) side of the numbers moves.
+  const d = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.effort._id,
+    addressLine1: '91 Target Ct', city: 'Austin', state: 'TX', zipCode: '78701',
+    normalizedAddress: '91 target ct austin tx 78701',
+    location: { type: 'Point', coordinates: [-97.731, 30.26] }, status: 'not_target', isActive: true,
+  });
+  const voter = await Voter.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: d._id,
+    stateVoterId: 'SVNT1', firstName: 'Nat', lastName: 'Target', fullName: 'Nat Target', surveyStatus: 'not_surveyed',
+  });
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: d._id, userId: ctx.canv._id,
+    actionType: 'not_target', effortId: ctx.effort._id, passId: ctx.pass._id, coordinatorId: ctx.boss._id,
+    location: GPS, distanceFromHouseMeters: 12, timestamp: new Date('2026-07-05T15:00:00Z'),
+  });
+  await recomputeCampaignStats(ctx.campaign._id);
+
+  const ids = [String(row._id)];
+  const prev = await call('POST', url(), {
+    ...asAdmin(),
+    body: { direction: 'to_survey', to: 'survey_submitted', dryRun: true, actionIds: ids, answers: YES },
+  });
+  assert.equal(prev.status, 200, `not_target is a legal source: ${JSON.stringify(prev.json)}`);
+  const { before, after } = prev.json.impact;
+  assert.equal(after.knocks, before.knocks, 'a knock either way');
+  assert.equal(after.contactRate, before.contactRate, 'and a contact either way');
+  assert.ok(after.connectionRate > before.connectionRate, 'only the survey rate moves');
+
+  const runId = await bulkRun({ direction: 'to_survey', to: 'survey_submitted', actionIds: ids, answers: YES });
+  const real = await moneyShot();
+  assert.equal(real.connectionRate, after.connectionRate, 'the preview is what landed');
+  const converted = await CanvassActivity.findById(row._id).lean();
+  assert.equal(converted.actionType, 'survey_submitted');
+  assert.equal(converted.reclassified.from, 'not_target', 'provenance names what the entry said');
+  assert.equal(await SurveyResponse.countDocuments({ voterId: voter._id, deskEntry: { $exists: true } }), 1);
+
+  const undo = await call('POST', url(`/${runId}/revert`), asAdmin());
+  assert.equal(undo.status, 200, JSON.stringify(undo.json));
+  assert.equal((await CanvassActivity.findById(row._id).lean()).actionType, 'not_target', 'revert is exact');
 });
 
 test('the campaign delete cascade takes SurveyConversionRun with it', { skip }, async () => {

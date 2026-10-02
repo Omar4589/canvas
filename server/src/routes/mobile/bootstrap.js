@@ -18,6 +18,7 @@ import { Effort } from '../../models/Effort.js';
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { doorStateFromDoorPass, surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
 import { canvasserScopeWithPasses, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
+import { availableOptInOutcomes, effectiveEnabledOutcomes, doorConfigStamp } from '../../services/canvass/outcomeToggles.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -117,6 +118,33 @@ async function assertCampaignAccess(req, campaignId) {
   }
   return { campaign };
 }
+
+// The door screen's settings — which outcome buttons it shows and whether Add a person does — for
+// BOTH wires: the bootstrap's campaign block, and /mobile/changes' doorConfig block (sent only when
+// the phone's stamp differs). One owner, so the two can never disagree and flip a phone back and
+// forth every 30 seconds. `campaign` is the unprojected lean doc assertCampaignAccess loads. The
+// release list is read once, so the list and the stamp always describe the same moment.
+const doorConfigFor = async (req, campaign) => {
+  const available = availableOptInOutcomes();
+  return {
+    // Door outcomes turned off for this campaign — additive; older clients ignore it and keep
+    // showing every button (the OUTCOME_DISABLED backstop in canvass.js covers them).
+    disabledOutcomes: campaign.disabledOutcomes || [],
+    // Off-by-default outcomes this phone may show, already narrowed (turned on ∩ released ∩ survey
+    // campaign) — the phone never needs the raw setting. Additive; older clients ignore it and never
+    // show the button (they have none).
+    enabledOutcomes: effectiveEnabledOutcomes(campaign, available),
+    // Walk-up voter policy + this user's effective permission — additive; older clients
+    // ignore both and never show the Add-person button. A stale-true client (bootstrap
+    // predates a policy flip) hits the ADD_VOTER_RESTRICTED backstop in canvass.js.
+    doorAddPolicy: campaign.doorAddPolicy || 'all',
+    canAddVoters:
+      campaign.type === 'survey' &&
+      ((campaign.doorAddPolicy || 'all') === 'all' || (await canManageCampaign(req, campaign._id))),
+    // The fingerprint of the three settings above; the phone sends it back on every /changes poll.
+    doorConfigStamp: doorConfigStamp(campaign, available),
+  };
+};
 
 // The user's assigned books across ALL active rounds, each tagged with its effortId
 // + resolved surveyTemplateId (effort override || campaign default). Applies to
@@ -385,16 +413,8 @@ router.get('/bootstrap', async (req, res, next) => {
         earlyVotingStart: campaign.earlyVotingStart ?? null,
         earlyVotingEnd: campaign.earlyVotingEnd ?? null,
         datesNote: campaign.datesNote ?? '',
-        // Door outcomes turned off for this campaign — additive; older clients ignore it and
-        // keep showing every button (the OUTCOME_DISABLED backstop in canvass.js covers them).
-        disabledOutcomes: campaign.disabledOutcomes || [],
-        // Walk-up voter policy + this user's effective permission — additive; older clients
-        // ignore both and never show the Add-person button. A stale-true client (bootstrap
-        // predates a policy flip) hits the ADD_VOTER_RESTRICTED backstop in canvass.js.
-        doorAddPolicy: campaign.doorAddPolicy || 'all',
-        canAddVoters:
-          campaign.type === 'survey' &&
-          ((campaign.doorAddPolicy || 'all') === 'all' || (await canManageCampaign(req, campaign._id))),
+        // disabledOutcomes, enabledOutcomes, doorAddPolicy, canAddVoters, doorConfigStamp.
+        ...(await doorConfigFor(req, campaign)),
       },
       activeSurvey: survey,
       surveys,
@@ -423,6 +443,15 @@ router.get('/changes', async (req, res, next) => {
     }
     const access = await assertCampaignAccess(req, campaignId);
     if (access.error) return res.status(access.error).json({ error: access.message });
+
+    // Door settings ride this poll (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §C.5): the phone sends the
+    // doorConfigStamp from its bootstrap, and only when it no longer matches does the response carry
+    // the settings, which the phone folds into its cached bootstrap — no refetch. One string compare
+    // on the campaign already loaded; no stamp sent (an older bundle) adds nothing. The phone must
+    // encodeURIComponent it ('|' and ',' inside); Express hands it back decoded.
+    const sentStamp = typeof req.query.doorConfigStamp === 'string' ? req.query.doorConfigStamp : null;
+    const doorConfig =
+      sentStamp !== null && sentStamp !== doorConfigStamp(access.campaign) ? await doorConfigFor(req, access.campaign) : null;
 
     const sinceMs = since ? Date.parse(since) : NaN;
     if (!Number.isFinite(sinceMs)) {
@@ -523,6 +552,8 @@ router.get('/changes', async (req, res, next) => {
       // For round-change detection: if this differs from the client's bootstrap
       // set, a round activated/archived → the client refetches the bootstrap.
       activePassIds: (await activePassIds(cId)).map(String),
+      // Only when the phone's door settings are stale (see above).
+      ...(doorConfig ? { doorConfig } : {}),
     });
   } catch (err) {
     next(err);

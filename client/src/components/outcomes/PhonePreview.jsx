@@ -6,14 +6,17 @@ import { STATUS_COLORS } from '../../lib/statusColors.js';
 // the real app's palette. Purely decorative (the checkboxes are the controls): aria-hidden.
 //
 // Button set + order mirror mobile/app/(app)/household/[id].jsx: survey campaigns show
-// Not home / Wrong address / Refused then the two signage outcomes; lit-drop shows Lit dropped
-// then the signage pair. `always` marks the buttons no toggle can remove.
+// Not home / Wrong address / Refused (then Not a target voter, when it is on) and the two signage
+// outcomes; lit-drop shows Lit dropped then the signage pair. `always` marks the buttons no toggle
+// can remove; `optIn` marks one that shows ONLY when listed in enabledOutcomes — the inverse of the
+// deny-list rule, where an unlisted button shows.
 
 const BUTTONS = {
   survey: [
     { key: 'not_home', label: 'Not home', always: true },
     { key: 'wrong_address', label: 'Wrong address' },
     { key: 'refused', label: 'Refused' },
+    { key: 'not_target', label: 'Not a target voter', optIn: true },
     { key: 'no_soliciting', label: 'No soliciting' },
     { key: 'restricted', label: 'Restricted access' },
   ],
@@ -24,9 +27,10 @@ const BUTTONS = {
   ],
 };
 
-const PhonePreview = ({ campaignType, disabledOutcomes }) => {
+const PhonePreview = ({ campaignType, disabledOutcomes, enabledOutcomes = [] }) => {
   const kind = campaignType === 'lit_drop' ? 'lit_drop' : 'survey';
   const off = new Set(disabledOutcomes || []);
+  const on = new Set(enabledOutcomes || []);
 
   return (
     <div aria-hidden className="select-none">
@@ -75,7 +79,7 @@ const PhonePreview = ({ campaignType, disabledOutcomes }) => {
               out with a transition so the flip reads as the phone updating. */}
           <div className="px-4 pb-3 pt-1">
             {BUTTONS[kind].map((b) => {
-              const hidden = !b.always && off.has(b.key);
+              const hidden = b.optIn ? !on.has(b.key) : !b.always && off.has(b.key);
               return (
                 <div
                   key={b.key}

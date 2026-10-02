@@ -10,7 +10,7 @@ import { formatRange } from '../lib/datetime';
 // doors/hr, and the first→last shift. `row` is normalized to:
 //   { userId, firstName, lastName, email, isActive, coordinatorName, inOverlap?,
 //     dayKnocks, daySurveys, dayLit, connectionRate, contactRate, doorsPerHour,
-//     hoursOnDoors, firstActivityAt, lastActivityAt }
+//     hoursOnDoors, firstActivityAt, lastActivityAt, dayNotTarget? }
 function initials(name) {
   return name
     .split(/\s+/)
@@ -40,6 +40,9 @@ export default function CanvasserCard({
   // variant no longer has — so a selected bare row takes a brandTint wash across the full
   // row instead. The checkbox itself is unchanged, and it is what actually reads as state.
   bare = false,
+  // "N not target" beside the contact rate — only on a campaign that has used the off-by-default
+  // outcome (the caller resolves it: lib/useOutcomeInUse.js), and only when N > 0.
+  notTargetInUse = false,
 }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -96,6 +99,7 @@ export default function CanvasserCard({
         </View>
         <Text style={styles.metaSmall}>
           {row.contactRate}% contact
+          {!litMode && notTargetInUse && row.dayNotTarget > 0 ? ` · ${row.dayNotTarget} not target` : ''}
           {/* Prefer measured hours where the server sent them: timeline rows keep the
               derived span in hoursOnDoors (old builds sum it) and ship the merged
               figure additively as measuredHoursOnDoors; leaderboard rows arrive

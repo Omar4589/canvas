@@ -11,6 +11,10 @@ import mongoose from 'mongoose';
 // from the ledgers (computeCampaignStats — the migration's oracle). Finishes with the corrupt →
 // reconcile repair and the unseeded-legacy fallback (no partial bumps; rollup stays exact live).
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-campaign-stats';
+// The campaign has the off-by-default "Not a target voter" outcome on, so the counters it feeds
+// are driven through the real route. Released for this file only; restored in after().
+const SAVED_RELEASE = process.env.OPT_IN_OUTCOMES;
+process.env.OPT_IN_OUTCOMES = 'not_target';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -82,6 +86,7 @@ before(async () => {
   const camp = await Campaign.create({
     organizationId: org._id, name: 'Parity C', type: 'survey', state: 'FL', isActive: true,
     surveyTemplateId: template._id,
+    enabledOutcomes: ['not_target'], everEnabledOutcomes: ['not_target'],
   });
   await CampaignAssignment.create({ organizationId: org._id, campaignId: camp._id, userId: canvA._id });
   await CampaignAssignment.create({ organizationId: org._id, campaignId: camp._id, userId: canvB._id });
@@ -113,6 +118,8 @@ before(async () => {
 });
 
 after(async () => {
+  if (SAVED_RELEASE === undefined) delete process.env.OPT_IN_OUTCOMES;
+  else process.env.OPT_IN_OUTCOMES = SAVED_RELEASE;
   if (server) await new Promise((r) => server.close(r));
   if (URI) await mongoose.disconnect();
 });
@@ -153,7 +160,10 @@ async function storedStats() {
 async function assertParity(label) {
   const stored = await storedStats();
   const fresh = await computeCampaignStats(ctx.camp._id);
-  for (const k of ['activityCount', 'knockCount', 'surveyedKnockCount', 'litKnockCount', 'refusedKnockCount', 'litDroppedCount', 'surveyCount']) {
+  for (const k of [
+    'activityCount', 'knockCount', 'surveyedKnockCount', 'litKnockCount', 'refusedKnockCount',
+    'notTargetKnockCount', 'contactKnockCount', 'litDroppedCount', 'surveyCount',
+  ]) {
     assert.strictEqual(stored[k] || 0, fresh[k] || 0, `${label}: stats.${k} matches ledger`);
   }
   assert.strictEqual(
@@ -204,12 +214,13 @@ test('field writes keep stats exact: knock / survey / cross-user replace / restr
   );
 
   // B refuses d1 → second row on the SAME pair: knocks still 1 (distinct household×pass),
-  // refused facet on, two canvassers.
+  // refused facet on, two canvassers. ONE contact: the door where A surveyed and B was refused is
+  // one door where someone answered — counting surveyed + refused here read 200%.
   assert.strictEqual((await knock(ctx.tokB, ctx.d1._id, 'refused')).status, 201);
   s = await assertParity('B refused d1');
   assert.deepStrictEqual(
-    { a: s.activityCount, k: s.knockCount, sk: s.surveyedKnockCount, rk: s.refusedKnockCount, cv: s.canvasserIds.length },
-    { a: 2, k: 1, sk: 1, rk: 1, cv: 2 }
+    { a: s.activityCount, k: s.knockCount, sk: s.surveyedKnockCount, rk: s.refusedKnockCount, ck: s.contactKnockCount, cv: s.canvasserIds.length },
+    { a: 2, k: 1, sk: 1, rk: 1, ck: 1, cv: 2 }
   );
 
   // A not-homes d2 → second pair.
@@ -223,8 +234,9 @@ test('field writes keep stats exact: knock / survey / cross-user replace / restr
   assert.strictEqual((await knock(ctx.tokA, ctx.d1._id, 'not-home')).status, 201);
   s = await assertParity('A flips d1 to not_home');
   assert.deepStrictEqual(
-    { a: s.activityCount, k: s.knockCount, sk: s.surveyedKnockCount, rk: s.refusedKnockCount, sv: s.surveyCount },
-    { a: 3, k: 2, sk: 0, rk: 1, sv: 0 }
+    { a: s.activityCount, k: s.knockCount, sk: s.surveyedKnockCount, rk: s.refusedKnockCount, ck: s.contactKnockCount, sv: s.surveyCount },
+    { a: 3, k: 2, sk: 0, rk: 1, ck: 1, sv: 0 },
+    "B's refusal keeps d1 a contact"
   );
 
   // Re-survey (for the admin-delete step) — resubmission inserts a fresh response.
@@ -237,6 +249,37 @@ test('field writes keep stats exact: knock / survey / cross-user replace / restr
   assert.strictEqual((await knock(ctx.tokA, ctx.d2._id, 'restricted')).status, 201);
   s = await assertParity('A restricted d2');
   assert.deepStrictEqual({ a: s.activityCount, k: s.knockCount }, { a: 3, k: 1 });
+});
+
+test('not_target: a knock and a contact, each door counted once however many canvassers answer it', { skip }, async () => {
+  const before = await assertParity('before not_target');
+
+  // B: someone not on the list answered at d3 → a new knocked door and a new contact.
+  assert.strictEqual((await knock(ctx.tokB, ctx.d3._id, 'not-target')).status, 201);
+  let s = await assertParity('B not_target d3');
+  assert.deepStrictEqual(
+    { k: s.knockCount, nt: s.notTargetKnockCount, ck: s.contactKnockCount, sk: s.surveyedKnockCount },
+    { k: before.knockCount + 1, nt: 1, ck: before.contactKnockCount + 1, sk: before.surveyedKnockCount },
+    'never a survey'
+  );
+
+  // A is refused at the same door in the same round: still one door, still one contact.
+  assert.strictEqual((await knock(ctx.tokA, ctx.d3._id, 'refused')).status, 201);
+  s = await assertParity('A refused d3');
+  assert.deepStrictEqual(
+    { k: s.knockCount, nt: s.notTargetKnockCount, rk: s.refusedKnockCount, ck: s.contactKnockCount },
+    { k: before.knockCount + 1, nt: 1, rk: before.refusedKnockCount + 1, ck: before.contactKnockCount + 1 }
+  );
+
+  // B changes their mind to not home: the door stays a contact through A's refusal.
+  assert.strictEqual((await knock(ctx.tokB, ctx.d3._id, 'not-home')).status, 201);
+  s = await assertParity('B not_home d3');
+  assert.deepStrictEqual({ nt: s.notTargetKnockCount, ck: s.contactKnockCount }, { nt: 0, ck: before.contactKnockCount + 1 });
+
+  // And A to not home as well: no one answered at d3 any more.
+  assert.strictEqual((await knock(ctx.tokA, ctx.d3._id, 'not-home')).status, 201);
+  s = await assertParity('A not_home d3');
+  assert.deepStrictEqual({ k: s.knockCount, ck: s.contactKnockCount }, { k: before.knockCount + 1, ck: before.contactKnockCount });
 });
 
 test('admin survey delete decrements surveyCount only', { skip }, async () => {
@@ -490,4 +533,39 @@ test('the counter oracle is ORG-SCOPED, so drift it reports is drift a repair ca
 
   await CanvassActivity.deleteOne({ householdId: orphanId });
   await recomputeCampaignStats(ctx.camp._id);
+});
+
+test('a trusted campaign whose contact counters were never seeded still answers, then reconciles', { skip }, async () => {
+  // The state every existing campaign is in between the deploy and the one-time
+  // migrate:campaign-stats --apply: stats trusted (reconciledAt set), the two new counters ABSENT.
+  // Campaign.create writes the defaults, so no other fixture reaches this — make it by hand.
+  await recomputeCampaignStats(ctx.camp._id);
+  const fresh = await computeCampaignStats(ctx.camp._id);
+  assert.ok(fresh.contactKnockCount > 0, 'the fixture has contacts, so absence is visible drift');
+  await Campaign.collection.updateOne(
+    { _id: ctx.camp._id },
+    { $unset: { 'stats.contactKnockCount': '', 'stats.notTargetKnockCount': '' } }
+  );
+  const raw = await Campaign.collection.findOne({ _id: ctx.camp._id });
+  assert.ok(raw.stats.reconciledAt && raw.stats.contactKnockCount === undefined, 'trusted, counter absent');
+
+  // Both stats-path readers must answer 200 with a finite rate — contactRate throws on a missing
+  // count, and only the copies' `|| 0` keeps these routes up in that window.
+  const auth = { token: ctx.adminTok, orgId: ctx.org._id };
+  const overview = await call('GET', `/admin/reports/overview?campaignId=${ctx.camp._id}`, auth);
+  assert.strictEqual(overview.status, 200, JSON.stringify(overview.json));
+  assert.ok(Number.isFinite(overview.json.totals.contactRate), 'overview contactRate is a number');
+  const rollup = await call('GET', '/admin/reports/campaign-rollup?scope=all', auth);
+  assert.strictEqual(rollup.status, 200, JSON.stringify(rollup.json));
+  const row = rollup.json.campaigns.find((c) => c.id === String(ctx.camp._id));
+  assert.ok(Number.isFinite(row.contactRate) && Number.isFinite(rollup.json.cumulative.contactRate));
+
+  // The dry run names it as drift (expected after the deploy), and the apply seeds it exactly.
+  const dry = await reconcileAllCampaignStats({ apply: false });
+  const found = dry.details.find((d) => d.campaignId === String(ctx.camp._id));
+  assert.ok(found?.diffs.some((x) => x.startsWith('contactKnockCount')), JSON.stringify(found));
+  await reconcileAllCampaignStats({ apply: true });
+  await assertParity('after seeding the contact counter');
+  const seeded = await Campaign.findById(ctx.camp._id, { stats: 1 }).lean();
+  assert.strictEqual(seeded.stats.contactKnockCount, fresh.contactKnockCount);
 });

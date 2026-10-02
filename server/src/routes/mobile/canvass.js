@@ -32,6 +32,7 @@ import { surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js'
 import { nameSchema, phoneSchema, voterEmailSchema } from '../../utils/validators.js';
 import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
 import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
+import { isOutcomeEnabled, outcomeEverEnabled } from '../../services/canvass/outcomeToggles.js';
 
 const router = Router();
 
@@ -144,16 +145,19 @@ const DO_NOT_CONTACT = {
   code: 'DO_NOT_CONTACT',
   message: 'This voter has asked not to be contacted. The survey was not saved.',
 };
-// A per-campaign disabled outcome (Campaign.disabledOutcomes — services/canvass/outcomeToggles.js).
-// The client hides the button, but a phone whose bootstrap predates the toggle flip still shows
-// it; this is the backstop. Message is shown VERBATIM by the mobile hard-failure alert
-// (lib/recordAction.js maps the code to its own title), so it names the outcome in the
-// canvasser's words, not the key.
+// An outcome this campaign does not allow right now (services/canvass/outcomeToggles.js): a
+// toggleable one turned off (Campaign.disabledOutcomes), or an opt-in one that is not on (not in
+// Campaign.enabledOutcomes, not released, or not a survey campaign). The client hides the button,
+// but a phone whose bootstrap predates the flip still shows it; this is the backstop. Message is
+// shown VERBATIM by the mobile hard-failure alert (lib/recordAction.js maps the code to its own
+// title), so it names the outcome in the canvasser's words, not the key — a missing entry here
+// prints the slug.
 const OUTCOME_DISABLED_LABELS = {
   restricted: 'Restricted access',
   refused: 'Refused',
   wrong_address: 'Wrong address',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
 };
 const outcomeDisabled = (actionType) => ({
   status: 400,
@@ -189,7 +193,11 @@ function distanceFromHouse(household, location) {
   return Math.round(haversineMeters(hLat, hLng, location.lat, location.lng));
 }
 
-const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted', 'no_soliciting'];
+// Every door disposition: one per (canvasser, door, round), the newer replacing the older. The
+// deleteMany, the stats pair read, supersededByNewer and the replaced-snapshot chain all read this
+// one list, and utils/reconcileCounts.js mirrors it — a disposition missing here would stack a
+// second row beside the canvasser's earlier one instead of replacing it.
+const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'restricted', 'no_soliciting', 'not_target'];
 
 // Snapshot of the entry a replace is about to delete, stamped onto the new row. "Latest
 // wins" is a delete-then-create, which would otherwise destroy the prior entry's GPS
@@ -318,14 +326,20 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   if (requireCampaignType && campaign.type !== requireCampaignType) {
     return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
   }
-  // Per-campaign disabled outcome: FRESH submissions are refused; offline replays are accepted.
-  // `wasOfflineSubmission` is stamped at ENQUEUE time (mobile/lib/offlineQueue.js), so it marks
-  // exactly the population recorded before the phone could learn the toggle flipped — rejecting
-  // those would silently destroy real door data. Client-asserted, same documented trust
-  // posture as supersededByNewer: this is policy, not security. Read off the raw body (like
-  // missingLocation) — zod hasn't parsed yet.
-  if (campaign.disabledOutcomes?.includes(actionType) && body?.wasOfflineSubmission !== true) {
-    return { error: outcomeDisabled(actionType) };
+  // An outcome this campaign does not allow right now: FRESH submissions are refused; offline
+  // replays are accepted. `wasOfflineSubmission` is stamped at ENQUEUE time
+  // (mobile/lib/offlineQueue.js), so it marks exactly the population recorded before the phone could
+  // learn the toggle flipped — rejecting those would silently destroy real door data.
+  // Client-asserted, same documented trust posture as supersededByNewer: this is policy, not
+  // security. Read off the raw body (like missingLocation) — zod hasn't parsed yet.
+  //
+  // One narrowing for the OPT-IN class (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §C.3): a replay is
+  // honored only if this campaign has had the outcome on at some point (everEnabledOutcomes).
+  // Otherwise no phone ever showed the button, and the request can only be hand-made. A toggleable
+  // outcome was always showable, so outcomeEverEnabled is true for it and the 2026-08-16 rule stands.
+  if (!isOutcomeEnabled(campaign, actionType)) {
+    const replay = body?.wasOfflineSubmission === true;
+    if (!replay || !outcomeEverEnabled(campaign, actionType)) return { error: outcomeDisabled(actionType) };
   }
 
   if (missingLocation(body)) return { error: LOCATION_REQUIRED };
@@ -601,6 +615,32 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
       status: 'lit_dropped',
       body: req.body,
       requireCampaignType: 'lit_drop',
+    });
+    if (result.error) return sendRouteError(res, result.error);
+    // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue
+    // drains on any 2xx, so this drops the stale item without the client reporting a failure.
+    res.status(result.superseded ? 200 : 201).json(result);
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Not a target voter: someone answered who is not on the list for this address and would not give
+// a name, so Add a person cannot be used (docs/PROPOSAL_NOT_TARGET_OUTCOME.md). A knock AND a
+// contact — someone was reached — but never a completion or a survey, and never a connection
+// (that rate counts surveys only). Survey campaigns only, and OFF unless an org admin turned it on
+// (Campaign.enabledOutcomes); the gate in recordHouseholdAction refuses it otherwise.
+// Non-completion, so a later tap supersedes it (statusPrecedence.js).
+router.post('/households/:householdId/not-target', async (req, res, next) => {
+  try {
+    const result = await recordHouseholdAction({
+      req,
+      householdId: req.params.householdId,
+      actionType: 'not_target',
+      status: 'not_target',
+      body: req.body,
+      requireCampaignType: 'survey',
     });
     if (result.error) return sendRouteError(res, result.error);
     // 200 = accepted but written nothing (a superseded replay); 201 = a real write. The queue

@@ -15,6 +15,7 @@ import { normalizeAndFilterAnswers } from '../surveys/normalizeAnswers.js';
 import { effectiveSurveyTemplatesForDoors } from '../surveys/effectiveTemplate.js';
 import { archiveOverwrittenResponses, snapshotFromArchive } from '../surveys/archiveOverwrite.js';
 import { bumpLive } from '../platform/platformStats.js';
+import { isOutcomeEnabled } from './outcomeToggles.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
   CONVERTIBLE_SOURCES,
@@ -98,7 +99,8 @@ export function validateConversion(campaign, { direction, to }) {
   if (!RECLASSIFIABLE_OUTCOMES.includes(to)) {
     return err(400, 'OUTCOME_NOT_RECLASSIFIABLE', 'Pick a door outcome to convert these entries to.');
   }
-  if (new Set(campaign.disabledOutcomes || []).has(to)) {
+  // isOutcomeEnabled, not the deny-list: an off-by-default outcome is a target only where it is on.
+  if (!isOutcomeEnabled(campaign, to)) {
     return err(
       400,
       'TARGET_DISABLED',

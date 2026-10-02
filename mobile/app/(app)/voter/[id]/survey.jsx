@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { shouldConfirmResurvey, buildResurveyPrompt } from '../../../../lib/resurvey';
+import { changePrompt, buildChangePrompt } from '../../../../lib/doorChange';
+import { surveyPath } from '../../../../lib/doorPaths';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { optimisticSubmit } from '../../../../lib/recordAction';
@@ -155,6 +157,9 @@ export default function VoterSurvey() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const firedRef = useRef(false);
   const resurveyPromptedRef = useRef(false);
+  // The door-change check runs ONCE, the first time the door is known — never later, when a
+  // teammate's delta could otherwise pop it up in the middle of a survey.
+  const doorCheckedRef = useRef(false);
 
   // Smart re-survey confirm — at mount, before any answer is entered, once per visit. Fires
   // ONLY when a TEAMMATE surveyed this voter this round (surveyedByMe === false); an own
@@ -162,17 +167,35 @@ export default function VoterSurvey() {
   // the server preserves the replaced response either way, so a missed confirm loses nothing.
   // Declared with the other hooks, before the DNC early return, and skips DNC voters (that
   // wall renders instead — the two alerts must never stack).
+  //
+  // The same mount check also asks before CHANGING the door's result (lib/doorChange.js, owner
+  // ruling 2026-10-02): a door already marked Not home, Refused, … this round gets "Take a survey
+  // instead?". One prompt per visit, whichever applies — the two never stack, and the DNC wall
+  // suppresses both. Here, on the survey screen, it covers every way into a survey: Take survey,
+  // Re-survey, and Add person → Add & take survey — before any answer is entered.
   useEffect(() => {
     if (resurveyPromptedRef.current) return;
     if (!voter || voter.dnc) return;
-    if (!shouldConfirmResurvey(voter)) return;
+    if (shouldConfirmResurvey(voter)) {
+      resurveyPromptedRef.current = true;
+      const p = buildResurveyPrompt();
+      Alert.alert(p.title, p.message, [
+        { text: p.cancelText, style: 'cancel', onPress: () => router.back() },
+        { text: p.confirmText }, // default style — proceeding is legitimate, not destructive
+      ]);
+      return;
+    }
+    if (doorCheckedRef.current || !household) return;
+    doorCheckedRef.current = true;
+    const prompt = changePrompt({ door: household, action: 'survey_submitted' });
+    if (!prompt) return;
     resurveyPromptedRef.current = true;
-    const p = buildResurveyPrompt();
-    Alert.alert(p.title, p.message, [
-      { text: p.cancelText, style: 'cancel', onPress: () => router.back() },
-      { text: p.confirmText }, // default style — proceeding is legitimate, not destructive
+    const w = buildChangePrompt(prompt, colors.statusLabels);
+    Alert.alert(w.title, w.message, [
+      { text: w.cancelText, style: 'cancel', onPress: () => router.back() },
+      { text: w.confirmText },
     ]);
-  }, [voter, router]);
+  }, [voter, household, router, colors]);
 
   // Live visibility: recompute which questions show as answers change. Feed the
   // pure evaluator a normalized cell per non-retired question (choice → optionIds,
@@ -295,7 +318,7 @@ export default function VoterSurvey() {
     setIsSubmitting(true);
 
     optimisticSubmit(qc, {
-      path: `/mobile/voters/${id}/survey`,
+      path: surveyPath(id),
       body: {
         surveyTemplateId: survey._id,
         answers: visibleQuestions.map((q) => {
@@ -329,7 +352,9 @@ export default function VoterSurvey() {
         ),
         households: prev.households.map((h) =>
           String(h._id) === String(voter.householdId)
-            ? { ...h, status: 'surveyed', lastActionAt: new Date().toISOString() }
+            // restrictedFrom cleared, never inherited: a stale 'desk' would let the change
+            // confirmation skip this door later (lib/doorChange.js).
+            ? { ...h, status: 'surveyed', restrictedFrom: null, lastActionAt: new Date().toISOString() }
             : h
         ),
       }),

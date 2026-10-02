@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import Section from '../components/Section.jsx';
+import { Button, Modal } from '../components/ui/index.js';
 import PhonePreview from '../components/outcomes/PhonePreview.jsx';
 import ReclassifyCard from '../components/outcomes/ReclassifyCard.jsx';
 import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
@@ -63,11 +65,19 @@ const Toggle = ({ id, label, hint, dot, checked, disabled, onChange }) => (
 // submissions (OUTCOME_DISABLED); doors already recorded keep their status and keep counting on
 // every report. Leads reach this page too — the field is deliberately lead-editable, like the
 // door goal.
+//
+// The one exception is the "Off until you turn it on" section (Campaign.enabledOutcomes — the
+// opt-in class, docs/PROPOSAL_NOT_TARGET_OUTCOME.md): an outcome nobody can verify, so it starts
+// off everywhere, only an org admin may switch it (the server 403s a lead), and turning it ON asks
+// first. It appears only once Doorline has released it (the campaigns response's
+// optInOutcomesAvailable), plus one "paused" state: withdrawn by Doorline but still set on here,
+// where only the turn-off is offered.
 export default function AppCustomizationPage() {
   const { campaignId } = useParams();
   const qc = useQueryClient();
+  const { isOrgAdmin } = useAuth();
 
-  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
+  const { campaign: current, campaignsQ, resolving, notFound } = useCurrentCampaign(campaignId);
 
   // Optimistic display while a save is in flight: show the array we just sent, then hand
   // back to server truth once the invalidate refetches (onSuccess returns the promise, so
@@ -78,6 +88,16 @@ export default function AppCustomizationPage() {
     mutationFn: (next) => api(`/admin/campaigns/${campaignId}`, { method: 'PATCH', body: { disabledOutcomes: next } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] }),
     onSettled: () => setPendingNext(null),
+  });
+
+  // Same optimistic pattern for the off-by-default outcomes (Campaign.enabledOutcomes). Its own
+  // mutation, so a failed switch can never roll back a deny-list flip or vice versa.
+  const [pendingEnabled, setPendingEnabled] = useState(null);
+  const [confirmOn, setConfirmOn] = useState(null); // the outcome key awaiting "Turn on"
+  const saveEnabled = useMutation({
+    mutationFn: (next) => api(`/admin/campaigns/${campaignId}`, { method: 'PATCH', body: { enabledOutcomes: next } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] }),
+    onSettled: () => setPendingEnabled(null),
   });
 
   // Same optimistic pattern for the walk-up policy (Campaign.doorAddPolicy).
@@ -98,6 +118,24 @@ export default function AppCustomizationPage() {
     const next = available ? disabled.filter((k) => k !== key) : [...disabled, key];
     setPendingNext(next);
     save.mutate(next);
+  };
+
+  // The opt-in row's three states: released (the normal switch); withdrawn by Doorline while still
+  // set on here (paused — turn-off only); otherwise no row at all.
+  const released = campaignsQ.data?.optInOutcomesAvailable || [];
+  const enabled = pendingEnabled ?? current.enabledOutcomes ?? [];
+  const notTargetOn = enabled.includes('not_target');
+  const notTargetState = type !== 'survey'
+    ? null
+    : released.includes('not_target')
+      ? 'released'
+      : notTargetOn
+        ? 'paused'
+        : null;
+  const setEnabled = (key, on) => {
+    const next = on ? [...enabled.filter((k) => k !== key), key] : enabled.filter((k) => k !== key);
+    setPendingEnabled(next);
+    saveEnabled.mutate(next);
   };
 
   return (
@@ -133,6 +171,42 @@ export default function AppCustomizationPage() {
               </div>
             )}
           </Section>
+
+          {notTargetState && (
+            <Section title="Off until you turn it on">
+              <p className="mb-2 text-sm text-fg-muted">
+                These outcomes can't be verified, so they start off on every campaign. When one is on, everyone on
+                this campaign gets the button — including anyone a team lead adds to the crew later.
+                {isOrgAdmin ? ' Only org admins can change this.' : ' Only org admins can turn this on or off.'}
+              </p>
+              <Toggle
+                id="outcome-not_target"
+                label={ACTION_LABELS.not_target}
+                hint={
+                  notTargetState === 'paused'
+                    ? 'Paused by Doorline — no phone shows this button right now. You can still turn it off for this campaign.'
+                    : OUTCOME_HINTS.not_target
+                }
+                dot={STATUS_COLORS.not_target}
+                checked={notTargetOn}
+                // A lead sees the state but can't change it; while paused, only the turn-off is offered.
+                disabled={!isOrgAdmin || saveEnabled.isPending || (notTargetState === 'paused' && !notTargetOn)}
+                onChange={(on) => (on ? setConfirmOn('not_target') : setEnabled('not_target', false))}
+              />
+              {notTargetOn && (
+                <p className="mt-2 text-xs text-fg-muted">
+                  Turning it off needs no confirmation. Entries already recorded keep counting. A phone that is offline
+                  keeps the button until it reconnects — review those entries on Door Outcomes, where they are marked
+                  Offline.
+                </p>
+              )}
+              {saveEnabled.isError && (
+                <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                  {saveEnabled.error?.message || 'Could not save. Try again.'}
+                </div>
+              )}
+            </Section>
+          )}
 
           <Section title="Always available">
             <p className="mb-2 text-sm text-fg-muted">These can't be turned off — without them a walk can't be recorded at all.</p>
@@ -199,9 +273,47 @@ export default function AppCustomizationPage() {
         </div>
 
         <div className="flex shrink-0 justify-center lg:sticky lg:top-4">
-          <PhonePreview campaignType={current.type} disabledOutcomes={disabled} />
+          {/* What phones show: an opt-in button only while it is on AND released — a paused one is
+              off on every phone. */}
+          <PhonePreview
+            campaignType={current.type}
+            disabledOutcomes={disabled}
+            enabledOutcomes={notTargetState === 'released' ? enabled : []}
+          />
         </div>
       </div>
+
+      {confirmOn && (
+        <Modal
+          size="md"
+          onClose={() => setConfirmOn(null)}
+          title={`Turn on "${ACTION_LABELS[confirmOn]}" for ${current.name}?`}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmOn(null)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setEnabled(confirmOn, true);
+                  setConfirmOn(null);
+                }}
+              >
+                Turn on
+              </Button>
+            </>
+          }
+        >
+          <p className="mb-3 text-sm text-fg">
+            Everyone canvassing this campaign sees the button once their app is up to date — including anyone a team
+            lead adds to the crew later.
+          </p>
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-fg-muted">
+            <li>It counts as a knock and as reaching a person (Contact %), never as a survey. Connection rate is unaffected.</li>
+            <li>No name is recorded, so an entry can't be verified. Turn it on only for crews you trust.</li>
+            <li>Each entry is GPS-stamped and shows on that canvasser's row on Home and Timeline.</li>
+            <li>This change is recorded in the campaign's History with your name.</li>
+          </ul>
+        </Modal>
+      )}
     </div>
   );
 }

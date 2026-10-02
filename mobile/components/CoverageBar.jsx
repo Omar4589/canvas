@@ -9,6 +9,9 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'refused', label: 'Refused' },
+  // Off by default: the full legend below skips it at 0, like the web, so a campaign that never
+  // turned it on never shows the words. It must still be a SEGMENT — the total sums SEGMENTS.
+  { key: 'not_target', label: 'Not target' },
   { key: 'no_soliciting', label: 'No solicit' },
   { key: 'lit_dropped', label: 'Lit dropped' },
   { key: 'not_home', label: 'Not home' },
@@ -38,7 +41,7 @@ export default function CoverageBar({ canvass = {}, compact = false }) {
       </View>
       {!compact && (
         <View style={styles.legend}>
-          {SEGMENTS.map((seg) => (
+          {SEGMENTS.filter((seg) => seg.key !== 'not_target' || canvass[seg.key]).map((seg) => (
             <View key={seg.key} style={styles.legendItem}>
               <View style={[styles.dot, { backgroundColor: colors.status[seg.key] }]} />
               <Text style={styles.legendLabel}>{seg.label}</Text>

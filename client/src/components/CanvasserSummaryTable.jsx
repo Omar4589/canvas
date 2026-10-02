@@ -25,9 +25,16 @@ function rateClass(pct) {
   return RATE_TEXT[rateLevel(pct)] || 'text-fg';
 }
 
+// The share of a canvasser's doors they recorded as Not a target voter — the figure an admin
+// compares across a crew (one person at 30% while everyone else sits near 8% is the thing to look
+// at). null when they knocked nothing, so the cell reads '—' and sinks in a sort.
+const notTargetShare = (row) => (row.dayKnocks ? Math.round(((row.dayNotTarget || 0) / row.dayKnocks) * 100) : null);
+
 // Columns depend on campaign type: the survey column becomes a lit-drop column for
-// lit-drop campaigns (both read the corresponding per-canvasser field).
-function columnsFor(litMode) {
+// lit-drop campaigns (both read the corresponding per-canvasser field). The Not target column
+// exists only on a survey campaign that has used the off-by-default outcome — its header here and
+// its hand-written cell below must stay at the same index.
+function columnsFor(litMode, notTargetInUse) {
   return [
     { key: 'name', label: 'Canvasser', numeric: false },
     { key: 'coordinatorName', label: 'Coordinator', numeric: false, help: metricHelp.coordinator },
@@ -44,6 +51,9 @@ function columnsFor(litMode) {
         ]),
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
     { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
+    ...(!litMode && notTargetInUse
+      ? [{ key: 'notTargetShare', label: 'Not target', numeric: true, help: metricHelp.notTarget }]
+      : []),
     { key: 'doorsPerHour', label: 'Doors/hr', numeric: true, help: metricHelp.doorsPerHour },
     { key: 'dayNoSoliciting', label: 'No solicit', numeric: true, help: metricHelp.noSoliciting },
     { key: 'dayRestricted', label: 'Restricted', numeric: true, help: metricHelp.restricted },
@@ -62,6 +72,7 @@ function sortValue(row, key) {
     const v = mergedDoorsPerHour(row);
     return v > 0 ? v : null;
   }
+  if (key === 'notTargetShare') return notTargetShare(row);
   return row[key] ?? null;
 }
 
@@ -138,8 +149,8 @@ function mergedDoorsPerHour(row) {
   return row.doorsPerHour || 0;
 }
 
-export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = false, onRowClick }) {
-  const columns = columnsFor(litMode);
+export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = false, notTargetInUse = false, onRowClick }) {
+  const columns = columnsFor(litMode, notTargetInUse);
   // Numeric columns open desc (biggest first — the leaderboard instinct); text asc.
   const [sort, setSort] = useState({ key: 'dayKnocks', dir: 'desc' });
 
@@ -239,6 +250,12 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
             {ratePct(r.connectionRate)}
           </td>
           <td className="px-3 py-2 text-right text-fg-muted">{ratePct(r.contactRate)}</td>
+          {!litMode && notTargetInUse ? (
+            <td className="px-3 py-2 text-right text-fg-muted">
+              {(r.dayNotTarget || 0).toLocaleString()}
+              <span className="text-fg-subtle"> · {ratePct(notTargetShare(r))}</span>
+            </td>
+          ) : null}
           <td className="px-3 py-2 text-right text-fg">
             {mergedDoorsPerHour(r) > 0 ? (
               <span className="inline-flex items-center justify-end gap-1.5">

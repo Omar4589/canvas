@@ -10,6 +10,7 @@ import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { paramsFor, ROUND_STATUSES } from '../lib/exportTypes';
+import { useOutcomeInUse } from '../lib/useOutcomeInUse';
 import DateRangeBar from './DateRangeBar';
 import TabSwitcher from './TabSwitcher';
 import { loadExportOptions } from '../lib/cache';
@@ -30,6 +31,10 @@ import { SHEET_TIMING } from './PullableSheet';
 const OUTCOME_CHIPS = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
 
 export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, onClose }) {
+  // Not a target voter — offered as an outcome chip and a round status only on a campaign that has
+  // used it, so a customer who never turns it on never sees the words.
+  const notTargetInUse = useOutcomeInUse(campaignId);
+  const outcomeChips = OUTCOME_CHIPS.filter((c) => c.key !== 'not_target' || notTargetInUse);
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -164,7 +169,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   ];
   const statusTabs = [
     { key: '', label: 'Any status' },
-    ...ROUND_STATUSES.map((s) => ({ key: s, label: s.replace(/_/g, ' ') })),
+    ...[...ROUND_STATUSES, ...(notTargetInUse ? ['not_target'] : [])].map((s) => ({ key: s, label: s.replace(/_/g, ' ') })),
   ];
 
   // "One row is…" must not read "one door event" while the Rows switch is on.
@@ -313,7 +318,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                 {/* SourceChips is a horizontal ScrollView with the flex caveat at its top: it is
                     safe here because it sits inside this sheet's vertical scroller content. */}
                 <View style={styles.bleed}>
-                  <SourceChips sources={OUTCOME_CHIPS} selected={actionTypes} onToggle={toggleOutcome} />
+                  <SourceChips sources={outcomeChips} selected={actionTypes} onToggle={toggleOutcome} />
                 </View>
               </View>
             ) : null}
@@ -325,7 +330,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                   <View style={styles.switchText}>
                     <Text style={styles.switchLabel}>One row per voter at the door</Text>
                     <Text style={styles.switchSub}>
-                      A knock that named nobody (not home, refused, lit drop…) repeats once per
+                      A knock that named nobody (not home, refused, not a target voter, lit drop…) repeats once per
                       registered voter at that address, same outcome and note on each — repeated,
                       not attributed. Same columns, more rows; the file is named
                       activity-log-by-voter so its rows are never counted as knocks.

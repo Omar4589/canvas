@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
+import { isOutcomeOn } from '../../../lib/outcomeToggles';
 import { guardedPush } from '../../../lib/navGuard';
 import { buildingKey } from '../../../lib/buildings';
 import { loadRoleContext } from '../../../lib/role';
@@ -51,16 +52,17 @@ function StatusPill({ status }) {
   const styles = useThemedStyles(makeStyles);
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
-  const isRefused = status === 'refused';
-  const bg = isDone ? colors.successBg : isRefused ? colors.warnBg : colors.bg;
+  // Someone answered and there was no survey — Refused, or Not a target voter. Same warn tint.
+  const isAnswered = status === 'refused' || status === 'not_target';
+  const bg = isDone ? colors.successBg : isAnswered ? colors.warnBg : colors.bg;
   const border = isDone
     ? colors.successBorder
-    : isRefused
+    : isAnswered
     ? colors.warnBorder
     : colors.border;
   const textColor = isDone
     ? colors.success
-    : isRefused
+    : isAnswered
     ? colors.warnFg
     : colors.textSecondary;
   return (
@@ -183,6 +185,10 @@ export default function HouseholdDetail() {
   // recordAction's hard-fail path re-pulls the config (missing field = older server = all on).
   const disabledOutcomes = bootstrap?.campaign?.disabledOutcomes || [];
   const outcomeOn = (k) => !disabledOutcomes.includes(k);
+  // Not a target voter is the inverse — OFF unless the campaign turned it on — so it never goes
+  // through outcomeOn (which reads any unlisted key as on). isOutcomeOn fails closed: a bootstrap
+  // from an older server, with no enabledOutcomes field, never shows it.
+  const notTargetOn = isOutcomeOn(bootstrap?.campaign, 'not_target');
   // Billing entitlement: when the org is paused, new dispositions are disabled
   // (the server 402s them anyway — this is the courteous version). Missing
   // entitlement (older cache / super admin) fails open.
@@ -522,6 +528,24 @@ export default function HouseholdDetail() {
                   <Text style={styles.actionButtonText}>Refused</Text>
                 </Pressable>
               )}
+
+              {/* Not a target voter — someone answered who isn't on the list for this address and
+                  wouldn't give a name (a name → Add person instead). Off by default; shown only on
+                  a campaign an org admin turned it on for. Right under Refused: the two "someone
+                  answered, no survey" outcomes. Never a one-tap quick action from the door list. */}
+              {notTargetOn && (
+                <Pressable
+                  onPress={() => submitAction('not_target')}
+                  disabled={isSubmitting || !canCanvass}
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.actionNotTarget,
+                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.actionButtonText, styles.actionButtonTextOnDark]}>Not a target voter</Text>
+                </Pressable>
+              )}
             </>
           )}
 
@@ -551,7 +575,7 @@ export default function HouseholdDetail() {
                 { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
               ]}
             >
-              <Text style={styles.actionButtonText}>Restricted access</Text>
+              <Text style={[styles.actionButtonText, styles.actionButtonTextOnDark]}>Restricted access</Text>
             </Pressable>
           )}
         </View>
@@ -785,6 +809,12 @@ function makeStyles(t) {
   actionRefused: { backgroundColor: colors.status.refused },
   actionRestricted: { backgroundColor: colors.status.restricted },
   actionNoSoliciting: { backgroundColor: colors.status.no_soliciting },
+  actionNotTarget: { backgroundColor: colors.status.not_target },
   actionButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: 16 },
+  // The two DARK buttons (Restricted slate, Not a target fuchsia) take a white label in BOTH themes:
+  // textInverse turns dark in dark mode, which read 2.3:1 on the slate. A per-button literal (the
+  // DoorListRow precedent), never a change to actionButtonText or the token — that would put white
+  // on Not home, Wrong address and Refused in dark mode.
+  actionButtonTextOnDark: { color: '#FFFFFF' },
   });
 }

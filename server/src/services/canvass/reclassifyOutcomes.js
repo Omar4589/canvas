@@ -7,6 +7,7 @@ import { recomputeHouseholdStatusesBatched } from './status.js';
 import { hydrateSurveyEvidence } from './answerScope.js';
 import { knocksPipeline, billableDoorsOf, contactRate, connectionRate } from '../reports/aggregations.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
+import { isOutcomeEnabled } from './outcomeToggles.js';
 
 // Rewriting what a door entry SAYS happened — the Door Outcomes page.
 //
@@ -43,6 +44,10 @@ export const RECLASSIFIABLE_OUTCOMES = Object.freeze([
   'refused',
   'no_soliciting',
   'restricted',
+  // The off-by-default outcome is listed so its entries can be found, exported, changed and
+  // unknocked — the cleanup path for exactly the abuse that keeps it off by default. It is never
+  // rate-neutral (it is a contact), so every pair touching it is priced.
+  'not_target',
 ]);
 
 // Everything the Door Outcomes page's ENTRIES TABLE may list. Wider than what this module
@@ -118,10 +123,9 @@ export async function countConvertible(campaignId, from) {
  * offer as a one-click action with no impact review.
  */
 export async function eligibleSources(campaign) {
-  const disabled = new Set(campaign.disabledOutcomes || []);
   const out = {};
   for (const outcome of RATE_NEUTRAL_OUTCOMES) {
-    if (!disabled.has(outcome)) continue;
+    if (isOutcomeEnabled(campaign, outcome)) continue;
     const counts = await countConvertible(campaign._id, outcome);
     if (counts.entries > 0) out[outcome] = counts;
   }
@@ -130,8 +134,7 @@ export async function eligibleSources(campaign) {
 
 /** Card targets: rate-neutral, still switched ON, and not the source itself. */
 export function eligibleTargets(campaign, from = null) {
-  const disabled = new Set(campaign.disabledOutcomes || []);
-  return RATE_NEUTRAL_OUTCOMES.filter((o) => !disabled.has(o) && o !== from);
+  return RATE_NEUTRAL_OUTCOMES.filter((o) => isOutcomeEnabled(campaign, o) && o !== from);
 }
 
 /**
@@ -140,7 +143,9 @@ export function eligibleTargets(campaign, from = null) {
  * The source no longer has to be switched off (owner ruling 2026-08-16 — the Door Outcomes page
  * is explicit enough on its own; requiring a toggle first made correcting a live campaign's
  * mistyped entry impossible). The TARGET still may not be a retired outcome: moving history INTO
- * something the campaign has stopped recording contradicts the retirement.
+ * something the campaign has stopped recording contradicts the retirement. isOutcomeEnabled, never
+ * the deny-list alone: an off-by-default outcome is a target only on a survey campaign that has it
+ * on while Doorline has it released — the deny-list would read every unlisted key as on.
  */
 export function validatePair(campaign, from, to) {
   if (!RECLASSIFIABLE_OUTCOMES.includes(from) || !RECLASSIFIABLE_OUTCOMES.includes(to)) {
@@ -156,7 +161,7 @@ export function validatePair(campaign, from, to) {
   if (from === to) {
     return { status: 400, body: { error: 'Pick two different outcomes.', code: 'OUTCOME_SAME' } };
   }
-  if (new Set(campaign.disabledOutcomes || []).has(to)) {
+  if (!isOutcomeEnabled(campaign, to)) {
     return {
       status: 400,
       body: {
@@ -214,7 +219,7 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
   const filter = buildEntryFilter(campaignId, q, outcomes);
   const [rows, total, doorAgg, facets] = await Promise.all([
     CanvassActivity.find(filter, {
-      householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1,
+      householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, wasOfflineSubmission: 1,
     })
       // The `_id` tiebreaker is not decoration: Mongo gives ties no stable order across separate
       // skip/limit queries, and every fixture-shaped ledger is FULL of identical timestamps.
@@ -265,6 +270,9 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
         userId: r.userId ? String(r.userId) : null,
         passId: r.passId ? String(r.passId) : null,
         timestamp: r.timestamp,
+        // Queued on a phone and synced later — the table marks it "Offline". The evidence an admin
+        // needs to review entries an offline phone recorded after an outcome was switched off.
+        wasOfflineSubmission: !!r.wasOfflineSubmission,
         ...(survey ? { survey } : {}),
       };
     }),

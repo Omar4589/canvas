@@ -26,6 +26,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import LiveStatus from '../components/LiveStatus.jsx';
 import { livePollOptions, liveStatusProps } from '../lib/livePoll.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { groupHouseholds, buildingKeyForCoords } from '../lib/buildings.js';
@@ -1553,6 +1554,7 @@ export default function MapPage() {
             onAnswerChange={setAnswerFilter}
             statusColors={STATUS_COLORS}
             statusLabels={STATUS_LABELS}
+            notTargetInUse={outcomeInUse(selectedCampaign, 'not_target')}
             buildingCount={buildings.length}
             stackedDoorCount={stackedIds.size}
             showCanvasserPins={showCanvasserPins}

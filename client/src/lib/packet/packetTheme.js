@@ -48,6 +48,7 @@ export const STATUS_INK = {
   lit_dropped: [29, 78, 216],
   restricted: [109, 40, 217],
   no_soliciting: [190, 24, 93], // pink-700 — deeper than the screen pink so it holds on paper
+  not_target: [134, 25, 143], // fuchsia-800 — a shade under the screen fuchsia, for paper
 };
 export const STATUS_LABEL = {
   not_home: 'NOT HOME',
@@ -57,6 +58,7 @@ export const STATUS_LABEL = {
   lit_dropped: 'LIT DROPPED',
   restricted: 'RESTRICTED',
   no_soliciting: 'NO SOLICITING',
+  not_target: 'NOT A TARGET',
 };
 
 // Page geometry, in points (1/72"). US Letter portrait. The derived values are spelled out

@@ -49,6 +49,14 @@ const MATRIX = [
   [{ actionType: 'lit_dropped', timestamp: T(1) }, { actionType: 'not_home', timestamp: T(2) }],
   [{ actionType: 'refused', timestamp: T(1) }, { actionType: 'no_soliciting', timestamp: T(2) }],
   [{ actionType: 'wrong_address', timestamp: T(3) }, { actionType: 'not_home', timestamp: T(1) }],
+  // not_target: a non-completion, last-write-wins status in both directions, and a survey still wins.
+  [{ actionType: 'not_target', timestamp: T(1) }],
+  [{ actionType: 'not_target', timestamp: T(1) }, { actionType: 'survey_submitted', timestamp: T(2) }],
+  [{ actionType: 'survey_submitted', timestamp: T(1) }, { actionType: 'not_target', timestamp: T(2) }],
+  [{ actionType: 'refused', timestamp: T(1) }, { actionType: 'not_target', timestamp: T(2) }],
+  [{ actionType: 'not_target', timestamp: T(1) }, { actionType: 'refused', timestamp: T(2) }],
+  [{ actionType: 'not_target', timestamp: T(1) }, { actionType: 'restricted', timestamp: T(2) }],
+  [{ actionType: 'restricted', timestamp: T(1) }, { actionType: 'not_target', timestamp: T(2) }],
 ];
 
 for (const campaignType of ['survey', 'lit_drop']) {

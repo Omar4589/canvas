@@ -223,10 +223,15 @@ export async function surveyedVotersFromDoorPass(doorPass) {
   return out;
 }
 
-// The zero-filled 8-key shape every per-status tally starts from — one literal, so a new
-// status lands in every consumer (pass progress, the map's /map/counts facet) at once.
+// The zero-filled 9-key shape every per-status tally starts from — one literal, so a new
+// status lands in every consumer (pass progress, the map's /map/counts facet) at once. It is also
+// a WHITELIST: /map/counts drops any status not seeded here, from the counts and from the status
+// filter alike, so a door status missing from this literal silently vanishes from the map header.
 export function emptyStatusCounts() {
-  return { unknocked: 0, not_home: 0, wrong_address: 0, refused: 0, lit_dropped: 0, surveyed: 0, restricted: 0, no_soliciting: 0 };
+  return {
+    unknocked: 0, not_home: 0, wrong_address: 0, refused: 0, lit_dropped: 0, surveyed: 0, restricted: 0, no_soliciting: 0,
+    not_target: 0,
+  };
 }
 
 export function statusCountsFromMap(map, householdIds) {

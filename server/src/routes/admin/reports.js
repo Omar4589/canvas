@@ -23,6 +23,7 @@ import { Organization } from '../../models/Organization.js';
 import { zonedDayRange, tzAbbrev, zonedDayStr } from '../../utils/timezone.js';
 import {
   KNOCK_ACTIONS,
+  CONTACT_ACTIONS,
   BILLABLE_WITH_RESTRICTED,
   NOT_BULK,
   knocksPipeline,
@@ -421,6 +422,11 @@ router.get('/overview', async (req, res, next) => {
             surveyedKnocks: acc.surveyedKnocks + (d.stats.surveyedKnockCount || 0),
             litKnocks: acc.litKnocks + (d.stats.litKnockCount || 0),
             refusedKnocks: acc.refusedKnocks + (d.stats.refusedKnockCount || 0),
+            notTargetKnocks: acc.notTargetKnocks + (d.stats.notTargetKnockCount || 0),
+            // `|| 0` is load-bearing here, not habit: contactKnockCount is ABSENT on every campaign
+            // the one-time migrate:campaign-stats recompute has not reached (lean skips defaults),
+            // and contactRate throws on a missing count rather than guess.
+            contactKnocks: acc.contactKnocks + (d.stats.contactKnockCount || 0),
             surveysSubmitted: acc.surveysSubmitted + (d.stats.surveyCount || 0),
             // Resolved PER CAMPAIGN, then summed: an org-wide rollup can span campaigns that
             // disagree about the policy, and a single org-level check would silently apply one
@@ -433,7 +439,7 @@ router.get('/overview', async (req, res, next) => {
             restrictedDoors: acc.restrictedDoors + (d.stats.restrictedDoorCount || 0),
           }),
           {
-            knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0,
+            knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, notTargetKnocks: 0, contactKnocks: 0,
             surveysSubmitted: 0, billableDoors: 0, restrictedDoors: 0,
           }
         );
@@ -490,12 +496,16 @@ router.get('/overview', async (req, res, next) => {
       lit_dropped: 0,
       restricted: 0, // inaccessible homes — its own coverage segment, not "knocked"
       no_soliciting: 0, // a sign ended the visit — reached the door, so it IS "knocked"
+      not_target: 0, // someone not on the list answered — reached the door, so it IS "knocked"
       voted: 0,
       dnc: 0, // fully do-not-contact doors — suppressed, never to be knocked
     };
     for (const r of statusAgg) canvass[r._id] = r.count;
 
-    const events = { notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0, refused: 0, restricted: 0, noSoliciting: 0 };
+    const events = {
+      notHome: 0, wrongAddress: 0, surveySubmitted: 0, litDropped: 0, refused: 0, restricted: 0, noSoliciting: 0,
+      notTarget: 0,
+    };
     for (const r of eventAgg) {
       if (r._id === 'not_home') events.notHome = r.count;
       else if (r._id === 'wrong_address') events.wrongAddress = r.count;
@@ -504,11 +514,13 @@ router.get('/overview', async (req, res, next) => {
       else if (r._id === 'refused') events.refused = r.count;
       else if (r._id === 'restricted') events.restricted = r.count;
       else if (r._id === 'no_soliciting') events.noSoliciting = r.count;
+      else if (r._id === 'not_target') events.notTarget = r.count;
     }
 
     const k = statTotals ||
       knockAgg[0] || {
-        knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+        knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, notTargetKnocks: 0, contactKnocks: 0,
+        billableDoors: 0, restrictedDoors: 0,
       };
     const surveyedVoters = surveyedVoterIds.length;
 
@@ -524,6 +536,9 @@ router.get('/overview', async (req, res, next) => {
         surveyedKnocks: k.surveyedKnocks,
         litKnocks: k.litKnocks,
         refusedKnocks: k.refusedKnocks,
+        notTargetKnocks: k.notTargetKnocks,
+        // Each door where someone answered, once — contactRate's numerator.
+        contactKnocks: k.contactKnocks,
         // Equal to `knocks` unless the campaign(s) in scope bill restricted doors. Rates
         // (below) and homesKnocked (above) stay knock-based in every case. The counter path
         // already applied each campaign's own policy while summing; only the live single-scope
@@ -603,6 +618,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
           surveyedKnocks: 0,
           litKnocks: 0,
           refusedKnocks: 0,
+          notTargetKnocks: 0,
+          contactKnocks: 0,
           billableDoors: 0,
           restrictedDoors: 0,
           surveysSubmitted: 0,
@@ -755,6 +772,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
           lit_dropped: 0,
           restricted: 0,
           no_soliciting: 0,
+          // Seeded, or the `bucket in c.coverage` guard below drops these doors from the bar.
+          not_target: 0,
           voted: 0,
           dnc: 0,
         },
@@ -765,6 +784,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
         surveyedKnocks: 0,
         litKnocks: 0,
         refusedKnocks: 0,
+        notTargetKnocks: 0,
+        contactKnocks: 0,
         restrictedDoors: 0,
         activeCanvassers: 0,
         lastActivityAt: null,
@@ -793,6 +814,10 @@ router.get('/campaign-rollup', async (req, res, next) => {
         c.surveyedKnocks = s.surveyedKnockCount || 0;
         c.litKnocks = s.litKnockCount || 0;
         c.refusedKnocks = s.refusedKnockCount || 0;
+        c.notTargetKnocks = s.notTargetKnockCount || 0;
+        // `|| 0` is load-bearing: contactKnockCount is absent until the one-time recompute reaches
+        // this campaign, and contactRate throws on a missing count rather than guess.
+        c.contactKnocks = s.contactKnockCount || 0;
         c.restrictedDoors = s.restrictedDoorCount || 0;
         c.litDropped = s.litDroppedCount || 0;
         c.activeCanvassers = (s.canvasserIds || []).length;
@@ -812,6 +837,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
       c.surveyedKnocks = r.surveyedKnocks;
       c.litKnocks = r.litKnocks;
       c.refusedKnocks = r.refusedKnocks;
+      c.notTargetKnocks = r.notTargetKnocks;
+      c.contactKnocks = r.contactKnocks;
       c.restrictedDoors = r.restrictedDoors;
     }
     for (const r of surveyAgg) {
@@ -855,6 +882,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
           surveyedKnocks: c.surveyedKnocks,
           litKnocks: c.litKnocks,
           refusedKnocks: c.refusedKnocks,
+          notTargetKnocks: c.notTargetKnocks,
+          contactKnocks: c.contactKnocks,
           // This campaign's own answer — a rollup can span campaigns that disagree, so the
           // policy is resolved per row rather than once for the response.
           billRestrictedDoors: resolveBillRestricted(campaign, orgDefaults),
@@ -886,6 +915,9 @@ router.get('/campaign-rollup', async (req, res, next) => {
       surveyedKnocks: sum('surveyedKnocks'),
       litKnocks: sum('litKnocks'),
       refusedKnocks: sum('refusedKnocks'),
+      notTargetKnocks: sum('notTargetKnocks'),
+      // A door belongs to one campaign, so per-campaign contact counts add up exactly.
+      contactKnocks: sum('contactKnocks'),
       // Sums the PER-ROW billableDoors, so a mixed-policy org totals each campaign under its
       // own rule rather than applying one campaign's answer to the whole org.
       billableDoors: sum('billableDoors'),
@@ -1010,6 +1042,11 @@ router.get('/canvassers', async (req, res, next) => {
           litDropped: 0,
           restricted: 0,
           noSoliciting: 0,
+          notTarget: 0,
+          // Folded from the per-actionType rows by SET membership, never a hand sum of the named
+          // tallies above — a hand sum is how a new knock outcome silently goes missing.
+          knocks: 0,
+          contactKnocks: 0,
           firstActivityAt: null,
           lastActivityAt: null,
           hoursOnDoors: 0,
@@ -1040,7 +1077,13 @@ router.get('/canvassers', async (req, res, next) => {
       // No soliciting: reached the door, a sign ended the visit. A knock (see the sum below),
       // never a contact — so it lifts doors/hour but not the contact rate.
       else if (row._id.actionType === 'no_soliciting') u.noSoliciting = row.count;
+      // Not a target voter: someone not on the list answered. A knock AND a contact.
+      else if (row._id.actionType === 'not_target') u.notTarget = row.count;
       else if (row._id.actionType === 'survey_submitted') u.surveyKnocks = row.count;
+      // One disposition per (canvasser, door, round) — REPLACEABLE_ACTIONS — so a plain count of
+      // this canvasser's knock / contact rows IS their distinct door-rounds: exact, no overlap.
+      if (KNOCK_ACTIONS.includes(row._id.actionType)) u.knocks += row.count;
+      if (CONTACT_ACTIONS.includes(row._id.actionType)) u.contactKnocks += row.count;
       if (row.lastAt && (!u.lastActivityAt || row.lastAt > u.lastActivityAt)) {
         u.lastActivityAt = row.lastAt;
       }
@@ -1098,7 +1141,7 @@ router.get('/canvassers', async (req, res, next) => {
         // Billable knocks = this canvasser's distinct (household, pass) door interactions.
         // surveyKnocks/litDropped are mutually exclusive by campaign type, so they're the
         // completion-action numerator for the connection rate.
-        const knocks = u.notHome + u.wrongAddress + u.refused + u.noSoliciting + u.litDropped + u.surveyKnocks;
+        const { knocks } = u;
         return {
           userId: u.userId,
           firstName: info?.firstName || '',
@@ -1116,6 +1159,7 @@ router.get('/canvassers', async (req, res, next) => {
           litDropped: u.litDropped,
           restricted: u.restricted, // inaccessible homes flagged — shown, never in `knocks`/billable
           noSoliciting: u.noSoliciting, // a sign ended the visit — shown, and IS in `knocks`
+          notTarget: u.notTarget, // someone not on the list answered — in `knocks` and the contact rate
           knocks,
           // homesKnocked kept as an alias of knocks for back-compat with un-updated callers.
           homesKnocked: knocks,
@@ -1124,11 +1168,7 @@ router.get('/canvassers', async (req, res, next) => {
             surveyedKnocks: u.surveyKnocks,
             litKnocks: u.litDropped,
           }),
-          contactRate: contactRate({
-            knocks,
-            surveyedKnocks: u.surveyKnocks,
-            refusedKnocks: u.refused,
-          }),
+          contactRate: contactRate({ knocks, contactKnocks: u.contactKnocks }),
           firstActivityAt: u.firstActivityAt,
           lastActivityAt: u.lastActivityAt,
           // Sum of per-DAY denominators — measured FbTime hours where the org has
@@ -2090,6 +2130,9 @@ router.get('/team-breakdown', async (req, res, next) => {
             hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
             hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
             hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
+            // The one hand-rolled caller where canvassers can overlap: fold the contact per
+            // door-pass, never add per-outcome flags (knocksPipeline's hasContact).
+            hasContact: { $max: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
             users: { $addToSet: '$userId' },
           },
         },
@@ -2100,6 +2143,7 @@ router.get('/team-breakdown', async (req, res, next) => {
             surveyedKnocks: { $sum: '$hasSurvey' },
             litKnocks: { $sum: '$hasLit' },
             refusedKnocks: { $sum: '$hasRefused' },
+            contactKnocks: { $sum: '$hasContact' },
             people: { $addToSet: '$users' },
           },
         },
@@ -2148,16 +2192,12 @@ router.get('/team-breakdown', async (req, res, next) => {
             surveyedKnocks: r.surveyedKnocks,
             litKnocks: r.litKnocks,
           }),
-          contactRate: contactRate({
-            knocks,
-            surveyedKnocks: r.surveyedKnocks,
-            refusedKnocks: r.refusedKnocks,
-          }),
+          contactRate: contactRate({ knocks, contactKnocks: r.contactKnocks }),
         };
       })
       .sort((a, b) => b.doors - a.doors);
 
-    const k = campaignAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0 };
+    const k = campaignAgg[0] || { knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, contactKnocks: 0 };
     const teamSum = teams.reduce((n, t) => n + t.doors, 0);
 
     res.json({
@@ -2427,6 +2467,10 @@ router.get('/canvasser-timeline', async (req, res, next) => {
             wrongAddress: { $sum: { $cond: [{ $eq: ['$actionType', 'wrong_address'] }, 1, 0] } },
             restricted: { $sum: { $cond: [{ $eq: ['$actionType', 'restricted'] }, 1, 0] } },
             noSoliciting: { $sum: { $cond: [{ $eq: ['$actionType', 'no_soliciting'] }, 1, 0] } },
+            notTarget: { $sum: { $cond: [{ $eq: ['$actionType', 'not_target'] }, 1, 0] } },
+            // contactRate's numerator for this canvasser: one disposition per door-round
+            // (REPLACEABLE_ACTIONS), so a plain count of contact rows is exact.
+            contacts: { $sum: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
             first: { $min: '$timestamp' },
             last: { $max: '$timestamp' },
             // The team(s) this canvasser's doors are stamped with, straight from the LEDGER — no
@@ -2478,6 +2522,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           wrongAddress: 0,
           dayRestricted: 0,
           dayNoSoliciting: 0,
+          dayNotTarget: 0,
+          contacts: 0,
           first: null,
           last: null,
           hoursOnDoors: 0,
@@ -2522,6 +2568,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
       row.wrongAddress += r.wrongAddress;
       row.dayRestricted += r.restricted;
       row.dayNoSoliciting += r.noSoliciting;
+      row.dayNotTarget += r.notTarget;
+      row.contacts += r.contacts;
       if (!row.first || r.first < row.first) row.first = r.first;
       if (!row.last || r.last > row.last) row.last = r.last;
     }
@@ -2616,6 +2664,9 @@ router.get('/canvasser-timeline', async (req, res, next) => {
           notHome: row.notHome,
           wrongAddress: row.wrongAddress,
           dayRestricted: row.dayRestricted, // inaccessible homes — a tally, never in dayKnocks
+          // Both IN dayKnocks. dayNoSoliciting was tallied above but never shipped until now.
+          dayNoSoliciting: row.dayNoSoliciting,
+          dayNotTarget: row.dayNotTarget,
           // daySurveys above = survey DOORS (the connection-rate numerator). This is survey VOTERS —
           // a different question, always >= doors, and it must be labelled as such in the UI.
           dayVoterSurveys: votersByUser.get(uid) || 0,
@@ -2649,11 +2700,7 @@ router.get('/canvasser-timeline', async (req, res, next) => {
             surveyedKnocks: row.daySurveys,
             litKnocks: row.dayLit,
           }),
-          contactRate: contactRate({
-            knocks: row.dayKnocks,
-            surveyedKnocks: row.daySurveys,
-            refusedKnocks: row.refused,
-          }),
+          contactRate: contactRate({ knocks: row.dayKnocks, contactKnocks: row.contacts }),
           inOverlap: overlapUserIds.has(uid),
         };
       })
@@ -3124,6 +3171,9 @@ router.get('/canvassers.csv', async (req, res, next) => {
           litDropped: 0,
           restricted: 0,
           noSoliciting: 0,
+          notTarget: 0,
+          // Set membership, never a hand sum — same fold as /canvassers.
+          knocks: 0,
           firstActivityAt: null,
           lastActivityAt: null,
           hoursOnDoors: 0,
@@ -3141,7 +3191,9 @@ router.get('/canvassers.csv', async (req, res, next) => {
       else if (r._id.actionType === 'lit_dropped') u.litDropped = r.count;
       else if (r._id.actionType === 'restricted') u.restricted = r.count;
       else if (r._id.actionType === 'no_soliciting') u.noSoliciting = r.count;
+      else if (r._id.actionType === 'not_target') u.notTarget = r.count;
       else if (r._id.actionType === 'survey_submitted') u.surveyKnocks = r.count;
+      if (KNOCK_ACTIONS.includes(r._id.actionType)) u.knocks += r.count;
       if (!u.firstActivityAt || r.firstAt < u.firstActivityAt) u.firstActivityAt = r.firstAt;
       if (!u.lastActivityAt || r.lastAt > u.lastActivityAt) u.lastActivityAt = r.lastAt;
     }
@@ -3168,16 +3220,19 @@ router.get('/canvassers.csv', async (req, res, next) => {
       'Knocks', 'Surveys taken', 'Lit drops', 'Not home', 'Wrong address',
       'Connection rate %', 'Hours on doors', 'Days active', 'Knocks/hr', 'Surveys taken/hr',
       'First activity', 'Last activity', 'Refused', 'Restricted', 'No soliciting',
-      // APPENDED LAST so existing column positions never shift under anyone's
-      // saved import script. Present for every org — 'Estimated' when FbTime was
-      // never connected — because a conditional column is a different file shape.
+      // APPENDED, so existing column positions never shift under anyone's saved import
+      // script. Present for every org — 'Estimated' when FbTime was never connected —
+      // because a conditional column is a different file shape.
       'Hours source',
+      // Appended AFTER 'Hours source' for the same reason, and present for every org (0 when the
+      // campaign never turned the outcome on): no existing column moves.
+      'Not a target',
     ];
     const enriched = Array.from(byUser.values())
       .map((u) => {
         const info = userMap.get(u.userId) || {};
         // Billable knocks = distinct (household, pass). Connection = completion knocks / knocks.
-        const knocks = u.notHome + u.wrongAddress + u.refused + u.noSoliciting + u.litDropped + u.surveyKnocks;
+        const { knocks } = u;
         const connection = connectionRate({
           knocks,
           surveyedKnocks: u.surveyKnocks,
@@ -3230,6 +3285,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
       u.restricted,
       u.noSoliciting,
       u.hoursSource === 'measured' ? 'Measured' : u.hoursSource === 'mixed' ? 'Mixed' : 'Estimated',
+      u.notTarget,
     ]);
 
     // The in-file stamp (owner-ruled, snapshot-and-stamp): a frozen artifact must
@@ -3237,7 +3293,7 @@ router.get('/canvassers.csv', async (req, res, next) => {
     // six months has no database row to consult. Two preamble rows above the
     // header (the billing statement CSV's precedent), then a blank line. Anyone's
     // import script that assumed row 1 was the header skips 3 rows now; the
-    // per-row 'Hours source' column is appended last so nothing else moved.
+    // per-row 'Hours source' column (and 'Not a target' after it) is appended so nothing else moved.
     const rangeLabel =
       req.query.from || req.query.to
         ? `${String(req.query.from || '').slice(0, 10) || 'start'} to ${String(req.query.to || '').slice(0, 10) || 'today'}`
@@ -3326,6 +3382,9 @@ router.get('/knocks-by-pass', async (req, res, next) => {
       // Tells the client whether billableDoors is a distinct number worth showing, or just a
       // duplicate of knocks. Clients must not re-derive it — the tri-state lives server-side.
       billRestrictedDoors: built.billRestricted,
+      // Whether this campaign has ever had "Not a target voter" on — the By pass table shows the
+      // column under the same rule the CSV below uses.
+      notTargetInUse: built.notTargetInUse,
     });
   } catch (err) {
     next(err);
@@ -3348,6 +3407,11 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
     // differs from Knocks (rather than a confusing duplicate of it).
     const doorCols = built.billRestricted ? ['Restricted doors', 'Billable doors'] : [];
     const doorVals = (r) => (built.billRestricted ? [r.restrictedDoors, r.billableDoors] : []);
+    // Same rule for the off-by-default outcome: only a campaign that has had it on gets the column,
+    // so every other campaign's file keeps its exact shape. exportBuilders.js's knocks-by-round file
+    // mirrors this column for column.
+    const ntCols = built.notTargetInUse ? ['Not a target'] : [];
+    const ntVals = (r) => (built.notTargetInUse ? [r.notTargetKnocks] : []);
 
     let headers;
     let rows;
@@ -3355,13 +3419,13 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
       headers = [
         'Walk list', 'Pass', 'Pass name', 'Canvasser first name', 'Canvasser last name',
         'Email', 'Status', 'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused',
-        'No soliciting', ...doorCols, 'Connection rate %', 'Contact rate %',
+        'No soliciting', ...ntCols, ...doorCols, 'Connection rate %', 'Contact rate %',
       ];
       rows = built.byCanvasser.map((r) => [
         r.effortName || '', r.roundNumber ?? '', r.roundName ?? r.roundLabel,
         r.firstName, r.lastName, r.email, r.status,
         r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
-        r.noSolicitingKnocks,
+        r.noSolicitingKnocks, ...ntVals(r),
         ...doorVals(r), r.connectionRate, r.contactRate,
       ]);
     } else {
@@ -3371,7 +3435,7 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
       headers = [
         'Walk list', 'Pass', 'Pass name', 'Pass status', 'Activated (ISO)', 'Archived (ISO)',
         'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
-        ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
+        ...ntCols, ...doorCols, 'Connection rate %', 'Contact rate %', 'New homes reached',
       ];
       rows = built.rounds.map((r) => [
         r.effortName || '', r.roundNumber ?? '',
@@ -3379,14 +3443,14 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
         r.activatedAt ? new Date(r.activatedAt).toISOString() : '',
         r.archivedAt ? new Date(r.archivedAt).toISOString() : '',
         r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks,
-        r.noSolicitingKnocks,
+        r.noSolicitingKnocks, ...ntVals(r),
         ...doorVals(r), r.connectionRate, r.contactRate, r.coverageGained,
       ]);
       const t = built.totals;
       rows.push([
         'TOTAL', '', '', '', '', '',
         t.knocks, t.surveyedKnocks, t.surveysTaken, t.litKnocks, t.refusedKnocks,
-        t.noSolicitingKnocks,
+        t.noSolicitingKnocks, ...ntVals(t),
         ...doorVals(t), t.connectionRate, t.contactRate, t.coverageGained,
       ]);
     }
@@ -3615,17 +3679,18 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const actions = { not_home: 0, wrong_address: 0, refused: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0, no_soliciting: 0 };
+    const actions = {
+      not_home: 0, wrong_address: 0, refused: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0,
+      no_soliciting: 0, not_target: 0,
+    };
     for (const r of actionAgg) actions[r._id] = r.count;
-    // The same knock definition as /canvassers: notHome + wrongAddress + REFUSED + lit + surveyed.
-    // Refused was missing here (this endpoint predates the Refused disposition), which made this
-    // panel read FEWER doors than the Timeline for the same person over the same range — and
-    // inflated the rate below via the smaller denominator. Because the mobile write path keeps at
-    // most one replaceable row per (canvasser, household, pass), this action sum IS the canvasser's
-    // distinct door-pass count — no separate dedupe needed.
-    const homesKnocked =
-      actions.not_home + actions.wrong_address + actions.refused + actions.no_soliciting +
-      actions.survey_submitted + actions.lit_dropped;
+    // The same knock definition as /canvassers — KNOCK_ACTIONS, by set membership. A hand sum of
+    // named actions is how this panel once read FEWER doors than the Timeline (Refused was missing,
+    // which also inflated the rate below via the smaller denominator). Because the mobile write
+    // path keeps at most one replaceable row per (canvasser, household, pass), this action sum IS
+    // the canvasser's distinct door-pass count — no separate dedupe needed. Same for contacts.
+    const homesKnocked = KNOCK_ACTIONS.reduce((n, a) => n + (actions[a] || 0), 0);
+    const contactKnocks = CONTACT_ACTIONS.reduce((n, a) => n + (actions[a] || 0), 0);
 
     const surveysSubmitted = surveysCount;
 
@@ -3733,11 +3798,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
       surveyedKnocks: actions.survey_submitted,
       litKnocks: actions.lit_dropped,
     });
-    const contactRatePct = contactRate({
-      knocks: homesKnocked,
-      surveyedKnocks: actions.survey_submitted,
-      refusedKnocks: actions.refused,
-    });
+    const contactRatePct = contactRate({ knocks: homesKnocked, contactKnocks });
 
     res.json({
       user: {
@@ -3772,6 +3833,7 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         notHome: actions.not_home,
         wrongAddress: actions.wrong_address,
         refused: actions.refused, // a real contact ("reached a person"), counted in the knocks
+        notTarget: actions.not_target, // someone not on the list answered — a contact, in the knocks
         notesAdded: actions.note_added,
         restricted: actions.restricted, // inaccessible-home marks — a tally, never a knock
         connectionRatePct,
@@ -3865,6 +3927,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
           notHome: 0,
           wrongAddress: 0,
           noSoliciting: 0,
+          notTarget: 0,
           litDropped: 0,
           notesAdded: 0,
           homesKnocked: 0,
@@ -3880,6 +3943,7 @@ router.get('/canvassers/:userId/daily', async (req, res, next) => {
       if (at === 'not_home') d.notHome = r.count;
       else if (at === 'wrong_address') d.wrongAddress = r.count;
       else if (at === 'no_soliciting') d.noSoliciting = r.count;
+      else if (at === 'not_target') d.notTarget = r.count;
       else if (at === 'lit_dropped') d.litDropped = r.count;
       else if (at === 'note_added') d.notesAdded = r.count;
       else if (at === 'survey_submitted') d.surveyKnocks = r.count;

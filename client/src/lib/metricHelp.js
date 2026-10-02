@@ -31,7 +31,7 @@ export const metricHelp = {
   connectionRate:
     'Of the doors knocked, the share that completed the goal — a survey submitted OR a lit drop. (A lit drop counts even if no one answered.)',
   contactRate:
-    'Of the doors knocked, the share where someone answered — a completed survey OR a refusal. (A refusal counts here but not toward connection rate.)',
+    'Of the doors knocked, the share where someone answered — a completed survey, a refusal, or (on campaigns that use it) Not a target voter. Each door counts once per pass, however many canvassers reached someone there. (Refusals and Not a target voter count here but not toward connection rate.)',
   // Was "measured from the first knock to the last" — which described a CALENDAR span and
   // under-reported pace roughly threefold over a multi-day range (737 doors over 6 days read 4.9/hr
   // instead of 13.7). It is the sum of each DAY's working span.
@@ -48,6 +48,8 @@ export const metricHelp = {
     'Inaccessible homes — a locked building, a gate, no legal access. Recorded and shown, but never counted as a knock and never billed.',
   noSoliciting:
     'Homes where a posted no-soliciting sign ended the visit. The canvasser reached the door, so these ARE knocks and count toward doors/hour — but nobody answered, so they never count toward the contact rate.',
+  notTarget:
+    "Doors where someone answered who isn't on the list for that address and wouldn't give their name. They are knocks and contacts, never surveys — so they lift the contact rate but not the connection rate. Off unless an org admin turned it on for the campaign.",
   // The one metric on the campaign Home page that ignores the date range, walk-list and crew
   // filters. If that sentence ever leaves this string, the card starts lying quietly.
   doorGoal:

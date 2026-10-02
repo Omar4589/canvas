@@ -206,9 +206,13 @@ test('totals == the sum of range-mode buckets, field by field', { skip }, async 
   const tById = new Map(totals.json.canvassers.map((c) => [String(c.userId), c]));
   assert.equal(rById.size, tById.size);
 
+  // dayNoSoliciting and dayNotTarget are emitted per row too (a field the $group never sums
+  // serializes as null, and null === null would hide it — the not-target suite pins real values);
+  // contactRate follows the same per-canvasser count in both modes.
   const FIELDS = [
     'dayKnocks', 'daySurveys', 'dayLit', 'refused', 'notHome', 'wrongAddress',
-    'dayRestricted', 'hoursOnDoors', 'doorsPerHour', 'connectionRate',
+    'dayRestricted', 'dayNoSoliciting', 'dayNotTarget', 'hoursOnDoors', 'doorsPerHour', 'connectionRate',
+    'contactRate',
   ];
   for (const [uid, r] of rById) {
     const t = tById.get(uid);

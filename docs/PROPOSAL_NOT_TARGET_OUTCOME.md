@@ -1,7 +1,10 @@
 # Proposal: "Not a target voter" — an opt-in door outcome
 
-> **Status: APPROVED by the owner 2026-10-02 — PLAN + DESIGN, reviewed three times, nothing built
-> yet.** The owner's decisions are recorded in *Decisions* below and quoted in §R; the design calls
+> **Status: BUILT 2026-10-02 (uncommitted, not deployed) — approved by the owner the same day as a
+> PLAN + DESIGN, reviewed three times.** Build notes, including the places the build deliberately
+> differs from the text below, are in [§S](#s-build-notes-2026-10-02) at the end.
+>
+> *As approved:* The owner's decisions are recorded in *Decisions* below and quoted in §R; the design calls
 > were approved with the plan. The surface map behind Part 2 came from a read-only sweep of
 > the whole repo (seven subsystem readers plus a completeness pass over 188 more files). The plan was
 > then reviewed adversarially twice more, every finding re-checked by a second agent trying to refute
@@ -1533,3 +1536,35 @@ Answered 2026-10-02, in the owner's words:
 
 **Plan approved by the owner, 2026-10-02.** Before the build starts, the uncommitted Voters-directory
 release is committed (§O, *Before building*).
+
+## S. Build notes (2026-10-02)
+
+Built in the order of §Q. Where the build differs from the text above, this section governs.
+
+1. **The phone gate test** lives in `server/test/outcomeToggles.test.js` (it loads all three copies of
+   the outcome rules and runs in CI), not in a new `mobile/lib/outcomeToggles.test.js` (§C.6, §N).
+2. **The queue path/body builders** that `doorChange.test.js` reuses live in a new react-native-free
+   module, `mobile/lib/doorPaths.js` (`addVoterPath`, `addVoterBody`, `surveyPath`), used by
+   `recordAddVoter`, the survey screen and `ownSurveysHere` alike — `recordAction.js` imports
+   react-native, so node tests cannot load builders exported from it (§D, §K).
+3. **Withdrawn but still set on, re-saving is accepted.** The PATCH checks the release only for keys
+   being turned ON (not already stored on), so a withdrawal never blocks saving the rest of App
+   Customization (§B.4).
+4. **The per-round CSV in-use flag** is computed inside `buildKnocksByPassData` from the campaign's
+   `enabledOutcomes` / `everEnabledOutcomes` and also returned on the JSON as `notTargetInUse`, which
+   the web By-pass table reads (§G).
+5. **Turf Cutting's Target/Exclude lists** now label statuses from `STATUS_LABELS` ("Not home") instead
+   of the slug with CSS capitalize ("Not Home") — the whole list, not only the new entry (§I).
+6. **The survey screen's door check** runs exactly once per visit, the first time the door is known, so
+   a teammate's delta can never pop it up mid-survey; the re-survey confirm keeps its existing
+   behavior (§D).
+7. **Phone admin screens** read "in use" through `mobile/lib/useOutcomeInUse.js` everywhere except the
+   campaign home, which already holds the full `['admin','campaigns']` row and asks `outcomeInUse`
+   directly (§K).
+8. **Test-runner trap found on the way:** a fixture with a duplicate unique key (two users sharing an
+   email) made `before()` fail, and under `node --test` the runner then spun at 100% CPU forever
+   instead of reporting — the integration runner has no per-suite timeout. Fixed in the fixture;
+   recorded here because any suite whose setup fails can do the same.
+9. **The required recompute was proved from the repo root** against a throwaway database seeded in
+   the post-deploy state: the dry run printed `DRIFTED Ops Check — contactKnockCount 0→2` and nothing
+   else, `--apply` seeded it, and a re-run printed "All campaign stats match the ledgers" (§O).

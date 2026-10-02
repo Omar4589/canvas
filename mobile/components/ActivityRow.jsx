@@ -16,6 +16,7 @@ const ACTION_TO_PIN = {
   lit_dropped: 'lit_dropped',
   restricted: 'restricted',
   no_soliciting: 'no_soliciting',
+  not_target: 'not_target',
   note_added: 'unknocked',
 };
 

@@ -27,11 +27,12 @@ function matchesAnswer(h, answerFilter) {
 }
 
 // The client map only shows doors we actually reached — every non-unknocked status. Survey
-// campaigns drop the lit-drop chip; lit-drop campaigns drop the surveyed chip.
+// campaigns drop the lit-drop chip; lit-drop campaigns drop the surveyed chip (and Not a target
+// voter, which exists on survey campaigns only).
 function visibleStatusesFor(campaignType) {
-  const base = ['surveyed', 'refused', 'restricted', 'no_soliciting', 'not_home', 'wrong_address', 'lit_dropped'];
+  const base = ['surveyed', 'refused', 'not_target', 'restricted', 'no_soliciting', 'not_home', 'wrong_address', 'lit_dropped'];
   if (campaignType === 'survey') return base.filter((s) => s !== 'lit_dropped');
-  if (campaignType === 'lit_drop') return base.filter((s) => s !== 'surveyed');
+  if (campaignType === 'lit_drop') return base.filter((s) => s !== 'surveyed' && s !== 'not_target');
   return base;
 }
 
@@ -73,6 +74,17 @@ export default function ClientReportMap({
 
   const households = dataQ.data?.households || [];
   const visibleStatuses = useMemo(() => visibleStatusesFor(campaignType), [campaignType]);
+  // The chips are gated on PRESENCE: the public wire carries no campaign settings, and an ungated
+  // list would add a "Not a target voter" chip to every survey campaign's share map — reports
+  // already sent included. The points load once from a frozen snapshot, so it can appear but
+  // never flicker away. The doors themselves are drawn either way (`reached` uses the full list).
+  const chipStatuses = useMemo(
+    () =>
+      households.some((h) => h.status === 'not_target')
+        ? visibleStatuses
+        : visibleStatuses.filter((s) => s !== 'not_target'),
+    [visibleStatuses, households]
+  );
 
   // Only doors we actually reached — drop unknocked (and anything off the campaign-type set).
   const reached = useMemo(
@@ -266,7 +278,8 @@ export default function ClientReportMap({
           survey={survey}
           statusColors={STATUS_COLORS}
           statusLabels={STATUS_LABELS}
-          statuses={visibleStatuses}
+          statuses={chipStatuses}
+          notTargetInUse={chipStatuses.includes('not_target')}
           hideCanvassers
         />
       </aside>

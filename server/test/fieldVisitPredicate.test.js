@@ -16,9 +16,14 @@ import {
 const id = new mongoose.Types.ObjectId();
 
 test('fieldVisitMatch is the filter billing has always used', () => {
+  // Pinned on purpose: a new knock outcome changes when a campaign's billing clock starts and who
+  // is in Results by voter, so adding one must be a deliberate edit here. not_target joined
+  // 2026-10-02 (docs/PROPOSAL_NOT_TARGET_OUTCOME.md §E.1) — a knock, so a field visit.
   assert.deepStrictEqual(fieldVisitMatch(id), {
     campaignId: id,
-    actionType: { $in: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'restricted'] },
+    actionType: {
+      $in: ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target', 'restricted'],
+    },
     $nor: [{ actionType: 'restricted', via: 'bulk' }],
   });
 });

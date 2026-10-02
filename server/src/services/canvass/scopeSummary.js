@@ -18,6 +18,7 @@ const OUTCOME_LABELS = {
   refused: 'Refused',
   no_soliciting: 'No soliciting',
   restricted: 'Restricted',
+  not_target: 'Not a target voter',
   survey_submitted: 'Surveyed',
 };
 

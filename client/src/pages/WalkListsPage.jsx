@@ -9,6 +9,7 @@ import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { describeIdsInFile, zeroMatchLine } from '../lib/idListPreview.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 
 const STATUSES = ['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'wrong_address', 'lit_dropped'];
 const STATUS_LABEL = {
@@ -20,6 +21,7 @@ const STATUS_LABEL = {
   no_soliciting: 'No soliciting',
   wrong_address: 'Wrong address',
   lit_dropped: 'Lit dropped',
+  not_target: 'Not a target voter',
 };
 
 const EMPTY = {
@@ -143,6 +145,8 @@ export default function WalkListsPage() {
   const { selected } = useCampaignSelection(campaignId);
   // Walk lists belong to the selected campaign → show times in its tz (fallback org).
   const tz = selected?.timeZone || orgTz;
+  // The off-by-default outcome is a status choice only on a campaign that has used it.
+  const statuses = outcomeInUse(selected, 'not_target') ? [...STATUSES, 'not_target'] : STATUSES;
   const [f, setF] = useState(EMPTY);
   const [name, setName] = useState('');
   const [mode, setMode] = useState('filter');
@@ -358,7 +362,7 @@ export default function WalkListsPage() {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
               <span className="font-medium text-fg-muted">Door status:</span>
-              {STATUSES.map((s) => (
+              {statuses.map((s) => (
                 <label key={s} className="flex items-center gap-1">
                   <input type="checkbox" checked={f.priorPassStatuses.includes(s)} onChange={() => toggleStatus(s)} />
                   {STATUS_LABEL[s]}
@@ -406,7 +410,7 @@ export default function WalkListsPage() {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
               <span className="font-medium text-fg-muted">Door status:</span>
-              {STATUSES.map((s) => (
+              {statuses.map((s) => (
                 <label key={s} className="flex items-center gap-1">
                   <input type="checkbox" checked={f.exPriorPassStatuses.includes(s)} onChange={() => toggleExStatus(s)} />
                   {STATUS_LABEL[s]}

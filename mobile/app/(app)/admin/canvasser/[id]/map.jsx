@@ -12,6 +12,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../../../../lib/api';
 import { useAdminCampaign } from '../../../../../lib/useAdminCampaign';
+import { useOutcomeInUse } from '../../../../../lib/useOutcomeInUse';
 import { MAPBOX_PUBLIC_TOKEN } from '../../../../../lib/config';
 import { initMapbox } from '../../../../../lib/mapbox';
 import { rangeFor, deviceTimezone } from '../../../../../lib/dateRanges';
@@ -32,6 +33,8 @@ const ACTION_TABS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'wrong_address', label: 'Wrong addr' },
   { key: 'refused', label: 'Refused' },
+  // Offered only on a campaign that has used the off-by-default outcome (filtered below).
+  { key: 'not_target', label: 'Not target' },
   { key: 'no_soliciting', label: 'No solicit' },
   { key: 'restricted', label: 'Restricted' },
   { key: 'lit_dropped', label: 'Lit drop' },
@@ -44,6 +47,7 @@ const ACTION_PIN = {
   refused: 'refused',
   restricted: 'restricted',
   no_soliciting: 'no_soliciting',
+  not_target: 'not_target',
   lit_dropped: 'lit_dropped',
   note_added: 'unknocked',
 };
@@ -62,6 +66,8 @@ export default function MapScreen() {
   // cache, which can hold a campaign a team lead doesn't manage (or be empty, which
   // left every query disabled and the screen blank).
   const campaign = useAdminCampaign(params.campaignId);
+  const notTargetInUse = useOutcomeInUse(campaign?.id);
+  const actionTabs = ACTION_TABS.filter((t) => t.key !== 'not_target' || notTargetInUse);
 
   const tz = campaign?.timeZone || deviceTimezone();
 
@@ -147,7 +153,7 @@ export default function MapScreen() {
       <FilterBar
         filters={[
           { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
-          { key: 'action', title: 'Action', options: ACTION_TABS, selected: actionFilter, onSelect: setActionFilter },
+          { key: 'action', title: 'Action', options: actionTabs, selected: actionFilter, onSelect: setActionFilter },
         ]}
       />
 
@@ -196,6 +202,7 @@ export default function MapScreen() {
                     'wrong_address', colors.status.wrong_address,
                     'refused', colors.status.refused,
                     'no_soliciting', colors.status.no_soliciting,
+                    'not_target', colors.status.not_target,
                     'restricted', colors.status.restricted,
                     'lit_dropped', colors.status.lit_dropped,
                     colors.textMuted,

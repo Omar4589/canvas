@@ -10,6 +10,7 @@ import CoordinatorConfirm from '../components/CoordinatorConfirm.jsx';
 import Pager from '../components/Pager.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
 import { formatRelative, formatDate } from '../lib/dates.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 
 // In-campaign roster (/campaigns/:campaignId/team). Surfaces CampaignAssignment — the
 // per-campaign roster that GATES mobile visibility AND who can be assigned books — so the
@@ -421,7 +422,7 @@ function StatBox({ label, value }) {
 // offers. The management sections follow the server's wall exactly: an admin manages anyone here;
 // a lead manages CANVASSERS (this roster is by definition a campaign they manage) — admins, other
 // leads, and Doorline staff render read-only for them.
-function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrgAdmin, activity, onClose, onRemove, removing }) {
+function TeamMemberPanel({ member, campaignId, campaignType, notTargetInUse = false, coordinators, isOrgAdmin, activity, onClose, onRemove, removing }) {
   const qc = useQueryClient();
   const summaryQ = useQuery({
     queryKey: ['admin', 'campaign-member-summary', campaignId, member.userId],
@@ -715,6 +716,16 @@ function TeamMemberPanel({ member, campaignId, campaignType, coordinators, isOrg
               )}
               <StatBox label="Days active" value={(kpi.daysActive ?? 0).toLocaleString()} />
               <StatBox label={isSurvey ? 'Survey rate' : 'Drop rate'} value={`${kpi.connectionRatePct ?? 0}%`} />
+              {/* The screen an admin opens to review one person: their Not-a-target count and
+                  share of their doors. Only on a campaign that has used the outcome. */}
+              {isSurvey && notTargetInUse && (
+                <StatBox
+                  label="Not a target"
+                  value={`${(kpi.notTarget ?? 0).toLocaleString()} · ${
+                    kpi.homesKnocked ? Math.round(((kpi.notTarget ?? 0) / kpi.homesKnocked) * 100) : 0
+                  }%`}
+                />
+              )}
             </div>
           ) : (
             <div className="rounded border border-dashed border-border bg-sunken px-3 py-4 text-center text-sm text-fg-muted">
@@ -1228,6 +1239,7 @@ export default function CampaignTeamPage() {
           activity={activityByUser.get(String(liveMember.userId))}
           campaignId={campaignId}
           campaignType={selected?.type}
+          notTargetInUse={outcomeInUse(selected, 'not_target')}
           coordinators={coordinators}
           isOrgAdmin={isOrgAdmin}
           onClose={() => setSelectedMember(null)}

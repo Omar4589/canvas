@@ -9,7 +9,7 @@ import { pickRound, roundMarkFromEntries, completedInRound, isRestricted, unmark
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
 // way /overlap-doors (the map ring) does. `restricted` and `note_added` are deliberately out.
-const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting']);
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target']);
 
 function formatDateTime(d, tz) {
   if (!d) return '—';

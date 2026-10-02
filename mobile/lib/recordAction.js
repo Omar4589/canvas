@@ -1,9 +1,14 @@
 import { Alert, AppState, Linking, Platform } from 'react-native';
 import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
-import { submitOrQueue, flushQueue } from './offlineQueue';
+import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
 import { saveBootstrap } from './cache';
+import { changePrompt, ownSurveysHere, buildChangePrompt } from './doorChange';
+import { addVoterPath, addVoterBody } from './doorPaths';
+import { lightColors } from './theme';
 
-const ACTION_PATHS = { not_home: 'not-home', wrong_address: 'wrong-address', lit_dropped: 'lit-drop', refused: 'refused', restricted: 'restricted', no_soliciting: 'no-soliciting' };
+// A missing key here throws in recordHouseholdAction AFTER the door screen has latched its
+// buttons — every outcome button the phone can show needs its route segment.
+const ACTION_PATHS = { not_home: 'not-home', wrong_address: 'wrong-address', lit_dropped: 'lit-drop', refused: 'refused', restricted: 'restricted', no_soliciting: 'no-soliciting', not_target: 'not-target' };
 
 // Patch the ['bootstrap'] cache and persist it. The React Query update is
 // synchronous, so every screen reading ['bootstrap'] (the map's pins, the
@@ -18,12 +23,16 @@ function writeBootstrap(qc, updater) {
   });
 }
 
+// restrictedFrom is set too, never inherited through the spread: the server sends it only while a
+// round reads restricted, so a stale 'desk' would otherwise outlive the mark and let the change
+// confirmation (lib/doorChange.js) skip a door the canvasser has since worked. A canvasser's own
+// Restricted tap is 'field', never the office's mark.
 function setHouseholdStatus(prev, householdId, status) {
   return {
     ...prev,
     households: (prev.households || []).map((h) =>
       String(h._id) === String(householdId)
-        ? { ...h, status, lastActionAt: new Date().toISOString() }
+        ? { ...h, status, restrictedFrom: status === 'restricted' ? 'field' : null, lastActionAt: new Date().toISOString() }
         : h
     ),
   };
@@ -288,6 +297,12 @@ export function optimisticSubmit(qc, opts) {
     // Fired synchronously right after the optimistic patch lands — i.e. once the action
     // is definitely happening. Callers navigate here instead of unconditionally.
     onAccepted,
+    // Opt-in "are you sure?" step: an async () => boolean run AFTER the in-flight lock is taken
+    // (so a double tap is deduped by the lock instead of stacking two prompts) and BEFORE the GPS
+    // gate. false = the canvasser backed out: nothing is recorded, and the caller gets the
+    // non-blocked `kept` sentinel so its button latch releases. recordHouseholdAction passes the
+    // door-change confirmation here.
+    confirm,
   } = opts;
 
   // If a submit to this exact path is already in flight, don't start a second — the
@@ -310,6 +325,12 @@ export function optimisticSubmit(qc, opts) {
   };
 
   const submitPromise = (async () => {
+    // Step 0 — the optional confirmation. Inside the lock, so hasInFlightActions() also covers the
+    // open alert and the OTA restart prompt can't reload the app mid-decision.
+    if (confirm && !(await confirm())) {
+      release();
+      return { ok: false, queued: false, kept: true };
+    }
     // Step 1 — the location gate, BEFORE the optimistic patch: a blocked tap must
     // leave zero trace (nothing recorded, nothing queued, nothing recolored).
     let location = null;
@@ -322,7 +343,8 @@ export function optimisticSubmit(qc, opts) {
           alertWhenActive(() =>
             locationBlockedAlert(err, {
               onCancel: () => resolve({ ok: false, queued: false, blocked: err.code || 'NO_FIX' }),
-              onRetry: () => resolve(optimisticSubmit(qc, opts)),
+              // `confirm` stripped: the canvasser already answered it for this tap.
+              onRetry: () => resolve(optimisticSubmit(qc, { ...opts, confirm: undefined })),
             })
           );
         });
@@ -419,14 +441,53 @@ export function optimisticSubmit(qc, opts) {
   return submitPromise;
 }
 
-// Record a single-household action (not_home / wrong_address / lit_dropped),
+// Ask before CHANGING a door's result this round (owner ruling 2026-10-02 — the decisions live in
+// lib/doorChange.js). Resolves true to record, false to back out. Reads the door and its voters
+// from the bootstrap cache and the offline queue (a survey still waiting to upload counts); a
+// failed queue read falls back to the cache half rather than leaving a latch stuck. Every way out
+// of the alert resolves — including onDismiss: on Android a newer alert (say, a hard-fail from the
+// previous door) dismisses this one with neither button firing, and the door buttons would stay dead.
+export const confirmDoorChange = async (qc, householdId, action) => {
+  const bootstrap = qc.getQueryData(['bootstrap']);
+  const door = (bootstrap?.households || []).find((h) => String(h._id) === String(householdId));
+  const pendingItems = await getPending().catch(() => []);
+  const ownSurveys = ownSurveysHere({ voters: bootstrap?.voters || [], householdId, pending: pendingItems || [] });
+  const prompt = changePrompt({ door, action, ownSurveys });
+  if (!prompt) return true;
+  const words = buildChangePrompt(prompt, lightColors.statusLabels);
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    alertWhenActive(() =>
+      Alert.alert(
+        words.title,
+        words.message,
+        // Cancel FIRST (Android button order); destructive styling only when answers would be lost.
+        [
+          { text: words.cancelText, style: 'cancel', onPress: () => done(false) },
+          { text: words.confirmText, style: words.destructive ? 'destructive' : 'default', onPress: () => done(true) },
+        ],
+        { cancelable: true, onDismiss: () => done(false) }
+      )
+    );
+  });
+};
+
+// Record a single-household action (not_home / wrong_address / refused / not_target / …),
 // optimistically recoloring its pin (and the client-computed building aggregate)
-// before the network call. Fire-and-forget: callers don't await it.
+// before the network call. Fire-and-forget: callers don't await it. Every caller — the door
+// screen's buttons, the door list's one-tap Not home, a building unit's quick button — gets the
+// change confirmation here, once.
 export function recordHouseholdAction(qc, householdId, action, { note = null, onAccepted } = {}) {
   const path = ACTION_PATHS[action];
   if (!path) throw new Error(`Unknown action: ${action}`);
   return optimisticSubmit(qc, {
     path: `/mobile/households/${householdId}/${path}`,
+    confirm: () => confirmDoorChange(qc, householdId, action),
     body: { note },
     optimisticPatch: (prev) => setHouseholdStatus(prev, householdId, action),
     reconcile: (prev, response) => {
@@ -451,8 +512,8 @@ export function recordHouseholdAction(qc, householdId, action, { note = null, on
 // because adding a person never recolors the pin.
 export const recordAddVoter = (qc, householdId, { voterId, firstName, lastName, phone = null, email = null, onAccepted } = {}) =>
   optimisticSubmit(qc, {
-    path: `/mobile/households/${householdId}/voters`,
-    body: { voterId, firstName, lastName, phone: phone || null, email: email || null },
+    path: addVoterPath(householdId),
+    body: addVoterBody({ voterId, firstName, lastName, phone, email }),
     optimisticPatch: (prev) => addVoterToBootstrap(prev, householdId, { voterId, firstName, lastName }),
     reconcile: (prev, response) =>
       response?.voter ? replaceVoterInBootstrap(prev, response.voter) : prev,

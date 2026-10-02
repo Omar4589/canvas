@@ -43,6 +43,7 @@ import { timeAgo, formatExact, formatInTz } from '../../../lib/datetime';
 import { radius, spacing, actionLabel } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 
 initMapbox();
 
@@ -66,6 +67,9 @@ const STATUS_OPTIONS = [
   { key: 'not_home', label: 'Not home' },
   { key: 'surveyed', label: 'Surveyed' },
   { key: 'refused', label: 'Refused' },
+  // Off-by-default outcome: offered only on a campaign that has used it, or whose counts say such
+  // doors exist (filtered in the menu below).
+  { key: 'not_target', label: 'Not target' },
   { key: 'no_soliciting', label: 'No solicit' },
   { key: 'restricted', label: 'Restricted' },
   { key: 'wrong_address', label: 'Wrong addr' },
@@ -78,7 +82,7 @@ const FIRST_KNOCK_COLOR = '#0891b2'; // cyan
 const LAST_KNOCK_COLOR = '#db2777'; // pink
 // Mirror the server's KNOCK_ACTIONS so the inline overlap badge matches the /overlap-doors
 // ring (restricted / note_added are not knocks — excluded).
-const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting']);
+const OVERLAP_KNOCK_ACTIONS = new Set(['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target']);
 
 const one = (v) => (Array.isArray(v) ? v[0] : v) || '';
 
@@ -394,6 +398,7 @@ export default function AdminMap() {
   );
 
   const cId = campaign?.id;
+  const notTargetInUse = useOutcomeInUse(cId);
   // Archived campaign ⇒ read-only. Flag review deliberately stays enabled — it records a decision
   // about work already done, and the server keeps accepting it.
   const { canWrite } = useCampaignArchived(cId);
@@ -1321,6 +1326,7 @@ export default function AdminMap() {
             'house-refused': require('../../../assets/icons/house-refused.png'),
             'house-restricted': require('../../../assets/icons/house-restricted.png'),
             'house-no_soliciting': require('../../../assets/icons/house-no_soliciting.png'),
+            'house-not_target': require('../../../assets/icons/house-not_target.png'),
             'house-lit_dropped': require('../../../assets/icons/house-surveyed.png'),
           }}
         />
@@ -1394,6 +1400,7 @@ export default function AdminMap() {
                 'refused', 'house-refused',
                 'restricted', 'house-restricted',
                 'no_soliciting', 'house-no_soliciting',
+                'not_target', 'house-not_target',
                 'lit_dropped', 'house-lit_dropped',
                 'house-unknocked',
               ],
@@ -1418,6 +1425,7 @@ export default function AdminMap() {
                   'wrong_address', colors.status.wrong_address,
                   'refused', colors.status.refused,
                   'no_soliciting', colors.status.no_soliciting,
+                  'not_target', colors.status.not_target,
                   'restricted', colors.status.restricted,
                   'lit_dropped', colors.status.lit_dropped,
                   colors.textSecondary,
@@ -1752,7 +1760,9 @@ export default function AdminMap() {
               count={statusCounts ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : null}
               onPress={() => setStatusFilter([])}
             />
-            {STATUS_OPTIONS.map((s) => (
+            {STATUS_OPTIONS.filter(
+              (s) => s.key !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0
+            ).map((s) => (
               <MenuItem
                 key={s.key}
                 label={s.label}

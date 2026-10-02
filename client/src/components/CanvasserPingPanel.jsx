@@ -24,6 +24,7 @@ const ACTION_COLORS = {
   refused: '#f59e0b',
   restricted: '#475569',
   no_soliciting: '#db2777',
+  not_target: '#a21caf',
   note_added: '#9ca3af',
 };
 

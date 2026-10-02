@@ -37,7 +37,7 @@ import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { csvCell, UTF8_BOM } from '../../services/export/csvWriter.js';
 import { tzAbbrev } from '../../utils/timezone.js';
 import { isDeleting, maybeExpireStaleDeletion, campaignHasCanvassed } from '../../services/campaigns/deletionState.js';
-import { TOGGLEABLE_OUTCOMES } from '../../services/canvass/outcomeToggles.js';
+import { TOGGLEABLE_OUTCOMES, OPT_IN_OUTCOMES, availableOptInOutcomes } from '../../services/canvass/outcomeToggles.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
@@ -142,12 +142,15 @@ const AUDITED_FIELDS = [
   'disabledOutcomes',
   // Who may add walk-up voters at the door — same "changes what canvassers can record" class.
   'doorAddPolicy',
+  // Opt-in door outcomes turned ON. The trust decision behind an unverifiable outcome: this row is
+  // the record of who switched it on and when (highlighted in both History feeds).
+  'enabledOutcomes',
 ];
 
 // Compare-and-store form. Mongoose hands back a String object for enum/String paths and `undefined`
 // for a path never set; both must compare equal to their plain/null counterparts or a no-op PATCH
 // would log a phantom change. Numbers and Booleans pass through so the feed can format them.
-// Arrays (disabledOutcomes) store as a SORTED comma-join: sorted so a reorder is a no-op, and
+// Arrays (disabledOutcomes, enabledOutcomes) store as a SORTED comma-join: sorted so a reorder is a no-op, and
 // empty ≡ never-set ≡ null so legacy docs don't log phantom rows either. Must branch before the
 // String fallback — String([an, array]) would join UNsorted and log those phantoms.
 function normalizeAudited(v) {
@@ -158,7 +161,14 @@ function normalizeAudited(v) {
   return s === '' ? null : s;
 }
 
-const updateSchema = createSchema.partial();
+// enabledOutcomes lives on the UPDATE schema only. It is not in createSchema, so POST strips it and
+// every campaign is born with its opt-in outcomes off; the only way on is this audited, admin-only
+// PATCH (which also keeps everEnabledOutcomes — the replay rule's record — in step). Putting it on
+// createSchema would let a create switch one on with no History row and an empty
+// everEnabledOutcomes, and the first switch-off after that would drop honest queued taps.
+const updateSchema = createSchema.partial().extend({
+  enabledOutcomes: z.array(z.enum(OPT_IN_OUTCOMES)).optional(),
+});
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -291,7 +301,16 @@ router.get('/', async (req, res, next) => {
     // "use the organization default" currently resolves to. Every campaign row already
     // carries its own tri-state override via the lean spread.
     const org = await Organization.findById(activeOrgId(req), { billRestrictedDoors: 1 }).lean();
-    res.json({ campaigns: live, deletingCampaigns: deleting, orgBillRestrictedDoors: Boolean(org?.billRestrictedDoors) });
+    // optInOutcomesAvailable: which off-by-default outcomes Doorline has released (the
+    // OPT_IN_OUTCOMES config var), so App Customization knows whether to offer the switch and the
+    // Door Outcomes "Change to" list can mirror the server's rule. Top-level, beside the org
+    // default, because it is the same for every campaign row.
+    res.json({
+      campaigns: live,
+      deletingCampaigns: deleting,
+      orgBillRestrictedDoors: Boolean(org?.billRestrictedDoors),
+      optInOutcomesAvailable: availableOptInOutcomes(),
+    });
   } catch (err) {
     next(err);
   }
@@ -469,10 +488,17 @@ router.patch('/:campaignId', async (req, res, next) => {
     // disabledOutcomes is absent for the same reason (owner ruling 2026-08-16): a lead running
     // a campaign owns which outcome buttons its canvassers see. disabledOutcomes.int.test.js
     // asserts a lead can set it.
+    //
+    // enabledOutcomes IS on this list (owner ruling 2026-10-02), unlike its sibling disabledOutcomes:
+    // turning on an outcome that cannot be verified is the org's trust decision, and a lead may be
+    // the paying client. Do not "tidy" it into the lead-editable class.
     if (!isOrgAdmin(req)) {
-      for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote', 'billRestrictedDoors']) {
+      for (const field of ['isActive', 'type', 'state', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd', 'datesNote', 'billRestrictedDoors', 'enabledOutcomes']) {
         if (data[field] !== undefined) {
-          return res.status(403).json({ error: `Only an org admin can change a campaign's ${field}.` });
+          const error = field === 'enabledOutcomes'
+            ? 'Only an org admin can turn off-by-default outcomes on or off.'
+            : `Only an org admin can change a campaign's ${field}.`;
+          return res.status(403).json({ error });
         }
       }
     }
@@ -491,6 +517,27 @@ router.patch('/:campaignId', async (req, res, next) => {
         error: 'Type cannot change after canvassing has started — create a new campaign instead.',
         code: 'type-locked',
       });
+    }
+
+    // Opt-in outcomes: only what Doorline has released can be turned on, and only on a survey
+    // campaign (checked against the MERGED type, so a PATCH that also flips the type is caught).
+    // Turning one off ([] or a shorter list) is always accepted — that is how an admin switches it
+    // off while Doorline has it withdrawn — and so is re-sending one that is already on: the release
+    // check is for keys being TURNED ON, so a withdrawal never blocks saving the rest of the form.
+    const mergedType = data.type !== undefined ? data.type : campaign.type;
+    if (data.enabledOutcomes !== undefined && data.enabledOutcomes.length) {
+      const available = availableOptInOutcomes();
+      const stored = campaign.enabledOutcomes || [];
+      const notAvailable = data.enabledOutcomes.filter((k) => !available.includes(k) && !stored.includes(k));
+      if (notAvailable.length) {
+        return res.status(400).json({ error: 'That outcome is not available yet.', code: 'OUTCOME_NOT_AVAILABLE' });
+      }
+      if (mergedType !== 'survey') {
+        return res.status(400).json({
+          error: 'Off-by-default outcomes are for survey campaigns only.',
+          code: 'OUTCOME_SURVEY_ONLY',
+        });
+      }
     }
 
     // Validate the early-voting window against the MERGED values — a PATCH that
@@ -547,6 +594,24 @@ router.patch('/:campaignId', async (req, res, next) => {
     // Lead-editable like disabledOutcomes (same class: a lead running a campaign owns what
     // its canvassers can record at a door).
     if (data.doorAddPolicy !== undefined) campaign.doorAddPolicy = data.doorAddPolicy;
+    // Opt-in outcomes: a NEW deduped array (no aliasing with beforeAudit), and everEnabledOutcomes
+    // grows to cover the stored value AND the new one, so enabledOutcomes ⊆ everEnabledOutcomes holds
+    // whatever wrote the stored value. Never shrinks: it is the record that a phone could have shown
+    // the button, which is what lets the replay rule honor taps queued before a switch-off.
+    if (data.enabledOutcomes !== undefined) {
+      const turnedOn = [...new Set(data.enabledOutcomes)];
+      campaign.everEnabledOutcomes = [
+        ...new Set([...(campaign.everEnabledOutcomes || []), ...(campaign.enabledOutcomes || []), ...turnedOn]),
+      ];
+      campaign.enabledOutcomes = turnedOn;
+    }
+    // A campaign leaving the survey type (allowed only before canvassing — the type lock above)
+    // cannot keep a survey-only outcome on: clear it, as an audited change like any other. Every
+    // enabled reader is type-scoped anyway; this keeps the stored setting honest too.
+    if (mergedType !== 'survey' && (campaign.enabledOutcomes || []).length) {
+      campaign.everEnabledOutcomes = [...new Set([...(campaign.everEnabledOutcomes || []), ...campaign.enabledOutcomes])];
+      campaign.enabledOutcomes = [];
+    }
     if (data.isActive !== undefined && data.isActive !== campaign.isActive) {
       campaign.isActive = data.isActive;
       // Billing reads this: a campaign bills through its ARCHIVE month, not
@@ -1050,7 +1115,9 @@ router.get('/:campaignId/outcome-entries.csv', async (req, res, next) => {
 
     const rows = await CanvassActivity.find(
       buildEntryFilter(campaign._id, q, CONVERTIBLE_SOURCES),
-      { householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, effortId: 1 }
+      // wasOfflineSubmission feeds the Offline column — this file runs its OWN find, not
+      // listEntries, so without this line that column would be silently blank on every row.
+      { householdId: 1, actionType: 1, userId: 1, timestamp: 1, passId: 1, effortId: 1, wasOfflineSubmission: 1 }
     )
       .sort({ timestamp: -1, _id: 1 })
       .limit(EXPORT_CAP)
@@ -1091,6 +1158,9 @@ router.get('/:campaignId/outcome-entries.csv', async (req, res, next) => {
       'Address', 'Unit', 'City', 'State', 'Zip',
       'Outcome', 'Canvasser', 'Round', 'Walk list',
       'Voters at visit', 'Answers at visit', 'Matched voters', 'Matched answers', 'Do not contact',
+      // Appended, for every org: queued on a phone and synced later. Same flag the lead-visible
+      // canvass-activity export already ships, so no new disclosure.
+      'Offline',
     ];
     const lines = [headers.map(csvCell).join(',')];
     for (const r of rows) {
@@ -1118,6 +1188,7 @@ router.get('/:campaignId/outcome-entries.csv', async (req, res, next) => {
           ev ? ev.matched.map((m) => m.voterName).join('; ') : '',
           ev ? ev.matched.map((m) => m.answers.map((a) => a.text).join(' / ')).join('; ') : '',
           allNamed.filter((v) => v.dnc).map((v) => v.voterName || v.name).join('; '),
+          r.wasOfflineSubmission ? 'Offline' : '',
         ].map(csvCell).join(',')
       );
     }

@@ -20,6 +20,7 @@ import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
 import { rateFromPct, makeRateColors } from '../../../lib/rates';
 import { metricHelp } from '../../../lib/metricHelp';
+import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { downloadCsv } from '../../../lib/csv';
 import { timeAgo } from '../../../lib/datetime';
 import { radius, spacing, withAlpha } from '../../../lib/theme';
@@ -127,6 +128,8 @@ export default function AdminTimeline() {
   const cId = campaign?.id ? String(campaign.id) : null;
   const tz = campaign?.timeZone || deviceTimezone();
   const litMode = campaign?.type === 'lit_drop';
+  // Rows carry dayNotTarget from the server; the card shows it only where the campaign used it.
+  const notTargetInUse = useOutcomeInUse(cId);
 
   const [metric, setMetric] = useState('knocks');
   const [coordinatorId, setCoordinatorId] = useState(''); // '' = all, 'none' = no coordinator
@@ -835,6 +838,7 @@ export default function AdminTimeline() {
                       tz={tz}
                       rank={i + 1}
                       litMode={litMode}
+                      notTargetInUse={notTargetInUse}
                       onPress={() => openCanvasser(r)}
                       selectable={compareMode}
                       selected={selectedIds.has(r.userId)}

@@ -10,7 +10,8 @@ import InfoHint from '../components/InfoHint.jsx';
 import Pager from '../components/Pager.jsx';
 import { Button, Select, EmptyState, SkeletonRows, Modal } from '../components/ui/index.js';
 import { downloadFile } from '../lib/downloadFile.js';
-import { ACTION_LABELS } from '../lib/statusColors.js';
+import { ACTION_LABELS, STATUS_LABELS } from '../lib/statusColors.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { loadExportOptions, saveExportOptions } from '../lib/exportOptions.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 
@@ -115,6 +116,8 @@ const OUTCOME_OPTIONS = Object.keys(ACTION_LABELS);
 // deliberately on their own screen rather than scrolled past among the pickers.
 const OPTION_TOKENS = ['outcome', 'perVoterRows', 'surveyAnswers'];
 
+// not_target (the off-by-default outcome) is appended per campaign — offered only where it has been
+// used — like the outcome chips below.
 const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 const STATUS_LABEL = {
@@ -415,7 +418,13 @@ export default function ExportsPage() {
   // A note is not a visit, so Results by voter — whose universe IS field visits — never offers that
   // chip. The server refuses it outright rather than intersecting to an empty file, and presenting a
   // choice that 400s is worse than not presenting it.
-  const chipOutcomes = type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS;
+  // Not a target voter is an outcome only some campaigns ever turn on: offered only where it has
+  // been used, so a customer who never turns it on never sees the words.
+  const notTargetInUse = outcomeInUse(campaign, 'not_target');
+  const chipOutcomes = (type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS).filter(
+    (a) => a !== 'not_target' || notTargetInUse
+  );
+  const roundStatuses = notTargetInUse ? [...ROUND_STATUSES, 'not_target'] : ROUND_STATUSES;
 
   const outcomeChipRow = (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -593,8 +602,8 @@ export default function ExportsPage() {
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Only doors with status</div>
               <Select className={selectCls} value={roundStatus} onChange={(e) => setRoundStatus(e.target.value)}>
                 <option value="">Any status</option>
-                {ROUND_STATUSES.map((s) => (
-                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                {roundStatuses.map((s) => (
+                  <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>
                 ))}
               </Select>
             </div>
@@ -754,8 +763,8 @@ export default function ExportsPage() {
                   <span>
                     <span className="font-medium text-fg">One row per voter at the door</span>
                     <span className="block text-xs text-fg-muted">
-                      A knock that named nobody — not home, wrong address, refused, lit drop, no
-                      soliciting, restricted — is one row about the door. Tick this and it repeats once
+                      A knock that named nobody — not home, wrong address, refused, not a target voter,
+                      lit drop, no soliciting, restricted — is one row about the door. Tick this and it repeats once
                       per registered voter at that address, each row carrying the same outcome, time,
                       canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
                       three rows means someone at that address declined, not that each person did. The

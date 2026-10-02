@@ -1,7 +1,7 @@
 import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
-import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
+import { KNOCK_ACTIONS, CONTACT_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 
 // Maintenance for Campaign.stats — the denormalized all-time ledger counters (see the field
 // comment in models/Campaign.js). Two tiers, both exact:
@@ -26,8 +26,9 @@ import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 // instant; the reconcile (migrate:campaign-stats / reconcileCounts) repairs any drift.
 
 // Billable-knock state of one (household, pass) pair, derived from its activity rows.
-// Mirrors knocksPipeline's inner $group: knock = any KNOCK_ACTIONS row; surveyed/lit/refused =
-// $max over the matching actionType.
+// Mirrors knocksPipeline's inner $group: knock = any KNOCK_ACTIONS row; surveyed/lit/refused/
+// notTarget = $max over the matching actionType; contact = any CONTACT_ACTIONS row (the fold that
+// counts a door once however many canvassers reached someone there).
 //
 // `restrictedDoor` mirrors the same pipeline run with includeRestricted: a pair counts as a
 // restricted DOOR only when it has a non-bulk `restricted` mark and NO knock — so knockCount and
@@ -38,7 +39,7 @@ import { KNOCK_ACTIONS, NOT_BULK, knocksPipeline } from './aggregations.js';
 // field work (see aggregations.js). Callers MUST project `via` alongside `actionType`, or every
 // desk mark would look like a walk.
 export function knockStateOf(rows) {
-  const state = { knock: false, surveyed: false, lit: false, refused: false, restrictedDoor: false };
+  const state = { knock: false, surveyed: false, lit: false, refused: false, notTarget: false, contact: false, restrictedDoor: false };
   let restricted = false;
   for (const r of rows) {
     if (r.actionType === 'restricted') {
@@ -50,6 +51,8 @@ export function knockStateOf(rows) {
     if (r.actionType === 'survey_submitted') state.surveyed = true;
     else if (r.actionType === 'lit_dropped') state.lit = true;
     else if (r.actionType === 'refused') state.refused = true;
+    else if (r.actionType === 'not_target') state.notTarget = true;
+    if (CONTACT_ACTIONS.includes(r.actionType)) state.contact = true;
   }
   state.restrictedDoor = restricted && !state.knock;
   return state;
@@ -63,6 +66,8 @@ export function knockStateDelta(before, after) {
     surveyedKnockCount: d(before.surveyed, after.surveyed),
     litKnockCount: d(before.lit, after.lit),
     refusedKnockCount: d(before.refused, after.refused),
+    notTargetKnockCount: d(before.notTarget, after.notTarget),
+    contactKnockCount: d(before.contact, after.contact),
     restrictedDoorCount: d(before.restrictedDoor, after.restrictedDoor),
   };
 }
@@ -127,6 +132,8 @@ export async function computeCampaignStats(campaignId) {
     surveyedKnockCount: k.surveyedKnocks || 0,
     litKnockCount: k.litKnocks || 0,
     refusedKnockCount: k.refusedKnocks || 0,
+    notTargetKnockCount: k.notTargetKnocks || 0,
+    contactKnockCount: k.contactKnocks || 0,
     restrictedDoorCount: k.restrictedDoors || 0,
     litDroppedCount,
     surveyCount,
@@ -165,6 +172,10 @@ const COUNTER_KEYS = [
   'surveyedKnockCount',
   'litKnockCount',
   'refusedKnockCount',
+  // Without these two, drift in them is never detected — and contactKnockCount is DRIFTED on every
+  // campaign until the one-time recompute seeds it (expected; the dry run says so).
+  'notTargetKnockCount',
+  'contactKnockCount',
   'restrictedDoorCount',
   'litDroppedCount',
   'surveyCount',

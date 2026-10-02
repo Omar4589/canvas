@@ -2,7 +2,7 @@ import { REASON_META } from '../lib/flags.js';
 import FlagLegend from './FlagLegend.jsx';
 import Segmented from './ui/Segmented.jsx';
 
-const DEFAULT_STATUSES = ['surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
+const DEFAULT_STATUSES = ['surveyed', 'refused', 'not_target', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
 const REVIEW_STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },
@@ -103,7 +103,14 @@ export default function MapFilters({
   // Which status chips to offer (the client map drops Unknocked, and Lit dropped for survey
   // campaigns). Defaults to the full admin set.
   statuses = DEFAULT_STATUSES,
+  // The off-by-default "Not a target voter" chip shows only on a campaign that has used it (or
+  // when the counts say such doors exist) — a campaign that never turned it on never sees it.
+  notTargetInUse = false,
 }) {
+  const shownStatuses = statuses.filter(
+    (s) => s !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0
+  );
+
   function toggleStatus(s) {
     if (statusFilter.includes(s)) onStatusChange(statusFilter.filter((x) => x !== s));
     else onStatusChange([...statusFilter, s]);
@@ -372,7 +379,7 @@ export default function MapFilters({
       <div>
         <SectionLabel>Status</SectionLabel>
         <div className="space-y-1.5">
-          {statuses.map((s) => (
+          {shownStatuses.map((s) => (
             <StatusChip
               key={s}
               status={s}

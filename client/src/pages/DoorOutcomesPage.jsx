@@ -21,6 +21,7 @@ import QueueWalkthrough from '../components/outcomes/QueueWalkthrough.jsx';
 import ConversionRunCard from '../components/outcomes/ConversionRunCard.jsx';
 import RunDetailModal from '../components/outcomes/RunDetailModal.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { isOutcomeEnabled, outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 // Door Outcomes — reviewing and correcting what canvassers recorded.
@@ -43,7 +44,9 @@ import { CampaignLoading, CampaignMissing } from '../components/campaigns/Campai
 // fraud cleanup, where the answers being removed are the evidence. Both are priced like any other
 // conversion, and both are undoable. See services/canvass/surveyConversion.js.
 
-const OUTCOMES = ['not_home', 'wrong_address', 'refused', 'no_soliciting', 'restricted'];
+// not_target is the off-by-default outcome: its filter chip shows only on a campaign that has used
+// it, and it is a "Change to" target only where the server would accept it (isOutcomeEnabled).
+const OUTCOMES = ['not_home', 'wrong_address', 'refused', 'not_target', 'no_soliciting', 'restricted'];
 // Surveyed rows are listable and selectable too — they route to the survey-conversion endpoints,
 // which archive their answers, never to the plain reclassify POST, which still refuses them.
 const SOURCES = [...OUTCOMES, 'survey_submitted'];
@@ -139,8 +142,12 @@ export default function DoorOutcomesPage() {
   const [queueTemplate, setQueueTemplate] = useState(null);
   const [detailRun, setDetailRun] = useState(null); // the run whose itemized history is open
 
-  const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
+  const { campaign: current, campaignsQ, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
+  // Which off-by-default outcomes Doorline has released — the server's rule for a "Change to"
+  // target needs it, and only the campaigns response carries it.
+  const optInAvailable = campaignsQ.data?.optInOutcomesAvailable || [];
+  const notTargetInUse = outcomeInUse(current, 'not_target');
   // allMembers, not members: the picker half of that hook drops deactivated people because the
   // server refuses to ASSIGN them — but this page is a report over recorded history, and the
   // flagship query here is about the canvasser who was just fired. Their rows are in the table
@@ -606,7 +613,7 @@ export default function DoorOutcomesPage() {
       {/* Filters */}
       <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          {SOURCES.map((k) => {
+          {SOURCES.filter((k) => k !== 'not_target' || notTargetInUse).map((k) => {
             const on = effectiveOutcomes.includes(k);
             const locked = answerActive && k !== SURVEYED;
             const n = facets[k];
@@ -937,6 +944,13 @@ export default function DoorOutcomesPage() {
                 <td className="px-3 py-2 whitespace-nowrap text-fg">
                   <Dot k={e.actionType} />
                   {ACTION_LABELS[e.actionType]}
+                  {/* Queued on a phone without signal and synced later. The evidence an admin needs
+                      to review entries an offline phone recorded after an outcome was switched off. */}
+                  {e.wasOfflineSubmission && (
+                    <Badge variant="neutral" className="ml-1.5" title="Recorded without a connection and synced later">
+                      Offline
+                    </Badge>
+                  )}
                 </td>
                 {/* The row's survey evidence: a filter whose result the admin can't see would be
                     unverifiable on a page that rewrites history — and the Surveyed direction
@@ -1230,7 +1244,7 @@ export default function DoorOutcomesPage() {
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm text-fg-muted">Change to</span>
               <Select value={target} onChange={(e) => setTarget(e.target.value)} className="w-44">
-                {OUTCOMES.filter((o) => !(current?.disabledOutcomes || []).includes(o)).map((o) => (
+                {OUTCOMES.filter((o) => isOutcomeEnabled(current, o, optInAvailable)).map((o) => (
                   <option key={o} value={o}>{ACTION_LABELS[o]}</option>
                 ))}
                 {/* Surveyed is only offered as a TARGET when nothing surveyed is selected — you

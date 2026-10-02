@@ -3,8 +3,10 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { Pass } from '../../models/Pass.js';
 import { Effort } from '../../models/Effort.js';
+import { Campaign } from '../../models/Campaign.js';
 import {
   KNOCK_ACTIONS,
+  CONTACT_ACTIONS,
   BILLABLE_WITH_RESTRICTED,
   NOT_BULK,
   knocksPipeline,
@@ -15,6 +17,7 @@ import {
 } from './aggregations.js';
 import { billRestrictedFor } from './billRestricted.js';
 import { hydrateCanvassers } from './canvasserIdentity.js';
+import { outcomeInUse } from '../canvass/outcomeToggles.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 
@@ -70,7 +73,16 @@ export async function buildKnocksByPassData({
   // Does this campaign invoice restricted doors? The pipelines below ALWAYS gather them
   // (so `restrictedDoors` reports what exists, consistently with /overview and the rollup);
   // this flag only decides what gets presented as the billable figure, via billableDoorsOf.
-  const billRestricted = await billRestrictedFor(cFilter.organizationId, cFilter.campaignId);
+  //
+  // Does this campaign use the off-by-default "Not a target voter" outcome? Decides whether the
+  // per-round files carry its column — answered ONCE here, so the CSV route and the Export Center's
+  // knocks-by-round file (which must match it column for column) cannot disagree, and a campaign
+  // that never turned it on keeps its file shape. The JSON rows carry the count either way.
+  const [billRestricted, campaignDoc] = await Promise.all([
+    billRestrictedFor(cFilter.organizationId, cFilter.campaignId),
+    Campaign.findOne({ _id: cFilter.campaignId, organizationId: cFilter.organizationId }, { enabledOutcomes: 1, everEnabledOutcomes: 1 }).lean(),
+  ]);
+  const notTargetInUse = outcomeInUse(campaignDoc, 'not_target');
   const knockOpts = { includeRestricted: true };
 
   const [perPass, totalRows, firstKnockRows, surveysPerPass, passes, efforts] = await Promise.all([
@@ -141,7 +153,8 @@ export async function buildKnocksByPassData({
   const shapeRow = (key) => {
     const p = passById.get(key) || null;
     const k = countsByPass.get(key) || {
-      knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+      knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, notTargetKnocks: 0,
+      contactKnocks: 0, billableDoors: 0, restrictedDoors: 0,
     };
     const legacy = key === 'null' || key === 'undefined';
     return {
@@ -163,6 +176,10 @@ export async function buildKnocksByPassData({
       litKnocks: k.litKnocks,
       refusedKnocks: k.refusedKnocks,
       noSolicitingKnocks: k.noSolicitingKnocks,
+      notTargetKnocks: k.notTargetKnocks,
+      // The contact-rate numerator, each door once — so a round's Contact rate % is checkable
+      // from this same row, as its connection rate already is.
+      contactKnocks: k.contactKnocks,
       // Equal to `knocks` unless this campaign invoices restricted doors. Rates below are
       // deliberately built from `knocks` in BOTH cases — a locked gate answered nobody.
       billableDoors: billableDoorsOf(k, billRestricted),
@@ -180,7 +197,8 @@ export async function buildKnocksByPassData({
   );
 
   const t = totalRows[0] || {
-    knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, billableDoors: 0, restrictedDoors: 0,
+    knocks: 0, surveyedKnocks: 0, litKnocks: 0, refusedKnocks: 0, noSolicitingKnocks: 0, notTargetKnocks: 0,
+    contactKnocks: 0, billableDoors: 0, restrictedDoors: 0,
   };
   const totals = {
     knocks: t.knocks,
@@ -188,6 +206,8 @@ export async function buildKnocksByPassData({
     litKnocks: t.litKnocks,
     refusedKnocks: t.refusedKnocks,
     noSolicitingKnocks: t.noSolicitingKnocks,
+    notTargetKnocks: t.notTargetKnocks,
+    contactKnocks: t.contactKnocks,
     // Same pipeline, same (household, pass) dedup as the per-round rows above, and the same
     // policy helper — so Σ(rounds.billableDoors) === totals.billableDoors by construction,
     // exactly like knocks.
@@ -224,6 +244,8 @@ export async function buildKnocksByPassData({
             hasLit: flag('lit_dropped'),
             hasRefused: flag('refused'),
             hasNoSoliciting: flag('no_soliciting'),
+            hasNotTarget: flag('not_target'),
+            hasContact: { $max: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
           },
         },
         {
@@ -236,6 +258,8 @@ export async function buildKnocksByPassData({
             litKnocks: { $sum: '$hasLit' },
             refusedKnocks: { $sum: '$hasRefused' },
             noSolicitingKnocks: { $sum: '$hasNoSoliciting' },
+            notTargetKnocks: { $sum: '$hasNotTarget' },
+            contactKnocks: { $sum: '$hasContact' },
           },
         },
       ]),
@@ -284,6 +308,8 @@ export async function buildKnocksByPassData({
           litKnocks: r.litKnocks,
           refusedKnocks: r.refusedKnocks,
           noSolicitingKnocks: r.noSolicitingKnocks,
+          notTargetKnocks: r.notTargetKnocks,
+          contactKnocks: r.contactKnocks,
           billableDoors: billableDoorsOf(r, billRestricted),
           restrictedDoors: r.restrictedDoors,
           connectionRate: connectionRate(r),
@@ -312,5 +338,5 @@ export async function buildKnocksByPassData({
     }
   }
 
-  return { cFilter, rounds, totals, byCanvasser, crossCanvasserDoors, billRestricted };
+  return { cFilter, rounds, totals, byCanvasser, crossCanvasserDoors, billRestricted, notTargetInUse };
 }

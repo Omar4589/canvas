@@ -180,6 +180,7 @@ async function moneyShot() {
       activityCount: c.stats.activityCount, knockCount: c.stats.knockCount,
       surveyedKnockCount: c.stats.surveyedKnockCount, litKnockCount: c.stats.litKnockCount,
       refusedKnockCount: c.stats.refusedKnockCount, restrictedDoorCount: c.stats.restrictedDoorCount,
+      notTargetKnockCount: c.stats.notTargetKnockCount, contactKnockCount: c.stats.contactKnockCount,
       litDroppedCount: c.stats.litDroppedCount, surveyCount: c.stats.surveyCount,
     },
     knocks: cum.knocks, contactRate: cum.contactRate, connectionRate: cum.connectionRate,
@@ -359,6 +360,53 @@ test('rows held by an earlier correction run are counted, not silently missing',
   const dry = await call('POST', url(), { ...asAdmin(), body: { dryRun: true, scope: { userId: String(ctx.canv._id) } } });
   assert.equal(dry.status, 200);
   assert.ok(dry.json.heldByRuns >= 1, 'the stamped row is reported as held, not just absent');
+});
+
+test('Not a target voter entries unknock like any knock: priced, and the revert is exact', { skip }, async () => {
+  // The cleanup path the off-by-default outcome exists to have: an untrusted canvasser's
+  // not_target taps struck from the record. Its own canvasser and door, so the scope is exact.
+  const nate = await User.create({ firstName: 'Nate', lastName: 'Target', email: 'un@t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: nate._id, organizationId: ctx.org._id, role: 'canvasser', isActive: true });
+  const d7 = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.effort._id,
+    addressLine1: '7 Unknock Uz', city: 'Austin', state: 'TX', zipCode: '78701',
+    normalizedAddress: '7 unknock uz austin tx 78701',
+    location: { type: 'Point', coordinates: [-97.733, 30.26] }, status: 'not_target', isActive: true,
+  });
+  const row = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: d7._id, effortId: ctx.effort._id,
+    userId: nate._id, actionType: 'not_target', passId: ctx.pass._id, timestamp: KNOCK_AT, location: GPS,
+  });
+  await recomputeCampaignStats(ctx.campaign._id);
+  const baseline = await moneyShot();
+  assert.equal(baseline.stats.notTargetKnockCount, 1);
+
+  const scope = { userId: String(nate._id) };
+  const dry = await call('POST', url(), { ...asAdmin(), body: { dryRun: true, scope } });
+  assert.equal(dry.status, 200, JSON.stringify(dry.json));
+  assert.equal(dry.json.entries, 1);
+  assert.deepEqual(dry.json.sources, ['not_target']);
+  assert.equal(dry.json.impact.after.knocks, baseline.knocks - 1, 'a knock comes off');
+  const { knockCount, contactKnockCount } = baseline.stats;
+  assert.equal(
+    dry.json.impact.after.contactRate,
+    Math.round(((contactKnockCount - 1) / (knockCount - 1)) * 100),
+    'and so does a contact'
+  );
+
+  const run = await call('POST', url(), { ...asAdmin(), body: { scope } });
+  assert.equal(run.status, 201, JSON.stringify(run.json));
+  await recomputeCampaignStats(ctx.campaign._id);
+  const landed = await moneyShot();
+  assert.equal(landed.contactRate, dry.json.impact.after.contactRate, 'preview == reality');
+  assert.equal(landed.stats.notTargetKnockCount, 0);
+  assert.equal(await CanvassActivity.countDocuments({ _id: row._id }), 0);
+
+  const undo = await call('POST', url('/revert'), { ...asAdmin(), body: { runId: run.json.run.id } });
+  assert.equal(undo.status, 200);
+  await recomputeCampaignStats(ctx.campaign._id);
+  assert.deepEqual(await moneyShot(), baseline, 'the revert restores every figure');
+  assert.equal((await CanvassActivity.findById(row._id).lean())?.actionType, 'not_target');
 });
 
 test('the campaign delete cascade takes UnknockRun and its chunks with it', { skip }, async () => {

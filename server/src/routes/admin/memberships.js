@@ -97,7 +97,8 @@ async function leadMaySeeTarget(req, userId) {
   return visible.has(String(userId));
 }
 
-const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+// Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here.
+const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 
 
 const addSchema = z.object({

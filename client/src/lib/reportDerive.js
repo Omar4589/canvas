@@ -9,11 +9,14 @@ import { STATUS_COLORS, STATUS_LABELS } from './statusColors.js';
 export const formatCount = (n) => (n || 0).toLocaleString();
 
 // Which contact outcomes to show, by campaign type. Survey campaigns hide the lit-drop row; lit-drop
-// campaigns hide the surveyed row. A null/unknown type (older reports) shows all four.
+// campaigns hide the surveyed row. A null/unknown type (older reports) shows all four. not_target
+// (Not a target voter — survey campaigns only, off by default) sits beside its fellow "someone
+// answered, no survey" outcome, and deriveReportSections drops its row whenever the count is 0, so
+// a campaign that never used it — and every report already sent — reads exactly as before.
 export function contactOrderFor(type) {
-  if (type === 'survey') return ['surveyed', 'refused', 'not_home', 'no_soliciting', 'wrong_address'];
+  if (type === 'survey') return ['surveyed', 'refused', 'not_target', 'not_home', 'no_soliciting', 'wrong_address'];
   if (type === 'lit_drop') return ['lit_dropped', 'refused', 'not_home', 'no_soliciting', 'wrong_address'];
-  return ['surveyed', 'refused', 'not_home', 'no_soliciting', 'wrong_address', 'lit_dropped'];
+  return ['surveyed', 'refused', 'not_target', 'not_home', 'no_soliciting', 'wrong_address', 'lit_dropped'];
 }
 
 // Client-facing, plain-language labels for the voter-contact breakdown. Deliberately local to the
@@ -25,6 +28,7 @@ const CONTACT_LABELS = {
   not_home: "Didn't answer",
   wrong_address: 'Wrong address',
   no_soliciting: 'No-soliciting sign',
+  not_target: 'Not a target voter',
   lit_dropped: 'Lit dropped',
 };
 
@@ -38,6 +42,8 @@ const CONTACT_HELP = {
   not_home: 'Doors where no one answered.',
   wrong_address: 'Doors that turned out to be a wrong or bad address.',
   no_soliciting: 'Doors we reached where a posted no-soliciting sign ended the visit. Nobody answered, so these are not counted as reaching a person.',
+  not_target:
+    "Doors where someone answered, but it wasn't one of the voters on our list for that address and they didn't share their details. We reached a person there, just not a voter we could survey.",
   lit_dropped: 'Doors where we dropped literature.',
 };
 const KPI_HELP = {
@@ -140,7 +146,7 @@ export function deriveReportSections(report) {
     title: 'Voter contact breakdown',
     subtitle: 'Outcomes across all doors knocked',
     help: CONTACT_SECTION_HELP,
-    items: contactOrder.map((k) => ({
+    items: contactOrder.filter((k) => k !== 'not_target' || (contactRaw[k] || 0) > 0).map((k) => ({
       label: CONTACT_LABELS[k] || STATUS_LABELS[k] || k,
       count: contactRaw[k] || 0,
       color: STATUS_COLORS[k],

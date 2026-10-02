@@ -6,6 +6,11 @@ import Card from './ui/Card.jsx';
 const SEGMENTS = [
   { key: 'surveyed', label: 'Surveyed', color: 'bg-green-500' },
   { key: 'refused', label: 'Refused', color: 'bg-amber-500' },
+  // Off by default (an opt-in outcome): the full legend below hides it at 0, so a campaign that
+  // never turned it on — and the org-wide Overview, where there is no one campaign to ask — never
+  // shows the words. It must still be a SEGMENT: the total sums SEGMENTS only, so a missing key
+  // would drop these doors and inflate every other percentage.
+  { key: 'not_target', label: 'Not a target voter', color: 'bg-fuchsia-700' },
   { key: 'lit_dropped', label: 'Lit dropped', color: 'bg-purple-500' },
   { key: 'not_home', label: 'Not home', color: 'bg-blue-500' },
   { key: 'wrong_address', label: 'Wrong address', color: 'bg-red-500' },
@@ -73,7 +78,7 @@ export default function CoverageBar({ canvass = {}, compact = false }) {
         })}
       </div>
       <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-        {SEGMENTS.map((s) => {
+        {SEGMENTS.filter((s) => s.key !== 'not_target' || canvass[s.key]).map((s) => {
           const count = canvass[s.key] || 0;
           const pct = total ? (count / total) * 100 : 0;
           return (

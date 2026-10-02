@@ -537,3 +537,40 @@ test('revoke-legacy: admin confirm kills open links and leaves protected ones al
   const kept = await ReportShareLink.findById(ctx.share._id);
   assert.strictEqual(kept.isActive, true, 'a passworded, expiring link is not legacy and survives');
 });
+
+test('a Not a target voter door publishes its status — never the canvasser note beside it', { skip }, async () => {
+  // The door note may name the person who answered (owner ruling 2026-10-02: fine for the org and
+  // the client to know). It is still canvasser-typed text, and the public points carry none.
+  const NOTE = 'Spoke to Sam Q. Resident, not on the list';
+  const hh = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, isActive: true, status: 'not_target',
+    addressLine1: '77 Elm St', city: 'Tampa', state: 'FL', zipCode: '33601',
+    normalizedAddress: '77 ELM ST|TAMPA|FL|33601',
+    location: { type: 'Point', coordinates: [-82.4523, 27.95] },
+  });
+  const admin = await User.findOne({ email: 'ada@t.co' });
+  await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, householdId: hh._id,
+    userId: admin._id, actionType: 'not_target', note: NOTE,
+    location: { lat: 27.95, lng: -82.45 }, timestamp: new Date('2026-07-15T18:00:00Z'),
+  });
+
+  const draft = await ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    title: 'Week 4', status: 'draft',
+    weekStart: '2026-07-13', weekEnd: '2026-07-19', timeZone: 'America/Chicago',
+    rangeStartUtc: new Date('2026-07-13T05:00:00Z'), rangeEndUtc: new Date('2026-07-20T05:00:00Z'),
+    visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true },
+  });
+  const pub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  assert.strictEqual(pub.status, 200, JSON.stringify(pub.json));
+
+  const point = await ClientReportMapPoint.findOne({ clientReportId: draft._id, householdId: hh._id }).lean();
+  assert.ok(point, 'a reached door is drawn');
+  assert.strictEqual(point.status, 'not_target');
+  const dump = JSON.stringify(await ClientReportMapPoint.find({ clientReportId: draft._id }).lean());
+  assert.ok(!dump.includes('Sam Q.'), 'no canvasser text in the frozen points');
+
+  const published = await ClientReport.findById(draft._id).lean();
+  assert.ok(!JSON.stringify(published.stats).includes('Sam Q.'), 'nor in the frozen stats');
+});

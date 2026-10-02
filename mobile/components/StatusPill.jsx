@@ -8,19 +8,20 @@ export default function StatusPill({ status, compact = false }) {
   const { colors } = useTheme();
   const dotColor = colors.status[status] || colors.textMuted;
   const isDone = status === 'surveyed' || status === 'lit_dropped';
-  const isRefused = status === 'refused';
+  // Someone answered and there was no survey — Refused, or Not a target voter. Same warn tint.
+  const isAnswered = status === 'refused' || status === 'not_target';
   const isMiss = status === 'not_home' || status === 'wrong_address';
-  const bg = isDone ? colors.successBg : isRefused ? colors.warnBg : isMiss ? colors.dangerBg : colors.bg;
+  const bg = isDone ? colors.successBg : isAnswered ? colors.warnBg : isMiss ? colors.dangerBg : colors.bg;
   const border = isDone
     ? colors.successBorder
-    : isRefused
+    : isAnswered
     ? colors.warnBorder
     : isMiss
     ? colors.dangerBorder
     : colors.border;
   const textColor = isDone
     ? colors.success
-    : isRefused
+    : isAnswered
     ? colors.warnFg
     : isMiss
     ? colors.danger

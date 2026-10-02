@@ -52,6 +52,7 @@ const STATUS_LABEL = {
   refused: 'Refused',
   restricted: 'Restricted',
   no_soliciting: 'No soliciting',
+  not_target: 'Not a target voter',
   lit_dropped: 'Lit dropped',
 };
 
@@ -496,6 +497,7 @@ export default function AdminBookDetail() {
               'house-refused': require('../../../../assets/icons/house-refused.png'),
               'house-restricted': require('../../../../assets/icons/house-restricted.png'),
               'house-no_soliciting': require('../../../../assets/icons/house-no_soliciting.png'),
+              'house-not_target': require('../../../../assets/icons/house-not_target.png'),
               'house-lit_dropped': require('../../../../assets/icons/house-surveyed.png'),
             }}
           />
@@ -531,6 +533,7 @@ export default function AdminBookDetail() {
                   'refused', 'house-refused',
                   'restricted', 'house-restricted',
                   'no_soliciting', 'house-no_soliciting',
+                  'not_target', 'house-not_target',
                   'lit_dropped', 'house-lit_dropped',
                   'house-unknocked',
                 ],

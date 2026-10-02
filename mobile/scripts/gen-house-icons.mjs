@@ -1,6 +1,11 @@
 // Generates the colored house map-icon PNGs used by the mobile map.
 // Run with: node scripts/gen-house-icons.mjs (from mobile/).
 //
+// Pass status names to write ONLY those icons — `node scripts/gen-house-icons.mjs not_target`.
+// Prefer that whenever you add a status: a full run rewrites every PNG, and house-restricted.png
+// (committed from a separate recolor) regenerates ~98 bytes different, so a full run silently
+// restyles every restricted pin. Check `git status` shows only the file you meant to add.
+//
 // Output: mobile/assets/icons/house-{status}.png at 128x128 (2x density of 64x64).
 // Modern two-tone house: rounded body in the status color, slightly darker
 // roof, small white window + door, soft drop shadow. One pre-colored variant
@@ -24,6 +29,7 @@ const STATUS_COLORS = {
   refused: '#F59E0B',
   restricted: '#475569',
   no_soliciting: '#DB2777',
+  not_target: '#A21CAF',
 };
 
 function darken(hex, amount = 0.2) {
@@ -50,7 +56,15 @@ function houseSvg(color) {
 </svg>`;
 }
 
+const only = process.argv.slice(2);
+const unknown = only.filter((s) => !STATUS_COLORS[s]);
+if (unknown.length) {
+  console.error(`unknown status: ${unknown.join(', ')} (known: ${Object.keys(STATUS_COLORS).join(', ')})`);
+  process.exit(1);
+}
+
 for (const [status, color] of Object.entries(STATUS_COLORS)) {
+  if (only.length && !only.includes(status)) continue;
   const out = path.join(OUT_DIR, `house-${status}.png`);
   await sharp(Buffer.from(houseSvg(color)))
     .resize(128, 128)

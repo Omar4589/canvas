@@ -27,6 +27,7 @@ import InsetGroup, {
 import CreateCanvasserSheet from '../../../components/CreateCanvasserSheet';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import { useCampaignArchived } from '../../../lib/useCampaignArchived';
+import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
 import { radius, spacing } from '../../../lib/theme';
@@ -159,6 +160,8 @@ export default function AdminUsers() {
         return c ? { id: String(c._id), name: c.name, type: c.type } : null;
       })()
     : null;
+  // The member sheet's Not-a-target figure; the shaped selectedCampaign above doesn't carry it.
+  const notTargetInUse = useOutcomeInUse(cId);
   // Roster writes (add to campaign, assign all, coordinator changes) are refused on an archived
   // campaign by the server, so the affordances come off here.
   const { canWrite } = useCampaignArchived(cId);
@@ -504,6 +507,7 @@ export default function AdminUsers() {
                   user: { id: String(u.id), firstName: u.firstName, lastName: u.lastName, email: u.email, lastLoginAt: u.lastLoginAt },
                 }}
                 campaign={selectedCampaign}
+                notTargetInUse={notTargetInUse}
                 coordinators={coordinators}
                 viewerRole={viewerRole}
                 onClose={() => setSheetUserId(null)}

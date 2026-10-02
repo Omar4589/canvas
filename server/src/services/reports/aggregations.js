@@ -10,8 +10,18 @@ import mongoose from 'mongoose';
 // canvasser reached the door and a posted sign ended the visit, the same walk as any other
 // door — but it is NOT a contact, so it never enters the contactRate numerator below.
 // `restricted` is the only disposition that is a visit without being a knock (never reached
-// the door); it lives in BILLABLE_WITH_RESTRICTED instead.
-export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+// the door); it lives in BILLABLE_WITH_RESTRICTED instead. `not_target` (someone answered who is
+// not on the list and would not give a name) is a knock AND a contact — and never a connection.
+//
+// Hand copies that cannot import this (their own files say why) must carry every key too:
+// routes/mobile/me.js and routes/admin/memberships.js DOOR_ACTIONS, routes/superAdmin/platform.js
+// ACTION_DOOR, services/voters/voterProfile.js, and both clients' OVERLAP_KNOCK_ACTIONS.
+export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
+
+// Someone answered the door. Membership IS the definition of a contact: contactRate's numerator is
+// the doors (per round) where any row is one of these, counted ONCE — never a sum of per-outcome
+// counts, which double-counts a door where one canvasser surveyed and another was refused.
+export const CONTACT_ACTIONS = ['survey_submitted', 'refused', 'not_target'];
 
 // The wider set used ONLY for billable-DOOR counting when an org opts in
 // (Campaign/Organization.billRestrictedDoors — resolve via billRestricted.js). A restricted mark
@@ -215,6 +225,9 @@ export function knocksPipeline(
         hasLit: { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
         hasRefused: { $max: { $cond: [{ $eq: ['$actionType', 'refused'] }, 1, 0] } },
         hasNoSoliciting: { $max: { $cond: [{ $eq: ['$actionType', 'no_soliciting'] }, 1, 0] } },
+        hasNotTarget: { $max: { $cond: [{ $eq: ['$actionType', 'not_target'] }, 1, 0] } },
+        // The contact fold: ONE flag per (door, round), whatever mix of contact rows it holds.
+        hasContact: { $max: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
       },
     },
     {
@@ -234,6 +247,11 @@ export function knocksPipeline(
         // A knock, never a contact — reported so the invoice-grade export and the by-round
         // table can show it, but deliberately absent from contactRate below.
         noSolicitingKnocks: { $sum: '$hasNoSoliciting' },
+        notTargetKnocks: { $sum: '$hasNotTarget' },
+        // contactRate's numerator: doors where someone answered, each once. NOT the sum of
+        // surveyedKnocks + refusedKnocks + notTargetKnocks — those are independent flags, and a door
+        // one canvasser surveyed and another was refused at would count twice (a 200% rate).
+        contactKnocks: { $sum: '$hasContact' },
       },
     },
   ];
@@ -250,12 +268,21 @@ export function connectionRate({ knocks = 0, surveyedKnocks = 0, litKnocks = 0 }
 }
 
 // "Reached a person" / contact rate = of the knocks we made, how many reached a live person —
-// a completed survey OR a refusal (both mean someone answered the door). Always a subset of
-// knocks, so always <= 100. Distinct from connectionRate (survey/lit completions only): a
-// refused door is reached but not surveyed, so it lifts the contact rate without the survey rate.
-export function contactRate({ knocks = 0, surveyedKnocks = 0, refusedKnocks = 0 } = {}) {
+// any CONTACT_ACTIONS row: a completed survey, a refusal, or someone not on the list (all mean
+// someone answered the door). Distinct from connectionRate (survey/lit completions only): a
+// refused or not-target door is reached but not surveyed, so it lifts the contact rate without the
+// survey rate.
+//
+// `contactKnocks` counts each door once (knocksPipeline's hasContact fold, or a per-canvasser count
+// where one disposition per door-round makes a plain count exact), so the rate is always <= 100.
+// It is REQUIRED: a caller that never built it is a code bug, and failing loudly beats a plausible
+// wrong number. The Campaign.stats copies are the one place absence is data (until the one-time
+// recompute seeds contactKnockCount); they default with `|| 0` like their neighbours and never
+// reach the throw.
+export function contactRate({ knocks = 0, contactKnocks } = {}) {
   if (!knocks) return 0;
-  return Math.round(((surveyedKnocks + refusedKnocks) / knocks) * 100);
+  if (!Number.isFinite(contactKnocks)) throw new TypeError('contactRate: contactKnocks is required');
+  return Math.round((contactKnocks / knocks) * 100);
 }
 
 // Coverage-funnel bucket. Doors that are suppressed AND otherwise unknocked are pulled out of

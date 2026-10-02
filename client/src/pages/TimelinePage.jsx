@@ -17,6 +17,7 @@ import TimelineGrid from '../components/TimelineGrid.jsx';
 import TimelineOverlaps from '../components/TimelineOverlaps.jsx';
 import TeamBreakdown from '../components/TeamBreakdown.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
@@ -547,6 +548,7 @@ export default function TimelinePage() {
                 tz={tz}
                 singleDay={isSingleDay}
                 litMode={current?.type === 'lit_drop'}
+                notTargetInUse={outcomeInUse(current, 'not_target')}
               />
               {allTime && (
                 <p className="text-sm text-fg-muted">

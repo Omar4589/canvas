@@ -21,6 +21,8 @@ const FIELD_LABELS = {
   type: 'Campaign type',
   state: 'State',
   disabledOutcomes: 'Door outcomes',
+  enabledOutcomes: 'Off-by-default outcomes',
+  doorAddPolicy: 'Adding people at the door',
   outcomeReclassify: 'Reclassified entries',
 };
 
@@ -50,6 +52,13 @@ export function formatValue(field, value) {
     if (!value) return 'all on';
     return `${String(value).split(',').map((k) => ACTION_LABELS[k] || k).join(', ')} off`;
   }
+  // The opt-in class: null means nothing extra is on (every campaign is born that way).
+  if (field === 'enabledOutcomes') {
+    if (!value) return 'none';
+    return String(value).split(',').map((k) => ACTION_LABELS[k] || k).join(', ');
+  }
+  // 'all' is the schema default, so anything but 'leads' reads as it.
+  if (field === 'doorAddPolicy') return value === 'leads' ? 'Team leads & admins only' : 'Everyone on the campaign';
   // Not a schema path: the outcome-reclassification tool writes the two outcome KEYS it folded
   // together, so the row reads "No soliciting → Not home" (and the reverse on a revert).
   if (field === 'outcomeReclassify') return ACTION_LABELS[value] || String(value ?? '');
@@ -66,13 +75,14 @@ export function formatValue(field, value) {
 }
 
 // Which changes deserve to catch the eye. Deliberately short: if everything is highlighted,
-// nothing is. A door goal moving DOWN, the invoice policy changing, and an outcome being
-// switched off are the edits someone might want to explain later — the rest are ordinary
-// campaign upkeep.
+// nothing is. A door goal moving DOWN, the invoice policy changing, an outcome being switched
+// off, and an off-by-default outcome being switched on or off are the edits someone might want
+// to explain later — the rest are ordinary campaign upkeep.
 export function isNotable(item) {
   if (item.kind === 'team') return !!item.restampError;
   if (item.field === 'billRestrictedDoors') return true;
   if (item.field === 'disabledOutcomes') return true;
+  if (item.field === 'enabledOutcomes') return true;
   // Rewriting recorded history always deserves the eye, in either direction.
   if (item.field === 'outcomeReclassify') return true;
   if (item.field === 'doorGoal') {
