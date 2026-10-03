@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -119,6 +120,12 @@ test('ever-enabled and in-use: once on, always in use — never because of the r
   for (const m of [server, web, mobile]) {
     assert.strictEqual(m.outcomeInUse(survey(), 'not_target'), false);
     assert.strictEqual(m.outcomeInUse(survey({ everEnabledOutcomes: ['not_target'] }), 'not_target'), true);
+    // Survey campaigns only: switched to lit drop before canvassing, a campaign keeps its record but
+    // can never record the outcome — so no column, chip or note may name it there.
+    const flipped = { ...survey({ everEnabledOutcomes: ['not_target'] }), type: 'lit_drop' };
+    assert.strictEqual(m.outcomeInUse(flipped, 'not_target'), false, 'a lit-drop campaign never uses it');
+    assert.strictEqual(m.outcomeInUse({ ...flipped, enabledOutcomes: ['not_target'] }, 'not_target'), false);
+    assert.strictEqual(m.outcomeInUse({ type: 'lit_drop' }, 'refused'), true, 'a toggleable outcome is unaffected');
   }
 });
 
@@ -160,6 +167,27 @@ test('the door-config stamp is stable, order-blind, and moves on every setting a
   assert.notStrictEqual(stamp, server.doorConfigStamp({ ...base, disabledOutcomes: [] }, RELEASED));
   assert.notStrictEqual(stamp, server.doorConfigStamp({ ...base, doorAddPolicy: 'all' }, RELEASED));
   assert.strictEqual(server.doorConfigStamp({ type: 'survey' }, RELEASED), '||all', 'a legacy doc has a stamp too');
-  // It contains '|' — the client MUST encode it (a raw '|' breaks every poll on iOS 15/16).
-  assert.strictEqual(decodeURIComponent(encodeURIComponent(stamp)), stamp);
+  // It contains '|' and ',' — why the client MUST encode it (a raw '|' breaks every poll on iOS 15/16).
+  // The encoding itself is guarded by changesPath's tests in mobile/lib/deltaFold.test.js.
+  assert.ok(stamp.includes('|'), `no '|' in ${stamp}`);
+  assert.ok(stamp.includes(','), `no ',' in ${stamp}`);
+});
+
+// …and the encoding itself, guarded HERE because CI runs this suite and never test:mobile: the
+// phone's own path builder (mobile/lib/deltaFold.js changesPath, plain ESM like the copies above) fed
+// the server's real stamp, and a read of the map screen — which node cannot load — proving it builds
+// the /changes URL through that builder and nothing else (the locationGate.test.js text-check pattern).
+test('the phone sends the door-config stamp percent-encoded, through its one path builder', async () => {
+  const { changesPath } = await import(path.resolve(here, '../../mobile/lib/deltaFold.js'));
+  const stamp = server.doorConfigStamp(
+    survey({ disabledOutcomes: ['restricted', 'refused'], enabledOutcomes: ['not_target'], doorAddPolicy: 'leads' }),
+    RELEASED
+  );
+  const url = changesPath({ campaignId: 'c1', since: '2026-10-02T15:00:00.000Z', doorConfigStamp: stamp });
+  const query = url.slice(url.indexOf('?') + 1);
+  assert.ok(!/[|,]/.test(query), `a raw '|' or ',' on the wire: ${url}`);
+  assert.strictEqual(new URLSearchParams(query).get('doorConfigStamp'), stamp, 'and it decodes back exactly');
+  const screen = fs.readFileSync(path.resolve(here, '../../mobile/app/(app)/map.jsx'), 'utf8');
+  assert.match(screen, /api\(changesPath\(\{/, 'map.jsx polls /changes through changesPath');
+  assert.ok(!screen.includes('/mobile/changes?'), 'map.jsx never hand-builds a /changes URL');
 });

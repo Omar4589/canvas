@@ -6,12 +6,13 @@ kind: faq
 order: 48
 sourceDoc: EXPORTS.md
 summary: Yes — tick One row per voter at the door when you queue it, and every not-home (or refused, lit drop…) repeats once per registered voter at that address; the file is renamed so its rows are never counted as knocks.
-tags: export, csv, activity, not home, voters, rows, download
+tags: export, csv, activity, not home, voters, rows, download, not a target voter
 ---
 
 Yes. By default the **Canvassing activity** export is one row per door event, and a knock that
 named nobody — *not home*, *refused*, *wrong address*, *lit dropped*, *no soliciting*,
-*restricted* — comes out as one row with the voter columns blank, because nobody was picked.
+*restricted*, and *not a target voter* on campaigns that use it — comes out as one row with the
+voter columns blank, because nobody was picked.
 Press **Queue export** and, in the dialog that opens, tick **One row per voter at the door** (on
 the phone: the **Rows** switch on the sheet) — each of those knocks then repeats once per voter
 registered at that address — same outcome, time, canvasser, GPS and note on every row, with that voter's State
@@ -22,9 +23,7 @@ matching every household member touched by a not-home — not for counting.
 
 Two things to keep straight:
 
-- **Repeated, not attributed.** A *refused* on three rows means someone at that address
-  declined, not that each of the three did; *no soliciting* is a sign on the property. Neither
-  is a do-not-contact request.
+- **Repeated, not attributed.** A *refused* on three rows means someone at that address declined, not that each of the three did; *not a target voter* on three rows means whoever answered wasn't one of the voters on your list for that address, so it describes none of the three; *no soliciting* is a sign on the property. None of these is a do-not-contact request.
 - **Rows are not knocks.** The columns are identical but the row count isn't, so the file is
   named **activity-log-by-voter** — never use it for an invoice — an admin can pull the
   per-round knock totals for that. Every row of one knock shares the same

@@ -1371,13 +1371,6 @@ export default function TurfsPage() {
   const orgTz = useOrgTimeZone();
   const { campaignId } = useParams();
   const { selected } = useCampaignSelection(campaignId);
-  // The Target / Exclude status lists. Not a target voter is offered only on a campaign that has
-  // used it — a customer who never turns it on never sees the words. Labels come from the shared
-  // STATUS_LABELS ("not_target".replace would read "not target").
-  const cutStatuses = [
-    'unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address',
-    ...(outcomeInUse(selected, 'not_target') ? ['not_target'] : []),
-  ];
   // Turf snapshots belong to the selected campaign → show times in its tz (fallback org).
   const tz = selected?.timeZone || orgTz;
   // Basemap style picker (Street/Hybrid/Satellite/Outdoors/Dark), independent of the
@@ -1413,6 +1406,15 @@ export default function TurfsPage() {
   // even when they match the target above (e.g. supporters who already took a yard
   // sign). null until the Exclude panel adds something.
   const [targetFilter, setTargetFilter] = useState({ priorPassStatuses: [], answerFilters: [], combine: 'or', exclude: null });
+  // The Target / Exclude status lists. Not a target voter is offered only on a campaign that has
+  // used it — a customer who never turns it on never sees the words — or while it is ticked: the
+  // filter survives a campaign switch, and a hidden tick could never be unticked. Labels come from
+  // the shared STATUS_LABELS ("not_target".replace would read "not target").
+  const notTargetTicked = [...targetFilter.priorPassStatuses, ...(targetFilter.exclude?.priorPassStatuses || [])].includes('not_target');
+  const cutStatuses = [
+    'unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'lit_dropped', 'wrong_address',
+    ...(outcomeInUse(selected, 'not_target') || notTargetTicked ? ['not_target'] : []),
+  ];
   const [showTarget, setShowTarget] = useState(false);
   const [showExclude, setShowExclude] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(new Set());

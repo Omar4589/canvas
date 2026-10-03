@@ -14,12 +14,13 @@ Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a "pass"/round is the billing
 passes), [EFFORTS.md](EFFORTS.md) (reports can be scoped to one effort via `effortId`; "All efforts" =
 the whole-campaign totals below), [SURVEYS.md](SURVEYS.md) (what "Surveys" / "Surveyed voters" count),
 [DATE_FILTERS.md](DATE_FILTERS.md) (the date-range control that scopes these numbers — presets,
-
 defaults, and boundary math), [EXPORTS.md](EXPORTS.md) (the export files carry these same three
 survey units and the Σ-rounds invariant — plus three counts that exist only in a file and reconcile
 with nothing on this page: **Results by voter**'s per-person *Surveys taken*, its *Address visits* /
 *Rounds worked*, and the activity log's survey-source rows), [TIMEZONES.md](TIMEZONES.md) (these counts are windowed and bucketed in
-the campaign's timezone — what "a day" means here).
+the campaign's timezone — what "a day" means here),
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (why **Not a target voter** exists,
+the owner's rulings behind how it counts, and the Contact % double count fixed with it).
 
 ---
 
@@ -47,7 +48,10 @@ They can disagree (Knocks can exceed Houses once you do a second pass) — that'
 > **Door-outcome toggles don't touch any number here.** A campaign can turn individual outcome
 > buttons off in the field app ([CAMPAIGNS.md](CAMPAIGNS.md) → Door outcomes) — that's a
 > *recording* policy. Every definition below keys off recorded rows, so doors recorded before a
-> toggle flip keep counting in every metric, rate, export, and invoice, forever.
+> toggle flip keep counting in every metric, rate, export, and invoice, forever. The same goes for
+> **Not a target voter**, the one outcome that starts *off* until an org admin turns it on: turning
+> it on or off — or Doorline pausing it everywhere — changes which buttons phones show, never how a
+> door already recorded counts.
 
 ### Houses knocked
 Distinct households that have been knocked at least once — **status outside
@@ -202,20 +206,39 @@ Two things to hold onto:
 
 Refused doors live in their own metric, `refusedKnocks` — the count of knocks (house-passes) whose
 outcome was Refused. It's a **subset of Knocks**. Refused is a survey-campaign concept; lit-drop
-campaigns don't surface it (`refusedKnocks` stays 0).
+campaigns don't surface it (`refusedKnocks` stays 0). Its twin, for someone who *isn't* one of the
+voters on the list, is **Not a target voter** (below).
 
 ### Reached a person  *(contact rate — survey campaigns only)*
-**(Surveyed knocks + Refused knocks) ÷ Knocks × 100.** Of the knocks we made, how many reached a
-**live person at the door** — whether or not they took the survey. This is a *new, separate* metric;
-it answers "how often did someone actually answer?" rather than "how often did we land a survey?"
-Field: `contactRate`. Because both pieces of the numerator are subsets of Knocks, it's always
+**Doors where someone answered ÷ Knocks × 100, each door counted once per round.** Of the knocks we
+made, how many reached a **live person at the door** — whether or not they took the survey.
+"Someone answered" means a completed survey, a refusal, or — on campaigns that use it — **Not a
+target voter**. It answers "how often did someone actually answer?" rather than "how often did we
+land a survey?" Field: `contactRate`. Every door it counts is also one of the Knocks, so it's always
 ≤ 100%.
 
+**Each door counts once per round, however many canvassers reached someone there** (corrected
+2026-10-02). The rate used to add *surveyed doors* and *refused doors* as two separate counts, so
+when one canvasser surveyed a voter and another recorded Refused at the **same door in the same
+round**, that door counted twice — a campaign with only that one door read **200%**, breaking the
+promise above. Now "someone answered" is one yes-or-no per door per round. What that changes:
+
+- **One canvasser's Contact % doesn't move.** A canvasser keeps one result per door per round, so
+  their own number was never double-counted.
+- **Campaign, team and per-round contact rates can only go down, and only where two canvassers
+  worked the same door in the same round.** No dashboard shows a campaign, team or per-round contact
+  rate. Where the corrected number does appear is the **Contact rate %** column of the per-round
+  invoice files (*knocks by pass* and the Export Center's *knocks by round*) and the Door Outcomes
+  price previews — so a per-round file downloaded again can read lower than a copy sent to a client
+  before the fix, on any campaign where canvassers overlapped, whether or not it ever used Not a
+  target voter.
+
 > **The Connection / Survey rate is UNCHANGED.** Connection rate is still *surveyed knocks ÷ knocks*
-> — refused doors are **not** in its numerator. A refusal lowers the Connection rate only the way any
-> other unsurveyed knock does (it's a knock with no survey). Reached-a-person rate will therefore sit
-> **at or above** the Connection rate by exactly the refused share. Two questions, two numbers: "did we
-> reach anyone?" (contact rate) vs. "did we land a survey?" (connection rate).
+> — refused and Not-a-target doors are **not** in its numerator. Each lowers the Connection rate only
+> the way any other unsurveyed knock does (it's a knock with no survey). Reached-a-person rate will
+> therefore sit **at or above** the Connection rate, by exactly the share of knocks where someone
+> answered and nobody was surveyed. Two questions, two numbers: "did we reach anyone?" (contact rate)
+> vs. "did we land a survey?" (connection rate).
 
 ### Restricted access  *(all campaign types)*
 A home a canvasser **physically can't reach** — a gated community, a locked building, no legal access.
@@ -296,9 +319,74 @@ two canvassers dispositioned differently appears in both buckets. The coverage s
 exclusion instead read the door's **resolved status**, which is one bucket per door. Don't reconcile
 one against the other; only the coverage segments are guaranteed to partition.
 
+### Not a target voter  *(survey campaigns that turn it on)*
+A door where **someone answered who isn't one of the voters on the list for that address, and won't
+give their name** — so the canvasser can't add them as a new person and survey them. Colored
+**fuchsia (`#A21CAF`)** on every screen. It exists on **survey campaigns only** and is **off on every
+campaign until an org admin turns it on** ([CAMPAIGNS.md](CAMPAIGNS.md) → *Off until you turn it
+on*), because nothing about it can be checked — no name is taken. Why it exists, and the owner's rulings behind
+every choice below: [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md).
+
+It counts **exactly like Refused** — the only difference is *who* answered:
+
+- It **is a knock.** It counts toward **Knocks**, **Houses knocked**, **billable doors** and the
+  doors/hour numerator: the canvasser walked to the door and talked to someone.
+- It **is a contact.** Someone answered, so it is in the **Reached a person** (contact rate)
+  numerator — once per door per round, like every contact.
+- It is **never a survey, so never a connection.** No answers are taken, so it never counts toward
+  Surveys, Voters surveyed or the Connection rate's numerator. It sits only in the Connection rate's
+  *bottom* number, which leaves the Connection rate exactly where tapping Not home or Refused at that
+  door would have left it. The one design that would have moved it — making it "not a knock" — was
+  rejected because it pushes the Connection rate **up**, the very lever someone misusing the button
+  would want.
+- It gets its **own coverage segment** (fuchsia), on the "knocked" side of the bar.
+
+Within a round the latest result wins, as for every outcome, and a survey wins over it: if anyone
+surveys someone at that door in the same round, the door reads Surveyed. The next round knocks it
+again, like Refused.
+
+**Four outcomes that look alike, side by side:**
+
+| Outcome | Who answered | Knock (billable) | Contact (reached a person) | Survey / connection |
+|---|---|---|---|---|
+| **Refused** | a voter on the list, who declined | yes | yes | no |
+| **Not a target voter** | someone not on the list, who wouldn't give a name | yes | yes | no |
+| **No soliciting** | nobody — a posted sign ended the visit | yes | no | no |
+| **Restricted access** | nobody — the door couldn't be reached | no | no | no |
+
+**Watching it.** Nothing can prove the conversation happened, so the numbers make it easy to look.
+On campaigns that use it, the canvasser tables on Home and Timeline gain a **Not target** column —
+each person's count and the share of their doors — and the same figure appears on the Team page's
+member panel and the phone's canvasser screens, so one person at 30% while the crew sits near 8%
+stands out. There is deliberately **no automatic flag**: a stale voter file produces an honestly high
+share, and a flag that accuses an honest canvasser is worse than one that misses a cheat. Every tap
+is GPS-stamped like any door result, so the GPS audit covers it, and overlap detection sees it (it is
+a knock).
+
+**Where it hasn't been used, it stays out of sight.** Every tile, column and chip for it appears only
+on a survey campaign that has had it on at some point (a filter for it that you ticked on another
+campaign stays on screen on the maps, Turf Cutting and Saved Searches until you clear it), and the
+coverage legends list it only when there is at least one. The explanation behind **Contact %**
+follows the same rule, so it comes in two
+versions: a campaign that uses the outcome gets the one that adds Not a target voter (on the Contact %
+column of the web canvasser tables on Home and Timeline, and in the phone campaign screen's
+explanation of its Top canvassers columns), and every other campaign gets the plain one, "a completed
+survey or a refusal", which never names it. The client report's **Voter contact breakdown** gains a
+**Not a target voter** row only when the report has at least one such door — and the breakdown still
+adds up to Doors knocked ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)). The per-round invoice files gain a
+**Not a target** column only for a survey campaign that has had it on. The one exception is the canvasser
+leaderboard CSV, whose **Not a target** column is there for every org (0 where it's unused) so that
+file keeps one shape ([EXPORTS.md](EXPORTS.md)).
+
+**Two units, as for No soliciting.** Its per-outcome count counts doors where **any** canvasser
+recorded it in that round, so a door one canvasser marked Not a target voter and another Refused sits
+in both counts. The coverage bar (one bucket per household) and the client breakdown (one outcome per
+door per round) each resolve the door to a single outcome instead. The per-outcome counts don't
+partition anything; those two do.
+
 ### Coverage funnel (the colored bar)
 Each household sits in exactly one bucket — `surveyed`, `lit_dropped`, `refused`, `restricted`,
-`no_soliciting`, `not_home`, `wrong_address`, `voted`, `dnc`, `doNotKnock`, or `unknocked` — so the bar sums to the total number
+`no_soliciting`, `not_target`, `not_home`, `wrong_address`, `voted`, `dnc`, `doNotKnock`, or `unknocked` — so the bar sums to the total number
 of households. `unknocked` = houses not yet knocked at all; `restricted` = homes a canvasser
 couldn't physically reach (its own segment — counted in the household total but not among the
 "knocked"); `voted` = early-voting doors that dropped off the canvasser's list (pulled out of
@@ -384,6 +472,18 @@ book — or a single home — restricted from Turf Cutting, the Map page or the 
 work, not a walk, so it never becomes a billable door; and a door that was restricted by one canvasser
 and knocked by another is **one** door, counted as a knock.
 
+**Now add Not a target voter** (a campaign that uses it). Suppose 5 of those 62 not-home knocks were
+really a conversation with someone who isn't on the list and wouldn't give a name, recorded as Not a
+target voter. Knocks stay **140**, and the door-outcome breakdown still sums to them: 70 surveyed /
+8 refused / 5 not a target / 57 not-home. The Connection rate stays **50%** — exactly what Not home
+gave those doors — while Reached a person rises to (70 + 8 + 5) ÷ 140 = **59%**.
+
+**And two canvassers at one door in one round.** Say one canvasser surveys a voter and a teammate,
+not knowing, records Refused at the same door in the same round. That door is **1 knock** (the
+overlap warning flags it; it is never billed twice), it reads **Surveyed** (a survey wins), and it is
+**1** door where someone answered — not 2. Before 2026-10-02 the contact rate added the surveyed and
+refused counts separately and counted that door twice; a campaign with only that door read 200%.
+
 None of this changes what **Doorline** charges you — that's a flat rate per active campaign per month
 and never reads door counts at all ([BILLING.md](BILLING.md)).
 
@@ -394,7 +494,8 @@ per **walk list × pass** (Pass 1, Pass 2, …), over the same date range as the
 above it. Each row shows that pass's **Knocks**, **Survey doors** (**Lit drops** on a lit-drop
 campaign), **Surveys taken** (survey campaigns only — the response unit, so it can exceed the
 door count wherever a house held several voters), **Conn %**, and **New homes reached**, with a
-**TOTAL** row underneath. The same
+**TOTAL** row underneath. On a campaign that uses **Not a target voter**, a **Not a target** column
+sits before Conn % (and each row of the mobile card adds "N not target"). The same
 per-pass numbers appear on each walk list's Passes panel, and the mobile admin campaign screen has
 a matching **By pass** card. Knocks recorded before passes existed show as one **"Legacy / no
 pass"** row, listed last.
@@ -410,14 +511,18 @@ date range set, the window applies to *when that first knock happened*.)
 
 **The export.** The section's **Export CSV** button downloads the same table — one row per walk
 list × round plus the TOTAL row — ready to check against an invoice, since billing is per knock
-(see [BILLING.md](BILLING.md)). The endpoint can also break the rounds down **per canvasser**
+(see [BILLING.md](BILLING.md)). The file carries more columns than the screen — Refused, No
+soliciting and **Contact rate %** among them. That Contact rate % counts each door once per round
+(see *Reached a person* above), and a **Not a target** column, right after No soliciting, appears
+only for a survey campaign that has had that outcome on — every other campaign's file keeps its
+exact columns. The endpoint can also break the rounds down **per canvasser**
 (who did the work in each round) — see Part 2 §E.
 
 ## Date range vs. all-time
 
 - **Honors the date filter:** Knocks, Survey doors, Surveys taken, Voters surveyed, Connection
-  rate, Active canvassers. (Knocks/lit range on the knock timestamp; surveys range on submission
-  time.)
+  rate, Active canvassers, and Not a target where a campaign shows it. (Knocks/lit range on the
+  knock timestamp; surveys range on submission time.)
 - **Always all-time / current-state:** Households, Houses knocked, and the coverage funnel.
 
 On a campaign page, the **Activity** section is the selected range; the **Coverage** section is
@@ -455,6 +560,9 @@ map/panel; if you want to reconcile a specific day's or week's numbers, use the 
 - A canvasser has **at most one knock record per (house, pass)**, so a single canvasser's
   **Knocks** is exactly their distinct house-passes.
 - Their **Connection rate** = their surveyed knocks ÷ their knocks (≤ 100%).
+- Their **Contact %** = the doors where they reached someone ÷ their knocks. Because they keep one
+  result per door per round, this was never double-counted, and the once-per-door fix (see *Reached
+  a person*) leaves it exactly as it was.
 - The org **Knocks** is **less than or equal to** the sum of every canvasser's knocks: when two
   canvassers overlap on the same house-pass, each gets personal credit for the knock they made,
   but the org counts that house-pass once (we don't bill the client for the overlap).
@@ -475,8 +583,9 @@ status. The reporting reads these fields:
 
 | Model | File | Fields that matter for metrics |
 |---|---|---|
-| `CanvassActivity` | [models/CanvassActivity.js](../server/src/models/CanvassActivity.js) | `householdId`, `userId`, `actionType` (`not_home`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`survey_submitted`/`lit_dropped`/`note_added`), `passId` (nullable), `campaignId`, `organizationId`, `timestamp` |
-| `Household` | [models/Household.js](../server/src/models/Household.js) | `status` (`unknocked`/`not_home`/`surveyed`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`lit_dropped`), `isActive`, `campaignId`, `lastActionAt`, `lastActionBy` |
+| `CanvassActivity` | [models/CanvassActivity.js](../server/src/models/CanvassActivity.js) | `householdId`, `userId`, `actionType` (`not_home`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`not_target`/`survey_submitted`/`lit_dropped`/`note_added`), `passId` (nullable), `campaignId`, `organizationId`, `timestamp` |
+| `Household` | [models/Household.js](../server/src/models/Household.js) | `status` (`unknocked`/`not_home`/`surveyed`/`wrong_address`/`refused`/`restricted`/`no_soliciting`/`not_target`/`lit_dropped`), `isActive`, `campaignId`, `lastActionAt`, `lastActionBy` |
+| `Campaign` | [models/Campaign.js](../server/src/models/Campaign.js) | `stats` (the maintained all-time counters — §H); `enabledOutcomes` / `everEnabledOutcomes` (the off-by-default outcome allow-list and its only-grows history). **No count reads the outcome fields** — on the reporting side they decide only whether a conditional column, tile or chip is drawn and whether copy names the outcome (which of the two Contact % explanations is shown, the Export Center's descriptions and hints, the full-backup notes), via `outcomeInUse` (= ever enabled, and never on a lit-drop campaign) in [services/canvass/outcomeToggles.js](../server/src/services/canvass/outcomeToggles.js) and its client mirrors; what they gate at recording time is [CAMPAIGNS.md](CAMPAIGNS.md)'s |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `voterId`, `householdId`, `userId`, `passId`, `campaignId`, `submittedAt` (one per voter **per pass**) |
 | `Pass` | [models/Pass.js](../server/src/models/Pass.js) | `effortId` (the walk list the round belongs to), `roundNumber` (ordered **per walk list** — unique on `{effortId, roundNumber}`, so numbering restarts in every walk list and "Pass 1" alone is ambiguous once a campaign has 2+ lists), `name`, `status`, `activatedAt` |
 | `Voter` | [models/Voter.js](../server/src/models/Voter.js) | `surveyStatus` (`not_surveyed`/`surveyed`), `householdId` (required → voters are campaign-disjoint) |
@@ -484,7 +593,7 @@ status. The reporting reads these fields:
 **The core invariant (write path).** In [`routes/mobile/canvass.js`](../server/src/routes/mobile/canvass.js),
 every knock submission first runs
 `CanvassActivity.deleteMany({ userId, householdId, passId, actionType ∈ REPLACEABLE_ACTIONS })`
-before inserting the new one (`REPLACEABLE_ACTIONS` = the six knock types **plus `restricted`** — so a
+before inserting the new one (`REPLACEABLE_ACTIONS` = the seven knock types **plus `restricted`** — so a
 mistaken restricted mark is superseded by any later disposition on the same door/pass, and vice-versa). Therefore:
 
 > **At most ONE `CanvassActivity` (knock) exists per `(userId, householdId, passId)`.**
@@ -495,21 +604,28 @@ household-scoped dedup, so a multi-voter house still yields exactly one `survey_
 activity per (user, house, pass) — even though it produces multiple `SurveyResponse` rows.
 
 `KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped',
-'no_soliciting']` ([services/reports/aggregations.js](../server/src/services/reports/aggregations.js)).
-`refused` and `no_soliciting` are knocks like the others (billable door interactions — in both cases
-the canvasser reached the door). Two actions are deliberately **excluded**: `note_added` (a note can be
-left without a visit decision) and **`restricted`** (an inaccessible-home *marker* — no door
-interaction happened, so it is never a knock and never enters any rate).
+'no_soliciting', 'not_target']` ([services/reports/aggregations.js](../server/src/services/reports/aggregations.js)).
+`refused`, `no_soliciting` and `not_target` are knocks like the others (billable door interactions —
+in all three cases the canvasser reached the door). Two actions are deliberately **excluded**:
+`note_added` (a note can be left without a visit decision) and **`restricted`** (an inaccessible-home
+*marker* — no door interaction happened, so it is never a knock and never enters any rate). A few
+files cannot import the constant and keep hand copies, named in the comment above it; a new knock
+outcome must be added to every one, or that surface silently stops counting the door.
 
-**The three-way distinction, since two of these look alike:** `refused` reached the door AND a person
-(a contact); `no_soliciting` reached the door but no person (a knock, never a contact);
-`restricted` reached neither (not even a knock). `contactRate`'s numerator is therefore
-`surveyed + refused` and nothing else.
+`CONTACT_ACTIONS = ['survey_submitted', 'refused', 'not_target']` (same file) — *someone answered the
+door*. Membership **is** the definition of a contact: `contactRate`'s numerator is the doors, per
+round, holding any of these rows, each counted once (`contactKnocks`, §C) — never a sum of the
+per-outcome counts.
+
+**The four-way distinction, since these look alike:** `refused` reached the door AND a voter on the
+list, who declined (a contact); `not_target` reached the door AND a person who isn't on the list and
+wouldn't give a name (a contact — never a survey, so never a connection); `no_soliciting` reached the
+door but no person (a knock, never a contact); `restricted` reached neither (not even a knock).
 
 The non-completion status precedence (`ACTION_TO_STATUS` / `statusPrecedence` in
-[utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)) maps `refused`, `no_soliciting`
-and `restricted` to same-named statuses, resolved last-write-wins — so a later mark can overwrite an
-earlier not-home on the same house-pass, but a survey still wins over any of them.
+[utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)) maps `refused`, `no_soliciting`,
+`not_target` and `restricted` to same-named statuses, resolved last-write-wins — so a later mark can
+overwrite an earlier not-home on the same house-pass, but a survey still wins over any of them.
 
 ## B. Field dictionary
 
@@ -518,12 +634,15 @@ earlier not-home on the same house-pass, but a survey still wins over any of the
 | `knocks` | Billable knocks: distinct `(household, passId)` | `knocksPipeline` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | `timestamp` |
 | `surveyedKnocks` | Knocks (house-passes) with ≥1 `survey_submitted` | `$max` flag in `knocksPipeline` | `/overview`, `/campaign-rollup` | `timestamp` |
 | `litKnocks` | Knocks with ≥1 `lit_dropped` | `$max` flag in `knocksPipeline` | `/overview`, `/campaign-rollup` | `timestamp` |
-| `refusedKnocks` | Knocks (house-passes) whose outcome was `refused` — a billable contact, **not** a survey. Subset of `knocks` (survey campaigns only; 0 on lit) | `$max` flag (`hasRefused`) in `knocksPipeline` | `/overview`, `/campaign-rollup` (on `/canvassers` the per-canvasser count is the bare `refused` column, which feeds that row's `contactRate`) | `timestamp` |
+| `refusedKnocks` | Knocks (house-passes) whose outcome was `refused` — a billable contact, **not** a survey. Subset of `knocks` (survey campaigns only; 0 on lit) | `$max` flag (`hasRefused`) in `knocksPipeline` | `/overview`, `/campaign-rollup`, `/knocks-by-pass`, `GET /admin/campaigns/:id/passes` rows (on `/canvassers` the per-canvasser count is the bare `refused` column, which feeds that row's `contactRate`) | `timestamp` |
+| `noSolicitingKnocks` | Knocks (house-passes) where any canvasser recorded `no_soliciting` — a knock, **never** a contact. Subset of `knocks`. Per canvasser it is the bare `noSoliciting` (`dayNoSoliciting` on the timeline) | `$max` flag (`hasNoSoliciting`) in `knocksPipeline` | `/knocks-by-pass` rounds, totals and `byCanvasser` (+ the **No soliciting** column of `.csv` and the Export Center file) — **not** on `/overview` or `/campaign-rollup` | `timestamp` |
+| `notTargetKnocks` | Knocks (house-passes) where any canvasser recorded `not_target` (**Not a target voter**) — a knock **and** a contact, **never** a survey. Subset of `knocks`; 0 on lit-drop campaigns and on any campaign that never turned the outcome on. Per canvasser it is the bare `notTarget` (`dayNotTarget` on the timeline, `kpi.notTarget` on the summary) | `$max` flag (`hasNotTarget`) in `knocksPipeline`; `Campaign.stats.notTargetKnockCount` on the counter path (§H) | `/overview` totals, `/campaign-rollup` rows + cumulative, `/knocks-by-pass` rounds/totals/`byCanvasser`, `GET /admin/campaigns/:id/passes` rows, client-report totals (frozen) | `timestamp` |
+| `contactKnocks` | `contactRate`'s numerator: house-passes holding ≥1 `CONTACT_ACTIONS` row (a survey, a refusal, a not-target), **each counted once** however many canvassers recorded a contact there. Subset of `knocks`. **Never** `surveyedKnocks + refusedKnocks + notTargetKnocks` — those are independent flags, and their sum counts an overlapped door twice | `$max` fold (`hasContact`) in `knocksPipeline`; `Campaign.stats.contactKnockCount` on the counter path (§H) | `/overview` totals, `/campaign-rollup` rows + cumulative, `/knocks-by-pass` rounds/totals/`byCanvasser`. `/canvassers`, `/canvasser-timeline` and `/canvassers/:id/summary` count it internally and ship only the rate | `timestamp` |
 | `restricted` | Per-canvasser tally of `restricted` (inaccessible-home) marks — **not** a knock, **never** in `knocks`/`homesKnocked`/any rate; its own coverage segment. All campaign types | count of that user's `restricted` activities | `/canvassers`, `/canvasser-timeline` (`dayRestricted`); coverage `canvass`/`events` on `/overview` · `/campaign-rollup` | `timestamp` |
 | `restrictedDoors` | Distinct `(household, passId)` doors whose ONLY disposition is a **field** `restricted` mark (`via ≠ 'bulk'` — desk marks, whole-book or single-home, never count). Disjoint from `knocks` by construction (a door with any knock is a knock). Reported **always**, billed or not, so the UI can offer the opt-in | `restrictedDoors` in `knocksPipeline` (`includeRestricted`) | `/overview`, `/campaign-rollup`, `/knocks-by-pass`, `/canvasser-timeline`, statement lines | `timestamp` |
 | `billableDoors` | The org's own invoice figure: `knocks` + (`restrictedDoors` **iff** this campaign bills them). `=== knocks` when the opt-in is off, which is the default. **Never** a rate denominator | `billableDoorsOf(row, billRestricted)` (§C) over `knocksPipeline` | `/overview`, `/campaign-rollup`, `/knocks-by-pass` (+`.csv`), `/canvasser-timeline` | `timestamp` |
-| `connectionRate` | `(surveyedKnocks + litKnocks) / knocks × 100`, integer, ≤100. **Unchanged by Refused** — refusals are not in the numerator | `connectionRate()` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | — |
-| `contactRate` | "Reached a person": `(surveyedKnocks + refusedKnocks) / knocks × 100`, integer, ≤100 | `contactRate()` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | — |
+| `connectionRate` | `(surveyedKnocks + litKnocks) / knocks × 100`, integer, ≤100. **Unchanged by Refused and by Not a target voter** — neither is in the numerator; each sits in the denominator like any unsurveyed knock | `connectionRate()` (§C) | `/overview`, `/campaign-rollup`, `/canvassers` | — |
+| `contactRate` | "Reached a person": `contactKnocks / knocks × 100`, integer, ≤100 — each door once per round. Until 2026-10-02 it was `(surveyedKnocks + refusedKnocks) / knocks`, which counted a door twice when two canvassers surveyed and refused it in the same round (§C) | `contactRate()` (§C) — **throws** when there are knocks and no finite `contactKnocks` | `/overview`, `/campaign-rollup`, `/canvassers`, `/canvasser-timeline`, `/knocks-by-pass` (+ the **Contact rate %** column), `/team-breakdown`, `GET /admin/campaigns/:id/passes` rows, `/canvassers/:id/summary` (`contactRatePct`), client-report totals. **On screen only per canvasser** (the Contact % columns and cards) and in the Door Outcomes price previews — the `/overview`, `/campaign-rollup`, `/passes`, `/team-breakdown` and client-report values reach no screen | — |
 | `surveysSubmitted` | Survey responses (one per voter/pass) — a volume count. **Surfaces as "Surveys taken"** (§G's labelling rule) | `SurveyResponse.countDocuments` / `$sum` | `/overview`, `/campaign-rollup`, `/canvassers` | `submittedAt` |
 | `surveysTaken` | The **same response unit**, per round — `/knocks-by-pass`'s name for it. `Σ(rounds) === totals.surveysTaken` by construction: every `SurveyResponse` carries exactly one `passId`, so the rows partition (which is precisely why a distinct-VOTER column can never live in that table — a voter surveyed in two rounds belongs to both). Also emitted per `(round, canvasser)` under `?groupBy=canvasser`, where it needs **no** `crossCanvasserDoors` correction: a response has one `userId`, so the per-user rows sum exactly | `{$sum: 1}` grouped on `$passId` in [knocksByPass.js](../server/src/services/reports/knocksByPass.js) | `/knocks-by-pass` (+`.csv` as `Surveys taken`), Export Center `knocks-by-round` | **`submittedAt`** — NOT `timestamp`; the survey ledger has no `timestamp` field, so windowing it on one silently returns zero |
 | `surveyedVoters` | Distinct voters surveyed | distinct `voterId` in `SurveyResponse` | `/overview`, `/campaign-rollup` | `submittedAt` |
@@ -552,26 +671,34 @@ source for knocks and the rate numerator:
   { $match: { ...match, actionType: { $in: KNOCK_ACTIONS } } },
   { $group: {
       _id: { householdId: '$householdId', passId: '$passId' /*, campaignId when byCampaign */ },
-      hasSurvey: { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
-      hasLit:    { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+      hasSurvey:  { $max: { $cond: [{ $eq: ['$actionType', 'survey_submitted'] }, 1, 0] } },
+      hasLit:     { $max: { $cond: [{ $eq: ['$actionType', 'lit_dropped'] }, 1, 0] } },
+      // …hasRefused / hasNoSoliciting / hasNotTarget, the same shape…
+      hasContact: { $max: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
   } },
   { $group: {
       _id: byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
       knocks: { $sum: 1 }, surveyedKnocks: { $sum: '$hasSurvey' }, litKnocks: { $sum: '$hasLit' },
+      contactKnocks: { $sum: '$hasContact' },
   } },
 ]
 ```
 
 The first `$group` collapses each `(household, pass)` to one row (the billable unit) and flags
-whether it landed a completion action; the second tallies.
+whether it landed a completion action — and whether anyone answered; the second tallies.
 
 **`byPass: true` promotes the inner group's `passId` to the outer `_id`** — one row per round.
 The inner `(household, pass)` dedup is identical either way, so **Σ(byPass rows) equals the
 collapsed campaign total by construction** — per-round numbers can never disagree with the
 headline they break down. `passId: null` surfaces as one legacy bucket (`_id: null`).
 
-The same `$max`/`$group` also flags `hasRefused` and sums it to `refusedKnocks` — the count of
-house-passes whose outcome was Refused (one per billable knock, so a subset of `knocks`).
+The same `$max`/`$group` also flags `hasRefused`, `hasNoSoliciting` and `hasNotTarget` and sums them
+to `refusedKnocks`, `noSolicitingKnocks` and `notTargetKnocks` — the house-passes where that outcome
+was recorded (at most one per billable knock, so each is a subset of `knocks`). Those flags are
+**independent**: a door where one canvasser surveyed and another recorded Refused in the same round
+is in both `surveyedKnocks` and `refusedKnocks`. **`hasContact` is the contact fold** — one flag per
+`(household, pass)` whatever mix of contact rows it holds — so `contactKnocks` counts that door once,
+and it is the only number a contact rate may be built from (below).
 
 **`restricted` never becomes a knock.** By default the opening `$match` filters to `KNOCK_ACTIONS`,
 which excludes it. Callers that need billable-door numbers pass `includeRestricted: true`, which
@@ -632,20 +759,52 @@ tally remains a straight count of `restricted` activities.
 connectionRate({ knocks, surveyedKnocks, litKnocks }) =
   knocks ? Math.round(((surveyedKnocks + litKnocks) / knocks) * 100) : 0
 
-contactRate({ knocks, surveyedKnocks, refusedKnocks }) =
-  knocks ? Math.round(((surveyedKnocks + refusedKnocks) / knocks) * 100) : 0
+contactRate({ knocks, contactKnocks }) =
+  knocks ? Math.round((contactKnocks / knocks) * 100) : 0
+  // …and throws a TypeError when there are knocks but contactKnocks is not a finite number
 ```
 
 Both live in [services/reports/aggregations.js](../server/src/services/reports/aggregations.js).
 Survey and lit completions are mutually exclusive within a campaign, so summing them is safe and
 the result never exceeds `knocks` (numerator ⊆ denominator) → always ≤ 100.
 
-**`contactRate` ("Reached a person") is the new, separate metric** — *(surveyed + refused) ÷ knocks*.
-It counts every knock where a person answered the door (a survey **or** a refusal). `connectionRate`
-is deliberately left alone: refusals never enter its numerator, so a refusal lowers the survey rate
-only as an unsurveyed knock. `refusedKnocks ⊆ knocks`, so `contactRate ≤ 100` and
-`contactRate ≥ connectionRate` (it adds the refused share on top). Refused is a survey-campaign
-disposition; on lit campaigns `refusedKnocks = 0` and `contactRate` degenerates to the survey share.
+**`contactRate` ("Reached a person")** is *doors where someone answered ÷ knocks*, each door once per
+round: `contactKnocks` counts every knock where a person answered the door — a survey, a refusal or
+a Not a target voter. `connectionRate` is deliberately left alone: neither refusals nor not-target
+doors enter its numerator, so each lowers the survey rate only as an unsurveyed knock.
+`contactKnocks ⊆ knocks`, so `contactRate ≤ 100`; and every surveyed door is a contact door, so
+`contactRate ≥ connectionRate` on survey campaigns — the gap is the knocks where someone answered and
+nobody was surveyed. The routes refuse all three contact outcomes on a lit-drop campaign, so there
+`contactKnocks = 0`.
+
+**Why the fold (2026-10-02).** The formula used to be `(surveyedKnocks + refusedKnocks) / knocks`. Each
+term is an independent per-`(household, pass)` `$max` flag across **all** canvassers' rows, so a door
+where canvasser A surveyed and canvasser B was refused in the same round put 2 in the numerator and 1
+in the denominator: a one-door campaign read **200%**, and that door beside one not-home door read
+100% instead of 50% — while this doc promised ≤ 100. A third contact outcome would have made it
+worse, so the numerator became the fold. Who it moves:
+
+- **Per canvasser: nothing.** `REPLACEABLE_ACTIONS` keeps one disposition per (canvasser, door,
+  round), so a plain count of a canvasser's own contact rows *is* their distinct contact doors —
+  exact with no fold. `/canvassers`, `/canvasser-timeline`, `/canvassers/:id/summary` and
+  `knocks-by-pass`'s `byCanvasser` rows read what they always did.
+- **Campaign, team and per-round: down, and only where canvassers overlapped** — a door-round where
+  two different people recorded different contact outcomes (before this release, a survey and a
+  refusal). No dashboard renders those values; the visible effect is the **Contact rate %** column of
+  `knocks-by-pass.csv` and the Export Center's `knocks-by-round` file, and the Door Outcomes price
+  previews, which run the same pipeline.
+
+**`contactRate()` requires the folded count.** It takes `{ knocks, contactKnocks }` and throws a
+`TypeError` when there are knocks but `contactKnocks` is not a finite number (`contactRate({ knocks:
+0 })` still returns 0) — a caller that never built the count is a code bug, and failing loudly beats
+a plausible wrong rate. Pipeline rows already carry `contactKnocks`; the hand-rolled callers build it
+from `CONTACT_ACTIONS` (§E). The one place a missing count is real data is `Campaign.stats` before the
+one-time recompute (§H), so both stats copies — `/overview`'s reduce and `/campaign-rollup`'s stats
+path — default it with `|| 0` and read low rather than throw. Pinned end to end by
+[test/contactOnce.int.test.js](../server/test/contactOnce.int.test.js): three doors — A surveys and B
+is refused at one, D is refused and C records Not a target voter at another, A finds nobody home at
+the third — read 67% on every campaign-level surface (the old formula: 100%), while each canvasser's
+own rate stays exact (A 50%; B, C and D 100%).
 
 ## D. Overlap detection
 
@@ -742,22 +901,22 @@ never looks like a two-person collision.
 
 | Endpoint | Scope | Key returns | Range basis |
 |---|---|---|---|
-| `GET /admin/reports/overview` | one campaign or org-wide | `totals{ households, voters, activeUsers, surveysSubmitted, surveyedVoters, homesKnocked, knocks, surveyedKnocks, litKnocks, refusedKnocks, connectionRate, contactRate }`, `canvass{}` (incl. `refused`, `restricted`), `events{}` (incl. `refused`, `restricted`) | **all-time** (no `from/to`) |
-| `GET /admin/reports/campaign-rollup` | `scope=active\|archived\|all` or `campaignId`; optional **`coordinatorId`** (`ObjectId \| 'none'` — crew-scopes the activity/survey numbers via `withTeam`; households/coverage stay campaign-wide, and the request always takes the live pipelines: a crew has no `Campaign.stats` counter equivalent, so the fast path is bypassed exactly like `effortId`/date windows) | `cumulative{…}` + `campaigns[ row{ households, homesKnocked, knockedPct, knocks, surveyedKnocks, litKnocks, refusedKnocks, surveysSubmitted, surveyedVoters, litDropped, connectionRate, contactRate, activeCanvassers, coverage{} } ]` | activity on `timestamp`, surveys on `submittedAt`; households/coverage all-time |
-| `GET /admin/reports/canvassers` | leaderboard; optional **`coordinatorId`** (`ObjectId \| 'none'`) — rows narrow to that crew (the lead's own null-stamped work folds in via the `teamMatch` `$or`; both ledgers take the identical clause so a row's knocks AND surveys agree) | rows `{ surveysSubmitted, surveyKnocks, notHome, wrongAddress, refused, restricted, litDropped, knocks, homesKnocked(=knocks), connectionRate, contactRate, status, hoursOnDoors, daysActive, doorsPerHour, coordinatorId, coordinatorName ('Multiple' when the window spans two teams — resolved from the LEDGER via the shared ledgerCoordinatorLabels, same as the timeline, so the Home leaderboard and the Timeline cannot disagree about a person's team), … }` (per-canvasser refused is the bare `refused` field, not `refusedKnocks`, and feeds `contactRate`; `restricted` is a standalone tally that feeds **no** rate. **`hoursOnDoors`/`doorsPerHour` are computed here as the SUM OF PER-DAY spans** — clients must not re-derive them from `firstActivityAt`/`lastActivityAt`, which is a *calendar* span and under-reports pace ~3×) | activity `timestamp`, surveys `submittedAt` |
-| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, surveysTaken, connectionRate, contactRate }], campaign{ doors, surveyDoors, connectionRate, … }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. **Scope:** a crew is **per-campaign**, so with a `campaignId` the lead set (whose own unstamped doors fold onto their own team row) is derived **for that campaign, from the LEDGER** — `leadIdsForScope`; an unscoped org-wide call reproduces the set it returned before crews became per-campaign. 🚨 **`teamSum − crossTeamDoors == campaign.doors` is a TAUTOLOGY and cannot fail** — it is not a check (§F). | `timestamp` |
-| `GET /admin/reports/canvassers.csv` | leaderboard export | columns incl. `Knocks`, `Connection rate %`, **`Refused`**, **`Restricted`** | same |
+| `GET /admin/reports/overview` | one campaign or org-wide | `totals{ households, voters, activeUsers, surveysSubmitted, surveyedVoters, homesKnocked, knocks, surveyedKnocks, litKnocks, refusedKnocks, notTargetKnocks, contactKnocks, billableDoors, restrictedDoors, connectionRate, contactRate }`, `canvass{}` (incl. `refused`, `restricted`, `no_soliciting`, `not_target`), `events{}` (raw row counts per actionType, incl. `refused`, `restricted`, `noSoliciting`, `notTarget`). `totals.contactRate` is rendered by no screen | **all-time** (no `from/to`) |
+| `GET /admin/reports/campaign-rollup` | `scope=active\|archived\|all` or `campaignId`; optional **`coordinatorId`** (`ObjectId \| 'none'` — crew-scopes the activity/survey numbers via `withTeam`; households/coverage stay campaign-wide, and the request always takes the live pipelines: a crew has no `Campaign.stats` counter equivalent, so the fast path is bypassed exactly like `effortId`/date windows) | `cumulative{…}` + `campaigns[ row{ households, homesKnocked, knockedPct, knocks, surveyedKnocks, litKnocks, refusedKnocks, notTargetKnocks, contactKnocks, billableDoors, restrictedDoors, surveysSubmitted, surveyedVoters, litDropped, connectionRate, contactRate, activeCanvassers, coverage{} } ]`. `coverage{}` is seeded with every Household status plus `voted` and `dnc` (`not_target` included) but not `doNotKnock`, so the fill loop's `bucket in c.coverage` guard drops do-not-knock doors from the rollup's coverage (they still count in `households`). This is a pre-existing gap; `/overview`'s `canvass{}` has no guard. Neither a row's nor `cumulative`'s `contactRate` is rendered by any screen | activity on `timestamp`, surveys on `submittedAt`; households/coverage all-time |
+| `GET /admin/reports/canvassers` | leaderboard; optional **`coordinatorId`** (`ObjectId \| 'none'`) — rows narrow to that crew (the lead's own null-stamped work folds in via the `teamMatch` `$or`; both ledgers take the identical clause so a row's knocks AND surveys agree) | rows `{ surveysSubmitted, surveyKnocks, notHome, wrongAddress, refused, restricted, noSoliciting, notTarget, litDropped, knocks, homesKnocked(=knocks), connectionRate, contactRate, status, hoursOnDoors, daysActive, doorsPerHour, coordinatorId, coordinatorName ('Multiple' when the window spans two teams — resolved from the LEDGER via the shared ledgerCoordinatorLabels, same as the timeline, so the Home leaderboard and the Timeline cannot disagree about a person's team), … }` (`knocks` and the contact count are folded from the per-actionType rows by **set membership** — `KNOCK_ACTIONS` / `CONTACT_ACTIONS` — never a hand sum of the named tallies, the trap that once left Refused out of the per-canvasser summary; `contactRate` = this canvasser's contact rows ÷ `knocks`, exact because each canvasser holds one disposition per door-round. The per-outcome tallies are the bare `refused`, `noSoliciting` and `notTarget` fields, not `refusedKnocks` and friends; `restricted` is a standalone tally that feeds **no** rate. **`hoursOnDoors`/`doorsPerHour` are computed here as the SUM OF PER-DAY spans** — clients must not re-derive them from `firstActivityAt`/`lastActivityAt`, which is a *calendar* span and under-reports pace ~3×) | activity `timestamp`, surveys `submittedAt` |
+| `GET /admin/reports/team-breakdown` | every TEAM at once, with the reconciliation | `{ ready, teams[{ coordinatorId, coordinatorName, people, doors, surveyDoors, surveysTaken, litKnocks, connectionRate, contactRate }], campaign{ doors, surveyDoors, litKnocks, connectionRate, contactRate }, teamSum, crossTeamDoors }`. `coordinatorName: null` = the **No team** bucket. `doors` is distinct `(household, pass)` **within** a team, so a same-team double-knock is absorbed. Each team's `contactRate` folds `hasContact` per `(household, pass, team)` — this is the one hand-rolled caller where canvassers can overlap — and `campaign.contactRate` comes from `knocksPipeline`; no screen renders either. **`ready: false`** when `Organization.teamAttributionReadyAt` is unset (the backfill hasn't run) — the endpoint returns empty rather than report every team as ~0 and No-team as enormous, which would look like data instead of an error. **Scope:** a crew is **per-campaign**, so with a `campaignId` the lead set (whose own unstamped doors fold onto their own team row) is derived **for that campaign, from the LEDGER** — `leadIdsForScope`; an unscoped org-wide call reproduces the set it returned before crews became per-campaign. 🚨 **`teamSum − crossTeamDoors == campaign.doors` is a TAUTOLOGY and cannot fail** — it is not a check (§F). | `timestamp` |
+| `GET /admin/reports/canvassers.csv` | leaderboard export | columns incl. `Knocks`, `Connection rate %`, **`Refused`**, **`Restricted`**, **`No soliciting`**, then `Hours source` and **`Not a target`** — appended last, in that order, and present for **every** org (`Not a target` reads 0 where the outcome was never used: a conditional column would be a different file shape, and appending moves no existing column). `Knocks` is the same set-membership fold as `/canvassers`. No contact-rate column | same |
 | `GET /admin/reports/team-averages` | org averages | `avg{ homesKnocked, surveysSubmitted, connectionRatePct, doorsPerHour, … }` (rate = Σ completion knocks / Σ knocks) | same |
-| `GET /admin/reports/canvassers/:id/summary` | one canvasser | `kpi{ homesKnocked(=knocks, **refused included** — it once wasn't, so this panel read fewer doors than the Timeline for the same person and over-stated the rate), surveyDoors (door-unit, the rate numerator), surveysSubmitted (voter-unit), refused, connectionRatePct + contactRatePct (the **shared** `connectionRate()`/`contactRate()` helpers, integer %), doorsPerHour, … }` + `quality{ totalActivities (ALL non-bulk rows, every action type — the percent denominator), offlineCount/offlinePercent, avgDistanceFromHouseMeters (raw average of the frozen stamps), farFromHouseCount (**the detector's rule via `farAssessment`/services/audit/farKpi.js** — effective distance minus GPS accuracy over `FAR_WARN_M`, med/high only; honest replaced-chain corrections and post-knock pin fixes are forgiven, a self-move still counts. **Living number**: correcting a pin retroactively lowers it), farFromHousePercent (= farFromHouseCount / totalActivities — the denominator did NOT change when the numerator got honest), farForgivenByPinCount (the pin-forgiven subset, so the number's movement is explainable), distanceHistogram (**raw frozen distances, deliberately NOT pin-aware** — it describes GPS behavior, not a verdict) }` | same |
+| `GET /admin/reports/canvassers/:id/summary` | one canvasser | `kpi{ homesKnocked(=knocks, summed over `KNOCK_ACTIONS` by membership — **refused included**: it once wasn't, so this panel read fewer doors than the Timeline for the same person and over-stated the rate), surveyDoors (door-unit, the rate numerator), surveysSubmitted (the response unit — "Surveys taken", not distinct voters), refused, notTarget, connectionRatePct + contactRatePct (the **shared** `connectionRate()`/`contactRate()` helpers, integer %; the contact count is summed over `CONTACT_ACTIONS`), doorsPerHour, … }` + `quality{ totalActivities (ALL non-bulk rows, every action type — the percent denominator), offlineCount/offlinePercent, avgDistanceFromHouseMeters (raw average of the frozen stamps), farFromHouseCount (**the detector's rule via `farAssessment`/services/audit/farKpi.js** — effective distance minus GPS accuracy over `FAR_WARN_M`, med/high only; honest replaced-chain corrections and post-knock pin fixes are forgiven, a self-move still counts. **Living number**: correcting a pin retroactively lowers it), farFromHousePercent (= farFromHouseCount / totalActivities — the denominator did NOT change when the numerator got honest), farForgivenByPinCount (the pin-forgiven subset, so the number's movement is explainable), distanceHistogram (**raw frozen distances, deliberately NOT pin-aware** — it describes GPS behavior, not a verdict) }` | same |
 | `GET /admin/reports/canvassers/:id/quality` | one canvasser, geo + sync audit | `{ totalActivities, offlineCount/offlinePercent, avgDistanceFromHouseMeters, farFromHouseCount/farFromHousePercent/farForgivenByPinCount (**the same helper as `/summary`** — the two screens cannot disagree; historically this count hardcoded 50 m while its own flagged list used 75 m), distanceHistogram, syncLagHistogram, lastSyncAt, flaggedActivities[≤100] (**raw `FAR_WARN_M`-or-offline SUPERSET, annotated never post-filtered** — each row carries `pinForgiven`, so a forgiven entry stays visible, marked) }` | activity `timestamp`, sync lag `submittedAt` |
 | `GET /admin/reports/canvassers/:id/activities` | one canvasser, paged raw feed (`?flaggedOnly=true` = the raw `FAR_WARN_M`-or-offline DB filter — deliberately a superset; effective/pin logic isn't an indexable query) | `{ total, limit, skip, activities[{ …, distanceFromHouseMeters, pinForgiven, wasOfflineSubmission, … }] }`. `pinForgiven` is computed per page; the DB filter and `total` are untouched by forgiveness, so pagination math stays exact | `timestamp` |
-| `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked, surveyKnocks, surveysSubmitted, connectionRatePct, … }]` | same |
-| `GET /admin/reports/knocks-by-pass` | one campaign, **per round** (`campaignId` REQUIRED — 400 without it; optional `effortId`, `from`/`to`, **`coordinatorId`** (`ObjectId \| 'none'`) — crew-scopes every activity pipeline (rows, totals, `byCanvasser`) while the row set stays every Pass, so a crew that skipped a round shows a real zero row. **Crew `coverageGained` rule:** "first-ever" is still judged **campaign-wide** — a door counts for the crew (in the pass it landed) only if the campaign's first-ever knock on it was that crew's; a door another crew reached first is never a "new home" here) | `{ campaignId, timeZone, from, to, rounds[], totals{}, byCanvasser?, crossCanvasserDoors? }`. Each `rounds[]` row: `{ passId (null = legacy), effortId, effortName, roundNumber, roundName, roundLabel ("Pass N · name" \| "Legacy / no pass"), status, activatedAt, archivedAt, knocks, surveyedKnocks, **surveysTaken**, litKnocks, refusedKnocks, connectionRate, contactRate, coverageGained }`. Row set = **every Pass** of the campaign/effort (0-knock rounds are real information) + any agg bucket without a Pass doc (legacy `passId:null`, or a deleted pass) + any **SurveyResponse** bucket (a response whose paired activity row was cleaned up would otherwise land in an unrendered bucket, and `totals.surveysTaken` sums the DISPLAYED rows); sorted walk list asc → round asc, legacy last. Everything is live aggregation via `knocksPipeline` — the round-blind `Campaign.stats` fast-path is never used here. **The contract: `Σ(rounds[].knocks) === totals.knocks`** (same for the survey/lit/refused tallies) — both run the same pipeline over the same match (`byPass` vs collapsed), so the rows always sum exactly to the headline (rates in `totals` are recomputed from the summed counts, not averaged). `coverageGained`: first-ever knock per household is found over the campaign **lifetime** (no date filter), then the window narrows to first-knocks that happened inside it — a re-knocked door credits only its first round. **`?groupBy=canvasser`** adds `byCanvasser[]`: **RAW per-user per-round rows — `NOT_BULK`, never team-folded** (the audit convention, like the answer drill: "who pressed the button", not "whose team gets credit"; admin bulk marks are excluded). A door two canvassers both knocked in the same round counts once for the round but once per canvasser; the over-claim is `crossCanvasserDoors` = Σ(per-canvasser knocks) − the NOT_BULK round totals (the `/team-breakdown` convention — computed against a NOT_BULK total so bulk marks can't masquerade as cross-canvasser overlap). | `timestamp` |
-| `GET /admin/reports/knocks-by-pass.csv` | the invoice-ready export (same params, incl. `coordinatorId` — one shared adapter threads it to both) | Same builder (`buildKnocksByPass`) as the JSON, so report and export can't drift. **Default:** one row per walk list × pass + a **TOTAL** row — columns `Walk list, Pass, Pass name, Pass status, Activated (ISO), Archived (ISO), Knocks, Survey doors, Surveys taken, Lit knocks, Refused, Connection rate %, Contact rate %, New homes reached`. **`?groupBy=canvasser`:** per-user per-pass rows (`Walk list, Pass, Pass name, Canvasser first/last name, Email, Status, Knocks, Survey doors, Surveys taken, Lit knocks, Refused, Connection rate %, Contact rate %`) — **no coverage column** (first-ever-knock coverage has no honest per-canvasser attribution) and no TOTAL row (the rows over-claim by `crossCanvasserDoors`, by design). `text/csv` attachment `knocks-by-pass-YYYY-MM-DD.csv`. | same |
+| `GET /admin/reports/canvassers/:id/daily` | one canvasser, per day | `days[{ homesKnocked (`KNOCK_ACTIONS` membership), surveyKnocks, surveysSubmitted, notHome, wrongAddress, noSoliciting, notTarget, litDropped, connectionRatePct, … }]` | same |
+| `GET /admin/reports/knocks-by-pass` | one campaign, **per round** (`campaignId` REQUIRED — 400 without it; optional `effortId`, `from`/`to`, **`coordinatorId`** (`ObjectId \| 'none'`) — crew-scopes every activity pipeline (rows, totals, `byCanvasser`) while the row set stays every Pass, so a crew that skipped a round shows a real zero row. **Crew `coverageGained` rule:** "first-ever" is still judged **campaign-wide** — a door counts for the crew (in the pass it landed) only if the campaign's first-ever knock on it was that crew's; a door another crew reached first is never a "new home" here) | `{ campaignId, timeZone, from, to, rounds[], totals{}, byCanvasser?, crossCanvasserDoors?, billRestrictedDoors, notTargetInUse }`. Each `rounds[]` row: `{ passId (null = legacy), effortId, effortName, roundNumber, roundName, roundLabel ("Pass N · name" \| "Legacy / no pass"), status, activatedAt, archivedAt, knocks, surveyedKnocks, **surveysTaken**, litKnocks, refusedKnocks, noSolicitingKnocks, notTargetKnocks, contactKnocks, billableDoors, restrictedDoors, connectionRate, contactRate, coverageGained }` — `contactKnocks` rides along so each round's `contactRate` is checkable from its own row, as `surveyedKnocks` makes its `connectionRate`; `byCanvasser[]` rows carry the same per-outcome fields and `contactKnocks`. **`notTargetInUse`** says whether this is a survey campaign that has ever had Not a target voter on (`outcomeInUse`, answered once inside `buildKnocksByPassData`, whose narrowed `Campaign.findOne` loads `type` with `enabledOutcomes`/`everEnabledOutcomes` so the lit-drop rule applies); both per-round files show the **Not a target** column under it. The web By pass table decides client-side by the same rule (`!isLitDrop && outcomeInUse(selectedCampaign, 'not_target')` in [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)), as does the phone's By pass card, and no client reads this field today. A campaign that had the outcome on and then switched to lit drop before canvassing keeps it in `everEnabledOutcomes` (the type change clears only `enabledOutcomes`) yet reads false here, so neither its files nor its By pass table (web) and card (phone) show the column — pinned in `optInOutcomes.int.test.js` ('flipped to lit-drop after it was on: nothing reads it as in use, so its per-round file keeps its shape'). The JSON rows carry the count either way. Row set = **every Pass** of the campaign/effort (0-knock rounds are real information) + any agg bucket without a Pass doc (legacy `passId:null`, or a deleted pass) + any **SurveyResponse** bucket (a response whose paired activity row was cleaned up would otherwise land in an unrendered bucket, and `totals.surveysTaken` sums the DISPLAYED rows); sorted walk list asc → round asc, legacy last. Everything is live aggregation via `knocksPipeline` — the round-blind `Campaign.stats` fast-path is never used here. **The contract: `Σ(rounds[].knocks) === totals.knocks`** (same for every per-outcome tally and for `contactKnocks`) — both run the same pipeline over the same match (`byPass` vs collapsed), so the rows always sum exactly to the headline (rates in `totals` are recomputed from the summed counts, not averaged). `coverageGained`: first-ever knock per household is found over the campaign **lifetime** (no date filter), then the window narrows to first-knocks that happened inside it — a re-knocked door credits only its first round. **`?groupBy=canvasser`** adds `byCanvasser[]`: **RAW per-user per-round rows — `NOT_BULK`, never team-folded** (the audit convention, like the answer drill: "who pressed the button", not "whose team gets credit"; admin bulk marks are excluded). A door two canvassers both knocked in the same round counts once for the round but once per canvasser; the over-claim is `crossCanvasserDoors` = Σ(per-canvasser knocks) − the NOT_BULK round totals (the `/team-breakdown` convention — computed against a NOT_BULK total so bulk marks can't masquerade as cross-canvasser overlap). | `timestamp` |
+| `GET /admin/reports/knocks-by-pass.csv` | the invoice-ready export (same params, incl. `coordinatorId` — one shared adapter threads it to both) | Same builder (`buildKnocksByPass`) as the JSON, so report and export can't drift. **Default:** one row per walk list × pass + a **TOTAL** row — columns `Walk list, Pass, Pass name, Pass status, Activated (ISO), Archived (ISO), Knocks, Survey doors, Surveys taken, Lit knocks, Refused, No soliciting, [Not a target], [Restricted doors, Billable doors], Connection rate %, Contact rate %, New homes reached`. **`?groupBy=canvasser`:** per-user per-pass rows (`Walk list, Pass, Pass name, Canvasser first name, Canvasser last name, Email, Status, Knocks, Survey doors, Surveys taken, Lit knocks, Refused, No soliciting, [Not a target], [Restricted doors, Billable doors], Connection rate %, Contact rate %`) — **no coverage column** (first-ever-knock coverage has no honest per-canvasser attribution) and no TOTAL row (the rows over-claim by `crossCanvasserDoors`, by design). The bracketed columns are conditional, and a campaign that uses neither feature gets none of them: **`Not a target`** only under `notTargetInUse` (a survey campaign that has ever had the outcome on — never a lit-drop one, even one switched from survey after it was on), **`Restricted doors` / `Billable doors`** only when the campaign bills restricted doors. **`Contact rate %`** is the row's `contactRate` — `contactKnocks ÷ knocks`, each door once per round (§C) — so a file downloaded again can read lower than one made before 2026-10-02 wherever canvassers overlapped; on a per-canvasser row it is that person's own rate, which the fold never moved. The Export Center's `knocks-by-round` file ([exportBuilders.js](../server/src/services/export/exportBuilders.js)) mirrors the default view column for column. `text/csv` attachment `knocks-by-pass-YYYY-MM-DD.csv`. | same |
 | `GET /admin/reports/overlaps` | overlap review (date-**windowed**, event-level) | see §D; its `passes[]` rows also carry the **`overwrites`** annotation described on the row below (same shape, same absent-when-none contract — both engines attach it) | `timestamp` |
 | `GET /admin/reports/overlap-doors` | the map's overlap **indicator + review list** (**anchored** to the window) | `{ householdIds:[…], doors:[{ householdId, household{id,addressLine1,addressLine2,city,state,zipCode,location}, totalCanvassers, passes:[{ passId, roundLabel, effortName, canvassers:[{userId, firstName, lastName, name, actionType, lastAt, inRange}], overwrites?:[{ voterId, voterName, by{id,name}, overwrittenBy{id,name}, overwrittenAt }] }] }], total, outOfRangeTotal }` — **self-contained, so the Overlaps report renders from this alone**. **`passes[].overwrites`** is **absent when none** (the OverlapDoorCard superset contract) and is built from `SurveyResponseArchive` **`via:'submit'` rows only** (restore swaps are admin curation, not field collisions) — rendered as "X replaced Y's survey answers for VoterName"; it only annotates doors already in the overlap set, never adds one. Params: `campaignId` **required** (400 without — unscoped it would scan the org ledger), optional `effortId`/`passId`/`userId`/`from`/`to` (`computeOverlapDoors` — see §D). Lead-gated. | anchored: detected pass-wide, surfaced when ≥1 knock is in `[from, to)` |
 | `GET /admin/reports/duplicate-surveys` | voters with >1 survey response — preserved same-round overwrites included via **`$unionWith` from `SurveyResponseArchive`**; optional `?userId=` (groups containing that canvasser — matched **after** grouping, so the filter never changes what counts as a duplicate and the group still returns every response), `?kind=all\|sameRoundOverwritten\|sameCanvasserSameDay\|differentCanvassers`, `skip`/`limit` (default 25, max 100) | `{ duplicates[{ voterId, count, voter, household, responses[{ responseId, canvasser, submittedAt, day, passId, roundLabel, overwritten, overwrittenAt, overwrittenBy }], sameRoundOverwritten, sameCanvasserSameDay, differentCanvassers }], total, limit, skip, timeZone, tzAbbrev }`. **`total` is the true matching-group count** (it was the post-truncation page length before paging existed). All three flags are computed **in the aggregation** — `sameRoundOverwritten` when the group carries an archived (overwritten) row, `sameCanvasserSameDay` when a `(userId, local day)` key repeats among **live** rows (day bucketed in the anchor tz, so a 11:50 PM / 12:10 AM pair is two days), `differentCanvassers` when >1 distinct live userId. Sorted `sameRoundOverwritten` first, then `sameCanvasserSameDay`, then `count` desc, `voterId` as the tiebreak so pages don't shuffle. An archived row's `responseId` is its **archive id**, served by `/responses/:id`'s archived fallback (a live response that replaced someone's answers carries `replacedEarlier` there). | `submittedAt` |
-| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to` — **day buckets up to 62 days, week buckets (Monday-start) from 63 to 183 days**, 400 past that; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{}, bucket:'day'\|'week' }` with per-canvasser `knocksByDay/surveysByDay` — **in `bucket:'week'` the `days[]` entries are Monday week-starts and every map is keyed by them** (the first/last week can be partial; the window still clips to `[from..to]`), plus `overlaps:[]` + `overlapsOmitted:true` and `inOverlap` always false (computeOverlaps is skipped, same reason as totals); `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayLit, dayRestricted, refused, restricted, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** and **`billableLitDoors`** — survey/lit doors deduped by (household, pass), the twins of `billableKnocks`. All three exist because the per-canvasser rows are RAW: clients must render these fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). **Both connection-rate numerator terms ship deduped on purpose** — when only the survey term was, the clients still summed `dayLit` across canvassers, putting a RAW term over a DEDUPED denominator: invisible on a survey campaign (lit ≈ 0), live on a lit-drop one. | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
+| `GET /admin/reports/canvasser-timeline` | one campaign, one **day** (`?date=`, the mobile path), a **range** (`?from/&to` — **day buckets up to 62 days, week buckets (Monday-start) from 63 to 183 days**, 400 past that; missing `to` = today), or **campaign-to-date** (`?totals=1`, no bounds) | `mode:'day'`: `{ date, hours[], hourTotals{} }` shape (byte-compatible for mobile); `mode:'range'`: `{ days[], dayTotals{}, bucket:'day'\|'week' }` with per-canvasser `knocksByDay/surveysByDay` — **in `bucket:'week'` the `days[]` entries are Monday week-starts and every map is keyed by them** (the first/last week can be partial; the window still clips to `[from..to]`), plus `overlaps:[]` + `overlapsOmitted:true` and `inOverlap` always false (computeOverlaps is skipped, same reason as totals); `mode:'totals'`: **neither** — no bucket maps, no `days[]`, `range:{from:null,to:null}`, `overlapsOmitted:true`. All three: `{ range{from,to}, tz, canvassers[{ knocksByHour\|knocksByDay, …, dayKnocks, daySurveys, dayVoterSurveys, dayLit, dayRestricted, dayNoSoliciting, dayNotTarget, refused, notHome, wrongAddress, status, isActive, firstActivityAt, lastActivityAt, hoursOnDoors, doorsPerHour, connectionRate, contactRate, inOverlap }], grandKnocks, billableKnocks, overlapDoors, overlaps[] }`. `dayKnocks/daySurveys/dayLit` are the WINDOW totals in every mode; `dayRestricted` is a parallel **Restricted** tally never in `dayKnocks`, while `dayNoSoliciting` and `dayNotTarget` are tallies **inside** `dayKnocks` (both outcomes are knocks). `dayNoSoliciting` was summed by the `$group` but never put on the row until 2026-10-02, so the web Timeline's **No solicit** column read 0 for everyone; `dayNotTarget` rides the same path. Both are pinned: real values in `notTarget.int.test.js`, range-vs-totals parity in `timelineTotals.int.test.js`. A row's `contactRate` is that canvasser's `CONTACT_ACTIONS` rows ÷ `dayKnocks` — exact, since they hold one disposition per door-round; the endpoint ships no campaign-level contact rate. `hoursOnDoors` = Σ per-day (last−first), same method as `/canvassers/:id/summary` — **restricted stops are in this window** (`[...KNOCK_ACTIONS, 'restricted']` matched for the span, then knocks exclude restricted), so a restricted-only bucket extends shift-hours without adding a knock (the heatmap grid, which shows knocks only, skips it). Also returns **`billableSurveyDoors`** and **`billableLitDoors`** — survey/lit doors deduped by (household, pass), the twins of `billableKnocks`. All three exist because the per-canvasser rows are RAW: clients must render these fields and never sum the columns (see the survey-doors callout in §"Survey DOORS vs survey VOTERS"). **Both connection-rate numerator terms ship deduped on purpose** — when only the survey term was, the clients still summed `dayLit` across canvassers, putting a RAW term over a DEDUPED denominator: invisible on a survey campaign (lit ≈ 0), live on a lit-drop one. | `timestamp` window in campaign tz; buckets via `$hour` (day) / `$dateToString` (range and totals) |
 
 ### The 62-day day-bucket bound, the 183-day cap, and why `totals` escapes both
 
@@ -802,11 +961,15 @@ Four invariants, each of which a plausible "simplification" would break:
   constant until the week tier decoupled them.
 
 **Cumulative summability:** `households`, `homesKnocked`, `knocks`, `surveyedKnocks`,
-`litKnocks`, `refusedKnocks`, `surveysSubmitted`, `surveyedVoters`, `litDropped` (and the coverage
-`restricted` tally) are summed across campaigns (households/voters are campaign-disjoint, so the
-distinct counts don't overlap). Cumulative
+`litKnocks`, `refusedKnocks`, `notTargetKnocks`, `contactKnocks`, `billableDoors`, `restrictedDoors`,
+`surveysSubmitted`, `surveyedVoters`, `litDropped` and every seeded `coverage` bucket (`restricted`
+and `not_target` included; `doNotKnock` is never seeded, so it is absent from the rollup) are summed
+across campaigns (households/voters are campaign-disjoint, so the distinct counts don't overlap, and
+a door belongs to one campaign, so the per-campaign `contactKnocks` folds add up exactly). `billableDoors`
+sums each row's own figure, so a mixed-policy org totals every campaign under its own rule. Cumulative
 `connectionRate` **and** `contactRate` are recomputed from the summed numerator/denominator (not
-averaged). `activeCanvassers` is **not** summable — it uses a separate org-wide `distinct('userId')`.
+averaged). `activeCanvassers` is **not** summable — it uses a separate org-wide `distinct('userId')`
+(the union of the campaigns' `stats.canvasserIds` on the counter path).
 
 ## F. Invariants & edge cases
 
@@ -1301,29 +1464,55 @@ resolver-not-direct-read pattern). The rules, in full in
   voters range on `submittedAt`. Don't mix them in one `$match`.
 - **`/overview` is all-time**, `/campaign-rollup` honors the range. The campaign page pulls
   Activity (range) from rollup and Coverage (all-time) from overview — intentional.
-- **Connection rate ≤ 100** by construction (numerator ⊆ knocks). "Surveys" is a separate volume
-  number that *can* exceed knocks for multi-voter homes.
+- **Connection rate ≤ 100 and Contact rate ≤ 100** by construction (each numerator ⊆ knocks). For
+  the contact rate that holds **only** because its numerator is the per-`(household, pass)` fold,
+  `contactKnocks` (§C): the per-outcome flags are independent, and adding them is how a one-door
+  campaign once read 200%. Per canvasser a plain count of their contact rows is exact (one
+  disposition per door-round). "Surveys" is a separate volume number that *can* exceed knocks for
+  multi-voter homes.
 - **Refused is a knock + a contact, never a survey (survey campaigns only).** `refused` is in
   `KNOCK_ACTIONS`, so a refused door is a billable knock and appears in the door-outcome breakdown's
   `refused` bucket (which keeps the breakdown summing to `doorsKnocked`). `refusedKnocks ⊆ knocks`.
-  It feeds **only** the new `contactRate` (= (surveyed + refused) ÷ knocks); the existing
-  `connectionRate` (= (surveyed + lit) ÷ knocks) is **unchanged** — a refusal lowers it only as an
-  unsurveyed knock. So `contactRate ≥ connectionRate` on survey campaigns; on lit campaigns
-  `refusedKnocks = 0`. A survey still beats a refusal in status precedence
+  It is in `CONTACT_ACTIONS`, so it feeds `contactRate` (doors where someone answered ÷ knocks, each
+  door once per round); `connectionRate` (= (surveyed + lit) ÷ knocks) is **unchanged** — a refusal
+  lowers it only as an unsurveyed knock. So `contactRate ≥ connectionRate` on survey campaigns; on lit
+  campaigns `refusedKnocks = 0`. A survey still beats a refusal in status precedence
   ([utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)), so a house-pass that was
   refused then surveyed resolves to `surveyed`, not `refused`.
 - **No soliciting is a knock, never a contact (all campaign types).** `no_soliciting` IS in
   `KNOCK_ACTIONS`, so it counts in `knocks`, `homesKnocked`, `billableDoors` (with no opt-in — the walk
   happened) and the doors/hour numerator, and it appears in the door-outcome breakdown's
   `no_soliciting` bucket, which is what keeps that breakdown summing to `doorsKnocked`. It is **not**
-  in either rate numerator: `contactRate` stays `(surveyed + refused) ÷ knocks` and `connectionRate`
-  stays `(surveyed + lit) ÷ knocks`, so a no-soliciting door lowers **both** as an unreached knock.
-  Surfaced as `noSoliciting` on `/canvassers`, `dayNoSoliciting` on `/canvasser-timeline`,
-  `noSolicitingKnocks` on `/knocks-by-pass` (+ the **No soliciting** CSV column), and as its own
-  coverage segment on the **knocked** side of the funnel. Two units on purpose: the `*Knocks` buckets
+  in either rate numerator: it is outside `CONTACT_ACTIONS`, so `contactKnocks` never counts it, and
+  `connectionRate` stays `(surveyed + lit) ÷ knocks`, so a no-soliciting door lowers **both** as an
+  unreached knock. Surfaced as `noSoliciting` on `/canvassers` and `/canvassers/:id/daily`,
+  `dayNoSoliciting` on `/canvasser-timeline` (on the row only since 2026-10-02 — §E),
+  `noSolicitingKnocks` on `/knocks-by-pass` (+ the **No soliciting** CSV column), `events.noSoliciting`
+  on `/overview`, and as its own coverage segment on the **knocked** side of the funnel. Two units on purpose: the `*Knocks` buckets
   are `$max`-per-door-pass (a door two canvassers dispositioned differently lands in two buckets, same
   as `refusedKnocks`), while coverage reads the door's single resolved status — only coverage
   partitions.
+- **Not a target voter is a knock + a contact, never a survey (survey campaigns that turn it on).**
+  `not_target` is in `KNOCK_ACTIONS` **and** `CONTACT_ACTIONS` and is no completion action, so it
+  counts in `knocks`, `homesKnocked`, `billableDoors` and the doors/hour numerator, and in
+  `contactKnocks` (once per door-round), but never in `surveyedKnocks` or `connectionRate`'s
+  numerator — it sits only in the denominator, exactly where a Not home or a Refused at that door
+  would have left it. It is in `REPLACEABLE_ACTIONS` and resolves last-write-wins beneath a sticky
+  survey ([utils/statusPrecedence.js](../server/src/utils/statusPrecedence.js)), so a door one
+  canvasser marked Not a target voter and another surveyed in the same round reads `surveyed`. It has
+  its own `not_target` bucket in the door-outcome breakdown (keeping it summing to `doorsKnocked`) and
+  its own coverage segment on the **knocked** side. Surfaced as `notTarget` on `/canvassers` (+ the
+  canvassers.csv **Not a target** column), `/canvassers/:id/summary` (`kpi.notTarget`) and
+  `/canvassers/:id/daily`; `dayNotTarget` on `/canvasser-timeline`; `notTargetKnocks` on `/overview`,
+  `/campaign-rollup`, `/knocks-by-pass`, the passes list and the client report; `events.notTarget`,
+  `canvass.not_target` / `coverage.not_target`; and `Campaign.stats.notTargetKnockCount` (§H). The
+  same two units as No soliciting: `notTargetKnocks` is `$max`-per-door-pass, while coverage and the
+  breakdown resolve one outcome per door. A lit-drop campaign never holds one — the route refuses the
+  action there (a plain 400) before the outcome gate runs. **No count reads `enabledOutcomes` /
+  `everEnabledOutcomes`:** turning the outcome off, or Doorline withdrawing it, changes which buttons
+  phones show, never a number already recorded — nor which columns are drawn: `outcomeInUse` reads
+  the only-grows `everEnabledOutcomes` and ignores the release, so once a survey campaign has had it
+  on, only a switch to lit drop hides them.
 - **Restricted is a marker, never a knock (all campaign types) — the inverse of Refused.** `restricted`
   is deliberately **out of** `KNOCK_ACTIONS`, so an inaccessible-home mark never counts in `knocks`,
   `homesKnocked` (`status ∉ {unknocked, restricted}`), `connectionRate`, `contactRate`, or the
@@ -1345,12 +1534,18 @@ resolver-not-direct-read pattern). The rules, in full in
 - **Client-report voter-contact breakdown is deduped per `(household, pass)`**, not a raw-event
   count: `computeWindowStats` ([computeReport.js](../server/src/services/reports/computeReport.js))
   resolves each house-pass to one outcome via `resolveStatus`, so the breakdown sums to
-  `doorsKnocked` and `breakdown.surveyed === surveyedKnocks`. The breakdown now has a **`refused`
-  bucket** (`events` keys `not_home`/`wrong_address`/`refused`/`surveyed`/`lit_dropped`); it's just
-  another resolved outcome, so the breakdown still sums to `doorsKnocked` and
-  `breakdown.refused === refusedKnocks`. The client-portal report labels this bucket **"Declined to
-  participate"** (`CONTACT_LABELS` in [client/src/lib/reportDerive.js](../client/src/lib/reportDerive.js)).
-  An overlap (2+ canvassers, same
+  `doorsKnocked` and `breakdown.surveyed === surveyedKnocks` (a survey is sticky, so a surveyed
+  house-pass always resolves `surveyed`). Its `events` keys are
+  `not_home`/`wrong_address`/`refused`/`surveyed`/`lit_dropped`/`no_soliciting`/`not_target` — every
+  knock outcome must be one, because the `status in events` guard silently drops a status the literal
+  lacks and the breakdown stops summing. The non-completion buckets resolve last-write-wins, so
+  `breakdown.refused ≤ refusedKnocks` and `breakdown.not_target ≤ notTargetKnocks`, equal unless two
+  canvassers dispositioned the same house-pass differently (the two-units rule above). The
+  client-portal report labels them **"Declined to participate"**, **"No-soliciting sign"** and **"Not a
+  target voter"** (`CONTACT_LABELS` in [client/src/lib/reportDerive.js](../client/src/lib/reportDerive.js));
+  the Not a target voter row is drawn only when its count is above zero, so a campaign that never
+  used it, and every report already sent, reads as before. The frozen `totals` carry `notTargetKnocks`
+  and a `contactRate` built from the fold, which no report screen renders. An overlap (2+ canvassers, same
   house-pass) is one outcome here, exactly as it's one knock. The admin Overview uses the deduped
   **coverage funnel** (`canvass`, per-household status) for the same reason; its raw `events{}`
   object is a separate volume lens (e.g. lit-drop volume). See [CLIENT_PORTAL.md](CLIENT_PORTAL.md).
@@ -1386,25 +1581,25 @@ for all of them — see the gotcha in §F).
 | File | Renders |
 |---|---|
 | [pages/OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) | Org Overview. `DateRangeSelector` → `/campaign-rollup?scope=active`. Cumulative `CoverageBar` + StatCards (Households, Houses knocked, **Knocks**, **Survey doors**, **Surveys taken**, **Voters surveyed**, **Connection rate**, Lit drops, Active canvassers — all three survey units, per §G). Per-campaign `CampaignCard` rows carry the same three. Per-campaign `CampaignCard` rows + `CoverageBar`; archived rows show Knocks. |
-| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Campaign detail. **Activity** (range, `/campaign-rollup?campaignId`): Knocks, Survey doors/Lit drops, **Surveys taken**, Voters surveyed, Connection rate — all THREE survey units, per the labelling rule in §G. **By pass** (range, `/knocks-by-pass` — same window + effort filter as Activity, so the rows sum to the same headline): walk list × round table (Knocks, Survey doors/Lit drops, **Surveys taken** — survey campaigns only, Conn %, New homes reached) + TOTAL `tfoot` + **Export CSV** (`/knocks-by-pass.csv`, raw fetch + blob — the SurveyExplorer pattern); hidden while `rounds` is empty. **Coverage** (all-time, `/overview`): households + homesKnocked + `CoverageBar`. |
+| [pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Campaign detail. **Activity** (range, `/campaign-rollup?campaignId`): Knocks, Survey doors/Lit drops, **Surveys taken**, Voters surveyed, Connection rate — all THREE survey units, per the labelling rule in §G — plus a **Not a target** tile (`notTargetKnocks`, "N% of knocks") on a survey campaign that uses the outcome (`outcomeInUse(campaign, 'not_target')`, [lib/outcomeToggles.js](../client/src/lib/outcomeToggles.js) — the gate for the console's Not-a-target tiles, columns and filters. The Map page chip also shows while such doors are counted, and it and the Turf Cutting / Walk Lists status lists stay on screen while ticked. The client report's share-map chip and breakdown row, and the coverage legends, appear only when there is such a door). **By pass** (range, `/knocks-by-pass` — same window + effort filter as Activity, so the rows sum to the same headline): walk list × round table (Knocks, Survey doors/Lit drops, **Surveys taken** — survey campaigns only, **Not a target** under the same gate, Conn %, New homes reached) + TOTAL `tfoot` + **Export CSV** (`/knocks-by-pass.csv`, raw fetch + blob — the SurveyExplorer pattern); hidden while `rounds` is empty. **Coverage** (all-time, `/overview`): households + homesKnocked + `CoverageBar`. **Canvassers**: `/canvassers` rows mapped onto the timeline row shape (`noSoliciting` → `dayNoSoliciting`, `notTarget` → `dayNotTarget`, …) and rendered by `CanvasserSummaryTable`. |
 | [components/PassManager.jsx](../client/src/components/PassManager.jsx) | Per-pass table (both mounts — PassesPage full view + Walk Lists drawer): **Knocks, Survey doors** (**Lit drops** on lit-drop campaigns — `campaignType` prop threaded from PassesPage/EffortsPage), **Conn %** from the enriched `GET /admin/campaigns/:id/passes` (see [PASSES.md](PASSES.md)). |
-| [components/CanvasserTable.jsx](../client/src/components/CanvasserTable.jsx) | Leaderboard table: Surveys, Lit drops, Not home, Wrong addr, **Knocks**, **Connection**, Last activity. |
+| [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) | The per-canvasser table on **both** Home (rows from `/canvassers`) and the Timeline (rows from `/canvasser-timeline`): Canvasser, Coordinator, Doors, Survey doors + Surveys taken (Lit drops on lit-drop), **Conn %**, **Contact %**, then **Not target** on a survey campaign that uses the outcome (`dayNotTarget` · its share of that person's doors; sorts by the share), Doors/hr, **No solicit** (`dayNoSoliciting`), **Restricted** (`dayRestricted`), Start, Last door. Contact %'s (i) is `metricHelp.contactRateNotTargetInUse`, which names Not a target voter, under that same gate, and `metricHelp.contactRate`, which never does, everywhere else. Both keep "Each door counts once per pass…", and [test/metricHelp.test.js](../server/test/metricHelp.test.js) pins both rules and that web and phone ship the same strings. The Team page's member panel ([pages/CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx)) shows the same figure, count · %, from `/canvassers/:id/summary` `kpi.notTarget`. (This row used to name `CanvasserTable.jsx`, a leaderboard that no longer exists.) |
 | [pages/DuplicateSurveysPage.jsx](../client/src/pages/DuplicateSurveysPage.jsx) | **Duplicate surveys** (`/admin/duplicate-surveys`): voters with >1 response. Compact cards (both flag badges render — never one behind the other), `Segmented` kind filter, ledger-first canvasser `<select>`, `DateRangeSelector` (opens on **All time**), shared `Pager` off the `skip`/`limit`/`total` contract. Fix path is **Open voter** → profile → delete. |
 | [components/GoalStrip.jsx](../client/src/components/GoalStrip.jsx) | **Door goal** in the campaign Home HEADER, sharing ONE wrapping row with the key-date pills under the type/state line: bar, percentage, done/target, doors left, need /day. Renders the `goal` block verbatim — no arithmetic, and no verdict, trailing rate or projection (all three removed 2026-08-15). **The placement carries the meaning**: this is the ONLY number on the page that ignores the range/walk-list/crew pickers, and it sits in campaign-identity space (beside Election Day and early voting, which are equally filter-immune) rather than among the filtered numbers. The old body card's explanatory footer is gone with it; the sentence lives in `metricHelp.doorGoal` behind the (i). Names its own goal date **only** when `deadlineSource === 'goalDate'` — on the Election Day fallback the countdown pill beside it already says so. Words + colors from [lib/goalPace.js](../client/src/lib/goalPace.js); compact `GoalCell`/`GoalBlock` for the campaigns table/cards are exported from `campaigns/CampaignCard.jsx`. |
-| [components/CoverageBar.jsx](../client/src/components/CoverageBar.jsx) | Segmented bar + numeric legend (counts + %). |
+| [components/CoverageBar.jsx](../client/src/components/CoverageBar.jsx) | Segmented bar + numeric legend (counts + %). `not_target` is always a **segment** — the total sums the segment list, so a missing key would drop those doors and inflate every other percentage — but the legend lists **Not a target voter** only when its count is above zero. |
 | [components/StatCard.jsx](../client/src/components/StatCard.jsx) | `label / value / hint / accent`. |
-| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (coordinator, rates, pace, start/last door, a **Restricted** tally column from `dayRestricted`), heatmap grid (hour columns for a day, day columns for a range), date-range presets **incl. All time** (campaign-to-date: swaps the grid + overlap cards for totals — see the `?totals=1` mode above) + single-day stepper, coordinator crew filter (**server-side** `?coordinatorId` — a deduped billable figure cannot be summed in the browser; overlaps card stays campaign-wide), a **by-team breakdown table** (`/team-breakdown`) with the reconciliation footer + an "← All teams" bar when a team is picked, Knocks/Surveys toggle, inline overlaps reconciliation. **Coordinator names come from the LEDGER** (`coordinatorId` stamped on each knock), NOT from the campaign roster — the old `useCampaignTeam` join blanked the column for anyone taken off a campaign. `useCampaignTeam` survives only for the "Knocking N of M" roster denominator. **Live refresh:** every count query on the page spreads `livePollOptions()` and the pill is built with `liveStatusProps([...all of them])` — see §G. First web overlaps surface. |
+| [pages/TimelinePage.jsx](../client/src/pages/TimelinePage.jsx) + [components/CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) + [components/TimelineGrid.jsx](../client/src/components/TimelineGrid.jsx) + [components/TimelineOverlaps.jsx](../client/src/components/TimelineOverlaps.jsx) | **Timeline** (`/campaigns/:id/timeline`, `/canvasser-timeline`): live performance dashboard — KPI strip (Doors, Surveys, Connection rate, Doors/hr, Knocking N of M), sortable per-canvasser table (`CanvasserSummaryTable` above — coordinator, rates incl. **Contact %**, pace, start/last door, a **No solicit** column from `dayNoSoliciting` that read 0 for everyone until the server shipped the field on 2026-10-02, a **Restricted** tally column from `dayRestricted`, and **Not target** on campaigns that use it), heatmap grid (hour columns for a day, day columns for a range), date-range presets **incl. All time** (campaign-to-date: swaps the grid + overlap cards for totals — see the `?totals=1` mode above) + single-day stepper, coordinator crew filter (**server-side** `?coordinatorId` — a deduped billable figure cannot be summed in the browser; overlaps card stays campaign-wide), a **by-team breakdown table** (`/team-breakdown`) with the reconciliation footer + an "← All teams" bar when a team is picked, Knocks/Surveys toggle, inline overlaps reconciliation. **Coordinator names come from the LEDGER** (`coordinatorId` stamped on each knock), NOT from the campaign roster — the old `useCampaignTeam` join blanked the column for anyone taken off a campaign. `useCampaignTeam` survives only for the "Knocking N of M" roster denominator. **Live refresh:** every count query on the page spreads `livePollOptions()` and the pill is built with `liveStatusProps([...all of them])` — see §G. First web overlaps surface. |
 
 ### Mobile ([mobile/app/(app)/admin](../mobile/app/(app)/admin))
 | File | Renders |
 |---|---|
 | [index.jsx](../mobile/app/(app)/admin/index.jsx) | Org Overview. `DateRangeBar` → `/campaign-rollup`. Cumulative card: `CoverageBar` + two stat rows (Knocks/Surveys/Surveyed; Connection/Lit/Canvassers). `CampaignCard`: full `CoverageBar` + coverage line + inline (knocks/surveys/voters/conn/canv); archived rows show knocks. `RowAccessory` adds a **door-goal** bar under the coverage bar, tagged *"all time"* because every other number on the row honors the range picker. |
-| [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Door goal** as a two-line pressable inside the key-dates block, beside `ElectionCountdownChip` and **above** `DateRangeBar` and both filter switchers — bar, percentage, done/target, verdict, then need/doing/late. Same placement argument as the web strip: it is the only number on the screen the filters below don't touch. Tapping opens the shared `MetricSheet` with `metricHelp.doorGoal`, which is where the all-time sentence lives now that the group's caption is gone. Prints its own deadline only when `deadlineSource === 'goalDate'`. Words from [mobile/lib/goalPace.js](../mobile/lib/goalPace.js), the hand-mirrored twin of the web copy; **Activity** tiles (Knocks, Survey doors/Lit drops, **Surveys taken**, Voters surveyed, Connection rate via `rateFromPct`) from rollup; **By pass** card (`/knocks-by-pass` over the same range — one row per walk list × round: knocks + "Conn N%"/"Lit N%"); **Coverage** (all-time) from overview; Top canvassers from `/canvassers`; "Timeline" quick-link. |
-| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (the coordinator filter is **server-side** `?coordinatorId`, same as web; the option list is a union of the roster and the coordinators actually stamped on the ledger, so a departed canvasser's team still appears; overlaps stay campaign-wide with a note). **No by-team breakdown table** — that surface is web-only, Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
+| [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | **Door goal** as a two-line pressable inside the key-dates block, beside `ElectionCountdownChip` and **above** `DateRangeBar` and both filter switchers — bar, percentage, done/target, then doors left and need/day (no verdict, trailing rate or projection — removed 2026-08-15, as on the web). Same placement argument as the web strip: it is the only number on the screen the filters below don't touch. Tapping opens the shared `MetricSheet` with `metricHelp.doorGoal`, which is where the all-time sentence lives now that the group's caption is gone. Prints its own deadline only when `deadlineSource === 'goalDate'`. Words from [mobile/lib/goalPace.js](../mobile/lib/goalPace.js), the hand-mirrored twin of the web copy; **Activity** tiles (Knocks, Survey doors/Lit drops, **Surveys taken**, Voters surveyed, Connection rate via `rateFromPct`) from rollup, plus a **Not a target** tile (count, "N% of knocks") on a survey campaign that uses the outcome (`outcomeInUse`, [mobile/lib/outcomeToggles.js](../mobile/lib/outcomeToggles.js)); **By pass** card (`/knocks-by-pass` over the same range — one row per walk list × round: knocks + "Conn N%"/"Lit N%", and "N not target" in the sub-line under the same gate); **Coverage** (all-time) from overview; Top canvassers from `/canvassers` (`CanvasserCard`: "N% contact", then "· N not target" when N > 0 under the same gate), whose **How these are counted** sheet ("What these columns mean", `canvasserMetrics`) explains Contact % with `metricHelp.contactRateNotTargetInUse` under the same gate and `metricHelp.contactRate` otherwise; "Timeline" quick-link. |
+| [timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) + [components/LiveStatus.jsx](../mobile/components/LiveStatus.jsx) | **Timeline** (`/canvasser-timeline`): live performance dashboard at web parity — KPI tiles (`KpiGrid`: Doors, Surveys, Connection rate via `rateFromPct`, Doors/hr, Knocking N of M), per-canvasser cards (coordinator, `dayKnocks/daySurveys/connectionRate`, the row's `contactRate`, "· N not target" from `dayNotTarget` on a campaign that uses the outcome, `hoursOnDoors`·doors/hr, `formatRange` shift line; tap → canvasser detail — the gate is [lib/useOutcomeInUse.js](../mobile/lib/useOutcomeInUse.js), which reads the shared `['admin','campaigns']` cache because the shaped campaign objects these screens hold don't carry the outcome fields, and stays false until that list loads so a figure can appear but never flash and retract), `DateRangeBar` presets **incl. 'all'** (campaign-to-date: `?totals=1`, grid hidden) + single-day stepper, walk-list + coordinator `TabSwitcher` crew filters (the coordinator filter is **server-side** `?coordinatorId`, same as web; the option list is a union of the roster and the coordinators actually stamped on the ledger, so a departed canvasser's team still appears; overlaps stay campaign-wide with a note). **No by-team breakdown table** — that surface is web-only, Knocks/Surveys toggle, frozen-name-column heatmap grid (hour columns single-day, day columns for a range — `data.mode` guarded), reconciliation + overlap cards (`overlapCount` true total), `LiveStatus` pill (20s poll while the range includes today, pause/refresh) + `useFocusedPoll`. Reloads the campaign on focus + accepts a `campaignId` param. |
 | [overlaps.jsx](../mobile/app/(app)/admin/overlaps.jsx) | Renders `overlaps[].passes[]` grouped by `roundLabel`. Campaign scope comes from the shared `CampaignChip` (archived campaigns included) + a focus re-sync — the screen previously had **no picker at all**, taking the cached pick via `useAdminCampaign()`, so an empty or unmanaged cache dead-ended it and its empty state told you to "pick a campaign you manage from the Overview", which never writes that cache. The resolving frame also needed its own branch: `/overlap-doors` is `enabled: !!cId`, and a disabled react-query is pending-but-not-fetching, so `isLoading` is false and the chain fell through to "No overlap 🎉" while the campaign was still being read off disk. |
 | [duplicate-surveys.jsx](../mobile/app/(app)/admin/duplicate-surveys.jsx) + [components/DuplicateVoterCard.jsx](../mobile/components/DuplicateVoterCard.jsx) | **Duplicate surveys** (`/duplicate-surveys`): voters with >1 response, collapsed cards that expand to who/when/round. Kind + canvasser `TabSwitcher`s, `DateRangeBar` (opens on **All time**), "Load more" off the `skip`/`limit`/`total` contract. Org admins delete a response in place (`DELETE /admin/voters/:id/surveys/:id`); leads read-only. |
-| [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. |
-| [components/CoverageBar.jsx](../mobile/components/CoverageBar.jsx) | Bar + legend; `compact` hides the legend. |
+| [canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx), [compare.jsx](../mobile/app/(app)/admin/canvasser/compare.jsx), [[id]/days.jsx](../mobile/app/(app)/admin/canvasser/[id]/days.jsx), [[id]/day/[date].jsx](../mobile/app/(app)/admin/canvasser/[id]/day/[date].jsx) | Per-canvasser drilldowns; `kpi.homesKnocked` (= knocks) + `connectionRatePct`. The profile adds a **Not a target** tile (`kpi.notTarget`, "N% of knocks", no team-average delta) on a survey campaign that uses the outcome (`useOutcomeInUse`), and the Users-hub member sheet ([components/MemberSheet.jsx](../mobile/components/MemberSheet.jsx)) a "not target" tile from the same field. |
+| [components/CoverageBar.jsx](../mobile/components/CoverageBar.jsx) | Bar + legend; `compact` hides the legend. `not_target` ("Not target") is always a segment, and the full legend skips it at 0, as on the web. |
 
 ### Personal (separate lens — NOT billing)
 [mobile/app/(app)/stats.jsx](../mobile/app/(app)/stats.jsx), [stats/[date].jsx](../mobile/app/(app)/stats/[date].jsx),
@@ -1413,29 +1608,37 @@ raw personal door events (today / for the date), and `responses`/`litDropped` ar
 these are a canvasser-motivation view and intentionally do **not** use the billable per-house-pass knock.
 
 **The personal connection rate, though, is bounded like the report's.** `/mobile/me/*` also returns
-`knockedHomes` / `surveyedHomes` / `litHomes` / `refusedHomes` (distinct `householdId` for that user/window/day), and the
+`knockedHomes` / `surveyedHomes` / `litHomes` / `refusedHomes` / `notTargetHomes` (distinct door-rounds
+for that user/window/day — keyed `(householdId, passId)` like `knocksPipeline`, so a door revisited in
+a new round counts again here too), and the
 mobile rate is `surveyedHomes ÷ knockedHomes` (or `litHomes ÷ knockedHomes`), clamped ≤100% in
 [mobile/lib/rates.js](../mobile/lib/rates.js) `getConnectionRate`. So a canvasser who knocks one home and
 surveys two voters there sees **100%, not 200%**, and the personal rate reads the same way as the
 admin/report `connectionRate` (= `surveyedKnocks/knocks`). Only the *rate* uses distinct homes; the
 displayed door/survey/lit **counts** stay raw.
 
-**Refused, per day (personal).** `/mobile/me/*` ([me.js](../server/src/routes/mobile/me.js)) also
-returns `refusedHomes` (distinct `householdId` this user marked `refused`) and `reachedHomes`
-(distinct homes that were **surveyed OR refused** — the personal "Reached a person" count, the local
-analogue of the report's `contactRate` numerator). `refused` is in this route's `DOOR_ACTIONS`, so a
-refusal also counts in the raw personal `doorsKnocked`. **`reachedHomes` is a per-day display value
-only — never sum it across days:** a home refused on day 1 and surveyed on day 2 would be
-double-counted (the code builds it as a fresh `Set` union per day, both in `/today` and the
-per-day `/history` rows).
+**Refused and Not a target voter, per day (personal).** `/mobile/me/*`
+([me.js](../server/src/routes/mobile/me.js)) also returns `refusedHomes` and `notTargetHomes` (distinct
+door-rounds this user marked `refused` / `not_target`) and `reachedHomes` (distinct door-rounds that
+were **surveyed, refused or not a target** — a `Set` union, so each counts once: the personal "Reached
+a person" count, the local analogue of the report's `contactKnocks`). `refused` and `not_target` are in
+this route's `DOOR_ACTIONS` (a hand copy of `KNOCK_ACTIONS`), so each also counts in the raw personal
+`doorsKnocked`. No phone screen reads `refusedHomes`, `notTargetHomes` or `reachedHomes` today.
+**`reachedHomes` is built per day** (a fresh `Set` union per day, both in `/today` and the per-day
+`/history` rows), **and the per-day values add up.** Each canvasser keeps one result per door per
+round (`REPLACEABLE_ACTIONS` — the disposition and survey routes delete this canvasser's earlier row
+for the (household, pass) before inserting), so each of their door-rounds lands on exactly one day,
+and per-day `reachedHomes` values add up to the window's distinct door-rounds. A refusal and a survey
+in different rounds are two door-rounds, counted twice here as in every report.
 
 **Restricted, per day (personal).** `/mobile/me/*` also returns `restricted` (count of this user's
-`restricted` marks) and `restrictedHomes` (distinct inaccessible `householdId`s), surfaced on **My
+`restricted` marks) and `restrictedHomes` (distinct inaccessible door-rounds), surfaced on **My
 Stats** as an "N restricted" line (shown only when > 0). Unlike `refused`, `restricted` is **not** in
 this route's `DOOR_ACTIONS`, so it never enters the raw personal `doorsKnocked` or `reachedHomes`
-(= surveyed OR refused). But its stops **do** count toward the shift window and travel distance (the
-canvasser was physically there). A per-day display value only — like `reachedHomes`, don't sum it
-across days.
+(= surveyed, refused or not a target). But its stops **do** count toward the shift window and travel distance (the
+canvasser was physically there). Like `reachedHomes`, it adds up across days for the same reason
+(`restricted` is a replaceable disposition too, and desk marks are `via:'bulk'`, which this route
+skips): the My Stats "N restricted" line is the sum of the per-day values over the selected range.
 
 **`remaining`** (the map HUD's "Remaining", [me.js `/today`](../server/src/routes/mobile/me.js)) = the
 doors still left for **this person** to knock: `status = 'unknocked'`, `isActive`,
@@ -1454,15 +1657,18 @@ bug, fixed by adding the `fullyVoted` filter + the per-user scope.)
 The unbounded "All time" dashboards no longer re-aggregate the whole ledger on every load. Each
 campaign carries a maintained counter subdoc — [models/Campaign.js](../server/src/models/Campaign.js)
 `stats`: `activityCount` (every activity row, bulk included — powers `hasCanvassed`), the
-`knocksPipeline` quadruple (`knockCount`/`surveyedKnockCount`/`litKnockCount`/`refusedKnockCount`,
-distinct household×pass), `litDroppedCount` (volume), `surveyCount` (`SurveyResponse` rows),
-`lastActivityAt` + `canvasserIds` (non-bulk, mirroring `NOT_BULK`), and `reconciledAt` (the trust
-marker).
+`knocksPipeline` counters (`knockCount`/`surveyedKnockCount`/`litKnockCount`/`refusedKnockCount`/
+`notTargetKnockCount`/`contactKnockCount`, distinct household×pass — `contactKnockCount` is the
+contact fold, one per door-round whatever mix of contact rows it holds — plus `restrictedDoorCount`
+from the same `includeRestricted` run, §C), `litDroppedCount` (volume), `surveyCount`
+(`SurveyResponse` rows), `lastActivityAt` + `canvasserIds` (non-bulk, mirroring `NOT_BULK`), and
+`reconciledAt` (the trust marker).
 
 **The semantics are identical to the live pipelines by construction** — maintenance lives in
 [services/reports/campaignCounters.js](../server/src/services/reports/campaignCounters.js): the
 mobile write path applies exact per-pair deltas (one indexed pre-read of the pair's replaceable
-rows derives the before/after knock state), and every rare admin bulk op (re-cut clear-knocks,
+rows derives the before/after knock state — `knockStateOf`, whose `notTarget` and `contact` flags
+are the pipeline's `hasNotTarget` and `hasContact`), and every rare admin bulk op (re-cut clear-knocks,
 snapshot restore, bulk-restrict/unrestrict, restrict-doors/unrestrict-doors (single-home desk marks),
 admin survey delete, demo staging) triggers a full per-campaign recompute. Locked by
 [test/campaignStats.int.test.js](../server/test/campaignStats.int.test.js) — parity against an
@@ -1480,19 +1686,54 @@ knock above the live per-round table indefinitely. Scoping both sides identicall
 real drift a reconcile can actually fix.
 
 **Who reads them:** `/campaign-rollup` with no date window, no effort filter, and no crew filter
-(knocks quadruple, `litDropped`, `activeCanvassers`, `lastActivityAt`); `/overview`'s knocks +
-survey volume; and `campaignSummaries.hasCanvassed` (the archive/delete gate). Date-ranged,
+(the knock counters, `litDropped`, `activeCanvassers`, `lastActivityAt`); `/overview`'s knock
+counters + survey volume; and `campaignSummaries.hasCanvassed` (the archive/delete gate). Date-ranged,
 effort-scoped, and crew-scoped (`?coordinatorId`) requests always use the live pipelines (a scalar
 counter can't be windowed, and a crew has no counter), as do DISTINCT counts (surveyed voters,
 ranged active canvassers).
 
 **Fallback, not failure:** a campaign whose `stats.reconciledAt` is null (created before the
 feature) makes the whole request fall back to the live aggregation — counters are exact or unused,
-never approximate. Seed/repair with `npm run migrate:campaign-stats -- --apply`
+never approximate, with the one deliberate exception below. Seed/repair with `npm run migrate:campaign-stats -- --apply`
 ([migrations/reconcileCampaignStats.js](../server/src/migrations/reconcileCampaignStats.js); the
 dry run lists unseeded/drifted campaigns). `reconcileCounts --apply` also re-syncs stats after its
 ledger dedups. Known limit: two truly simultaneous writes on the same (household, pass) can drift a
 pair counter by 1 until the next reconcile — documented in the service header.
+
+**The two counters added 2026-10-02, and the recompute they require.** `notTargetKnockCount` and
+`contactKnockCount` are bumped on the hot path like the rest, and both are in the drift check
+(`COUNTER_KEYS`). `notTargetKnockCount` is exact from day one, because no `not_target` row predates
+it. **`contactKnockCount` is the exception to "exact or unused":** `reconciledAt` vouches for a whole
+campaign, not for a field added after it was stamped (the same blind spot §C describes for
+`restrictedDoorCount`), and campaigns already had surveys and refusals. So on every already-trusted
+campaign the counter is **absent** until it is seeded (a lean read skips schema defaults), and once
+phones start bumping it, **partial or even negative**: a door that had a contact before the deploy and
+is re-recorded without one afterwards (Refused → Not home) decrements the absent field to −1. The two
+stats-path readers, `/overview`'s reduce and `/campaign-rollup`'s stats path, default it with `|| 0`,
+so they answer instead of throwing (`contactRate()` would throw on a missing count, §C), and their
+`contactKnocks` / `contactRate` read low (below zero in that corner) until the seed. No screen renders
+either value (§B). Pinned by `campaignStats.int.test.js` ("a trusted campaign whose contact counters
+were never seeded still answers, then reconciles").
+
+**Required right after the server deploy** (runbook:
+[OPERATIONS.md](OPERATIONS.md#contactknockcount-and-the-required-recompute-migratecampaign-stats)): in
+the Heroku dashboard, **More → Run console**, run `npm run migrate:campaign-stats` (the dry run). Expect
+every campaign that had a survey or refusal recorded before the deploy to be listed as
+`DRIFTED <name> — contactKnockCount M→N`: that is the new counter being seeded, not drift. `M` is 0
+where no phone has bumped it yet, and it can be negative (`-1→N`). The drift check compares the
+stored value (`c.stats?.[k] || 0`) with a fresh recompute, and on a trusted campaign the stored value
+is only the post-deploy bumps (`$inc` creates the absent field), so the gap is the contact
+door-rounds that stood at the deploy. A campaign whose answered doors all came after the deploy is
+therefore already exact and is **not** listed (nor is one that an admin operation with a full
+recompute, such as a desk restrict or an unknock, has touched since). Expect no other key on a
+`DRIFTED` line; any other key there is genuine drift, worth a look before applying. An `UNSEEDED`
+line is a legacy campaign (new campaigns are stamped at birth) that the apply will stamp. Then run
+`npm run migrate:campaign-stats -- --apply`; a second dry run then reads "All campaign stats match
+the ledgers. Nothing to do." If the step is skipped, the nightly reconcile below seeds the counter
+within a day, logging every such campaign at `warn` that one night. That is expected once, and is
+not a bump-hook bug. (Both commands were checked from the repo root against a throwaway database in
+the pre-recompute state: a campaign with one surveyed-and-refused door and one refused door read
+`contactKnockCount 0→2`, the fold's 2 where the old formula gave 3.)
 
 **The reconcile runs NIGHTLY** (`CAMPAIGN_STATS_JOB`, 04:07 UTC, `CAMPAIGN_STATS_CRON`) — registered
 in `MAINTENANCE_JOBS` in [services/retention/scheduler.js](../server/src/services/retention/scheduler.js)

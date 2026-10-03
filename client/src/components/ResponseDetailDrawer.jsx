@@ -7,6 +7,7 @@ import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { formatDistanceImperial } from '../lib/flags.js';
+import { ACTION_LABELS } from '../lib/statusColors.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import Drawer from './ui/Drawer.jsx';
 import Badge from './ui/Badge.jsx';
@@ -185,7 +186,9 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
             {r.deskEntry && (
               <div className="text-xs text-amber-600">
                 Entered at a desk on {formatInTz(r.deskEntry.at, tz, TIME_OPTS, true)}
-                {r.deskEntry.fromOutcome ? ` — this door was recorded as ${String(r.deskEntry.fromOutcome).replace(/_/g, ' ')}` : ''}
+                {r.deskEntry.fromOutcome
+                  ? ` — this door was recorded as ${(ACTION_LABELS[r.deskEntry.fromOutcome] || r.deskEntry.fromOutcome).toLowerCase()}`
+                  : ''}
               </div>
             )}
 

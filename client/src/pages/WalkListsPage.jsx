@@ -145,9 +145,11 @@ export default function WalkListsPage() {
   const { selected } = useCampaignSelection(campaignId);
   // Walk lists belong to the selected campaign → show times in its tz (fallback org).
   const tz = selected?.timeZone || orgTz;
-  // The off-by-default outcome is a status choice only on a campaign that has used it.
-  const statuses = outcomeInUse(selected, 'not_target') ? [...STATUSES, 'not_target'] : STATUSES;
   const [f, setF] = useState(EMPTY);
+  // The off-by-default outcome is a status choice only on a campaign that has used it — or while it
+  // is ticked: the form survives a campaign switch, and a hidden tick could never be unticked.
+  const notTargetTicked = [...f.priorPassStatuses, ...f.exPriorPassStatuses].includes('not_target');
+  const statuses = outcomeInUse(selected, 'not_target') || notTargetTicked ? [...STATUSES, 'not_target'] : STATUSES;
   const [name, setName] = useState('');
   const [mode, setMode] = useState('filter');
   const [csvFile, setCsvFile] = useState(null);

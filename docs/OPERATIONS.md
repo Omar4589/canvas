@@ -99,6 +99,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | --- | --- | --- |
 | `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
+| `reconcile-campaign-stats` | Daily 04:07 UTC | **Re-checks every campaign's stored all-time counts** (`Campaign.stats` — what the campaigns list and the All-time dashboards read) against the knock and survey records, and writes back the true numbers. Same code as `npm run migrate:campaign-stats -- --apply`. When it had to repair something, the worker log carries a warning naming each campaign and count; a campaign that needs repairing every night is a bug in the counters. Cron override: `CAMPAIGN_STATS_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `retention-triggers` | Daily 04:41 UTC | **Warns, then condemns organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then hands each due org (wind-down, dormancy, due deletion requests) to **`org-delete-queue`** — one job per org, so a failure is isolated to that org instead of aborting the sweep, and the worker does the destroying minutes later. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. The run receipt reports `enqueued`; `purged` is 0 because this job no longer destroys anything itself. |
 | `sweep-stale-imports` | Daily 05:53 UTC | **Fails stuck imports and deletes orphaned upload files.** Expires import jobs whose worker died mid-run (no heartbeat for minutes) with a clear failure message, then deletes the **raw uploaded voter files** left behind by finished, failed, or vanished imports older than 24h — a crashed import used to keep the complete uploaded file forever — plus stray worker temp files. Cron override: `IMPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 
@@ -132,7 +133,7 @@ logged only:
 | --- | --- |
 | `RESEND_API_KEY` | The Resend API key. **Setting this is the go-live switch — see the gate below.** |
 | `MAIL_FROM` | The sender, e.g. `Doorline <notifications@doorline.app>`. Both vars required; key without from stays dormant (loud warning in the logs). |
-| `MOBILE_INSTALL_URL_IOS` / `_ANDROID` | Where a **canvasser's invite email** sends them to INSTALL the app. Defaults to the public store listings. Env-overridable because email can't be recalled — a wrong link is fixed for all future mail from the Heroku dashboard (Settings → Config Vars), no deploy. **Distinct from `MOBILE_STORE_URL_IOS`/`_ANDROID`** ([mobile/README.md](../mobile/README.md)), which override where the in-app *update* button sends someone who already has the app. Both stores went public 2026-07-28: both install vars are set, `MOBILE_STORE_URL_IOS` is now a no-op, and `MOBILE_STORE_URL_ANDROID` stays **deliberately unset** until the Play cutover (install is `com.doorline.app`; the fielded fleet is still `com.canvassapp.mobile`). |
+| `MOBILE_INSTALL_URL_IOS` / `_ANDROID` | Where a **canvasser's invite email** sends them to INSTALL the app. Defaults to the public store listings. Env-overridable because email can't be recalled — a wrong link is fixed for all future mail from the Heroku dashboard (Settings → Config Vars), no deploy. **Distinct from `MOBILE_STORE_URL_IOS`/`_ANDROID`** ([mobile/README.md](../mobile/README.md)), which override where the in-app *update* button sends someone who already has the app. Both stores went public 2026-07-28: both install vars are set, `MOBILE_STORE_URL_IOS` is now a no-op, and `MOBILE_STORE_URL_ANDROID` stays **set** to the `com.doorline.app` listing while the legacy `com.canvassapp.mobile` fleet still exists, because that app's built-in update link points at the listing being retired. |
 | `MAIL_TIMEOUT_MS` | Send timeout, default 10000. |
 | `RESEND_WEBHOOK_SECRET` | Signing secret for the delivery webhook (Resend dashboard → Webhooks → add `https://doorline.app/api/webhooks/resend`, events: delivered / bounced / complained / delivery_delayed — never opened/clicked). Unset = delivery statuses simply stay blank on the Emails page. |
 
@@ -376,6 +377,112 @@ so in one line. **STOP** marks the same digits in campaigns in two different sta
 merge), **CHECK** marks a name or birth date that differs. What each finding means and what to do
 about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 
+### Release "Not a target voter" — and the switch that withdraws it (October 2026)
+
+**Not a target voter** is a door button for when a canvasser talks to someone who isn't one of the
+voters on the list and won't give their name. It is off on every campaign until an org admin turns it
+on, and no org admin can until Doorline **releases** it — which you do here, once the app update is on
+the phones. What it is and how it counts: [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md).
+
+**The release is one config var, `OPT_IN_OUTCOMES`** (**Settings ▸ Reveal Config Vars**). The server
+checks it on every request, and saving it restarts the dynos — no deploy.
+
+| `OPT_IN_OUTCOMES` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships | Not released. App Customization has no switch for it, nobody can turn it on, no phone shows the button, and a tap that arrives anyway is refused. |
+| **`not_target`** | Released. App Customization gains an **Off until you turn it on** section on survey campaigns, which only org admins can switch. No campaign has the button until one of them does. |
+| **Unset again**, after a release | **The Doorline-wide off switch.** Every campaign's button goes — on an online phone within about 30 seconds of being on the map, on an offline one when it reconnects — and new taps are refused. Doors already recorded keep counting, a tap made offline still syncs and counts, and every campaign keeps its setting: an org admin sees **Paused by Doorline** and can still turn it off. |
+
+**Setting it again brings the button back on every campaign still set on, all at once. Tell org admins
+before you re-release.**
+
+**To release it, in this order.** Before you start, confirm item 25 in
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md): it needs no policy text change, but it is yours to sign
+off before the production deploy. If production does not yet run `4d1276a` (the campaign Voters tab; the
+**Activity** tab shows the commit production runs), this deploy ships that release too: confirm item 24
+as well, and in step 1 run the audit against the commit production runs instead of `4d1276a`.
+
+1. **Deploy server and web from `main`** (**Deploy** tab ▸ **Manual deploy**) with `OPT_IN_OUTCOMES`
+   unset. The button ships dormant; everything else is live at once. Things customers can notice
+   that day: Contact % counts each door once per round, so a re-downloaded per-round file can read
+   lower than a copy sent earlier — only where one canvasser surveyed a door and another recorded
+   Refused there in the same round; the Timeline's **No solicit** column, which has always read 0,
+   starts showing each canvasser's real count; the web campaign History shows an Add-person policy
+   change in plain words instead of the raw setting; and two downloads gain a column for every org (`canvassers.csv` ends with
+   **Not a target**, the Door Outcomes download with **Offline**). No index build, no
+   client-version bump: on your computer, `npm run audit:mobile-api -- 4d1276a` from the repo root
+   flags the phone-facing route files this release touches, and none of them removes or renames
+   anything the shipped app reads.
+
+2. **Required, straight after the deploy**, in the Run console:
+
+   ```
+   npm run migrate:campaign-stats              # dry run — lists what it would change, writes nothing
+   npm run migrate:campaign-stats -- --apply   # recompute and save every campaign's stored counts
+   ```
+
+   The release adds a stored count of the doors where someone answered, which existing campaigns
+   don't have yet. **The dry run should list every campaign that had a survey or refusal before the
+   deploy, each naming `contactKnockCount` and nothing else:**
+
+   ```
+   DRIFTED   <campaign name> — contactKnockCount 0→<N>
+   ```
+
+   That is the new count being filled in for the first time, so run `--apply`. A campaign whose
+   surveys and refusals all came after the deploy is already exact and isn't listed, and neither is
+   one an office action has recomputed since (a desk restrict or an unknock, for example). If
+   canvassers have recorded doors since the deploy, the number before the arrow may not be 0 — it can even be below
+   zero — and it means the same thing. **Any other count named on a line is real drift:** `--apply`
+   repairs it too, but write down which campaign and count, and look into it. Afterwards, a re-run of the dry run prints
+   `All campaign stats match the ledgers. Nothing to do.` (All three were checked from the repo root
+   against a throwaway database set up the way the deploy leaves production.) No screen reads the new
+   count, so nobody sees a wrong number while it waits; skip this and the nightly
+   `reconcile-campaign-stats` job (04:07 UTC, in the jobs table above) fills it in at its next run, with
+   a warning in the worker log naming every campaign it repaired.
+
+3. **Ship the phone update.** On your computer, in `mobile/`: `npm run ota:check`, then
+   `npm run ota:staging`; check it on TestFlight and Play internal; then `npm run ota:production` from
+   `main`. It is JavaScript plus one new map-pin image — no store build. The staging apps talk to
+   production, where the button isn't released yet, so it can't appear there. What you can check, on a
+   test campaign: changing a door's result now asks first ("Change this door's result?"), and turning an
+   existing outcome off on App Customization takes its button off a phone within about 30 seconds of the
+   map being open.
+
+4. **Before releasing, make sure every phone either has the update or is being told to get one.** Give
+   the production update time to land — a phone downloads it the next time the app is opened or
+   brought back, then runs it from the fresh start after that, or straight away if someone accepts the
+   **Restart** the app then offers (never shown on a door or survey screen). Then check the builds that
+   update can **never** reach, however long you wait: builds on an older fingerprint, the `playorg`
+   channel, and the retired `com.canvassapp.mobile` app (their runtime versions: `eas build:list`, the
+   expo.dev build pages, or *Where things stood at the lane split* in
+   [mobile/README.md](../mobile/README.md)). Open this for each one (`platform=ios` for an iPhone build):
+
+   ```
+   https://api.doorline.app/api/build-status?platform=android&runtimeVersion=<runtime version>
+   ```
+
+   Every one must answer `"status":"outdated"`. If any answers `ok`, narrow
+   `MOBILE_CURRENT_RUNTIME_ANDROID` / `MOBILE_CURRENT_RUNTIME_IOS` to the runtime versions of the current
+   production and staging builds (an unset var answers `ok` for every build), so those phones get the
+   existing soft "update available" nag. **Before narrowing the Android list, make sure
+   `MOBILE_STORE_URL_ANDROID` is set** (it should already be) to the `com.doorline.app` listing,
+   `https://play.google.com/store/apps/details?id=com.doorline.app` — without it the nag sends the legacy
+   app's users back to the listing being retired (mobile/README.md). Keep `MOBILE_UPDATE_MODE` on `soft`:
+   `hard` blocks the whole app, and whatever the legacy app has queued offline is lost if people stop
+   opening it. This is why the release waits: an old build draws a teammate's Not a target voter door
+   as an unknocked (near-black) house labelled "Unknown".
+
+5. **Release:** set `OPT_IN_OUTCOMES` to `not_target` (**Settings ▸ Reveal Config Vars**). The section
+   appears in every org; only org admins can switch it.
+
+**Roll forward only, once any campaign has used it.** After the first Not a target voter door is
+recorded, never roll the server back past this release (**Activity** tab ▸ *Roll back to here*): the
+phones' Not a target voter taps would be refused and any waiting in an offline queue thrown away; older
+code doesn't count those doors as knocked; and a release old enough not to know the status fails any
+save of those doors — even an unrelated pin fix, whose error then holds up that lead's offline queue.
+To take the button away, unset `OPT_IN_OUTCOMES` and fix forward.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -604,6 +711,8 @@ fraud audit).
 | `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
 | `npm run audit:voter-id-spellings` | **Read-only.** Per campaign: share of voter IDs starting with 0, ID widths (mixed widths = rows already lost zeros); per organization: one person stored under two spellings, the same person twice in one campaign, Person-directory keys that would collide once zeros are ignored, parked early-vote / do-not-contact IDs matching a voter only after ignoring zeros. `--org <slug>`, `--json`, `--samples N`. Rule in [`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js); test `auditVoterIdSpellings.int.test.js` runs it as a child process over the real script |
+| `npm run migrate:campaign-stats` | **Read-only.** Recomputes every campaign's `Campaign.stats` from the ledgers and lists the ones that differ (`DRIFTED`) or were never seeded (`UNSEEDED`) — [see below](#contactknockcount-and-the-required-recompute-migratecampaign-stats) |
+| `npm run migrate:campaign-stats -- --apply` | **Once, straight after the Not-a-target release deploy** (seeds `contactKnockCount`); otherwise any time counter drift is suspected. Recomputes and stamps **every** campaign — the same code as the nightly `reconcile-campaign-stats` job |
 
 Five notes on `repair:import-pins` specifically, because they surprise people:
 
@@ -797,6 +906,85 @@ team-blind.
 [`lockAccountDeletion.js`](../server/src/utils/lockAccountDeletion.js) takes the email as a bare positional
 argument (not just `--email=`) because the Heroku web console is a single text box and `npm run x -- --flag
 y` quoting is a footgun there.
+
+### The opt-in outcome release gate (`OPT_IN_OUTCOMES`)
+
+[`availableOptInOutcomes()`](../server/src/services/canvass/outcomeToggles.js) reads
+`process.env.OPT_IN_OUTCOMES` on every call — split on commas, trimmed, and filtered to the
+`OPT_IN_OUTCOMES` constant (`['not_target']`), so an unknown key is ignored rather than released.
+Nothing caches it; every reader calls it per request:
+
+- **`GET /api/admin/campaigns`** returns it as the top-level `optInOutcomesAvailable`. App Customization
+  (web and phone) shows the switch on a survey campaign when the key is in it, a turn-off-only "Paused by
+  Doorline" row when it isn't but the campaign's `enabledOutcomes` still has it, and nothing otherwise.
+- **The campaign PATCH** checks the release only for a key being turned **on** (400
+  `OUTCOME_NOT_AVAILABLE`). Turning off, and re-sending a key already stored on, are always accepted, so
+  a withdrawal never blocks saving the rest of the form.
+- **Both phone wires** — the bootstrap campaign block and `/mobile/changes`' `doorConfig` block, one
+  owner (`doorConfigFor` in [bootstrap.js](../server/src/routes/mobile/bootstrap.js)) — carry
+  `enabledOutcomes` = on ∩ released ∩ survey campaign (`effectiveEnabledOutcomes`). `doorConfigStamp` is
+  built from that effective list, so flipping the var changes the stamp of every survey campaign set
+  on, and a phone folds the new `doorConfig` from its next 30-second `/mobile/changes` poll — no
+  refetch.
+- **The recording gate** (`recordHouseholdAction` in [canvass.js](../server/src/routes/mobile/canvass.js))
+  refuses a fresh tap on a survey campaign with 400 `OUTCOME_DISABLED` unless the outcome is set on and
+  released there (`isOutcomeEnabled`). A lit-drop door never reaches this gate: the route's survey-only
+  check (`requireCampaignType: 'survey'`) answers first, with a plain 400
+  `Action not valid for campaign type "lit_drop".` and no code. A replay
+  (`wasOfflineSubmission: true`) is honored if the campaign has **ever** had it on
+  (`outcomeEverEnabled` — `everEnabledOutcomes`, which ignores the release), so the off switch never
+  rejects taps queued offline where it was on, and a campaign that never had it on refuses even a replay.
+- **The Door Outcomes desk and survey conversion** (`validatePair` in
+  [reclassifyOutcomes.js](../server/src/services/canvass/reclassifyOutcomes.js), and
+  [surveyConversion.js](../server/src/services/canvass/surveyConversion.js)) accept Not a target voter as
+  a "Change to" target only where `isOutcomeEnabled`, else 400 `TARGET_DISABLED`; the web Door Outcomes
+  page builds its **Change to** list the same way from `optInOutcomesAvailable`. After a withdrawal,
+  entries can still be changed away from it, but never to it.
+- **`outcomeInUse`** (ever set on, or on now), behind the conditional columns, tiles and filter chips on
+  the admin screens and the per-round CSV column, ignores the release too. The client report's
+  breakdown row, the share-map chip and the coverage legends are gated on a non-zero count instead,
+  which ignores it as well. Either way, history stays visible after a withdrawal.
+
+**Why roll forward only.** Code without the route 404s `POST /api/mobile/households/:id/not-target`,
+and [`offlineQueue.js`](../mobile/lib/offlineQueue.js) drops any 4xx that is not an auth failure (a 401
+or the 403 `PASSWORD_CHANGE_REQUIRED`, which it holds until sign-in), this 404 included, so queued taps
+are lost. `KNOCK_ACTIONS` before this release lacks `not_target`, so those rows stop counting as knocks. And the
+`Household.status` enum accepts `not_target` only from `4d1276a` on (the value shipped with the
+Voters-tab commit, ahead of the route): mongoose validates loaded paths on every `save()`, so on
+anything older a write that never touches `status` — `updateHouseholdLocation`'s pin move is a
+`save()` — fails with `` `not_target` is not a valid enum value for path `status` `` (checked on mongoose
+8.23.1). That 500 is not dropped: a 5xx stays at the head of the queue for retry and holds up the lead's
+queue behind it.
+
+### `contactKnockCount` and the required recompute (`migrate:campaign-stats`)
+
+The release adds `notTargetKnockCount` and `contactKnockCount` to `Campaign.stats` (declared with
+default 0 in [Campaign.js](../server/src/models/Campaign.js)) and to `COUNTER_KEYS` in
+[campaignCounters.js](../server/src/services/reports/campaignCounters.js), so the drift check compares
+both. `contactKnockCount` is distinct household × pass with any `CONTACT_ACTIONS` row — the contact-rate
+numerator, once per door per round. `notTargetKnockCount` is exact from day one (no rows predate it);
+`contactKnockCount` is not. On an already-trusted campaign (`stats.reconciledAt` set) it is absent —
+lean reads skip schema defaults — and the hot-path `$inc` moves it from nothing, so until a recompute it
+is partial or even negative (a refusal recorded before the deploy and changed after it decrements it).
+Its only reader is the stats-backed campaign-level `contactRate` on `/overview` and `/campaign-rollup`,
+which no screen renders; both stats copies default it with `|| 0`, so the routes keep answering. Hence a
+required one-time recompute rather than a version gate
+([PROPOSAL_NOT_TARGET_OUTCOME.md §F](PROPOSAL_NOT_TARGET_OUTCOME.md#f-campaignstats)).
+
+[`reconcileCampaignStats.js`](../server/src/migrations/reconcileCampaignStats.js) runs
+`reconcileAllCampaignStats`, the same function the nightly `reconcile-campaign-stats` job runs with
+`apply: true` ([scheduler.js](../server/src/services/retention/scheduler.js)). It recomputes every
+campaign from the ledgers and prints `DRIFTED   <name> — <key> <stored>→<fresh>, …` for a trusted
+campaign that differs (`lastActivityAt/canvasserIds differ` when only those do) and `UNSEEDED` for one
+never stamped; `--apply` prints the same list, then recomputes and stamps **every** campaign. Checked
+from the repo root against a throwaway mongod in the post-deploy state — exact stats with both new keys
+`$unset`, on three campaigns: one holding a door where one canvasser surveyed and another recorded
+Refused in the same round plus a refused door, one with only Not home, one lit drop. The dry run printed
+`DRIFTED   Survey with contacts — contactKnockCount 0→2` and nothing else, `--apply` seeded it, and the
+re-run printed `All campaign stats match the ledgers. Nothing to do.` Re-dispositioning the refused door
+to Not home through the real hot-path delta before the recompute made the same line read
+`contactKnockCount -1→1`. Skipped, the nightly job seeds it and warns once:
+`[maintenance] reconcile-campaign-stats: repaired <D> drifted, seeded 0 of <M> campaign(s) — <name> (contactKnockCount 0→<N>); …`.
 
 ## Why `autoIndex` is off in production
 

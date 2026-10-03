@@ -255,9 +255,10 @@ export default function AdminAppCustomization() {
             <InsetGroup>
               <InsetSwitchRow
                 label={ACTION_LABELS.not_target}
+                // The turn-off line is an org admin's: a lead can't turn it off.
                 sub={
                   notTargetState === 'paused'
-                    ? 'Paused by Doorline — no phone shows this button right now. You can still turn it off for this campaign.'
+                    ? `Paused by Doorline — no phone shows this button right now.${isOrgAdmin ? ' You can still turn it off for this campaign.' : ''}`
                     : OUTCOME_HINTS.not_target
                 }
                 value={notTargetOn}
@@ -271,7 +272,7 @@ export default function AdminAppCustomization() {
               campaign gets the button.{' '}
               {isOrgAdmin ? 'Only org admins can change this.' : 'Only org admins can turn this on or off.'}
               {notTargetOn
-                ? ' Entries already recorded keep counting. A phone that is offline keeps the button until it reconnects.'
+                ? ' If it is turned off, entries already recorded keep counting, and a phone that is offline keeps the button until it reconnects.'
                 : ''}
             </GroupFooter>
           </>

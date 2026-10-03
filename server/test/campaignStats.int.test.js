@@ -569,3 +569,23 @@ test('a trusted campaign whose contact counters were never seeded still answers,
   const seeded = await Campaign.findById(ctx.camp._id, { stats: 1 }).lean();
   assert.strictEqual(seeded.stats.contactKnockCount, fresh.contactKnockCount);
 });
+
+test('reconcileAllCampaignStats: notTargetKnockCount drift is caught too', { skip }, async () => {
+  // The other new counter. The seeding test above unsets it on a ledger with no not_target rows
+  // (absent reads 0 = 0), so it proves nothing about this key. Here the campaign holds a real
+  // not_target knock and ONLY this counter is wrong: a drift check that skipped it would report
+  // "nothing to do" forever.
+  assert.strictEqual((await knock(ctx.tokB, ctx.d4._id, 'not-target')).status, 201);
+  const exact = await assertParity('B not_target d4');
+  assert.strictEqual(exact.notTargetKnockCount, 1, 'the campaign holds one not_target knock');
+  await Campaign.updateOne({ _id: ctx.camp._id }, { $inc: { 'stats.notTargetKnockCount': 1 } });
+
+  const dry = await reconcileAllCampaignStats({ apply: false });
+  const found = dry.details.find((d) => d.campaignId === String(ctx.camp._id));
+  assert.ok(found?.diffs.some((x) => x.startsWith('notTargetKnockCount')), JSON.stringify(found));
+  assert.strictEqual(found.diffs.length, 1, `nothing else drifted (got ${found.diffs.join(', ')})`);
+
+  await reconcileAllCampaignStats({ apply: true });
+  const fixed = await assertParity('after the not_target repair');
+  assert.strictEqual(fixed.notTargetKnockCount, 1, 'repaired');
+});

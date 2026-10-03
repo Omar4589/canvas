@@ -6,10 +6,12 @@ kind: guide
 order: 33
 sourceDoc: MAPS.md
 summary: Read your assigned doors on the map, colored by status, and keep it in sync.
-tags: canvasser, map, doors, refresh, directions, navigation
+tags: canvasser, map, doors, refresh, directions, navigation, legend, pin colors, not a target voter
 ---
 
 Your map shows the doors in your assigned book. Each pin is colored by its status, so you can see at a glance what's done and what's left as you work down the block.
+
+Pull up the **Today's Progress** panel at the bottom of the map to see the **Pin legend**, which names each status color on a survey campaign. One color is off unless your campaign turns it on: if your campaign has the **Not a target voter** button turned on (for someone who answers the door but isn't on your list and won't give their name), doors marked that way are **fuchsia**, and the map's filter lists them as **Not target**. That legend entry and filter option appear while your campaign has the button on, or while a door on your map is still marked that way. (An outcome your campaign has turned off drops out of the legend and the filter too, once no door on your map is marked with it.) If you don't see **Not a target voter**, record the door as you do today and mention it to your lead.
 
 **Tap a house** and a panel slides up with the address, how many voters live there (and how many you've already surveyed), and when it was last visited. Each voter shows **party, age, and gender** — for example, "Democratic · 34 yrs · Female" — along with a **✓ Voted** tag if they've already voted early, and whether they've been surveyed yet.
 
@@ -17,11 +19,11 @@ Voter records are often incomplete, so anything the file doesn't have is simply 
 
 Tap **Open** to go into the house and take a survey. The voters read exactly the same there as they do on the map panel.
 
-The map stays in sync with your book automatically. Small changes an admin makes — a corrected pin, a door's status — patch in on their own within about half a minute. Bigger changes, like being handed a new book, come in when you **pull down to refresh** (or reopen the campaign).
+The map stays in sync with your book automatically. Small changes an admin makes — a corrected pin, a door's status — patch in on their own within about half a minute, and so do changes to your campaign's door settings: which outcome buttons you see, and whether you can add a person. That happens while you're on the map; if you're on a door screen at the time, the change arrives once you're back on the map. (On an older version of the app, settings changes wait for a **Refresh**; when the app says [a new version is ready](app-asks-to-restart), tap **Restart** to get the latest.) Bigger changes, like being handed a new book, come in when you tap **Refresh** (↻) on the map (or reopen the campaign).
 
 If a **red notice** appears at the top of the map saying location is required, your phone's location is off (or Doorline doesn't have permission). Tap the notice to fix it — recording doors is paused until location is back on, because every door needs a GPS stamp. See [Why does Doorline need my location?](why-location-required).
 
-> Tip: If your supervisor tells you they moved some houses to you, pull-to-refresh so your map picks them up.
+> Tip: If your supervisor tells you they moved some houses to you, tap **Refresh** (↻) so your map picks them up.
 
 **Getting to the house.** Under the address on the pull-up panel there's a **Directions →** link. Tap it, pick your maps app, and it opens with walking directions to that house. On an iPhone you'll be offered Apple Maps, Google Maps and Waze; on Android, Google Maps or whichever other maps app you have. The link is on the house screen and the building screen too.
 

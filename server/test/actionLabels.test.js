@@ -89,3 +89,15 @@ test('server door-status wording is identical to the web console', () => {
     );
   }
 });
+
+// The printed walk packet keeps its own paper ink and wording (client/src/lib/packet/packetTheme.js
+// — deliberately not the screen palette). An unknown status still prints, as its raw slug in gray,
+// so a missing key would not crash; it would just put "NOT_TARGET" on paper. `unknocked` is the one
+// status the packet never prints (packetPdf.js skips it), so it alone may be absent.
+const packet = await import(path.resolve(here, '../../client/src/lib/packet/packetTheme.js'));
+
+test('the walk packet has ink and a label for every door status it prints', () => {
+  const printed = DOOR_STATUSES.filter((s) => s !== 'unknocked');
+  assert.deepStrictEqual(Object.keys(packet.STATUS_LABEL).sort(), [...printed].sort(), 'packetTheme.js STATUS_LABEL has drifted from the Household.status enum');
+  assert.deepStrictEqual(Object.keys(packet.STATUS_INK).sort(), [...printed].sort(), 'packetTheme.js STATUS_INK has drifted from the Household.status enum');
+});

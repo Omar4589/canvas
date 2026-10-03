@@ -100,11 +100,14 @@ Each door has:
 - A **numbered red circle** — its place in the walk order. **Solid** means a new door;
   **hollow** means this door carried over from the previous page.
 - The **address**, largest thing on the block, then city/state/ZIP and unit.
-- **Last round's result** as a small outlined pill, on doors that were already visited.
+- **Last round's result** as a small outlined pill, on doors that were already visited. On a
+  campaign that uses **Not a target voter**, a door recorded that way reads **NOT A TARGET**.
 - **Who lives there** — name, party, age.
 - **What happened** — Not home · Refused · Wrong address · Surveyed · No soliciting · Restricted.
   One set for both layouts: a volunteer ticks the same box either way, and two vocabularies for one act made
-  the cover's tally disagree with the app.
+  the cover's tally disagree with the app. If your campaign uses **Not a target voter**, there is
+  deliberately no box for it here or on the cover's tally: paper can't know which campaigns turned
+  it on, and nothing on paper is ever read back into the app.
 - **Lines to write on.**
 
 Every packet also gets a **cover**, led by the **Doorline lockup** (mark plus wordmark), then
@@ -286,7 +289,8 @@ client/src/pages/PrintPacketsPage.jsx        the studio (three panes, full-bleed
 
 server/src/routes/admin/packets.js           GET /sources, GET /data
 server/src/services/packet/buildPacket.js    assembly: order, suppression, survey, age
-server/test/packet.int.test.js               the only server coverage this feature has
+server/test/packet.int.test.js               the packet routes and assembly
+server/test/actionLabels.test.js             STATUS_INK / STATUS_LABEL cover every printed status
 client/src/lib/packet/packetPdf.test.js      pagination + survey-model + split-render invariants
 client/src/lib/packet/splitBooks.test.js     the chunking rules
 ```
@@ -707,6 +711,21 @@ Other renderer traps:
 - `PAGE` is frozen, so derived values are spelled out in the literal — a late `PAGE.X = …` throws.
 - Do **not** copy `reportPdf.js`'s `ACCENT_HEX.brand`; it is `#4f46e5` (indigo), predating the red
   brand. The neutrals in that block are correct and are mirrored in `packetTheme.js`.
+- **The pill and the boxes are two vocabularies, on purpose.** The pill reads the door's per-round
+  status (`getPassStatusMap`, which resolves through `ACTION_TO_STATUS`, so a new outcome needs no
+  packet code to reach it) and draws it from `STATUS_INK` / `STATUS_LABEL` in `packetTheme.js`,
+  keyed to `Household.status`. A status missing there would still print, in gray with its raw key
+  upper-cased (`NOT_TARGET`). Each new status is still added to both maps by hand, but CI now
+  catches a miss: "the walk packet has ink and a label for every door status it prints" in
+  `server/test/actionLabels.test.js` pins both maps' keys to `Household.status` (every status
+  except `unknocked`, which the packet never prints). `not_target` has both: fuchsia-800 ink (a
+  shade under the screen's fuchsia, for paper) and "NOT A TARGET". The boxes and the cover tally
+  come from `OUTCOMES` in `packetPdf.js`, which stays at six even though its comment asks for
+  lockstep with the app's door buttons. The `/data` payload's `campaign` block is
+  `{ id, name, type }` — no outcome settings — so the renderer can't tell whether a campaign turned
+  the outcome on, and an unconditional box would print the words on every campaign's paper; and
+  since nothing written on paper is read back, the box would buy nothing. Design call 12 in
+  [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md).
 
 ## The map
 

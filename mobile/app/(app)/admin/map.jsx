@@ -1760,8 +1760,10 @@ export default function AdminMap() {
               count={statusCounts ? Object.values(statusCounts).reduce((a, b) => a + b, 0) : null}
               onPress={() => setStatusFilter([])}
             />
+            {/* An active status always shows: the filter survives a campaign switch, and a hidden
+                one could only be cleared through All statuses. */}
             {STATUS_OPTIONS.filter(
-              (s) => s.key !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0
+              (s) => s.key !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0 || statusFilter.includes(s.key)
             ).map((s) => (
               <MenuItem
                 key={s.key}

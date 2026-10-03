@@ -19,7 +19,9 @@ the export files carry — plus the counts that exist only in a file: Results by
 voters-by-answer CSV stays as-is), [DATE_FILTERS.md](DATE_FILTERS.md) (every dated column uses
 the campaign anchor timezone), [BILLING.md](BILLING.md) (the read-only wind-down and the export
 carve-out), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (the v4 2026-08-01 watchlist
-entry this feature is bound by).
+entry this feature is bound by), [CAMPAIGNS.md](CAMPAIGNS.md) (the Door Outcomes page and its CSV),
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the opt-in Not a target voter
+outcome, its columns, and the once-per-door Contact rate %).
 
 ---
 
@@ -78,6 +80,14 @@ and *Wrong address* unticked to drop desk marks and bad addresses from the file,
 activity's chips live in the dialog that **Queue export** opens for that type (beside the
 one-row-per-voter box); the Notes chips sit inline with the other filters. The phone's row-count
 preview follows it, and the export history lists the outcomes a file was narrowed to.
+**Not a target voter** — a door outcome that stays off until an org admin turns it on for a
+campaign — is offered as a chip only on a campaign that has had it turned on at some point, and the
+same goes for the statuses **Doors by round** can be narrowed to (*Only doors with status*). A chip
+or status picked on another campaign that this one doesn't offer is dropped when you queue, so the
+file never carries a choice you can no longer see. The wording follows the same rule: the Canvassing
+activity and Results by voter descriptions and the note under **One row per voter at the door**
+mention the outcome only on a campaign that uses it, and a full backup's README only when a campaign
+in that backup does.
 On **Results by voter** the chips do one thing only: they choose which *doors* are in the file. Narrow
 to *Not home* and you get the people at the addresses where somebody was out — each row still showing
 that address's own outcome, which can therefore name an outcome you did not tick, while the visit
@@ -111,19 +121,22 @@ Results by voter for who was reached.
 A "not home" is a fact about an address. Some tools on the receiving end want a fact about a
 *person* — a row per registered voter, so a knock can be matched to every household member in a
 voter-keyed system. Press **Queue export** on a Canvassing activity export, tick **One row per
-voter at the door** in the dialog that opens, and every knock that named nobody — not home, wrong address, refused, lit drop, no
-soliciting, restricted — comes out once per voter registered at that address, each row carrying
-the same outcome, time, canvasser, GPS and note, with that voter's State voter ID, UID, name and
-party filled in. Rows that already name a voter (a survey at the door) are untouched.
+voter at the door** in the dialog that opens, and every knock that named nobody — not home, wrong
+address, refused, lit drop, no soliciting, restricted, and *not a target voter* on a campaign that
+uses it — comes out once per voter registered at that address, each row carrying the same outcome,
+time, canvasser, GPS and note, with that voter's State voter ID, UID, name and party filled in. Rows
+that already name a voter (a survey at the door) are untouched.
 
 Four things to know before you rely on the file:
 
 - **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that
-  address declined — not that each of the three did. *No soliciting* is a sign on the property,
-  and neither is a do-not-contact request. *Restricted* rows repeat too, and many of those are
-  desk marks over a whole book rather than a visit, so an export over a bulk-restricted book can
-  grow a lot; the `Via` column says which rows are desk marks, filtering to one canvasser
-  leaves them out, and unticking *Restricted* under **Door outcome** drops them altogether.
+  address declined — not that each of the three did. *Not a target voter* (on a campaign that uses
+  it) on three rows means the person who answered was **not** on the list — none of the three. *No
+  soliciting* is a sign on the property, and none of these is a do-not-contact request.
+  *Restricted* rows repeat too, and many of those are desk marks over a whole book rather than a
+  visit, so an export over a bulk-restricted book can grow a lot; the `Via` column says which rows
+  are desk marks, filtering to one canvasser leaves them out, and unticking *Restricted* under
+  **Door outcome** drops them altogether.
 - **Its rows are not knocks.** The columns are identical to the normal file but the row count is
   not, so the file is named **`activity-log-by-voter`** (and the download
   `…-canvass-activity-by-voter-<date>.csv`) — never sum its rows for an invoice; the invoice-grade
@@ -200,8 +213,9 @@ histories.
 
 **The Address columns describe the door, not the person.** *Refused* on a three-voter house means
 somebody there declined — not all three, and not any identifiable one of them. The same goes for *No
-soliciting* (a sign on the property) and *Not home*. Only the survey blocks are facts about the
-person whose row it is.
+soliciting* (a sign on the property) and *Not home*. And *Not a target voter*, on a campaign that uses
+it, means the person who answered there was **not** one of the listed voters at all. Only the survey
+blocks are facts about the person whose row it is.
 
 **Answers are grouped by round**, so a voter surveyed in round 1 and again in round 2 shows both,
 side by side, in blocks labelled by walk list and round (`North Side R1 — …`) — nothing averaged,
@@ -309,6 +323,27 @@ a status other than `unknocked`/`restricted` equal that round's **Knocks** in th
 report, and the backup's `knocks-by-round.csv` is built by the very same pipeline as that
 report, so the TOTAL row always matches.
 
+**Not a target voter is a knock** — a billable door, like Refused — so its doors are already inside
+**Knocks** in every file, and in **Doors by round** they read `not_target`, on the counted side of
+that reconciliation. On a campaign that uses the outcome (a survey campaign that has had it turned on
+at some point), the per-round files — the **By pass** table's **Export CSV** on the campaign Home,
+and the backup's `knocks-by-round.csv` — also carry a **Not a target** column, right after **No
+soliciting**. Every other campaign's per-round file keeps exactly the columns it had.
+
+**Contact rate %** in those per-round files counts each door **once per round**: the share of doors
+where someone answered (a survey, a refusal, or — on a campaign that uses it — Not a target voter). It
+used to count a door twice when one canvasser surveyed someone and another recorded Refused there in
+the same round, which could even push the rate past 100%. So a per-round file downloaded now can show
+a lower Contact rate % than a copy sent earlier — only on campaigns where canvassers overlapped like
+that, whether or not the campaign ever used Not a target voter. Each canvasser's own contact rate is
+unchanged: one person cannot overlap with themselves.
+
+Two downloads that live outside this page also gained a column, for every organization, at the very
+end so that no column already in them moved: the Timeline's **Export CSV** (the canvasser file) now
+ends **Hours source, Not a target** — 0 wherever the outcome was never used — and the Door Outcomes
+page's **Export CSV** now ends with **Offline**, which reads *Offline* on an entry a phone recorded
+offline and synced later, and is blank otherwise.
+
 ---
 
 # Part 2 — Technical reference
@@ -348,7 +383,8 @@ cursors in, backpressured writes out; ZIP entries append **sequentially** via ar
 anti-drift spine: each type declares `adminOnly` / `requiresCampaign` / `subjectType` /
 `validateParams` (whitelist; snapshots a SavedSearch's filter JSON at POST) / `contentKind`
 (survey-results becomes a ZIP when >1 template has responses) / `build` — plus the
-**user-facing copy**: `label` / `desc` / `oneRowIs` / `filters` (UI filter-group tokens),
+**user-facing copy**: `label` / `desc` / `descNotTargetInUse` (the form of `desc` that names Not a
+target voter, on the two types whose copy does) / `oneRowIs` / `filters` (UI filter-group tokens),
 served by `GET /types`. The mobile sheet consumes all of it; the web overlays label/desc/filters
 onto its local TYPES list (which keeps the per-filter component wiring and the older-server
 fallback strings); `oneRowIs` renders on mobile only. Edits to what a type IS happen here once.
@@ -475,7 +511,19 @@ becomes routine on large fanned exports. The full backup passes `params: {}`, so
 
 un-fanned by construction. Off by default; frozen into `ExportJob.params`; surfaced by the web
 history's `scopeLabel` (which now also surfaces `includeDoorVoters`, `actionTypes`,
-`includeSurveyNote` and `includeSurveyAnswers`).
+`includeSurveyNote` and `includeSurveyAnswers`). `not_target` (2026-10-02) took no code here: its
+route writes the row door-level with a `null` `voterId`, so it fans exactly like `refused` (pinned in
+`test/exportBuilders.int.test.js`: one knock, one row per registered voter at the door, the same
+`not_target` Action on each, estimate == build). Its own caveat — whoever answered was none of the
+listed voters — is spelled out in Part 1 and in the Help Center's one-row-per-voter FAQ and Exports
+guide. The in-app copy lists it among the repeated door-level knocks under the generic
+repeated-not-attributed caveat, and only on a campaign that uses it: canvass-activity's
+`descNotTargetInUse` (the plain `desc` never names it) and both clients' one-row-per-voter hints. In
+the Export Center, the only copy that explains the outcome itself is Results by voter's
+`descNotTargetInUse`, for that file's Address columns — and it says only that the person who
+answered was not on the list. It once added "so none of the listed voters was reached"; that clause
+was dropped because Address outcome is the door's latest result across the rounds in scope
+(definition 2 below), so a listed voter may have been reached on an earlier visit.
 
 **The opt-in answer layer (`params.includeSurveyAnswers`)** — the Center's SECOND row option, on
 `canvass-activity` only (token `surveyAnswers`; same backward-compatibility argument, no version
@@ -597,7 +645,11 @@ written down here rather than left in the code:
    stored `Household.status`, deliberately: `utils/reconcileCounts.js` only rewrites those fields
    inside `if (h.status !== newStatus)`, so drift in the stored value is never repaired by the
    nightly job and must not be exported as fact. Resolving over VISITS instead would print "Not
-   home" for a door the whole rest of the product calls "Restricted".
+   home" for a door the whole rest of the product calls "Restricted". `not_target` is a knock, so it
+   is a visit too and its doors' listed voters are in the universe; their rows read *Not a target
+   voter* — the door-not-person caveat at its sharpest, since it records that whoever answered was
+   none of them. Like every non-completion status it is latest-wins over every round in scope, so a
+   door refused by a listed voter in round 1 and marked Not a target voter in round 2 reads the latter.
 3. **The FILTERS narrow the work columns** — a "last week, canvasser Ada" file prints Ada's visits in
    that window, not the door's lifetime. **The outcome chips narrow the work columns too** — `loadDoorFacts` intersects them through
 `fieldVisitActionTypes` — and they additionally choose WHICH DOORS are in the file. The one thing they
@@ -678,7 +730,8 @@ real rows back re-imports `resolveStatus`'s array-order tie-break at equal insta
 which a composite `$max: {at, action}` does not have. So the pipeline ships `actions` (an
 `$addToSet` over `STATUS_ROW_MATCH` rows) plus `latestActionType`, mapped off the composite **in the
 pipeline** rather than at the call site, so that field name cannot be hand-copied wrong again.
-Labels come from `DOOR_STATUS_LABELS` (8 keys, the `Household.status` domain), pinned by
+Labels come from `DOOR_STATUS_LABELS` (9 keys since `not_target` → "Not a target voter" joined, the
+`Household.status` domain), pinned by
 `test/actionLabels.test.js` against `Household`'s own enum and, wording for wording, against the web
 `STATUS_LABELS` — a SUBSET comparison, never `deepStrictEqual`: the web map carries three more keys
 (`voted` / `dnc` / `doNotKnock`) that are VOTER facts, not door statuses. The aggregation runs with
@@ -721,8 +774,10 @@ admin-only types + org-wide scope via `isOrgAdmin`.
   Returns `{type, contentKind, rows, dncWithheld, approx, files?}` (`files[]` = per-template
   breakdown when survey-results will ZIP). Counts only: no artifact, no `addAuditSubjects`;
   read-only, so it neither checks nor counts toward the active-job throttle.
-- `GET /types` — the registry's `label/desc/oneRowIs/adminOnly/requiresCampaign/filters/estimate`
-  per type, role-filtered (a lead never receives the admin-only types). Copy only, no data.
+- `GET /types` — the registry's
+  `label/desc/descNotTargetInUse/oneRowIs/adminOnly/requiresCampaign/filters/estimate` per type,
+  role-filtered (a lead never receives the admin-only types). Copy only, no data;
+  `descNotTargetInUse` is `null` for every type but canvass-activity and results-by-voter.
 - `GET /worker-status` — the imports worker-status pattern against the export queue.
 - `GET /` — history, paged; admins also see org-wide (`campaignId:null`) rows; leads only
   managed campaigns; `audit.subjectIds` projected out of every list.
@@ -786,6 +841,43 @@ History rows: failed/expired taps offer Retry (re-POST of the frozen params) and
 long-press deletes any non-running row; a worker-offline banner mirrors the web's.
 [`lib/artifactDownload.js`](../mobile/lib/artifactDownload.js) downloads TO DISK
 (`FileSystem.downloadAsync` — binary-safe for ZIPs, memory-flat) then opens the share sheet.
+
+**Not a target voter is offered — and named — only where it has been on** (2026-10-02). The web
+page's chip list (`chipOutcomes`, behind the one chip row that serves both the `outcome` token —
+Canvassing activity and Results by voter — and the Notes type's `noteOutcome` token) and
+doors-by-round's *Only doors with status* select (`roundStatuses`, which now labels from
+`STATUS_LABELS` instead of printing the slug) include `not_target` only when
+`outcomeInUse(campaign, 'not_target')` holds — read off the full campaign document
+`useCampaignSelection` returns, where "in use" means the campaign has had it on at some point
+(`everEnabledOutcomes` / `enabledOutcomes`) and is not a lit-drop campaign (a survey campaign switched
+to lit drop keeps `everEnabledOutcomes` but can never record the outcome), never whether Doorline
+currently has it released. The
+page's state survives a type or campaign switch, so `paramsForCreate` sends only the chips and the
+round status on offer right now; one picked elsewhere cannot ride along unseen.
+The mobile sheet gates its outcome chips and round-status tabs the same way through
+`useOutcomeInUse(campaignId)`, which reads the cached `['admin','campaigns']` rows and answers false
+until they resolve, so a chip can appear but never flash and retract; its tabs print the same status
+labels as the web select (the theme's `statusLabels`), no longer the slug. The gate is presentation
+only: the server whitelists — `ACTION_TYPES` (`notesQuery.js`) for `actionTypes`, `DOOR_STATUSES` for
+`roundStatuses` (without the key, a doors-by-round export narrowed to the status would 400) — accept
+`not_target` on every campaign, so an older client or a hand-built request still validates and simply
+matches no rows where the outcome never ran.
+
+The copy is gated too (owner ruling 2026-10-02,
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) §S.10). `GET /types` ships `desc`,
+which never names the outcome, beside `descNotTargetInUse` — the naming form, set only for
+canvass-activity and results-by-voter and `null` for every other type. `exportTypes.js` builds each
+pair from one function called both ways (`activityDesc` / `resultsByVoterDesc`), so the two forms
+cannot drift. The web page overlays `(notTargetInUse && s.descNotTargetInUse) || s.desc || t.desc`,
+and the phone's `mergeTypeMeta` carries the field so `ExportSheet` picks it the same way through
+`useOutcomeInUse`. An older client reads `desc` alone and shows the neutral copy, and neither
+client's local fallback copy names the outcome. Both clients' one-row-per-voter hints add "not a
+target voter" only in use. The full backup's README.txt and manifest.json notes come from
+`backupNotes(campaigns.some((c) => outcomeInUse(c, 'not_target')))` (the `BACKUP_NOTES` constant is
+gone) and name it only when a campaign in that bundle uses it — for the org-wide bundle, any campaign
+in the org. Every neutral form is the pre-feature string exactly — both `desc`s, both hints as
+rendered, and `backupNotes(false)`, which reproduces the retired `BACKUP_NOTES` array — so a customer
+who never turns the outcome on reads exactly what they read before.
 
 **Six** types stay web-only to QUEUE (owner scope decision): Survey answers (detailed), Filtered
 voters, Voter profile notes, **Notes**, **Results by voter**, and the full-backup ZIP. Notes is the
@@ -854,6 +946,35 @@ by construction. `test/exports.int.test.js` pins the tenth type's tokens, its `a
 and `estimate: true`, and the new `surveyAnswers` token on canvass-activity — that pinned token list
 is the anti-drift gate and is *supposed* to fail the moment a token is added.
 
+Not a target voter (2026-10-02) is pinned across eight server suites, plus
+`client/src/lib/exportsPageRender.smoke.test.js` and `mobile/lib/exportTypes.test.js`.
+`test/exportBuilders.int.test.js`: on its own campaign, a listed voter at such a door gets a
+Results-by-voter row whose Address outcome reads *Not a target voter* with no raw `not_target`
+anywhere in the file, estimate==build holds, the one-row-per-voter fan repeats the knock once per
+registered voter with `not_target` on each row and its chip narrows the file (estimate == build), the
+backup's `knocks-by-round.csv` carries the column after *No soliciting* there but not on a campaign
+that never used it, and the backup's README and manifest name the outcome only when the bundle holds
+a campaign that uses it (any campaign, for the org-wide bundle). `test/exports.int.test.js`: no
+type's `desc` names the outcome; only canvass-activity and results-by-voter ship
+`descNotTargetInUse`. `test/notTarget.int.test.js`: the `canvassers.csv` header ends
+`Hours source,Not a target`, `/knocks-by-pass.csv` carries the column right after *No soliciting*
+only where used (its TOTAL carrying the expected count, and the JSON's `notTargetInUse` false
+elsewhere), and doors-by-round's `validateParams` accepts the status.
+`test/optInOutcomes.int.test.js`: on a survey campaign switched to lit drop after the outcome was on
+(`everEnabledOutcomes` still holding it), the knocks-by-pass JSON's `notTargetInUse` is false, so its
+per-round files keep their shape — the case that needs `type` in `buildKnocksByPassData`'s narrow
+campaign projection, and the only suite that pins it.
+`test/reportsHoursSource.int.test.js`: the header ends `Hours source,Not a target` and data rows end
+`Measured,0` / `Estimated,0`. `test/reclassifyOutcomes.int.test.js` and
+`test/surveyConversion.int.test.js`: `outcome-entries.csv` ends `,Offline`, filled on an offline
+entry and blank on a live one.
+`test/contactOnce.int.test.js` pins the once-per-door Contact rate on the round surfaces the
+per-round files are built from. The client smoke renders the Exports page: on a campaign that never
+used the outcome nothing names it — type cards (server copy or local fallback), round-status select,
+outcome chips, one-row-per-voter hint — while one that uses it gets the naming forms, the status and
+the chip, and one that switched it off since keeps the naming copy. The mobile test pins that
+`mergeTypeMeta` carries `descNotTargetInUse` and that no local fallback names the outcome.
+
 ## The hours-stamp rule (standing)
 
 **Any frozen artifact that carries an hours or per-hour figure must say inside the file when those
@@ -866,9 +987,17 @@ that produced the file leaves whoever opens it in six months holding a number wi
 Today exactly ONE artifact carries hours — the legacy leaderboard CSV,
 `GET /admin/reports/canvassers.csv` (not an Export Center type). It opens with two preamble rows
 (`Canvasser export, <range>, hours as of <ISO>`, plus `Crew: <name>` when a crew filter was
-applied, then a blank line) before the header, and ends every row with an `Hours source` column
-(`Measured`/`Estimated`/`Mixed` — always present, so the file shape is constant whether or not an
-org connected FbTime). Import scripts that assumed row 1 was the header must skip three rows.
+applied, then a blank line) before the header. Its `Hours source` column
+(`Measured`/`Estimated`/`Mixed`) was appended after every existing column and is always present, so
+the file shape is constant whether or not an org connected FbTime. Since 2026-10-02 one more column
+follows it — **`Not a target`**, that canvasser's Not a target voter entries in the range, `0`
+wherever the outcome was never used — appended under the same always-present rule (the route's own
+comment: a conditional column is a different file shape), so no existing column moved: the header
+now ends `…,Hours source,Not a target`, and each data row ends with that canvasser's two values (for
+example `…,Measured,0`). Those entries are knocks, so they are inside `Knocks` too:
+the route now sums `Knocks` by `KNOCK_ACTIONS` membership instead of naming six action types, so the
+next outcome cannot fall out of it. Import scripts that assumed row 1 was the header must skip three
+rows.
 
 **Scope belongs in the stamp too.** The route honors `?coordinatorId` — the same crew filter
 `GET /canvassers` takes — and names the crew in the preamble, because one crew's rows and a whole
@@ -881,6 +1010,18 @@ filter the table carries, or say on its face that it didn't.**
 Downloadable from the **web** Timeline and the **mobile** admin Timeline; both send the campaign,
 walk list, crew and range currently on screen. No Export Center type, statement, or client report carries
 hours; if one ever grows an hours column, it inherits this rule.
+
+**The same always-present rule** covers the Door Outcomes page's download,
+`GET /admin/campaigns/:campaignId/outcome-entries.csv` (the route is documented in
+[CAMPAIGNS.md](CAMPAIGNS.md)): since 2026-10-02 it ends with an **`Offline`** column, for every org,
+printing `Offline` on an entry the phone queued offline and synced later (`wasOfflineSubmission`) and
+blank otherwise — the evidence an admin reviews when a phone that was offline at a switch-off kept
+recording an outcome. The route runs its OWN `CanvassActivity.find` rather than `listEntries`, so the
+flag had to join that projection as well, or the column would print blank on every row. It is no new
+disclosure: the lead-visible canvass-activity export already ships the same flag as
+`Offline submission`. The per-round files follow the opposite, conditional rule — `Not a target` joins
+`/knocks-by-pass.csv` and the backup's `knocks-by-round.csv` only for a campaign that uses the
+outcome (see the appendix), as the restricted-billing columns always have.
 
 ## Appendix — column contracts (per type)
 
@@ -960,8 +1101,21 @@ the event document — that guard is what blanks a do-not-contact person's row.
   typed by an admin while the row's `userId` is still the field canvasser, so Author alone would
   name the wrong person — the two columns are read together.
 - **`knocks-by-round.csv`** (backup only) — Walk list, Pass, Pass name, Pass status,
-  Activated/Archived (ISO); Knocks, Survey doors, **Surveys taken**, Lit knocks, Refused;
-  [Restricted doors, Billable doors when restricted billing is on]; Connection rate %,
-  Contact rate %, New homes reached; TOTAL row. `Surveys taken` is the response unit and sits
-  beside the door unit deliberately — the two are read together, and only the DOOR column feeds
-  the rates. Column order matches `/admin/reports/knocks-by-pass.csv` exactly.
+  Activated/Archived (ISO); Knocks, Survey doors, **Surveys taken**, Lit knocks, Refused, No
+  soliciting; *[Not a target — only on a campaign that uses the outcome: has had it on, never lit
+  drop]*; *[Restricted doors,
+  Billable doors — only when restricted billing is on]*; Connection rate %, Contact rate %, New homes
+  reached; TOTAL row. `Surveys taken` is the response unit and sits beside the door unit
+  deliberately — the two are read together, and only the DOOR column feeds the rates. **Contact
+  rate %** is `contactKnocks / knocks`: doors where someone answered (`CONTACT_ACTIONS` — a survey, a
+  refusal, Not a target voter) counted ONCE per (door, round) by `knocksPipeline`'s `hasContact` fold.
+  Until 2026-10-02 it was `(surveyedKnocks + refusedKnocks) / knocks`, two independent per-door flags,
+  so a door where one canvasser surveyed and another recorded Refused in the same round counted twice;
+  recomputed over the same rows, a value can only be lower, and only where canvassers overlapped.
+  Both conditional column sets are decided once, in `buildKnocksByPassData` (`billRestricted`, and
+  `notTargetInUse` — `outcomeInUse` off the campaign's `type` / `enabledOutcomes` /
+  `everEnabledOutcomes`; `type` rides the narrow projection so a survey campaign switched to lit drop
+  after turning it on reads false), and both files consume them, so an org-wide backup can hold
+  differently shaped `knocks-by-round.csv` files in different campaign folders. Column order matches
+  `/admin/reports/knocks-by-pass.csv` exactly; that route's `?groupBy=canvasser` form carries the
+  same conditional `Not a target` column in the same place.

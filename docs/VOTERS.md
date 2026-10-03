@@ -68,7 +68,10 @@ One page with everything about a voter:
   ("Replaced X's earlier answers … preserved below") and the **preserved** earlier response shows
   beneath it as a muted read-only card with a **Restore this response…** action (admins).
 - **Notes** — admin notes you add here, plus read-only notes captured in the field.
-- **Canvass activity** — what's happened at the household.
+- **Canvass activity** — what's happened at the household: each knock's result in plain words
+  ("Surveyed", "Not home"), who recorded it and when, and any note left with it. On campaigns that
+  use **Not a target voter**, those knocks are listed too, with their note — the entry means whoever
+  answered the door wasn't on the list, not that this voter isn't a target.
 
 Admins reach a profile from either Voters page, and the two show the same person with one
 difference: opened from the **org-wide** page — or by an admin from the campaign tab — the profile
@@ -227,13 +230,26 @@ little stale. Canvassers on **survey campaigns** get an **＋ Add person** butto
 optional** — those two are only for people who'd like to be contacted back. The person is **saved
 immediately** to that address (they stay on the roster even if the conversation ends there), and
 the survey opens for them right away. It works **offline** exactly like every other door action —
-the add and its survey queue together and sync in order when signal returns.
+the add and its survey queue together and sync in order when signal returns. (If the door already
+shows a different result this round — Not home, say — the survey screen asks first, *"Take a
+survey instead?"*, and **Cancel** leaves the person added but not surveyed. See
+[CANVASSER_APP.md](CANVASSER_APP.md) → *Changing a door's result*.)
+
+**Someone who won't give a name can't be added** — Add person needs a first and last name. That
+visit is what the **Not a target voter** button is for, on campaigns that have it turned on: one
+tap, no name recorded, counted as a knock and as reaching a person but never as a survey. It's off
+on every campaign until an org admin turns it on (survey campaigns only); where it's off, the
+canvasser records the door as they do today and mentions it to their lead. See
+[CANVASSER_APP.md](CANVASSER_APP.md) → *Not a target voter* and [CAMPAIGNS.md](CAMPAIGNS.md) →
+*Off until you turn it on*.
 
 What campaigns control and admins see:
 
 - **Who can add** is a campaign setting on **App Customization** ("Adding people at the door"):
   everyone on the campaign (the default), or team leads & admins only. Editable by leads, like the
-  outcome toggles, and audited in the campaign's history.
+  outcome toggles, and audited in the campaign's history. A change reaches canvassers' phones on its
+  own within about 30 seconds while they're on the map — no refresh needed (a phone with no signal
+  gets it once it's back online; an app that hasn't taken the latest update still needs a refresh).
 - Door-added people are **marked "Added at the door"** (who added them, and when) — as a badge in
   the Voters directory (with a filter to see only them), and as a banner on their profile.
 - They flow into **reports, surveys, tags, and exports like any other voter**. They have **no
@@ -294,7 +310,14 @@ campaign's only** and `otherCampaigns` is `[]` — and the builder returns `null
 campaign route passes `scopeCampaignId: isOrgAdmin(req) ? null : req.campaign._id` (owner rulings
 2026-09-30: an admin still sees every campaign with links; a lead sees only their own); the mobile
 profile route passes it for every non-org-admin. (Never name a new option `campaignId` — the
-builder has a local `const campaignId = household?.campaignId`.)
+builder has a local `const campaignId = household?.campaignId`.) **Canvass activity** is the door's
+latest knocks (up to 50) whose `actionType` is in the builder's own `KNOCK_ACTIONS` — a hand copy of
+the list in [services/reports/aggregations.js](../server/src/services/reports/aggregations.js) that
+must carry every knock outcome. `not_target` is in it, so a Not a target voter knock and its `note`
+are in every resident's `activity` — all three callers return it, only the web profile renders the
+list ([notTarget.int.test.js](../server/test/notTarget.int.test.js) pins it). On the profile, that
+is the only place its note shows: a door result carries no `voterId`, so it never joins the
+voter-tagged field notes (the Notes hub and the `notes` export still list it as a door note).
 
 **The note** — [`server/src/services/voters/voterNotes.js`](../server/src/services/voters/voterNotes.js)
 → `createVoterNote({ orgId, voterId, authorId, body })` is the **ONE** `VoterNote` writer, used by
@@ -408,6 +431,14 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
   - The **offline pair** is ordering-safe by construction: the phone mints the voter's `_id`, the
     create is idempotent on it, and the FIFO queue replays create-before-survey — so the queued
     survey's path references an id that survives any number of replays.
+  - **The policy reaches phones on the map poll (since 2026-10-02).** `doorAddPolicy` and the
+    per-user `canAddVoters` ride both phone wires, built by the one `doorConfigFor` in
+    [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js): the bootstrap's campaign
+    block, and `/mobile/changes`, where the phone sends its `doorConfigStamp` (URL-encoded) on the
+    map's 30-second poll and gets a `doorConfig` block back only when the stamp no longer matches —
+    folded into the cached campaign, no refetch. A canvasser's phone that hasn't picked up a switch
+    to `'leads'` still hits `ADD_VOTER_RESTRICTED` on a fresh add; offline replays still bypass.
+    Detail in [CANVASSER_APP.md](CANVASSER_APP.md).
   - Adding a voter is **billing- and door-count-neutral** (billing = distinct household×pass over
     CanvassActivity; doors = Household docs) and voter-unit surfaces (surveyedVoters, tags,
     coverage) absorb the row naturally. Demographic filters skip them (null party/age/districts).
@@ -421,7 +452,7 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
 | File | Renders |
 |---|---|
 | [pages/VotersPage.jsx](../client/src/pages/VotersPage.jsx) | Directory: filters + server-paginated table. **Two modes, one component**, chosen by `useParams().campaignId`. **Org mode** (`/voters`, the `ORG_NAV` item, inside the `orgAdmin` RoleGate in [App.jsx](../client/src/App.jsx)): `/admin/voters`, campaign select, Campaign column, the DNC-list and do-not-knock links, row → `/voters/:id`, plus an **Open in campaign →** link beside the select once a campaign is chosen. **Campaign mode** (`/campaigns/:campaignId/voters` — the `voters` item in `CAMPAIGN_NAV` ([navItems.js](../client/src/components/navItems.js)), Field group after Map, routed in the campaign block **outside** the gate so leads reach it): header = the campaign name (`useCurrentCampaign` + `CampaignGate` loading/missing states), no campaign select / column / DNC links, api base `/admin/campaigns/<cid>/voters`, the query key carries the campaign id, row → `/campaigns/<cid>/voters/:id`, and an admin-only **Org-wide directory →** link. The 503 `DIRECTORY_TIMEOUT` band + `shouldRetryDirectory` serve both modes; [lib/votersDirectoryRender.smoke.test.js](../client/src/lib/votersDirectoryRender.smoke.test.js) pins the query key + row shape. |
-| [pages/VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) | Profile: editable identity/contact, household + members, survey responses (edit-in-place by question type, shows edited-by/at; a winning response renders its `replacedEarlier` note, and preserved responses from `overwrittenSurveys[]` render as muted read-only cards with **Restore this response…**), admin notes CRUD + read-only field notes, activity, and the admin-only `StaffAccessCard`. **Campaign mode** (`/campaigns/:campaignId/voters/:voterId`): data from `/admin/campaigns/<cid>/voters/<id>`, back link to the campaign list (or Notes when `state.from === 'notes'`), "Also in" sibling links and household-member links campaign-relative. An **admin** keeps every control (the writes still call the org `/admin/voters` routes). A **lead** (`isOrgAdmin` false) is read-only: no identity Edit, no DNC flag/clear (the DNC section with reason / who / when IS shown), no survey Edit/Delete/Restore, no walk-up Delete, no note Delete, no `StaffAccessCard`; they can add a note (POST to the campaign route) and mark/lift household do-not-knock. |
+| [pages/VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) | Profile: editable identity/contact, household + members, survey responses (edit-in-place by question type, shows edited-by/at; a winning response renders its `replacedEarlier` note, and preserved responses from `overwrittenSurveys[]` render as muted read-only cards with **Restore this response…**), admin notes CRUD + read-only field notes, activity (each row labeled by `actionLabel` from [lib/statusColors.js](../client/src/lib/statusColors.js) — the canonical `ACTION_LABELS`, e.g. "Surveyed", "Not home", "Not a target voter"; every knock outcome has an entry, so no row prints a raw slug), and the admin-only `StaffAccessCard`. **Campaign mode** (`/campaigns/:campaignId/voters/:voterId`): data from `/admin/campaigns/<cid>/voters/<id>`, back link to the campaign list (or Notes when `state.from === 'notes'`), "Also in" sibling links and household-member links campaign-relative. An **admin** keeps every control (the writes still call the org `/admin/voters` routes). A **lead** (`isOrgAdmin` false) is read-only: no identity Edit, no DNC flag/clear (the DNC section with reason / who / when IS shown), no survey Edit/Delete/Restore, no walk-up Delete, no note Delete, no `StaffAccessCard`; they can add a note (POST to the campaign route) and mark/lift household do-not-knock. |
 | [pages/NotesPage.jsx](../client/src/pages/NotesPage.jsx) `NoteCard` · [components/ResponseDetailDrawer.jsx](../client/src/components/ResponseDetailDrawer.jsx) | Both link a voter to the **campaign** profile `/campaigns/<cid>/voters/<id>` for every role (the campaign id is in scope on both), so a lead's tap-through lands on a page they can open. |
 
 **Mobile** ([mobile/app/(app)/voters](../mobile/app/(app)/voters)):

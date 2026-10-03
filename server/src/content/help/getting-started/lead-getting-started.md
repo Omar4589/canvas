@@ -37,6 +37,7 @@ On any campaign you've been granted, you're as powerful as an admin:
 - Changing anyone's **role**, name, or email — and managing admins or fellow leads
 - Archiving or deleting survey templates, and the **tag library** (you build and edit surveys for your campaigns; tags you can use, not edit)
 - **Do-not-contact flags** — flagging someone reaches every campaign in the organization at once, so it's admin-only
+- Turning **Not a target voter** on or off — the optional door button for someone who answers but isn't on the voter list for that address and won't give a name. With no name, an entry can't be checked, so it starts off on every campaign and the switch stays with org admins. When it's on, everyone canvassing the campaign gets the button, including canvassers you add later
 - Granting the team-lead role
 
 ## Your Users page (mobile)

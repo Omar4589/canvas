@@ -6,16 +6,18 @@ kind: page
 order: 117
 sourceDoc: CAMPAIGNS.md
 summary: Correct what a canvasser recorded at a door — relabel it, record or remove survey answers, or unknock it entirely.
-tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list, search, export, csv, unknock, fraud, remove entries
+tags: outcomes, corrections, surveys, quality, page, admin, filter, date, date range, answers, walk list, search, export, csv, unknock, fraud, remove entries, not a target voter, offline
 ---
 
-**Door Outcomes** (in the sidebar's **Quality** group, next to Audit) is where you change what a recorded entry *says*. It's **org admins only** — leads decide what canvassers can record going forward, but changing the record itself sits one level up.
+**Door Outcomes** (in the sidebar's **Quality** group, next to Audit) is where you change what a recorded entry *says*. It's **org admins only** — leads decide what canvassers can record going forward (all but the optional **Not a target voter** button, which only org admins switch), but changing the record itself sits one level up.
 
 Filter by outcome, canvasser, walk list, round, date range — or, on a survey campaign, by a **specific survey answer** — then tick the entries you want: one row to fix one door, or **Select all N matching** for a whole batch, then pick what they should become. Dates mean the campaign's own days, the same way they do on the dashboard.
 
 **Filtering by answer** (open **Survey answers** in the filter bar) finds the doors where someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It needs one other filter set first (a canvasser, walk list, round or date range), it only ever matches Surveyed entries, and if your campaign has used more than one survey you pick which survey's answers you mean. The table then shows who matched at each door — and who else answered at the same visit, because changing a Surveyed entry takes **every** answer recorded at that visit, not just the matching one. The review step names them all before anything happens.
 
 There's also an **address search** (street, city or ZIP — it narrows the selection like any other filter), a newest/oldest **sort**, a running **entries · doors** count, and **Export CSV**, which downloads exactly what the table shows — survey evidence included — for handing off to whoever needs the worksheet.
+
+**Entries recorded offline are tagged.** An entry a phone saved while it couldn't reach Doorline — no signal, usually — and sent later shows a small **Offline** tag beside its outcome, and **Export CSV** ends with a matching **Offline** column (*Offline*, or blank). On this page it's a label only: there's no filter for it, and no number here changes because of it.
 
 You can also arrive here with the filter already set: the **Audit** page's drilled-canvasser view and the **Survey Explorer**'s answer drill each offer a *Correct in Door Outcomes* link that carries their filter over.
 
@@ -24,7 +26,7 @@ You can also arrive here with the filter already set: the **Audit** page's drill
 That review step is the whole safety model, so it's never skippable.
 
 - A change that can't move any number says so: *"No reported numbers change."* True for any mix of **Not home**, **Wrong address** and **No soliciting** — each is one knock, and none means you reached a person.
-- A change that *can* shows your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate, restricted doors — with the changed figures in red. **Refused** moves your contact rate; **Restricted** moves billable doors. You can still make the change. You just can't make it by accident.
+- A change that *can* shows your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate, restricted doors — with the changed figures in red. **Refused** moves your contact rate — and so does **Not a target voter**, on campaigns that use it, since both mean someone answered; **Restricted** moves billable doors. You can still make the change. You just can't make it by accident.
 
 Entries keep their time, GPS location, canvasser, round and turf. Only the label changes — door colors follow, and phones pick them up on the next sync.
 
@@ -79,6 +81,28 @@ Three honest limits, all named in the review step: a billing statement already i
 month stays as issued (it will show a drift warning when read); a published client report keeps
 its frozen numbers; and a phone that recorded one of the struck knocks before the cleanup can't
 sneak it back in afterward — the server drops the replay quietly.
+
+## Not a target voter entries
+
+**Not a target voter** is an optional door button for someone who answers but isn't on your list
+for that address and won't give a name. It stays off until an org admin turns it on for a
+campaign, and an entry with no name can't be checked, so this page is where you look them over.
+Its filter chip appears only on campaigns that have had it turned on.
+
+- **Changing one is always priced.** It counts as reaching a person, so the review step shows what the change does to your contact rate before anything runs.
+- **It's a *Change to* choice only where canvassers can record it right now** — a survey campaign that has it on, while Doorline has it available. Its entries stay listed here even after it's switched off, so cleaning up never waits on the switch.
+
+To clean up one canvasser's suspect entries, filter to that canvasser and a date range, tick the
+**Not a target voter** chip, select the entries, and then:
+
+- **Change them** — to **Not home**, say, when they were real visits with the wrong label. The review step prices what moves.
+- **Convert them to Surveyed** if the answers really were taken (see *Recording survey answers* above). Bear in mind what the entry itself said: that whoever answered was *not* one of the voters listed at that address. The answers you enter go to the voters on file there, so convert one only when you know a listed voter really answered.
+- **Unknock** them, so they stop counting and billing.
+
+**Switched it off while a canvasser's phone was offline?** That phone keeps the button until it
+reconnects, and what it records in the meantime still syncs and counts — real door work is never
+thrown away. To review those entries, filter by the canvasser and the dates since you switched it
+off, and look for the **Offline** tag.
 
 ## Seeing exactly what a change did
 

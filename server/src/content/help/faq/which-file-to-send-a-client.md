@@ -6,7 +6,7 @@ kind: faq
 order: 73
 sourceDoc: EXPORTS.md
 summary: Results by voter — one row per person at the doors you worked, with the door's outcome in plain English and their answers by round. It is not an accounting of doors, and its visit counts are not invoice lines.
-tags: export, csv, client, results by voter, deliverable, survey, download
+tags: export, csv, client, results by voter, deliverable, survey, download, not a target voter
 ---
 
 **Results by voter**, from the campaign's **Exports** page. Queue it on the web — the phone's
@@ -30,9 +30,7 @@ Four things to be straight about before you send it:
   door worked twice in one round reads 2 while billing counts that door once for that round. Don't
   reconcile this file against an invoice or against Doors by round's per-round visit column: those
   count doors per round, this counts visits to an address.
-- **The address columns describe the door, not the person.** *Refused* on a three-voter house
-  means somebody there declined, not that each of the three did, and it is not a do-not-contact
-  request. See [Restricted vs. refused](restricted-vs-refused).
+- **The address columns describe the door, not the person.** *Refused* on a three-voter house means somebody there declined, not that each of the three did, and it is not a do-not-contact request. *Not a target voter* — on campaigns that use that optional door button — means the person who answered wasn't one of the voters on your list for that address. See [Restricted vs. refused](restricted-vs-refused).
 - **Personal detail is off by default, on purpose.** Two tick-boxes beside the filters add it:
   **Include contact & demographic details** (phone, date of birth, precinct, districts,
   coordinates) and **Include the note from each survey** — the answers are what somebody clicked,

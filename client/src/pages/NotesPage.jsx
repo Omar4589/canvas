@@ -10,6 +10,7 @@ import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { Card, Badge, Button } from '../components/ui/index.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
 function buildQuery(params) {
@@ -264,7 +265,8 @@ export default function NotesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <span className="mr-1 text-xs uppercase tracking-wide text-fg-muted">Outcome</span>
-          {OUTCOMES.map((a) => {
+          {/* Not a target voter is offered only on a campaign that has used it. */}
+          {OUTCOMES.filter((a) => a !== 'not_target' || outcomeInUse(current, 'not_target')).map((a) => {
             const active = outcomes.includes(a);
             return (
               <button

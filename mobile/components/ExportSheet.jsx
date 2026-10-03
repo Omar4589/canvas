@@ -31,8 +31,9 @@ import { SHEET_TIMING } from './PullableSheet';
 const OUTCOME_CHIPS = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
 
 export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, onClose }) {
-  // Not a target voter — offered as an outcome chip and a round status only on a campaign that has
-  // used it, so a customer who never turns it on never sees the words.
+  // Not a target voter — named in the description and the per-voter hint, and offered as an outcome
+  // chip and a round status, only on a campaign that has used it, so a customer who never turns it on
+  // never sees the words.
   const notTargetInUse = useOutcomeInUse(campaignId);
   const outcomeChips = OUTCOME_CHIPS.filter((c) => c.key !== 'not_target' || notTargetInUse);
   const { colors } = useTheme();
@@ -169,7 +170,9 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   ];
   const statusTabs = [
     { key: '', label: 'Any status' },
-    ...[...ROUND_STATUSES, ...(notTargetInUse ? ['not_target'] : [])].map((s) => ({ key: s, label: s.replace(/_/g, ' ') })),
+    // The status's own label, as the web select shows it — the slug with underscores swapped read
+    // "not target" for Not a target voter.
+    ...[...ROUND_STATUSES, ...(notTargetInUse ? ['not_target'] : [])].map((s) => ({ key: s, label: colors.statusLabels[s] || s })),
   ];
 
   // "One row is…" must not read "one door event" while the Rows switch is on.
@@ -208,7 +211,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
             <Text style={styles.title}>
               {meta.emoji} {meta.label}
             </Text>
-            <Text style={styles.desc}>{meta.desc}</Text>
+            <Text style={styles.desc}>{(notTargetInUse && meta.descNotTargetInUse) || meta.desc}</Text>
 
             <View style={styles.item}>
               <Text style={styles.itemLabel}>One row is…</Text>
@@ -330,7 +333,8 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                   <View style={styles.switchText}>
                     <Text style={styles.switchLabel}>One row per voter at the door</Text>
                     <Text style={styles.switchSub}>
-                      A knock that named nobody (not home, refused, not a target voter, lit drop…) repeats once per
+                      A knock that named nobody (not home, refused, {notTargetInUse ? 'not a target voter, ' : ''}lit
+                      drop…) repeats once per
                       registered voter at that address, same outcome and note on each — repeated,
                       not attributed. Same columns, more rows; the file is named
                       activity-log-by-voter so its rows are never counted as knocks.

@@ -1263,6 +1263,12 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     omission here reveals nothing the same admin could not already download.
     **AMENDS the door-unit clause of `exportScope.js` and the "blank on purpose" sentence in
     [EXPORTS.md](EXPORTS.md)**: a door-unit row now has one opt-in, audited exception.
+    *[v6 2026-10-02: a door note can now sit on a `not_target` entry ("Not a target voter", item
+    25), printed with Outcome `not_target`. With `includeDoorVoters` on, that row lists the
+    registered voters beside an outcome that is true of **none** of them by definition (someone not
+    on the list answered), and the note may name that unlisted person (owner ruling 2026-10-02:
+    acceptable) or say something about a listed voter. Same opt-in, same per-download record, same
+    audience.]*
 
     **(b) A role widening — an owner ruling, and the reason two sentences here were false.** The
     new type is `adminOnly: false`, so a **team lead** can download it — including the `voter`
@@ -1326,6 +1332,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     sweeper, cascades and access log); the export-facing published promise is the do-not-contact
     sentence, which this satisfies strictly. The owner should confirm before the production
     release.
+    *[v6 2026-10-02: the voter-less action list above gains `not_target` ("Not a target voter",
+    item 25). Its attached outcome (`not_target` in the Action column) is true of **none** of the
+    listed voters by definition: someone not on the list answered. The attached note is free text:
+    it may describe that unlisted person, possibly by name (owner ruling 2026-10-02: acceptable), or
+    say something about a listed voter (item 25(a)'s example), and it is repeated onto every listed
+    voter's row. Same mitigations, same file, same audience. On web and phone, the export copy that
+    carries the "repeated, not attributed" caveat (the Canvassing activity description and the "One
+    row per voter at the door" hint) names it only on campaigns that use the outcome, and the full
+    backup's README.txt and manifest.json notes name it only when a campaign in that bundle uses it
+    (owner ruling 2026-10-02, made after the build; it extends plan design call 9, so none of that
+    copy shows the words to a customer who never turns it on). Call 9's own exception stands:
+    `canvassers.csv` always carries a "Not a target" column, 0 when unused. [EXPORTS.md](EXPORTS.md)
+    and the Help Center's exports guide name it too, worded for campaigns that use it.]*
 
 19. **[v6 2026-09-02 — Billing month history: an EXISTING aggregate, shown over more months, to the
     same gated audience. No new data, no new recipient, no money.]** The org Billing page grew a
@@ -1469,6 +1488,23 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     are optional and both are off by default — the existing contact/demographic block
     (`includeVoterDetail`) and the canvasser's survey note (`includeSurveyNote`, one cell per block,
     `exportBuilders.js:1431`). Docs: [EXPORTS.md](EXPORTS.md).
+    *[v6 2026-10-02: the `Household.status` domain is now **nine** values — `not_target` ("Not a
+    target voter", item 25) joined it; `DOOR_STATUS_LABELS` prints it in *Address outcome* as a fact
+    about the door, true of none of the people listed there (the same change moved the anchors
+    above: `DOOR_STATUS_LABELS` is now `utils/statusPrecedence.js:94`, `resolveStatusFromSummary`
+    `:79`).]*
+    *[v6 2026-10-02 anchor refresh: the results-by-voter copy now lives in an arrow function above
+    the registry, `resultsByVoterDesc` (`services/export/exportTypes.js:197-198`), which builds both
+    forms the registry serves: `desc`, which never names Not a target voter, and
+    `descNotTargetInUse`, which does (item 25). The three sentences quoted below ("The file to send a
+    client", the three-voter house, "built to be read rather than re-imported") are in both. So this
+    item's `exportTypes.js` anchors now read: the registry entry `:298` → `:318`; the copy at `:300`
+    → `:198` (served at `:320-321`); `:302 + :304-307` → `:323 + :325-328`; `adminOnly` `:308` →
+    `:329`; the frozen opt-ins `:333-336` → `:354-357`; Survey results' `:255-256` → `:275-276`.
+    Also moved since this item was written: `routes/admin/exports.js:338` → `:342`,
+    `client/src/pages/ExportsPage.jsx:194` / `:199` → `:197` / `:202`, and
+    `services/access/supportAccess.js:144` → `:148`. Every other anchor in this item, besides the
+    `statusPrecedence.js` pair refreshed above, was re-checked and resolves as written.]*
 
     **(a) The purpose is external hand-off, and that part IS new.** Every existing type is a
     re-import file, an audit file or a backup; this one's registry copy is *"The file to send a
@@ -1633,6 +1669,14 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `…-canvass-activity-with-surveys-<date>.csv` from ONE function (`activityFileNames` at `:409`),
     and the suffix tracks whether rows were actually added rather than the raw tick — so a human can
     tell from the filename that a file of knocks carries answers.
+    *[v6 2026-10-02 anchor refresh: the "Not a target voter" build (item 25) and its follow-up moved
+    seven of this item's anchors. In (a): `exportTypes.js:194` → `:214` (Canvassing activity's
+    `adminOnly: false`), `:256` → `:276` (Survey results'), `:222` → `:242` (`includeSurveyAnswers`
+    frozen into `ExportJob.params`), and `client/src/pages/ExportsPage.jsx:200` → `:203`. In (d):
+    `routes/mobile/canvass.js:797` → `:837`, `:875` → `:915`, and
+    `services/notes/notesQuery.js:148-166` → `:151-169`. Not moved, but one line off since this item
+    was written: the corrected comment in (c) is `services/export/exportEstimates.js:62-66`, not
+    `:63-67`. Every other anchor in this item was re-checked and resolves as written.]*
 
     **(a) The audience is unchanged; the co-location is the change.** `canvass-activity` is
     `adminOnly: false` and so is `survey-results` (`exportTypes.js:194`, `:256`), so everyone who can
@@ -1809,6 +1853,116 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     items 17, 19, 21, 22 and 23 were — specifically that rulings 1 and 2 (the DNC reason and the
     email shown to a lead) are as intended, since those are the two fields where "already on the
     phone" is the only prior disclosure.
+
+25. **[v6 2026-10-02 — "Not a target voter": an OPT-IN door outcome (off on every campaign until an
+    org admin turns it on). A new FACT recorded about an address, through the existing door-outcome
+    row — no new field, no new collection channel, no new recipient, no new subprocessor, no
+    retention change. What is new for disclosure is one more door-status VALUE in published reports
+    and lead-visible exports. Said out loud here as the repo invariant requires.]** What shipped:
+    `CanvassActivity.actionType` and `Household.status` gain `not_target` (label "Not a target voter",
+    `utils/statusPrecedence.js` `DOOR_STATUS_LABELS`); the canvasser records it with one tap,
+    `POST /mobile/households/:id/not-target` (`routes/mobile/canvass.js:635`), on SURVEY campaigns
+    only, GPS-stamped like every outcome, with the same optional door note. A FRESH tap is recorded
+    only where `Campaign.enabledOutcomes` lists it (`models/Campaign.js:51`, changed only by the
+    org-admin, audited campaign PATCH) and Doorline has released it (the `OPT_IN_OUTCOMES` config
+    var). On a survey campaign where it is not on, or not released, a fresh tap is refused
+    (`OUTCOME_DISABLED`); on a lit-drop campaign the route's survey-only check refuses it first (a
+    plain 400 with no code). An offline-queued tap (`wasOfflineSubmission`, set by the client — "policy, not
+    security", `routes/mobile/canvass.js:333-334`) is still recorded on a survey campaign that has
+    had the outcome on at some point (`everEnabledOutcomes`; `outcomeEverEnabled`,
+    `services/canvass/outcomeToggles.js:55`, deliberately ignores the release). So entries can
+    arrive after an org admin switches it off or Doorline withdraws it, including taps made on a
+    phone that was offline when it was switched off. That residual is accepted (plan §C.3); admins
+    review such entries on Door Outcomes by their **Offline** tag and in the `outcome-entries.csv`
+    **Offline** column (stamped on that file's §B8 entry). Docs:
+    [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (§M walks the triggers),
+    [METRICS.md](METRICS.md), [CANVASSER_APP.md](CANVASSER_APP.md).
+
+    **(a) What we collect — no new field; one new fact, and the note sentence that matters.** The row
+    carries exactly what every door outcome carries: the outcome, the time, the canvasser, the GPS
+    reading, an optional note. The fact it records is new — *someone at this address answered who is
+    not one of the listed voters and would not give their details* — and no reason picklist or new
+    free-text field was added (one tap, by design). **But the existing optional door note on this
+    outcome will often describe exactly that unlisted person** (e.g. "her ex answered, said Jane
+    moved"), possibly by name. Per items 17(a) and 18, that note sits next to the registered voters'
+    names in two lead-visible exports: Notes with "Include the voters registered at each door", and
+    Canvassing activity with "One row per voter at the door". In the app it also shows on the web
+    profile of every registered voter at that door: the profile's Canvass activity list is the
+    household's door entries with their notes, and `KNOCK_ACTIONS` in
+    `services/voters/voterProfile.js` includes `not_target` (the phone profile route returns the same
+    list, unrendered). Those profiles are management-only: org admins, and team leads for campaigns
+    they manage (item 24). A lead can be the client. The repo's
+    do-not-knock precedent treats free text about people outside the voter file as worth recording,
+    so it is recorded: **owner ruling 2026-10-02 — acceptable** (*"no, its okay for us to know names
+    and stuff. espeically the client because they own the data and all."* — plan §R item 2), so no
+    canvasser copy discourages it. `privacy.html:90` (*"a survey response, a door status, or a
+    note"*) already covers both the status and the note.
+
+    **(b) Retention / deletion — unchanged.** The row rides `CanvassActivity`'s existing cascades
+    (campaign delete, organization delete, Unknock). `enabledOutcomes` / `everEnabledOutcomes` are
+    two arrays of outcome keys on the campaign and die with it; the new `Campaign.stats` counters
+    (`notTargetKnockCount`, `contactKnockCount`) are derived from the ledger and recomputable.
+    Nothing new to purge.
+
+    **(c) Who can access — unchanged.** The switch governs RECORDING, not reading: turning it on or
+    off is org-admin only (a lead's PATCH is refused 403 — a lead may be the paying client, and this
+    is the org's trust decision), audited in the campaign History with the actor. Every read of the
+    resulting rows rides existing role gates. One new column on an existing admin-only file:
+    `outcome-entries.csv` (`routes/admin/campaigns.js:1106`, gate `loadForReclassify` — org admin
+    only) appends **Offline** ("Offline" or blank) from `wasOfflineSubmission`; the same flag already
+    ships as "Offline submission" in the wider-audience, lead-visible canvass-activity export
+    (`services/export/exportBuilders.js:455`, `:572`, `:630`), so it is no new disclosure. The
+    phone's settings delivery (`/mobile/changes` `doorConfig`) returns only the requesting user's own
+    campaign settings and their own `canAddVoters`, the same values the bootstrap already sends them.
+
+    **(d) Sharing / subprocessors — none. Not a DPA §6 event.** No new third party receives anything.
+
+    **(e) What we expose — yes, one more door-status value, in five places.** (i) Published client
+    reports and their PDF: a new **"Not a target voter"** row in the Voter contact breakdown, shown
+    only when the count is above zero (old frozen reports, and campaigns that never used it, render
+    exactly as before; `client/src/lib/reportDerive.js:149`, which the page and the PDF share). Every
+    report frozen since this change also carries, in its public payload, an aggregate
+    `totals.notTargetKnocks` per window (the door-rounds with a Not a target voter entry; 0 on a
+    campaign that never used it) that no page or PDF renders: `computeWindowStats` writes it
+    (`services/reports/computeReport.js:188`; the breakdown's own `not_target` count, `:174`, is also
+    0 when unused), and `shapeWindow` (`services/reports/clientReportView.js:8`) passes `totals`
+    through whole (`:22`) to the report route (`routes/public/share.js:154`), as `shapeReportListRow`
+    does into the list route's `headline` (`clientReportView.js:44-47`; `share.js:131`). A count,
+    never a door, an address or a name. (ii) The unauthenticated share map:
+    `ClientReportMapPoint.status` may now be `not_target`; `buildFrozenMapPoints`
+    (`services/reports/computeReport.js:256`) writes the door's
+    coordinates, street line, city and state, its status and the whitelisted answers — **never the
+    note** (pinned by `test/reportSecurity.int.test.js`, "a Not a target voter door publishes its
+    status — never the canvasser note beside it"); the share map offers a filter chip for it only on
+    a report that has such a door. (iii) **Results by voter** prints "Not a target voter" in the
+    *Address outcome* column beside each registered voter's name at that door — a fact about the
+    door that is true of **none** of the people listed. The type's description says the Address
+    columns describe the door, not the person, and, only on campaigns that use the outcome, that "Not
+    a target voter" means the person who answered was not on the list (`resultsByVoterDesc`,
+    `services/export/exportTypes.js:198`). It no longer adds that none of the listed voters was
+    reached: Address outcome is the door's latest result across the rounds in scope, so a listed
+    voter may have been reached earlier. (iv) Fanned activity rows (item 18): the voter-less row is
+    repeated once per registered voter at the door. Its outcome (`not_target` in the Action column)
+    is true of **none** of them by definition; its note is free text that may describe the unlisted
+    person, possibly by name, or say something about a listed voter, and it rides every one of those
+    rows. (v) The Notes export (item 17(a), lead-visible): a door note on this outcome prints with
+    Outcome `not_target`, and with the opt-in "Include the voters registered at each door"
+    (`includeDoorVoters`) the names of the registered voters at that door are on the same row — the
+    same attached outcome, true of none of them, beside a note that may name the unlisted person or
+    say something about a listed voter.
+
+    **No published sentence becomes false.** `privacy.html:90` (activity "such as a survey response,
+    a door status, or a note"), `:94` (location at action time; door results recorded offline are
+    held on the device until delivered), `:101` (published reports present "door statuses … shown at
+    the address level" and exclude voter names, canvasser identities and action timestamps — the note
+    may contain a name, but no canvasser text reaches the frozen points or stats, pinned by
+    `test/reportSecurity.int.test.js`, so the sentence stays true) and `:105` (an organization
+    reporting on its own canvassing to its own clients, including by export) cover it as written.
+    `:91` (the Add-a-person sentence about someone "not on the uploaded list") describes one channel,
+    not the only one: a name a canvasser types into this outcome's optional note is a "note" under
+    `:90`, so `:91` stays true. **Assessment: no Privacy Policy / ToS / DPA text edit is required.**
+    Owner to confirm before the production deploy, as with items 17-24 — specifically the note ruling
+    in (a), together with this reading of `:91`.
 
 ---
 
@@ -2339,6 +2493,17 @@ inherit it. Full reasoning in the v5 2026-08-11 watchlist entry.]*
 > Record-level audit: `addAuditSubjects` tags every household row written and every voter named
 > (the `walklists.js` precedent), persisted for staff access under a grant. Uses the shared
 > `csvWriter` cell escaping (formula-injection guard + BOM).**
+>
+> *[v6 2026-10-02: the file gains an appended **Offline** column ("Offline" or blank, from
+> `wasOfflineSubmission`) — the evidence an admin needs to review entries an offline phone
+> recorded after an outcome was switched off (item 25). Still org-admin only; the same flag
+> already ships as "Offline submission" in the lead-visible canvass-activity export
+> (`exportBuilders.js:455`, `:572`, `:630`), so no new disclosure.]*
+>
+> *[v6 2026-10-02 — placement note: the paragraph below is the body of the v5 2026-08-09
+> `?coordinatorId` crew-filter stamp directly above this entry. The 2026-08-26 entry was inserted
+> between that stamp's header and its body; nothing in it is about `outcome-entries.csv`.]*
+>
 > The parameter only **narrows** the row set to one coordinator's crew (or the no-crew bucket) —
 > same gates, same audience, same columns, no new field and no new recipient; an omitted parameter
 > is byte-identical to before. Line anchors in the table above have drifted with unrelated code
@@ -2403,7 +2568,7 @@ Two of your own findings conflict here and I am telling you which is right.
 
 ### (c) Transmission — **VERIFIED: at action time, AND on a pin correction.**
 
-- No location ping, heartbeat, presence, or live-tracking endpoint exists on the server. GPS reaches the server **only** in user-initiated request bodies: the five door-action endpoints (`server/src/routes/mobile/canvass.js:246`, `:264`, `:282`, `:300`, `:322`), the survey submit (`:358`), and the pin-correction endpoint (`:207`).
+- No location ping, heartbeat, presence, or live-tracking endpoint exists on the server. GPS reaches the server **only** in user-initiated request bodies: the five door-action endpoints (`server/src/routes/mobile/canvass.js:246`, `:264`, `:282`, `:300`, `:322`), the survey submit (`:358`), and the pin-correction endpoint (`:207`). *[v6 2026-10-02: **seven door-action endpoints now, not five, and every pin in this bullet has rotted.** One route per door result, each refusing a request that carries no GPS stamp (`LOCATION_REQUIRED`): `POST /mobile/households/:householdId/…` with `not-home`, `wrong-address`, `refused`, `lit-drop`, `not-target` (new with item 25), `restricted` and `no-soliciting` (`canvass.js:549`, `:569`, `:589`, `:609`, `:635`, `:664`, `:690`). The survey submit is now `:728` and the pin-correction endpoint `:486`. One more user-initiated body, never listed here, carries the stamp too: Add a person (`POST /mobile/households/:householdId/voters`, `:1004`, item 16) refuses a request without one and stores none of it. The bullet's finding is unchanged: no ping, heartbeat, presence or tracking route exists, and GPS reaches the server only in user-initiated request bodies.]*
 - **`optimisticSubmit` calls `getCurrentLocation()` unconditionally and merges the result into EVERY request body** (`mobile/lib/recordAction.js:173-184`). So a pure **drag** pin correction — where the user positioned the marker by hand and never asked to use their location — **still takes a fresh GPS fix and ships it to the server.** The server's zod schema for that route has no `location` key (`canvass.js:198-205`), so it is discarded on arrival — **but it is transmitted**, which is what a privacy policy speaks to.
 - **GPS is MANDATORY, not optional.** `location` is a required, non-nullable field (`canvass.js:70-74`, `:78`, `:353`) and `CanvassActivity.location` is `required: true` (`models/CanvassActivity.js:39`). If permission is denied the client sends `location: null` and the server rejects it with a 400. **The knock cannot be recorded without a coordinate.**
 
@@ -2471,6 +2636,11 @@ For **each individual household that was reached**, `ClientReportMapPoint` store
 - **the operator-whitelisted survey answers given at that door**
 
 (`server/src/models/ClientReportMapPoint.js:31-41`; built at `server/src/services/reports/computeReport.js:201-213`; shaped for the browser at `services/reports/clientReportView.js:67-77`; served **unauthenticated** at `server/src/routes/public/share.js:166-173`; rendered as address-then-answer in a click-through detail panel at `client/src/components/ClientReportMap.jsx:233-252`.)
+
+*[v6 2026-10-02: "the household's canvass status" can now be `not_target` ("Not a target voter",
+item 25) on campaigns that turned that outcome on. For this outcome the point gains only the status
+value — never the door note; the share map offers its filter chip only on a report that has such a
+door. Within `privacy.html:101`'s "door statuses" sentence either way.]*
 
 The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReportMapPoint.js:33`). **That is not an accurate description of its precision.** What it excludes is the unit/apartment line (`addressLine2`) and the ZIP.
 

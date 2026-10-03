@@ -6,7 +6,7 @@ kind: guide
 order: 10
 sourceDoc: CAMPAIGNS.md
 summary: How to create a campaign, work the Campaigns page, edit safely, and archive or delete.
-tags: campaigns, create, edit, archive, delete, key dates, door outcomes
+tags: campaigns, create, edit, archive, delete, key dates, door outcomes, not a target voter, app customization
 ---
 
 A campaign is the container for one canvassing project — its voters, walk lists, passes, surveys, and reports all live inside it.
@@ -34,18 +34,35 @@ The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archi
 - **Door goal + goal date** — admins **and leads.** The one exception to the line above: if you run a campaign, you set its target. Every change is recorded with your name in the campaign's [History](#history--who-changed-what).
 - **Name, survey, timezone** — admins and leads. As a lead you open the same edit drawer; the admin-only fields show but are greyed out.
 - **Restricted doors on invoices** — admins only. Choose whether restricted (inaccessible) homes count toward this campaign's billable door totals, or leave it on *Use organization default*. Unlike Type, this is never locked — it only affects how doors are reported, so you can change it at any point in the campaign and change it back.
-- **Door outcomes** — admins **and leads**, from the campaign's **App Customization** page (see below).
+- **Door outcomes** — admins **and leads**, from the campaign's **App Customization** page (see below). The one exception is an outcome that starts off — today only **Not a target voter** — which only org admins can turn on or off.
 
 ## Door outcomes — which buttons canvassers see
 
-Every campaign starts with the full set of outcome buttons in the field app. On the campaign's **App Customization** page (in the sidebar's Setup group on the web; **Quick actions → App customization** on your phone) you can turn individual ones off — say your campaign never wants **No soliciting** used. The web page shows a live phone preview of the door screen beside the toggles — flip one and the button disappears from the preview, exactly as it will from your canvassers' phones.
+Every campaign starts with the standard outcome buttons switched on in the field app — the one outcome that starts off is in the next section. On the campaign's **App Customization** page (in the sidebar's Setup group on the web; **Quick actions → App customization** on your phone) you can turn individual ones off — say your campaign never wants **No soliciting** used. The web page shows a live phone preview of the door screen beside the toggles — flip one and the button disappears from the preview, exactly as it will from your canvassers' phones.
 
 - **You can turn off:** Wrong address, Refused, No soliciting, Restricted access. (A lit-drop campaign shows only the last two — the first two don't exist at its doors.)
 - **Always on:** Not home and the goal outcome (Survey / Lit dropped). Without those, a walk can't be recorded.
+- **Off until an org admin turns it on:** **Not a target voter** — survey campaigns only, and only once Doorline has made it available. See below.
 
-Turning one off hides the button on canvassers' phones and blocks new recordings of it — even from a phone that hasn't refreshed yet, which instead gets a clear "turned off" message. A knock a canvasser recorded **while offline before the change** still syncs when they reconnect: a settings change never throws away work that already happened.
+Turning one off hides the button on canvassers' phones and blocks new recordings of it — even from a phone that hasn't picked up the change yet, which instead gets a clear "turned off" message. A phone on the current app picks up changes from this page within about 30 seconds while its map is on screen, with no refresh; a phone on an older app version gets them when it next reloads the campaign (tapping **Refresh** ↻ on the map, a restart, switching campaigns, or a new round). A door a canvasser recorded **while their phone was offline** still syncs when they reconnect — even one tapped after you made the change, because a phone with no signal keeps the buttons it already has until it's back online. A settings change never throws away real door work.
 
 **Nothing about the past changes.** Doors already recorded keep their status and keep counting in every number, report, and export. Each flip is recorded in the campaign's [History](#history--who-changed-what) with your name — "Door outcomes: all on → Refused off."
+
+## Off until you turn it on — Not a target voter
+
+You may never see this section on **App Customization**: it appears only on **survey** campaigns, and only once Doorline has made the outcome available. **Not a target voter** is a door button for the moment a canvasser talks to someone who isn't one of the voters on the list for that address, and that person won't give their name. Without it there's no honest way to record that visit — **＋ Add person** needs a name, **Refused** hides that the person wasn't one of your voters, and **Not home** says nobody answered. It counts as a knock and as reaching a person (Contact %), never as a survey, so the connection rate reads exactly as it would have with Not home or Refused at that door. See [Understanding the numbers](metrics).
+
+Nothing about it can be checked — no name is taken — so it works the opposite way from the switches above:
+
+- **It starts off on every campaign**, existing and new.
+- **Only org admins can turn it on or off.** As a team lead you see the section and whether it's on, but the switch is greyed out with the line *"Only org admins can turn this on or off."* Turning on an outcome nobody can verify is the organization's trust decision, so it stays with org admins — ask one.
+- **When it's on, everyone on the campaign gets the button** — including anyone a team lead adds to the crew later. Turn it on only for crews you trust.
+- **Turning it on asks first.** The confirmation spells out that it counts as a knock and as reaching a person, never as a survey; that an entry can't be verified; that each one is GPS-stamped and shows on that canvasser's row on Home and the Timeline; and that the change goes into History with your name. Turning it off doesn't ask — that's the safe direction.
+- **History** records each switch, highlighted, with who and when: *Off-by-default outcomes: none → Not a target voter*, and back to *none* when it's switched off.
+
+**Turning it off.** A phone that's online loses the button within about 30 seconds of being on the map, and a tap in the meantime gets a "turned off for this campaign" message instead of being recorded. A phone that's **offline** when it's switched off (no signal, or airplane mode) keeps the button until it reconnects, and what it records meanwhile syncs and counts, like any offline door result. An org admin can review those entries on the **Door Outcomes** page — filter by canvasser and date; entries recorded offline are marked **Offline** — and change any they don't accept, or Unknock them so they stop counting and billing. Everything already recorded keeps its status and keeps counting; nothing is converted automatically. (On a campaign that has never had it on, nothing gets through at all — not even from a phone's offline queue, since no phone could have shown the button there.)
+
+**Paused by Doorline.** Doorline can withdraw the outcome everywhere at once if something goes wrong. A campaign that's still set on then reads *"Paused by Doorline — no phone shows this button right now."* Phones drop the button, new taps are refused, everything already recorded keeps counting, and the campaign keeps its setting — an org admin can still turn it off, but not back on until Doorline makes it available again. When Doorline releases it again, the button comes back on every campaign still set on, and Doorline tells org admins before it does.
 
 ## Door Outcomes — fixing what was recorded
 
@@ -56,7 +73,7 @@ Filter by outcome, canvasser, walk list, round, date range — or, on a survey c
 **The review step is the important part: it tells you what the change does to your numbers.**
 
 - If the change can't move anything, it says so: *"No reported numbers change."* That's true for any mix of **Not home**, **Wrong address** and **No soliciting** — each is one knock and none means you reached a person.
-- If it *can*, you see your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate — with the changed figures in red. **Refused** moves your contact rate (someone answered) and **Restricted** moves billable doors (those can be invoiced). You can still make the change; you just can't make it by accident.
+- If it *can*, you see your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate — with the changed figures in red. **Refused** — and, on a campaign that uses it, **Not a target voter** — moves your contact rate (someone answered) and **Restricted** moves billable doors (those can be invoiced). You can still make the change; you just can't make it by accident.
 - **Lit dropped** entries can never be converted — a lit drop has no answers to move either way.
 - **Surveyed** entries can be converted in both directions, but not as a relabel: you enter the answers going in, and removing them shows you exactly whose answers go. See below.
 
@@ -108,7 +125,7 @@ See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## History — who changed what
 
-A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, the door-outcome toggles, archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
+A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, what canvassers can record at the door — the door-outcome toggles, an off-by-default outcome switched on or off, and who may add people at the door — archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
 
 On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
 

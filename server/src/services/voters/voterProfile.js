@@ -12,7 +12,8 @@ import { User } from '../../models/User.js';
 import { Person } from '../../models/Person.js';
 import { Organization } from '../../models/Organization.js';
 
-const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'];
+// Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here.
+const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 const hasText = (s) => typeof s === 'string' && s.trim() !== '';
 
 // Build the full profile payload for one voter. Three callers share it:

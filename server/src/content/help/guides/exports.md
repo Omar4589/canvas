@@ -7,7 +7,7 @@ order: 24
 sourceDoc: EXPORTS.md
 
 summary: Queue background CSV exports — canvassing activity, doors by round, survey results, results by voter (the file you send a client), your voter file, or a filtered subset — and download them from the Exports page.
-tags: export, csv, download, voter file, backup, data, results by voter, client file, survey answers
+tags: export, csv, download, voter file, backup, data, results by voter, client file, survey answers, not a target voter, contact rate, by pass, per-round, timeline
 ---
 
 Your data is yours. The **Exports** page (open a campaign, then **Exports** in the sidebar — on
@@ -30,18 +30,8 @@ keep, open in Excel or Google Sheets, or load into another tool.
 
 ## What you can export
 
-- **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at
-  that door. The complete field record. Voter name and IDs fill in only when a survey named the
-  voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter
-
-  columns are blank on purpose. Pressing **Queue export** on this type opens a dialog with three
-  choices: **Door outcome** chips that narrow the file to the outcomes you tick (leave
-  *Restricted* and *Wrong address* unticked to drop them, or tick only *Not home* for a re-knock
-  list with the full detail), **One row per voter at the door**, which repeats those knocks
-  once per registered voter at the address instead, and **Include survey answers**, which puts
-  what each survey recorded beside the knock that took it — both explained below.
-- **Doors by round** — one row per door per round with its status. Filter it to `not home` and
-  you have a re-knock list.
+- **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at that door. The complete field record. Voter name and IDs fill in only when a survey named the voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter columns are blank on purpose. Pressing **Queue export** on this type opens a dialog with three choices: **Door outcome** chips that narrow the file to the outcomes you tick (leave *Restricted* and *Wrong address* unticked to drop them, or tick only *Not home* for a re-knock list with the full detail), **One row per voter at the door**, which repeats those knocks once per registered voter at the address instead, and **Include survey answers**, which puts what each survey recorded beside the knock that took it — both explained below. **Not a target voter** — an optional door button that stays off until an org admin turns it on — is offered as a chip only on a campaign that has had it turned on.
+- **Doors by round** — one row per door per round with its status. Filter it to *Not home* and you have a re-knock list. Its status filter offers **Not a target voter** under the same rule as the chips — and, like a chip, a status you picked before switching to a campaign that doesn't offer it is dropped when you queue, so the file matches what's on screen.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
   more than one survey, you get one file per survey.
 - **Survey answers (detailed)** — one row per recorded answer, exactly as captured at the door,
@@ -96,17 +86,13 @@ A *not home* is a fact about an address. If the tool you're handing the file to 
 about a person — a row for every registered voter at the address — press **Queue export** on a
 Canvassing activity export and tick **One row per voter at the door** in the dialog that opens
 (on the phone: the **Rows** switch on the sheet). Every knock that named nobody (*not home*, *wrong address*, *refused*, *lit dropped*,
-*no soliciting*, *restricted*) then comes out once per voter registered at that address, each
-row carrying the same outcome, time, canvasser, GPS and note, with that voter's State voter ID,
+*no soliciting*, *restricted* — and *not a target voter*, on campaigns that use it) then comes
+out once per voter registered at that address, each row carrying the same outcome, time, canvasser, GPS and note, with that voter's State voter ID,
 UID, name and party filled in. Surveys, which already name the person, are unchanged.
 
 Three things to know:
 
-- **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that
-  address declined — not that each of the three did. *No soliciting* is a sign on the property.
-  Neither is a request not to be contacted. *Restricted* rows repeat too, and many of those are
-  desk marks over a whole book rather than a visit — the **Via** column says which, and unticking
-  *Restricted* under **Door outcome** leaves them out altogether.
+- **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that address declined — not that each of the three did. *Not a target voter* on three rows means whoever answered wasn't one of the voters on your list for that address, so it describes none of the three. *No soliciting* is a sign on the property. None of these is a request not to be contacted. *Restricted* rows repeat too, and many of those are desk marks over a whole book rather than a visit — the **Via** column says which, and unticking *Restricted* under **Door outcome** leaves them out altogether.
 - **Its rows are not knocks.** The columns are the same but the row count isn't, so the file
   arrives named **activity-log-by-voter** — never count its rows for an invoice. Every row of one
   knock shares the same **Activity DB id**, so counting distinct values there gets you back to
@@ -162,9 +148,11 @@ grouped by round, the surveys they took.
 
 **The Address columns are about the door, not the person.** *Address outcome*, *Address visits*,
 *Rounds worked*, *Address first / last visited* and *Last visited by* all describe the house.
-*Refused* on a three-voter household means somebody there declined, not that all three did. The
-outcome is the same one the map, Books and Door Outcomes show for that door — a marked-restricted
-door reads *Restricted* here too — just spelled out instead of coded.
+*Refused* on a three-voter household means somebody there declined, not that all three did.
+*Not a target voter* (on campaigns that use that button) means the person who answered wasn't one
+of the voters on your list for that address. The outcome is the same one the map, Books and Door
+Outcomes show for that door — a marked-restricted door reads *Restricted* here too — just spelled
+out instead of coded.
 
 **Answers are grouped by round.** Every round that produced surveys gets its own group of columns:
 a **Survey** cell naming the survey (and saying *(desk entered)* when an admin typed the answers
@@ -250,6 +238,23 @@ How they drop out depends on what a row *is*. On **Results by voter** they are d
 export is a list of people, so there is no row left to keep. On **Canvassing activity** the knock
 stays, because it is a record of work that was done and billed, and it is their name, their survey
 answers and the note from that survey that come out blank.
+
+## The per-round and Timeline downloads
+
+Two downloads live on the pages whose numbers they carry rather than here.
+
+**The By pass table's Export CSV**, on the campaign's Home, is the per-round summary — one row per
+walk list and round, with a TOTAL row that matches the Knocks number on screen (an admin's full
+backup carries the same per-round table, for the whole campaign to date). It's the invoice-grade
+file — see [The campaign Home (dashboard)](page-campaign-home). Two things about it:
+
+- **On a campaign that uses Not a target voter**, it has a **Not a target** column right after **No soliciting**. Those doors are knocks, so they're already inside **Knocks**. Every other campaign's file keeps exactly the columns it had.
+- **Contact rate % counts each door once per round** — the share of doors where someone answered: a survey, a refusal, or (on campaigns that use it) Not a target voter. It used to count a door twice when one canvasser surveyed someone there and another recorded Refused in the same round, which could even push the rate past 100%. So a file you download now can show a lower Contact rate % than a copy you downloaded earlier — only on a campaign where two canvassers recorded the same door in the same round. Knocks, survey doors and the connection rate don't change, and neither does any one canvasser's own contact rate.
+
+**The Timeline's Export CSV** — one row per canvasser — ends with a **Not a target** column after
+**Hours source**: that canvasser's Not a target voter entries, 0 on a campaign that doesn't use
+that button. Every organization's file has it, at the very end, so no column you already rely on
+moved.
 
 ## Archived campaigns still export
 

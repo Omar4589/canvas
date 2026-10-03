@@ -6,7 +6,7 @@ kind: page
 order: 100
 sourceDoc: CAMPAIGNS.md
 summary: What the campaign dashboard shows and when to use it.
-tags: dashboard, home, metrics
+tags: dashboard, home, metrics, not a target voter
 ---
 
 The campaign **Home** is your dashboard — the first screen when you drill into a campaign. It does two jobs depending on where the campaign is in its life.
@@ -20,6 +20,8 @@ While you're still setting up, Home shows the **Setup progress** card: an ordere
 ## Once you're live
 
 After the first pass is activated and knocks start coming in, Home becomes a **monitoring dashboard**: households, houses knocked, knocks, active canvassers, and a coverage bar — filterable by date range, by walk list, and by **crew**. On a **survey** campaign you'll also see surveys and a connection rate; on a **lit-drop** campaign, lit drops and a lit rate instead.
+
+On a survey campaign that has had the optional **Not a target voter** door button turned on, there's one more tile beside the connection rate — **Not a target**, the count and its share of knocks — and the **Canvassers** table gains a **Not target** column after Contact %: each person's count and the share of their doors. It sorts by share, so one canvasser far above the rest of the crew stands out. In the mobile app the campaign screen shows the same figure, and the **Top canvassers** cards add each person's not-target count. A campaign that never turned it on shows none of this. See [Understanding the numbers](metrics).
 
 ## The door-goal line
 
@@ -39,7 +41,7 @@ Three of the numbers also carry a small grey word telling you the unit: **Survey
 
 ## The By pass breakdown
 
-Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), surveys taken, the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it.
+Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), surveys taken, the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it. On a survey campaign that has had **Not a target voter** turned on, it also has a **Not a target** column (and so does its CSV).
 
 **New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. With a crew selected, "first-ever" is still judged campaign-wide — a home counts for the crew only if that crew made its very first knock, so a door another crew reached first is never a "new home" here. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 

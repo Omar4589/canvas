@@ -260,6 +260,10 @@ export default function ExportsPage() {
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
+  // Not a target voter is an outcome only some campaigns ever turn on: named, and offered as a
+  // chip or round status, only where it has been used — a customer who never turns it on never
+  // sees the words.
+  const notTargetInUse = outcomeInUse(campaign, 'not_target');
   const serverById = typesQ.data?.types ? new Map(typesQ.data.types.map((t) => [t.id, t])) : null;
   const visibleTypes = TYPES.filter((t) => (serverById ? serverById.has(t.id) : !t.adminOnly || !isLead)).map(
     (t) => {
@@ -270,7 +274,7 @@ export default function ExportsPage() {
       return {
         ...t,
         label: s.label || t.label,
-        desc: s.desc || t.desc,
+        desc: (notTargetInUse && s.descNotTargetInUse) || s.desc || t.desc,
         filters: Array.isArray(s.filters) && s.filters.length ? s.filters : t.filters,
       };
     }
@@ -373,7 +377,10 @@ export default function ExportsPage() {
     if (wants('effort') && effortId) p.effortId = effortId;
     if (wants('pass') && passId) p.passId = passId;
     if (wants('canvasser') && userId) p.userId = userId;
-    if (wants('roundStatus') && roundStatus) p.roundStatuses = [roundStatus];
+    // Narrowed to what THIS campaign offers, like the outcome chips below: the page survives a
+    // campaign switch, so a Not a target voter picked on another campaign can still be held here
+    // while the select reads Any status.
+    if (wants('roundStatus') && roundStatus && roundStatuses.includes(roundStatus)) p.roundStatuses = [roundStatus];
     if (wants('savedSearch')) p.savedSearchId = savedSearchId;
     if (wants('import') && importJobId) p.importJobId = importJobId;
     if (wants('voterDetail') && includeVoterDetail) p.includeVoterDetail = true;
@@ -417,10 +424,7 @@ export default function ExportsPage() {
   // the options dialog for Canvassing activity. One element, two homes.
   // A note is not a visit, so Results by voter — whose universe IS field visits — never offers that
   // chip. The server refuses it outright rather than intersecting to an empty file, and presenting a
-  // choice that 400s is worse than not presenting it.
-  // Not a target voter is an outcome only some campaigns ever turn on: offered only where it has
-  // been used, so a customer who never turns it on never sees the words.
-  const notTargetInUse = outcomeInUse(campaign, 'not_target');
+  // choice that 400s is worse than not presenting it. Not a target voter: see notTargetInUse.
   const chipOutcomes = (type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS).filter(
     (a) => a !== 'not_target' || notTargetInUse
   );
@@ -763,8 +767,9 @@ export default function ExportsPage() {
                   <span>
                     <span className="font-medium text-fg">One row per voter at the door</span>
                     <span className="block text-xs text-fg-muted">
-                      A knock that named nobody — not home, wrong address, refused, not a target voter,
-                      lit drop, no soliciting, restricted — is one row about the door. Tick this and it repeats once
+                      A knock that named nobody — not home, wrong address, refused,{' '}
+                      {notTargetInUse ? 'not a target voter, ' : ''}lit drop, no soliciting, restricted — is one
+                      row about the door. Tick this and it repeats once
                       per registered voter at that address, each row carrying the same outcome, time,
                       canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
                       three rows means someone at that address declined, not that each person did. The

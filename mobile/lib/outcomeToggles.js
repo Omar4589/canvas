@@ -42,7 +42,9 @@ export const isOutcomeOn = (campaign, key) => {
 // exists only for an opt-in outcome. Needs the FULL campaign row from the ['admin','campaigns']
 // query — screens holding a shaped campaign (campaignShape, useAdminCampaign) go through
 // lib/useOutcomeInUse.js instead, because those copies never carry these fields.
+// Never on a lit-drop campaign: the opt-in class is survey-only, and a campaign switched to lit drop
+// before canvassing keeps its everEnabledOutcomes record (the type change clears only enabledOutcomes).
 export const outcomeInUse = (campaign, key) =>
   !OPT_IN_OUTCOMES.includes(key) ||
-  (campaign?.everEnabledOutcomes || []).includes(key) ||
-  (campaign?.enabledOutcomes || []).includes(key);
+  (campaign?.type !== 'lit_drop' &&
+    ((campaign?.everEnabledOutcomes || []).includes(key) || (campaign?.enabledOutcomes || []).includes(key)));

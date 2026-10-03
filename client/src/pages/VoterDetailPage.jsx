@@ -7,7 +7,7 @@ import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
 import { Badge } from '../components/ui/index.js';
 import { choicesFor, OTHER_OPTION_ID } from '../lib/surveyChoices.js';
-import { ACTION_LABELS } from '../lib/statusColors.js';
+import { ACTION_LABELS, actionLabel } from '../lib/statusColors.js';
 
 function fmtDate(d, tz, withTime = true) {
   if (!d) return '—';
@@ -893,7 +893,7 @@ export default function VoterDetailPage() {
               {p.notes.field.map((n) => (
                 <li key={`${n.source}-${n.id}`} className="rounded border border-border p-3 text-sm">
                   <p className="whitespace-pre-wrap text-fg">{n.note}</p>
-                  <p className="mt-1 text-xs text-fg-subtle">{n.source === 'survey' ? 'Survey' : n.actionType} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
+                  <p className="mt-1 text-xs text-fg-subtle">{n.source === 'survey' ? 'Survey' : actionLabel(n.actionType)} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
                 </li>
               ))}
             </ul>
@@ -908,7 +908,8 @@ export default function VoterDetailPage() {
           <ul className="space-y-1.5 text-sm">
             {p.activity.map((a) => (
               <li key={a.id} className="flex flex-wrap gap-x-2 text-fg-muted">
-                <span className="font-medium text-fg">{a.actionType.replace('_', ' ')}</span>
+                {/* The canonical label (statusColors.js): the slug with an underscore swapped read "not target". */}
+                <span className="font-medium text-fg">{actionLabel(a.actionType)}</span>
                 <span className="text-fg-subtle">· {fmtDate(a.timestamp, orgTz)}{a.by ? ` · ${a.by.name}` : ''}</span>
                 {a.note && <span className="text-fg-muted">— {a.note}</span>}
               </li>

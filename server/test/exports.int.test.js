@@ -262,6 +262,17 @@ test('GET /types: registry metadata, role-filtered, unified labels', { skip }, a
   assert.strictEqual(byId.notes.adminOnly, false, 'notes is lead-visible (owner ruling)');
   assert.strictEqual(byId.notes.estimate, true);
   assert.ok(byId['canvass-activity'].desc.length > 0, 'descriptions ship from the registry');
+  // Not a target voter is named only on a campaign that uses it (owner ruling 2026-10-02): `desc`
+  // never names it — older clients render that field alone — and the two types whose copy does name
+  // it ship that form beside it, for the client to pick by outcomeInUse.
+  for (const t of admin.json.types) {
+    assert.ok(!/not a target/i.test(t.desc), `${t.id}: the plain description never names the off-by-default outcome`);
+  }
+  const named = admin.json.types.filter((t) => t.descNotTargetInUse).map((t) => t.id).sort();
+  assert.deepStrictEqual(named, ['canvass-activity', 'results-by-voter']);
+  assert.match(byId['canvass-activity'].descNotTargetInUse, /plain knocks \(not home, refused, no soliciting, not a target voter, lit drop\)/);
+  assert.match(byId['results-by-voter'].descNotTargetInUse, /"Not a target voter" means the person who answered was not on the list\./);
+  assert.strictEqual(byId['voter-file'].descNotTargetInUse, null, 'a type whose copy never names it ships null');
   // perVoterRows is the Center's first ROW option; both clients take their filter tokens from
   // this list, so the token shipping here is what makes the checkbox/switch render at all.
   assert.deepStrictEqual(byId['canvass-activity'].filters, [

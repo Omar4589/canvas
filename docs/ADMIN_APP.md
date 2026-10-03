@@ -74,10 +74,13 @@ next sync.
 **Part 1 — For everyone.** Open a campaign and the first thing you see is **Activity** for the date
 range you picked — the range is named right under the heading, so a number is never undated. Knocks
 leads as the big number; beneath it, one row each for Survey doors, Surveys taken, Voters surveyed, and the
-Connection rate. Small grey words under two of them (`houses`, `people`) say what's being counted,
-because a house can hold several voters and those two numbers are deliberately different. The
+Connection rate. Small grey words under three of them (`houses`, `forms`, `people`) say what's being
+counted, because a house can hold several voters and surveying someone again in a later pass is
+another form, so those numbers are deliberately different. The
 connection rate carries a colored badge and a plain-English verdict — *On target · 986 of 4,136
-doors* — so you can check the percentage against the two numbers printed right above it.
+doors* — so you can check the percentage against the two numbers printed right above it. On a
+campaign that has used **Not a target voter**, one more row follows the rate, marked `doors` (see
+*Not a target voter on the phone*, below).
 
 Nothing has a little **ⓘ** button any more. Instead there's one line at the bottom of the group,
 **How these are counted**, that slides up a panel explaining every number in the group with your
@@ -251,12 +254,60 @@ state and both cache reads are gone — the screen now reads only `loadCurrentUs
 On a campaign's detail screen, between the Activity group and Coverage, a **By pass** group lists
 one row per walk-list pass (walk list name over the pass label, e.g. "Pass 2 · GOTV") with the
 pass's knocks in the value column and a "Conn N%" fragment ("Lit N%" on a lit-drop campaign)
-tier-colored in the row's sub-line — over the same date range as the Activity group. Keeping the
+tier-colored in the row's sub-line — over the same date range as the Activity group (on a campaign
+that has used **Not a target voter**, the sub-line counts those doors too). Keeping the
 rate in the sub-line leaves the right-hand column exactly one tabular number per row. The rows are
 counted exactly like the web dashboard's **By pass** table, so they always sum to the same Knocks
 headline — a footer under the group now says so — and knocks recorded before passes existed show as
 a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
+
+### Not a target voter on the phone — the switch and its numbers
+
+**Not a target voter** is an optional door button for the moment a canvasser talks to someone who
+isn't on the list for that address and won't give their name ([CANVASSER_APP.md](CANVASSER_APP.md)
+→ *Not a target voter*). Nothing about it can be checked, so it is **off on every campaign** until
+an org admin turns it on — and until a campaign has had it on, none of the numbers below appear (the
+switch itself shows on every survey campaign once Doorline has made the outcome available).
+
+**Turning it on.** On a survey campaign, once Doorline has made the outcome available, **App
+customization** (the campaign screen's Quick actions) shows an **Off until you turn it on** group
+with one switch, **Not a target voter**. Turning it on asks first (**Cancel** first, **Turn on**
+second), and the question spells out what you're agreeing to: everyone canvassing the campaign gets
+the button once their app is up to date — including anyone a team lead adds to the crew later; it
+counts as a knock and as reaching a person, never as a survey; no name is recorded, so an entry
+can't be verified; and the change goes into the campaign's History with your name. Turning it off
+saves straight away: entries already recorded keep counting, and a phone that's offline keeps the
+button until it reconnects. Either way, phones pick the change up within about 30 seconds of being
+on the map. **Only org admins can change it** — a team lead sees the switch and whether it's on,
+but can't flip it ([ROLES.md](ROLES.md)). If Doorline withdraws the outcome while a campaign still
+has it on, the switch stays, reading *Paused by Doorline — no phone shows this button right now*,
+and the only thing it can do is turn off. Every flip lands in **History** as *Off-by-default
+outcomes*, highlighted.
+
+**Its numbers.** Once a survey campaign has had it on — and from then on, even after it's switched
+off — the phone's admin screens show it alongside the other results:
+
+- **Campaign screen → Activity** — a **Not a target** row after the connection rate: the count for
+  the range, with its share of the knocks underneath. *How these are counted* explains it.
+- **Campaign screen → By pass** — each pass's grey line adds how many of its doors were Not a target.
+- **Top canvassers** and the **Timeline** roster — anyone who recorded one shows "· N not target"
+  after their contact rate.
+- **A canvasser's profile** — a **Not a target** row after *Not home / wrong*: their count and its
+  share of their knocks, with no "vs team" comparison.
+- **Users → a person's sheet** — a **not target** count beside their doors, survey doors, connection
+  rate and days.
+- **A canvasser's Activity feed and Territory map** (under *Drill down* on their profile) — a
+  **Not target** choice in the *Action* filter.
+- **The Map tab** — fuchsia pins, and a **Not target** choice in the status filter.
+- **Coverage** — a fuchsia **Not target** segment, listed in the legend only when there's at least
+  one.
+
+There is deliberately no automatic warning for a high share — a stale voter file produces an
+honestly high one. The per-canvasser figure is there so one person far above the rest of the crew is
+easy to spot; changing or unknocking their entries happens on the web's **Door Outcomes** page
+([CAMPAIGNS.md](CAMPAIGNS.md) → *Door Outcomes*; the setting itself is *Off until you turn it on*
+there).
 
 ### One filter row: value-showing chips (2026-08)
 
@@ -552,17 +603,22 @@ where relevant a grey line of explanation.
   queues the everyday CSV types with a live row-count preview, and keeps working on an archived
   campaign ([EXPORTS.md](EXPORTS.md));
   **History** — who changed this campaign's settings (the door goal, the key dates, the invoice
-  policy, archiving) plus team reassignments, read-only, campaign chip and all
+  policy, archiving, the outcome switches and who can add people at the door) plus team
+  reassignments, read-only, campaign chip and all
   ([CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*); it is reached from the campaign screen's
   Quick actions rather than the More hub, since it answers a question you have while looking at a
   campaign's numbers;
   **App customization** — which outcome buttons this campaign's canvassers see, a stack of
   switches (the inset grammar's `InsetSwitchRow`, its first use) with an always-available list
   below, plus — on survey campaigns — the **"Adding people at the door"** switch (ON = every
-  canvasser can add a walk-up voter at a door; OFF = team leads & admins only); reached from the
-  campaign screen's Quick actions like History, edits save on flip, and
-  every flip lands in History ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*;
-  [VOTERS.md](VOTERS.md) → *Adding a person at the door*);
+  canvasser can add a walk-up voter at a door; OFF = team leads & admins only) and, once Doorline
+  has made it available, the **Off until you turn it on** switch for **Not a target voter** (org
+  admins only; turning it on asks first — see *Not a target voter on the phone*, above); reached
+  from the campaign screen's Quick actions like History, edits save on flip, every flip lands in
+  History, and a change reaches canvassers' phones within about 30 seconds while they're on the map
+  (an offline phone once it reconnects; an app without the latest update on its next refresh)
+  ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door outcomes*; [VOTERS.md](VOTERS.md) → *Adding a person at the
+  door*);
   **Overlaps** — now carries the same campaign chip (it used to take the cached pick with no
   picker at all, so an empty cache dead-ended it); entries open a detail screen with a map of the
   house and "Open on live map";
@@ -654,9 +710,12 @@ participate. It's a **billable knock** and counts as a **contact**, but it is **
 in its own amber bucket (color `#F59E0B` everywhere). Where it shows up for an admin:
 - **Coverage** — the all-time coverage bar (Overview and each campaign dashboard) has its own amber
   **Refused** segment beside Surveyed / Not home / Wrong address.
-- **A new "Reached a person" rate** — `contactRate = (surveyed + refused) ÷ knocks` — measures how
-  often a knock reached a live person. It's **separate from** the existing Connection/Survey rate,
-  which is unchanged (refusals don't count as surveys there).
+- **A new "Reached a person" rate (Contact %)** — the doors where someone answered (a survey, a
+  refusal, or — on campaigns that use it — Not a target voter) ÷ knocks — measures how often a
+  knock reached a live person. **Each door counts once per round**, however many canvassers reached
+  someone there (since 2026-10-02 — before, a door one canvasser surveyed and another recorded as
+  Refused in the same round counted twice). It's **separate from** the existing Connection/Survey
+  rate, which is unchanged (refusals don't count as surveys there).
 - **Per-canvasser CSV** — the leaderboard export gains a **Refused** column.
 - **Client reports** — the door-outcome breakdown labels it **"Declined to participate."**
 
@@ -913,6 +972,73 @@ client-only:
 
 The full server/data/render depth for all three lives in [MAPS.md](MAPS.md) (§D endpoints, §E render,
 §J file map) and [METRICS.md](METRICS.md) §D (the two overlap surfaces) — not duplicated here.
+
+## Not a target voter on the phone — App customization and the in-use gate
+
+The phone admin half of [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) §K (its §S
+records where the build differs from the plan). The counting is [METRICS.md](METRICS.md)'s; the
+setting's server contract — `Campaign.enabledOutcomes` / `everEnabledOutcomes`, the PATCH refusals,
+the `OPT_IN_OUTCOMES` release gate — is [CAMPAIGNS.md](CAMPAIGNS.md)'s. All of it ships by OTA — JS
+plus the bundled `house-not_target.png` pin; no native build.
+
+**The switch.** [admin/app-customization.jsx](../mobile/app/(app)/admin/app-customization.jsx) reads
+the raw `['admin','campaigns']` row (the shaped campaign copies carry none of these fields) and
+renders the *Off until you turn it on* group for a survey campaign in one of three states:
+
+| State | When | What renders |
+|---|---|---|
+| released | the response's top-level `optInOutcomesAvailable` lists `not_target` | the switch, sub-line `OUTCOME_HINTS.not_target` |
+| paused | not released, but the row's `enabledOutcomes` still lists it | sub-line "Paused by Doorline — no phone shows this button right now." — plus, for an org admin only, "You can still turn it off for this campaign."; the switch is enabled only while it is on, so it can only turn off |
+| — | neither, and every lit-drop campaign | no group |
+
+- **Its own mutation** — `PATCH /admin/campaigns/:id { enabledOutcomes }`, beside the
+  `disabledOutcomes` and `doorAddPolicy` ones, with the screen's local-flip + snap-back pattern (an
+  error re-seeds the list from the cached row), so a failed write only ever reverts its own switch.
+- **Admin-only.** The switch is `disabled` unless `loadRoleContext().isOrgAdmin` (super or org
+  admin), held in state that starts `false`, so a lead never gets a live switch even for a frame.
+  The server is the authority: a lead's PATCH carrying the key, on or off, is a 403 "Only an org
+  admin can turn off-by-default outcomes on or off." ([ROLES.md](ROLES.md)). The group's footer
+  tells an admin "Only org admins can change this." and a lead "Only org admins can turn this on or
+  off.", and adds the offline-phone caveat while the outcome is on.
+- **Turning it ON** is an `Alert.alert` with **Cancel** (`style: 'cancel'`) first, then **Turn on**
+  — only the confirm writes. Turning it off writes at once.
+- **History.** The server audits the field; [lib/campaignHistory.js](../mobile/lib/campaignHistory.js)
+  (hand-mirrored from the web) labels it *Off-by-default outcomes*, renders an empty value as "none",
+  and `isNotable` always highlights it.
+
+**The in-use gate.** Every phone admin figure, chip and tab that exists only for this outcome is
+gated on `outcomeInUse(campaign, 'not_target')` ([lib/outcomeToggles.js](../mobile/lib/outcomeToggles.js)):
+true once the campaign's `everEnabledOutcomes` or `enabledOutcomes` lists it — and never on a
+lit-drop campaign, because a survey campaign switched to lit drop before canvassing keeps its
+`everEnabledOutcomes` record but can never record the outcome (the server and web copies answer the
+same; [CAMPAIGNS.md](CAMPAIGNS.md) → *Off-by-default outcomes*). It never reads the release, so
+neither a switch-off nor a withdrawal hides history. The campaign screen holds the full
+`['admin','campaigns']` row and asks it directly (`!isLitDrop && outcomeInUse(campaign,
+'not_target')`). Every other screen holds a **shaped** campaign — `useAdminCampaign`'s `shape()`,
+`campaignShape()`, MemberSheet's `{ id, name, type }` — so it goes through
+[`useOutcomeInUse(campaignId)`](../mobile/lib/useOutcomeInUse.js), built like `useCampaignArchived`:
+the same `['admin','campaigns']` query (react-query dedupes by key; `staleTime` 60 s), looked up by
+id, and `false` until it resolves — a figure can appear but never flash and retract. Don't widen the
+shaped copies or the persisted active-campaign blob to carry the fields instead
+([lib/useCampaignArchived.js](../mobile/lib/useCampaignArchived.js) records why).
+
+| Screen | Shown when in use | Source |
+|---|---|---|
+| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) — Activity | a "Not a target" row after the rate: value = the count, unit "doors", sub-line "N% of knocks"; `metricHelp.notTarget` in the shared `MetricSheet` | `/admin/reports/campaign-rollup` row `notTargetKnocks`, over its `knocks` |
+| — By pass | "N not target · " ahead of each row's Conn accent | `/admin/reports/knocks-by-pass` rows' `notTargetKnocks` |
+| — Top canvassers | `topCanvasserRows` maps `dayNotTarget: c.notTarget ?? 0` and passes `notTargetInUse` to `CanvasserCard`; the group's *How these are counted* key explains Contact % with `metricHelp.contactRateNotTargetInUse` (names the outcome) instead of `metricHelp.contactRate` (never does) | `/admin/reports/canvassers` row `notTarget` |
+| [admin/timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) | `notTargetInUse` on its `CanvasserCard`s | `/admin/reports/canvasser-timeline` rows' `dayNotTarget` |
+| [components/CanvasserCard.jsx](../mobile/components/CanvasserCard.jsx) | "· N not target" after the contact rate when `notTargetInUse` and `dayNotTarget > 0`, never in lit mode | `row.dayNotTarget` |
+| [admin/canvasser/[id]/index.jsx](../mobile/app/(app)/admin/canvasser/[id]/index.jsx) | a "Not a target" KPI row after "Not home / wrong": the count, sub-line "N% of knocks"; no team delta — `/team-averages` carries none | `/admin/reports/canvassers/:userId/summary` `kpi.notTarget`, over `kpi.homesKnocked` |
+| [admin/users.jsx](../mobile/app/(app)/admin/users.jsx) → [components/MemberSheet.jsx](../mobile/components/MemberSheet.jsx) | a "not target" tile after "days", survey campaigns only; `users.jsx` resolves the hook and passes `notTargetInUse` in | the same summary's `kpi.notTarget` |
+| [admin/canvasser/[id]/activity.jsx](../mobile/app/(app)/admin/canvasser/[id]/activity.jsx), [map.jsx](../mobile/app/(app)/admin/canvasser/[id]/map.jsx) | the "Not target" `ACTION_TABS` entry (filtered out otherwise) | — |
+| [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | the "Not target" status option — in use, **or** `byStatus.not_target > 0`, **or** already in the active status filter (the filter survives a campaign switch, and a hidden pick could only be cleared through *All statuses*) | `/admin/households/map/counts` |
+
+The Notes screen's outcome chips and the export sheet's outcome chips and round statuses use the
+same hook ([NOTES.md](NOTES.md), [EXPORTS.md](EXPORTS.md)). Not gated, because they only draw what
+exists: the fuchsia `house-not_target` pin on the admin map and the book map, the fuchsia ping on
+the admin map and point on a canvasser's Territory map (their `circleColor` matches), and the
+`CoverageBar` segment, whose full legend skips `not_target` at 0.
 
 ## Web-dashboard admin surfaces (file map)
 These tools are web-only (the mobile More hub links out to the web for them). Listed here so the file

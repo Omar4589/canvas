@@ -329,7 +329,7 @@ mark-and-continue and never change status.
 | `/admin/integrations/fbtime/projects` | **new.** `{ windowDays, startDate, endDate, timeZone, projects: [{ fbtimePersonId, lastShiftAt, projects: [{id, name, lastAt, shifts}] }], degraded, reason }`. See *Recent project labels* below |
 | `POST /admin/integrations/fbtime/links` | additive optional `fbtimeName` / `fbtimeEmail`. `FbTimePersonLink` has always carried these so a row still names somebody once the person leaves `/people`, but only the auto-match pass wrote them — every hand-made link was blank in exactly the case the fields exist for |
 | `/admin/memberships` | additive `campaignIds[]` per member (rostered campaigns, from `CampaignAssignment` — distinct from `managedCampaignIds`, which is a lead's grant), **lead-scoped**; `fbtime {linked, personName, source}` (**admin-only**, null when the org has no connection); `user.isDeleted` |
-| `/admin/reports/canvassers.csv` | preamble stamp rows (`Canvasser export, <range>, hours as of <ISO>` + blank) and a trailing `Hours source` column — see [EXPORTS.md](EXPORTS.md) for the standing rule |
+| `/admin/reports/canvassers.csv` | preamble stamp rows (`Canvasser export, <range>, hours as of <ISO>` + blank) and an `Hours source` column appended after every existing one. Since 2026-10-02 the `Not a target` column follows it (the header ends `…,Hours source,Not a target`, present for every org); no existing column moved — see [EXPORTS.md](EXPORTS.md) for the standing rule |
 
 Clients: the web/mobile Timeline KPI applies the all-or-nothing rule over the rows **in view**
 (the crew filter changes who is included), summing server-computed per-row fields — composing,

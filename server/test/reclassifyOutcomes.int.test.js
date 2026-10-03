@@ -820,6 +820,10 @@ test('not_target is never rate-neutral: changing it is priced, and the preview i
 
     const run = await call('POST', url(), { ...asAdmin(), body: { to: 'not_home', scope: { outcomes: ['not_target'] } } });
     assert.equal(run.status, 201, JSON.stringify(run.json));
+    // The filter line is frozen onto the run document (plan §P trap 11): a label missing from
+    // scopeSummary.js would be stored as the raw key for good, not just shown wrong once.
+    const listed = (await call('GET', url(), asAdmin())).json.runs.find((r) => r.id === run.json.run.id);
+    assert.equal(listed.scopeSummary, 'Not a target voter', 'the label people read, never the not_target key');
     const actual = await moneyShot();
     assert.equal(actual.contactRate, preview.json.impact.after.contactRate, 'the previewed rate is the real one');
     const stats = (await Campaign.findById(ctx.campaign._id).lean()).stats;

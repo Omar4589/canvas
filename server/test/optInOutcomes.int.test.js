@@ -87,7 +87,8 @@ before(async () => {
   const litDrop = await Campaign.create({
     organizationId: org._id, name: 'Opt-in Lit', type: 'lit_drop', state: 'TX', timeZone: 'America/Chicago', isActive: true,
   });
-  // Uncanvassed, so the type lock lets it flip to lit-drop in the type-change test.
+  // Uncanvassed, so the type lock lets it flip to lit-drop in the type-change test. Its doors don't
+  // trip the lock (it reads knocks); a recording test replays a tap on one after the flip.
   const flipper = await Campaign.create({
     organizationId: org._id, name: 'Opt-in Flipper', type: 'survey', state: 'TX', timeZone: 'America/Chicago', isActive: true,
   });
@@ -104,7 +105,7 @@ before(async () => {
   // Doors to knock: an active round on every campaign the recording tests write to.
   const doors = {};
   let n = 0;
-  for (const [key, c] of Object.entries({ survey, litDrop, legacy, live })) {
+  for (const [key, c] of Object.entries({ survey, litDrop, legacy, live, flipper })) {
     const effort = await Effort.create({ organizationId: org._id, campaignId: c._id, name: 'Intake' });
     await Pass.create({
       organizationId: org._id, campaignId: c._id, effortId: effort._id,
@@ -367,7 +368,36 @@ test('survey campaigns only: the route refuses a lit-drop door before the gate',
   release();
   const r = await knock(ctx.doors.litDrop[0], 'not-target');
   assert.equal(r.status, 400, JSON.stringify(r.json));
+  assert.equal(r.json.error, 'Action not valid for campaign type "lit_drop".', 'the type check, not OUTCOME_DISABLED');
   assert.equal((await rowsAt(ctx.doors.litDrop[0])).length, 0);
+});
+
+test('flipped to lit-drop after it was on: the gate would honor a queued replay, the type check refuses it', { skip }, async () => {
+  release();
+  // ctx.flipper had it on as a survey campaign until the type-change test above flipped it to
+  // lit-drop. everEnabledOutcomes remembers, so the replay rule lets this queued tap past the gate:
+  // only the route's type check keeps it from replacing a canvasser's lit_dropped at the door.
+  const doc = await stored(ctx.flipper);
+  assert.equal(doc.type, 'lit_drop');
+  assert.deepEqual(doc.enabledOutcomes, []);
+  assert.deepEqual(doc.everEnabledOutcomes, ['not_target']);
+
+  const door = ctx.doors.flipper[0];
+  const r = await knock(door, 'not-target', { ...replay, timestamp: new Date(Date.now() - 60_000).toISOString() });
+  assert.equal(r.status, 400, JSON.stringify(r.json));
+  assert.equal(r.json.error, 'Action not valid for campaign type "lit_drop".');
+  assert.equal((await rowsAt(door)).length, 0);
+  assert.equal((await Household.findById(door._id).lean()).status, 'unknocked');
+});
+
+test('flipped to lit-drop after it was on: nothing reads it as in use, so its per-round file keeps its shape', { skip }, async () => {
+  // everEnabledOutcomes still remembers (above), but a lit-drop campaign can never record the outcome.
+  // knocksByPass loads the campaign NARROWED, so it must load `type` for outcomeInUse to say no — the
+  // flag the per-round CSV and the Export Center's knocks-by-round file both read for their column.
+  assert.deepEqual((await stored(ctx.flipper)).everEnabledOutcomes, ['not_target']);
+  const r = await call('GET', `/admin/reports/knocks-by-pass?campaignId=${ctx.flipper._id}`, asAdmin());
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.notTargetInUse, false);
 });
 
 test('on: one tap records a knock row and the door reads Not a target voter on both wires', { skip }, async () => {
@@ -457,8 +487,12 @@ test('the bootstrap carries the EFFECTIVE list and the stamp — on, withdrawn, 
 
 test('/mobile/changes sends the door settings only when the phone stamp is stale', { skip }, async () => {
   release();
+  // Two outcomes switched off put a comma in the stamp beside its pipes — both characters the
+  // phone has to encode, so the round trip below proves both.
+  assert.equal((await patch(ctx.live, { disabledOutcomes: ['refused', 'wrong_address'] })).status, 200);
   const camp = await bootstrapOf(ctx.live);
   assert.match(camp.doorConfigStamp, /\|/, 'the real stamp contains a pipe — the encoded form is the one under test');
+  assert.match(camp.doorConfigStamp, /,/, 'and a comma');
 
   const same = await changesOf(ctx.live, camp.doorConfigStamp);
   assert.equal(same.status, 200, JSON.stringify(same.json));

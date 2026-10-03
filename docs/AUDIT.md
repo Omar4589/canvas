@@ -26,9 +26,11 @@ campaigns, and super-admins), [TIMEZONES.md](TIMEZONES.md) (the campaign-day the
 
 ## What it's for
 
-Every time a canvasser marks a door — Not home, Survey, Refused, Restricted, Lit drop — the app stamps
-**where the phone was** at that moment (a Restricted-access mark is GPS-stamped and audited like any
-other door action, even though it isn't a billable knock). That trail answers the questions you can't ask from knock counts alone:
+Every time a canvasser marks a door — Not home, Wrong address, Survey, Refused, No soliciting,
+Restricted, Lit drop, and **Not a target voter** on campaigns that use it — the app stamps **where
+the phone was** at that moment (a Restricted-access mark is GPS-stamped and audited like any other
+door action, even though it isn't a billable knock). That trail answers the questions you can't ask
+from knock counts alone:
 
 - Did they mark a house they never actually walked to?
 - Were they entering everything from **one spot** — sitting in a car, never getting out?
@@ -80,6 +82,38 @@ work. (Moving a pin is a lead/admin action — see [MAPS.md](MAPS.md) — so thi
 
 Each flag has a **severity** (low / medium / high) so the worst ones stand out. Distances everywhere
 in the app display in **feet**, switching to **miles** once a distance reaches a mile.
+
+## What it doesn't judge: which outcome was picked
+
+The audit checks **where and when** a door was recorded — never **which result** the canvasser
+chose. There is deliberately no flag for an unusual mix of outcomes, such as a high share of **Not a
+target voter** on a campaign that uses that button. A stale voter file produces an honestly high
+share: when people on the list have moved, a crew talks to plenty of people who aren't on it. And a
+flag that accuses an honest canvasser is worse than one that misses a cheat.
+
+Those entries still go through all five flags above — each is GPS-stamped like any door result, so a
+Not a target voter tapped from a parked car is flagged like anything else tapped there. For the mix
+itself, the numbers are laid out for a person to read: on campaigns that use the outcome, the
+canvasser tables on Home and Timeline carry a **Not target** column — each person's count and their
+share of the doors they knocked, sortable by share — so one canvasser at 30% while the crew sits near
+8% is easy to see. The Team page's member panel and the phone's canvasser profile show the count
+and share too; the phone's member sheet and canvasser cards show the count alone (a card only once
+it's above zero). When something looks wrong, an org admin takes it to **Door Outcomes**: filter to
+that canvasser's Not a target voter entries, then change them (to Not home, say — the preview shows
+what moves), convert one to Surveyed if the answers really were taken, or Unknock them so they no
+longer count.
+
+### Entries recorded offline after an outcome is switched off
+
+Switching an outcome off stops phones that are online from recording it. A phone that was
+**offline** at the time (no signal, or airplane mode) keeps showing the button until it reconnects,
+and what it records offline syncs and counts like any offline door result — real door work is never
+thrown away. The evidence for reviewing those entries is the **Offline** mark: on Door Outcomes, every
+entry that was recorded without a connection and synced later wears an **Offline** tag beside its
+outcome, and the page's **Export CSV** file has an **Offline** column. Filter Door Outcomes by
+canvasser and date, check the Offline entries from after the switch-off, and change or Unknock any you
+don't accept. (Here in the audit, an entry synced from offline already shows as a **Weak GPS** flag —
+low, unless its location was also poor or stale.)
 
 ## Where you review them — two places
 
@@ -232,6 +266,14 @@ a `survey_submitted` `CanvassActivity`; the ledger already has a row per survey,
 avoids double-counting **and** collapses several quick voter-surveys at one door into a single
 door-action (the right unit for a GPS audit — one physical visit — which also prevents a false Rapid
 flag). See [METRICS.md](METRICS.md) for the dual-ledger.
+
+**Outcome-agnostic, also deliberately.** The scan excludes only desk marks (`via: 'bulk'`), and the
+only `actionType` anything here tests is `note_added` — `rapid` sets notes aside, and the
+per-canvasser `totalActions` in `summarize` doesn't count them. No rule branches on a door outcome,
+so every door result with a location is checked like every other — `not_target` (2026-10-02)
+arrived with no detector change, and the next outcome will too. Exercised against `computeReasons`:
+a `not_target` row 400 m from its pin flags `far`/high, and one synced from offline flags
+`weak_gps`/low.
 
 The pure detection core is exported as **`computeReasons(rows, pinMap, thresholds)`** (no DB) and
 unit-tested in [server/test/flagDetection.test.js](../server/test/flagDetection.test.js) (each flag
@@ -584,6 +626,28 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **The replace must never run without stamping the snapshot.** `buildReplacedSnapshot` reads the
   pre-`deleteMany` rows; any new replace path (or a reorder that queries after the delete) silently
   destroys the correction evidence again.
+- **No outcome-mix flag — a ruling, not a gap.** `REASON_TYPES`
+  ([reports.js](../server/src/routes/admin/reports.js)) is five location-and-timing reasons, and
+  there is deliberately no sixth keyed on what a canvasser records — not even a share of Not a target
+  voter, the outcome nothing can verify (design call 13 in
+  [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md), approved by the owner with the
+  plan on 2026-10-02). An honest crew on a stale voter file records a high share, and a false
+  accusation costs more than a miss. The share is evidence for a person instead, shown only where
+  the campaign has used the outcome (`outcomeInUse`):
+  `CanvasserSummaryTable`'s **Not target** column on Home and Timeline (count ·
+  `dayNotTarget ÷ dayKnocks`, sorted by share), the per-canvasser summary's `kpi.notTarget` on the
+  Team page's member panel and the phone's canvasser profile and member sheet, and `dayNotTarget` on
+  the phone's canvasser cards. Don't add a threshold flag without a new owner ruling.
+- **Entries an offline phone recorded after an outcome was switched off are reviewed on Door
+  Outcomes, by `wasOfflineSubmission`.** The recording route still accepts a queued replay of an
+  outcome that is now off — for an off-by-default outcome, only if the campaign ever had it on
+  (`everEnabledOutcomes`) — so those taps sync and count. `listEntries`
+  ([reclassifyOutcomes.js](../server/src/services/canvass/reclassifyOutcomes.js)) projects the flag
+  for the entries table's **Offline** tag, and `GET /admin/campaigns/:campaignId/outcome-entries.csv`
+  projects it again for its appended **Offline** column ("Offline" or blank, for every org). That
+  route runs its **own** `CanvassActivity.find`, not `listEntries`, so dropping the flag from its
+  projection prints the column blank on every row with no error. Here, the same flag already gives
+  each such entry a `weak_gps` reason (low unless the fix itself was poor or stale).
 - **Absent provenance never flags.** `location.mocked` `false`/`null`/absent and a missing
   `location.fixTimestamp` (legacy rows, old clients, iOS for `mocked`) must never produce a
   `mock_gps` or stale-fix flag — only affirmative evidence flags.

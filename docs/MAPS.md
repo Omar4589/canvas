@@ -37,6 +37,7 @@ Every house is a pin, colored by its current status:
 | Blue | Not home | A canvasser knocked; nobody answered. |
 | Green | Surveyed | Someone answered and a survey was taken. |
 | Amber | Refused | Someone answered but declined to participate — a real contact, just not a survey. (Survey campaigns only.) |
+| Fuchsia | Not a target voter | Someone answered, but it wasn't one of the voters on the list for that address and they wouldn't give their name. A knock and a contact — never a survey. (Survey campaigns only, and only where an org admin has turned it on.) |
 | Red | Wrong address | The door doesn't exist / bad data. |
 | Purple | Lit dropped | Literature was left (no conversation). |
 | Pink | No soliciting | A posted sign ended the visit. The canvasser reached the door, so it **is** a knock — but nobody answered, so it is not a contact. (All campaign types.) |
@@ -53,6 +54,14 @@ and Wrong address (red) mean nobody was reached; **Refused (amber) means a perso
 they just declined to take the survey. It still counts as a knock and as a contact, so it gets its own
 distinct color rather than blending in with the misses (see [METRICS.md](METRICS.md) for the "Reached a
 person" rate). It only appears on survey campaigns.
+
+**Not a target voter (fuchsia) is Refused's neighbor.** Both mean a person answered the door and no
+survey was taken; the difference is *who* answered. Refused is a voter on the list who declined. Not a
+target voter is someone who isn't on the list for that address and wouldn't give their name (someone who
+*does* give a name is added with **＋ Add person** and surveyed instead). It counts the way Refused does —
+a knock and a contact, never a survey (see [METRICS.md](METRICS.md)). It is the one door color that
+starts **off**: it exists only on survey campaigns where an org admin has turned it on, so a campaign
+that never uses it never sees the color, its legend entry or its filter chip.
 
 **No soliciting vs. Restricted.** These are the two dispositions where nobody answered but the visit
 still ended, and they are counted in *opposite* ways — the difference is whether the canvasser reached
@@ -138,10 +147,15 @@ A canvasser opens the app and sees the doors in the books assigned to them. They
   survey status. Voter files are patchy, so whatever's missing is simply left out. **Open** takes you
   into the door, where every voter reads exactly the same way — the sheet and the door screen used to
   disagree (one showed age, the other showed precinct), which confused people.
-- **Mark a door and see it instantly.** Tapping Not home / Wrong address / Refused / Restricted /
-  Survey / Lit drop recolors the pin **right away** — the GPS stamp and the save to the server happen in
-  the background, so you never wait on a spinner to know it registered. (Refused turns the pin amber and
-  is offered on survey campaigns only; Restricted turns it slate and is offered on all campaign types.)
+- **Mark a door and see it instantly.** Tapping Not home / Wrong address / Refused / No soliciting /
+  Restricted / Survey / Lit drop recolors the pin **right away** — the GPS stamp and the save to the
+  server happen in the background, so you never wait on a spinner to know it registered. (Refused turns
+  the pin amber and is offered on survey campaigns only; Restricted turns it slate and is offered on all
+  campaign types; **Not a target voter** turns it fuchsia, on survey campaigns that have it turned on —
+  its filter chip and legend entry show only then, or while a door on your map still carries it.) A
+  tap that would **change** a door's result this round — yours or a teammate's, the office's Restricted
+  mark excepted — asks first, and warns you if it would delete survey answers you took there; see
+  [CANVASSER_APP.md](CANVASSER_APP.md).
 - **Recenter / follow** their own location (a "follow me" button; it turns itself off when you pan the
   map or background the app, to save battery).
 - **Work offline.** If there's no signal, the door still recolors instantly and the action is saved on
@@ -186,7 +200,10 @@ An organizer sees the whole campaign at once:
   the campaign has **two or more walk lists**, an in-page **"All walk lists"** select that narrows
   the doors and pins to one walk list (the mobile admin map offers the same as a **walk-list chip**
   in its filter row; single-list campaigns show neither). A walk-list deep link still works and
-  simply arrives with that control pre-set.
+  simply arrives with that control pre-set. The **Not a target voter** status chip is offered only on
+  a survey campaign that has had that outcome turned on, or whose counts show such doors — a campaign
+  that never uses it doesn't see the chip. (A chip you ticked on another campaign stays visible after
+  you switch, so you can untick it.)
 - **Filter to one canvasser and the colors become *their* work.** By default a door is colored by its
   **global** status — has *anyone* ever surveyed it, across the whole campaign. Filter the map to a
   **single canvasser** and each door instead shows **that canvasser's own disposition**: green only
@@ -284,7 +301,9 @@ campaigns they manage (see [ROLES.md](ROLES.md)).
 - **Admin overview map (mobile)** — the same all-doors view on a phone, with an optional canvasser-pings
   toggle. Its count chip reads the same way — **3,513 / 10,482 doors** (match / in campaign), with
   "N in view" beneath when the screen holds fewer; tap it for the breakdown. The Status menu shows
-  each status's campaign-wide count, and the answer menu's numbers are responses, not doors.
+  each status's campaign-wide count (its **Not target** row follows the web chip's rule: only on a
+  survey campaign that has had the outcome turned on, or when that count is above zero, or while it
+  is still ticked), and the answer menu's numbers are responses, not doors.
 - **A single canvasser's path** — one canvasser's pings over a date range, to review their day.
 - **Books overview** — a marker per book at its center, colored by how much of it is done; tap one to
   jump into that book on the map.
@@ -300,9 +319,14 @@ campaigns they manage (see [ROLES.md](ROLES.md)).
 - **How fresh:** the web map refreshes ~every 20s; the mobile app keeps doors in sync ~every 30s.
   Mobile stays deliberately light on battery (canvassers open and close the app all day), while the
   web map can be more live because admins sit at a connected desk.
-- **What's live vs. what needs a refresh:** pin fixes and status changes sync in ~30s, but **moving a
-  door to another book, merging/splitting books, or reassigning a canvasser only show up after a full
-  refresh** (pull-to-refresh / reopen the campaign). See
+- **What's live vs. what needs a refresh:** pin fixes and status changes sync in ~30s, and so do
+  **door settings** — an outcome button turned on or off for the campaign, or who may add a person at
+  the door, reaches a phone within about 30 seconds of it being on the map (a phone that is offline
+  picks the change up on its first successful sync after it reconnects, with no refresh needed; one on
+  an older version of the app picks it up on its next full refresh instead, but has no **Not a target
+  voter** button at all, so switching that outcome on reaches the phone only after the app updates). But
+  **moving a door to another book, merging/splitting books, or reassigning a canvasser only show up
+  after a full refresh** (pull-to-refresh / reopen the campaign). See
   [PASSES_AND_TURF.md → How field phones get these edits](PASSES_AND_TURF.md).
 
 ## Approximate pins, and fixing them
@@ -503,10 +527,17 @@ before recoloring, which made doors feel unrecorded on weak signal — the bare 
    read **capped at ~6s** so a cold GPS can't stall the submit.
 3. **Background — submit/queue.** It POSTs `{ location: { lat, lng, accuracy }, timestamp, note }`:
    `POST /mobile/households/:id/not-home` · `/wrong-address` · `/refused` · `/restricted` ·
-   `/no-soliciting` · `/lit-drop`, or
+   `/no-soliciting` · `/not-target` · `/lit-drop`, or
    `POST /mobile/voters/:voterId/survey` ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js))
    through [lib/offlineQueue.js](../mobile/lib/offlineQueue.js) `submitOrQueue`. A transport failure
    (including the **~20s `api` timeout** — [lib/api.js](../mobile/lib/api.js)) queues it instead.
+   (`/not-target` is survey-only — on a lit-drop campaign the route's campaign-type check answers a
+   plain 400 before any outcome gate — and off by default: on a survey campaign a fresh tap is refused
+   `400 OUTCOME_DISABLED` unless the campaign has it in `enabledOutcomes` and the `OPT_IN_OUTCOMES`
+   config var releases it. A queued offline tap (`wasOfflineSubmission`) is accepted even while it is
+   off, as for every toggleable outcome, but only on a campaign that has had it on at some point
+   (`everEnabledOutcomes`) — on any other campaign no phone could have shown the button. The setting
+   itself is in [CAMPAIGNS.md](CAMPAIGNS.md).)
 4. **Server.** Creates a `CanvassActivity` (stamping `distanceFromHouseMeters` = haversine from the
    house), runs `recomputeHouseholdStatus`, and sets `household.status` / `lastActionAt` / `lastActionBy`
    (the save bumps `updatedAt`). Re-knocking the same door **in the same round deletes + replaces** the
@@ -515,6 +546,17 @@ before recoloring, which made doors feel unrecorded on weak signal — the bare 
    authoritative status. On a **hard** (4xx/5xx) failure it invalidates `['bootstrap']` to pull server
    truth back (so an optimistic change can't linger as a lie) and alerts. Other canvassers pick the
    door up on their next `changes` poll (F).
+
+**Changing a result asks first (2026-10-02).** `recordHouseholdAction` hands `optimisticSubmit` an opt-in
+`confirm` step (`confirmDoorChange` in [lib/recordAction.js](../mobile/lib/recordAction.js); the
+decision is `changePrompt` / `ownSurveysHere` in [lib/doorChange.js](../mobile/lib/doorChange.js), pinned
+by `doorChange.test.js`). It runs inside the per-path in-flight lock and **before** the location gate and
+the cache patch, so a tap that would replace the door's result this round, or delete survey answers this
+canvasser took there (cached or still queued), recolors only once they confirm, and backing out records,
+queues and recolors nothing. A fresh door, the same result again and a door still wearing the office's
+desk mark are not asked — except that the survey-loss warning is checked first and always shows. Every
+household-action caller inherits it: the door screen's buttons, the door list's one-tap Not home and a
+building unit's quick button. Rules and wording in [CANVASSER_APP.md](CANVASSER_APP.md).
 
 Offline actions queue on the device ([lib/offlineQueue.js](../mobile/lib/offlineQueue.js)) and flush
 on **reconnect (a `@react-native-community/netinfo` listener in [map.jsx](../mobile/app/(app)/map.jsx)),
@@ -528,13 +570,13 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 |---|---|---|---|
 | `GET /admin/households/map` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ households, canvassers[], activities[], total, truncated, cap }` | Params: `campaignId, from, to, status, userId, questionKey, option, optionId, surveyTemplateId, includeActivities, effortId, passId, importId, savedSearchId, bbox`. **Built from the same `parseMapQuery` / `authorizeMapScope` / `buildMapScope` helpers as `/map/counts`** (the route adds only the viewport and, in the global-status mode, the stored-status clause), so the two can never disagree about what a filter means; `mapCounts.int.test.js` pins the door sets together. **`truncated` + `cap` are now READ**: web shows a "⚠ Map capped at 50,000 doors" pill and mobile a "capped" line. `importId` / `savedSearchId` **intersect** with the date-window narrowing (they used to be overwritten by it — "View on map" from an import opened on Today showed today's work, not the import; the clients now also open those deep links on All time). **`surveyTemplateId`** (optional, validated ObjectId) scopes the answer filter (`questionKey` + `option`/`optionId`) to **one survey template** — question keys and option ids are label slugs unique only *within* a template, so on a multi-survey campaign an unscoped filter can union answers from two templates whose slugs collide. Both clients now send it (web `MapFilters`/`MapPage`/`AnswerMiniMap`, mobile `admin/map.jsx` — stamped from the survey-results payload's `surveyTemplate.id` when an answer chip is set, or seeded from the drill-in params); **without it the legacy cross-template union applies** (old mobile builds, legacy deep links — a deep link without the param briefly queries cross-template until the survey query resolves the current template's id). **`bbox=west,south,east,north`** (both clients send it after the first auto-fit, debounced per settled pan/zoom) narrows the pull to the viewport via `$geoWithin` on the household `2dsphere` index; an absent/degenerate/near-world bbox falls back to the unbounded pull (50k cap + `truncated`). For smooth panning the clients send a **padded buffer** box and skip the refetch while the viewport stays inside the last padded box — web pads ~4× the viewport (`inflateBbox` in `MapPage.jsx`, containment-gated), mobile pads ~10%/side + epsilon-gates (`admin/map.jsx`) — so small pans cost no request. Each household row carries `doNotKnock` **and `excludedFromTurf`** — projected purely so the client can count/badge/dim them; **neither is ever a server filter** (§I) — and, since 2026-08-21, **`effortId`** (string \| null; both detail panels pre-check Intake with it, and the web panel filters its `PASS_REQUIRED` round picker to the door's walk list — the mobile sheet has no picker) and **`lastAction.via`** (`'bulk'` for a desk mark — the last-activity aggregate never excluded bulk rows, so without it a desk mark read as the admin's field work; the panels tag it *desk*). Each household's `surveys[]` carries META only (`id, submittedAt, voter, canvasser, note`) — **`answers[]` moved to the lazy per-door `GET /admin/households/:householdId/surveys`** (same lead-scope guard, optional `passId`), fetched on open by both the web detail panel and (now, at web parity) the mobile door sheet. Otherwise: matching households + 5 parallel queries (voters, survey meta, last-activity aggregate, canvasser directory, optional activities). `activities` (pings) only when `includeActivities=1`. **With `passId`** the door set is scoped to that round's books AND each door's `status`/`lastAction`/surveys are resolved **per-round** (`getPassStatusMap` + `passId`-scoped activity/survey queries; a door untouched that round reads `unknocked`) — the audit reflects the selected round, not the global latest. The `status=` **filter** is also applied against the per-round status when `passId` is set, so the door set matches the colors shown. **With `userId`** (the canvasser filter) each door's `status`/`lastAction` are resolved to **that canvasser's OWN** disposition (`getUserStatusMap` — `surveyed` if they surveyed it, else their latest action; a door they never touched reads `unknocked`), the last-activity aggregate is narrowed to their own knocks, and the `status=` filter tests that per-user status too — so the colors AND the door set are one canvasser's work, not the global "ever-surveyed" status. **Without `userId`/`passId`** the row ships the global `Household.status` (unchanged legacy behavior); the client renders `status` → pin color either way, so the recolor is automatic and needs no client change. (`userId` **takes** the `statusMap` branch but still honors `passId` — `getUserStatusMap(userId, …, passId)` scopes to that round — so `userId`+`passId` yields *that canvasser's disposition within that round*.) The admin map screen also accepts a **client-side** `?household=<id>` URL param (web `MapPage`, and now mobile `admin/map.jsx` with a `&focusAt=` nonce) that focuses a single door — used by the [Notes hub](NOTES.md) "view on map" link; it opens the map on **all-time** so an old door still loads, then flies to the pin. Not a server param. |
 | `GET /admin/households/:householdId/activity` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ currentPassId, rounds:[{ passId, roundNumber, name, status, entries:[{ kind:'knock', actionType, at, passId, canvasser, canvasserId, note, via } \| { kind:'survey', actionType:'survey_submitted', at, passId, canvasser, canvasserId, voter }] }] }` | The lazy per-door **History by pass** behind both admin maps' door panels and the Turf Cutting popup (`['household-activity', id]` on web, `['admin','household-activity', id]` on mobile). Lead-scoped, campaign-gated, `AccessLog`-subject-tagged. A survey's `survey_submitted` knock row is suppressed when its `SurveyResponse` line exists (same door + pass + canvasser), so a survey never lists twice. Rounds are **only the rounds with entries** (plus a `passId: null` "Before passes" pseudo-round for legacy null-pass rows — keyed `'none'` internally), highest round number first; entries latest-first within a round. **`via`** on each knock entry (`'bulk'` = a desk mark — whole-book or single-home — `null` = field; survey entries carry none, and clients treat undefined as field), **`status`** on each round (its Pass status), and top-level **`currentPassId`** (string \| null): the round a desk mark with no explicit `passId` resolves to for THIS door — the door's effort's active round → its single non-archived round → null (Intake → null). The desk-mark UIs classify a door **only from that round's entries** (`pickRound(rounds, scopePassId \|\| currentPassId)` in [client/src/lib/restrictMark.js](../client/src/lib/restrictMark.js), `doorMarkState` in [mobile/lib/restrictBooks.js](../mobile/lib/restrictBooks.js)): latest entry restricted with `via:'bulk'` → desk (Unmark offered), restricted without → field (no desk action), any survey / lit_dropped → completed, a missing round → not restricted this round. Never from `h.status` — global mode is `Household.status` across ALL rounds, canvasser-filtered mode is that canvasser's own status; only per-pass mode matches the server. Shape additions of 2026-08-21 are additive (old clients read every Restricted as field and offer no Unmark — safe). |
-| `GET /mobile/bootstrap` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ user, campaign, surveys, households[], voters[], books[], generatedAt }` | Canvasser-scoped to assigned books on active rounds; fully-voted doors dropped. The map's initial load. Voters project `party / gender / dateOfBirth / surveyStatus` (+ a derived `voted`) — everything the shared `VoterMeta` line needs and nothing it doesn't. **`precinct` was removed**: once the door screen stopped showing it, no mobile surface read it from this payload, and it was being shipped for every voter on every device. (The voter *profile* still shows precinct — it's fed by `GET /mobile/voters/:id`, a different, unprojected query.) |
-| `GET /mobile/changes?since=` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ serverTime, households[], voters[] }` | Delta: households with `updatedAt > since`, plus voters on **two tracks, unioned**: ALL voters of each changed household, **and voters whose own `updatedAt` moved** — so a pure identity edit (admin correction, Person propagation, re-import reconcile) reaches phones in ~30s without a re-bootstrap. Client patches the bootstrap cache so multiple canvassers stay in sync. Full contract + consequences in [PASSES_AND_TURF.md](PASSES_AND_TURF.md) §G. |
+| `GET /mobile/bootstrap` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ user, campaign, activeSurvey, surveys, households[], voters[], books[], efforts, activePassIds[], entitlement, generatedAt }` | Canvasser-scoped to assigned books on active rounds; fully-voted doors dropped. The map's initial load. The `campaign` block carries the **door settings** — `disabledOutcomes`, `enabledOutcomes` (the off-by-default outcomes this phone may show, already narrowed to turned on ∩ released ∩ survey campaign; the phone never gets the raw setting), `doorAddPolicy`, `canAddVoters` and `doorConfigStamp`, their fingerprint — all from one helper, `doorConfigFor`, which `/changes` reuses so the two wires can never disagree (2026-10-02; additive). Voters project `party / gender / dateOfBirth / surveyStatus` (+ a derived `voted`) — everything the shared `VoterMeta` line needs and nothing it doesn't. **`precinct` was removed**: once the door screen stopped showing it, no mobile surface read it from this payload, and it was being shipped for every voter on every device. (The voter *profile* still shows precinct — it's fed by `GET /mobile/voters/:id`, a different, unprojected query.) |
+| `GET /mobile/changes?campaignId=&since=&doorConfigStamp=` | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) | `{ serverTime, households[], voters[], activePassIds[], doorConfig? }` | Delta: households with `updatedAt > since` (each with its per-round `status`, `lastActionAt` and `restrictedFrom`), plus voters on **two tracks, unioned**: ALL voters of each changed household, **and voters whose own `updatedAt` moved** — so a pure identity edit (admin correction, Person propagation, re-import reconcile) reaches phones in ~30s without a re-bootstrap. `activePassIds` feeds the client's round-change check (a difference → full bootstrap). **Door settings ride the same poll (2026-10-02):** the phone sends back the `doorConfigStamp` its bootstrap carried, and when that no longer equals `doorConfigStamp(campaign)` the response gains **`doorConfig: { disabledOutcomes, enabledOutcomes, doorAddPolicy, canAddVoters, doorConfigStamp }`** — the same door-settings fields, from the same `doorConfigFor`, that a fresh bootstrap's campaign block carries — which the phone spreads into its cached campaign with no refetch (§F). The stamp is `<disabledOutcomes, sorted>\|<effective enabledOutcomes>\|<doorAddPolicy>`, each list comma-joined (a legacy document with no fields reads `\|\|all`), so the client must **always `encodeURIComponent` it** (§I). No stamp sent — any bundle from before this change — means no `doorConfig`, ever. Otherwise the cost is one string compare on the campaign `assertCampaignAccess` already loaded, plus at most one `canManageCampaign` on the poll that ships a block. Pinned by `optInOutcomes.int.test.js` (*"/mobile/changes sends the door settings only when the phone stamp is stale"*, sent encoded with a real `\|` in it) and the stamp's properties (order-blind, moved by a withdrawal) by `outcomeToggles.test.js`. Client patches the bootstrap cache so multiple canvassers stay in sync. Full contract + consequences in [PASSES_AND_TURF.md](PASSES_AND_TURF.md) §G. |
 | `GET /mobile/me/today?since=` | [routes/mobile/me.js](../server/src/routes/mobile/me.js) | Shift stats | Powers the bottom-sheet **Today's Progress** (doors, responses, remaining, pace, distance). Refetched on the 120s poll **and immediately when a knock/survey is confirmed** — the record flow invalidates `['mobile','me']` (see the intervals note below). |
 | `GET /admin/reports/canvassers/:userId/path` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | One canvasser's pings | Feeds the single-canvasser path map. |
 | `GET /admin/reports/flags` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | `{ summary, entries[], … }` | The GPS-audit **flag overlay** — a *separate* query MapPage runs only when "Show flagged entries" is on, so toggling flags never refetches households. Live-detected, not stored. Full spec in [AUDIT.md](AUDIT.md). |
 | `GET /admin/reports/overlap-doors` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | `{ householdIds:[…], doors:[{ householdId, passes:[{ passId, roundLabel, canvassers:[{userId,name}] }] }], total }` | The **Overlaps** overlay's data — doors knocked by **2+ distinct canvassers in the same pass** (`computeOverlapDoors`, [services/reports/overlaps.js](../server/src/services/reports/overlaps.js)). **Detection is ANCHORED, not windowed** (2026-07-19): the pipeline groups over the **whole pass** but surfaces a collision only when **at least one of its knocks falls inside `[from, to)`** — so a door knocked the 5th and again the 11th rings while you view the 11th, and `doors[].passes[].canvassers[]` carries each canvasser's `lastAt` + an `inRange` flag so the UI can name the *earlier* knock. Each door is **self-contained** — an org-scoped `household{…}` (address + `location`), a `totalCanvassers` count, and per-canvasser `firstName`/`lastName`/`actionType` deliberately mirroring `/overlaps`' field names so ONE card component (`client/src/components/OverlapDoorCard.jsx`) renders both the Timeline's windowed reconciliation list and the anchored **Overlaps report** (`/campaigns/:campaignId/overlaps`, and mobile's `admin/overlaps`, which now carries the shared `CampaignChip` — this endpoint's required `campaignId` had no on-screen source there before). The per-canvasser action comes from a `$max` over a composite `{at, action}` object — BSON compares objects field-by-field, so it yields the latest knock *and* its action without a `$sort` stage or `$top` (unused elsewhere in this codebase, so its server support is unproven). Collisions with no in-window knock are returned as **`outOfRangeTotal`** (the "+N outside your dates" hint) rather than dropped. The date test is an expression inside `$group`, never a `$match` — filtering first would make the cross-day case invisible instead of countable. Params: **`campaignId` is REQUIRED** (400 otherwise; unscoped this aggregated the org's entire ledger), plus optional `effortId`/`passId`/`from`/`to`/**`userId`** (collisions *involving* that canvasser — applied after grouping, since narrowing rows to one person first would leave nothing to collide). Lead-gated like its neighbors. Each pass entry also carries **`effortName`**, and `roundLabel` is prefixed with the walk-list name (*North · Pass 2 · GOTV*) **only when the campaign has 2+ efforts** — `roundNumber` restarts per walk list, so "Pass 2" alone is ambiguous there; single-list campaigns keep the short label (the shared `passLabeler` in [overlaps.js](../server/src/services/reports/overlaps.js) does the same for `/overlaps` and the timeline reconciliation; an org-wide match with no `campaignId` falls back to "the surfaced passes span 2+ efforts"). A *separate* query both maps run only when "Show overlaps" is on (so toggling it never refetches households). **It is NOT polled** (2026-07-19): a whole-pass aggregation whose answer barely moves minute to minute was re-running every 20s for as long as the layer stayed open; it now fetches once per scope change, so it is deliberately outside the live-poll set on both clients. It still catches the cross-day collisions the date-scoped `/overlaps` structurally cannot see (see the anchoring note above). The endpoint returns **ids only**: each map rings whichever of those doors are currently loaded in the viewport (coordinates come from the loaded households via `overlapDoorsToGeoJSON`), so the `total` count can legitimately exceed the number of rings visible at a given zoom/pan. Full model + the two-surfaces comparison in [METRICS.md](METRICS.md) §D. |
-| `GET /admin/households/map/counts` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ universe:{ total, excludedFromTurf, doNotKnock }, matching:{ total, excludedFromTurf, doNotKnock }, byStatus:{ unknocked, not_home, surveyed, refused, restricted, no_soliciting, wrong_address, lit_dropped }, statusMode }` | The numbers behind both admin maps' header/chip. Same params as `/map` minus `bbox` / `includeActivities` / `includeBounds` (accepted, ignored) — the client keys it on filters-minus-bbox so panning never refetches it. **`universe`** is every active geocoded door in the campaign (or in the selected walk list when `effortId` is set; the org when neither) — filter-independent: pass / import / saved-search / date / canvasser / answer / status / bbox never move it, and it deliberately does NOT apply `KNOCKABLE_DOOR_FILTER` (the map shows excluded + do-not-knock doors, so the denominator is what the map can show; the two sub-counts ride along). **`matching`** honors every filter incl. `status`, campaign-wide — the header's primary number. **`byStatus`** honors every filter EXCEPT `status` ("what would I get if I clicked this chip"); statuses are mutually exclusive per door, so `Σ byStatus == matching.total` with no status filter and `matching == Σ byStatus[selected]` otherwise — **derived on the server**, so web and mobile print the same number. Per-user / per-pass modes (`statusMode: 'user' \| 'pass'`) resolve status through the same `getUserStatusMap` / `getPassStatusMap` as `/map`, so the chips agree with the pin colors; an early-exit door set answers zeros + a real universe. Global mode = two index-backed `$group`s; user/pass mode = one slim `find` over the (bbox-free) scope ids + one activity aggregate. Lead-gated identically; polled at 20s under the Live pill on both clients. |
+| `GET /admin/households/map/counts` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ universe:{ total, excludedFromTurf, doNotKnock }, matching:{ total, excludedFromTurf, doNotKnock }, byStatus:{ unknocked, not_home, surveyed, refused, restricted, no_soliciting, not_target, wrong_address, lit_dropped }, statusMode }` | The numbers behind both admin maps' header/chip. `byStatus` is seeded from `emptyStatusCounts()` ([passStatus.js](../server/src/services/passes/passStatus.js)), and that literal is also a **whitelist**: a stored status it doesn't seed is skipped by the tally and by the `matching` sum's status selection, so a door status missing there silently vanishes from the header — `not_target` was added to it with the outcome (2026-10-02), and `mapCounts.int.test.js` hand-lists the nine keys on purpose. Same params as `/map` minus `bbox` / `includeActivities` / `includeBounds` (accepted, ignored) — the client keys it on filters-minus-bbox so panning never refetches it. **`universe`** is every active geocoded door in the campaign (or in the selected walk list when `effortId` is set; the org when neither) — filter-independent: pass / import / saved-search / date / canvasser / answer / status / bbox never move it, and it deliberately does NOT apply `KNOCKABLE_DOOR_FILTER` (the map shows excluded + do-not-knock doors, so the denominator is what the map can show; the two sub-counts ride along). **`matching`** honors every filter incl. `status`, campaign-wide — the header's primary number. **`byStatus`** honors every filter EXCEPT `status` ("what would I get if I clicked this chip"); statuses are mutually exclusive per door, so `Σ byStatus == matching.total` with no status filter and `matching == Σ byStatus[selected]` otherwise — **derived on the server**, so web and mobile print the same number. Per-user / per-pass modes (`statusMode: 'user' \| 'pass'`) resolve status through the same `getUserStatusMap` / `getPassStatusMap` as `/map`, so the chips agree with the pin colors; an early-exit door set answers zeros + a real universe. Global mode = two index-backed `$group`s; user/pass mode = one slim `find` over the (bbox-free) scope ids + one activity aggregate. Lead-gated identically; polled at 20s under the Live pill on both clients. |
 | `GET /admin/campaigns/:campaignId/households/pin-fixes` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ households:[{ id, addressLine1, addressLine2, city, state, zipCode, location, status, coordSource, coordConfidence }], total, truncated, cap }` | The **Pin Fixes queue**: every door matching `NEEDS_PIN_FIX` (active + `interpolated` + unconfirmed) — the same predicate the rollup's `pinsToFix` badge counts, so list and badge can never disagree. `requireCampaignManager` (leads with a grant included); readable on an **archived** campaign (the router's `requireActiveCampaign` gates only writes). Cap `PIN_FIX_LIST_CAP` (default 10 000, env read at call time) with the `/map` `{ total, truncated, cap }` convention — the page's list and map both consume the whole set at once (the Turf-page hybrid pattern), not a pager. |
 | `POST /admin/campaigns/:campaignId/households/:householdId/confirm-location` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ household:{ id, locationConfirmedAt }, updated }` | Confirm-in-place (**Pin Fixes**): body `{ scope?: 'unit'\|'building', confirmed?: boolean }` (default `confirmed: true`; `false` = undo). Stamps `locationConfirmedBy/At` via `confirmHouseholdLocation` — never the move writer — and logs a from==to `HouseholdLocationChange` (`source:'confirm'`). Building scope fans out to **interpolated** siblings on the ~1.1m key only. Refuses `400 NOT_APPROXIMATE` on a non-interpolated door (undo skips that check), plus the router's usual 403/409. Full semantics in §B. |
 
@@ -587,18 +629,29 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
 ## E. Rendering
 
 - **Web (Mapbox GL JS):** GeoJSON **sources + layers** — a symbol layer for household icons, a circle
-  layer for pings, a line layer for ping→house links. House icons are drawn to a canvas at runtime.
+  layer for pings, a line layer for ping→house links. House icons are drawn to a canvas at runtime,
+  one per `STATUS_COLORS` key (`registerLayers` loops over it, so `house-not_target` registers itself);
+  the `households-symbols` `icon-image` match and the ping `circle-color` match still name each status.
   Updates call `source.setData(...)`, so a refresh re-paints features **without** recreating DOM
   markers or moving the camera (auto-fit runs once via a `_didFitBounds` flag).
 - **Mobile (`@rnmapbox/maps`):** native **`ShapeSource` + `SymbolLayer`** driven by **one** GeoJSON
   feature collection — deliberately **not** per-pin `MarkerView` components (thousands would block
   pinch-zoom and melt the device) and **no clustering**. House pins are pre-baked PNGs in
-  [mobile/assets/icons](../mobile/assets/icons) (`house-unknocked/not_home/surveyed/wrong_address/refused/restricted/no_soliciting`,
-  including its own amber `house-refused.png`, slate `house-restricted.png` and pink
-  `house-no_soliciting.png`; `lit_dropped` reuses the surveyed icon). All are generated by
-  [scripts/gen-house-icons.mjs](../mobile/scripts/gen-house-icons.mjs). The `icon-image` match in
-  [map.jsx](../mobile/app/(app)/map.jsx) maps `refused → house-refused`,
-  `restricted → house-restricted` and `no_soliciting → house-no_soliciting`. Building & book progress
+  [mobile/assets/icons](../mobile/assets/icons) (`house-unknocked/not_home/surveyed/wrong_address/refused/restricted/no_soliciting/not_target`,
+  including its own amber `house-refused.png`, slate `house-restricted.png`, pink
+  `house-no_soliciting.png` and fuchsia `house-not_target.png`; `lit_dropped` reuses the surveyed icon).
+  All are generated (128×128) by [scripts/gen-house-icons.mjs](../mobile/scripts/gen-house-icons.mjs).
+  **Generate a new one by name** — from `mobile/`, `node scripts/gen-house-icons.mjs not_target`. The
+  script takes status names and writes only those (an unknown name exits 1 and writes nothing). A bare
+  run rewrites every PNG it knows, and `house-restricted.png` — committed from a separate recolor —
+  regenerates about 98 bytes different, silently restyling every restricted pin; check that `git status`
+  shows only the file you meant to add. The PNG is `require()`d, so it ships in an OTA bundle — no
+  native build. The `icon-image` match in [map.jsx](../mobile/app/(app)/map.jsx) maps
+  `refused → house-refused`, `restricted → house-restricted`, `no_soliciting → house-no_soliciting` and
+  `not_target → house-not_target`; the admin map ([admin/map.jsx](../mobile/app/(app)/admin/map.jsx)) and
+  the admin book map ([admin/book/[turfId].jsx](../mobile/app/(app)/admin/book/[turfId].jsx)) carry the
+  same arm and the same `Mapbox.Images` entry. A status a match doesn't name falls through to its
+  default — the unknocked house — with no error. Building & book progress
   markers (grey/yellow/green) are
   generated by [scripts/genMarkerIcons.js](../mobile/scripts/genMarkerIcons.js) (SVG→PNG via `sharp`).
 - **Buildings grouping:** [mobile/lib/buildings.js](../mobile/lib/buildings.js) rounds coordinates to ~1m
@@ -610,7 +663,7 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
 - **Web building layer (admin map):** `registerLayers` adds a `buildings` GeoJSON source and a
   `building-symbols` symbol layer fed by `buildingsToGeoJSON(buildings)`. The icon is drawn to canvas at
   runtime by `drawBuildingIcon` in three roll-up colors (`building-done` / `building-partial` /
-  `building-none`, from `buildingColorsForTheme(dark)`) — deliberately **three** states, not the 8-status
+  `building-none`, from `buildingColorsForTheme(dark)`) — deliberately **three** states, not the 9-status
   palette, because a building holds a mix and painting it one door's status would be a false claim. The
   `text-field` is a `['step', ['zoom'], '', 14, …]` so the "N doors" label only appears at z≥14, and it's
   `text-optional` — labels may collide away, icons never do (`icon-allow-overlap` + `icon-ignore-placement`),
@@ -694,7 +747,7 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
 | Web admin map | 20s (when Live on); **paused in background**; `keepPreviousData` | [MapPage.jsx](../client/src/pages/MapPage.jsx), [LiveStatus.jsx](../client/src/components/LiveStatus.jsx) |
 | Web admin map — `/map/counts` (header + status-chip counts) | 20s with Live, keyed on filters-minus-bbox; joins the pill via `liveStatusProps` | [MapPage.jsx](../client/src/pages/MapPage.jsx) |
 | Mobile admin map — `/map` + `/map/counts` | 20s with Live; focus-gated (`useFocusedPoll`); the pill answers for both | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) |
-| Mobile `changes` (door/voter sync) | 30s; `refetchIntervalInBackground:false` | [map.jsx](../mobile/app/(app)/map.jsx) |
+| Mobile `changes` (door/voter sync + door settings) | 30s; `refetchIntervalInBackground:false`; focus-gated (`useFocusedPoll`) | [map.jsx](../mobile/app/(app)/map.jsx) |
 | Mobile `me/today` (shift stats) | 120s | [map.jsx](../mobile/app/(app)/map.jsx) |
 
 The web map uses **full refetch**, not a `since=` delta, on purpose: re-knocks **delete + replace**
@@ -724,9 +777,27 @@ after a tap reverts the pin to its pre-action color (a blue→grey→blue flicke
 house — or the map remounting after a survey — never kicks off a stale full refetch; and
 `optimisticSubmit` calls **`cancelQueries(['bootstrap'], { revert: false })`** to discard any bootstrap
 fetch already in flight at record time (e.g. a manual pull-to-refresh). Bootstrap now refetches only on
-first load, manual pull-to-refresh, campaign switch, or a hard-fail `invalidate`; liveness in between is
-the `changes` delta. (`refetchOnWindowFocus` is already globally `false`; `focusManager` tracks
-app-foreground via AppState, not screen navigation.)
+first load, manual pull-to-refresh, campaign switch, a round change the `changes` delta detects
+(`activePassIds` differs), the first delta after a cold start served from the disk snapshot, or a
+hard-fail `invalidate`; liveness in between is the `changes` delta. (`refetchOnWindowFocus` is already
+globally `false`; `focusManager` tracks app-foreground via AppState, not screen navigation.)
+
+**Door settings are part of that liveness — not a refetch (2026-10-02).** An outcome toggle, an
+off-by-default outcome switched on or off, or an Add-person policy change used to reach a phone only on a
+full bootstrap. Now the `changes` queryFn reads `doorConfigStamp` from the `['bootstrap']` cache at fetch
+time (it is not part of the query key) and appends it, encoded, to the poll; when the server answers
+with a `doorConfig` block (§D), the effect that folds the households spreads it into the cached
+`campaign` and persists it with `saveBootstrap`, and the next poll sends the new stamp. Nothing is
+refetched, so a knock's `cancelQueries(['bootstrap'])` can't cancel it, a weak signal can't fail it, and
+the cached voters (optimistic walk-up adds included) survive. The door screen and the map's chips and
+legend re-render from the cache; a canvasser on a door screen picks the change up on returning to the
+map, and a tap made there before then on something just switched off meets the server's backstop
+(`OUTCOME_DISABLED`, or `ADD_VOTER_RESTRICTED` for the Add-person policy). It adds no
+request — the stamp rides the 30s poll the map already makes, focus-gated as above. An offline phone
+catches up on its first successful poll after it reconnects: its cache still holds the old stamp, so the
+server answers with the new block — no bootstrap needed. A bundle from before this change (it sends no
+stamp, so it never gets a block) still learns the settings only on a full bootstrap. **The refetch list
+above is unchanged: nothing new refetches.**
 
 **The hard guarantee — pending overlay.** Belt-and-suspenders on top of the above, so NO refetch from
 any source (now or future) can revert a fresh recolor: [lib/recordAction.js](../mobile/lib/recordAction.js)
@@ -741,7 +812,7 @@ invalidated. Net effect: a pin can't be reverted to pre-action state, no matter 
 
 Canonical palette (hex): `unknocked #9ca3af`, `not_home #3b82f6`, `surveyed #22c55e`,
 `wrong_address #ef4444`, `refused #f59e0b`, `restricted #475569`, `no_soliciting #db2777`,
-`lit_dropped #a855f7`, plus `voted #14b8a6`.
+`not_target #a21caf`, `lit_dropped #a855f7`, plus `voted #14b8a6`.
 
 `refused` is **amber `#F59E0B`**, label **Refused** (web/admin/mobile alike) — a *contact* disposition
 (a voter answered but declined), kept visually distinct from the misses (blue Not home / red Wrong
@@ -763,16 +834,52 @@ purple `lit_dropped`: unlike those two it appears on *both* campaign types, so i
 next to either. It **is** counted as a knock (unlike `restricted`) but never as a contact (unlike
 `refused`) — see [METRICS.md](METRICS.md).
 
+`not_target` is **fuchsia `#A21CAF`** (Tailwind `bg-fuchsia-700` in the coverage bars), label **Not a
+target voter** (web/admin/mobile alike; the phone's filter chips and coverage legend shorten it to **Not
+target**) — someone answered who isn't on the list for that address and wouldn't give a name. Counted
+like `refused`: a knock **and** a contact, never a survey or a connection (see
+[METRICS.md](METRICS.md)). It drives its house pin (`house-not_target`) and its ping circle (the
+`registerLayers` `actionType` match on the web, the `circleColor` match on the mobile admin map). The
+hue was chosen as the most distinguishable from every status that can share a survey campaign's map,
+under the common forms of color blindness too; its nearest neighbor, `lit_dropped` purple, never shares
+a campaign with it, because the outcome is survey-only. **It is the one status that starts off** — it
+exists only where an org admin has turned it on — so the chips and legend entries that offer it are
+gated (below); pins and pings never are.
+
 - **Mobile (canonical):** [lib/theme.js](../mobile/lib/theme.js) `colors.status.refused = '#F59E0B'` /
   `colors.statusLabels.refused = 'Refused'` and `colors.status.restricted = '#475569'` /
   `colors.statusLabels.restricted = 'Restricted'` — used by all mobile maps for legend dots and ping
   colors. `restricted` is in **both** the survey legend (`SURVEY_LEGEND` in
   [map.jsx](../mobile/app/(app)/map.jsx)) and the `LIT_DROP_LEGEND` (refused is survey-only), and so is
-  `no_soliciting`.
+  `no_soliciting`. `colors.status.not_target = '#A21CAF'` / `colors.statusLabels.not_target = 'Not a
+  target voter'` is in `SURVEY_LEGEND` only.
   (`mobile/components/StatusColor.js` holds the same values but is currently unused/legacy.)
 - **Web:** `STATUS_COLORS` / `STATUS_LABELS` — canonical in [lib/statusColors.js](../client/src/lib/statusColors.js)
-  (`refused: '#f59e0b'`, `restricted: '#475569'`, `no_soliciting: '#db2777'`), consumed by [MapPage.jsx](../client/src/pages/MapPage.jsx)
+  (`refused: '#f59e0b'`, `restricted: '#475569'`, `no_soliciting: '#db2777'`, `not_target: '#a21caf'`), consumed by [MapPage.jsx](../client/src/pages/MapPage.jsx)
   and the shared [mapRender.js](../client/src/lib/mapRender.js) house-icon + ping layers.
+
+**Where the Not a target voter chip appears.** Each map gates it on what that map can know, so a campaign
+that never turns the outcome on never sees the words:
+
+- **Web admin map:** [MapFilters.jsx](../client/src/components/MapFilters.jsx) shows the chip when its
+  `notTargetInUse` prop is true — MapPage passes `outcomeInUse(selectedCampaign, 'not_target')`
+  ([lib/outcomeToggles.js](../client/src/lib/outcomeToggles.js): on now, or listed in
+  `everEnabledOutcomes`, and never on a lit-drop campaign, which keeps that record when switched from
+  survey before canvassing) — **or** when `/map/counts` `byStatus.not_target > 0`, **or** while
+  `statusFilter` already holds it: the filter survives a campaign switch (MapPage is not remounted per
+  campaign), and a hidden ticked chip would empty the map with nothing on screen to untick.
+- **Mobile admin map:** the Status menu's **Not target** row, on `useOutcomeInUse(campaignId)`
+  ([mobile/lib/useOutcomeInUse.js](../mobile/lib/useOutcomeInUse.js) — it reads the full row from the
+  `['admin','campaigns']` cache, because the campaign objects the admin screens hold are shaped copies
+  without these fields; false until that list resolves) **or** the same count, **or** while it is
+  ticked (same reason).
+- **Canvasser map:** the disabled-outcome rule, inverted. `not_target` joins `disabledSet` whenever
+  `isOutcomeOn(bootstrap.campaign, 'not_target')` is false (fail-closed: a bootstrap without
+  `enabledOutcomes` reads off), and a disabled status keeps its chip and legend entry only while a loaded
+  door still wears it.
+- **Client report map** ([ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx)): the public
+  snapshot carries no campaign settings, so the chip is gated on **presence** — offered only when the
+  frozen points include such a door; the door is drawn either way. Lit-drop campaigns never offer it.
 
 **Building roll-up colors (outside the status palette).** A building glyph stands for 2+ doors with a
 *mix* of statuses, so it can't wear any one of them. Three states instead: **green** (`STATUS_COLORS.surveyed`
@@ -847,6 +954,13 @@ constants). A small legend labels the two rings when they're shown.
   — the throw is uncatchable from JS, and a *native* catch would swallow the failure and silently
   leave telemetry **on**, quietly falsifying the privacy policy.
 - **Native symbol layers, not MarkerView; no clustering** — one GeoJSON feature collection per layer.
+- **A new door status is named by hand in every pin and ping `match`.** The web icon *image* registers
+  itself from `STATUS_COLORS`, but the `icon-image` and ping `circle-color` matches in
+  [mapRender.js](../client/src/lib/mapRender.js), the three mobile `icon-image` matches with their
+  `Mapbox.Images` maps (canvasser, admin and book maps) and the mobile ping-color matches each list the
+  statuses and fall through — to the unknocked house, or a grey dot — with no error; `emptyStatusCounts()`
+  drops an unseeded status from the counts the same way (§D). Grep an existing status (`no_soliciting`)
+  to find them all.
 - **The building key has ONE rule and exactly THREE implementations of it.** `` `${round(lat*1e5)}|${round(lng*1e5)}` ``
   (~1.1 m) is implemented in [client/src/lib/buildings.js](../client/src/lib/buildings.js) (web),
   [mobile/lib/buildings.js](../mobile/lib/buildings.js) (mobile), and
@@ -922,6 +1036,13 @@ constants). A small legend labels the two rings when they're shown.
   (`reconcilePendingHouseholds` in [recordAction.js](../mobile/lib/recordAction.js), applied to both
   server writers in [map.jsx](../mobile/app/(app)/map.jsx)) re-holds the status until the server confirms.
   Don't drop these or add a bootstrap `refetchInterval` — use the `changes` delta for liveness.
+- **`doorConfigStamp` is always `encodeURIComponent`-ed on the `changes` poll.** It contains `|` and `,`.
+  With a raw `|`, React Native on iOS before 17 (the app supports 15.1+) re-encodes the whole URL, the
+  already-encoded `since` reaches the server double-encoded, `Date.parse` fails and `/changes` answers 400
+  on **every** poll — teammates' results, round changes and door settings all stop, silently, because the
+  map reads only `changesQ.data`. Express hands the parameter back decoded, so the server compares it
+  as-is. Door settings travel as a **fold** of the `doorConfig` block into the cached campaign, never as a
+  bootstrap refetch (§F).
 - **`api` has a ~20s timeout** ([lib/api.js](../mobile/lib/api.js)); a bare fetch with none let weak
   signal hang ~60s before an action would queue offline.
 - **Writes are double-tap-safe (defense in depth).** Survey/action submits are fire-and-forget +
@@ -974,7 +1095,7 @@ constants). A small legend labels the two rings when they're shown.
 | [client/src/components/DoorStackPanel.jsx](../client/src/components/DoorStackPanel.jsx) | Web admin map's "every door on this pin" list — opened by a building click or by a click that hit more than one house. Presentational; MapPage owns selection and hands the picked door to `HouseholdDetailPanel` (with a "← Back to all N doors" bar). |
 | [client/src/components/ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) | Read-only client-report coverage map: frozen snapshot points, client-side status/answer filtering, no canvassers; ResizeObserver-resized (see gotcha §I). |
 | [client/src/components/LiveStatus.jsx](../client/src/components/LiveStatus.jsx) | The "Live · updated Xs ago" toggle/indicator + Refresh. |
-| [mobile/app/(app)/map.jsx](../mobile/app/(app)/map.jsx) | Canvasser map: pins, buildings, bottom sheet, follow mode, offline badge, `changes`/`me/today` polling. |
+| [mobile/app/(app)/map.jsx](../mobile/app/(app)/map.jsx) | Canvasser map: pins, buildings, bottom sheet, follow mode, offline badge, `changes`/`me/today` polling — the `changes` poll sends the encoded `doorConfigStamp` and folds a returned `doorConfig` into the cached campaign, and its household fold copies `restrictedFrom` (§D, §F). The status chips and pin legend hide a disabled outcome, and `not_target` while it is off, unless a loaded door still wears it (§G). |
 | [mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Mobile admin overview map + canvasser-pings toggle + the walk-list `FilterChip` + menu (2+-effort campaigns; picking one clears pass/import scope — §D) + first/last-knock rings (single canvasser) + the `/map/counts` count chip (`match / universe doors`, "N in view" beneath, tap → explain menu) + campaign-wide counts in the Status menu and response counts in the answer menu; tapped-door sheet now at **web parity** (header status/address, last action, **History by pass**, voters, surveys with lazy answers) + the inline **⚠ Overlap** badge + the opt-in **Overlaps** ring toggle (`/overlap-doors`, rings beneath the pins) + the round-labelled **Mark / Unmark restricted** row above *Move pin* (`doorMarkState` from [mobile/lib/restrictBooks.js](../mobile/lib/restrictBooks.js) over the sheet's `/activity` rounds; `restrict-doors` / `unrestrict-doors`; see [ADMIN_APP.md](ADMIN_APP.md)). |
 | [mobile/app/(app)/admin/canvasser/[id]/map.jsx](../mobile/app/(app)/admin/canvasser/[id]/map.jsx) | One canvasser's path of action pings. |
 | [mobile/app/(app)/books.jsx](../mobile/app/(app)/books.jsx) | Books overview map (centroid markers). |

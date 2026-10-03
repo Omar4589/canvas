@@ -294,12 +294,12 @@ export default function CampaignDetail() {
       },
       ...(isLitDrop ? [] : [{ key: 'voters', label: 'Voters surveyed', help: metricHelp.surveyedVoters }]),
       { key: 'conn', label: 'Conn %', help: metricHelp.connectionRate },
-      { key: 'contact', label: 'Contact %', help: metricHelp.contactRate },
+      { key: 'contact', label: 'Contact %', help: notTargetInUse ? metricHelp.contactRateNotTargetInUse : metricHelp.contactRate },
       { key: 'pace', label: 'Doors / hr', help: metricHelp.doorsPerHour },
       { key: 'coordinator', label: 'Coordinator', help: metricHelp.coordinator },
       { key: 'span', label: 'Start / Last door', help: `${metricHelp.start} ${metricHelp.lastDoor}` },
     ],
-    [isLitDrop]
+    [isLitDrop, notTargetInUse]
   );
 
   const questions = surveyResultsQ.data?.questions || [];

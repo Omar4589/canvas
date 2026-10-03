@@ -6,7 +6,7 @@ kind: faq
 order: 32
 sourceDoc: CAMPAIGNS.md
 summary: Open the campaign's History — it records every settings change with who made it and when, and folds in team reassignments too.
-tags: history, audit, who changed, door goal, changed, log, tracking, accountability
+tags: history, audit, who changed, door goal, changed, log, tracking, accountability, door outcomes, not a target voter, add person
 ---
 
 Open the campaign's **⋮ menu → History**. If it's the door goal you're wondering about, there's also a **History** link on the door-goal line at the top of the campaign's Home page.
@@ -28,6 +28,9 @@ You'll see a list, newest first:
 - **Restricted doors on invoices** — the setting that changes what you bill
 - **Archiving** and **reactivating** — archiving stops the billing clock
 - The campaign's **name**, **type**, and **state**
+- **Door outcomes** — an outcome button switched off for canvassers, or back on
+- **Off-by-default outcomes** — an org admin switching on or off a door button that starts off on every campaign (today only **Not a target voter**)
+- **Adding people at the door** — whether everyone on the campaign, or only team leads and admins, gets the **＋ Add person** button
 - **Team reassignments**, including how many doors moved with the person
 
 The **timezone** and the **attached survey** aren't recorded. A timezone change already makes itself obvious — every daily number on the campaign shifts, and you're warned before you confirm — and the survey in use is on the campaign's Survey tab.

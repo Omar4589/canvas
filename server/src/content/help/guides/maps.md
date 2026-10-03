@@ -6,14 +6,14 @@ kind: guide
 order: 19
 sourceDoc: MAPS.md
 summary: Read the admin and field maps, follow canvasser pings, and fix an off-spot pin.
-tags: maps, pins, pings, gps, pin correction, live updates
+tags: maps, pins, pings, gps, pin correction, live updates, pin colors, door settings
 ---
 
 There are two maps, and they draw the **same doors** from the **same data**. The **web admin map** is your desk view: every door in the campaign, plus where canvassers have been, with filters and a live feed. The **field map** is what a canvasser sees on their phone: just the doors in the books assigned to them.
 
 ## Reading the pins
 
-Every house is a pin colored by its current status — gray (unknocked), blue (not home), green (surveyed), amber (refused), red (wrong address), purple (lit dropped), pink (no soliciting), and slate (restricted). If two colors trip you up, see [Restricted vs. refused](restricted-vs-refused). Doors where everyone has already voted drop off the field map on their own.
+Every house is a pin colored by its current status — gray (unknocked), blue (not home), green (surveyed), amber (refused), red (wrong address), purple (lit dropped), pink (no soliciting), and slate (restricted). One more, **fuchsia**, marks **Not a target voter**: someone answered who isn't on the list for that address and wouldn't give their name. That outcome is off until an org admin turns it on for a survey campaign, so you'll only see the color — and its status chip — on a campaign that has had it turned on. If two colors trip you up, see [Restricted vs. refused](restricted-vs-refused). Doors where everyone has already voted drop off the field map on their own.
 
 ## What the count up top is counting
 
@@ -114,4 +114,4 @@ To work through **all** of them at once, use the [Pin Fixes page](page-pin-fixes
 
 ## What's live vs. what needs a refresh
 
-Status changes and pin fixes flow in on their own — the web map about every 20 seconds, phones about every 30. But **moving a door to another book, merging or splitting books, or reassigning a canvasser** only appears after a full refresh. See [Changes not showing in the field](changes-not-showing-in-field).
+Status changes and pin fixes flow in on their own — the web map about every 20 seconds, phones about every 30. So do your campaign's **door settings**: an outcome button turned on or off, or a change to who can add a person at the door, reaches a canvasser's phone within about 30 seconds while their map is open — no refresh needed (a phone that's offline, or on an older version of the app, is the exception). But **moving a door to another book, merging or splitting books, or reassigning a canvasser** only appears after a full refresh. See [Changes not showing in the field](changes-not-showing-in-field).

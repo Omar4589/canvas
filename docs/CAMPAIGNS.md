@@ -17,7 +17,8 @@ CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific 
 [SURVEYS.md](SURVEYS.md) (attach a survey before activating a pass), [PASSES.md](PASSES.md) (passes:
 lifecycle + where they're managed), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting books),
 [METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a timezone change matters),
-[ROLES.md](ROLES.md) (delegating a campaign to a team lead).
+[ROLES.md](ROLES.md) (delegating a campaign to a team lead), [CANVASSER_APP.md](CANVASSER_APP.md)
+(the door screen App Customization shapes).
 
 ---
 
@@ -148,8 +149,15 @@ report, but only as an explicit per-report tick (see [CLIENT_PORTAL.md](CLIENT_P
 
 A door goal is a contract number, and a lead can change one. **History** records who changed what
 and when: the goal and its date, the key dates and note, the billable-doors policy, archiving and
-reactivating, and the campaign's name, type and state. Open it from a campaign's **⋮ menu →
-History**, or from the **History** link on the door-goal strip when a number looks wrong.
+reactivating, the campaign's name, type and state, and what canvassers can record at the door —
+which outcome buttons are switched off (*Door outcomes*), switching an off-by-default outcome on or off
+(*Off-by-default outcomes* — see "Off until you turn it on" below), and who may add people at the
+door (*Adding people at the door*). Open it from a campaign's **⋮ menu → History**, or from the
+**History** link on the door-goal strip when a number looks wrong.
+
+The add-people setting reads in plain words — *Adding people at the door: Everyone on the campaign →
+Team leads & admins only* — since October 2026. Before that, History showed the raw setting (*Door
+Add Policy: all → leads*).
 
 The feed also folds in **team reassignments**, which is the other way a number moves without anyone
 knocking a door: changing someone's coordinator re-stamps all of their past work onto the new team,
@@ -257,36 +265,56 @@ in the drawer). The rules protect your data once canvassing has started:
   lost and all-time totals are unchanged, but day-by-day numbers shift. See [TIMEZONES.md](TIMEZONES.md).
 - **Type (survey ⇄ lit drop)** — **locked once canvassing has started.** Flipping it would corrupt
   how door statuses are computed and orphan existing survey responses, so the radios go read-only
-  with a note. To run a different type, create a new campaign.
+  with a note. To run a different type, create a new campaign. Changing a survey campaign to lit
+  drop before then also switches **Not a target voter** off if it was on (that outcome exists only
+  on survey campaigns), and History records the switch-off.
 - **Survey template** — the campaign's **Survey** tab (`/campaigns/:id/survey`) is where you attach,
   change, or preview the survey. Repointing a survey campaign warns you if the chosen survey already
   has responses (new answers report alongside the old ones). To change questions, duplicate the
   survey on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
 - **Door outcomes** — always editable, **by org admins AND team leads** (same reasoning as the door
   goal: whoever runs the campaign owns what canvassers can record). Lives on the **App
-  Customization** page — see the section below.
+  Customization** page — see the section below. **The one exception is an outcome that starts
+  off** (today only **Not a target voter**, and only once Doorline has made it available): **org
+  admins only** turn it on or off — see "Off until you turn it on" below.
 
 ### Door outcomes — which buttons canvassers see (added 2026-08)
 
-Every campaign starts with the full set of outcome buttons in the field app. The **App
-Customization** page in the campaign drill-in (`/campaigns/:id/customize`, and the matching
-screen in the mobile admin app) lets you turn individual ones off — say a campaign that never
-wants **No soliciting** used. The web page renders a **live phone mockup** of the door screen
-beside the toggles — flip one and its button slides out of the preview, so you see exactly what
-your canvassers will. (The page is named for what it will grow into — every "what does the field
-app offer" setting belongs here. Changing what ALREADY-recorded entries say is a different job,
-on the **Door Outcomes** page below.) What's toggleable is deliberately narrow:
+Every campaign starts with the standard outcome buttons switched on in the field app (the one
+outcome that starts off is the next section's). The **App Customization** page in the campaign
+drill-in (`/campaigns/:id/customize`, and the matching screen in the mobile admin app) lets you
+turn individual ones off — say a campaign that never wants **No soliciting** used. The web page
+renders a **live phone mockup** of the door screen beside the toggles — flip one and its button
+slides out of the preview, so you see exactly what your canvassers will. (The page is named for
+what it will grow into — every "what does the field app offer" setting belongs here. Changing what
+ALREADY-recorded entries say is a different job, on the **Door Outcomes** page below.) What's
+toggleable is deliberately narrow:
 
 - **Can be turned off:** Wrong address, Refused, No soliciting, Restricted access (a lit-drop
   campaign only shows the last two — the first two don't exist in its door UI).
 - **Never toggleable:** Not home and the completion action (Surveyed / Lit dropped). Without those,
   a walk can't be recorded at all.
+- **Off until you turn it on:** **Not a target voter** — survey campaigns only, and only once
+  Doorline has made it available. It is the one outcome that starts off, and only org admins can
+  switch it (next section).
 
 Turning an outcome **off** does two things: the button disappears from the door screen, and the
 server refuses fresh submissions of it (so a phone with a stale view can't sneak one in — the
-canvasser gets a clear "turned off" message and the app refreshes its buttons). One deliberate
-exception: a knock a canvasser recorded **while offline, before you flipped the toggle**, is still
-accepted when their phone reconnects — a settings change never destroys real door data.
+canvasser gets a clear "turned off" message and the app refreshes its buttons).
+
+**Changes reach phones within about 30 seconds (added 2026-10).** Everything on this page that
+shapes the door screen — these switches, the off-by-default outcome, and who may add people at the
+door — rides the map's existing 30-second update: a phone on the current app picks the change up
+while its map is on screen, with no refresh and no extra requests. A canvasser standing on a door
+screen gets it once they're back on the map. A phone that hasn't taken that app update still gets
+it the old way, when it next reloads the whole campaign (a refresh, a restart, switching campaigns,
+or a new round).
+
+One deliberate exception to the refusal: a door a canvasser recorded **while their phone was
+offline** is still accepted when it reconnects — even one tapped after you switched the outcome
+off, because a phone with no signal keeps the buttons it already has until it's back online. A
+settings change never destroys real door data. (The off-by-default outcome narrows this one way;
+see below.)
 
 **Nothing about the past changes.** Doors already recorded keep their status, color, and place in
 every count, rate, export, and invoice. This is a recording policy, not a reporting one — see
@@ -295,6 +323,68 @@ all on → Refused off"), highlighted the same way invoice-policy changes are. T
 **bulk restrict** on a book, or **Mark restricted** on a single home from the Turf Cutting map, the Map
 page or the mobile admin app — keep working even while Restricted is toggled off: they're desk actions
 owned by the same people who own the toggle.
+
+### Off until you turn it on — Not a target voter (added 2026-10)
+
+You may never see this section on App Customization: it appears only on **survey** campaigns, and
+only once Doorline has made the outcome available. **Not a target voter** is a door button for the
+moment a canvasser **talks to someone who isn't one of the voters on the list for that address, and
+that person won't give their name**. Without it there's no honest way to record that visit — **＋ Add
+person** needs a name, **Refused** hides that the person wasn't one of your voters, and **Not home**
+says nobody answered. It counts as a knock and as reaching a person (Contact %), never as a survey,
+so the connection rate reads exactly as it would have with Not home or Refused at that door. How it
+counts: [METRICS.md](METRICS.md) → *Not a target voter*; the canvasser's side:
+[CANVASSER_APP.md](CANVASSER_APP.md); why it works this way:
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md).
+
+Nothing about it can be checked — no name is taken — so it works the opposite way from the switches
+above:
+
+- **It starts off on every campaign, existing and new.** A campaign can't be created with it on;
+  it's switched on afterwards, here, so the switch-on always has a History row.
+- **Only org admins can turn it on or off.** Team leads see the section and whether it's on, with
+  the switch disabled and the line *"Only org admins can turn this on or off."* — unlike the switches
+  above, which a lead can flip. A team lead can be the paying client, and this switch is the
+  organization's trust decision.
+- **When it's on, everyone on the campaign gets the button** — including anyone a team lead adds to
+  the crew later. Turn it on only for crews you trust.
+- **Survey campaigns only.** Lit-drop doors have no voter list on the phone, so there's no "target"
+  to compare against. Changing a survey campaign to lit drop (allowed only before canvassing starts)
+  switches it off.
+- **Turning it on asks first.** The confirmation says it counts as a knock and as reaching a person,
+  never as a survey; that an entry can't be verified; that each one is GPS-stamped and shows on that
+  canvasser's row; and that the change goes into History with your name. Turning it off doesn't ask —
+  that's the safe direction. The web page's phone mockup shows the button only while it's on and
+  available.
+- **History** records each switch, highlighted, with who and when: *Off-by-default outcomes: none →
+  Not a target voter*, and back to *none* when it's switched off.
+
+**Doorline releases it.** Doorline makes the outcome available only once the app update that can
+show the button has reached canvassers' phones; until then the section doesn't appear. Doorline can
+also withdraw it everywhere at once if something goes wrong. So on a survey campaign the section has
+three states:
+
+- **Available** — a normal switch.
+- **Paused by Doorline** — Doorline has withdrawn the outcome, but this campaign is still set on. The
+  row reads *"Paused by Doorline — no phone shows this button right now."*: phones drop the button
+  (an offline one once it reconnects), new taps are refused, and an org admin can still turn it off
+  for the campaign, but not back on until Doorline makes it available again. Everything already
+  recorded keeps counting and the campaign keeps its setting, so when Doorline releases it again the
+  button comes back on every campaign still set on — Doorline tells org admins before it does.
+- **Not available and not set** — no section at all.
+
+**Turning it off.** A phone that's online loses the button within about 30 seconds of being on the
+map, and the server refuses a live tap at once ("turned off for this campaign"). A phone that's
+**offline** when you switch it off (no signal, or airplane mode) keeps the button until it
+reconnects, and what it records meanwhile syncs and counts, like any offline door result — real door
+work is never thrown away. To review those entries, open **Door Outcomes**, filter by canvasser and
+date, and look for the **Offline** tag (below); change or Unknock any you don't accept. Nothing
+already recorded is converted automatically.
+
+**Hard to fake from outside the app.** On a campaign that has **never** had it on, the server refuses
+it outright — even from a phone's offline queue, because no phone could ever have shown the button
+there. Once a campaign has had it on, a queued offline tap is honored even after a switch-off or a
+pause, for the reason above.
 
 ### Door Outcomes — correcting what was recorded (added 2026-08)
 
@@ -315,9 +405,9 @@ whole safety model:
   doors are identical before and after.
 - A conversion that *does* move something shows your campaign's own before-and-after — knocks,
   billable doors, contact rate, survey rate, restricted doors — with the changed figures in red and
-  a red confirm button. **Refused** moves the contact rate (someone answered) and **Restricted**
-  moves billable doors (it can be invoiced), so those are always priced. They are still allowed:
-  a wrong button deserves a real fix.
+  a red confirm button. **Refused** — and, on campaigns that use it, **Not a target voter** — moves
+  the contact rate (someone answered), and **Restricted** moves billable doors (it can be invoiced),
+  so those are always priced. They are still allowed: a wrong button deserves a real fix.
 - **Lit dropped can never be converted**, in either direction, by anyone — a lit drop has no
   answers to move either way.
 - **Surveyed CAN be converted, in both directions**, but not as a relabel — see the next section.
@@ -333,6 +423,12 @@ The table also carries an **address search** (matches street, city or ZIP — it
 selection exactly like every other filter, so "Select all N matching" means the searched set), a
 **newest/oldest sort**, a live **entries · doors** count, and **Export CSV** — the filtered table
 as a file, survey evidence included, for handing an investigation's worksheet to whoever needs it.
+
+**Entries recorded offline are tagged (added 2026-10).** An entry a phone recorded without a
+connection and synced later shows a small **Offline** tag beside its outcome, and the CSV ends with a
+matching **Offline** column (for every organization — *Offline*, or blank). It is how you review what
+an offline phone recorded after you switched an outcome off: filter by canvasser and date, and look
+for the tag. It's a label only — nothing filters or counts by it.
 
 The **answer filter** (the *Survey answers* disclosure in the filter bar) finds the doors where
 someone gave a particular answer — "everyone this canvasser surveyed who answered *Opposed*." It
@@ -354,9 +450,21 @@ restrict** on a book or **Mark restricted** on a single home (desk marks, not fi
 with its own undo where it was made: the book's Unmark, or the house popup / door panel), and entries a
 previous run already changed, until that run is reverted.
 
+**Not a target voter on this page** (added 2026-10). Its filter chip appears only on a campaign that
+has had it on at some point. Its entries are listed and exported like any other outcome's, even
+while Doorline has it paused: cleaning up never depends on the release. Changing one is **always
+priced**: like Refused, it counts as reaching a person, so changing it to anything but Refused or
+Surveyed can move the contact rate. It is offered under **Change to** only where canvassers
+could record it right now — a survey campaign that has it on, while Doorline has it available. To
+clean up one canvasser's suspect entries: filter to that canvasser (and a date range) and the **Not a
+target voter** chip, tick the entries, then change them (to Not home, say — the preview shows what
+moves), convert them to Surveyed if the answers really were taken (next section), or **Unknock**
+them so they stop counting and billing.
+
 The **App Customization** page keeps a small **Reclassification** card for the common follow-up
 right after you switch an outcome off; it is the same machinery, limited to the never-moves-a-number
-folds.
+folds (so it never offers Not a target voter: it counts as reaching a person, so changing it can
+move a number).
 
 ### Converting to and from Surveyed (added 2026-08)
 
@@ -384,6 +492,12 @@ Who gets an answer recorded: **every voter on file at that address, except anyon
 do-not-contact, and except anyone who already answered that round.** That last rule is absolute —
 a real answer a canvasser collected in the field is never overwritten by a desk entry. The confirm
 step names everyone who will be skipped and why.
+
+**A Not a target voter entry can be converted to Surveyed too** (on campaigns that use it) — the fix
+when a canvasser really surveyed someone and then tapped the wrong button. Bear in mind what that
+entry itself said: that whoever answered was *not* one of the voters listed at that address. The
+answers you enter go to the voters on file there, so convert one only when you know a listed voter
+really answered.
 
 Every answer you record here is **attributed to the canvasser who knocked** — their knock, their
 time, their GPS, their round and team, so their numbers and their pay reflect the work they did.
@@ -563,20 +677,29 @@ recording time in [routes/mobile/canvass.js](../server/src/routes/mobile/canvass
 submission of a disabled outcome is `400 { code: 'OUTCOME_DISABLED' }`, while a replay carrying
 `wasOfflineSubmission: true` is accepted — same client-asserted trust posture as
 `supersededByNewer`, because rejecting it would silently destroy a real knock recorded before the
-toggle flipped). ISO date strings order chronologically as plain strings, so all
-window checks are lexicographic — no `Date` parsing. A `pre('validate')` invariant enforces that a `survey`
-campaign has a `surveyTemplateId` and a `lit_drop` campaign never does (it nulls it on save). There
-is no `draft` state — `isActive` is the only lifecycle flag (active ⇄ archived).
+phone could learn of the flip), the opt-in pair `enabledOutcomes` / `everEnabledOutcomes` (**String
+arrays, default `[]`**, both element-enum'd to `OPT_IN_OUTCOMES` — the ALLOW-list of outcomes that
+start off, and the server-maintained record of every one the campaign has ever had on; see
+§Off-by-default outcomes below), and `doorAddPolicy` (`'all'` | `'leads'`, default `'all'` — who may
+add a walk-up voter at a door; lead-editable and audited like `disabledOutcomes`, backstopped by
+`ADD_VOTER_RESTRICTED` with the same offline-replay tolerance; [VOTERS.md](VOTERS.md)). ISO date
+strings order chronologically as plain strings, so all window checks are lexicographic — no `Date`
+parsing. A `pre('validate')` hook nulls `surveyTemplateId` on a `lit_drop` campaign; a `survey`
+campaign may exist without one, but a round can't be activated until it has one
+([routes/admin/passes.js](../server/src/routes/admin/passes.js) answers `400 { code:
+'survey-required' }`). There is no `draft` state — `isActive` is the only lifecycle flag (active ⇄
+archived).
 
 **[CampaignChange.js](../server/src/models/CampaignChange.js)** — the configuration audit trail:
 `{ organizationId, campaignId, field, fromValue, toValue, byUserId, source }`, one row per field
 per edit, written from the campaigns PATCH handler against an explicit `AUDITED_FIELDS` list
 (`timeZone` and `surveyTemplateId` are deliberately absent — see Part 1). `fromValue`/`toValue` are
 `Mixed` because the audited fields span String, Number and tri-state Boolean, and `null` is a real
-value on both sides for most of them. `disabledOutcomes` stores as a **sorted comma-join**
-(`'refused,restricted'`; empty ≡ never-set ≡ `null`) via an array branch in `normalizeAudited`, so
-a reordered no-op PATCH can't log a phantom change; both clients' `campaignHistory.js` split it
-back into labels ("Refused, Restricted off" / "all on"). Written **after** `campaign.save()` on purpose so a row can
+value on both sides for most of them. `disabledOutcomes` and `enabledOutcomes` store as a **sorted
+comma-join** (`'refused,restricted'`; empty ≡ never-set ≡ `null`) via an array branch in
+`normalizeAudited`, so a reordered no-op PATCH can't log a phantom change; both clients'
+`campaignHistory.js` split them back into labels ("Refused, Restricted off" / "all on"; "Not a
+target voter" / "none"). Written **after** `campaign.save()` on purpose so a row can
 never describe a change that didn't land, and `await`ed rather than fire-and-forget — the narrow
 window where the save commits and the insert throws (one unlogged edit, a 500) is the accepted cost
 of that ordering, and it is the cheaper mistake than logging a change a failed save never made.
@@ -601,18 +724,98 @@ deliberate — `mobile/lib/api.js` inspects 400/403/404 for `ORG_CONTEXT`/`FORBI
 an already-released bundle doesn't recognise can eject the user to the org picker. Pinned by
 [test/archivedCampaign.int.test.js](../server/test/archivedCampaign.int.test.js).
 
+## Off-by-default outcomes (the opt-in class, 2026-10)
+
+[outcomeToggles.js](../server/src/services/canvass/outcomeToggles.js) holds three disjoint classes,
+hand-mirrored in [client/src/lib/outcomeToggles.js](../client/src/lib/outcomeToggles.js) and
+[mobile/lib/outcomeToggles.js](../mobile/lib/outcomeToggles.js): `TOGGLEABLE_OUTCOMES` (on by
+default — the `disabledOutcomes` deny-list), `OPT_IN_OUTCOMES = ['not_target']` (off by default —
+the `enabledOutcomes` allow-list) and `ALWAYS_ON_OUTCOMES` (`not_home`, `survey_submitted`,
+`lit_dropped`). [outcomeToggles.test.js](../server/test/outcomeToggles.test.js) pins every door
+`actionType` except `note_added` into exactly one class, both mirrors to the server, and each
+`Campaign` element enum to its class — so `not_target` can never be stored in the deny-list. **Why
+it can't live there:** the deny-list reads empty or missing as everything on, and every campaign the
+POST has created since the toggles shipped stores `[]` explicitly, so joining it would switch the
+outcome ON everywhere — and a lost update on the whole-array PATCH would fail open. The allow-list
+fails closed: missing reads off on lean and hydrated reads alike, so legacy documents need no
+migration.
+
+- **`everEnabledOutcomes`** is server-maintained — never client-set, never in zod, it only grows —
+  with the invariant `enabledOutcomes ⊆ everEnabledOutcomes` whatever wrote the stored value. It is
+  the record that a phone could ever have shown the button.
+- **The release gate.** `availableOptInOutcomes()` reads the `OPT_IN_OUTCOMES` config var on every
+  call (comma list, trimmed, filtered to the constant — an unknown key is never released), so the
+  Heroku dashboard flips it with no deploy. It exists because the web console ships in the server's
+  slug (`heroku-postbuild` builds `client/dist`): without it, admins could switch the outcome on the
+  day the code deployed, before any phone could draw it. Unset = not released: the PATCH refuses
+  turning it on, the phones' effective list is empty, and fresh taps are refused. Unsetting it after
+  a release is the Doorline-wide off switch; campaigns keep `enabledOutcomes`, so setting it again
+  restores the button on every campaign still set on. Runbook: [OPERATIONS.md](OPERATIONS.md).
+- **The helpers.** `isOutcomeEnabled(campaign, key, available)` is the one answer to "may this be
+  recorded here right now?" — opt-in: survey ∧ released ∧ on; toggleable: not in the deny-list;
+  always-on: true. Every reader that used to test `disabledOutcomes.includes(k)` (the recording gate,
+  the Door Outcomes targets, the survey-conversion targets) goes through it, because the deny-list
+  reads an unlisted key as on. `outcomeEverEnabled` (opt-in: in `everEnabledOutcomes` or on now;
+  every other class: true; ignores the release) backs the replay rule, and `outcomeInUse` — the same
+  predicate, except that an opt-in key is **never in use on a lit-drop campaign** — gates the
+  columns, tiles, chips, filters and per-round CSV column that exist only for the outcome, and picks
+  the wording wherever copy would name it (the Export Center descriptions and full-backup notes,
+  [EXPORTS.md](EXPORTS.md); the Contact % help, below), so a customer who never turns it on never
+  sees the words, and history stays visible after a withdrawal. The lit-drop clause exists because a
+  survey campaign switched to lit drop before canvassing keeps its `everEnabledOutcomes` record (the
+  type change clears only `enabledOutcomes`) yet can never record the outcome; all three copies
+  answer it identically ([outcomeToggles.test.js](../server/test/outcomeToggles.test.js) runs the
+  lit-drop cases against each). One deliberate exception skips the gate and names it for every org:
+  canvassers.csv's always-present "Not a target" column (appended after "Hours source", 0 when
+  unused, so the file keeps one shape). The Contact % help is gated too: `metricHelp.contactRate`,
+  shown everywhere, never names the outcome; `metricHelp.contactRateNotTargetInUse` does, and is
+  shown only where the campaign uses it (the web canvasser table's Contact % column, the phone
+  campaign screen's Top-canvassers key) — both keep "Each door counts once per pass…".
+  `effectiveEnabledOutcomes` (stored ∩ released ∩ survey) is the only list a phone receives, on
+  the bootstrap and in `/mobile/changes`' `doorConfig` block, fingerprinted by
+  `doorConfigStamp` ([CANVASSER_APP.md](CANVASSER_APP.md) → *Door settings ride the 30-second
+  delta*). The `/mobile/campaigns` picker is deliberately not extended.
+- **The recording gate and the replay rule** (`recordHouseholdAction` in
+  [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)): `!isOutcomeEnabled` refuses a
+  fresh tap with `OUTCOME_DISABLED` (the message names "Not a target voter"). A replay
+  (`wasOfflineSubmission: true`, stamped at enqueue time by `mobile/lib/offlineQueue.js`) is honored
+  only when `outcomeEverEnabled` — so on a campaign that never had it on even a replay is refused (no
+  phone could have shown the button), while a toggleable outcome, always showable, keeps the
+  original replay tolerance from when the toggles shipped (every `wasOfflineSubmission` replay passes
+  the gate). `POST /mobile/households/:id/not-target` passes `requireCampaignType: 'survey'`, so
+  a lit-drop door is refused before the gate. **Accepted residual:** a phone offline at a switch-off
+  keeps its cached button, and its taps replay and count. Closing that would mean trusting the
+  phone's tap clock against the switch-off time, which the route deliberately avoids, and the queue
+  drops any 4xx silently (`offlineQueue.js`), so an honest canvasser's real knock would vanish. The
+  Door Outcomes **Offline** tag is the review surface.
+
+Pinned by [optInOutcomes.int.test.js](../server/test/optInOutcomes.int.test.js) (off by default and
+on a legacy document, POST born off with no History row, the lead 403, the release states, survey-only
+and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, both wires) and
+[notTarget.int.test.js](../server/test/notTarget.int.test.js) (the route and the counting).
+
 ## Endpoints — [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js)
 
 - **GET `/admin/campaigns`** — `withCounts()` attaches per-campaign `counts` (households, knocked,
   surveysSubmitted, litDropped) and, via [campaignSummaries.js](../server/src/services/reports/campaignSummaries.js),
   the management flags `{ setupComplete, stepsDone, stepsTotal, nextStepKey, hasCanvassed, deletable,
-  canEditType }`.
-- **POST `/admin/campaigns`** — create; survey type requires a valid in-org `surveyTemplateId`.
+  canEditType }`. The envelope also carries a top-level **`optInOutcomesAvailable`**
+  (`availableOptInOutcomes()` — the released opt-in keys, the same for every row, so it sits beside
+  `orgBillRestrictedDoors`); the rows carry `enabledOutcomes` / `everEnabledOutcomes` through the
+  lean spread. App Customization picks its state from `optInOutcomesAvailable` and the row's
+  `enabledOutcomes`; Door Outcomes' "Change to" list passes `optInOutcomesAvailable` to the client
+  `isOutcomeEnabled`, and its filter chip reads the row's two lists through `outcomeInUse`.
+- **POST `/admin/campaigns`** — create; a survey campaign may be created without a template, but a
+  `surveyTemplateId` it supplies must be a valid in-org id (a `lit_drop` create stores `null`).
   Key-date fields validate as `isoDateSchema` (shared, in `validators.js`); an inverted early-voting
   window (`earlyVotingEnd < earlyVotingStart`, lexicographic) is a `400`. `doorGoal` is
   `z.number().int().min(1).max(10_000_000).nullable()` (there is no shared numeric validator — this
   follows the inline precedent in `superAdmin/billing.js`); a `goalDate` with no `doorGoal` is a
-  `400 { code: 'goal-date-without-goal' }`.
+  `400 { code: 'goal-date-without-goal' }`. **`enabledOutcomes` is not in `createSchema`**, so zod
+  strips it and every campaign is born with its opt-in outcomes off: the only way on is the audited
+  PATCH, which also keeps `everEnabledOutcomes` in step. A create that could switch one on would
+  leave no History row of the switch-on — the row that shows who turned on an outcome nobody can
+  verify.
 - **PATCH `/admin/campaigns/:id`** — update. **Type-lock guard:** if `type` changes and
   `campaignHasCanvassed(id)` (any `CanvassActivity` or `SurveyResponse`), returns `400
   { code: 'type-locked' }`. Archive/reactivate is just `{ isActive }`. The key-date fields join
@@ -630,31 +833,62 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   desk-mark carve-out (`restrict-doors` still 200 with `disabledOutcomes: ['restricted']`) by
   [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) case 13; the
   server/client/mobile constant mirrors by [outcomeToggles.test.js](../server/test/outcomeToggles.test.js).
+  **`enabledOutcomes` IS in the org-admin-only list** (owner ruling 2026-10-02, commented beside the
+  2026-08-16 one so nobody "tidies" it into the lead-editable class): switching on an outcome nobody
+  can verify is the organization's trust decision, and a lead may be the paying client. A lead's
+  PATCH carrying the key, on or off, is a `403` before anything is written, with words instead of the
+  loop's interpolated field name ("Only an org admin can turn off-by-default outcomes on or off.").
+  It is accepted only on `updateSchema` (`createSchema.partial().extend({ enabledOutcomes })`). Once
+  the campaign loads: a key being turned ON that is neither released nor already stored is `400
+  { code: 'OUTCOME_NOT_AVAILABLE' }`, and a non-empty list while the **merged** type (incoming ??
+  stored) isn't `survey` is `400 { code: 'OUTCOME_SURVEY_ONLY' }`. Turning it off (an empty list)
+  skips both checks, and re-sending an already-on key is exempt from the release check (only keys
+  being turned ON are checked against it), so a withdrawal never blocks saving
+  ([PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) §S.3). The array is deduped and
+  assigned new; `everEnabledOutcomes` becomes the union of its stored value, the stored
+  `enabledOutcomes` and the new list. A PATCH that moves the type off `survey` (legal only before
+  canvassing — the type lock) folds `enabledOutcomes` into `everEnabledOutcomes` and clears it, and
+  the clear is an audited row like any other.
 - **Outcome RECLASSIFICATION** — folding a retired outcome's recorded history into another —
   is a separate, stricter tool:
   [reclassifyOutcomes.js](../server/src/services/canvass/reclassifyOutcomes.js) behind
   GET/POST `/admin/campaigns/:id/reclassify-outcomes` and POST `…/revert`, **org admins only**
   (`isOrgAdmin`, not `canManageCampaign` — a lead owns what their canvassers see, not what the
   ledger says), plus GET `…/outcome-entries` for the Door Outcomes page's filtered table.
-  `RECLASSIFIABLE_OUTCOMES` is all five DOOR outcomes; the completion actions are absent from
+  `RECLASSIFIABLE_OUTCOMES` is all six DOOR outcomes (`not_target` joined 2026-10, so its entries
+  can be listed, exported, changed and unknocked — the cleanup path for exactly the abuse that keeps
+  it off by default; `CONVERTIBLE_SOURCES` and `UNKNOCKABLE_SOURCES` derive from it, and so does
+  `surveyConversion`'s `SOURCES_FOR('to_survey')`); the completion actions are absent from
   **this module** and must stay absent, because a bare `actionType` flip into `survey_submitted`
   fabricates answers nobody gave and a bare flip out of it orphans answers somebody did — and this
   module has neither an answer composer nor an archive, so it cannot honestly do either. **The
   Surveyed direction is real, and lives in the sibling `services/canvass/surveyConversion.js`**,
   which pays for both halves: an admin composes real answers against the door's own survey, every
   created row carries a `deskEntry` stamp, and the reverse direction ARCHIVES rather than deletes.
-  See §Converting to and from Surveyed below. `lit_dropped` remains unconvertible in both
+  See §Converting to and from Surveyed in Part 1. `lit_dropped` remains unconvertible in both
   directions — a lit drop has no answers to move either way. **`RATE_NEUTRAL_OUTCOMES =
   ['not_home','wrong_address','no_soliciting']` is the set that carries the old safety argument**:
   all three are in `KNOCK_ACTIONS` and none is a contact, so knocks, `contactRate`,
   `connectionRate`, `billableDoorsOf` and every `Campaign.stats` counter are unmoved by any
   conversion within it (no counter keys on the three individually — `knockCount`/`activityCount`
-  cover them, the rest count surveys/lit/refused/restricted). A pair touching `refused` or
+  cover them, the rest count surveys/lit/refused/not-target/contacts/restricted). **`not_target` is
+  never in it** — like `refused`, it is a contact. A pair touching `refused`, `not_target` or
   `restricted` DOES move a reported figure, so it is allowed but **priced** — see `computeImpact`
   below — and it triggers `recomputeCampaignStats` afterwards, which the rate-neutral path
   deliberately skips. The target must not be a retired outcome (`TARGET_DISABLED`); the old
   "source must be switched off first" rule was **dropped** (owner ruling 2026-08-16) because it
-  made correcting a live campaign's mistyped entry impossible.
+  made correcting a live campaign's mistyped entry impossible. `validatePair`,
+  `eligibleSources`/`eligibleTargets` and `surveyConversion.validateConversion` all ask
+  `isOutcomeEnabled`, never the deny-list alone (which reads every unlisted key as on), so
+  `not_target` is a target only on a survey campaign that has it on while it is released —
+  `TARGET_DISABLED` on a lit-drop campaign, while withdrawn, or where it is off — and the App
+  Customization card, whose targets are the rate-neutral set, never offers it. As a SOURCE it needs
+  no release: a withdrawn outcome's entries stay listable, changeable and unknockable, and
+  `to_survey` from it is legal (the desk composes answers for the voters on file; Part 1 states the
+  caveat). Pinned by the `not_target` cases at the end of
+  [reclassifyOutcomes.int.test.js](../server/test/reclassifyOutcomes.int.test.js) (listed and
+  exported while withdrawn, the Offline mark, priced with preview == landed, the three
+  `TARGET_DISABLED` cases).
 - **`computeImpact` is a simulation, not a formula.** The "after" figures come from the SAME
   `knocksPipeline` that produces "before", with a `$set` ahead of it rewriting `actionType` for
   exactly the selected ids — so a preview cannot drift from what the run actually does. The int
@@ -708,7 +942,14 @@ an already-released bundle doesn't recognise can eject the user to the org picke
   `voters-by-answer.csv` pattern — same `entryScopeSchema`, one `resolveEntryScope`, the same
   `buildEntryFilter` behind the `__resolved` throw, so the file can never disagree with the table;
   50k cap, shared `csvWriter` escaping, household + named-voter audit subjects, DNC column in the
-  marked-not-dropped posture. **Address search** resolves in `resolveEntryScope` to a
+  marked-not-dropped posture. **The offline flag** (2026-10-02) rides both: `listEntries` projects
+  `wasOfflineSubmission` and ships it on every row as a boolean (`false`, never undefined — the
+  table's **Offline** tag; display only, no filter, no count), and the CSV, which runs its OWN
+  `CanvassActivity.find` rather than `listEntries`, adds it to that projection and appends an
+  **`Offline`** column for every org (`Offline` or blank) — without the projection line the column
+  would print blank on every row. No new disclosure: the canvassing-activity export already ships
+  the same flag as `Offline submission` ([EXPORTS.md](EXPORTS.md)). **Address search** resolves in
+  `resolveEntryScope` to a
   `householdId $in` (display fields, never `normalizedAddress`), capped by `addressSearchCap()`
   (2k — measured 2026-08-26, not guessed: a real search matches dozens, and the cap's only live
   job is bounding the degenerate one; env-overridable) with the same truncation posture as the
@@ -967,11 +1208,45 @@ The cold-start readiness chain is a pure derivation in
   value formatting live in [campaignHistory.js](../client/src/lib/campaignHistory.js), never on the
   server, so re-wording a field label is not a data migration and an old row renders with today's
   copy. `labelForField` falls back to a de-camel-cased guess, so a field the server starts logging
-  before the client knows about it still renders instead of vanishing.
+  before the client knows about it still renders instead of vanishing — which is how `doorAddPolicy`
+  rendered until 2026-10-02 (*Door Add Policy*, raw `all`/`leads`). It now has words: *Adding people
+  at the door*, valued *Everyone on the campaign* / *Team leads & admins only*. The same edit added
+  `enabledOutcomes` → *Off-by-default outcomes* (the outcome labels joined; `null` → *none*).
+  `isNotable` highlights `enabledOutcomes` in both directions, like `disabledOutcomes` and
+  `billRestrictedDoors`; `doorAddPolicy` is not highlighted. The mobile copy,
+  [mobile/lib/campaignHistory.js](../mobile/lib/campaignHistory.js), carries the same words.
 - **The edit drawer is open to LEADS**, not just org admins — the server has always accepted
   `name`/`surveyTemplateId`/`timeZone` from them and now takes the goal too, so withholding the
   drawer entirely left a lead unable to reach a field they own. `canEditAdminFields={isOrgAdmin}`
   renders the org-admin-only inputs disabled with a one-line reason rather than hiding them.
+- **App Customization:** [AppCustomizationPage.jsx](../client/src/pages/AppCustomizationPage.jsx)
+  and its phone twin [admin/app-customization.jsx](../mobile/app/(app)/admin/app-customization.jsx).
+  The "Off until you turn it on" section derives one of three states from the campaigns response's
+  `optInOutcomesAvailable` and the row's `enabledOutcomes`: `released` (the normal switch), `paused`
+  (not released but still set on — the "Paused by Doorline" hint, turn-off only), or none (no
+  section; always none on a lit-drop campaign). It has its own `PATCH { enabledOutcomes }` mutation,
+  separate from the deny-list's, so a failed switch never rolls back the other. ON opens a
+  confirmation (the web `Modal`; on the phone an `Alert`, Cancel first) and OFF doesn't. For a lead
+  the switch is disabled (web `useAuth().isOrgAdmin`; the phone's `loadRoleContext` result defaults
+  to false until it loads, so a lead can never flip it even for a frame). The words follow the role
+  too: on both, the paused hint's "You can still turn it off for this campaign." renders only for an
+  org admin, and so does the web's while-on footer with its pointer to Door Outcomes — a lead can do
+  neither. A lead's web footer instead says when its facts apply ("If an org admin turns it off,
+  entries already recorded keep counting, and a phone that is offline keeps the button until it
+  reconnects."); the phone's while-on caveat, the same for everyone, opens "If it is turned off, …".
+  `PhonePreview` receives `enabledOutcomes` only in the `released` state: a paused outcome is off
+  on every phone. Pinned by
+  [appCustomizationRender.smoke.test.js](../client/src/lib/appCustomizationRender.smoke.test.js).
+- **Door Outcomes:** [DoorOutcomesPage.jsx](../client/src/pages/DoorOutcomesPage.jsx) lists
+  `not_target` in `OUTCOMES`, right after `refused` (its place on the door screen). Its filter chip
+  renders only when
+  `outcomeInUse(current, 'not_target')` — the client mirror, reading the full `/admin/campaigns` row,
+  never a shaped copy that would lack the fields. The "Change to" list filters through the client
+  `isOutcomeEnabled(current, o, optInAvailable)` (`optInAvailable` is the campaigns response's
+  `optInOutcomesAvailable`), so it never offers a target the server
+  would refuse with `TARGET_DISABLED`, and a row with `wasOfflineSubmission` wears an **Offline**
+  `Badge` beside its outcome. The chip gate and the tag are pinned by
+  [doorOutcomesRender.smoke.test.js](../client/src/lib/doorOutcomesRender.smoke.test.js).
 - **Door goal:** the server owns every number
   ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
   and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin

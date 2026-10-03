@@ -29,3 +29,14 @@ export const foldDeltaVoters = (prevVoters, deltaVoters, knownHouseholdIds) => {
   );
   return appended.length ? [...merged, ...appended] : merged;
 };
+
+// The poll's request path, pulled out of map.jsx (which node can't load) so the encoding is
+// unit-testable. doorConfigStamp is ALWAYS encodeURIComponent'd: it contains '|' and ',', and a
+// raw '|' makes iOS 15/16 percent-encode the whole URL — the already-encoded `since` arrives as
+// %253A, the server 400s every poll, and teammates' results, round changes and door settings all
+// stop with nothing on screen. No stamp (a bootstrap from a server without the field) → no param,
+// which the server reads as "never send doorConfig". campaignId is an ObjectId hex and goes in as-is.
+export const changesPath = ({ campaignId, since, doorConfigStamp }) => {
+  const stampParam = doorConfigStamp ? `&doorConfigStamp=${encodeURIComponent(doorConfigStamp)}` : '';
+  return `/mobile/changes?campaignId=${campaignId}&since=${encodeURIComponent(since)}${stampParam}`;
+};

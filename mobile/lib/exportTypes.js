@@ -60,7 +60,8 @@ export const EXPORT_TYPE_META = [
 export const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 // Lay the server registry's copy over the local fallback, keyed by id. Server label /
-// desc / oneRowIs / filters win; mobile-only fields (emoji, sub, contents) stay local.
+// desc / descNotTargetInUse / oneRowIs / filters win; mobile-only fields (emoji, sub, contents)
+// stay local.
 export function mergeTypeMeta(serverTypes) {
   const byId = new Map((serverTypes || []).map((t) => [t.id, t]));
   return EXPORT_TYPE_META.map((meta) => {
@@ -70,6 +71,9 @@ export function mergeTypeMeta(serverTypes) {
       ...meta,
       label: s.label || meta.label,
       desc: s.desc || meta.desc,
+      // The copy that names Not a target voter — the export sheet shows it only on a campaign that
+      // uses the outcome (useOutcomeInUse). `desc` never names it.
+      descNotTargetInUse: s.descNotTargetInUse || null,
       oneRowIs: s.oneRowIs || meta.oneRowIs,
       filters: Array.isArray(s.filters) && s.filters.length ? s.filters : meta.filters,
     };

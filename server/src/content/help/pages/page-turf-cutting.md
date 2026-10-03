@@ -6,7 +6,7 @@ kind: page
 order: 105
 sourceDoc: PASSES_AND_TURF.md
 summary: Cut a pass's doors into books, accept them, assign them, and watch a round's progress.
-tags: turf, books, cutting, assign, progress, status, move, page
+tags: turf, books, cutting, assign, progress, status, move, page, target doors, exclude doors
 ---
 
 **Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
@@ -15,7 +15,7 @@ tags: turf, books, cutting, assign, progress, status, move, page
 
 Once a round has been knocked, the map starts showing you how it's going:
 
-- **Every house is colored by what happened at it in the round you've picked** — surveyed, not home, refused, no soliciting, restricted, or still unknocked.
+- **Every house is colored by what happened at it in the round you've picked** — surveyed, not home, refused, no soliciting, restricted, or still unknocked (and **Not a target voter**, on a campaign that uses it).
 - **The ring around each house is its book's color**, so you can see a house's status *and* which book it belongs to at the same time.
 - **Book labels count the work** — `Book 4 · 23/65` means 23 of that book's 65 houses are done.
 - **Books shade in as they fill up** — pale means untouched, solid means finished. Easy way to spot a book nobody has started.
@@ -52,6 +52,11 @@ When you cut a round, two checkboxes appear above **Generate** whenever there's 
 Both are **on by default** and both are independent — tick either, both, or neither. Either way it's
 non-destructive: the homes stay in the campaign and in every count, they're just left out of *this
 round's* books, and they come back automatically if someone re-records the door later.
+
+On a survey campaign that has had **Not a target voter** turned on, there's no checkbox for those doors — like
+refusals, they're cut back in and knocked again next round. Instead, the **Target doors** and **Exclude
+doors** status lists offer it: target those doors to go back for the listed voters nobody reached there,
+or exclude them to skip those doors.
 
 ## Marking a book restricted
 

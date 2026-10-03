@@ -35,6 +35,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Effort } = await import('../src/models/Effort.js');
 const { Pass } = await import('../src/models/Pass.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
+const { Voter } = await import('../src/models/Voter.js');
 const { KNOCK_ACTIONS, CONTACT_ACTIONS } = await import('../src/services/reports/aggregations.js');
 const { resolveStatus, ACTION_TO_STATUS, DOOR_STATUS_LABELS } = await import('../src/utils/statusPrecedence.js');
 const { computeWindowStats } = await import('../src/services/reports/computeReport.js');
@@ -65,6 +66,11 @@ before(async () => {
   const admin = await User.create({ firstName: 'Ada', lastName: 'Admin', email: 'nta@t.co', passwordHash: 'x', isActive: true });
   const c1 = await User.create({ firstName: 'Cara', lastName: 'One', email: 'nt1@t.co', passwordHash: 'x', isActive: true });
   const c2 = await User.create({ firstName: 'Cal', lastName: 'Two', email: 'nt2@t.co', passwordHash: 'x', isActive: true });
+  // Doorline staff, for the Control Room. Support level is enough to read it; no membership.
+  const staff = await User.create({
+    firstName: 'Sam', lastName: 'Staff', email: 'nts@t.co', passwordHash: 'x', isActive: true,
+    isSuperAdmin: true, platformRole: 'support',
+  });
   await Membership.create({ userId: admin._id, organizationId: org._id, role: 'admin', isActive: true, billingAccess: true });
   await Membership.create({ userId: c1._id, organizationId: org._id, role: 'canvasser', isActive: true });
   await Membership.create({ userId: c2._id, organizationId: org._id, role: 'canvasser', isActive: true });
@@ -139,8 +145,8 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, admin, c1, c2, campaign, plain, litCampaign, effort, pass, doors,
-    adminTok: signUserToken(admin), c1Tok: signUserToken(c1),
+    org, admin, c1, c2, campaign, plain, litCampaign, effort, pass, doors, act,
+    adminTok: signUserToken(admin), c1Tok: signUserToken(c1), staffTok: signUserToken(staff),
   });
 });
 
@@ -183,6 +189,21 @@ const csv = async (path) => {
   return r.text.replace(/^﻿/, '').trim().split('\n');
 };
 const cid = () => `campaignId=${ctx.campaign._id}`;
+// A door outside the hand-counted fixture, for a test that adds rows and takes them back out
+// (in a finally) so every total above keeps its value.
+const tempDoor = (n, status) =>
+  Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.effort._id,
+    addressLine1: `${n} Temp Way`, city: 'Austin', state: 'TX', zipCode: '78701',
+    normalizedAddress: `${n} temp way austin tx 78701`,
+    location: { type: 'Point', coordinates: [-97.74, 30.26] },
+    status, isActive: true,
+  });
+const dropTemp = async (doors) => {
+  const ids = doors.map((d) => d._id);
+  await CanvassActivity.deleteMany({ householdId: { $in: ids } });
+  await Household.deleteMany({ _id: { $in: ids } });
+};
 
 const EXPECTED_KNOCKS = 7;
 // Two units, as for refused — door 7 was marked not_target by one canvasser and not_home by
@@ -326,14 +347,29 @@ test('per-canvasser numbers are exact: in knocks AND in the contact rate', { ski
 });
 
 test('the Timeline, in range and totals modes: a real dayNotTarget and a finite contact rate', { skip }, async () => {
-  for (const mode of [`from=2026-04-13&to=2026-04-15`, 'totals=1']) {
-    const tl = await get(`/admin/reports/canvasser-timeline?${cid()}&${mode}`);
-    const cara = tl.canvassers.find((c) => c.userId === String(ctx.c1._id));
-    assert.deepEqual(
-      { nt: cara.dayNotTarget, ns: cara.dayNoSoliciting, k: cara.dayKnocks, rate: cara.contactRate },
-      { nt: 3, ns: 0, k: 7, rate: 71 },
-      mode
-    );
+  // dayNoSoliciting was summed but never sent, so the column read 0 forever, and this fixture has
+  // no no_soliciting row to show it. Cal gets two for this test only: a knock each, never a contact.
+  const extra = [await tempDoor(1, 'no_soliciting'), await tempDoor(2, 'no_soliciting')];
+  for (const d of extra) await ctx.act(d, ctx.c2._id, 'no_soliciting');
+  try {
+    for (const mode of [`from=2026-04-13&to=2026-04-15`, 'totals=1']) {
+      const tl = await get(`/admin/reports/canvasser-timeline?${cid()}&${mode}`);
+      const cara = tl.canvassers.find((c) => c.userId === String(ctx.c1._id));
+      assert.deepEqual(
+        { nt: cara.dayNotTarget, ns: cara.dayNoSoliciting, k: cara.dayKnocks, rate: cara.contactRate },
+        { nt: 3, ns: 0, k: 7, rate: 71 },
+        mode
+      );
+      // Cal: door 7's not_home plus the two no_soliciting doors.
+      const cal = tl.canvassers.find((c) => c.userId === String(ctx.c2._id));
+      assert.deepEqual(
+        { nt: cal.dayNotTarget, ns: cal.dayNoSoliciting, k: cal.dayKnocks, rate: cal.contactRate },
+        { nt: 0, ns: 2, k: 3, rate: 0 },
+        mode
+      );
+    }
+  } finally {
+    await dropTemp(extra);
   }
 });
 
@@ -341,8 +377,81 @@ test('canvassers.csv: the Not a target column is present for every org, after Ho
   const lines = await csv(`/admin/reports/canvassers.csv?${cid()}`);
   const header = lines.find((l) => l.startsWith('Rank,'));
   assert.ok(header.endsWith('Hours source,Not a target'), header);
-  const cara = lines.find((l) => l.includes('Cara'));
-  assert.ok(cara.endsWith(',3'), cara);
+  // Cells read BY NAME. Knocks is set membership (KNOCK_ACTIONS); the old hand sum of the named
+  // outcome columns had no not_target term and would read 4 knocks at 25% for Cara.
+  const cols = header.split(',');
+  const row = (firstName) => {
+    const cells = lines.find((l) => l.split(',')[cols.indexOf('First name')] === firstName).split(',');
+    assert.equal(cells.length, cols.length, `${firstName}'s row is as wide as the header`);
+    const cell = (name) => Number(cells[cols.indexOf(name)]);
+    return { k: cell('Knocks'), conn: cell('Connection rate %'), nt: cell('Not a target') };
+  };
+  assert.deepEqual(row('Cara'), { k: 7, conn: 14, nt: 3 });
+  assert.deepEqual(row('Cal'), { k: 1, conn: 0, nt: 0 });
+});
+
+// Three routes keep a HAND COPY of KNOCK_ACTIONS: routes/mobile/me.js, routes/admin/memberships.js
+// and routes/superAdmin/platform.js. A copy missing an outcome silently stops counting that door on
+// its screen and nothing else fails, so each copy is pinned against the fixture.
+test("the phone's own day (/mobile/me) counts it: knocked, not-a-target and reached homes", { skip }, async () => {
+  const r = await call('GET', `/mobile/me/day?${cid()}&since=2026-04-14T00:00:00Z&until=2026-04-15T00:00:00Z`, {
+    token: ctx.c1Tok, orgId: ctx.org._id,
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  // Cara's day: 7 doors and the restricted mark; reached = surveyed ∪ refused ∪ not-target = 1 + 1 + 3.
+  assert.deepEqual(
+    { d: r.json.doorsKnocked, k: r.json.knockedHomes, nt: r.json.notTargetHomes, reached: r.json.reachedHomes, r: r.json.restricted },
+    { d: 7, k: 7, nt: 3, reached: 5, r: 1 }
+  );
+});
+
+test("the Users-hub member stats count it in the member's doors knocked", { skip }, async () => {
+  const s = await get(`/admin/memberships/${ctx.c1._id}/stats`);
+  assert.deepEqual({ d: s.doorsKnocked, r: s.restricted }, { d: 7, r: 1 });
+});
+
+// Two more copies outside routes/: the phone's history keeps its own per-day sets (me.js /history),
+// and the voter profile filters its door-activity list by its own KNOCK_ACTIONS (voterProfile.js).
+test("the phone's history (/mobile/me/history) counts it too — its own per-day copy", { skip }, async () => {
+  const r = await call('GET', `/mobile/me/history?${cid()}&tz=America%2FChicago`, { token: ctx.c1Tok, orgId: ctx.org._id });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const day = r.json.days.find((d) => d.date === DAY);
+  assert.ok(day, JSON.stringify(r.json.days));
+  // The same day as /mobile/me/day reads it: reached = surveyed ∪ refused ∪ not-target = 1 + 1 + 3.
+  assert.deepEqual(
+    { d: day.doorsKnocked, k: day.knockedHomes, nt: day.notTargetHomes, reached: day.reachedHomes },
+    { d: 7, k: 7, nt: 3, reached: 5 }
+  );
+});
+
+test('the voter profile lists a Not a target voter knock at their door, with its note', { skip }, async () => {
+  // A listed voter at door 4, where someone else answered. Taken back out in the finally.
+  const voter = await Voter.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: ctx.doors[3]._id,
+    stateVoterId: 'NT-PROFILE-1', firstName: 'Lena', lastName: 'Listed', fullName: 'Lena Listed',
+  });
+  try {
+    const r = await call('GET', `/admin/voters/${voter._id}`, auth());
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const knocks = r.json.activity.map((a) => ({ actionType: a.actionType, note: a.note }));
+    assert.deepEqual(knocks, [{ actionType: 'not_target', note: 'Tenant answered; the listed voter moved out.' }]);
+  } finally {
+    await Voter.deleteOne({ _id: voter._id });
+  }
+});
+
+test("the Control Room counts it in today's doors knocked", { skip }, async () => {
+  // "Today" only, and every fixture knock is in April: one not-a-target door knocked now, for this
+  // test only.
+  const door = await tempDoor(3, 'not_target');
+  await ctx.act(door, ctx.c1._id, 'not_target', { timestamp: new Date() });
+  try {
+    const r = await call('GET', '/super-admin/platform-overview', { token: ctx.staffTok });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.totals.today.doorsKnocked, 1);
+  } finally {
+    await dropTemp([door]);
+  }
 });
 
 test('the per-round CSV carries the column only for a campaign that has used the outcome', { skip }, async () => {

@@ -60,8 +60,11 @@ export const outcomeEverEnabled = (campaign, key) =>
 // "Does this campaign use the outcome?" — the ONE predicate behind every conditional column, tile,
 // chip and per-round CSV column. Rows of an opt-in outcome can only exist once it has been on, so a
 // customer who never turns it on never sees the words. Never reads the release: history stays
-// visible after a withdrawal.
-export const outcomeInUse = (campaign, key) => outcomeEverEnabled(campaign, key);
+// visible after a withdrawal. Never on a lit-drop campaign: the opt-in class is survey-only, and a
+// campaign switched to lit drop before canvassing keeps its everEnabledOutcomes record (the type
+// change clears only enabledOutcomes) — it can never record the outcome, so nothing names it.
+export const outcomeInUse = (campaign, key) =>
+  outcomeEverEnabled(campaign, key) && (!OPT_IN_OUTCOMES.includes(key) || campaign?.type !== 'lit_drop');
 
 // The opt-in list a phone may act on: the stored setting ∩ released ∩ survey campaign. Shipped on
 // the bootstrap and in /mobile/changes' door-config block — a phone never needs the raw setting.

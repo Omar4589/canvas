@@ -182,9 +182,10 @@ export default function AppCustomizationPage() {
               <Toggle
                 id="outcome-not_target"
                 label={ACTION_LABELS.not_target}
+                // The turn-off and Door Outcomes lines are an org admin's: a lead can do neither.
                 hint={
                   notTargetState === 'paused'
-                    ? 'Paused by Doorline — no phone shows this button right now. You can still turn it off for this campaign.'
+                    ? `Paused by Doorline — no phone shows this button right now.${isOrgAdmin ? ' You can still turn it off for this campaign.' : ''}`
                     : OUTCOME_HINTS.not_target
                 }
                 dot={STATUS_COLORS.not_target}
@@ -195,9 +196,9 @@ export default function AppCustomizationPage() {
               />
               {notTargetOn && (
                 <p className="mt-2 text-xs text-fg-muted">
-                  Turning it off needs no confirmation. Entries already recorded keep counting. A phone that is offline
-                  keeps the button until it reconnects — review those entries on Door Outcomes, where they are marked
-                  Offline.
+                  {isOrgAdmin
+                    ? 'Turning it off needs no confirmation. Entries already recorded keep counting. A phone that is offline keeps the button until it reconnects — review those entries on Door Outcomes, where they are marked Offline.'
+                    : 'If an org admin turns it off, entries already recorded keep counting, and a phone that is offline keeps the button until it reconnects.'}
                 </p>
               )}
               {saveEnabled.isError && (

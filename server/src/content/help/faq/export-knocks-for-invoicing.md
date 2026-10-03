@@ -6,7 +6,7 @@ kind: faq
 order: 46
 sourceDoc: METRICS.md
 summary: Download the per-pass knock breakdown from the campaign Home's By pass section — the TOTAL row always matches the campaign's knock count.
-tags: export, csv, invoice, billing, passes, knocks, download
+tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter
 ---
 
 Open the campaign's **Home** and find the **By pass** section — one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range. Click **Export CSV** to download the same table as a spreadsheet.
@@ -15,12 +15,22 @@ Each row carries that pass's knocks, survey doors (or lit drops), connection rat
 
 The last line is the **TOTAL row**: the sum of every pass above it, and always exactly the campaign's Knocks number for the same date range — so you can check the export against the dashboard, or against an invoice, at a glance. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 
-Three things to know:
+Five things to know:
 
 - **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading. The same goes for the **coordinator filter**: if a crew is selected, the export is that crew's rows and TOTAL, not the campaign's — leave it on "All coordinators" for an invoice.
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
 - **No-soliciting doors are already in there.** They're knocks like any other, counted in the **Knocks** column, plus their own **No soliciting** column so you can see how many there were.
+- **So are Not a target voter doors**, on campaigns that use that optional door button. They're billable knocks, like Refused, counted in **Knocks** — and a survey campaign that has had the button turned on gets its own **Not a target** column right after **No soliciting**. Every other campaign's export keeps exactly the columns it had.
 - **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).
+
+**Contact rate % can read lower than a copy you downloaded earlier.** That column counts each door
+**once per round**: the share of doors where someone answered — a survey, a refusal, or (on
+campaigns that use it) Not a target voter. It used to count a door twice when one canvasser
+surveyed someone there and another recorded Refused in the same round, which could even push the
+rate past 100%. So an export you download now can show a lower Contact rate % than one you
+downloaded or sent before — only on a campaign where two canvassers recorded the same door in the
+same round. Knocks, survey doors and the connection rate don't change, and neither does any one
+canvasser's own contact rate. The per-round numbers in a full backup follow the same rule.
 
 **Want a file that sticks around, or the per-door detail behind these totals?** The campaign's
 **Exports** page can queue the same per-round numbers inside a full backup, plus a

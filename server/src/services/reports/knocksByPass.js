@@ -77,10 +77,12 @@ export async function buildKnocksByPassData({
   // Does this campaign use the off-by-default "Not a target voter" outcome? Decides whether the
   // per-round files carry its column — answered ONCE here, so the CSV route and the Export Center's
   // knocks-by-round file (which must match it column for column) cannot disagree, and a campaign
-  // that never turned it on keeps its file shape. The JSON rows carry the count either way.
+  // that never turned it on keeps its file shape. The JSON rows carry the count either way. `type`
+  // rides in the projection: outcomeInUse says no on a lit-drop campaign, which a survey campaign
+  // switched to lit drop after turning the outcome on would otherwise fail (everEnabledOutcomes stays).
   const [billRestricted, campaignDoc] = await Promise.all([
     billRestrictedFor(cFilter.organizationId, cFilter.campaignId),
-    Campaign.findOne({ _id: cFilter.campaignId, organizationId: cFilter.organizationId }, { enabledOutcomes: 1, everEnabledOutcomes: 1 }).lean(),
+    Campaign.findOne({ _id: cFilter.campaignId, organizationId: cFilter.organizationId }, { type: 1, enabledOutcomes: 1, everEnabledOutcomes: 1 }).lean(),
   ]);
   const notTargetInUse = outcomeInUse(campaignDoc, 'not_target');
   const knockOpts = { includeRestricted: true };

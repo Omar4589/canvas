@@ -105,6 +105,17 @@ test('App Customization: the opt-in section in every state the server can put it
     assert.ok(/disabled/.test(switchTag(lead)), 'a lead sees the state but cannot change it');
     assert.match(lead, /Only org admins can turn this on or off/);
 
+    // A lead can't turn it off and can't open Door Outcomes, so neither line is offered to them.
+    const leadPaused = render({ campaign: { ...survey, enabledOutcomes: ['not_target'] }, available: [], isOrgAdmin: false });
+    assert.match(leadPaused, /Paused by Doorline/);
+    assert.ok(!leadPaused.includes('You can still turn it off'), 'paused, lead: no turn-off line');
+    assert.ok(!leadPaused.includes('Door Outcomes'), 'lead: no pointer to the admin-only Door Outcomes page');
+    // …and the facts they do get say WHEN they apply — bare, they read as if a reconnecting phone
+    // lost the button while the switch is still on.
+    assert.match(leadPaused, /If an org admin turns it off, entries already recorded keep counting, and a phone that is offline keeps the button until it reconnects\./);
+    assert.match(paused, /You can still turn it off/, 'paused, admin: the turn-off line stays');
+    assert.match(on, /review those entries on Door Outcomes/, 'admin: the review pointer stays');
+
     const lit = render({ campaign: { type: 'lit_drop', disabledOutcomes: [], enabledOutcomes: [] }, available: ['not_target'] });
     assert.ok(!lit.includes('Off until you turn it on'), 'lit-drop campaigns: no section');
   } finally {

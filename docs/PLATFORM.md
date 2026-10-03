@@ -47,8 +47,9 @@ so "signed out then in" and "session expired then in" landed in different places
   campaigns), **who's active right now** (canvassers who logged something in the last 15 minutes),
   **today's activity** (doors knocked, surveys, lit drops — across every org), and a table of every
   organization with its members, campaigns, who's live, and when it was last active. Alongside it, a
-  **live activity feed** streams recent door events (Not home / Wrong address / **Refused** /
-  **Restricted** / Survey / Lit drop) from across all orgs. Two more blocks (moved here from Support
+  **live activity feed** streams recent door events (Not home / Wrong address / **Refused** / No
+  soliciting / Not a target voter / **Restricted** / Survey / Lit drop) from across all orgs. Two
+  more blocks (moved here from Support
   access): the **Idle organizations** queue — active-status, $0 (no live campaign), silent past the
   idle window; the population neither retention sweep can ever resolve, so a human decides
   re-engage vs terminate, and each row's **Manage billing →** deep-links to that org's Account tab
@@ -58,8 +59,12 @@ so "signed out then in" and "session expired then in" landed in different places
   `client/src/lib/platformStatsMeta.js`, mirrored to mobile); the one worth memorizing: lifetime
   "Doors knocked" counts **raw field records**, a deliberately different unit from the billable
   "knocks" in reports (one per household per round — see [METRICS.md](METRICS.md)), so it always
-  reads higher. A muted "Recomputed nightly · last reconciled …" line shows the totals' freshness,
-  with a **Reconcile now** button beside it (the same idempotent recompute the nightly job runs).
+  reads higher. Both door counts — today's and the lifetime total — include every door result that
+  counts as a knock, No soliciting and **Not a target voter** among them (the off-by-default
+  outcome, so only campaigns that turned it on contribute), and their ⓘ copy names both; Restricted
+  marks are never knocks. A muted "Recomputed nightly · last reconciled …" line shows the totals'
+  freshness, with a **Reconcile now** button beside it (the same idempotent recompute the nightly
+  job runs).
   Each totals card now carries a **trend sparkline** with a 30d / 90d / 1y toggle — one bar per UTC
   day, **through yesterday** (the last complete day, so a partial today never reads as a dip). The
   trend covers **live organizations only**: a deleted customer's records were destroyed on
@@ -374,10 +379,19 @@ customer owns.
   [METRICS.md](METRICS.md)) but **excludes `restricted`** (a marker, not a knock). Restricted marks are
   surfaced as their own separate `today.restricted` tally instead of being folded into `doorsKnocked`,
   yet they still count a canvasser toward "active now" (they're real `CanvassActivity`).
+  `ACTION_DOOR` ([platform.js](../server/src/routes/superAdmin/platform.js)) is a **hand copy** of
+  `KNOCK_ACTIONS` ([aggregations.js](../server/src/services/reports/aggregations.js)) — it doesn't
+  import it — so each new knock outcome is added here by hand: it carries `no_soliciting`, and
+  `not_target` since 2026-10-02. A key missing here undercounts "Today" and drops that outcome from
+  the activity feed, with no error. The lifetime totals and the trend series import `KNOCK_ACTIONS`
+  directly and needed no edit; the ⓘ copy in `platformStatsMeta.js` (web, mirrored to mobile) names
+  both outcomes.
 - **`activity-feed`** returns the most recent `CanvassActivity` events whose
   `actionType ∈ [...ACTION_DOOR, 'restricted']` (so **Refused and Restricted** events both appear,
-  matching the styling the feed UIs ship), newest first, with org / canvasser / campaign / household
-  populated; supports `?since=` for polling and `?limit=`.
+  matching the styling the feed UIs ship — and No soliciting and Not a target voter, which both feeds
+  dot in their own colors, web `CrossOrgActivityFeed`'s `DOT_CLS` and mobile `lib/activityFeed.js`'s
+  `dotColors`, and label from the shared `ACTION_LABELS`), newest first, with org / canvasser /
+  campaign / household populated; supports `?since=` for polling and `?limit=`.
 - **The trend series (`PlatformDaily` + `platform-trends`)** — one row per UTC day, the five
   lifetime metrics counted from the DATES of surviving rows with the **same filter set as the live
   bucket** (internal excluded, `KNOCK_ACTIONS`, never `via:'bulk'`). Rebuilt in FULL by

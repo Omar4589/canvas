@@ -2,13 +2,9 @@ import { Alert, AppState, Linking, Platform } from 'react-native';
 import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
 import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
 import { saveBootstrap } from './cache';
-import { changePrompt, ownSurveysHere, buildChangePrompt } from './doorChange';
-import { addVoterPath, addVoterBody } from './doorPaths';
+import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, ownSurveyedIds, restoreOwnSurveys } from './doorChange';
+import { ACTION_PATHS, addVoterPath, addVoterBody } from './doorPaths';
 import { lightColors } from './theme';
-
-// A missing key here throws in recordHouseholdAction AFTER the door screen has latched its
-// buttons — every outcome button the phone can show needs its route segment.
-const ACTION_PATHS = { not_home: 'not-home', wrong_address: 'wrong-address', lit_dropped: 'lit-drop', refused: 'refused', restricted: 'restricted', no_soliciting: 'no-soliciting', not_target: 'not-target' };
 
 // Patch the ['bootstrap'] cache and persist it. The React Query update is
 // synchronous, so every screen reading ['bootstrap'] (the map's pins, the
@@ -172,7 +168,7 @@ export function reconcilePendingLocations(households) {
 // In-flight de-dup: request paths currently being submitted, so a rapid double-fire to the SAME
 // target (a double-tap, or an offline-queue flush racing a live submit) collapses to one request.
 // This is a cheap optimisation ONLY — it avoids the wasted second call, nothing more. Note it is
-// keyed by PATH, and every action has its own path (ACTION_PATHS above), so `not-home` and
+// keyed by PATH, and every action has its own path (doorPaths.js ACTION_PATHS), so `not-home` and
 // `refused` on one door never collide here.
 //
 // What actually backstops a duplicate submit differs by resource, and it is worth being exact
@@ -303,6 +299,10 @@ export function optimisticSubmit(qc, opts) {
     // non-blocked `kept` sentinel so its button latch releases. recordHouseholdAction passes the
     // door-change confirmation here.
     confirm,
+    // Opt-in undo for a REJECTED write (a 4xx/5xx that won't be retried), applied at once — the
+    // bootstrap refetch below restores server truth too, but it can fail, and some patches must not
+    // outlive a write that never happened (recordHouseholdAction's cleared survey marks).
+    rollbackPatch,
   } = opts;
 
   // If a submit to this exact path is already in flight, don't start a second — the
@@ -395,6 +395,7 @@ export function optimisticSubmit(qc, opts) {
       // Server rejected it (not a network drop) and submitOrQueue won't retry —
       // drop the optimistic claim and pull server truth back so it can't linger.
       for (const p of pending) clearPendingHousehold(p.id);
+      if (rollbackPatch) writeBootstrap(qc, rollbackPatch);
       qc.invalidateQueries({ queryKey: ['bootstrap'] });
       if (result.error?.data?.code === 'LOCATION_REQUIRED') {
         // The server backstop for the gate above (an old client, or a gate bypass).
@@ -485,11 +486,22 @@ export const confirmDoorChange = async (qc, householdId, action) => {
 export function recordHouseholdAction(qc, householdId, action, { note = null, onAccepted } = {}) {
   const path = ACTION_PATHS[action];
   if (!path) throw new Error(`Unknown action: ${action}`);
+  // The survey marks this tap clears below, so a rejected result can put them back.
+  let cleared = [];
   return optimisticSubmit(qc, {
     path: `/mobile/households/${householdId}/${path}`,
     confirm: () => confirmDoorChange(qc, householdId, action),
     body: { note },
-    optimisticPatch: (prev) => setHouseholdStatus(prev, householdId, action),
+    // The voters too: the server deletes this canvasser's surveys at the door with the result, and
+    // its reply carries only the household — left alone, the next change here would warn about
+    // answers already gone (doorChange.js clearOwnSurveysAtDoor).
+    optimisticPatch: (prev) => {
+      cleared = ownSurveyedIds(prev.voters, householdId);
+      return clearOwnSurveysAtDoor(setHouseholdStatus(prev, householdId, action), householdId);
+    },
+    // Rejected, the result deleted nothing — the marks must come back before the next tap, or that
+    // tap would skip the erase warning and really delete the answers.
+    rollbackPatch: (prev) => restoreOwnSurveys(prev, cleared),
     reconcile: (prev, response) => {
       const status = response?.household?.status;
       return status ? setHouseholdStatus(prev, householdId, status) : prev;

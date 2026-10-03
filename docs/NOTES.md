@@ -58,9 +58,9 @@ phone — it never seats you in one on its own, you pick it.
 - **Walk list** — if the campaign has more than one walk list, scope door + survey notes to it. (Admin
   notes aren't tied to a walk list, so they're hidden while a walk list is selected — the screen says so.)
 - **Outcome** — narrow door notes to the outcome they were left on: Not home, Refused, Lit
-  dropped, Surveyed and the rest. Admin notes have no door outcome, so they're hidden while an
-  outcome is selected; survey notes appear only when **Surveyed** is one of them (the screen says
-  so).
+  dropped, Surveyed and the rest. **Not a target voter** is one of the choices only on a campaign
+  that has used it. Admin notes have no door outcome, so they're hidden while an outcome is
+  selected; survey notes appear only when **Surveyed** is one of them (the screen says so).
 - **Search** — type any text to match note contents.
 
 ## Taking the notes with you
@@ -135,6 +135,17 @@ that one key, and spreading a second one silently disarms the first:
    one without the other.) An empty selection normalizes to *no filter*, because an empty `$or`
    reaches Mongo as an error.
 
+**`ACTION_TYPES` must list every outcome, because a missing one fails open.** `resolveNoteScope`'s
+`picked()` keeps only the keys `ACTION_TYPES` knows and normalizes an empty result to `null` — rule
+3's *no filter*. So a chip list made only of unknown keys narrows nothing: the hub answers with every
+note from all three sources, under a chip that names one outcome. (Exercised: `actionTypes:
+['bogus']` resolves to `null` with sources `door, survey, voter`, while `['not_target']` stays
+itself with `door` alone.) That is why `not_target` went into `ACTION_TYPES` with the outcome, and
+"the Notes hub filter selects only its notes — never every note" in
+[notTarget.int.test.js](../server/test/notTarget.int.test.js) pins it. The `notes` export fails the
+other way — `exportTypes.js` checks the same list and refuses an unknown key (`actionTypes contains
+an unknown action.`) — so only the hub would go quietly wrong.
+
 **Auth:** `requireAuth` → `orgContext` → `requireOrgRole('admin','lead')`; super-admin bypasses the role
 check, and a team **lead** is additionally scoped by `canManageCampaign(campaignId)`. It passes
 `requireEntitlement` as a read, so it keeps working under billing suspension. The mobile `api()` helper
@@ -147,7 +158,7 @@ already attaches the Bearer token + `X-Org-Id`, so mobile reuses it **as-is** �
 | `campaignId` | **Required** — 400 (`A campaignId is required.`) without it. |
 | `from`, `to` | Date-only `YYYY-MM-DD`, half-open window resolved in the campaign's anchor tz. Both absent = all-time. |
 | `type` | CSV subset of `door,survey,voter` (absent/unrecognized = all three). |
-| `actionType` | CSV subset of the eight `CanvassActivity.actionType` values. Narrows door notes; structurally excludes admin notes, and survey notes unless `survey_submitted` is among them. Unlike `type`, the counts **honor** it. |
+| `actionType` | CSV subset of the nine `CanvassActivity.actionType` values (`ACTION_TYPES`; unknown keys are dropped, and a list of only unknown keys is *no filter* — see above). Narrows door notes; structurally excludes admin notes, and survey notes unless `survey_submitted` is among them. Unlike `type`, the counts **honor** it. |
 | `userId` | Author filter — matches `CanvassActivity.userId`, `SurveyResponse.userId`, `VoterNote.authorId`. |
 | `effortId` | Scopes door + survey to that walk list **and forces `includeVoter=false`** (VoterNote has no effort linkage → zero admin notes while set). |
 | `q` | Case-insensitive substring (regex-escaped) over the three note fields. |
@@ -198,6 +209,13 @@ Defaults the date range to **Today** in the campaign tz (a `rangeTouchedRef` + t
 `?household=` is present, then flies to the pin). Household door-notes are also surfaced on
 [HouseholdDetailPanel](../client/src/components/HouseholdDetailPanel.jsx).
 
+The outcome chips are every `ACTION_LABELS` key, without counts (the endpoint counts per source, not
+per outcome), except that **Not a target voter** is offered only where `outcomeInUse(current,
+'not_target')` holds — the campaign has had it on at some point
+([lib/outcomeToggles.js](../client/src/lib/outcomeToggles.js)) — so a customer who never turns it on
+never sees the words. `current` is the full campaign document from `useCurrentCampaign`; a shaped
+copy would not carry `enabledOutcomes` / `everEnabledOutcomes`. Mobile applies the same rule (below).
+
 ## Mobile frontend
 
 Ported to match the web, reusing the same endpoint. All JS-only → ships **over-the-air** (`eas update`),
@@ -205,7 +223,7 @@ no native rebuild, no server deploy.
 
 | File | Role |
 |---|---|
-| [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) | The screen. Hidden Tabs `href:null` (inherits admin/lead gating). `CampaignChip` scope (archived campaigns selectable, auto-default active-only) + `ArchivedCampaignBanner` + `useFocusEffect` re-sync + `prevCid` reset (this Tabs screen stays mounted); `DateRangeBar` default **Today** (full presets, incl. All time); source/author/walk-list filters; debounced search; **`useInfiniteQuery` "Load more"** (endpoint caps `limit` at 100, so it pages). |
+| [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) | The screen. Hidden Tabs `href:null` (inherits admin/lead gating). `CampaignChip` scope (archived campaigns selectable, auto-default active-only) + `ArchivedCampaignBanner` + `useFocusEffect` re-sync + `prevCid` reset (this Tabs screen stays mounted); `DateRangeBar` default **Today** (full presets, incl. All time); source/author/walk-list filters; debounced search; **`useInfiniteQuery` "Load more"** (endpoint caps `limit` at 100, so it pages). Outcome chips come from `ACTION_LABELS` (no color and no count — the endpoint counts per source) and drop `not_target` unless [`useOutcomeInUse(cId)`](../mobile/lib/useOutcomeInUse.js) says the campaign has used it — read from the shared `['admin','campaigns']` rows, false until they resolve, so the chip can appear but never flash away. |
 | [mobile/app/(app)/admin/notes.jsx](../mobile/app/(app)/admin/notes.jsx) `noteRow` | One note as an inset row: source dot as the leading glyph, quoted body as the label, `author · time · voter · address` on the sub line. A note with a target is an `InsetNavRow` (taps through to the voter, or the map focused on that door); one with neither is an inert `InsetRow`. (The standalone `NoteCard.jsx` went when the inset-group grammar landed — the past-tense comment naming it at `notes.jsx` is the only surviving reference and is correct.) |
 | [mobile/components/SourceChips.jsx](../mobile/components/SourceChips.jsx) | **New** multi-select chip row with counts (`TabSwitcher` is single-select only). |
 | `admin/_layout.jsx`, `admin/more.jsx`, `admin/campaign/[campaignId].jsx` | Register the screen + two entry points (More-menu row, campaign Quick-actions tile), mirroring the GPS-audit screen. |

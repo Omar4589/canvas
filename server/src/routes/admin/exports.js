@@ -225,6 +225,10 @@ router.get('/types', (req, res) => {
       id,
       label: def.label,
       desc: def.desc,
+      // The description that names Not a target voter, for a type whose copy does. A client shows
+      // it only on a campaign that uses the outcome (outcomeInUse); `desc` never names it, so an
+      // older client that ignores this field shows the neutral copy.
+      descNotTargetInUse: def.descNotTargetInUse || null,
       oneRowIs: def.oneRowIs || null,
       adminOnly: !!def.adminOnly,
       requiresCampaign: !!def.requiresCampaign,

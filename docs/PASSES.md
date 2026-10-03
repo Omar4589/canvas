@@ -53,6 +53,11 @@ Each pass row in that table shows its own numbers — **Books**, **Knocks**, **S
 [METRICS.md](METRICS.md)). The panel is **all-time**; the dashboard table honors its date filter,
 so the two match exactly on an "All time" range and can legitimately differ on any narrower one.
 
+On a campaign that has **Not a target voter** turned on, a door marked that way is a knock in these
+numbers like any other, but never a survey door — so **Conn %** reads exactly as it would have if the
+canvasser had tapped Not home or Refused there — and it fills the pass's **Progress** bar as done work,
+in its own fuchsia stretch. A campaign that never turns it on sees no change.
+
 ## Pass 1 is created for you
 
 When you create a walk list, **Pass 1 is created automatically** so the usual flow — walk list →
@@ -113,10 +118,17 @@ Two callers:
 - `GET /` (the list) — every pass of the campaign (optionally `?effortId=`) with `turfCount` plus
   **per-round counts from the shared billing pipeline** (`knocksPipeline({ campaignId }, { byPass:
   true })`, [aggregations.js](../server/src/services/reports/aggregations.js)): `knockCount`,
-  `surveyedKnocks`, `litKnocks`, `refusedKnocks`, `connectionRate`, `contactRate`. Same aggregation
-  every report uses, run **all-time** (no date window) — it equals the `/admin/reports/knocks-by-pass`
-  report exactly when that report's range is all-time; a windowed report legitimately shows less
-  ([METRICS.md](METRICS.md) §E). Also returns `activePassIds`.
+  `surveyedKnocks`, `litKnocks`, `refusedKnocks`, `notTargetKnocks`, `connectionRate`, `contactRate`.
+  Same aggregation every report uses, run **all-time** (no date window) — it equals the
+  `/admin/reports/knocks-by-pass` report exactly when that report's range is all-time; a windowed
+  report legitimately shows less ([METRICS.md](METRICS.md) §E). Also returns `activePassIds`.
+  **`notTargetKnocks`** (2026-10-02, additive) counts the round's (door, pass) knocks holding a
+  `not_target` row — an independent flag like `refusedKnocks`, and 0 on any campaign that never
+  turned the outcome on. **`contactRate`** is `contactKnocks ÷ knockCount`, the pipeline's
+  `hasContact` fold (a survey, a refusal or `not_target`), so each door counts **once per round**
+  however many canvassers recorded a contact there; summing the per-outcome flags instead had read one
+  door twice (a 200% rate on a one-door round). `contactRate()` throws without `contactKnocks`. The
+  Passes table shows neither field.
 - `POST /:id/activate` — requires ≥1 published `Turf` for the pass; on survey campaigns requires
   `campaign.surveyTemplateId`. Archives other **active** passes **of the same effort** only, then
   sets `active` (+ `activatedAt` once).
@@ -124,7 +136,10 @@ Two callers:
   (with `isActive`/`knockCount`) when the pass is active or has knocks; the client gates a typed
   `archive` confirmation on that.
 - `DELETE /:id` — draft only.
-- `GET /:id/progress` — per-pass door status counts for the progress bar.
+- `GET /:id/progress` — per-pass door status counts for the progress bar: `{ passId, total, counts }`
+  over the doors of every book in the pass, each door's status **for this round**
+  (`getPassStatusMap` → `statusCountsFromMap`), so `counts` is the nine-key `emptyStatusCounts()`
+  shape ([passStatus.js](../server/src/services/passes/passStatus.js)), `not_target` included.
 
 ## Client — one component, two mounts
 
@@ -141,6 +156,11 @@ EffortsPage via `EffortRow`) so the compact drawer variant labels the column cor
   resolves the effort name + timezone).
 - `variant="compact"` — a one-line New-pass control + the table, mounted inline in the Walk Lists
   drawer (`EffortsPage.jsx`).
+
+The table's **Progress** column (both variants) is `ProgressBar` over `/:id/progress`: one segment per
+non-zero status, colored from `SEG_COLORS` (`not_target` is fuchsia `#a21caf`, drawn right after
+`refused`), beside a done % of `(total − unknocked) ÷ total` — so a `not_target` door counts as done,
+and a campaign with no such doors draws exactly what it did before.
 
 Mutations invalidate `['admin','passes',campaignId]`, `['admin','efforts',campaignId]` (so the walk
 list's "Active pass" column refreshes), `['admin','setup-status',campaignId]`, and

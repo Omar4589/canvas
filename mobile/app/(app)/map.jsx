@@ -37,7 +37,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
-import { foldDeltaVoters } from '../../lib/deltaFold';
+import { foldDeltaVoters, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
 import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
 import { distanceToCoords } from '../../lib/geo';
@@ -526,14 +526,14 @@ export default function MapScreen() {
     queryKey: ['mobile', 'changes', activeCampaign?.id],
     queryFn: async () => {
       if (!sinceRef.current || !activeCampaign?.id) return null;
-      const since = encodeURIComponent(sinceRef.current);
       // The door-settings fingerprint from the bootstrap (read at fetch time, not part of the key):
       // the server answers with `doorConfig` only when it no longer matches. ALWAYS encoded — it
       // contains '|' and ',', and a raw '|' makes iOS 15/16 re-encode the whole URL, turning
       // `since` into garbage the server 400s on every poll (teammates' results stop, silently).
-      const stamp = qc.getQueryData(['bootstrap'])?.campaign?.doorConfigStamp;
-      const stampParam = stamp ? `&doorConfigStamp=${encodeURIComponent(stamp)}` : '';
-      return api(`/mobile/changes?campaignId=${activeCampaign.id}&since=${since}${stampParam}`);
+      // changesPath (lib/deltaFold.js) does the encoding, so it can be pinned: lib/deltaFold.test.js, and
+      // in CI server/test/outcomeToggles.test.js, which also checks that this screen calls it.
+      const doorConfigStamp = qc.getQueryData(['bootstrap'])?.campaign?.doorConfigStamp;
+      return api(changesPath({ campaignId: activeCampaign.id, since: sinceRef.current, doorConfigStamp }));
     },
     enabled: !!activeCampaign?.id && !!data,
     refetchInterval: 30 * 1000,

@@ -58,6 +58,19 @@ reporting — map, timeline, insights, early voting, and client reports.
   to it is recorded to the campaign's **History** feed with the actor's name (see
   [CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*). Leads reach the campaign edit drawer for this
   reason, with the org-admin-only fields rendered read-only rather than withheld.
+- **Turn an off-by-default door outcome on or off.** Some door outcomes can't be checked, so they
+  start **off** on every campaign — today there is one, **Not a target voter**, for someone at the
+  door who isn't on the list and won't give their name ([CANVASSER_APP.md](CANVASSER_APP.md); the setting:
+  [CAMPAIGNS.md](CAMPAIGNS.md) → *Off until you turn it on*). Only org admins switch one on or off.
+  A lead sees the switch on **App Customization** and whether it's on, but can't change it — the
+  one setting on that page a lead can see and not change, since the other outcome switches and who
+  can add a person at the door stay theirs. The server refuses a lead either way, so this can't be
+  bypassed from the UI. The reason (owner ruling 2026-10-02): turning on an outcome nobody can
+  verify is the org's trust decision, and a lead may be the paying client. Once it's on, **everyone
+  on that campaign** gets the button — including any canvasser a lead adds to the crew later — so
+  admins turn it on only for crews they trust. The switch appears only on survey campaigns, and only
+  once Doorline has made the outcome available; every flip is recorded in the campaign's
+  **History** with who did it.
 - **Run the org survey library, or touch the tag library.** Surveys are nuanced: a lead **can author**
   survey templates — create new ones, and edit or duplicate their own or any survey attached to a
   campaign they manage — but their **library is scoped to exactly that set**: the list, the attach
@@ -269,9 +282,23 @@ Without it a lead could cut turf and hand out every book except their own: the c
 **Campaign-targeted org routers** — role `('admin','lead')` at the router, then a per-request check:
 
 - **`campaigns`** ([campaigns.js](../server/src/routes/admin/campaigns.js)) — `GET /` returns only
-  `managedCampaignIds` for a lead. `PATCH /:id` is allowed for a managed campaign but a lead may edit
-  only `{name, surveyTemplateId, timeZone}` — `isActive` (archive), `type`, and `state` are admin-only.
-  `POST` (create) and `DELETE` are **admin-only** (inline `isOrgAdmin` guard).
+  `managedCampaignIds` for a lead. `POST` (create) and `DELETE` are **admin-only** (inline
+  `isOrgAdmin` guard). `PATCH /:id` is allowed for a managed campaign, but a lead's body
+  may not carry the org-admin-only keys — `isActive` (archive), `type`, `state`, the key dates
+  (`electionDay`, `earlyVotingStart`, `earlyVotingEnd`, `datesNote`), `billRestrictedDoors`, and since
+  2026-10-02 `enabledOutcomes`. The lockout loop refuses the first one present with a 403 naming the
+  field, before the campaign is even loaded; what's left — `name`, `surveyTemplateId`, `timeZone`,
+  `doorGoal`/`goalDate`, `disabledOutcomes`, `doorAddPolicy` — is lead-editable (the comments at the
+  loop record each ruling and say not to "tidy" either class into the other).
+  - **`enabledOutcomes`** (the off-by-default outcomes, today `not_target`) gets words instead of the
+    raw key — `"Only an org admin can turn off-by-default outcomes on or off."` — and is refused on or
+    off, `[]` included, so a lead can't switch it off either. Its sibling `disabledOutcomes` stays
+    lead-editable (owner ruling 2026-08-16); this one is the org's trust decision (owner ruling
+    2026-10-02 — a lead may be the paying client). The switch has **no per-user term once on**: the
+    bootstrap's `enabledOutcomes` is turned on ∩ released ∩ survey campaign for every caller (unlike
+    `canAddVoters`, which is per user), so a canvasser a lead adds to the crew later gets the button
+    too — intended. Pinned by [optInOutcomes.int.test.js](../server/test/optInOutcomes.int.test.js)
+    (the lead refusal, on and off, with the same lead's `disabledOutcomes` edit still 200).
 - **`imports`** ([imports.js](../server/src/routes/admin/imports.js)) — every campaign-targeted endpoint
   (`/csv`, `/csv/preview`, `/csv/preview-enqueue`, `/geocode-check`, the job detail/errors/undo, and the
   history list) requires the target `campaignId ∈ managedCampaignIds` for a lead (`manages()` helper).
@@ -568,6 +595,10 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   (just Campaigns) for a lead; the full campaign drill-in nav — the campaign **Voters** tab included — is
   the same for both roles.
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) hides create/edit/archive/delete for leads;
+  [AppCustomizationPage.jsx](../client/src/pages/AppCustomizationPage.jsx) renders the *Off until you
+  turn it on* switch **disabled, never hidden**, unless `useAuth().isOrgAdmin` — a lead reads whether
+  it's on, with "Only org admins can turn this on or off." — while the outcome switches and the
+  Add-person radios above and below it stay live for them;
   [CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) **shows** a lead the authoring
   affordances (New/Edit/Duplicate) via `canManage = isOrgAdmin || managedCampaignIds.includes(campaignId)`,
   with the server's `canManageSurvey` as the per-survey authority;
@@ -607,7 +638,10 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   re-derives the role after each org switch. [lib/role.js](../mobile/lib/role.js) mirrors the web split —
   `isOrgAdmin` (unscoped org authority; **excludes** `lead`) vs `isConsoleUser` / `isConsoleRole` (may see
   the admin app; **includes** `lead`). Gate admin *entry points* on `isConsoleUser`, billing/org-wide
-  affordances on `isOrgAdmin`. [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) and
+  affordances on `isOrgAdmin` — which is also what disables the *Off until you turn it on* switch in
+  [admin/app-customization.jsx](../mobile/app/(app)/admin/app-customization.jsx) for a lead
+  (`loadRoleContext().isOrgAdmin`, held in state that starts `false`, so a lead never gets a live
+  switch even for a frame). [admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) and
   [index.jsx](../mobile/app/index.jsx) both use `isConsoleRole`; the canvasser drawer's **Admin
   dashboard** row is gated on `isConsoleUser` (it was `isOrgAdmin`, which stranded a lead who switched to
   canvass mode). In [more.jsx](../mobile/app/(app)/admin/more.jsx) the org Users row is **shown** to
@@ -679,9 +713,11 @@ test:int`):
   [dnc.int.test.js](../server/test/dnc.int.test.js), the flags list + bulk review in
   [flagBulkReview.int.test.js](../server/test/flagBulkReview.int.test.js), the canvasser timeline and
   overlap doors in
-  [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndOverlaps.int.test.js), and the
+  [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndOverlaps.int.test.js), the
   admin-only `revoke-legacy` share sweep in
-  [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
+  [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js), and the refused
+  `enabledOutcomes` PATCH (on and off) in
+  [optInOutcomes.int.test.js](../server/test/optInOutcomes.int.test.js).
 - [perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) — the scope guarantee
   above, as a fixture no other suite could build: **two campaigns in ONE org** (Asa leads HD54, Frank
   leads HD64, Maria canvasses both). Asserts that two leads setting Maria's crew in their own campaigns

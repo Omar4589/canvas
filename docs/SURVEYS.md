@@ -362,6 +362,13 @@ not everything that was typed.
 > and a **Desk entered** column in exports, so you can always tell the two apart. A canvasser's real
 > field answer is *never* overwritten by one. See
 > [CAMPAIGNS.md → Converting to and from Surveyed](CAMPAIGNS.md).
+>
+> On a campaign that uses **Not a target voter**, those entries can be converted too — the fix for a
+> canvasser who surveyed a voter on the list and then tapped the wrong button. Check with the
+> canvasser first: that entry said the person who answered was *not* one of the voters on the list
+> for that address, and converting it records survey answers for voters who are. The door already
+> counted as a knock and as reaching someone, so converting it changes neither; only the survey
+> count and the connection rate go up.
 
 The survey report tells you *how many* picked "Opposed"; sooner or later you need the **who** behind
 a number — which voters gave it, which **canvasser typed it**, at what time, with what note, and
@@ -460,7 +467,12 @@ same pass, the new one replaces the old. When the earlier response belongs to **
 the app asks before opening the survey ("Already surveyed this round") — and if they go ahead, the
 replaced answers are **preserved, not lost**: they appear on the voter's profile as a read-only
 preserved-response card, and an admin can **restore** them (a lossless swap — the two responses
-trade places, nothing is deleted). A house with three voters surveyed in one visit produces
+trade places, nothing is deleted). Opening a survey at a door already marked with a different result
+this round — **Not home**, say, by this canvasser or a teammate — asks first too: *"This door is
+already marked Not home this round. Take a survey instead?"* (**Cancel** goes back, **Continue**
+opens the survey). The office's desk **Restricted** mark is the exception, since that door's card
+already says to work it normally. Only one of the two questions ever shows per visit, and a
+do-not-contact voter gets neither. A house with three voters surveyed in one visit produces
 **three survey responses but counts as one knock** (see [METRICS.md](METRICS.md)).
 
 ## Editing a survey — what's allowed once it has answers
@@ -864,7 +876,7 @@ the wire), [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndO
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The saved-search / targeted-round answer-filter chips. Beyond per-question `answerFilters`, it renders a **"By tag"** chip row from the `tags` palette prop (falling back to the case-insensitive union of option tags) and emits selected tags to the parent via `onTagChange` as **`answerTagFilters: [{ tag }]`** (case-insensitive, display-cased). |
 | [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | Saved-search builder. Wires `AnswerFilters` with `tags={surveyTags}` (from `survey-results` `tags[]`) + `answerTagFilters` into the filter (sent to `resolveWalkList`). Per saved search, **Export CSV** (`exportCsv`) does an **authenticated blob download**: `fetch` the export endpoint with `Authorization: Bearer` + `X-Org-Id` headers, read `res.blob()`, then click a synthetic `<a download>` (filename from `Content-Disposition`). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |
-| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form. Imports `makeCell` + `visibleQuestionKeys` and recomputes `visibleQuestions` live as answers change; renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box. Required-validation runs over **visible** questions only. Submits `{ optionIds, answer (snapshot), otherText, questionKey, questionLabel }` per visible answer; offline queue + optimistic recolor via `optimisticSubmit`. |
+| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form. Imports `makeCell` + `visibleQuestionKeys` and recomputes `visibleQuestions` live as answers change; renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box. Required-validation runs over **visible** questions only. Submits `{ optionIds, answer (snapshot), otherText, questionKey, questionLabel }` per visible answer; offline queue + optimistic recolor via `optimisticSubmit`. At mount, before any answer, at most **one** confirm per visit: the cross-canvasser re-survey prompt ([resurvey.js](../mobile/lib/resurvey.js)), else the door-change prompt (`changePrompt` kind `survey` → `buildChangePrompt`, [doorChange.js](../mobile/lib/doorChange.js)), checked once, the first time the door is known, so a teammate's delta can never pop it mid-survey; a DNC voter's wall suppresses both. |
 | [mobile/lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded). |
 
 ## H. Migrations
@@ -1174,7 +1186,7 @@ flavors, the CSV's headers/columns/timezone rendering, and the response detail's
 on `QUEUE_NAMES.OUTCOME_CONVERT` (concurrency 1). **Routes:** eight, all on
 [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js) under
 `/:campaignId/survey-conversions`, all behind `loadForReclassify` (**org admins only**).
-**Test:** [surveyConversion.int.test.js](../server/test/surveyConversion.int.test.js) (20 tests).
+**Test:** [surveyConversion.int.test.js](../server/test/surveyConversion.int.test.js) (34 tests).
 
 ### Why this is a sibling of `reclassifyOutcomes.js`, not part of it
 
@@ -1240,6 +1252,19 @@ last differs. **Do not "align" the two.**
 
 ### Eligibility, skips and the template rule
 
+- **Sources are `RECLASSIFIABLE_OUTCOMES`** (`SOURCES_FOR('to_survey')`), so an outcome that joins
+  that list becomes convertible with no edit here. `not_target` did on 2026-10-02, on purpose: it is
+  the remedy when a canvasser surveyed a listed voter and then tapped the wrong button. The caveat is
+  the entry's own claim — `not_target` asserts that whoever answered was **not** a listed voter, and
+  a desk entry asserts the opposite for every voter it writes, so the admin is overriding the field
+  record rather than filling in a blank (Part 1 says so). The numbers behave: both actions are knocks
+  and both are in `CONTACT_ACTIONS`, so knocks and contact rate hold and only connection rate rises;
+  `reclassified.from` keeps `'not_target'`, and revert restores it exactly — pinned by "to_survey
+  from Not a target voter" in [surveyConversion.int.test.js](../server/test/surveyConversion.int.test.js).
+  (Each created response's `deskEntry.fromOutcome` is the row's `actionType`, so it reads
+  `not_target` too.) The reverse direction is narrower: `validateConversion` lets `from_survey`
+  *target* `not_target` only where `isOutcomeEnabled` does — a survey campaign with it on while
+  Doorline has it released — else `TARGET_DISABLED`.
 - **Eligible voters** = every `Voter` at the door in the campaign, **minus `doNotContact.flagged`**.
   There is no voter-level targeting field anywhere — walk lists own DOORS (`Household.effortId`) —
   so this is the honest reading of "who the walk list targeted", and it matches the set the mobile

@@ -35,7 +35,9 @@ export const isOutcomeEnabled = (campaign, key, available = []) => {
 // "Does this campaign use the outcome?" — the gate behind every column, tile, chip and filter that
 // exists only for an opt-in outcome. Reads the FULL campaign document (the /admin/campaigns row);
 // never a shaped copy, which would not carry these fields and would read false forever.
+// Never on a lit-drop campaign: the opt-in class is survey-only, and a campaign switched to lit drop
+// before canvassing keeps its everEnabledOutcomes record (the type change clears only enabledOutcomes).
 export const outcomeInUse = (campaign, key) =>
   !OPT_IN_OUTCOMES.includes(key) ||
-  (campaign?.everEnabledOutcomes || []).includes(key) ||
-  (campaign?.enabledOutcomes || []).includes(key);
+  (campaign?.type !== 'lit_drop' &&
+    ((campaign?.everEnabledOutcomes || []).includes(key) || (campaign?.enabledOutcomes || []).includes(key)));

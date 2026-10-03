@@ -16,7 +16,9 @@ published, a report never changes, and next week's report just appears at the sa
 Related: [METRICS.md](METRICS.md) (the numbers a report freezes), [SURVEYS.md](SURVEYS.md) (where the
 support/survey breakdowns come from + the per-question percentage rule), [MAPS.md](MAPS.md) (the shared
 map rendering), [USERS.md](USERS.md) (admin/lead/canvasser roles), [TIMEZONES.md](TIMEZONES.md) and
-[DATE_FILTERS.md](DATE_FILTERS.md) (how the report week is anchored).
+[DATE_FILTERS.md](DATE_FILTERS.md) (how the report week is anchored),
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the opt-in Not a target voter
+outcome behind the breakdown's conditional row).
 
 ---
 
@@ -40,10 +42,19 @@ A report reads top to bottom as a document, in this order:
   week**, not today. **Progress only** — never a pace, an "on track" verdict, or a projected finish
   date. Those are live management numbers; frozen onto a document a client reads weeks later they
   would keep asserting something that had stopped being true.
-- **Voter contact breakdown** — outcomes across the doors (surveyed, *declined to participate*, not
-  home, wrong address, lit dropped), shown as one stacked bar with a legend. This reads **first**, right
-  after the numbers. On survey campaigns, **Declined to participate** is the door where someone answered
-  but wouldn't take the survey — a real contact, not a survey — shown in amber.
+- **Voter contact breakdown** — outcomes across the doors (surveyed, *declined to participate*,
+  *didn't answer*, *no-soliciting sign*, wrong address, lit dropped), shown as one stacked bar with a
+  legend. This reads **first**, right after the numbers. On survey campaigns, **Declined to
+  participate** is the door where someone answered but wouldn't take the survey — a real contact, not
+  a survey — shown in amber. A campaign that uses the **Not a target voter** door button (it stays off
+  until an org admin turns it on) also gets a fuchsia **Not a target voter** row right after it, whose
+  "(i)" — and the PDF's definitions — read: "Doors where someone answered, but it wasn't one of the
+  voters on our list for that address and they didn't share their details. We reached a person there,
+  just not a voter we could survey." It is there so a low connection rate has a visible reason: the
+  crew was talking to people, just not to the voters on the list. It appears **only when the report
+  has at least one such door**, so campaigns that never use the button, and every report already
+  sent, look exactly as before. Every door still lands in exactly one row, so the breakdown still
+  adds up to Doors knocked; the Connection rate card is unchanged, and no new cards are added.
 - **Support breakdown** — the question you designate as "support" (e.g. *1,394 Support · 404 Likely
   Support · 889 Undecided · 50 Opposed*), emphasized as the headline.
 - **Voter groups** — the survey **tags** you explicitly chose to show (see below), one row each:
@@ -57,7 +68,13 @@ A report reads top to bottom as a document, in this order:
   Activity*).
 - **A coverage map** — an interactive, read-only map of where the team has been: only the doors we
   actually reached (unknocked doors are hidden), colored by outcome, with filters by status and survey
-  answer. It shows **no canvasser names or locations** — only the doors and their outcomes.
+  answer. It shows **no canvasser names or locations** — only the doors and their outcomes. A **Not a
+  target voter** status filter is offered only when a door on that report's map shows that outcome.
+  The map shows each door once, as it stood at the end of the report's week, while the breakdown
+  counts the door's result in every round — so a door marked Not a target voter in an earlier round
+  and knocked again since shows its newer result on the map, and a report can show the breakdown row
+  without the filter. A map already shared gains no new filter, and those doors are drawn in fuchsia
+  like any other door we reached, carrying their outcome and never the canvasser's note.
 
 The header shows the campaign, a human week range (e.g. *May 31 – Jun 13, 2026*), and a **Download PDF**
 button — a one-click, paginated PDF of the numbers, breakdowns, and observations (the map is left out).
@@ -200,7 +217,9 @@ publish appear automatically — so you share it once. Recipients only ever see 
 **[ClientReportMapPoint](../server/src/models/ClientReportMapPoint.js)** — one frozen household point
 per published report (its own collection so a large campaign can't blow the 16 MB BSON limit). Stores
 `lng/lat`, coarse address, the door's `status` **as of the report's end**, and the whitelisted survey
-`answers`. **No canvasser identity, no voter name, no timestamps** are ever stored here.
+`answers`. **No canvasser identity, no voter name, no timestamps** are ever stored here — and no note:
+a door marked with the opt-in **Not a target voter** outcome reaches the share page as its `not_target`
+status alone, never the canvasser's optional door note.
 
 **[ReportShareLink](../server/src/models/ReportShareLink.js)** — a public, revocable link to **one
 campaign's** published reports. `{ organizationId, campaignId, token (unique), label, passwordHash |
@@ -247,16 +266,45 @@ below the **"Surveys taken"** KPI: a home with two voters surveyed in one visit 
 but 2 surveys**. (Before this fix the breakdown counted raw activity events, so overlaps made it
 over-count and the bar didn't tie to Doors knocked.) The client labels are local to
 [reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`: "Surveyed" / "Declined to
-participate" / "Didn't answer" / "Wrong address" / "Lit dropped"), separate from the admin coverage
-bar's `STATUS_LABELS`. The `refused` row is the **"Declined to participate"** bucket — a door where a
-voter answered but declined the survey: a billable knock and a contact, but **not** a survey, so it's
-separate from "Surveyed". `contactOrderFor('survey')` slots it right after `surveyed`; `computeReport`
-keeps it in `contactBreakdown.events` so the bar still sums exactly to `totals.doorsKnocked`. (It's the
+participate" / "Didn't answer" / "No-soliciting sign" / "Wrong address" / "Not a target voter" /
+"Lit dropped"), separate from the admin coverage bar's `STATUS_LABELS`. The `refused` row is the
+**"Declined to participate"** bucket — a door where a voter answered but declined the survey: a
+billable knock and a contact, but **not** a survey, so it's separate from "Surveyed".
+`contactOrderFor('survey')` slots it right after `surveyed`; `computeReport` keeps it in
+`contactBreakdown.events` so the bar still sums exactly to `totals.doorsKnocked`. (It's the
 client-facing reflection of the door-level **Refused** disposition — see [METRICS.md](METRICS.md) /
-[SURVEYS.md](SURVEYS.md); `totals.refusedKnocks` and `contactRate = (surveyed + refused) / knocks` are
-admin-side and don't appear in the client report.) Each KPI and breakdown row
-carries a plain-language `help` string surfaced as an on-screen "(i)" tooltip (`InfoHint`) and a
-"What these numbers mean" section in the PDF.
+[SURVEYS.md](SURVEYS.md).) Each KPI and breakdown row carries a plain-language `help` string surfaced
+as an on-screen "(i)" tooltip (`InfoHint`) and a "What these numbers mean" section in the PDF.
+
+**The `not_target` row ("Not a target voter", 2026-10-02).** The opt-in door outcome — someone answered
+who isn't on the list and won't give a name; off on every campaign until an org admin turns it on — is,
+like `refused`, a knock and a contact but never a survey, and it reaches the breakdown in three steps:
+
+- **Counted.** `computeWindowStats`' `events` literal seeds `not_target: 0`. The `status in events`
+  guard silently drops any knock outcome missing from that literal, so without the key those doors
+  would fall out of the bar, the bar would stop summing to Doors knocked, and `percentsTo100` would
+  inflate every other row.
+- **Ordered.** `contactOrderFor('survey')` and the null-type list (old reports) slot it right after
+  `refused`; the lit-drop list leaves it out, since the outcome exists on survey campaigns only.
+- **Hidden at zero.** `deriveReportSections` drops the `not_target` item whenever its cumulative count
+  is 0. Frozen reports from before the outcome lack the key entirely, so they — and every campaign that
+  never turns it on — render exactly as before, and the PDF, built from the same derivation, follows.
+  Pinned by [reportDerive.test.js](../client/src/lib/reportDerive.test.js) (every knock status has a
+  row, label and help; the rows sum to Doors knocked; the row is absent at 0 and on a legacy report).
+
+**Two units, as with refused.** The breakdown resolves ONE status per (door, round) — latest wins among
+non-completion outcomes, and a survey by anyone makes the door Surveyed — while `totals.notTargetKnocks`
+(frozen beside `refusedKnocks`) is `knocksPipeline`'s per-(door, round) `$max` flag. In an overlap they
+differ: a door where one canvasser recorded Not a target voter and a teammate later recorded Not home
+counts in the flag but resolves to "Didn't answer". Only the breakdown partitions Doors knocked.
+
+`totals.refusedKnocks`, `totals.notTargetKnocks` and `totals.contactRate` are frozen into each window,
+but no client renderer shows them (`shapeWindow` passes `totals` through whole, so they do ride the
+public payload). `contactRate` is now doors where someone answered — `CONTACT_ACTIONS`: a survey, a
+refusal or Not a target voter — counted **once** per (door, round) by `knocksPipeline`'s `hasContact`
+fold, ÷ knocks (see [METRICS.md](METRICS.md)). The old `(surveyed + refused) / knocks` counted a door
+twice when one canvasser surveyed and another recorded Refused in the same round; a frozen report keeps
+the value it was computed with.
 
 Survey/support breakdowns use the **per-question** denominator (each option's percent = count ÷ that
 question's own answer total), and `ReportBreakdown` rounds them to total exactly 100% — see
@@ -400,6 +448,24 @@ active `ReportShareLink` (404 otherwise):
   takes a `requestOpts` prop so its fetches run public (`{ public: true, shareToken }`) on the share
   page while the admin preview stays authed; it reuses the admin map's pin rendering via
   [lib/mapRender.js](../client/src/lib/mapRender.js) (`withCanvassers: false`).
+- **The share map's status chips are gated on presence** (2026-10-02). `visibleStatusesFor(campaignType)`
+  includes `not_target` for survey and null-type reports (lit-drop leaves it out), and `reached` filters
+  the points on that full list, so those doors are always drawn. The list handed to `MapFilters` is
+  `chipStatuses` instead, which drops `not_target` unless a loaded point carries it — passed with
+  `notTargetInUse={chipStatuses.includes('not_target')}`, because `MapFilters` applies its own in-use
+  gate to every caller. Presence is the only signal available: the public wire carries no campaign
+  settings, and the share page and the builder preview render the **live** bundle against points fixed
+  as of the report's end (the share page reads the ones frozen at publish; the builder's
+  `/:id/preview/map` builds them live, never persisted). So both inputs come from the loaded points.
+  `chipStatuses` keeps the chip off any report with no such door, reports already sent included.
+  `notTargetInUse` lets it past `MapFilters`' own gate, which defaults to false (no `statusCounts` is
+  passed here) and would otherwise hide the chip even where such doors exist. Presence is **not** the
+  breakdown row's rule: a point carries ONE status per door — `resolveStatus` over every round's
+  activity before `rangeEndUtc` (campaign-wide, even on a walk-list report) — while the row counts one
+  resolved outcome per (door, round) in the report's own scope, so a door marked `not_target` in round
+  1 and `not_home` in round 2 counts in the row but is drawn as Not home, with no chip. The points load once
+  (`households` is `[]` while loading), so the chip can appear but never flicker away. Pinned by
+  [clientReportMapRender.smoke.test.js](../client/src/lib/clientReportMapRender.smoke.test.js).
 - API plumbing: [api/client.js](../client/src/api/client.js) gained a `public: true` option (no user
   `Authorization`/`X-Org-Id`) and a `shareToken` option (`X-Share-Token`);
   [lib/shareAccess.js](../client/src/lib/shareAccess.js) stores the unlock token per share in
@@ -418,4 +484,6 @@ The PDF export adds one client dependency, **`jspdf`** (lazy-loaded into its own
 client install` (the `heroku-postbuild` `install:all` already does this). The `viewCount`/`lastViewedAt`
 fields need **no migration** (`$inc` treats a missing field as 0; schema defaults apply on read) — and
 neither do `effortId`/`effortName` (both default `null` = whole campaign, which is what every existing
-report already is; no new index).
+report already is; no new index). Nor does the `not_target` row (2026-10-02): a frozen report without
+the key renders exactly as before, and a draft gains the key on its next recompute (its row hidden
+while the count is 0).

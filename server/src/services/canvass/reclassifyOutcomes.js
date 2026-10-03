@@ -25,7 +25,7 @@ import { isOutcomeEnabled } from './outcomeToggles.js';
 // are all preserved — this is a re-labelling, never a re-recording. Every run is stamped,
 // listed, and revertible.
 
-// The five DOOR outcomes — everything THIS module may convert, in either direction.
+// The six DOOR outcomes — everything THIS module may convert, in either direction.
 //
 // Completion actions (`survey_submitted`, `lit_dropped`) are absent and must stay absent HERE, and
 // the reason is still true: a surveyed entry owns a real SurveyResponse, so a bare actionType flip
@@ -65,13 +65,15 @@ export const UNKNOCKABLE_SOURCES = Object.freeze([...CONVERTIBLE_SOURCES, 'lit_d
 
 // The three that are interchangeable ARITHMETIC: each is exactly one knock and none is a contact,
 // so any conversion among them provably moves nothing — not knocks, not contactRate (numerator is
-// surveyed + refused), not connectionRate (surveyed + lit), not billableDoors, and no
+// the doors with a contact — surveyed, refused or not_target — once per round), not connectionRate
+// (surveyed + lit), not billableDoors, and no
 // Campaign.stats counter (no key counts these three individually — verified against
 // models/Campaign.js). A pair inside this set skips both the impact simulation and the counter
 // recompute below, which is also what keeps a whole-outcome fold unbounded.
 //
-// `refused` and `restricted` are the mirror image: refused IS a contact and restricted is a
-// billable non-knock, so any pair touching them moves a reported number. They are allowed —
+// `refused`, `not_target` and `restricted` are the mirror image: refused and not_target ARE contacts
+// (each with its own count) and restricted is a billable non-knock, so any pair touching them moves a
+// reported number. They are allowed —
 // a wrong button deserves a real fix — but always priced first, and never silently.
 export const RATE_NEUTRAL_OUTCOMES = Object.freeze(['not_home', 'wrong_address', 'no_soliciting']);
 

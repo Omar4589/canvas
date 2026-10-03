@@ -6,7 +6,7 @@ kind: guide
 order: 22
 sourceDoc: METRICS.md
 summary: What a knock, a survey door, coverage, and the connection rate actually mean — and why two pages can show different survey counts.
-tags: metrics, knocks, coverage, rate, billing, doors, surveys, overlap, teams
+tags: metrics, knocks, coverage, rate, billing, doors, surveys, overlap, teams, contact rate, connection rate, not a target voter
 ---
 
 A few definitions make every number on your dashboard click into place.
@@ -53,7 +53,9 @@ Survey **tags** (like "Supporter") count **people, once each** — and each tag 
 ## Rates
 
 - **Connection rate** — of the doors you knocked, the share where the goal was completed: a **survey taken**, or (on a lit-drop campaign) **literature left**. It divides by **doors, not voters** — so 273 survey doors ÷ 1,252 doors = 22%.
-- **Contact rate** — the share where someone actually came to the door. That includes [refusals](restricted-vs-refused): a refusal means you reached a person, even though you didn't get a survey.
+- **Contact rate** (**Contact %** on the canvasser tables) — the share where someone actually came to the door. That includes [refusals](restricted-vs-refused): a refusal means you reached a person, even though you didn't get a survey. On a campaign that uses it, **Not a target voter** (below) counts here too. Each door counts **once per round**, however many canvassers reached someone there.
+
+> A door where one canvasser surveyed someone and another recorded Refused in the same round used to count twice here; it now counts once. Each canvasser's own Contact % is unchanged by that fix. A campaign's or a round's contact rate can only come out lower, and only where two canvassers worked the same door in the same round — you'd see it in the **Contact rate %** column of the **By pass** table's CSV export, so a file downloaded again can read lower than a copy you sent before.
 
 ### What counts as a good connection rate
 
@@ -66,6 +68,10 @@ The connection rate is graded on three bands, and that's what its color means:
 In the mobile app the band is spelled out next to the percentage — *On target · 986 of 4,136 doors* — so you can check the number against the two figures printed just above it. Tap **How these are counted** under the Activity list to see the full ladder and which band you're in right now.
 
 A low rate isn't always a canvassing problem: knocking at the wrong time of day, a list heavy on apartments, or a long walk list stretched thin will all pull it down. Compare it against the same campaign's earlier passes before reading much into one day.
+
+### Why is our connection rate low?
+
+On a survey campaign the connection rate only counts **surveys**, so a crew can talk to plenty of people and still read low. A common reason is an **out-of-date voter file**: people move and households change, so whoever opens the door often isn't one of the voters listed there. Someone who gives their name can be added at the door with **＋ Add person** and surveyed like anyone else. Someone who won't give a name is what **Not a target voter** is for, on a campaign that has it turned on: those conversations then show up — as their own row on the client report and in Contact % — while the connection rate itself stays where it was. See [Our canvassers are talking to people — why is the connection rate low?](low-connection-rate).
 
 ### Lit drops vs lit doors
 
@@ -87,6 +93,14 @@ Coverage is always for the whole campaign — it can't be narrowed to one team, 
 Time actually spent on doors. If your organization has connected **FbTime**, this divides by measured clock time — those figures are marked **FbTime** on the canvasser tables (or **measured** on mobile), and an estimated row says *why* it's estimated, in the row itself. Otherwise it's estimated from each day's first knock to its last knock, added up. Gaps between days aren't counted, so a canvasser who worked three hard afternoons isn't penalised for the days in between.
 
 Measured and estimated hours are never mixed into one team rate: a team figure only says "measured" when every canvasser in it is fully measured.
+
+## Not a target voter
+
+An optional door button — survey campaigns only, and off on every campaign until an org admin turns it on — for when someone answers the door who isn't one of the voters on the list for that address, and won't give their name. A campaign that has never had it on has none of these doors.
+
+It counts **exactly like a refusal**. It **is** a knock — it counts toward doors, doors/hour, and billing, and it has its own segment in the coverage bar — and it **is** a contact, because someone answered, so it counts toward your **contact rate**. But it is **never** a survey, so it never counts toward survey doors or the **connection rate**: that reads exactly as it would have if the canvasser had tapped Not home or Refused at that door. In a round, a survey wins over it — if anyone surveys someone at that door, the door reads Surveyed — and the next round knocks it again, like a refusal. See [Refused, Not a target voter, No soliciting, and Restricted](restricted-vs-refused).
+
+On a survey campaign that has had it on, the canvasser tables on Home and the Timeline gain a **Not target** column — each person's count and the share of their doors — so one canvasser far above the rest of the crew is easy to spot. Nothing flags it automatically: a stale voter file honestly produces a high share, so look before you act. Every tap is GPS-stamped like any door result, so the GPS audit covers it too.
 
 ## No soliciting
 

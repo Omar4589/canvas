@@ -6,7 +6,7 @@ kind: guide
 order: 21
 sourceDoc: CLIENT_PORTAL.md
 summary: Build a weekly client report, publish it to freeze the numbers, and share it with a login-free link.
-tags: client reports, share link, publish, weekly report, PDF, coverage map, walk list
+tags: client reports, share link, publish, weekly report, PDF, coverage map, walk list, contact breakdown, not a target voter
 ---
 
 ## What a client report is
@@ -14,6 +14,8 @@ tags: client reports, share link, publish, weekly report, PDF, coverage map, wal
 It's the weekly update you used to assemble by hand and email — headline numbers, a voter-contact breakdown, your support and survey breakdowns, your written observations, and an interactive map of where the team has been. You build it, review it, and publish it. Recipients open a public link and read it top to bottom — no account to create, just the link's password (you hand them both), asked once per browser tab.
 
 Whoever you share the link with sees a clean hub with that campaign's reports, newest first — the latest week plus the full history. They only ever see published reports for that one campaign: no drafts, no other campaigns, no live data, and no canvasser names or locations on the map.
+
+The **voter-contact breakdown** puts every door knocked into exactly one outcome — *Surveyed*, *Declined to participate*, *Didn't answer*, and so on — so it always adds up to Doors knocked. On a campaign that uses the optional **Not a target voter** door button (an org admin has to turn it on), it gains a **Not a target voter** row, right after *Declined to participate*, explained to your client as: *"Doors where someone answered, but it wasn't one of the voters on our list for that address and they didn't share their details. We reached a person there, just not a voter we could survey."* That's how a low connection rate gets a visible reason: the crew was talking to people, just not to the voters on the list. The row appears only in a report that has at least one such door, so a campaign that never uses the button — and every report already sent — reads exactly as before. The map's **Not a target voter** filter has its own rule: it appears only when a door on that map is still marked that way at the end of the report's week. The map shows each door once, as it stood then, while the row counts every round — so a door marked Not a target voter in an earlier round and knocked again since shows its newer result on the map, and a report can show the row without the filter. The connection rate card doesn't change, and no new cards are added.
 
 ## Build and publish
 

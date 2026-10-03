@@ -1,8 +1,10 @@
 # Proposal: "Not a target voter" — an opt-in door outcome
 
-> **Status: BUILT 2026-10-02 (uncommitted, not deployed) — approved by the owner the same day as a
-> PLAN + DESIGN, reviewed three times.** Build notes, including the places the build deliberately
-> differs from the text below, are in [§S](#s-build-notes-2026-10-02) at the end.
+> **Status: BUILT 2026-10-02 (committed in 6d3ca94, then a follow-up commit on top of it — §S items
+> 10-14 and the docs and Help Center cascade; not deployed — dormant until `OPT_IN_OUTCOMES` is set) —
+> approved by the owner the same day as a PLAN + DESIGN, reviewed three times.** Build notes,
+> including the places the build deliberately differs from the text below, the post-build review fixes
+> and the owner's later ruling on export copy, are in [§S](#s-build-notes-2026-10-02) at the end.
 >
 > *As approved:* The owner's decisions are recorded in *Decisions* below and quoted in §R; the design calls
 > were approved with the plan. The surface map behind Part 2 came from a read-only sweep of
@@ -1568,3 +1570,83 @@ Built in the order of §Q. Where the build differs from the text above, this sec
 9. **The required recompute was proved from the repo root** against a throwaway database seeded in
    the post-deploy state: the dry run printed `DRIFTED Ops Check — contactKnockCount 0→2` and nothing
    else, `--apply` seeded it, and a re-run printed "All campaign stats match the ledgers" (§O).
+10. **Owner ruling, after the build: the Export Center copy names the outcome only where a campaign
+    uses it.** This replaces two lines above — §G's "BACKUP_NOTES … and the descriptions at 187 and 300
+    name the outcome" and the "One row per voter" hint naming it for everyone. `GET /admin/exports/types`
+    now ships `desc`, which never names it, plus `descNotTargetInUse` (the naming form; `null` for a type
+    whose copy never names it). Web and phone pick by `outcomeInUse`, the gate every other surface uses,
+    so the route stays copy-only, with no campaign lookup and no new access check. An older client reads
+    `desc` alone and shows the neutral copy. The two "One row per voter at the door" hints (web dialog,
+    phone sheet) name it only in use. A full backup's README.txt and manifest.json notes name it when a
+    campaign in that bundle uses it; for the org-wide bundle that means any campaign in the org. The
+    neutral forms are the pre-feature strings, character for character. The same rule now covers the
+    Contact % help text: `metricHelp.contactRate` never names the outcome, and
+    `contactRateNotTargetInUse` does, shown only where the campaign uses it (the web canvasser tables'
+    Contact % column, and the Contact % entry in the phone campaign home's Top canvassers column
+    explainer). Results by voter's naming form also lost its last
+    clause ("…so none of the listed voters was reached"): Address outcome is the door's latest result
+    across the rounds in scope, so a listed voter may have been reached earlier. It now says the person
+    who answered was not on the list. Unchanged on purpose: the always-present "Not a target" column in
+    `canvassers.csv` (the Timeline's download, not an Export Center type; call 9's file-shape rule). It is
+    now the only report, file or metric-help text that names the outcome to a customer who never turns it
+    on. Two places outside call 9's gate name it for everyone, by design: App Customization's "Off until
+    you turn it on" switch, which org admins and team leads see on every survey campaign once Doorline
+    releases it, and the Help Center articles, which say "on campaigns that use it".
+11. **Review fixes.** (a) A "Not a target voter" filter picked on one campaign survived a switch to a
+    campaign that hides the choice: applied, but with nothing on screen to untick. Exports now drops a
+    round status the campaign doesn't offer when it queues (the rule its outcome chips already follow);
+    the web map, the phone admin map, Turf Cutting and Saved Searches keep a selected or ticked choice
+    visible until it is cleared. (b) App Customization told a team lead "You can still turn it off" and
+    pointed them at Door Outcomes, which a lead can't open; on web and phone those lines now show only to
+    org admins. (c) Two label slips: the Survey Explorer response drawer printed a converted door as
+    "recorded as not target" — it now uses the outcome's label, as the voter profile does. The phone
+    export sheet's round-status tabs printed slugs ("not target") and now print the status labels the web
+    select uses, which also capitalizes the other tabs. (d) The erase warning could fire about answers
+    already gone. Recording a result deletes the canvasser's own surveys at the door on the server, but
+    the reply carries only the household, so the cached voters kept reading "surveyed by me" and the
+    next change warned again ("Keep my survey" then kept nothing). Offline, the same happened through
+    the queue: a survey queued before a queued result kept counting. Now the recorder clears the
+    canvasser's own survey marks on that door's cached voters the moment it records (`doorChange.js`
+    `clearOwnSurveysAtDoor`). That is exact, because a voter holds at most one survey per round, so
+    "surveyed by me" means nobody else's survey is involved. If the server REJECTS that result (a
+    4xx), the marks come straight back (`restoreOwnSurveys`, through a new `rollbackPatch` option on
+    `optimisticSubmit`), so the next tap still warns even when the bootstrap refetch fails too. In
+    `ownSurveysHere`, cached own surveys always count, and a QUEUED survey is skipped only when a door
+    result at that door was tapped after it — compared by the queued tap time, the way the server's
+    `supersededByNewer` compares them, with queue position as the fallback. A first version also
+    hid cached surveys whenever any result was queued; review proved that a MISSED warning, end to end
+    against the real server: a result stuck in the queue, then a survey sent live (the server keeps it
+    and later discards the older replay), then a new result — which really deletes it. A spare warning
+    only asks; a missed one loses answers. Two spare warnings remain, both older than this feature: a
+    queued survey older than a result that went out live, and a refetch or delta repainting the
+    server's pre-result state before the queue flushes. The seven result routes now share one path map
+    (`doorPaths.js` `ACTION_PATHS`) between the recorder and the counter. (e) The web voter profile's
+    Canvass activity list now includes Not a target voter knocks (`voterProfile.js` KNOCK_ACTIONS) and
+    prints every entry with its standard label instead of the slug. (f) App Customization's footer now
+    says when its facts apply ("If an org admin turns it off, …" for a lead on the web; "If it is turned
+    off, …" on the phone).
+12. **Tests the plan listed that the first build missed, now in:** the walk-packet label/ink guard lives
+    in `server/test/actionLabels.test.js` beside the other label guards, not in `packetPdf.test.js`,
+    because it reads the `Household.status` enum and only the server test tree loads models. Also: the
+    `/changes` stamp round trip with both a comma and a pipe (`optInOutcomes.int`), the per-voter fan and
+    the outcome chip on a Not-a-target door with estimate == build (`exportBuilders.int`), and three new
+    files: `client/src/lib/mapFiltersRender.smoke.test.js`, `client/src/lib/exportsPageRender.smoke.test.js`
+    (the type cards, the round-status list, and the options dialog's chips and hint) and
+    `mobile/lib/exportTypes.test.js`. A second review then found guards that would have stayed green
+    with their fix reverted. Each is now proven by reverting its fix in a scratch copy: `notTarget.int`
+    pins canvassers.csv's Knocks and Connection rate % by header, a non-zero Timeline `dayNoSoliciting`,
+    and the knock lists hand-copied into `/mobile/me/day`, `/mobile/me/history`, the Users-hub member
+    stats, the Control Room and the voter profile. `optInOutcomes.int` pins the survey-only check on a
+    campaign switched to lit drop (a queued replay the gate alone would honor), `reclassifyOutcomes.int`
+    the run's frozen scope label, `campaignStats.int` drift on `notTargetKnockCount`,
+    `server/test/metricHelp.test.js` both Contact % help forms, and `campaignHistory.test.js` (web and
+    phone) the History wording.
+13. **`outcomeInUse` is false on a lit-drop campaign** for an opt-in key, in all three copies. A survey
+    campaign switched to lit drop before canvassing keeps `everEnabledOutcomes` (the type change clears
+    only `enabledOutcomes`), so it read as "in use". It then grew an empty "Not a target" column in its
+    per-round CSV, and backup notes and chips that name an outcome it can never record. `knocksByPass.js`
+    loads the campaign narrowed, so its projection now carries `type` too; without it the per-round
+    files never saw the new rule (pinned in `optInOutcomes.int`).
+14. **The phone's `/changes` URL has one builder**, `mobile/lib/deltaFold.js` `changesPath`, called by
+    `map.jsx`. `server/test/outcomeToggles.test.js` feeds it the server's real stamp and text-checks
+    that `map.jsx` uses it. That suite runs in CI, which never runs `test:mobile`.

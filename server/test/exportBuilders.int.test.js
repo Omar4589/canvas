@@ -1149,7 +1149,7 @@ test('not_target: plain-English door outcome for the client, and the per-round c
   });
   const h51 = await home(51, 'not_target');
   const h52 = await home(52, 'refused');
-  for (const [h, sv, first, last] of [[h51, 'SV51', 'Nina', 'Listed'], [h52, 'SV52', 'Rex', 'Declined']]) {
+  for (const [h, sv, first, last] of [[h51, 'SV51', 'Nina', 'Listed'], [h51, 'SV51B', 'Iris', 'Housemate'], [h52, 'SV52', 'Rex', 'Declined']]) {
     await Voter.create({
       organizationId: ctx.org._id, campaignId: c5._id, householdId: h._id,
       stateVoterId: sv, firstName: first, lastName: last, fullName: `${first} ${last}`, party: 'DEM',
@@ -1184,9 +1184,43 @@ test('not_target: plain-English door outcome for the client, and the per-round c
   });
   assert.strictEqual(est.rows, rbv.doc.rowCount, 'estimate == build');
 
+  // One row per voter at the door: voter-less like refused, so the knock repeats once per
+  // registered voter there, the same outcome on each — true of neither of them. And its outcome
+  // chip is accepted and narrows the file to that one door (Rex's refused is filtered out).
+  const activity = EXPORT_TYPES['canvass-activity'];
+  const raw = { actionTypes: ['not_target'], perVoterRows: true };
+  const params = await activity.validateParams(raw, { organizationId: ctx.org._id, campaignId: c5._id });
+  const fanned = await runExport('canvass-activity', raw, { campaignId: c5._id });
+  const fLines = csvLines(fanned.text);
+  const fHeader = cellsOf(fLines[0]);
+  const fRows = fLines.slice(1).map(cellsOf);
+  assert.strictEqual(fanned.doc.rowCount, 2, 'Nina and Iris, one knock');
+  assert.deepStrictEqual(fRows.map((c) => c[fHeader.indexOf('Voter last name')]).sort(), ['Housemate', 'Listed']);
+  assert.ok(fRows.every((c) => c[fHeader.indexOf('Action')] === 'not_target'), 'the outcome repeats on each row');
+  assert.strictEqual(new Set(fRows.map((c) => c[fHeader.indexOf('Activity DB id')])).size, 1, 'one activity, repeated');
+  const fEst = await activity.estimate({
+    organizationId: ctx.org._id,
+    campaignId: c5._id,
+    campaign: await Campaign.findById(c5._id).lean(),
+    params,
+    anchorTz: TZ,
+    dnc: await loadDncVoterIdSet(ctx.org._id),
+  });
+  assert.strictEqual(fEst.rows, fanned.doc.rowCount, 'estimate == build, fanned and chipped');
+
   // The full backup's knocks-by-round mirrors /knocks-by-pass.csv column for column — the
   // Not a target column after No soliciting here, and absent from Ward 4, which never used it.
   const used = await runExport('full-backup', {}, { campaignId: c5._id });
   assert.ok(used.text.includes('Lit knocks,Refused,No soliciting,Not a target,'), 'the column, in its place');
   assert.ok(!ctx.artifacts['full-backup'].text.includes('No soliciting,Not a target'), 'Ward 4 keeps its file shape');
+
+  // The backup's notes name the outcome only when the bundle holds a campaign that uses it (owner
+  // ruling 2026-10-02): Ward 5's README and manifest do; nothing in Ward 4's bundle does; and the
+  // org-wide bundle — Ward 4 and Ward 5 together — does, since one campaign using it is enough.
+  const namedKnocks = 'door-level knocks (not home, refused, no soliciting, not a target voter, lit drop)';
+  assert.strictEqual(used.text.split(namedKnocks).length - 1, 2, 'Ward 5: README and manifest, once each');
+  assert.ok(ctx.artifacts['full-backup'].text.includes('door-level knocks (not home, refused, no soliciting, lit drop)'), 'Ward 4: the plain note');
+  assert.ok(!/not.a.target/i.test(ctx.artifacts['full-backup'].text), 'Ward 4: nothing in its bundle names it');
+  const orgWide = await runExport('full-backup', {}, { campaignId: null });
+  assert.strictEqual(orgWide.text.split(namedKnocks).length - 1, 2, 'org-wide: named once in each');
 });

@@ -105,10 +105,12 @@ export default function MapFilters({
   statuses = DEFAULT_STATUSES,
   // The off-by-default "Not a target voter" chip shows only on a campaign that has used it (or
   // when the counts say such doors exist) — a campaign that never turned it on never sees it.
+  // An ACTIVE chip always shows: the filter survives a campaign switch, and a hidden one would
+  // empty the map with nothing on screen to untick.
   notTargetInUse = false,
 }) {
   const shownStatuses = statuses.filter(
-    (s) => s !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0
+    (s) => s !== 'not_target' || notTargetInUse || (statusCounts?.not_target ?? 0) > 0 || statusFilter.includes(s)
   );
 
   function toggleStatus(s) {

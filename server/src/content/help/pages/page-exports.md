@@ -7,7 +7,7 @@ order: 115
 sourceDoc: EXPORTS.md
 
 summary: What each control on the campaign Exports page does — the type picker, the filters, the options dialog, and the export history.
-tags: exports, page, download, csv, results by voter, survey answers
+tags: exports, page, download, csv, results by voter, survey answers, not a target voter
 ---
 
 Open a campaign and pick **Exports** in the sidebar.
@@ -20,12 +20,7 @@ Open a campaign and pick **Exports** in the sidebar.
   **Results by voter** are available to leads — **Results by voter** is the card to reach for when
   the file is going to a client: one row per person at the doors you worked, with what happened at
   their address and what they said.
-- **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's
-  timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), the
-  **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names),
-
-  or the **Door outcome** chips (inline for **Notes**; inside the options dialog for **Canvassing
-  activity** and **Results by voter** — tick the outcomes you want; nothing ticked means all).
+- **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), the **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names), the **Only doors with status** picker (for **Doors by round**), or the **Door outcome** chips (inline for **Notes**; inside the options dialog for **Canvassing activity** and **Results by voter** — tick the outcomes you want; nothing ticked means all). **Not a target voter** — an optional door button that stays off until an org admin turns it on — appears among the chips and statuses only on a campaign that has had it turned on. A chip or status you picked before switching to a campaign that doesn't offer it is dropped when you queue, so the file matches what's on screen.
 
 - **Include contact & demographic details** — on the two survey exports and on **Results by
   voter**. Off by default; tick it to add phone, phone type, cell phone, gender, date of birth,

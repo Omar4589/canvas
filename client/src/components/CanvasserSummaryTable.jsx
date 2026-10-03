@@ -50,7 +50,12 @@ function columnsFor(litMode, notTargetInUse) {
           { key: 'dayVoterSurveys', label: 'Surveys taken', numeric: true, help: metricHelp.surveysTaken },
         ]),
     { key: 'connectionRate', label: 'Conn %', numeric: true, help: metricHelp.connectionRate },
-    { key: 'contactRate', label: 'Contact %', numeric: true, help: metricHelp.contactRate },
+    {
+      key: 'contactRate',
+      label: 'Contact %',
+      numeric: true,
+      help: !litMode && notTargetInUse ? metricHelp.contactRateNotTargetInUse : metricHelp.contactRate,
+    },
     ...(!litMode && notTargetInUse
       ? [{ key: 'notTargetShare', label: 'Not target', numeric: true, help: metricHelp.notTarget }]
       : []),

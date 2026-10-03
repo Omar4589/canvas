@@ -31,7 +31,11 @@ export const metricHelp = {
   connectionRate:
     'Of the doors knocked, the share that completed the goal — a survey submitted OR a lit drop. (A lit drop counts even if no one answered.)',
   contactRate:
-    'Of the doors knocked, the share where someone answered — a completed survey, a refusal, or (on campaigns that use it) Not a target voter. Each door counts once per pass, however many canvassers reached someone there. (Refusals and Not a target voter count here but not toward connection rate.)',
+    'Of the doors knocked, the share where someone answered — a completed survey or a refusal. Each door counts once per pass, however many canvassers reached someone there. (A refusal counts here but not toward connection rate.)',
+  // The same, naming Not a target voter — shown only on a campaign that uses the outcome, so a
+  // customer who never turns it on never sees the words (the export copy's rule).
+  contactRateNotTargetInUse:
+    'Of the doors knocked, the share where someone answered — a completed survey, a refusal, or Not a target voter. Each door counts once per pass, however many canvassers reached someone there. (Refusals and Not a target voter count here but not toward connection rate.)',
   // Was "measured from the first knock to the last" — which described a CALENDAR span and
   // under-reported pace roughly threefold over a multi-day range (737 doors over 6 days read 4.9/hr
   // instead of 13.7). It is the sum of each DAY's working span.
