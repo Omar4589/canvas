@@ -11,6 +11,7 @@ import { VoterNote } from '../../models/VoterNote.js';
 import { User } from '../../models/User.js';
 import { Person } from '../../models/Person.js';
 import { Organization } from '../../models/Organization.js';
+import { isAnswerable } from '../surveys/routing.js';
 
 // Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here.
 const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
@@ -317,6 +318,9 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
         questions: (tpl?.questions || [])
           .slice()
           .sort((a, b) => (a.order || 0) - (b.order || 0))
+          // Answerable questions only: a statement records nothing, and the editor would render it
+          // as a text input labelled with its read-aloud paragraph.
+          .filter(isAnswerable)
           // otherOption rides along so the editor can materialize the synthetic "Other (specify)"
           // choice — it is a question FLAG, never a row in options[].
           .map((q) => ({

@@ -173,7 +173,7 @@ test('the door-config stamp is stable, order-blind, and moves on every setting a
   assert.ok(stamp.includes(','), `no ',' in ${stamp}`);
 });
 
-// …and the encoding itself, guarded HERE because CI runs this suite and never test:mobile: the
+// …and the encoding itself, guarded HERE (written when CI ran this suite but not test:mobile; CI's checks job has run test:mobile too since 2026-10-03): the
 // phone's own path builder (mobile/lib/deltaFold.js changesPath, plain ESM like the copies above) fed
 // the server's real stamp, and a read of the map screen — which node cannot load — proving it builds
 // the /changes URL through that builder and nothing else (the locationGate.test.js text-check pattern).

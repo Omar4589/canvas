@@ -21,7 +21,9 @@ the campaign anchor timezone), [BILLING.md](BILLING.md) (the read-only wind-down
 carve-out), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (the v4 2026-08-01 watchlist
 entry this feature is bound by), [CAMPAIGNS.md](CAMPAIGNS.md) (the Door Outcomes page and its CSV),
 [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the opt-in Not a target voter
-outcome, its columns, and the once-per-door Contact rate %).
+outcome, its columns, and the once-per-door Contact rate %),
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (scripted surveys, whose read-aloud
+statements and closings are never a column or a row).
 
 ---
 
@@ -59,6 +61,16 @@ still works** — that window exists precisely so you can take your data with yo
 | **Voter profile notes** (admins only) | one note written on a voter profile | the profile trail on its own, with author and edit history |
 
 | **Full backup** (admins only, ZIP) | — | a copy of each type above for one campaign (or every campaign) — except **Filtered voters** (a saved-search subset) and **Results by voter** (the bundle already carries the survey files) — plus per-round totals, a manifest, and a plain-language README |
+
+**"One column per question" means one per question that records an answer.** A scripted survey can
+also hold read-aloud **statements** and **closings** — lines the canvasser says that take no answer —
+and they never appear in any file: no column in Survey results, Results by voter or the activity
+log's survey answers, and no row in Survey answers (detailed). Nothing records which closing a
+conversation reached, either, so there is nothing about it to export, and the survey's own
+instructions to canvassers (the "For you — not read aloud" notes on its blocks) are part of the
+survey, not of anything recorded, so no file carries them. The **Note** column is still the note a
+canvasser types when saving a survey. The design is in
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md).
 
 Team leads see the campaign-scoped types for the campaigns they manage; org-wide exports, the
 **Voter profile notes** type, and the full backup are admin-only. **Notes** *is* lead-available,
@@ -428,7 +440,11 @@ differently — get this wrong and the parity loop fails:**
 | admin | never counted, row skipped silently | the estimate's campaign-membership join already excludes it. The builder cannot tell "voter deleted" from "voter in another campaign" (`VoterNote` is org-level, so cross-campaign notes are the *common* case), and neither case is in `est.rows` |
 
 survey-answers must
-count `$size(answers)` entries, never responses. All estimates are countDocuments-class and run
+count `$size(answers)` entries, never responses. Scripted surveys leave that parity alone: a
+statement row is never stored (`normalizeAndFilterAnswers` drops one for every writer, in both
+`dropHidden` modes — including the empty row an older phone bundle or an offline replay posts), so
+`$size(answers)` still counts exactly the rows the builder writes, and no estimate needs to know
+statements exist. All estimates are countDocuments-class and run
 inline in the web dyno — with three aggregation-class exceptions, all still inline: canvass-activity
 under `perVoterRows` (the FIRST row-multiplying option, see *The opt-in row grain* below), the same
 type under `includeSurveyAnswers` (the second — `countUncoveredResponses`), and `results-by-voter`
@@ -744,13 +760,25 @@ planner drop the `householdId` bound.
 `templateAnswerPlan(template, orphanEntries)` and `snapshotAnswerText`, lifted out of
 `buildSurveyResultsWide` and now spent by **three** surfaces: survey-results, `results-by-voter`'s
 blocks, and `canvass-activity`'s answer layer. It returns `{cols, columnOf, renderAnswer,
-templateName}`: current questions in template order then orphan keys (hard-deleted questions,
+templateName}`: current answerable questions in template order (never a statement — below) then
+orphan keys (hard-deleted questions,
 labelled from their snapshot and discovered by the CALLER, which owns the response query they come
 from), the `Label (key)`-on-duplicates base name, and the id-native renderer with the recorded
 snapshot as fallback — including the seeded `__other__` sentinel that makes a write-in read
 `Other — potholes` instead of colliding with a canonical option of the same wording. Callers that
 group columns further (by round, by survey) **decorate** `columnOf`; they must never re-implement it,
 or one file's header stops matching another's.
+
+**Statements are never columns** — this is where "one column per question" becomes "one column per
+question that records an answer" for all three surfaces at once. `cols` is the template's
+**answerable** questions (`isAnswerable` from `services/surveys/routing.js`: anything but
+`type: 'statement'`) then the orphans, and the `Label (key)` duplicate count runs over those columns
+only, so a statement that happens to share a question's label never pushes that question's header
+into the `Label (key)` form. `known`, the set an orphan must be missing from, deliberately still spans
+**every** template key, statements included: narrowing it too would re-admit a stray stored row under
+a statement key (an admin edit saved while the template was missing stores answers as sent) as an
+orphan column labelled by its snapshot. `test/surveyColumns.test.js` pins all three, and that the
+remaining columns keep template order.
 
 **It is a FACTORY, and that is load-bearing rather than tidy.** Option ids are unique only WITHIN a
 question and question keys only WITHIN a template — and `POST /admin/surveys/:id/duplicate` clones
@@ -931,7 +959,8 @@ and `fieldVisitActionTypes` returns `null` — not `[]` — on an empty intersec
 every row set with distinct instants, and deliberately does NOT at a tie, where it resolves on
 `actionType` and answers the same way whatever order the scan returned),
 `test/surveyColumns.test.js` (column order, orphan keys, `Label (key)` duplicates, the write-in
-sentinel, and the cross-template collision that is the whole reason the plan is a factory), and
+sentinel, the cross-template collision that is the whole reason the plan is a factory, and
+statements: never a column, still `known`, never decorating a same-label question's header), and
 `client/src/lib/exportOptions.test.js` (defaults, per-campaign scoping, a throwing `localStorage`).
 `test/actionLabels.test.js` gained the door-status label gate described above.
 `test/exportBuilders.int.test.js` gained five `results-by-voter` cases (the row set plus the two
@@ -1032,6 +1061,10 @@ Voter identity in the six voter-bearing CSVs is always the pair **`State voter I
 from `canonicalFields.js`; the two spellings coexist deliberately, matching each file's
 neighbors). Every new identity cell must derive from the DNC-guarded voter object, never from
 the event document — that guard is what blanks a do-not-contact person's row.
+
+Every "one column per question" below is one per **answerable** question, from `templateAnswerPlan`:
+a statement (`type: 'statement'`, read-aloud text or a closing) is never a column, and
+`survey-answers.csv` never has a row for one, because none is ever stored.
 
 - **`activity-log.csv`** — Timestamp (ISO), Date, Time (tz), Action; Address block (line 1/2,
   City, State, Zip, County); **State voter ID, UID**, Voter first/last name, Party (filled only

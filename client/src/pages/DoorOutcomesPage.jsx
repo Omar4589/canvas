@@ -14,6 +14,7 @@ import { STATUS_COLORS, ACTION_LABELS } from '../lib/statusColors.js';
 import { Badge, Button, Card, DataTable, EmptyState, Modal, Select, Skeleton } from '../components/ui/index.js';
 import { useConversionRunPoll } from '../lib/useConversionRunPoll.js';
 import { buildAnswers, dropEmptyAnswers } from '../lib/surveyAnswerForm.js';
+import { isAnswerable } from '../lib/surveyRunner.js';
 import SurveyAnswerComposer from '../components/outcomes/SurveyAnswerComposer.jsx';
 import SurveyConvertModal from '../components/outcomes/SurveyConvertModal.jsx';
 import RemoveAnswersModal from '../components/outcomes/RemoveAnswersModal.jsx';
@@ -350,9 +351,12 @@ export default function DoorOutcomesPage() {
   };
 
   // The bulk answer set, empty rows dropped — partial entry is legal, but an unanswered question
-  // should not be stored as a blank row on every voter.
+  // should not be stored as a blank row on every voter. Statements are read-aloud script and never
+  // post a row.
   const composedAnswers = () =>
-    dropEmptyAnswers(buildAnswers((composing?.questions || []).filter((q) => !q.retired), vals, otherTexts));
+    dropEmptyAnswers(
+      buildAnswers((composing?.questions || []).filter((q) => !q.retired && isAnswerable(q)), vals, otherTexts)
+    );
   const answeredCount = () => composedAnswers().length;
 
   // `actionIds` is omitted for "select all N" so the server works from the filter — the selection

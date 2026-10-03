@@ -10,6 +10,7 @@ import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
 import { streetOf, UNIT_SUFFIX } from '../../utils/streetName.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
 import { computeWalkOrder } from '../turf/walkOrder.js';
+import { isStatement } from '../surveys/routing.js';
 
 // Assembles the data a PRINTED walk packet needs. Print-only by design: nothing here
 // writes, and nothing a volunteer marks on the paper ever comes back (docs/WALK_PACKETS.md).
@@ -86,8 +87,17 @@ const streetSummary = (doors) => {
 
 // Retired questions and options stay in reports but must never reach the field — the same
 // cut client/src/components/SurveyPreview.jsx makes on screen. visibleIf survives verbatim:
-// routes/admin/surveys.js:157 guarantees every rule points at a STRICTLY EARLIER non-retired
+// validateVisibleIfIntegrity (routes/admin/surveys.js) guarantees every rule points at a STRICTLY EARLIER non-retired
 // question, so a printed form can be one top-to-bottom column with skip instructions.
+//
+// Statements (read-aloud blocks and closings) stay IN `questions`, in place: the print model
+// needs their position to number the answerable questions around them and to print each one
+// once, with its gate, on the "What to say" page. This is a field-level picker, so it carries
+// what paper uses of the script flow (docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I) — the template's
+// flow, each block's role, title, links and route, each answer's route — and NEVER a block's
+// `note`: canvasser notes never print (ruling 10). The template is a lean read, which applies no
+// Mongoose defaults, so one saved before these fields existed arrives without them; every one
+// reads absent as its default, and an empty-string route as no route.
 const toPrintableSurvey = (tpl) => {
   if (!tpl) return null;
   const questions = (tpl.questions || [])
@@ -101,16 +111,23 @@ const toPrintableSurvey = (tpl) => {
       otherOption: !!q.otherOption,
       refusalOption: !!q.refusalOption,
       visibleIf: q.visibleIf || null,
+      // `role` has no schema default and means nothing on a question, so the type decides first.
+      role: isStatement(q) ? (q.role === 'closing' ? 'closing' : 'statement') : null,
+      title: q.title || null,
+      links: (q.links || []).filter((l) => l && l.url).map((l) => ({ label: l.label || null, url: l.url })),
+      goTo: q.goTo || null,
+      otherGoTo: q.otherGoTo || null,
       options: (q.options || [])
         .filter((o) => !o.retired)
         .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .map((o) => ({ id: o.id, text: o.text, script: o.script || null })),
+        .map((o) => ({ id: o.id, text: o.text, script: o.script || null, goTo: o.goTo || null })),
     }));
   return {
     id: String(tpl._id),
     name: tpl.name,
     intro: tpl.intro || '',
     closing: tpl.closing || '',
+    flow: tpl.flow || 'list',
     questions,
   };
 };

@@ -164,5 +164,65 @@
     ],
     "answersByKey": { "q1": { "optionIds": ["__other__"], "text": null } },
     "expectedVisibleKeys": ["q1", "q2"]
+  },
+  {
+    "name": "statement gated like a question: shown when its condition holds, and an ungated first statement always",
+    "questions": [
+      { "key": "s0", "type": "statement" },
+      { "key": "q1", "type": "single_choice" },
+      { "key": "s1", "type": "statement", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["undecided"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["undecided"], "text": null } },
+    "expectedVisibleKeys": ["s0", "q1", "s1"]
+  },
+  {
+    "name": "statement gated like a question: hidden when another answer is picked",
+    "questions": [
+      { "key": "s0", "type": "statement" },
+      { "key": "q1", "type": "single_choice" },
+      { "key": "s1", "type": "statement", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["undecided"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["yes"], "text": null } },
+    "expectedVisibleKeys": ["s0", "q1"]
+  },
+  {
+    "name": "statement gated like a question: hidden while the question is unanswered",
+    "questions": [
+      { "key": "s0", "type": "statement" },
+      { "key": "q1", "type": "single_choice" },
+      { "key": "s1", "type": "statement", "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["undecided"] }] } }
+    ],
+    "answersByKey": {},
+    "expectedVisibleKeys": ["s0", "q1"]
+  },
+  {
+    "name": "closing block from two sources: reached straight from Q1",
+    "questions": [
+      { "key": "q1", "type": "single_choice" },
+      { "key": "q2", "type": "single_choice", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] } },
+      { "key": "close", "type": "statement", "role": "closing", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }, { "questionKey": "q2", "op": "any_of", "optionIds": ["maybe"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["yes"], "text": null } },
+    "expectedVisibleKeys": ["q1", "close"]
+  },
+  {
+    "name": "closing block from two sources: reached through Q2",
+    "questions": [
+      { "key": "q1", "type": "single_choice" },
+      { "key": "q2", "type": "single_choice", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] } },
+      { "key": "close", "type": "statement", "role": "closing", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }, { "questionKey": "q2", "op": "any_of", "optionIds": ["maybe"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["no"], "text": null }, "q2": { "optionIds": ["maybe"], "text": null } },
+    "expectedVisibleKeys": ["q1", "q2", "close"]
+  },
+  {
+    "name": "closing block from two sources: stale hidden answers withheld, so Q2's old pick does not reach it",
+    "questions": [
+      { "key": "q1", "type": "single_choice" },
+      { "key": "q2", "type": "single_choice", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] } },
+      { "key": "close", "type": "statement", "role": "closing", "visibleIf": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }, { "questionKey": "q2", "op": "any_of", "optionIds": ["maybe"] }] } }
+    ],
+    "answersByKey": { "q1": { "optionIds": ["undecided"], "text": null }, "q2": { "optionIds": ["maybe"], "text": null } },
+    "expectedVisibleKeys": ["q1"]
   }
 ]

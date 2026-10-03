@@ -9,7 +9,7 @@
 # in the product, but nothing told anyone the alarm was disconnected either.
 #
 # Two jobs, deliberately split:
-#   checks       — the two unit suites + the web build. ~2-3 min, no services. EVERY push.
+#   checks       — the three unit suites + the web build. ~2-3 min, no services. EVERY push.
 #   integration  — all 109 integration suites. ~12 min. Only main, or on demand.
 #
 # The slow one is kept off feature branches on purpose. A long job in front of every commit gets
@@ -41,9 +41,11 @@ jobs:
             server/package-lock.json
             client/package-lock.json
 
-      # The server's unit suite reads two CLIENT/MOBILE source files directly (test/actionLabels.test.js
-      # compares the action- and status-label maps across all three platforms). They are plain ESM with
-      # no React or React Native imports, so a full checkout is all it needs — no mobile install.
+      # The server's unit suite reads CLIENT and MOBILE source files directly: the cross-platform label
+      # and wording checks (test/actionLabels.test.js, metricHelp, outcomeToggles, webRoutes) and the
+      # survey mirrors' drift guards (src/services/surveys/: visibility, scriptText, routing). The ones it
+      # imports are plain ESM with no React or React Native imports, so a full checkout is all it needs
+      # — no mobile install.
       - run: npm ci
         working-directory: server
       - name: server unit tests
@@ -55,6 +57,11 @@ jobs:
       - name: client unit tests
         run: npm test
         working-directory: client
+      # Every mobile/lib/*.test.js (the root script's glob), the phone's survey stepper among them. They
+      # import nothing outside mobile/lib and no npm package, so no install: a React Native import in any
+      # module one of them loads would fail this step.
+      - name: mobile unit tests
+        run: npm run test:mobile
       - name: web build
         run: npm run build
         working-directory: client

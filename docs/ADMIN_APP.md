@@ -15,7 +15,10 @@ Related: [CANVASSER_APP.md](CANVASSER_APP.md) (the field app), [PASSES_AND_TURF.
 
 The web-dashboard admin tools this doc references for depth: [SURVEYS.md](SURVEYS.md) (the survey
 builder — conditional questions, option scripts, "Other (specify)", tags — and the survey report),
-[WALKLISTS.md](WALKLISTS.md) (saved searches, by-tag filtering, CSV export), [METRICS.md](METRICS.md)
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (scripted surveys: statements,
+closings, "then go to" routing, canvasser notes and links, one block per screen, **Try it** — the
+design and the owner rulings), [WALKLISTS.md](WALKLISTS.md) (saved searches, by-tag filtering, CSV
+export), [WALK_PACKETS.md](WALK_PACKETS.md) (how a survey prints), [METRICS.md](METRICS.md)
 (the **Refused** door outcome and the **contactRate** / "Reached a person" math).
 
 ---
@@ -645,8 +648,9 @@ different set of rows — one shared implementation now, not three lookalikes.
 The mobile app above is for in-the-field admin work (assigning books, watching the numbers).
 **Setup and analysis live on the web dashboard** — and several of those tools grew capabilities worth
 knowing about. The depth lives in the linked docs; here's what an admin can now do and where it shows
-up. (Mobile is unchanged by all of this — the survey builder, the survey report, walk lists, and tags
-are web-only; the only field-app change is the new **Refused** button covered in
+up. (The survey builder, the survey report, walk lists, and tags are web-only; the field-app changes
+that come with them are the new **Refused** button and, for scripted surveys, the survey screen's
+read-aloud blocks, canvasser notes and links, and one-block-per-screen walk, all covered in
 [CANVASSER_APP.md](CANVASSER_APP.md).)
 
 ### Walk-up voters: oversight on the web
@@ -674,7 +678,8 @@ campaigns with links. The org-wide **Voters** directory (every campaign at once,
 admin-only. [VOTERS.md](VOTERS.md) → *The campaign Voters tab*.
 
 ### The survey builder does more than plain questions
-On the **Surveys** page, beyond wording/type/required/options, a question can now carry:
+On the **Surveys** page (and in a campaign's own survey builder, which team leads use), beyond
+wording/type/required/options, a question can now carry:
 - **Conditional display ("Show only if…")** — show a question only when an **earlier** answer matches
   (Match ALL / Match ANY over rules). Branch, skip, and skip-to-end all come from this one control.
 - **Read-aloud option scripts** — a per-option line the canvasser sees the moment they pick that
@@ -685,9 +690,87 @@ On the **Surveys** page, beyond wording/type/required/options, a question can no
   options **across questions**, so anyone who picked any tagged option counts once. Tags are
   **admin-only** metadata for reporting and list-building — canvassers never see them.
 
+A survey can also be written as a **script**, the way door scripts usually are — lines to read, several
+goodbyes, and "go to" arrows:
+
+- **Statements and closings.** Beside **+ Add question** sit **+ Add statement** and **+ Add closing**.
+  A **statement** is text the canvasser reads aloud (paragraphs allowed) that takes no answer: it gets
+  no question number and never shows in results (on the web dashboard or the phone's campaign screen),
+  exports or the response editor. A **closing** is a statement that is a goodbye; a survey can have as
+  many as it has paths, each shown only on the path that reaches it. An optional **Title** ("Close 2")
+  names a block in the "then go to" lists, on the phone and on paper — left blank, its first words are
+  used. The survey's own **Closing** box becomes the **default closing**: the goodbye on any path that
+  reaches no closing block. A survey needs at least one question that records an answer; statements
+  and closings alone are refused.
+- **"Then go to" arrows.** Every answer (and Other, and a free-text question) has a **then go to**
+  select: continue to the next block (the choice names it), any **later** block, or **End the
+  conversation**, where the default closing is read. Setting the first arrow switches the survey to
+  **Go to**, and a banner says so: *This survey uses Go to. Each block shows based on which answers
+  lead to it; Show-only-if conditions are built for you.* In Go to each statement and closing gets a
+  select of its own (a new closing starts on End), the condition editor gives way to a read-only
+  **Reached when …** line written from the arrows, and a grey **Continues to: …** line shows wherever
+  nothing on a block says where to go, so a forgotten arrow is visible before it misroutes a
+  conversation. Arrows only point forward, a block nothing leads to is an error ("Nothing leads to
+  …"), and removing or retiring a block that arrows point at sends them back to "continue" with a
+  one-line notice. A non-required question whose answers carry arrows gets a warning: if the
+  canvasser skips it, the conversation ends there.
+- **Switching styles.** **Switch back to Show only if**, on the banner, leaves Go to. On a survey that
+  was still Show only if when you opened it (its arrows not yet saved) it is an undo: the arrows go
+  and every block gets back the condition it was opened with. On a survey saved with Go to, or a new
+  one, it turns the arrows into ordinary conditions and removes them, so the survey shows exactly
+  what its arrows did; that waits while an arrow has an error. **Leaving Go to is always allowed;
+  entering it is blocked once a survey has responses** — on such a survey the **then go to** selects
+  are greyed out with the hint to Duplicate the survey and build the scripted version there (from the
+  Surveys list, or at the top of a campaign's **Edit survey** page, where team leads find it). (So on
+  a survey with responses, Switch back asks first: once saved, there's no way back to Go to.) A
+  Show-only-if condition still on a block when the first arrow is set has to be re-expressed as an
+  arrow or removed before the survey saves — nothing is silently deleted.
+- **Canvasser notes and links**, on every block. **+ note to canvasser (not read aloud)** shows on the
+  phone in a blue "For you — not read aloud" box; it is never read aloud, and never printed, exported
+  or shown in results. **+ link** adds up to five web links, each starting with https:// or http:// (a
+  label with no address is an error); the canvasser taps one to open it in the phone's browser and
+  show the voter. Nothing about the voter is attached, and there's no QR code in the app — by owner
+  ruling the QR goes on the printed literature.
+- **`{{canvasser}}`.** Type it in the greeting, a statement, a closing, an answer's read-aloud script or
+  a note, and each canvasser sees their own first name (the preview shows yours; paper prints a blank
+  line). It is the only placeholder — dates are typed by hand. A misspelt one is refused at save, and
+  `{{` is refused outright, in the builder and again at save, in a question's wording, an answer, a
+  title and a link label: the first two are stored with every answer, the last two show exactly as
+  typed.
+- **One block per screen.** A Survey settings checkbox. It ticks itself when a survey that wasn't a
+  script when opened gets a statement, a closing or an arrow — judged on the survey as it will be
+  saved, so one added and taken out again changes nothing — and once you tick or untick it yourself,
+  that stands. Canvassers then see one block at a time with Next, Back and Skip
+  ([CANVASSER_APP.md](CANVASSER_APP.md) → *Taking a survey*). Every existing survey keeps the single
+  page.
+- **Try it.** The survey preview — a campaign's **Survey** tab and the quick view on the Surveys page —
+  has an **Overview | Try it** switch. **Try it** lets you click through every path as a canvasser
+  would, one block per screen or one page to match the setting, running the same code as the phone;
+  nothing is saved. **Overview** shows each conditional block's **Shown when …** line, statements and
+  closings with their notes and links, and each answer's read-aloud line under it.
+- **Counts** are of questions: the builder's header reads like "5 questions · 4 statements" (retired
+  blocks left out), the quick view adds "· 4 statements", and the library row and the campaign Survey
+  tab count only the questions a canvasser answers.
+
+**Refused is not a survey answer.** By owner ruling a refusal is recorded only from the door screen's
+**Refused** button, so there is no "Refused" option to add: a canvasser refused mid-script backs out
+of the survey and taps Refused on the door — unless they already surveyed someone else at that door
+this round, when they leave the door as it is, because a Refused tap would replace their result there
+and delete those answers (the phone asks first). **Tags work the same in a script** — tag every "yes" that
+means a supporter, wherever it sits on the path — with one thing to know before quoting the Tags
+panel's *current* figure on a multi-round campaign: "current" is decided per tagged question, so a
+later visit that never reaches a tagged question leaves that question's last answer standing
+([SURVEYS.md](SURVEYS.md) → *Tags*).
+
 > These are the same builder features described in full in [SURVEYS.md](SURVEYS.md) (including the now
-> much more permissive "edit a survey that already has answers" rules). The only hard block is changing
-> a question's **answer type** once it has responses.
+> much more permissive "edit a survey that already has answers" rules) and, for scripts,
+> [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md). Two changes are hard-blocked once a
+> survey has responses: changing a question's **answer type**, and switching it to **Go to** routing —
+> Duplicate the survey for either (on the Surveys list, or at the top of a campaign's **Edit survey**
+> page, which is where a team lead finds it; it switches that campaign to the copy, so do it between
+> shifts). Adding statements, closings, notes and links stays safe, and so do
+> changes to a Go to survey's arrows (between shifts, not during one: a phone keeps the version it
+> loaded until it refreshes).
 
 ### The survey report now rolls up by tag
 The campaign's **survey results** (on the campaign dashboard, below the per-question charts) gained a
@@ -1046,16 +1129,24 @@ map is complete; full server/data depth is in the linked docs, not duplicated.
 
 | Capability | Client | Server / data | Doc |
 |---|---|---|---|
-| Survey builder: conditions, option scripts, "Other (specify)", **tag** combobox + palette | [SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) (`SurveyForm`, `OptionRow`, `ConditionEditor`; `tagPalette` → `tags`; shared `<datalist id="survey-tags">`) | [routes/admin/surveys.js](../server/src/routes/admin/surveys.js) (`canonicalizeTags`, `validateVisibleIfIntegrity`, soft-retire reconcile); `SurveyTemplate.tags` / `option.tag` / `option.script` / `question.visibleIf` / `question.otherOption` | [SURVEYS.md](SURVEYS.md) §B/§D/§I |
+| Survey builder: conditions, option scripts, "Other (specify)", **tag** picker; scripted surveys — statements and closings, canvasser notes and links, "then go to" (the Go to banner, **Switch back**, Reached when / Continues to), `{{canvasser}}`, the **One block per screen** setting, and the preview's **Try it** | [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`SurveyForm`, hosted by [SurveyEditorPage.jsx](../client/src/pages/SurveyEditorPage.jsx) and the in-campaign [CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx); `OptionRow` with `TagPicker` over the org's tags, `ConditionEditor`, `StatementCard`, `RouteSelect`, `OtherRow`, `BlockExtras`, `FlowSection`); its pure rules in [lib/surveyBuilderRules.js](../client/src/lib/surveyBuilderRules.js) (`surveyIssues`, `switchBack`, `autoPresentation`, `repointRoutes`, `displayNum`, `countLabel`) over the compiler mirror [lib/surveyRouting.js](../client/src/lib/surveyRouting.js); [SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) (Overview · Try it, on `lib/surveyRunner.js`) with [lib/surveyConditionText.js](../client/src/lib/surveyConditionText.js) for the "Shown when / Reached when / Only if" wording | [routes/admin/surveys.js](../server/src/routes/admin/surveys.js) (`canonicalizeTags`, `validateVisibleIfIntegrity`, soft-retire reconcile; `applyFlow` → `compileRouting` in [services/surveys/routing.js](../server/src/services/surveys/routing.js); placeholder checks from [services/surveys/scriptText.js](../server/src/services/surveys/scriptText.js); the `survey-has-responses` 409 on entering Go to; `duplicate` copies `flow`, `presentation` and `tags`; a zod 400 puts the first of its plain-English rule messages in `error` — zod's built-in checks still read "Invalid input" — with `issues` unchanged); `SurveyTemplate.tags` / `flow` / `presentation`, `option.tag` / `option.script` / `option.goTo`, `question.visibleIf` / `question.otherOption` / `type: 'statement'` / `role` / `title` / `note` / `links` / `goTo` / `otherGoTo` | [SURVEYS.md](SURVEYS.md) §B/§D/§I, [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) §E–§G |
 | Survey report **Tags** rollup + voters-by-tag drill | [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) renders `<TagResults>` from `surveyResultsQ.data.tags`; `QuestionResults.jsx` `TagResults` | `GET /admin/reports/survey-results` `tags[]` (distinct voters per tag via `answerTagClause`) + `GET /admin/reports/voters-by-answer?tag=&surveyTemplateId=` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [SURVEYS.md](SURVEYS.md) §I |
 | Saved searches: **By tag** filter + status filter incl. **Refused** / **Restricted** + **Export CSV** | [WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) (`AnswerFilters` `answerTagFilters`; `STATUSES` includes `'refused'`/`'restricted'`; `exportCsv` authenticated blob download) | `filter.answerTagFilters` ([resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js)) + `GET /admin/campaigns/:id/walklists/:id/export.csv` ([routes/admin/walklists.js](../server/src/routes/admin/walklists.js)) | [WALKLISTS.md](WALKLISTS.md), [SURVEYS.md](SURVEYS.md) §I |
 | **Refused** door outcome in admin numbers | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) amber `refused` segment; [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) / [OverviewPage.jsx](../client/src/pages/OverviewPage.jsx) coverage; [reportDerive.js](../client/src/lib/reportDerive.js) `CONTACT_LABELS.refused = 'Declined to participate'` | `refused` (coverage + events), `refusedKnocks`, `contactRate` on `/overview` · `/campaign-rollup` · `/canvassers`; `Refused` column in `/admin/reports/canvassers.csv` ([routes/admin/reports.js](../server/src/routes/admin/reports.js)) | [METRICS.md](METRICS.md) |
 | **Restricted access** door outcome (all campaign types; **not** billable) — and the **desk marks** (a whole book, a lassoed map selection, or a single home) | [CoverageBar.jsx](../client/src/components/CoverageBar.jsx) slate `restricted` segment; [statusColors.js](../client/src/lib/statusColors.js) `restricted: '#475569'`; [CanvasserSummaryTable.jsx](../client/src/components/CanvasserSummaryTable.jsx) `dayRestricted` column; single-home mark/unmark in [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) (`RestrictSection` in the house popup, building popup counts) and [HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) (`RestrictedSection`), classifier [lib/restrictMark.js](../client/src/lib/restrictMark.js); **web-only** many-door "Select doors" mode on both web maps ([MapSelectModeControl.jsx](../client/src/components/MapSelectModeControl.jsx) + [DoorSelectionBar.jsx](../client/src/components/DoorSelectionBar.jsx) over [lib/lassoSelect.js](../client/src/lib/lassoSelect.js) / [lib/useLassoDraw.js](../client/src/lib/useLassoDraw.js) — [MAPS.md](MAPS.md) §K); mobile: the admin Map door sheet row + the book house pop-up (not web-only — listed here for the file map) | `restricted` (coverage + events + per-canvasser tally), excluded from `KNOCK_ACTIONS`/`homesKnocked`/rates; `Restricted` column in `/admin/reports/canvassers.csv`; `dayRestricted` on `/canvasser-timeline`; `excludeRestricted` cut option ([turfs.js](../server/src/routes/admin/turfs.js) → [generateTurf.js](../server/src/services/turf/generateTurf.js)); desk marks via `restrict-bulk` / `unrestrict-bulk` + `restrict-doors` / `unrestrict-doors` → [services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) (`via:'bulk'`, never billed, never anyone's work) | [METRICS.md](METRICS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) |
 | **Campaign Voters tab** (Field group, after Map; lead-visible) + the campaign-relative profile | [VotersPage.jsx](../client/src/pages/VotersPage.jsx) / [VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) in campaign mode (`useParams().campaignId`); `voters` in `CAMPAIGN_NAV` ([navItems.js](../client/src/components/navItems.js)); routes `/campaigns/:campaignId/voters[/:voterId]` in the campaign block of [App.jsx](../client/src/App.jsx) | `GET /admin/campaigns/:campaignId/voters[/:voterId]` + `POST …/:voterId/notes` ([routes/admin/campaignVoters.js](../server/src/routes/admin/campaignVoters.js), `requireCampaignManager`); the ONE list resolver `listVoters` ([services/voters/voterDirectory.js](../server/src/services/voters/voterDirectory.js)) and `buildVoterProfile(…, { scopeCampaignId })` | [VOTERS.md](VOTERS.md) §B–C, [ROLES.md](ROLES.md) |
 
-> Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**
-> (`question.refusalOption` is reserved and unwired). "Refused" is a **door-level disposition** on
-> survey campaigns, recorded from the field app, not a survey answer. See [SURVEYS.md](SURVEYS.md) §A.
+> Note — what is **not** in the survey builder: there is **no per-question "Refused to answer" option**.
+> By owner ruling (2026-10-02) a refusal is recorded only from the door screen's **Refused** button — a
+> **door-level disposition** on survey campaigns, recorded from the field app — and never as a survey
+> answer, scripted surveys included. `question.refusalOption` is a leftover from an earlier plan, not a
+> feature: the API accepts and stores the flag (never on a statement), the builder has no control for
+> it, and the phone and the reports ignore it. The only surface that shows it is a printed walk
+> packet, as a muted "Refused" bubble a volunteer could circle and the app could never record
+> ([WALK_PACKETS.md](WALK_PACKETS.md) → *Survey resolution*). Don't build on it: a tracked survey
+> "Refused" was rejected by the same ruling
+> ([PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) §N). See [SURVEYS.md](SURVEYS.md)
+> (Part 1, the note *a refusal is the door's Refused button*, and §A).
 
 ## Roadmap (Phase 2+)
 Campaigns (CRUD) · Efforts & assignments · Walk lists · Voters (search) · Surveys (builder) — each adds

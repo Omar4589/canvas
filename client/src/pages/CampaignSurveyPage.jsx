@@ -8,6 +8,7 @@ import { Card, Badge, Button, Select, DataTable } from '../components/ui';
 import Modal from '../components/ui/Modal.jsx';
 import SurveyPreview from '../components/SurveyPreview.jsx';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
+import { activeBlocks, answerableQuestions } from '../lib/surveyRunner.js';
 
 // In-campaign Survey screen (/campaigns/:campaignId/survey). Surveys are reusable
 // org-level templates; this screen manages the campaign's survey COVERAGE:
@@ -142,6 +143,8 @@ export default function CampaignSurveyPage() {
   const attachedId = campaign.surveyTemplateId?._id || campaign.surveyTemplateId || null;
   const attachedSurvey = attachedId ? surveyById.get(String(attachedId)) || null : null;
   const others = attachedSurvey ? usedByOthers(attachedSurvey, campaignId) : 0;
+  // What canvassers answer: retired questions and read-aloud statements are not questions.
+  const attachedQuestionCount = answerableQuestions(activeBlocks(attachedSurvey)).length;
   // Lead lists narrow usedByCampaigns to their campaigns; the server's bare
   // `usedElsewhere` boolean keeps the shared badge honest beyond their view.
   const sharedBeyondView = !!attachedSurvey?.usedElsewhere;
@@ -216,8 +219,8 @@ export default function CampaignSurveyPage() {
                     {attachedSurvey.archivedAt && <Badge variant="neutral" dot>Archived</Badge>}
                   </div>
                   <div className="mt-1 text-xs text-fg-muted">
-                    {(attachedSurvey.questions || []).filter((q) => !q.retired).length} question
-                    {(attachedSurvey.questions || []).filter((q) => !q.retired).length === 1 ? '' : 's'}
+                    {attachedQuestionCount} question
+                    {attachedQuestionCount === 1 ? '' : 's'}
                     {defaultCoverageCount > 0 && (
                       <> · {defaultCoverageCount.toLocaleString()} response{defaultCoverageCount === 1 ? '' : 's'} in this campaign</>
                     )}
@@ -251,7 +254,13 @@ export default function CampaignSurveyPage() {
                       {attachedSurvey.responseCount.toLocaleString()} response
                       {attachedSurvey.responseCount === 1 ? '' : 's'} across all campaigns — editing keeps past
                       answers; only changing a question&apos;s <strong className="font-medium text-fg">answer
-                      type</strong> needs Duplicate.
+                      type</strong>
+                      {attachedSurvey.flow !== 'script' && (
+                        <>
+                          , or switching it to <strong className="font-medium text-fg">Go to</strong>,
+                        </>
+                      )}{' '}
+                      needs Duplicate.
                     </div>
                   )}
                   <div className="px-5 py-4">

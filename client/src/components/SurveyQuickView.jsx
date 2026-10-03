@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Drawer, Badge, Button } from './ui';
 import SurveyPreview from './SurveyPreview.jsx';
+import { activeBlocks, isStatement } from '../lib/surveyRunner.js';
 
 // Read-only quick view of one survey template in a right-side drawer — the fast
 // "what is this survey, where does it run, how is it doing" pane. Authoring lives
@@ -33,6 +34,11 @@ export default function SurveyQuickView({
   const archived = !!survey.archivedAt;
   const inUse = usedByCampaigns.length > 0 || usedByWalkLists.length > 0;
   const deletable = survey.responseCount === 0 && !inUse;
+  // Questions are the blocks a canvasser answers. A statement is read aloud and records nothing,
+  // so it is counted on its own, never as a question.
+  const blocks = activeBlocks(survey);
+  const statementCount = blocks.filter(isStatement).length;
+  const questionCount = blocks.length - statementCount;
 
   // Campaigns worth a results link: current default attachments ∪ campaigns that
   // actually collected responses under this survey (covers swapped-away history).
@@ -68,7 +74,12 @@ export default function SurveyQuickView({
               <dd className="text-right tabular-nums text-fg">{fmtDate(survey.updatedAt)}</dd>
               <dt className="text-fg-muted">Questions</dt>
               <dd className="text-right tabular-nums text-fg">
-                {(survey.questions || []).filter((q) => !q.retired).length}
+                {questionCount}
+                {statementCount > 0 && (
+                  <span className="text-fg-muted">
+                    {' '}· {statementCount} statement{statementCount === 1 ? '' : 's'}
+                  </span>
+                )}
               </dd>
             </dl>
           </div>

@@ -2,9 +2,10 @@
 // admin in-place edit path can never drift. Both call this; the only difference
 // is dropHidden (submit drops ghost answers to hidden questions, admin edit
 // keeps them to preserve recorded history). NEVER throws / never 400s — unknown
-// option ids are pruned and unknown-question rows are dropped silently.
+// option ids are pruned; unknown-question rows and statement rows are dropped silently.
 import { makeCell, visibleQuestionKeys } from './visibility.js';
 import { OTHER_OPTION_ID, isOtherOptionId } from './otherOption.js';
+import { isStatement } from './routing.js';
 
 // Collapse an answer snapshot (string | string[] | null) to a single string or null.
 function stringifyAnswer(a) {
@@ -58,6 +59,12 @@ export function normalizeAndFilterAnswers(
   for (const row of rawAnswers || []) {
     const q = questionByKey.get(row.questionKey);
     if (!q) continue; // unknown question — never carried
+    // A statement (read-aloud text or a closing) records nothing, so its row is never carried,
+    // in BOTH dropHidden modes and for every writer. Today's clients post none; this is the
+    // backstop for a phone on an older bundle (it posts an empty row per statement it showed)
+    // and for an offline replay queued days ago. Nothing else drops it: a reached statement is
+    // a known, visible key.
+    if (isStatement(q)) continue;
 
     const validIds = new Set((q.options || []).map((o) => o.id));
     if (q.otherOption) validIds.add(OTHER_OPTION_ID);

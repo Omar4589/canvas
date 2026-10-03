@@ -1964,6 +1964,129 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     Owner to confirm before the production deploy, as with items 17-24 — specifically the note ruling
     in (a), together with this reading of `:91`.
 
+26. **[v6 2026-10-02 — Scripted surveys: read-aloud statements and closing blocks, "then go to"
+    routing, canvasser-only notes, tappable web links and the `{{canvasser}}` placeholder.
+    Customer-authored TEMPLATE content plus a user-initiated hand-off of a URL to the device browser
+    — no new personal data, no new field about any person, no new recipient, no new subprocessor, no
+    retention change, nothing new in exports, client reports or share links. Same class as items 15
+    and 20; no policy edit. Said out loud here as the repo invariant requires.]** What shipped (built
+    2026-10-02, uncommitted at time of writing): `SurveyTemplate` (`models/SurveyTemplate.js`, zod
+    twin in `routes/admin/surveys.js`) gains a fourth block type, `statement` — read aloud, never
+    answered — with a `role` (`statement` or `closing`) and an optional `title` (≤ 80 characters);
+    any block can carry a canvasser `note` (≤ 2000, never read aloud) and up to five `links`
+    (`{ label ≤ 120, url ≤ 2000 }`, `^https?://` only, so a `javascript:` or `data:` URL is a 400).
+    "Then go to" routes (`goTo` on answers and blocks, `otherGoTo`) are compiled into the existing
+    `visibleIf` at save (`services/surveys/routing.js`), and the template gains `flow` (`list` |
+    `script`) and `presentation` (`scroll` | `steps`, one block per screen on the phone).
+    `{{canvasser}}` in script text (the greeting, closings, statements, answer scripts, notes) reads
+    as the signed-in canvasser's own first name on the phone (`bootstrap.user.firstName`, already on
+    that phone), as the viewer's own first name in the web preview, and as a blank line on paper
+    (`services/surveys/scriptText.js`, mirrored to the client and the phone). Docs:
+    [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (§K walks the triggers; §O, "As
+    built", records where the build differs from the plan), [SURVEYS.md](SURVEYS.md).
+
+    **(a) What we collect — nothing new about anyone.** `SurveyResponse` is unchanged. A statement or
+    closing records nothing: the phone posts no row for one (`buildSubmitRows`,
+    `mobile/lib/surveyRunner.js`), and `normalizeAndFilterAnswers`
+    (`services/surveys/normalizeAnswers.js`) drops a statement row in both modes for every writer —
+    the phone's survey POST, the admin response edit and desk conversion — the backstop for an older
+    app bundle or an offline replay. Which closing a conversation reached is not recorded (plan ruling
+    11). Statement text, titles, notes and links are customer-authored template content, the same
+    class as the greeting, the closing and the answer scripts that already exist. They are written in
+    the survey builder by the customer's org admins and team leads: only the survey routes
+    (`routes/admin/surveys.js`, `requireOrgRole('admin', 'lead')`) write statement text, titles, notes
+    or links. Two other writers touch template documents, and neither writes any of those fields: the
+    org-admin tag-library routes (`routes/admin/tags.js`, `requireOrgRole('admin')`, through
+    `services/surveys/tagOps.js`) rewrite answer tag names and the survey's tag palette only, and the
+    super-admin demo rebuild (`routes/superAdmin/platform.js` → `services/platform/seedDemoOrg.js`)
+    creates or resets Doorline's own demo survey in the demo org, whose blocks are plain questions.
+    Nothing about a voter or a door flows into any of them. `{{canvasser}}` is filled on the device for
+    display only and the filled text is never stored or sent: the only template text stored with a
+    response, a question's wording and an answer's text, may not contain `{{` at all on a live
+    question or answer (the save check skips a retired one, which never reaches a phone). One
+    boundary, recorded so it is not crossed by accident: the Burton script's Close 3 asks "Do you know
+    anyone else that would want to vote for Paul?" and stays read aloud only. Recording those names
+    would be new personal data and a "what we collect" event.
+
+    **(b) Retention / deletion — unchanged.** The new fields live on the template document and follow
+    its existing lifecycle: archive, delete-when-unused, and the organization-deletion cascade
+    (`services/platform/deleteOrganization.js` lists `SurveyTemplate`). No new collection, no index,
+    no TTL, nothing to purge.
+
+    **(c) Who can access — the existing readers of template text, and one point for the owner.** The
+    new text reaches exactly who template text already reaches: every rostered canvasser's phone (the
+    bootstrap ships whole lean templates, `routes/mobile/bootstrap.js`); org admins and team leads in
+    the builder and the preview (a lead's library is scoped to surveys they authored or that are
+    attached to a campaign they manage); org admins in the desk-entry payloads (answerable questions
+    only, behind `loadForReclassify`; a question's note and links ride in that JSON unrendered, to a
+    reader who can already open the builder); and paper (statements, closings, their titles and their
+    links — a question's links ride in the packet payload but never print — and never a note:
+    `toPrintableSurvey` in `services/packet/buildPacket.js` does not carry it; (e) lists what prints).
+    The response editor's question snapshot (`services/voters/voterProfile.js`) keeps its field
+    whitelist and answerable questions only, so a note never reaches it. **Notes are lead-visible and
+    lead-authorable:** a team lead can write and read a canvasser note on a survey they authored or
+    one attached to a campaign they manage, through the in-campaign builder and the campaign's Survey
+    tab, and a lead may be the paying client. The Burton note is opposition research about the other
+    candidate. This was put to the owner in the plan (§K).
+
+    **(d) Sharing / subprocessors — none. Not a DPA §6 event.** A link is a USER-INITIATED hand-off,
+    the class items 15 and 20 recorded, on the two conditions those items set, both met in code. (i)
+    It opens only on an explicit tap, in the device browser: the phone
+    (`mobile/components/SurveyNoteAndLinks.jsx`) calls `Linking.openURL` with the URL exactly as the
+    author saved it, and drops anything that is not http(s) rather than hand it to the OS; the web
+    preview renders an http(s) link as an anchor that opens a new tab only on a click, with
+    `rel="noopener noreferrer"`, so no Referer is sent; paper prints the address as text. (ii) Nothing
+    about the voter, the door or the canvasser is appended; nothing fetches, prefetches, previews,
+    embeds (no WebView) or proxies a link; and no tap is logged or sent to Doorline. The linked site
+    sees what any visitor's browser sends, exactly as if the canvasser had typed the address in.
+    Doorline engages nobody "to provide the Service" (`DPA.md` §6's test) and has no contract, API key
+    or SDK with any linked site. One difference from items 15 and 20 is recorded deliberately, and it
+    is narrower: there the URL carried a voter's street address; here the customer's author chose the
+    URL and it carries nothing from Doorline's records, so a tap discloses nothing about anyone, and
+    with no user data in the URL the Google Play Data-safety "sharing" question item 20 weighed does
+    not arise. No QR code is drawn on the phone (owner ruling: the QR is on the printed literature),
+    so no QR library or QR-image service is involved. **No customer notice; no `privacy.html` / ToS /
+    DPA edit.**
+
+    **(e) What we expose — nothing new reaches exports, client reports or share links.** Exports:
+    `templateAnswerPlan` (`services/export/surveyColumns.js`) builds columns over answerable questions
+    only, so a statement is never a column, and no export builder reads a block's note, links, title
+    or routes. Client reports: `computeSurveyBreakdowns` (`services/reports/computeReport.js`) is
+    choice-only and emits a question's key, wording, type and option counts, and `publicPointAnswer`
+    returns nothing for a statement, so neither a published report nor a share-map point can carry
+    statement text, a note or a link; the public share route (`routes/public/share.js`) never reads a
+    template, only those frozen payloads. Pinned since 2026-10-03 by
+    `server/test/surveyBlocks.int.test.js` ("a client report and its public map carry no statement,
+    even from a stray stored row"): with a stray stored row under a statement's key,
+    `computeSurveyBreakdowns` still gives breakdowns for the choice questions only, with no statement
+    text anywhere in its output, `computeWindowStats` (the report builder's window) gives breakdowns
+    for the same questions, and `publicPointAnswer` returns null for every statement. In-app results:
+    `/survey-results` (`routes/admin/reports.js`) skips statements, so no results card, tag rollup or
+    phone admin screen shows one. Paper is the one surface that prints the new text, and never a note.
+    On the walk packet's "What to say" page, once, beside the greeting, closing and answer scripts it
+    already printed: each statement's and closing's read-aloud text, its title, and its links' labels
+    and addresses (a question's links don't print). And in a Go to survey every arrow — with the
+    answers at each door, and after a statement or closing on the "What to say" page — names a
+    statement or closing it leads to by its title, or an untitled one by a quoted excerpt of the first
+    sixty or so characters of its read-aloud text.
+
+    **No published sentence becomes false.** `privacy.html:90` (canvassing activity "such as a survey
+    response, a door status, or a note" — a scripted survey records answers to its questions exactly
+    as before), `:98` (no advertising cookies or third-party advertising trackers — Doorline adds
+    nothing to a link and loads nothing from it), `:101` (a published report shows only the predefined
+    answer choices of selected survey questions — a statement is not a question and cannot be
+    selected) and `:106` (the service-providers paragraph — nobody new) all stay true. The template
+    text itself reads as Customer Data under `terms.html:91` and `DPA.md` §1 (data the customer
+    uploads to or generates in the Service). **Assessment: no Privacy Policy / ToS / DPA text edit is
+    required.** **Reopen this item** if a link ever gains anything per-voter, per-door or
+    per-canvasser (a token, an id, a tracking parameter Doorline adds), if taps are logged or counted,
+    if links are fetched, prefetched, previewed or unfurled (on the device or server-side) or opened
+    in an embedded WebView, if a QR is drawn by an external service, if statement or note text starts
+    reaching an export, a client report or a share link, or if a statement starts recording what the
+    voter says (Close 3's referral names are the likely first ask). Owner to confirm before the
+    production deploy and OTA, as with items 17-25 — specifically the lead-visible, lead-authorable
+    note in (c).
+
 ---
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree

@@ -1395,8 +1395,8 @@ both the list route and the CSV), `restrictBooks.test.js`, `packetPdf.test.js`
 
 Run: `npm --prefix server test`, `npm --prefix server run test:int` (throwaway mongod per file; file
 args relative to `server/`), `npm --prefix client test`, `npm --prefix client run build`, `npm run
-test:mobile` (not in CI — run locally), and a mobile `expo export` to prove the bundle and the new
-asset resolve.
+test:mobile` (not in CI — run locally) (2026-10-03: CI's checks job now runs it), and a mobile
+`expo export` to prove the bundle and the new asset resolve.
 
 ## O. Rollout, gates and compatibility
 
@@ -1649,4 +1649,5 @@ Built in the order of §Q. Where the build differs from the text above, this sec
     files never saw the new rule (pinned in `optInOutcomes.int`).
 14. **The phone's `/changes` URL has one builder**, `mobile/lib/deltaFold.js` `changesPath`, called by
     `map.jsx`. `server/test/outcomeToggles.test.js` feeds it the server's real stamp and text-checks
-    that `map.jsx` uses it. That suite runs in CI, which never runs `test:mobile`.
+    that `map.jsx` uses it. That suite runs in CI, which never runs `test:mobile`. (2026-10-03:
+    CI's checks job now runs it.)

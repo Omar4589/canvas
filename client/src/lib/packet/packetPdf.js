@@ -41,6 +41,12 @@ const text = (doc, s, x, y, opts) => doc.text(asciiSafe(s), x, y, opts);
 
 // A row of outlined pills (circle one) or squares (tick any), wrapped to the content width.
 // Returns the height consumed whether or not it painted.
+//
+// An item may carry an `arrow`: a Script-flow answer's "go to", printed beside its box
+// ("-> Q4"), past the write-in line when it has one, and kept on the same row as its box. Both
+// passes measure it in the hint face and put the option face straight back, because the next
+// label is measured in whatever face is current — a pass that left the hint face set would
+// measure one width and paint another. Items without an arrow take exactly the old path.
 const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
   const size = opts.size || TYPE.option;
   setFont(doc, size, 'normal', DARK);
@@ -52,7 +58,16 @@ const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
     const tw = doc.getTextWidth(label);
     const boxW = shape === 'pill' ? tw + 12 : tw + 15;
     const advance = boxW + 6;
-    if (cx + boxW > x + w && cx > x) { cx = x; cy += 17; rows += 1; }
+    const arrow = item.arrow ? asciiSafe(`-> ${item.arrow}`) : null;
+    let arrowW = 0;
+    if (arrow) {
+      setFont(doc, TYPE.gate, 'italic', GRAY);
+      arrowW = doc.getTextWidth(arrow);
+      setFont(doc, size, 'normal', DARK);
+    }
+    const arrowAt = boxW + 4 + (item.writeIn ? 124 : 0);
+    const span = arrow ? arrowAt + arrowW : boxW;
+    if (cx + span > x + w && cx > x) { cx = x; cy += 17; rows += 1; }
     if (paint) {
       const ink = item.muted ? SUBTLE : GRAY;
       doc.setDrawColor(ink[0], ink[1], ink[2]);
@@ -76,9 +91,18 @@ const chipRow = (doc, x, y, w, items, shape, paint, opts = {}) => {
           doc.line(lineX, cy + 11, lineX + lineW, cy + 11);
         }
       }
+      if (arrow) {
+        setFont(doc, TYPE.gate, 'italic', GRAY);
+        text(doc, arrow, cx + arrowAt, cy + 9.8);
+        setFont(doc, size, 'normal', DARK);
+      }
     }
-    cx += advance;
-    if (item.writeIn) cx += 130;
+    if (arrow) {
+      cx += arrowAt + arrowW + 10;
+    } else {
+      cx += advance;
+      if (item.writeIn) cx += 130;
+    }
     if (cx > x + w) { cx = x; cy += 17; rows += 1; }
   }
   return rows * 17 + 2;
@@ -168,10 +192,13 @@ const questionSegment = (q, ctx) => ({
         q.options, q.type === 'single_choice' ? 'pill' : 'square', paint
       );
     }
-    if (q.skipHint) {
+    // One instruction line under the answers: List flow's forward skip, or Script flow's "go to"
+    // for a question whose answers carry no arrows of their own. The model fills at most one.
+    const hint = q.skipHint || q.arrow;
+    if (hint) {
       if (paint) {
         setFont(doc, TYPE.gate, 'italic', GRAY);
-        text(doc, `-> ${q.skipHint}`, x + indent + 4, y + h + 7);
+        text(doc, `-> ${hint}`, x + indent + 4, y + h + 7);
       }
       h += 11;
     }
@@ -741,6 +768,12 @@ const drawCover = (doc, payload, book, ctx, coverMap) => {
 // `nextPage` is the renderer's own newPage, not doc.addPage — a long script used to break onto
 // a raw page with no header band, no footer and no entry in pageOwner, so it printed unbranded
 // and unnumbered.
+//
+// It prints the print model's `script` sequence, in the order the conversation runs: the
+// opening; each statement and closing ONCE, headed with its "only if" gate, with its links as
+// addresses and, in Script flow, where it goes next; the read-aloud lines under answers; and the
+// template's closing, captioned as the fallback once closing blocks exist. Canvasser notes are
+// not in the sequence and never print (ruling 10).
 const drawScriptPage = (doc, survey, ctx, startY, nextPage) => {
   const x = PAGE.MARGIN;
   // Clear of the band's WALKED BY rule: a 24pt heading on BODY_TOP put its cap height straight
@@ -749,25 +782,44 @@ const drawScriptPage = (doc, survey, ctx, startY, nextPage) => {
   setFont(doc, TYPE.scriptTitle, 'bold', DARK);
   text(doc, 'What to say', x, y);
   y += 20;
-  const para = (label, body) => {
-    if (!body) return;
-    if (y > PAGE.BODY_BOTTOM - 40) y = nextPage();
-    setFont(doc, TYPE.micro, 'bold', GRAY);
-    text(doc, label.toUpperCase(), x, y);
-    y += 13;
-    setFont(doc, TYPE.coverBody, 'normal', DARK);
-    doc.splitTextToSize(asciiSafe(body), ctx.contentW).forEach((ln) => {
-      if (y > PAGE.BODY_BOTTOM - 12) y = nextPage();
+  // Wrapped lines in one face. A page break draws the next page's band and footer, which leave
+  // the footer's 7.5pt gray face set, so the face goes back on before the next line — without
+  // that, everything after a break printed in footer type, and a statement can run to 5000
+  // characters, longer than a page.
+  const lines = (s, size, style, color) => {
+    setFont(doc, size, style, color);
+    doc.splitTextToSize(asciiSafe(s), ctx.contentW).forEach((ln) => {
+      if (y > PAGE.BODY_BOTTOM - 12) {
+        y = nextPage();
+        setFont(doc, size, style, color);
+      }
       text(doc, ln, x, y);
       y += 13;
     });
+  };
+  const para = (label, body, { links = [], arrow = null } = {}) => {
+    if (!body && !links.length) return;
+    if (y > PAGE.BODY_BOTTOM - 40) y = nextPage();
+    // A heading can carry a gate longer than the line ("only if Q3 = … or Q5 = …"), so it wraps
+    // like the body; a heading that fits prints exactly as it always has.
+    lines(label.toUpperCase(), TYPE.micro, 'bold', GRAY);
+    if (body) lines(body, TYPE.coverBody, 'normal', DARK);
+    for (const l of links) lines(l.label ? `${l.label}: ${l.url}` : l.url, TYPE.coverBody, 'normal', DARK);
+    if (arrow) lines(`-> ${arrow}`, TYPE.gate, 'italic', GRAY);
     y += 12;
   };
-  para('Opening', survey.intro);
-  for (const s of survey.scripts) {
-    para(`${s.question} — if they say "${s.option}"`, s.script);
+  for (const e of survey.script) {
+    if (e.kind === 'opening') para('Opening', e.text);
+    else if (e.kind === 'option') para(`${e.question} — if they say "${e.option}"`, e.text);
+    else if (e.kind === 'statement' || e.kind === 'closing') {
+      // Its kind, the author's title when there is one ("Close 2", the name a door page's arrow
+      // points at), then the gate to check before reading it aloud.
+      const name = `${e.kind === 'closing' ? 'Closing' : 'Statement'}${e.title ? `: ${e.title}` : ''}`;
+      para(e.gate ? `${name} — ${e.gate}` : name, e.text, { links: e.links, arrow: e.arrow });
+    } else if (e.kind === 'default-closing') {
+      para(survey.closingIsFallback ? 'Closing — when no closing block applies' : 'Closing', e.text);
+    }
   }
-  para('Closing', survey.closing);
 
   // Rule off the reference block so the first door doesn't read as part of the script.
   doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
@@ -884,8 +936,11 @@ export const renderPacketPdf = async (payload, settings) => {
     });
 
     let y = newPage(book);
-    if (layout === 'survey' && ctx.survey && settings.showScriptPage &&
-        (ctx.survey.intro || ctx.survey.closing || ctx.survey.scripts.length)) {
+    // The sequence holds exactly what the page prints: the opening, the closing and every
+    // answer's read-aloud line, as this gate always tested, and now every statement and closing
+    // block too — a script of statements alone, with no opening, closing or answer scripts,
+    // still gets its page.
+    if (layout === 'survey' && ctx.survey && settings.showScriptPage && ctx.survey.script.length) {
       y = drawScriptPage(doc, ctx.survey, ctx, y, () => newPage(book));
     }
     let lastStreet = null;

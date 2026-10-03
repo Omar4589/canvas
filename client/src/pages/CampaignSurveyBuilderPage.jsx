@@ -9,9 +9,9 @@ import SurveyForm from '../components/SurveyBuilder.jsx';
 // the shared SurveyForm INSIDE the drill-in so authoring never bounces the admin out to
 // the org-wide Surveys library. New: create a template + attach it to this campaign.
 // Edit: load the campaign's attached template and patch it in place — with a warning when
-// other campaigns share it (and a one-click "duplicate this campaign's own copy"). Save
-// and cancel both return to the Survey tab. No server changes: POST/PATCH /admin/surveys
-// + PATCH /admin/campaigns/:id { surveyTemplateId }.
+// other campaigns share it (and a one-click "duplicate this campaign's own copy"), and the
+// same Duplicate when it has responses. Save and cancel both return to the Survey tab. No
+// server changes: POST/PATCH /admin/surveys + PATCH /admin/campaigns/:id { surveyTemplateId }.
 
 function usedByOthers(survey, campaignId) {
   return (survey?.usedByCampaigns || []).filter((c) => String(c.id) !== String(campaignId)).length;
@@ -83,7 +83,8 @@ export default function CampaignSurveyBuilderPage({ mode }) {
 
   // "Duplicate to edit just this campaign's copy": copy the shared template, attach the
   // copy to THIS campaign, and stay on /survey/edit — the refetch re-enters edit on the
-  // now-unshared copy and the warning clears.
+  // now-unshared copy and the warning clears. The same action is the way out for a survey
+  // with responses (an answer type or Go to needs a fresh copy).
   const duplicate = useMutation({
     mutationFn: (id) => api(`/admin/surveys/${id}/duplicate`, { method: 'POST' }),
     onSuccess: async (res) => {
@@ -124,6 +125,11 @@ export default function CampaignSurveyBuilderPage({ mode }) {
   // quiet exactly when the survey is shared with a campaign they can't see — the server
   // ships the bare `usedElsewhere` boolean for that case (no names, no counts).
   const sharedBeyondView = editing && !!attachedSurvey?.usedElsewhere;
+  const shared = others > 0 || sharedBeyondView;
+  // A survey with responses can't change a question's answer type or switch to Go to, and the
+  // builder sends its author to Duplicate: this page has to offer it, because a lead has no
+  // survey list to duplicate from (the org Surveys page is admin-only).
+  const locked = editing && !!attachedSurvey?.hasResponses;
   // On create, whether this campaign already has a main survey decides the copy + attach.
   const hasMain = !!attachedId;
 
@@ -144,21 +150,32 @@ export default function CampaignSurveyBuilderPage({ mode }) {
             : " It will become this campaign's default survey when you save.")}
       </p>
 
-      {editing && (others > 0 || sharedBeyondView) && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
-          <span>
-            {others > 0
-              ? `This survey is also used by ${others} other campaign${others === 1 ? '' : 's'} — changes apply to all of them.`
-              : 'This survey is also used elsewhere in your organization — changes apply there too.'}
-          </span>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => duplicate.mutate(attachedSurvey._id)}
-            loading={duplicate.isPending}
-          >
-            Duplicate to edit just this campaign's copy
-          </Button>
+      {editing && (shared || locked) && (
+        <div className="mb-4 rounded border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              {others > 0
+                ? `This survey is also used by ${others} other campaign${others === 1 ? '' : 's'} — changes apply to all of them.`
+                : sharedBeyondView
+                  ? 'This survey is also used elsewhere in your organization — changes apply there too.'
+                  : 'Duplicate makes a fresh copy of this survey and switches this campaign to it. The original keeps its responses.'}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => duplicate.mutate(attachedSurvey._id)}
+              loading={duplicate.isPending}
+            >
+              {shared ? "Duplicate to edit just this campaign's copy" : 'Duplicate to edit a copy'}
+            </Button>
+          </div>
+          {/* The copy replaces the old survey here at once, and the server refuses a submission
+              made under a survey its door no longer uses, so a phone's queue drops it. */}
+          <p className="mt-2 text-xs">
+            Switch the campaign to the copy between shifts — surveys still queued on phones under the old one would be
+            dropped.
+          </p>
+          {duplicate.error && <p className="mt-2 text-xs text-danger-fg">{duplicate.error.message}</p>}
         </div>
       )}
 
@@ -171,6 +188,7 @@ export default function CampaignSurveyBuilderPage({ mode }) {
         saving={editing ? update.isPending : create.isPending}
         orgTags={orgTags}
         onCreateTag={isOrgAdmin ? createTag : undefined}
+        duplicateAt="at the top of this page"
       />
 
       {(create.error || update.error) && (

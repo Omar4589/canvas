@@ -1,3 +1,5 @@
+import { isStatement, blockName } from './routing.js';
+
 // Classify a survey-question edit as safe or destructive relative to existing
 // responses. Survey reports join answers to the CURRENT template by question
 // `key` (see routes/admin/reports.js survey-results) and to options by STABLE
@@ -26,7 +28,10 @@ export function classifyQuestionEdits(oldQuestions = [], newQuestions = []) {
     const nq = newByKey.get(oq.key);
     if (!nq) continue;
     if (nq.type !== oq.type) {
-      reasons.push(`Question "${oq.label}" changed type (${oq.type} → ${nq.type}).`);
+      // A statement's label IS its read-aloud body (up to 5000 characters), so it is named by its
+      // title or first words; a question's message stays exactly as it always read.
+      const name = isStatement(oq) ? `Statement "${blockName(oq)}"` : `Question "${oq.label}"`;
+      reasons.push(`${name} changed type (${oq.type} → ${nq.type}).`);
     }
   }
 

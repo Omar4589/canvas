@@ -7,6 +7,7 @@ import { choiceKeyStages, mergeOptionRows, answerTagClause } from '../surveys/an
 import { currentVoterSetsByTag } from '../surveys/currentTags.js';
 import { tagOptionMap, normalizeTag } from '../surveys/tags.js';
 import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
+import { isStatement } from '../surveys/routing.js';
 
 // Compute service for the client report builder. Everything here is WINDOWED by an explicit
 // UTC date range so a snapshot can be frozen for a given week (period) AND cumulatively
@@ -230,6 +231,9 @@ export async function computeWindowStats({
 // stored rows have no optionIds and therefore always take the snapshot-matching branch.
 export function publicPointAnswer(question, row) {
   if (!question || question.type === 'text') return null; // text questions never reach the map
+  // Nor does a statement: it records nothing. Without this a stray stored row under a statement
+  // key would fall into the snapshot branch below, with no labels to match, and pin 'Other'.
+  if (isStatement(question)) return null;
   const labelById = new Map((question.options || []).map((o) => [o.id, o.text]));
   const ids = Array.isArray(row.optionIds) ? row.optionIds : [];
   let values;

@@ -17,7 +17,10 @@ light/dark tokens every screen here is built from), [LOCK_SCREEN_AND_DIRECTIONS.
 [CAMPAIGNS.md](CAMPAIGNS.md) (App Customization, where a campaign's door-outcome settings live),
 [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the design and owner rulings behind
 **Not a target voter**, the "Change this door's result?" confirmation, and door settings on the
-30-second update).
+30-second update), [SURVEYS.md](SURVEYS.md) (the survey system the at-door survey runs) and
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (scripted surveys — read-aloud
+statements, several closings, "then go to" routing, canvasser notes and links, one block per screen:
+the design and the owner rulings behind *Taking a survey*).
 
 ---
 
@@ -358,7 +361,8 @@ Tapping a voter opens their survey. A few things make the script feel like a rea
 - **Questions appear and disappear as you answer.** A later question can be set up to show only when an
   earlier answer matches (for example, a follow-up that only shows if the person said they're undecided).
   You don't manage any of this — the right questions just show up live as you go, and the progress bar
-  and "Question N of M" count only ever reflect the questions actually on screen.
+  (with its "Question N of M" count on a one-page survey) only ever reflects the questions actually on
+  screen. Read-aloud blocks never count as questions.
 - **Read-aloud prompts.** Some answer choices have a short script attached. Pick that choice and an
   amber **Read aloud** callout appears right under it with the words to say next.
 - **Other (specify).** When a question allows it, an **Other (specify)** choice shows at the end of the
@@ -366,6 +370,54 @@ Tapping a voter opens their survey. A few things make the script feel like a rea
   count as answered until you've typed something.)
 - The **greeting** and **closing** scripts, when the survey has them, sit in the same amber callouts at
   the top and bottom.
+- **Read-aloud blocks and closings.** Some surveys are written as a script. Besides questions they
+  have amber blocks you simply read out: a **Read aloud** block in the middle of the conversation, or
+  a **Closing**, the goodbye. They take no answer and never get a question number. A script can have
+  several closings, and you only see the one for the way the conversation went (say, one goodbye for
+  a supporter and another for someone who already voted). When the conversation reaches none of
+  them, you get the survey's ordinary closing instead.
+- **"For you — not read aloud."** A blue box under a block is a note for you, not for the voter —
+  for example *"Both links are also on the push card."* Don't read it out.
+- **Links.** A block can carry links. Tap one and the page opens in your phone's browser, so you can
+  turn the screen round and show the voter. Nothing about the voter or the door goes with it. There's
+  no QR code in the app: when a campaign has one, it's on the printed literature.
+- **Your name.** Where the script has you say your name ("My name is …"), the app fills in your own
+  first name.
+
+**Scripted surveys usually show one block per screen.** A survey with read-aloud blocks, closings or
+"go to" routing is normally set to show one thing at a time, in large type, instead of one long page
+(your campaign chooses):
+
+- **Read the greeting**, then tap **Next**.
+- **On a question, tap an answer to select it** — its read-aloud line (or the Other box) appears under
+  it — then tap **Next**, which takes you wherever that answer leads. **Next** stays greyed out until a
+  required question has an answer. Optional questions also have **Skip**, which clears anything you
+  picked and moves on. A quick double-tap only ever moves you one screen.
+- **On a read-aloud block, read it and tap Next.**
+- **The last screen is the goodbye for this conversation** — a closing, the survey's ordinary closing,
+  or just *"Done — end of the survey."* — with the **Note** box and **Save Response** on it.
+- **‹ Back** (top left), or Android's back button, steps back one screen; on the first screen it leaves
+  the survey, as it always has. Change an earlier answer and the screens that no longer apply drop
+  away — anything typed on them isn't saved.
+- The bar at the top fills as you answer and names the question you're on (**Question 3**), but never
+  "of 7": how long a conversation runs depends on the answers.
+- Rarely — if the survey was changed while you were partway through — the last screen shows **Answer
+  Question N to finish** instead of Save. Tap it to jump back to the question that still needs an
+  answer.
+
+**Every other survey stays on one page**, as before: questions and read-aloud blocks appear in place as
+you answer. On a scripted survey shown on one page, when an answer reveals something low on the
+screen, the page scrolls it into view for you (never while you're typing); an ordinary survey's page
+never moves on its own. On a survey that uses go-to routing or closing blocks, shown on one page, the
+ordinary closing waits until every required question is answered, so you never read a goodbye above a
+question you're still asking.
+
+**If the person refuses partway through**, there's no "Refused" answer to pick: a refusal is never a
+survey answer. Go **‹ Back** out of the survey (on one block per screen, Back steps back a screen at a
+time and leaves from the first one) and tap **Refused** on the door screen. Nothing you picked is saved.
+The exception: if you already surveyed someone else at this door this round, leave the door as it is
+and don't tap Refused — it would replace your result for the door and delete the answers you took
+there (the app warns you first: tap **Keep my survey**).
 
 **If a teammate already surveyed this voter this round**, the app asks before opening the survey —
 a one-time "**Already surveyed this round**" prompt: *"Another canvasser already surveyed this
@@ -835,12 +887,12 @@ without this change sends no stamp and keeps the full-refetch behavior. Pinned b
 [optInOutcomes.int.test.js](../server/test/optInOutcomes.int.test.js) — the bootstrap and `/changes`
 stamps agree, an encoded stamp containing `|` and `,` reads back equal, an older bundle gets nothing
 new, and a switch-off answers with exactly what a fresh bootstrap would. The phone's half is guarded
-in CI by [server/test/outcomeToggles.test.js](../server/test/outcomeToggles.test.js), because CI runs
-the server unit suite and never `test:mobile`: it feeds the server's real `doorConfigStamp` to
-`changesPath` (no raw `|` or `,` on the wire, and the param decodes back exactly) and text-checks
-map.jsx — it must poll through `api(changesPath({` and never hand-build a `/mobile/changes?` URL.
-`changesPath`'s own cases (no param without a stamp, `since` encoded too) are in
-[deltaFold.test.js](../mobile/lib/deltaFold.test.js).
+in CI by [server/test/outcomeToggles.test.js](../server/test/outcomeToggles.test.js), written while CI
+ran the server unit suite and not `test:mobile` (CI's checks job has run `test:mobile` too since
+2026-10-03): it feeds the server's real `doorConfigStamp` to `changesPath` (no raw `|` or `,` on the
+wire, and the param decodes back exactly) and text-checks map.jsx — it must poll through
+`api(changesPath({` and never hand-build a `/mobile/changes?` URL. `changesPath`'s own cases (no param
+without a stamp, `since` encoded too) are in [deltaFold.test.js](../mobile/lib/deltaFold.test.js).
 
 The delta's household fold, just above it in map.jsx, now also copies `restrictedFrom`
 (`c.restrictedFrom ?? null` — `/changes` always sent it), so a desk Restricted mark made mid-shift
@@ -1140,22 +1192,29 @@ passing silently.
 
 [app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) — resolves the voter,
 household, and the **effort-scoped** survey (the door's book → `surveyTemplateId` override, falling back
-to `activeSurvey`) from the bootstrap cache. Three field behaviors beyond a flat questionnaire:
+to `activeSurvey`) from the bootstrap cache. What it knows about the survey — which blocks show, which
+record an answer, numbering, progress, the Save gate, the POST rows, where the default closing goes,
+and the one-block-per-screen stepper — comes from the pure door runner
+[lib/surveyRunner.js](../mobile/lib/surveyRunner.js) (*Scripted surveys on the phone*, below); the
+screen holds the state and draws. Three field behaviors beyond a flat questionnaire:
 
-- **Conditional visibility.** `visibleQuestions` is recomputed from `answers` every render via the
-  shared pure evaluator [lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js)
+- **Conditional visibility.** `visible` (`visibleBlocks(survey, answers)`) is recomputed from `answers`
+  every render via the shared pure evaluator [lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js)
   (`makeCell` + `visibleQuestionKeys`, mirrored from `services/surveys/visibility.js` on the server and
-  the admin client). It normalizes each non-retired question to a cell (choice → optionIds, text →
-  text), hides questions whose `visibleIf` fails, and **withholds hidden questions' answers** from the
-  rules of later questions. Everything downstream — the progress bar, the "Question N of M" count,
-  `validate()` (required only enforced on visible questions), and the submitted `answers` array — keys
-  off `visibleQuestions`, so hidden questions never block a save or get sent.
+  the admin client). It normalizes each non-retired block to a cell (choice → optionIds, text →
+  text, statement → always empty), hides blocks whose `visibleIf` fails, and **withholds hidden
+  questions' answers** from the rules of later questions. Everything downstream — the progress bar,
+  the "Question N of M" count, `validate()` (`requiredPending`: required only enforced on visible
+  questions), and the submitted `answers` array (`buildSubmitRows`) — keys off `visible`, over its
+  **answerable** blocks only, so hidden questions and statements never block a save or get sent.
 - **Per-option read-aloud scripts.** When a selected option has `opt.script`, an amber `scriptBlock`
   ("Read aloud") renders inline beneath it (in both `SingleChoice` and `MultipleChoice`). The survey's
-  `intro` and `closing` render in the same callout at the top/bottom.
+  `intro` ("Greeting") and `closing` (the default closing, below) render in the same callout at the
+  top/bottom.
 - **Other (specify).** When `q.otherOption` is set, a synthetic `{ id: '__other__' }` choice is appended;
-  selecting it renders a `FreeText` box stored in `otherTexts[q.key]`. `isAnsweredNow` treats an
-  Other-only selection as unanswered until its text is non-empty. On submit, the `__other__` sentinel is
+  selecting it renders a `FreeText` box stored in `otherTexts[q.key]`. The runner's `isAnswered` (the
+  screen's old inline `isAnsweredNow`, moved unchanged) treats an Other-only selection as unanswered
+  until its text is non-blank. On submit, the `__other__` sentinel is
   sent in `optionIds` with the typed value in `otherText` (and snapshotted into the answer's label text,
   fallback `'Other'`).
 
@@ -1167,6 +1226,137 @@ registers the pending overlay, and `onAccepted` pops back with `router.dismiss(2
 screen*) without awaiting the write. Before any answer is entered, the screen's mount-time check may
 ask first — the teammate re-survey confirm or the door-change confirmation, never both (see *The
 change confirmation* above).
+
+### Scripted surveys on the phone
+
+The phone half of [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) §H (the template
+fields are its §E1). JavaScript only, so it ships over the air; additive on the wire, so no
+client-version bump.
+
+- **Statements.** A block with `type: 'statement'` is read aloud and records nothing;
+  `role: 'closing'` makes it a closing (readers check the type first — `role` has no schema default). Its
+  `label` **is** the read-aloud text (up to 5000 characters, newlines kept) and its optional `title`
+  names it. `StatementBlock` draws it as the amber `scriptBlock`, captioned **Read aloud** or
+  **Closing**, plus `· ‹title›` when it has one, with the body in `scriptBody` (18/26, read at arm's
+  length) on both presentations. A statement never takes a number (`questionNumbers` counts answerable
+  blocks), never counts toward progress, never blocks Save (not even a stored `required: true`) and
+  never posts a row (`buildSubmitRows`). The server is the backstop: `normalizeAndFilterAnswers` drops
+  a statement row for every writer, which cleans up after an older bundle (it posts an empty row per
+  statement it showed) and an offline replay queued before the update.
+- **Notes and links** ([components/SurveyNoteAndLinks.jsx](../mobile/components/SurveyNoteAndLinks.jsx)),
+  drawn under any block — statement, closing or question card — on both presentations, and nothing
+  when the block has neither. The `note` is the canvasser's and never read aloud, so it must never
+  look like script: everything said aloud is amber, while the note is an `infoBg` well with an `info`
+  left rule, the label **For you — not read aloud**, and text in `infoFg` ([THEMING.md](THEMING.md)).
+  `links` render as `InsetActionRow`s labelled with the link's label (else its host) and open with
+  `Linking.openURL(url).catch(() => {})` (never `canOpenURL`, per `lib/mapsLinks.js`) in the device
+  browser, only on a tap, with nothing about the voter or the door appended. http(s) only: the server
+  refuses any other scheme at save, and one from an older template is dropped here. No QR code, by
+  owner ruling — the QR lives on the printed literature. Opening only on a tap and appending nothing
+  are the two conditions that keep a link out of the privacy policy (PROPOSAL §K).
+- **`{{canvasser}}`.** `fill` = `fillScript(text, { canvasserFirstName: bootstrap.user.firstName })`
+  from [lib/surveyScriptText.js](../mobile/lib/surveyScriptText.js) (a byte-identical mirror of
+  `server/src/services/surveys/scriptText.js`, drift-guarded by `scriptText.test.js`) fills the
+  greeting, the default closing, statement text, option scripts and notes — never a question's label or
+  an option's text, which are snapshotted onto every stored answer, so the server refuses `{{` in them.
+  A missing name reads as `______`; an unknown token stays as typed (the save check refuses new ones).
+  It is the only placeholder: dates are typed by hand, by owner ruling.
+- **Which presentation.** `survey.presentation === 'steps'` is one block per screen; anything else
+  (absent on older templates) is the single page. The builder ticks it when a survey that wasn't a
+  script when opened gains a statement, a closing or a route (worked out from the survey as it will be
+  saved, never latched on a keystroke), and every existing survey keeps the single page. It never
+  applies while the do-not-contact wall or the not-found screen shows (`formShown`), so Back stays
+  plain there.
+
+**One block per screen (`'steps'`).** A cursor over the visible list, held in component state as a
+screen id rather than a route per block, so the stack depth `dismiss(2)` relies on never changes:
+
+- `screens(survey, answers)`: the greeting (`'__intro__'`, only when the intro has non-blank text — a
+  blank or whitespace-only one gets no screen), one screen per visible block, then the end screen
+  (`'__end__'`) unless the last visible block is a closing. The two non-block ids
+  (`INTRO_SCREEN_ID` / `END_SCREEN_ID`) are reserved `__` names because a block key is a slug of its
+  label — a question labelled "End" is keyed `end` — and no key can start with `__` (every key
+  generator strips underscores, and the server refuses a hand-sent one).
+- `clampScreenId` resolves the cursor on every render: the cursor while it is still a screen for these
+  answers, else the last screen before its position (a template refresh can retire or hide the block
+  under it). When the two differ the cursor is set to the clamped screen during that render (never in
+  an effect), so the next answer is measured from the screen on display: left on the vanished block,
+  a tap that revealed a block between the two would make that block the screen, moving the canvasser
+  on without a Next and past any screens in between. A canvasser's own tap never moves it, because a
+  block's visibility depends only on earlier answers.
+- **A tap selects; Next advances.** A tap reveals the option's read-aloud line or the Other box and
+  never moves the cursor. `canAdvance` disables **Next** on a visible required question with no
+  answer; `canSkip` offers **Skip** on optional answerable questions only. Skip is `skipAnswer` (the
+  answer and its Other text removed) followed by `nextScreenId(survey, skipped.answers, id)`: the next
+  screen comes from the NEW answers, never the render's list, or a Skip that hid the following blocks
+  would land on one of them. There is no automatic advance — it would hide the line under the picked
+  answer, make Other untypable and let a double-tap land on the next screen's pill.
+- `saveScreenId` is always the last screen: a closing that is the last visible block, else the end
+  screen. It carries the **Note** field and **Save Response**. A closing with a block still visible
+  after it (Close 2 before Close 4, or one a multiple-choice union left above a later block) has Next.
+  The end screen shows the default closing when `showDefaultClosing` holds, else *Done — end of the
+  survey.* Next never passes a blank required question, so the end is only reached with the path
+  complete; if a template refresh left one behind the cursor, Save gives way to an outlined **Answer
+  Question N to finish** button that jumps the cursor to it, and `validate()`'s alert stays behind
+  both.
+- **Back.** The header's **‹ Back** steps to `prevScreenId` and, on the first screen (`null`), leaves
+  with `router.back()` as before. Android's hardware back does the same through `BackHandler`,
+  registered in an expo-router `useFocusEffect` (live only while this screen is focused, removed
+  through the subscription it returns) and returning `false` on the first screen so the stack pops.
+  iOS swipe-back pops the route and discards the form, as it always has.
+- **Double-tap guard.** The footer sits in the same place on every screen, so the second touch of a
+  double-tap would land on the next screen's control — Next on Close 2 becoming Save on Close 4. Every
+  step control (Back, Next, Skip, Save, the jump) ignores a press within `STEP_GUARD_MS` (400 ms) of
+  the last step (`stepAtRef`). A negative gap — the phone's clock set back after a step, say by an
+  automatic time correction — never counts, or every step control would stay dead until the clock
+  caught up. Each step also dismisses the keyboard, and each screen starts scrolled to its top.
+- **Layout.** A question drops its number badge (the caption row reads **Question N** on question
+  screens only, with no "of M": a path's length isn't known until it is walked) and its label goes to
+  18/26 (`questionLabelLarge`); the greeting and the end screen's closing use `scriptBody` (18/26) too.
+  Next, Skip and Save sit in a footer docked under the `ScrollView`, inside the
+  `KeyboardAvoidingView`, so the keyboard never covers them. The progress bar is answered ÷ answerable
+  visible.
+
+**The single page (`'scroll'`).** Today's screen with statements woven in: question cards keep their
+numbered badges (over `questionNumbers`), progress and `validate()` run over answerable blocks, and
+the default closing follows `showDefaultClosing` — shown only when it has non-blank text (a
+whitespace-only closing no longer draws an empty box) and no closing block is visible, and on a
+`needsClosingGuard` survey (Script flow, or any closing block; narrower than `isScripted` on purpose,
+because a statement alone never moves the goodbye) only once `pathComplete`. A plain survey renders as
+before. On a scripted survey only (`isScripted`: a statement, a closing or a live route on an active
+block, or Script flow), when a tap reveals a block the page scrolls it into view only if its top lands
+in the bottom quarter of the viewport or below (`REVEAL_FOLD`, 0.75), parking it a third of the way
+down (`REVEAL_AT`), with a third of a screen still in view above it: a diff of the visible keys
+between renders, a per-block `onLayout` y-map, and no scroll while a `TextInput` is focused
+(`TextInput.State.currentlyFocusedInput()`). Every other survey's page never moves on its own, as
+before; on an existing Show-only-if survey, scrolling to a follow-up far below the answer that showed
+it would drag that answer and its read-aloud line off the top.
+
+**The runner** ([lib/surveyRunner.js](../mobile/lib/surveyRunner.js)) is canonical here and mirrored
+byte-for-byte below its marker into `client/src/lib/surveyRunner.js`, where the web preview's **Try
+it** walks a survey with the same code. It owns `isStatement` / `isAnswerable` / `isClosingBlock`,
+`activeBlocks`, `buildCells`, `visibleBlocks`, `isAnswered`, `answerableQuestions`, `questionNumbers`,
+`requiredPending` / `pathComplete`, `progress`, `buildSubmitRows`, `closingReached`, `isScripted`,
+`needsClosingGuard`, `showDefaultClosing`, and the stepper — `screens`, `saveScreenId`, `screenKind`,
+`clampScreenId`, `canAdvance`, `canSkip`, `nextScreenId`, `prevScreenId`, `skipAnswer`. It follows no
+route itself: "then go to" arrows are compiled into `visibleIf` when the survey is saved, so both
+presentations read the same evaluator-visible list the server re-runs at save, and there is no second
+routing engine. The cell build, `isAnswered`, progress, the Save check and the POST rows are the
+screen's old inline code, moved unchanged. `client/src/lib/surveyRunner.test.js` is the drift guard
+(CI's client unit job runs it); `mobile/lib/surveyRunner.test.js` pins the behaviour against a frozen
+copy of the old screen code and every Burton path, through `npm run test:mobile` at the repo root,
+which CI's checks job also runs.
+
+**Refused stays a door outcome** (owner ruling 2026-10-02): no survey answer files a refusal, so a
+voter who refuses mid-script means Back out of the survey and the door screen's **Refused** button —
+unless this canvasser already surveyed someone else at the door this round. Then the door is left as
+it is: a Refused there would replace their result and delete those answers (`changePrompt` asks first,
+kind `erase`, `lib/doorChange.js`).
+
+**An older bundle** shown a statement-bearing template renders the statement as a numbered card of its
+full `label` with no control, counts it as an unanswered question, shows the default closing on every
+path and posts an empty row for it, which the server drops. It routes correctly, because the compiled
+rules use only `any_of`, an op it already evaluates.
 
 ## Effort selection + data
 
@@ -1199,7 +1389,11 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `doorChange.test.js` — the change confirmation's decisions, words, `clearOwnSurveysAtDoor` and
   its undo `restoreOwnSurveys`),
   `lib/doorPaths.js` (`ACTION_PATHS` and `doorResultPath`, plus the shared queue path/body builders),
-  `assets/icons/house-not_target.png` (the fuchsia pin).
+  `assets/icons/house-not_target.png` (the fuchsia pin), `lib/surveyRunner.js` (+
+  `surveyRunner.test.js`, run with `npm run test:mobile` — the door runner and the one-block-per-screen
+  stepper, mirrored to `client/src/lib/surveyRunner.js`), `lib/surveyScriptText.js` (`fillScript` for
+  `{{canvasser}}`, mirrored from `server/src/services/surveys/scriptText.js`),
+  `components/SurveyNoteAndLinks.jsx` (a block's "For you — not read aloud" note and its link rows).
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
   `app/(app)/books.jsx`, `app/(app)/map.jsx` (+ the Not target chip, legend entry and pin; the
   `/changes` URL through `changesPath`, the `doorConfig` fold, and `restrictedFrom` in the delta fold),
@@ -1212,14 +1406,17 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   pink `no_soliciting` dot + slate `restricted` dot; the opt-in Not a target voter button and white
   labels on the two dark buttons),
   `app/(app)/voter/[id]/survey.jsx` (conditional questions, per-option scripts, Other specify; the
-  mount-time door-change confirmation),
+  mount-time door-change confirmation; statements and closings, notes and links, `{{canvasser}}`, one
+  block per screen with its Back/Next/Skip and Android back, the default-closing guard on a Go to
+  survey or one with closing blocks, and scroll-to-reveal on a scripted survey's single page — all
+  through `lib/surveyRunner.js`),
   `lib/recordAction.js` (the dispositions' `ACTION_PATHS`, now imported from `doorPaths.js`; the
   `confirm` step and `confirmDoorChange`; `restrictedFrom` kept fresh; the optimistic
   `clearOwnSurveysAtDoor`, undone through `optimisticSubmit`'s new `rollbackPatch` when the server
   rejects the result), `lib/surveyVisibility.js` (shared visibility evaluator),
   `lib/outcomeToggles.js` (the fail-closed `isOutcomeOn`), `components/StatusPill.jsx` (amber tint
   for `not_target`),
-  `lib/theme.js` (`status.refused`/`statusLabels.refused` amber + `status.restricted`/`statusLabels.restricted` slate + `status.not_target`/`statusLabels.not_target` fuchsia tokens),
+  `lib/theme.js` (`status.refused`/`statusLabels.refused` amber + `status.restricted`/`statusLabels.restricted` slate + `status.not_target`/`statusLabels.not_target` fuchsia tokens; `infoFg`, readable text on `infoBg` for the survey note — [THEMING.md](THEMING.md)),
   `server/src/routes/mobile/bootstrap.js` (+ `doorConfigFor`: `enabledOutcomes` and `doorConfigStamp`
   on the bootstrap, `doorConfig` on `/changes`), `server/src/routes/mobile/canvass.js` (the
   `/not-target` route and the opt-in gate), `server/src/routes/auth.js` (self-service `PATCH /auth/me`).

@@ -1,4 +1,5 @@
 import { OTHER_OPTION_ID } from '../surveys/otherOption.js';
+import { isAnswerable } from '../surveys/routing.js';
 
 // Answer columns for ONE survey template, plus the renderer that fills them. Lifted out of
 // buildSurveyResultsWide so the Results by voter export spends the same logic instead of a second
@@ -26,7 +27,8 @@ export const snapshotAnswerText = (a) => {
  *                      CALLER discovers these, because it owns the response query they come from.
  *
  * Returns { cols, columnOf, renderAnswer, templateName }:
- *   cols        — current questions in template order, then orphans
+ *   cols        — current questions in template order, then orphans. Never a statement: it records
+ *                 nothing, and "one column per question" means per question that records an answer.
  *   columnOf    — the column's BASE name: the label, or `label (key)` when this template uses one
  *                 label twice. Callers that group columns further (by round, by survey) decorate
  *                 this; they must not re-implement it, or one file's header stops matching another's.
@@ -36,13 +38,20 @@ export const snapshotAnswerText = (a) => {
  */
 export const templateAnswerPlan = (template, orphanEntries = []) => {
   const questions = (template?.questions || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  // `known` spans EVERY template key, statements included, while the columns are the answerable
+  // questions only. Narrowing `known` too would re-admit a stray stored row under a statement key
+  // (an admin edit saved while the template was missing stores answers as sent) as an orphan
+  // column labelled by its snapshot.
   const known = new Set(questions.map((x) => x.key));
+  const answerable = questions.filter(isAnswerable);
   const orphans = orphanEntries
     .filter((o) => o.key && !known.has(o.key))
     .map((o) => ({ key: o.key, label: o.label || o.key }));
 
+  // Counted over the columns only: a statement that happens to share a question's label is not a
+  // column, so it must not push that question's header into the `label (key)` form.
   const labelCounts = new Map();
-  for (const x of [...questions, ...orphans]) labelCounts.set(x.label, (labelCounts.get(x.label) || 0) + 1);
+  for (const x of [...answerable, ...orphans]) labelCounts.set(x.label, (labelCounts.get(x.label) || 0) + 1);
   const columnOf = (x) => ((labelCounts.get(x.label) || 0) > 1 ? `${x.label} (${x.key})` : x.label);
 
   const optionTextById = new Map();
@@ -67,5 +76,5 @@ export const templateAnswerPlan = (template, orphanEntries = []) => {
       .join(' | ');
   };
 
-  return { cols: [...questions, ...orphans], columnOf, renderAnswer, templateName: template?.name || '' };
+  return { cols: [...answerable, ...orphans], columnOf, renderAnswer, templateName: template?.name || '' };
 };

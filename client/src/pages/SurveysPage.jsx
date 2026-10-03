@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import StatCard from '../components/StatCard.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import SurveyQuickView from '../components/SurveyQuickView.jsx';
+import { activeBlocks, answerableQuestions } from '../lib/surveyRunner.js';
 import {
   Card,
   Button,
@@ -218,8 +219,8 @@ export default function SurveysPage() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-fg">
-                  {/* what canvassers actually see — retired questions excluded */}
-                  {(s.questions || []).filter((q) => !q.retired).length}
+                  {/* what canvassers actually answer — retired questions and read-aloud statements excluded */}
+                  {answerableQuestions(activeBlocks(s)).length}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-fg-muted">
                   {s.responseCount > 0 ? s.responseCount.toLocaleString() : <span className="text-fg-subtle">—</span>}

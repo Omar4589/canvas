@@ -113,7 +113,7 @@ export default function DesignPanel({
           />
           <Toggle
             id="showScriptPage" label="What to say"
-            hint="Opens the first door page — your opening, closing and option scripts, once."
+            hint="Opens the first door page — your opening, statements, closings and option scripts, once."
             checked={settings.showScriptPage} onChange={(v) => set({ showScriptPage: v })}
             disabled={settings.layout !== 'survey' || !hasSurvey}
           />

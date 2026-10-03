@@ -36,6 +36,58 @@ test('two questions sharing a label are disambiguated by key, and only then', ()
   assert.deepStrictEqual(plan.cols.map(plan.columnOf), ['Support? (a)', 'Support? (b)', 'Turnout']);
 });
 
+// Statements (read-aloud text and closings) live in the same questions[] array but record nothing,
+// so "one column per question" means one per question that records an answer.
+// docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I.
+const statement = (key, label, order, role = 'statement') => q(key, label, order, [], { type: 'statement', role });
+
+test('a statement block is not a column', () => {
+  const plan = templateAnswerPlan({
+    questions: [
+      q('support', 'Support?', 1, [{ id: 'yes', text: 'Yes' }], { type: 'single_choice' }),
+      statement('pitch', "That's completely understandable.\n\nCommon sense, right?", 2),
+      q('why', 'Why?', 3, [], { type: 'text' }),
+      statement('close_4', 'For more information, visit the website.', 4, 'closing'),
+    ],
+  });
+  assert.deepStrictEqual(plan.cols.map((c) => c.key), ['support', 'why']);
+  assert.deepStrictEqual(plan.cols.map(plan.columnOf), ['Support?', 'Why?']);
+});
+
+test('`known` still covers statement keys, so a stray stored statement row never becomes an orphan column', () => {
+  // An admin edit saved while the template was missing stores rows as sent (routes/admin/voters.js),
+  // so a statement key can turn up in recorded answers. It is on the template: not an orphan.
+  const plan = templateAnswerPlan(
+    { questions: [q('support', 'Support?', 1), statement('close_2', 'Every vote matters.', 2, 'closing')] },
+    [{ key: 'close_2', label: 'Every vote matters.' }, { key: 'deleted', label: 'Asked once' }]
+  );
+  assert.deepStrictEqual(plan.cols.map((c) => c.key), ['support', 'deleted']);
+});
+
+test("a statement sharing a question's label does not decorate that question's header", () => {
+  const plan = templateAnswerPlan({
+    questions: [q('support', 'Can Paul count on your support?', 1), statement('recap', 'Can Paul count on your support?', 2)],
+  });
+  assert.deepStrictEqual(plan.cols.map(plan.columnOf), ['Can Paul count on your support?']);
+});
+
+test('statements leave the remaining columns in template order', () => {
+  const plan = templateAnswerPlan(
+    {
+      questions: [
+        statement('close_3', 'Great!', 6, 'closing'),
+        q('q4', 'Plan to vote?', 5),
+        statement('s1', 'The pitch.', 3),
+        q('q1', 'Support?', 1),
+        q('q3', 'Voted for Paul?', 4),
+        statement('s0', 'The aside.', 2),
+      ],
+    },
+    [{ key: 'gone', label: 'A retired question' }]
+  );
+  assert.deepStrictEqual(plan.cols.map(plan.columnOf), ['Support?', 'Voted for Paul?', 'Plan to vote?', 'A retired question']);
+});
+
 test('answers render id-native against CURRENT option text', () => {
   const plan = templateAnswerPlan({
     questions: [q('top', 'Top issue', 1, [{ id: 'housing', text: 'Housing costs' }])],

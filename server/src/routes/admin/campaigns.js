@@ -33,6 +33,7 @@ import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import { Effort } from '../../models/Effort.js';
 import { hydrateSurveyEvidence } from '../../services/canvass/answerScope.js';
+import { isAnswerable } from '../../services/surveys/routing.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { csvCell, UTF8_BOM } from '../../services/export/csvWriter.js';
 import { tzAbbrev } from '../../utils/timezone.js';
@@ -1666,6 +1667,12 @@ const runWire = (r, by = null) => ({
   by,
 });
 
+// Every conversion payload's questions: the answerable ones only. Desk entry records answers
+// after the fact and reads no script, so a statement (read-aloud text or a closing) would only
+// reach the desk composer and the queue walkthrough as an input labelled with a paragraph. The
+// worker still normalizes against the stored template, which drops any statement row anyway.
+const answerableQuestions = (questions) => (questions || []).filter(isAnswerable);
+
 // The template the composer must be built against, resolved from the SELECTION rather than from
 // the campaign — per-effort survey overrides mean "the campaign's survey" has no single answer.
 router.post('/:campaignId/survey-conversions/template', async (req, res, next) => {
@@ -1696,7 +1703,7 @@ router.post('/:campaignId/survey-conversions/template', async (req, res, next) =
         name: template.name,
         version: template.version,
         intro: template.intro,
-        questions: template.questions,
+        questions: answerableQuestions(template.questions),
       },
       entries: sel.entries,
       doors: sel.doors,
@@ -1809,7 +1816,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
         impact,
         survey,
         template: template
-          ? { id: String(template._id), name: template.name, version: template.version, questions: template.questions }
+          ? { id: String(template._id), name: template.name, version: template.version, questions: answerableQuestions(template.questions) }
           : null,
       });
     }
@@ -1842,7 +1849,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     if (body.mode === 'queue') {
       created.doorsRemaining = sel.ids.map(String);
       created.template = template
-        ? { id: String(template._id), name: template.name, version: template.version, intro: template.intro, questions: template.questions }
+        ? { id: String(template._id), name: template.name, version: template.version, intro: template.intro, questions: answerableQuestions(template.questions) }
         : null;
     }
 
@@ -2208,7 +2215,7 @@ router.get('/:campaignId/survey-conversions/:runId', async (req, res, next) => {
           'name version intro questions'
         ).lean();
         wire.template = t
-          ? { id: String(t._id), name: t.name, version: t.version, intro: t.intro, questions: t.questions }
+          ? { id: String(t._id), name: t.name, version: t.version, intro: t.intro, questions: answerableQuestions(t.questions) }
           : null;
       }
     }

@@ -6,6 +6,7 @@ import { splitBooks } from './splitBooks.js';
 import { DEFAULT_SETTINGS } from './packetSettings.js';
 import { PAGE } from './packetTheme.js';
 import { asciiSafe, countUnprintable, scanUnprintableNames } from '../pdfText.js';
+import { compileRouting } from '../surveyRouting.js';
 
 // jsPDF's browser build runs under node, so the pagination invariant — the one that
 // silently ruins a print run — can be asserted against a real document rather than a mock.
@@ -643,4 +644,290 @@ const PAGE_PIN_80_DOORS_SPLIT_35 = 85;
 test('page count for a split fixture is pinned', async () => {
   const doc = await renderPacketPdf(splitBooks(makePayload(80, 2), 35), DEFAULT_SETTINGS);
   assert.equal(doc.getNumberOfPages(), PAGE_PIN_80_DOORS_SPLIT_35);
+});
+
+// ── scripted surveys ─────────────────────────────────────────────────────────
+// Statements and closings are blocks a canvasser reads instead of asks
+// (docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I). Paper prints each ONCE on the "What to say" page with
+// its gate, numbers the door questions over the answerable blocks only, says where each answer
+// goes in Script flow, and never prints a canvasser note. The fixture is the Burton script in
+// miniature, authored with arrows and compiled by the client's copy of the server compiler, so
+// its gates are the ones a saved template stores. Every block carries a note the payload would
+// never send (buildPacket.js drops it), to prove the client would not print one either.
+
+const NOTE = 'CANVASSER NOTE never on paper';
+const SCRIPT_BLOCKS = [
+  {
+    key: 'q1', label: 'Can Paul count on your support?', type: 'single_choice', required: true, note: NOTE,
+    options: [
+      { id: 'yes', text: 'Yes', goTo: 'q4' },
+      { id: 'no', text: 'No', goTo: 'q2' },
+      { id: 'undecided', text: 'Undecided', goTo: 's1_pitch' },
+      { id: 'voted', text: 'Already voted', goTo: 'q3', script: 'Oh great! Well thank you for participating.' },
+    ],
+  },
+  // No arrow: a text question continues into the block after it, answered or not.
+  { key: 'q2', label: 'Is there a particular reason?', type: 'text', options: [] },
+  {
+    key: 's_opponent', type: 'statement', role: 'statement', options: [], goTo: '__end__', note: NOTE,
+    label: 'Are you aware of how much legal and financial trouble his opponent is in?',
+    links: [{ label: 'Opponent ledger', url: 'https://example.org/ledger' }],
+  },
+  {
+    key: 'q3', label: 'Did you vote for Paul Burton?', type: 'single_choice',
+    options: [
+      { id: 'yes', text: 'Yes', goTo: 'close_3' },
+      { id: 'no', text: 'No', goTo: '__end__' },
+      { id: 'declined', text: 'Declined to say', goTo: '__end__' },
+    ],
+  },
+  {
+    key: 's1_pitch', type: 'statement', role: 'statement', title: 'Statement 1', options: [],
+    label: 'That is completely understandable.\n\nPaul has spent twenty years fixing roads. Common sense, right?',
+  },
+  {
+    key: 's1_question', label: 'Having heard that, can Paul count on your support?', type: 'single_choice',
+    options: [
+      { id: 'yes', text: 'Yes', goTo: 'q4' },
+      { id: 'still', text: 'Still undecided', goTo: 'close_4' },
+      { id: 'no', text: 'No', goTo: '__end__' },
+    ],
+  },
+  {
+    key: 'q4', label: 'Do you plan to vote on election day, vote early, or vote by mail?', type: 'single_choice',
+    otherOption: true, otherGoTo: 'close_2',
+    options: [
+      { id: 'eday', text: 'Election Day', goTo: 'close_2' },
+      { id: 'early', text: 'Voting early', goTo: 'close_2' },
+      { id: 'not', text: 'Not voting', goTo: '__end__' },
+    ],
+  },
+  {
+    key: 'close_2', type: 'statement', role: 'closing', title: 'Close 2', options: [], goTo: 'close_4', note: NOTE,
+    label: 'Every vote matters. Make a plan to vote.',
+  },
+  {
+    key: 'close_3', type: 'statement', role: 'closing', title: 'Close 3', options: [], goTo: 'close_4',
+    label: 'Great! Do you know anyone else who would vote for Paul?',
+  },
+  {
+    key: 'close_4', type: 'statement', role: 'closing', title: 'Close 4', options: [], goTo: '__end__', note: NOTE,
+    label: 'For more information visit the website. Have a great day!',
+    links: [{ label: 'Website', url: 'https://example.org/paul' }, { label: 'Polling place', url: 'https://example.org/where' }],
+  },
+];
+
+const scripted = (overrides = {}) => {
+  const { questions, errors } = compileRouting(SCRIPT_BLOCKS);
+  assert.deepEqual(errors, [], 'the fixture must compile');
+  return {
+    id: 's-burton', name: 'Burton door script', flow: 'script',
+    intro: 'Hi, my name is {{canvasser}}, a volunteer with the Burton campaign.',
+    closing: 'Thank you for your time today.',
+    questions,
+    ...overrides,
+  };
+};
+
+const countOf = (haystack, needle) => haystack.split(needle).length - 1;
+
+test('scripted print model: statements leave the door form, numbering skips them, answers carry arrows', () => {
+  const m = buildSurveyPrintModel(scripted());
+  assert.equal(m.flow, 'script');
+  // Numbered over the questions alone: the post-pitch question is Q4, because the statements
+  // around it take no number.
+  assert.deepEqual(m.questions.map((q) => `${q.number}:${q.key}`), ['1:q1', '2:q2', '3:q3', '4:s1_question', '5:q4']);
+
+  // Script flow says where every answer goes, fall-through included, instead of a skip line.
+  const arrows = (key) => m.questions.find((q) => q.key === key).options.map((o) => `${o.text} ${o.arrow}`);
+  assert.deepEqual(arrows('q1'), ['Yes Q5', 'No Q2', 'Undecided Statement 1', 'Already voted Q3']);
+  assert.deepEqual(arrows('q3'), ['Yes Close 3', 'No End', 'Declined to say End']);
+  assert.deepEqual(arrows('s1_question'), ['Yes Q5', 'Still undecided Close 4', 'No End']);
+  assert.deepEqual(arrows('q4'), ['Election Day Close 2', 'Voting early Close 2', 'Not voting End', 'Other: Close 2']);
+  assert.ok(m.questions.every((q) => q.skipHint === null));
+  // A text question has no answers to carry one, so its route goes under it; an untitled
+  // statement is named by its opening words in quotes, never its whole body.
+  assert.match(m.questions[1].arrow, /^"Are you aware of how much legal .*\.\.\."$/);
+  assert.ok(!m.questions[1].arrow.includes('opponent is in?'));
+  // A question that simply continues to the next one down the page needs no line.
+  assert.equal(m.questions[0].arrow, null);
+
+  // The compiled gates read in those numbers.
+  assert.equal(m.questions[1].gate, 'Only if Q1 = "No"');
+  assert.equal(m.questions[3].gate, 'Only if Q1 = "Undecided"');
+  assert.equal(m.questions[4].gate, 'Only if Q1 = "Yes" or Q4 = "Yes"');
+
+  // The What to say sequence, in conversation order, each block with its gate, its links and
+  // where it goes next.
+  assert.deepEqual(
+    m.script.map((e) => e.kind),
+    ['opening', 'option', 'statement', 'statement', 'closing', 'closing', 'closing', 'default-closing']
+  );
+  const block = (key) => m.script.find((e) => e.key === key);
+  assert.deepEqual(
+    ['s_opponent', 's1_pitch', 'close_2', 'close_3', 'close_4'].map((k) => [block(k).title, block(k).arrow]),
+    [[null, 'End'], ['Statement 1', 'Q4'], ['Close 2', 'Close 4'], ['Close 3', 'Close 4'], ['Close 4', 'End']]
+  );
+  assert.equal(block('s_opponent').gate, 'Only if Q1 = "No"');
+  assert.equal(block('close_2').gate, 'Only if Q5 = "Election Day" or "Voting early" or "Other"');
+  // Close 4 is reached three ways, the chains through Close 2 and Close 3 included.
+  assert.equal(
+    block('close_4').gate,
+    'Only if Q3 = "Yes" or Q4 = "Still undecided" or Q5 = "Election Day" or "Voting early" or "Other"'
+  );
+  assert.deepEqual(block('close_4').links.map((l) => l.url), ['https://example.org/paul', 'https://example.org/where']);
+  assert.equal(m.closingIsFallback, true);
+
+  // {{canvasser}} is the blank a volunteer fills by saying their own name.
+  assert.equal(m.intro, 'Hi, my name is ______, a volunteer with the Burton campaign.');
+  // The answer scripts keep the shape they always had, beside the sequence.
+  assert.deepEqual(m.scripts, [
+    { question: 'Can Paul count on your support?', option: 'Already voted', script: 'Oh great! Well thank you for participating.' },
+  ]);
+  assert.ok(!JSON.stringify(m).includes(NOTE), 'a canvasser note must never reach the print model');
+});
+
+test('a scripted packet prints each statement once, on the What to say page, never beside a door', async () => {
+  const doc = await renderPacketPdf(makePayload(4, 1, { survey: scripted() }), DEFAULT_SETTINGS);
+  const pages = pageTexts(doc);
+  const all = pages.join('\n');
+  const scriptPage = pages.find((p) => p.includes('What to say'));
+  assert.ok(scriptPage, 'the What to say page must print');
+
+  // Each block headed with the gate to check before reading it aloud.
+  for (const heading of [
+    'STATEMENT - ONLY IF Q1 = "NO"',
+    'STATEMENT: STATEMENT 1 - ONLY IF Q1 = "UNDECIDED"',
+    'CLOSING: CLOSE 2 - ONLY IF Q5 = "ELECTION DAY" OR "VOTING EARLY" OR "OTHER"',
+    'CLOSING: CLOSE 3 - ONLY IF Q3 = "YES"',
+    'CLOSING: CLOSE 4 - ONLY IF Q3 = "YES" OR Q4 = "STILL UNDECIDED"', // wraps; the head is enough
+    // With closing blocks present, the template's own closing is the fallback, and says so.
+    'CLOSING - WHEN NO CLOSING BLOCK APPLIES',
+  ]) {
+    assert.ok(scriptPage.includes(heading), `missing heading: ${heading}`);
+  }
+  // Links print as addresses, and where a block goes next prints under it.
+  assert.ok(scriptPage.includes('(Website: https://example.org/paul) Tj'));
+  assert.ok(scriptPage.includes('(Opponent ledger: https://example.org/ledger) Tj'));
+  assert.ok(scriptPage.includes('(-> Close 4) Tj'));
+
+  // Never beside a door: every read-aloud body is in the whole packet exactly once.
+  for (const body of ['opponent is in?', 'Common sense, right?', 'Make a plan to vote.', 'who would vote for Paul?', 'Have a great day!']) {
+    assert.equal(countOf(all, body), 1, `"${body}" must print once, not per door`);
+  }
+  // Every door asks five numbered questions, and no sixth: statements take no number.
+  assert.equal(countOf(all, '(4. Having heard that'), 4);
+  assert.equal(countOf(all, '(5. Do you plan to vote'), 4);
+  assert.ok(!all.includes('(6. '));
+  // Each answer's arrow sits beside it, on every door.
+  assert.equal(countOf(all, '(-> Statement 1) Tj'), 4);
+  assert.equal(countOf(all, '(-> Close 3) Tj'), 4);
+  // Script flow prints arrows, not List flow's "skip to" instruction.
+  assert.ok(!all.includes('skip to'));
+
+  // {{canvasser}} prints as the blank line; braces never reach paper; notes never print.
+  assert.ok(scriptPage.includes('Hi, my name is ______'));
+  assert.ok(!all.includes('{{'));
+  assert.ok(!all.includes(NOTE), 'a canvasser note must never print');
+});
+
+test('a scripted packet keeps every line on the page, at every household size', async () => {
+  for (const perDoor of [1, 3, 8]) {
+    const doc = await renderPacketPdf(makePayload(5, perDoor, { survey: scripted() }), DEFAULT_SETTINGS);
+    for (const [i, stream] of pageTexts(doc).entries()) {
+      for (const y of textYs(stream)) {
+        assert.ok(
+          y >= PAGE.MARGIN - 12 && y <= PAGE.H - PAGE.MARGIN + 12,
+          `${perDoor} voters/door: text at y=${y} on page ${i + 1} is off the page`
+        );
+      }
+    }
+  }
+});
+
+test('statements alone still earn the What to say page', async () => {
+  // No opening, no closing, no answer scripts: exactly what the page's gate used to test, so a
+  // script made only of statements and closings never printed at all.
+  const bare = scripted({ intro: '', closing: '' });
+  bare.questions = bare.questions.map((q) => ({
+    ...q, options: (q.options || []).map((o) => ({ ...o, script: null })),
+  }));
+  const m = buildSurveyPrintModel(bare);
+  assert.deepEqual([m.intro, m.closing, m.scripts.length], ['', '', 0]);
+  const all = pageTexts(await renderPacketPdf(makePayload(2, 1, { survey: bare }), DEFAULT_SETTINGS)).join('\n');
+  assert.ok(all.includes('What to say'));
+  assert.ok(all.includes('STATEMENT: STATEMENT 1 - ONLY IF Q1 = "UNDECIDED"'));
+  assert.equal(countOf(all, 'Common sense, right?'), 1);
+  // No template closing, so no fallback heading.
+  assert.ok(!all.includes('WHEN NO CLOSING BLOCK APPLIES'));
+
+  // And with truly nothing to say, still no page.
+  const silent = {
+    ...SURVEY, intro: '', closing: '',
+    questions: SURVEY.questions.map((q) => ({ ...q, options: (q.options || []).map((o) => ({ ...o, script: null })) })),
+  };
+  const none = pageTexts(await renderPacketPdf(makePayload(2, 1, { survey: silent }), DEFAULT_SETTINGS)).join('\n');
+  assert.ok(!none.includes('What to say'));
+});
+
+test('List flow keeps its skip instructions and prints no arrows; its statements print once', async () => {
+  // A hand-gated statement inside a gated run: it takes no number and never joins the door
+  // form, so the run's parent still gets its skip line, numbered over the questions alone.
+  const gate = { logic: 'all', rules: [{ questionKey: 'plan', op: 'any_of', optionIds: ['def', 'pro'] }] };
+  const list = {
+    ...SURVEY,
+    questions: [
+      SURVEY.questions[1], // plan
+      { key: 'early', type: 'statement', role: 'statement', label: 'Early voting starts Tuesday.', options: [], visibleIf: gate },
+      SURVEY.questions[2], // how
+      SURVEY.questions[3], // where
+      SURVEY.questions[4], // free
+      { key: 'thanks', type: 'statement', role: 'closing', title: 'Thanks', label: 'Thanks for planning your vote!', options: [], visibleIf: gate },
+    ],
+  };
+  const m = buildSurveyPrintModel(list);
+  assert.equal(m.flow, 'list');
+  assert.deepEqual(m.questions.map((q) => `${q.number}:${q.key}`), ['1:plan', '2:how', '3:where', '4:free']);
+  assert.equal(m.questions[0].skipHint, 'If not "Definitely" or "Probably", skip to Q4');
+  assert.ok(m.questions.every((q) => q.arrow === null && q.options.every((o) => !('arrow' in o))));
+  const early = m.script.find((e) => e.key === 'early');
+  assert.deepEqual([early.gate, early.arrow], ['Only if Q1 = "Definitely" or "Probably"', null]);
+  assert.equal(m.closingIsFallback, true);
+
+  const pages = pageTexts(await renderPacketPdf(makePayload(3, 1, { survey: list }), DEFAULT_SETTINGS));
+  const all = pages.join('\n');
+  assert.equal(countOf(all, 'Early voting starts Tuesday.'), 1);
+  assert.ok(all.includes('STATEMENT - ONLY IF Q1 = "DEFINITELY" OR "PROBABLY"'));
+  assert.ok(all.includes('CLOSING: THANKS - ONLY IF Q1 = "DEFINITELY" OR "PROBABLY"'));
+  assert.ok(all.includes('CLOSING - WHEN NO CLOSING BLOCK APPLIES'));
+  assert.equal(countOf(all, '(-> If not "Definitely" or "Probably", skip to Q4) Tj'), 3);
+  assert.ok(!all.includes('(-> End) Tj') && !all.includes('(-> Q'), 'List flow prints no arrows');
+
+  // A survey with no closing block keeps its plain Closing heading.
+  assert.equal(buildSurveyPrintModel(SURVEY).closingIsFallback, false);
+  const plain = pageTexts(await renderPacketPdf(makePayload(1, 1), DEFAULT_SETTINGS)).join('\n');
+  assert.ok(plain.includes('(CLOSING) Tj'));
+  assert.ok(!plain.includes('WHEN NO CLOSING BLOCK APPLIES'));
+});
+
+test('a statement longer than a page keeps its type across the break', async () => {
+  // A page break draws the next page's band and footer, which leave the footer's 7.5pt face
+  // set; the What to say page used to carry on in it. A statement can run to 5000 characters,
+  // so a break inside one is routine.
+  const pitch = 'Pitch sentence about roads, parks and the county budget. '.repeat(86).trim();
+  const survey = {
+    id: 's-long', name: 'Long pitch', intro: 'Hello. '.repeat(20), closing: '',
+    questions: [
+      { key: 'q', label: 'Can we count on you?', type: 'single_choice', options: [{ id: 'y', text: 'Yes' }] },
+      { key: 'pitch', type: 'statement', role: 'statement', title: 'Pitch', label: pitch, options: [] },
+    ],
+  };
+  const doc = await renderPacketPdf(makePayload(2, 1, { survey }), DEFAULT_SETTINGS);
+  const runs = pageTexts(doc).map((stream) =>
+    [...stream.matchAll(/BT\s*\/F\d+\s+([\d.]+)\s+Tf[^]*?\(((?:\\.|[^\\)])*)\)\s*Tj/g)]
+      .filter((r) => r[2].includes('Pitch sentence'))
+      .map((r) => Number(r[1])));
+  const pagesWithPitch = runs.filter((sizes) => sizes.length).length;
+  assert.ok(pagesWithPitch >= 2, 'fixture no longer breaks a page inside the statement');
+  assert.deepEqual([...new Set(runs.flat())], [10], 'every line of the statement prints in the body face');
 });

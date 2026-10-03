@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import SurveyAnswerFields from '../surveys/SurveyAnswerFields.jsx';
 import { visibleQuestionKeys } from '../../lib/surveyVisibility.js';
 import { cellsFromVals } from '../../lib/surveyAnswerForm.js';
+import { isAnswerable } from '../../lib/surveyRunner.js';
 
 // The answers an admin is recording on a canvasser's behalf.
 //
@@ -19,9 +20,12 @@ export default function SurveyAnswerComposer({ template, vals, otherTexts, onCha
     () => (template?.questions || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0)).filter((q) => !q.retired),
     [template]
   );
+  // The evaluator walks EVERY non-retired block, statements included, because that is the list
+  // the phone and the server walk. What is drawn and counted ("N of M answered") is the answerable
+  // part only: a statement is script for the door, and desk entry records answers after the fact.
   const visible = useMemo(() => {
     const keys = visibleQuestionKeys(questions, cellsFromVals(questions, vals));
-    return questions.filter((q) => keys.has(q.key));
+    return questions.filter((q) => keys.has(q.key) && isAnswerable(q));
   }, [questions, vals]);
 
   const answered = visible.filter((q) => {

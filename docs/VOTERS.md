@@ -189,7 +189,8 @@ statuses above it isn't about what happened; it's a standing request:
 - **Mark / unmark Do not contact** — on the voter profile, with a required reason (see above).
 - **Edit a survey response in place** — correct answers or the note. Edits are **audited**: we
   record who changed it and when, and keep the voter's "surveyed" status in sync. You can also
-  delete a response.
+  delete a response. The editor lists only the questions that record an answer: a scripted survey's
+  read-aloud statements and closings never appear in it, because nothing is ever recorded for them.
 - **Restore a replaced (preserved) response** — when a canvasser's same-round submit overwrote a
   teammate's earlier answers, the earlier response is preserved and shown on the profile as a
   muted read-only card. **Restore this response…** swaps it back losslessly: the current response
@@ -300,7 +301,9 @@ The org list and the campaign list therefore cannot disagree on a count or a row
 **The profile** — [`server/src/services/voters/voterProfile.js`](../server/src/services/voters/voterProfile.js)
 → `buildVoterProfile(voterId, { orgId, scopeCampaignId })` composes the whole payload (voter incl.
 `email`, household + campaign + members, voted status, surveys **with their template question
-defs** for editing, household canvass activity, and notes = admin `VoterNote`s + derived field
+defs** for editing (answerable questions only: `.filter(isAnswerable)` drops statements, which
+record nothing, so `VoterDetailPage`'s editor never renders a read-aloud paragraph as a text
+input), household canvass activity, and notes = admin `VoterNote`s + derived field
 notes). **Three callers** — the org route, the campaign route and the mobile profile route — so the
 shape is identical everywhere. **The scope rule:** with `scopeCampaignId` unset, the person-level
 unions run across the voter's sibling rows (every campaign); with it set, `personRowIds` collapses
@@ -346,7 +349,7 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 | `PATCH /admin/voters/:voterId` | Edit allowed fields (Zod; incl. `email` — org-local, empty string → null; its phone fields stay deliberately LOOSE free-text because the form round-trips legacy file phones, unlike the strict `phoneSchema` on the walk-up create). Locks `stateVoterId`/`householdId`/`organizationId`; stamps `lastEditedBy/At`; recomputes `fullName`. |
 | `DELETE /admin/voters/:voterId` | **Door-added rows ONLY** (`doorAdded != null`, else 400 `NOT_DOOR_ADDED`) — the only voter delete in the product; imported rows leave via re-import/undo-import or campaign deletion. Cascade: `SurveyResponse` rows deleted (+`bumpCampaignStats surveys: -n` — `surveyCount` counts response docs), `SurveyResponseArchive` + `VoterNote` + `VotedVoter` deleted, **`CanvassActivity` rows KEPT with `voterId` nulled** (the door visit genuinely happened and is billable; nothing joins the field — doorKey.js), then the Voter, then `recomputeFullyDnc` + `recomputeHouseholdActive` (deleting a door's only voter deactivates the door and the delta drops it from phones). Phones that hold the voter keep a **phantom row until their next full bootstrap** (a deleted doc can't ride the merge-only delta) — a survey against it 404s and the offline queue drops it. |
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD (the create goes through `createVoterNote`, §B). |
-| `PATCH /admin/voters/:voterId/surveys/:responseId` | Edit `answers`/`note`; sets `editedBy/At`; then `recomputeSurveyStatus`. |
+| `PATCH /admin/voters/:voterId/surveys/:responseId` | Edit `answers`/`note`; `answers` go through `normalizeAndFilterAnswers(template, …, { dropHidden: false })` — answers a later condition would hide are kept (recorded history), unknown keys and **statement** rows are dropped (a missing template stores them as sent); sets `editedBy/At`; then `recomputeSurveyStatus`. |
 | `DELETE /admin/voters/:voterId/surveys/:responseId` | Delete a response; then `recomputeSurveyStatus`. Never touches archived (preserved) siblings. |
 | `POST /admin/voters/:voterId/surveys/:archiveId/restore` | **Lossless swap**: archive the displaced current response (`via:'restore'`), promote the preserved one verbatim, consume the archive row (re-restore = 404); resurrects (+1 `surveyCount`) if the current response was deleted meanwhile; then `recomputeSurveyStatus`. See [SURVEYS.md](SURVEYS.md) §F. |
 | `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` | Erase a preserved (overwritten) response outright. No counters move — archives were never counted. |

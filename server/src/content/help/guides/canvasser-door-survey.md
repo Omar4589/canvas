@@ -5,8 +5,8 @@ audience: canvasser
 kind: guide
 order: 31
 sourceDoc: SURVEYS.md
-summary: Open the survey for a voter, answer the questions, and submit.
-tags: canvasser, survey, voter, door
+summary: Open the survey for a voter, answer the questions — one screen at a time on a scripted survey — and submit.
+tags: canvasser, survey, voter, door, script, read aloud, closing, next, skip, back, link, note
 ---
 
 On a survey campaign, tap a voter at the house to open their survey.
@@ -16,6 +16,20 @@ Each voter shows their **party, age, and gender** — whatever the voter file ha
 ## Answering
 
 Work through the questions and tap your answers. Some questions only appear **based on earlier answers** — for example, a follow-up that shows up only if someone said they're undecided — so the survey adapts as you go. Don't worry about which questions to skip; the app shows the right ones.
+
+Some surveys are **scripts**. Besides questions, they have amber **Read aloud** boxes — words for you to say that the voter doesn't answer — and they end on a **Closing**. Most scripts show **one thing at a time**:
+
+- **Read the screen, then tap Next.** The greeting and each Read aloud box get a screen of their own.
+- **On a question, tap the answer.** If it comes with a line for you to read, the line appears right under it. Then tap **Next** — on a required question it only works once you've answered. Your answer decides which screen comes next.
+- **Skip** shows on optional questions only. It clears any answer you picked and moves on.
+- **‹ Back** at the top goes to the previous screen, so you can change an earlier answer. The app follows the new answer, and nothing from the old path is saved. On the first screen, Back leaves the survey; on Android, your phone's back button works the same way.
+- **A blue *For you — not read aloud* box is for you**, not the voter: a tip from your campaign.
+- **Tap a link** to open the page in your phone's browser and show it to the voter.
+- **The last screen is the goodbye for that conversation**, with a **Note** box and **Save Response**. If it says **Answer Question 3 to finish** instead, tap it to jump back to the question that still needs an answer.
+
+When a script is all on one page, Read aloud and Closing boxes appear in place as you answer, and anything new that appears near the bottom of the screen is scrolled into view for you. An ordinary survey without a script never scrolls on its own.
+
+**If the voter refuses partway through**, nothing has been saved yet — answers are only saved when you tap **Save Response**. Tap **‹ Back** until you're out of the survey, then tap **Refused** on the door screen. (If you've already surveyed someone else at this door, just leave it there — see *Submitting* below.)
 
 ## Submitting
 

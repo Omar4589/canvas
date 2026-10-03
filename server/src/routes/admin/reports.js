@@ -17,6 +17,7 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } from '../../services/surveys/answerAgg.js';
 import { currentVoterSetsByTag } from '../../services/surveys/currentTags.js';
 import { OTHER_OPTION_ID } from '../../services/surveys/otherOption.js';
+import { isStatement } from '../../services/surveys/routing.js';
 import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
@@ -1319,6 +1320,10 @@ router.get('/survey-results', async (req, res, next) => {
 
     const aggResults = [];
     for (const q of sortedQs) {
+      // A statement (read-aloud text or a closing) records nothing: skipped here, once, so no
+      // aggregation runs for it and no results surface (web dashboard cards, the phone's
+      // campaign and canvasser screens, the tag rollup below) ever gets an empty card for it.
+      if (isStatement(q)) continue;
       const isText = q.type === 'text';
       const wantsPreview = voterPreviewLimit > 0 && !isText;
 

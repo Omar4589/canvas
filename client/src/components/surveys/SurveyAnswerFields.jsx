@@ -1,4 +1,5 @@
 import { choicesFor, OTHER_OPTION_ID } from '../../lib/surveyChoices.js';
+import { isAnswerable } from '../../lib/surveyRunner.js';
 
 // The input controls for one survey question set — the renderer half of the answer form.
 //
@@ -10,6 +11,9 @@ import { choicesFor, OTHER_OPTION_ID } from '../../lib/surveyChoices.js';
 //
 // `keepIds` per question keeps a SINCE-RETIRED option visible when this response actually selected
 // it; without it, saving silently de-selects the answer.
+//
+// A statement (read-aloud script, no answer) is never drawn: it would fall into the free-text
+// branch below and post whatever was typed into it as an answer nobody can record.
 export default function SurveyAnswerFields({ questions, vals, otherTexts, onChange, onOtherChange, idPrefix = 'q' }) {
   const setVal = (key, value) => onChange({ ...vals, [key]: value });
   const toggleMulti = (key, optId) => {
@@ -19,7 +23,7 @@ export default function SurveyAnswerFields({ questions, vals, otherTexts, onChan
 
   return (
     <div className="space-y-3">
-      {questions.map((q) => {
+      {questions.filter(isAnswerable).map((q) => {
         const selected = Array.isArray(vals[q.key]) ? vals[q.key] : vals[q.key] ? [vals[q.key]] : [];
         const choices = choicesFor(q, { keepIds: selected });
         const otherPicked = selected.includes(OTHER_OPTION_ID);

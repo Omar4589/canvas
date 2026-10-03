@@ -1,0 +1,500 @@
+[
+  {
+    "name": "Burton, final graph (Part 1 table)",
+    "questions": [
+      {
+        "key": "q1", "type": "single_choice", "label": "Can he count on your support…?", "required": true,
+        "options": [
+          { "id": "yes", "text": "Yes", "tag": "Supporter", "goTo": "q4" },
+          { "id": "no", "text": "No", "goTo": "q2" },
+          { "id": "undecided", "text": "Undecided", "goTo": "s1_pitch" },
+          { "id": "already_voted", "text": "Already voted", "script": "Oh great! Well thank you for participating.", "goTo": "q3" }
+        ]
+      },
+      { "key": "q2", "type": "text", "label": "Thank you for sharing. Is there a particular reason?", "required": false, "options": [], "goTo": null },
+      {
+        "key": "s_q2_opponent", "type": "statement", "role": "statement", "required": false, "options": [],
+        "label": "Are you aware of how much legal and financial trouble his opponent is in?",
+        "note": "Could share this with them if the situation feels appropriate.",
+        "links": [{ "label": "The opponent ledger article", "url": "https://example.org/opponent-ledger" }],
+        "goTo": "__end__"
+      },
+      {
+        "key": "q3", "type": "single_choice", "label": "If you don't mind sharing, did you vote for Paul Burton?", "required": true,
+        "options": [
+          { "id": "yes", "text": "Yes", "tag": "Supporter", "goTo": "close_3" },
+          { "id": "no", "text": "No", "goTo": "__end__" },
+          { "id": "declined_to_say", "text": "Declined to say", "goTo": "__end__" }
+        ]
+      },
+      {
+        "key": "s1_pitch", "type": "statement", "role": "statement", "title": "Statement 1", "required": false, "options": [],
+        "label": "That's completely understandable… Common sense, right?",
+        "goTo": null
+      },
+      {
+        "key": "s1_question", "type": "single_choice", "label": "Having heard that, can Paul count on your support?", "required": true,
+        "options": [
+          { "id": "yes", "text": "Yes", "tag": "Supporter", "goTo": "q4" },
+          { "id": "still_undecided", "text": "Still undecided", "goTo": "close_4" },
+          { "id": "no", "text": "No", "goTo": "__end__" }
+        ]
+      },
+      {
+        "key": "q4", "type": "single_choice", "required": true,
+        "label": "The election is Tuesday, November 3rd. Do you plan to vote on election day, vote early, or vote by mail?",
+        "options": [
+          { "id": "election_day", "text": "Election Day", "goTo": "close_2" },
+          { "id": "voting_early", "text": "Voting early", "goTo": "close_2" },
+          { "id": "by_mail", "text": "Vote by mail", "goTo": "close_2" },
+          { "id": "unsure", "text": "Unsure", "goTo": "close_2" },
+          { "id": "declined_to_answer", "text": "Declined to answer", "goTo": "close_2" },
+          { "id": "not_voting", "text": "Not voting", "goTo": "__end__" }
+        ]
+      },
+      {
+        "key": "close_2", "type": "statement", "role": "closing", "title": "Close 2", "required": false, "options": [],
+        "label": "Every vote matters… make a plan to vote.",
+        "note": "Dates are also on the push card.",
+        "goTo": "close_4"
+      },
+      {
+        "key": "close_3", "type": "statement", "role": "closing", "title": "Close 3", "required": false, "options": [],
+        "label": "Great! … Do you know anyone else that would want to vote for Paul?",
+        "goTo": "close_4"
+      },
+      {
+        "key": "close_4", "type": "statement", "role": "closing", "title": "Close 4", "required": false, "options": [],
+        "label": "For more information… Have a great day!",
+        "note": "Both links are also on the push card.",
+        "links": [
+          { "label": "Campaign website", "url": "https://example.org/burton" },
+          { "label": "Find your polling place", "url": "https://example.org/polling-place" }
+        ],
+        "goTo": "__end__"
+      }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] },
+      "s_q2_opponent": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] },
+      "q3": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["already_voted"] }] },
+      "s1_pitch": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["undecided"] }] },
+      "s1_question": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["undecided"] }] },
+      "q4": { "logic": "any", "rules": [
+        { "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] },
+        { "questionKey": "s1_question", "op": "any_of", "optionIds": ["yes"] }
+      ] },
+      "close_2": { "logic": "any", "rules": [
+        { "questionKey": "q4", "op": "any_of", "optionIds": ["election_day", "voting_early", "by_mail", "unsure", "declined_to_answer"] }
+      ] },
+      "close_3": { "logic": "any", "rules": [{ "questionKey": "q3", "op": "any_of", "optionIds": ["yes"] }] },
+      "close_4": { "logic": "any", "rules": [
+        { "questionKey": "q3", "op": "any_of", "optionIds": ["yes"] },
+        { "questionKey": "s1_question", "op": "any_of", "optionIds": ["still_undecided"] },
+        { "questionKey": "q4", "op": "any_of", "optionIds": ["election_day", "voting_early", "by_mail", "unsure", "declined_to_answer"] }
+      ] }
+    },
+    "paths": [
+      { "name": "a supporter reaches Close 2 then Close 4, never Close 3", "answers": { "q1": ["yes"], "q4": ["election_day"] }, "expectedVisibleKeys": ["q1", "q4", "close_2", "close_4"] },
+      { "name": "already voted for Paul: Close 3 then Close 4", "answers": { "q1": ["already_voted"], "q3": ["yes"] }, "expectedVisibleKeys": ["q1", "q3", "close_3", "close_4"] },
+      { "name": "still undecided after the pitch: Close 4 only", "answers": { "q1": ["undecided"], "s1_question": ["still_undecided"] }, "expectedVisibleKeys": ["q1", "s1_pitch", "s1_question", "close_4"] },
+      { "name": "No: the reason, the follow-up line, then End", "answers": { "q1": ["no"], "q2": "Prefers the incumbent" }, "expectedVisibleKeys": ["q1", "q2", "s_q2_opponent"] }
+    ]
+  },
+  {
+    "name": "a block reached from two sources",
+    "questions": [
+      { "key": "a", "type": "single_choice", "label": "Have you heard of Paul?", "options": [
+        { "id": "x", "text": "Yes", "goTo": "c" },
+        { "id": "y", "text": "No", "goTo": null }
+      ] },
+      { "key": "b", "type": "single_choice", "label": "Would you like to learn more?", "options": [
+        { "id": "p", "text": "Yes", "goTo": "c" },
+        { "id": "q", "text": "No", "goTo": "__end__" }
+      ] },
+      { "key": "c", "type": "statement", "role": "closing", "title": "Close", "label": "Here is a flyer.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "a": null,
+      "b": { "logic": "any", "rules": [{ "questionKey": "a", "op": "any_of", "optionIds": ["y"] }] },
+      "c": { "logic": "any", "rules": [
+        { "questionKey": "a", "op": "any_of", "optionIds": ["x"] },
+        { "questionKey": "b", "op": "any_of", "optionIds": ["p"] }
+      ] }
+    },
+    "paths": [
+      { "name": "straight in from the first question", "answers": { "a": ["x"] }, "expectedVisibleKeys": ["a", "c"] },
+      { "name": "in through the second question", "answers": { "a": ["y"], "b": ["p"] }, "expectedVisibleKeys": ["a", "b", "c"] },
+      { "name": "the second question routes to End", "answers": { "a": ["y"], "b": ["q"] }, "expectedVisibleKeys": ["a", "b"] },
+      { "name": "an unanswered branching question routes nowhere", "answers": { "a": ["y"] }, "expectedVisibleKeys": ["a", "b"] }
+    ]
+  },
+  {
+    "name": "a backward jump is an error",
+    "questions": [
+      { "key": "name", "type": "text", "label": "What is your name?", "options": [], "goTo": null },
+      { "key": "rent", "type": "single_choice", "label": "Do you rent?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "name" },
+        { "id": "no", "text": "No", "goTo": null }
+      ] },
+      { "key": "close", "type": "statement", "role": "closing", "title": "Close", "label": "Thanks!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "rent", "optionId": "yes", "message": "The answer \"Yes\" on \"Do you rent?\" can only go to a later block, and \"What is your name?\" comes before it — move \"What is your name?\" down or pick another target." }
+    ],
+    "expectedVisibleIf": {
+      "name": null,
+      "rent": null,
+      "close": { "logic": "any", "rules": [{ "questionKey": "rent", "op": "any_of", "optionIds": ["no"] }] }
+    }
+  },
+  {
+    "name": "a route back to its own block is an error",
+    "questions": [
+      { "key": "ready", "type": "single_choice", "label": "Ready to hear more?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "ready" },
+        { "id": "no", "text": "No", "goTo": null },
+        { "id": "maybe", "text": "Maybe later", "goTo": "close" }
+      ] },
+      { "key": "pitch", "type": "statement", "role": "statement", "title": "Pitch", "label": "Here is why Paul is running.", "options": [], "goTo": "pitch" },
+      { "key": "close", "type": "statement", "role": "closing", "title": "Close", "label": "Thanks for your time.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "ready", "optionId": "yes", "message": "The answer \"Yes\" on \"Ready to hear more?\" can only go to a later block, not back to \"Ready to hear more?\" itself — pick another target." },
+      { "key": "pitch", "message": "\"Pitch\" can only go to a later block, not back to \"Pitch\" itself — pick another target." }
+    ],
+    "expectedVisibleIf": {
+      "ready": null,
+      "pitch": { "logic": "any", "rules": [{ "questionKey": "ready", "op": "any_of", "optionIds": ["no"] }] },
+      "close": { "logic": "any", "rules": [{ "questionKey": "ready", "op": "any_of", "optionIds": ["maybe"] }] }
+    }
+  },
+  {
+    "name": "a block nothing leads to is an error, named by its first sixty characters",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "close" },
+        { "id": "no", "text": "No", "goTo": "close" }
+      ] },
+      { "key": "s", "type": "statement", "role": "statement", "options": [], "goTo": "__end__",
+        "label": "That's completely understandable.\n\nPaul has spent twenty years   fixing roads in this district, and he will keep doing it." },
+      { "key": "close", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "s", "message": "Nothing leads to \"That's completely understandable. Paul has spent twenty year…\". Route an answer to it, or move it where the flow reaches it." }
+    ],
+    "expectedVisibleIf": {
+      "q1": null,
+      "s": null,
+      "close": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes", "no"] }] }
+    }
+  },
+  {
+    "name": "multiple choice is a union",
+    "questions": [
+      { "key": "issues", "type": "multiple_choice", "label": "Which issues matter most to you?", "required": true, "options": [
+        { "id": "roads", "text": "Roads", "goTo": "roads_info" },
+        { "id": "parks", "text": "Parks", "goTo": "parks_info" },
+        { "id": "none", "text": "None of these", "goTo": "__end__" }
+      ] },
+      { "key": "roads_info", "type": "statement", "role": "statement", "title": "Roads", "label": "Paul fixed forty miles of roads.", "options": [], "goTo": "__end__" },
+      { "key": "parks_info", "type": "statement", "role": "closing", "title": "Parks", "label": "Paul opened two new parks.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "issues": null,
+      "roads_info": { "logic": "any", "rules": [{ "questionKey": "issues", "op": "any_of", "optionIds": ["roads"] }] },
+      "parks_info": { "logic": "any", "rules": [{ "questionKey": "issues", "op": "any_of", "optionIds": ["parks"] }] }
+    },
+    "paths": [
+      { "name": "two picks route to two blocks: both shown", "answers": { "issues": ["roads", "parks"] }, "expectedVisibleKeys": ["issues", "roads_info", "parks_info"] },
+      { "name": "End on one pick never suppresses another pick's route", "answers": { "issues": ["roads", "none"] }, "expectedVisibleKeys": ["issues", "roads_info"] },
+      { "name": "End alone", "answers": { "issues": ["none"] }, "expectedVisibleKeys": ["issues"] },
+      { "name": "the later block alone", "answers": { "issues": ["parks"] }, "expectedVisibleKeys": ["issues", "parks_info"] }
+    ]
+  },
+  {
+    "name": "Other (specify) routes through otherGoTo and sits last in its atom",
+    "questions": [
+      { "key": "source", "type": "single_choice", "label": "How did you hear about Paul?", "otherOption": true, "otherGoTo": "thanks", "options": [
+        { "id": "mail", "text": "Mail", "goTo": "thanks" },
+        { "id": "tv", "text": "TV", "goTo": "__end__" },
+        { "id": "friend", "text": "A friend", "goTo": null }
+      ] },
+      { "key": "who", "type": "text", "label": "Who told you about him?", "options": [], "goTo": null },
+      { "key": "thanks", "type": "statement", "role": "closing", "title": "Thanks", "label": "Thanks for letting us know.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "source": null,
+      "who": { "logic": "any", "rules": [{ "questionKey": "source", "op": "any_of", "optionIds": ["friend"] }] },
+      "thanks": { "logic": "any", "rules": [{ "questionKey": "source", "op": "any_of", "optionIds": ["mail", "friend", "__other__"] }] }
+    },
+    "paths": [
+      { "name": "an Other pick follows otherGoTo", "answers": { "source": ["__other__"] }, "expectedVisibleKeys": ["source", "thanks"] },
+      { "name": "an answer routed to End", "answers": { "source": ["tv"] }, "expectedVisibleKeys": ["source"] },
+      { "name": "a continue through the text question", "answers": { "source": ["friend"] }, "expectedVisibleKeys": ["source", "who", "thanks"] }
+    ]
+  },
+  {
+    "name": "otherGoTo is ignored while Other is off",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Any concerns?", "otherOption": false, "otherGoTo": "gone", "options": [
+        { "id": "yes", "text": "Yes" },
+        { "id": "no", "text": "No" }
+      ] },
+      { "key": "q2", "type": "text", "label": "What are they?", "options": [] }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": null
+    },
+    "paths": [
+      { "name": "a plain question carries on whatever was picked", "answers": { "q1": ["no"] }, "expectedVisibleKeys": ["q1", "q2"] }
+    ]
+  },
+  {
+    "name": "retired answers neither fire nor count",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Will you take a yard sign?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "sign" },
+        { "id": "maybe", "text": "Maybe", "retired": true, "goTo": "sign" },
+        { "id": "later", "text": "Later", "retired": true, "goTo": "gone" },
+        { "id": "no", "text": "No", "goTo": "__end__" }
+      ] },
+      { "key": "sign", "type": "statement", "role": "closing", "title": "Sign", "label": "Great, a volunteer will drop one off.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "sign": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }] }
+    },
+    "paths": [
+      { "name": "a stored retired answer routes nowhere", "answers": { "q1": ["maybe"] }, "expectedVisibleKeys": ["q1"] },
+      { "name": "a live answer still routes", "answers": { "q1": ["yes"] }, "expectedVisibleKeys": ["q1", "sign"] }
+    ]
+  },
+  {
+    "name": "a retired answer's route is not a way in",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "close" },
+        { "id": "no", "text": "No", "retired": true, "goTo": "why" }
+      ] },
+      { "key": "why", "type": "text", "label": "Why not?", "options": [], "goTo": "__end__" },
+      { "key": "close", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "why", "message": "Nothing leads to \"Why not?\". Route an answer to it, or move it where the flow reaches it." }
+    ],
+    "expectedVisibleIf": {
+      "q1": null,
+      "why": null,
+      "close": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }] }
+    }
+  },
+  {
+    "name": "a question whose only arrows sit on retired answers is plain",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Do you have a yard?", "options": [
+        { "id": "yes", "text": "Yes" },
+        { "id": "no", "text": "No", "retired": true, "goTo": "close" }
+      ] },
+      { "key": "q2", "type": "text", "label": "How big is it?", "options": [] },
+      { "key": "close", "type": "statement", "role": "closing", "title": "Close", "label": "Thanks!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": null,
+      "close": null
+    }
+  },
+  {
+    "name": "a plain question mid-script never strands the path",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "required": true, "options": [
+        { "id": "yes", "text": "Yes", "goTo": "p" },
+        { "id": "no", "text": "No", "goTo": "__end__" }
+      ] },
+      { "key": "p", "type": "single_choice", "label": "Which issue matters most?", "required": false, "options": [
+        { "id": "roads", "text": "Roads" },
+        { "id": "parks", "text": "Parks" }
+      ] },
+      { "key": "z", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "p": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }] },
+      "z": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes"] }] }
+    },
+    "paths": [
+      { "name": "skipping the plain question still reaches the closing", "answers": { "q1": ["yes"] }, "expectedVisibleKeys": ["q1", "p", "z"] },
+      { "name": "answering it changes nothing", "answers": { "q1": ["yes"], "p": ["parks"] }, "expectedVisibleKeys": ["q1", "p", "z"] },
+      { "name": "End before it", "answers": { "q1": ["no"] }, "expectedVisibleKeys": ["q1"] }
+    ]
+  },
+  {
+    "name": "a plain linear survey compiles to no conditions",
+    "questions": [
+      { "key": "a", "type": "single_choice", "label": "First?", "options": [{ "id": "x", "text": "X" }, { "id": "y", "text": "Y" }] },
+      { "key": "b", "type": "single_choice", "label": "Second?", "options": [{ "id": "x", "text": "X" }] },
+      { "key": "c", "type": "text", "label": "Anything else?", "options": [] }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "a": null,
+      "b": null,
+      "c": null
+    }
+  },
+  {
+    "name": "a text question first is unconditional",
+    "questions": [
+      { "key": "t", "type": "text", "label": "Who answered the door?", "options": [], "goTo": null },
+      { "key": "q", "type": "single_choice", "label": "Are you registered to vote?", "options": [
+        { "id": "a", "text": "Yes", "goTo": "c" },
+        { "id": "b", "text": "No", "goTo": "__end__" }
+      ] },
+      { "key": "c", "type": "statement", "role": "closing", "title": "Close", "label": "Thanks!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "t": null,
+      "q": null,
+      "c": { "logic": "any", "rules": [{ "questionKey": "q", "op": "any_of", "optionIds": ["a"] }] }
+    },
+    "paths": [
+      { "name": "nothing typed, the question still shows", "answers": {}, "expectedVisibleKeys": ["t", "q"] }
+    ]
+  },
+  {
+    "name": "retired blocks pass through untouched",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "options": [
+        { "id": "a", "text": "Yes", "goTo": "q3" },
+        { "id": "b", "text": "No", "goTo": null }
+      ] },
+      { "key": "old", "type": "text", "label": "Old question", "retired": true, "options": [], "goTo": "q1",
+        "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is", "optionIds": ["a"] }] } },
+      { "key": "q2", "type": "text", "label": "Why not?", "options": [], "goTo": null },
+      { "key": "q3", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["b"] }] },
+      "q3": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["a", "b"] }] }
+    },
+    "paths": [
+      { "name": "No skips over the retired block into the next live one", "answers": { "q1": ["b"] }, "expectedVisibleKeys": ["q1", "q2", "q3"] }
+    ]
+  },
+  {
+    "name": "an incoming condition on a live block is ignored and overwritten",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?",
+        "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q9", "op": "answered", "optionIds": [] }] },
+        "options": [
+          { "id": "yes", "text": "Yes", "goTo": "q3" },
+          { "id": "no", "text": "No", "goTo": null }
+        ] },
+      { "key": "q2", "type": "text", "label": "Why not?", "options": [],
+        "visibleIf": { "logic": "all", "rules": [{ "questionKey": "q1", "op": "is_not", "optionIds": ["yes"] }] } },
+      { "key": "q3", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__",
+        "visibleIf": { "logic": "any", "rules": [] } }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] },
+      "q3": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes", "no"] }] }
+    },
+    "paths": [
+      { "name": "No, nothing typed: the closing still shows", "answers": { "q1": ["no"] }, "expectedVisibleKeys": ["q1", "q2", "q3"] },
+      { "name": "nothing answered: the stale conditions no longer decide anything", "answers": {}, "expectedVisibleKeys": ["q1"] }
+    ]
+  },
+  {
+    "name": "the fall-through trap: a closing left on continue runs into the next",
+    "questions": [
+      { "key": "q", "type": "single_choice", "label": "Can we count on you?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "c2" },
+        { "id": "no", "text": "No", "goTo": "c3" }
+      ] },
+      { "key": "c2", "type": "statement", "role": "closing", "title": "Close 2", "label": "Make a plan to vote.", "options": [], "goTo": null },
+      { "key": "c3", "type": "statement", "role": "closing", "title": "Close 3", "label": "Thanks anyway.", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q": null,
+      "c2": { "logic": "any", "rules": [{ "questionKey": "q", "op": "any_of", "optionIds": ["yes"] }] },
+      "c3": { "logic": "any", "rules": [{ "questionKey": "q", "op": "any_of", "optionIds": ["yes", "no"] }] }
+    },
+    "paths": [
+      { "name": "Yes reads both closings", "answers": { "q": ["yes"] }, "expectedVisibleKeys": ["q", "c2", "c3"] },
+      { "name": "No reads only its own", "answers": { "q": ["no"] }, "expectedVisibleKeys": ["q", "c3"] }
+    ]
+  },
+  {
+    "name": "a direct route and a continue on the same question merge into one atom",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "q3" },
+        { "id": "no", "text": "No", "goTo": null }
+      ] },
+      { "key": "q2", "type": "text", "label": "Why not?", "options": [] },
+      { "key": "q3", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] },
+      "q3": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes", "no"] }] }
+    }
+  },
+  {
+    "name": "a Go to on a choice question itself is an error",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Can we count on you?", "goTo": "q3", "options": [
+        { "id": "yes", "text": "Yes", "goTo": "q3" },
+        { "id": "no", "text": "No", "goTo": null }
+      ] },
+      { "key": "q2", "type": "text", "label": "Why not?", "options": [] },
+      { "key": "q3", "type": "statement", "role": "closing", "title": "Close", "label": "Thank you!", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "q1", "message": "\"Can we count on you?\" is a choice question, so its Go to belongs on each answer — remove the one on the question itself." }
+    ],
+    "expectedVisibleIf": {
+      "q1": null,
+      "q2": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["no"] }] },
+      "q3": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["yes", "no"] }] }
+    }
+  },
+  {
+    "name": "a route to a removed block is an error",
+    "questions": [
+      { "key": "q1", "type": "single_choice", "label": "Where do you get your news?", "options": [
+        { "id": "paper", "text": "Paper", "goTo": "gone" },
+        { "id": "tv", "text": "TV", "goTo": "old" },
+        { "id": "web", "text": "Online", "goTo": null }
+      ] },
+      { "key": "old", "type": "statement", "role": "statement", "title": "Old pitch", "label": "Read this.", "retired": true, "options": [], "goTo": "__end__" },
+      { "key": "sites", "type": "text", "label": "Which sites?", "options": [], "goTo": "__end__" }
+    ],
+    "expectedErrors": [
+      { "key": "q1", "optionId": "paper", "message": "The answer \"Paper\" on \"Where do you get your news?\" goes to a block that has been removed — pick another target." },
+      { "key": "q1", "optionId": "tv", "message": "The answer \"TV\" on \"Where do you get your news?\" goes to a block that has been removed — pick another target." }
+    ],
+    "expectedVisibleIf": {
+      "q1": null,
+      "sites": { "logic": "any", "rules": [{ "questionKey": "q1", "op": "any_of", "optionIds": ["web"] }] }
+    }
+  }
+]

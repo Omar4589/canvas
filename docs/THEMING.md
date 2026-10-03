@@ -173,6 +173,7 @@ Defined in [mobile/lib/theme.js](../mobile/lib/theme.js) (`lightColors` / `darkC
 | `success` / `warn` / `danger` / `info` (+ `*Bg`) | base + soft tint | lifted base + deep tint | status colors |
 | `warnFg` / `warnBorder` / `dangerBorder` | `#92400E` / `#FCD34D` / `#FCA5A5` | `#FCD34D` / `#854D0E` / `#7F1D1D` | caution text/border, danger border |
 | `successFg` / `dangerFg` | `#166534` / `#991B1B` | `#4ADE80` / `#FCA5A5` | **small text on `successBg` / `dangerBg`** — see below |
+| `infoFg` | `#1E40AF` | `#93C5FD` | info-fg — **small text on `infoBg`** (the survey's canvasser note) — see below |
 | `accentPurple` (+ `Bg`) / `teal` (+ `Bg`) | `#7E22CE` / `#0F766E` | `#C084FC` / `#2DD4BF` | campaign-type / voted badges |
 | `backdrop` / `chromeBar` | `rgba(0,0,0,.45)` / `rgba(255,255,255,.95)` | `rgba(0,0,0,.65)` / `rgba(17,24,39,.95)` | modal scrim / map top bar |
 | `mapLabel` / `mapLabelHalo` | `#111827` / `#FFFFFF` | `#E5E7EB` / `#0B0F19` | Mapbox symbol label + halo |
@@ -190,11 +191,25 @@ The vivid status hues are sized for **large** text and icons, where the WCAG flo
 | `successFg` `#166534` on `successBg` | **6.49:1** | passes |
 | `dangerFg` `#991B1B` on `dangerBg` | **6.80:1** | passes |
 | `warnFg` `#92400E` on `warnBg` | **6.37:1** | passes (amber always had this) |
+| `info` `#3B82F6` on `infoBg` `#DBEAFE` | **3.01:1** | fails for small text |
+| `infoFg` `#1E40AF` on `infoBg` | **7.15:1** | passes |
 
 So `makeRateColors()` in [mobile/lib/rates.js](../mobile/lib/rates.js) returns **three** keys per
 tier: `bg` (the tint), `fg` (vivid — big numerals, dots, icons) and `deep` (the `*Fg` token — any
 text at caption/body size sitting on `bg`). **Pick by size, not by taste.** `caution` maps both `fg`
 and `deep` to `warnFg` because amber has no readable vivid variant.
+
+**`infoFg` is the readable info-hued text on `infoBg`**, added for the survey's canvasser note — the
+blue **For you — not read aloud** box under a survey block
+([components/SurveyNoteAndLinks.jsx](../mobile/components/SurveyNoteAndLinks.jsx),
+[CANVASSER_APP.md](CANVASSER_APP.md) → *Scripted surveys on the phone*), whose label and text are
+both set in the info hue. Until then `info` and `infoBg` had no readable foreground pair: raw `info`
+on `infoBg` is **3.01:1** in light. The dark pair already passed (`#60A5FA` on `#12243F`,
+**6.12:1**), and `infoFg` gives both schemes one token to name (dark `#93C5FD`, **8.63:1**). The note
+is blue on purpose: everything a canvasser reads aloud on that screen is amber (`warnBg` / `warnFg`),
+so the tint itself says *this is not for the voter*. Use `infoFg` for small info-hued text on
+`infoBg` (`textPrimary` there is fine too); `HelpBlocks`' Note callout label still uses raw `info` —
+fix it when you touch that file, don't copy it.
 
 Four other traps in the same family, all measured:
 

@@ -11,7 +11,7 @@ tags: refused, not a target voter, restricted, no soliciting, disposition, billi
 
 They look similar in the field but don't all count the same. The question that separates them is **how far you got** — and, when someone answers, **who** it was:
 
-- **Refused** — you reached the door **and a person**. Someone came out and turned you away. This **is** a knock and **is** a contact (you reached someone).
+- **Refused** — you reached the door **and a person**. Someone came out and turned you away. This **is** a knock and **is** a contact (you reached someone). A refusal is recorded only with this button on the door screen — never with a survey answer, even one named Refused.
 - **Not a target voter** — you reached the door **and a person**, but not one of the voters on your list for that address, and they wouldn't give their name (someone who does give a name can be added with **＋ Add person** and surveyed instead, unless your campaign has limited adding people to team leads and admins). It counts exactly like Refused — it **is** a knock and **is** a contact, and it is **never** a survey. It's an optional button, only on survey campaigns that have it turned on. If you don't see **Not a target voter**, record the door as you do today and mention it to your lead.
 - **No soliciting** — you reached the door, but a posted sign ended the visit and nobody answered. This **is** a knock — you made the same walk as any other house — but it is **not** a contact, so it doesn't lift your "reached a person" rate.
 - **Restricted access** — you never reached the door at all: a gated community, a locked building, no access. It's fully visible and counted as its own category, but it is **not** counted as a knock (you never actually knocked).

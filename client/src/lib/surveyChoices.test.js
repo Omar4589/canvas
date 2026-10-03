@@ -35,6 +35,17 @@ test('non-choice questions have no choices', () => {
   assert.deepEqual(choicesFor(undefined), []);
 });
 
+test('a statement has no choices, even carrying stray options or the Other flag', () => {
+  // A statement (docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md) is read aloud and takes no answer. The
+  // server empties its options and clears otherOption, but a surface that drew choices for one
+  // would offer an answer the server then throws away.
+  assert.deepEqual(choicesFor({ type: 'statement', role: 'statement', options: [] }), []);
+  assert.deepEqual(
+    choicesFor({ type: 'statement', role: 'closing', otherOption: true, options: [{ id: 'o_x', text: 'X' }] }),
+    []
+  );
+});
+
 test('legacy string options still render', () => {
   const out = choicesFor({ type: 'single_choice', options: ['Yes', 'No'] });
   assert.deepEqual(out.map((c) => c.text), ['Yes', 'No']);

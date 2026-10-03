@@ -9,8 +9,15 @@
 // into a junk bucket named after the typed text.
 //
 // Pure on purpose: no JSX, no hooks. The renderer is components/surveys/SurveyAnswerFields.jsx.
+//
+// A STATEMENT (type 'statement', docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I) is script read aloud at
+// the door and records nothing, so all three halves below skip it: no form slot, no answer row,
+// no evaluator cell. The server drops a statement row anyway (normalizeAnswers.js); skipping it
+// here keeps every caller of these helpers honest without leaning on that backstop. isAnswerable
+// is the phone's own test (surveyRunner.js), so desk entry and the door agree on what a statement is.
 import { OTHER_OPTION_ID } from './surveyChoices.js';
 import { makeCell } from './surveyVisibility.js';
+import { isAnswerable } from './surveyRunner.js';
 
 /**
  * Form state from stored answers.
@@ -23,6 +30,7 @@ export function seedFromAnswers(questions, answers = []) {
   const vals = {};
   const otherTexts = {};
   for (const q of questions || []) {
+    if (!isAnswerable(q)) continue;
     const a = (answers || []).find((x) => x.questionKey === q.key);
     if (q.type === 'text') {
       vals[q.key] = a?.answer ?? '';
@@ -54,7 +62,9 @@ export function seedFromAnswers(questions, answers = []) {
  */
 export function buildAnswers(questions, vals, otherTexts = {}, { carryThrough = [] } = {}) {
   const editable = (questions || []).filter((q) => !q.retired);
-  const answers = editable.map((q) => {
+  // A statement gets no row. Its key still lands in `seen` below, so a stray stored row for it is
+  // not carried through either.
+  const answers = editable.filter(isAnswerable).map((q) => {
     const v = vals[q.key];
     if (q.type === 'text') {
       return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [] };
@@ -92,6 +102,9 @@ export const dropEmptyAnswers = (answers) =>
 export const cellsFromVals = (questions, vals) => {
   const cells = {};
   for (const q of questions || []) {
+    // No cell for a statement: the evaluator reads an absent cell as empty, which is all a
+    // statement could ever hold, and no rule may reference one.
+    if (!isAnswerable(q)) continue;
     const v = vals[q.key];
     // A text question's value is TEXT, never an option id — treating it as one made a free-text
     // answer look like a chosen option to every visibleIf rule reading optionIds.

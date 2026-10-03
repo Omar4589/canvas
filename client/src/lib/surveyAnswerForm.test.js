@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { seedFromAnswers, buildAnswers, dropEmptyAnswers, cellsFromVals } from './surveyAnswerForm.js';
+import { visibleQuestionKeys } from './surveyVisibility.js';
 
 // The pure halves of the survey answer form, shared by the admin response EDITOR and the
 // desk-entry COMPOSER. The bug these exist to prevent: rebuilding answers without the __other__
@@ -100,6 +101,55 @@ test('dropEmptyAnswers keeps only what was actually answered', () => {
     { questionKey: 'd', optionIds: [], answer: 'typed' },
   ]);
   assert.deepEqual(out.map((a) => a.questionKey), ['a', 'd']);
+});
+
+// Scripted surveys (docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I): a statement is read aloud and records
+// nothing. A slot would draw an input for it in the desk composer, and a row would post a blank
+// answer for it — the junk the server's normalize backstop exists to drop.
+const SCRIPTED = [
+  QUESTIONS[0],
+  // A stored `required: true` or a stray option must not turn it into something answerable.
+  {
+    key: 'pitch',
+    label: 'That is completely understandable.\n\nCommon sense, right?',
+    type: 'statement',
+    role: 'statement',
+    required: true,
+    options: [{ id: 'stray', text: 'Stray' }],
+    visibleIf: { logic: 'any', rules: [{ questionKey: 'support', op: 'any_of', optionIds: ['yes'] }] },
+  },
+  { key: 'goodbye', label: 'Thank you for your time.', type: 'statement', role: 'closing', options: [] },
+  QUESTIONS[2],
+];
+
+test('a statement gets no form slot, even when a stored row names it', () => {
+  const { vals, otherTexts } = seedFromAnswers(SCRIPTED, [
+    { questionKey: 'support', optionIds: ['yes'], answer: 'Yes' },
+    { questionKey: 'pitch', optionIds: ['stray'], answer: 'Stray' },
+  ]);
+  assert.deepEqual(Object.keys(vals), ['support', 'notes']);
+  assert.deepEqual(Object.keys(otherTexts), ['support']);
+});
+
+test('a statement produces no answer row, and a stray stored row for one is not carried through', () => {
+  const rows = buildAnswers(SCRIPTED, { support: 'yes', pitch: 'stray', goodbye: 'typed', notes: 'n' }, {});
+  assert.deepEqual(rows.map((a) => a.questionKey), ['support', 'notes']);
+  const carried = buildAnswers(SCRIPTED, { support: 'yes' }, {}, {
+    carryThrough: [
+      { questionKey: 'pitch', questionLabel: 'x', answer: null, optionIds: [] },
+      { questionKey: 'gone', questionLabel: 'Removed', answer: 'x', optionIds: ['x'] },
+    ],
+  });
+  assert.deepEqual(carried.map((a) => a.questionKey), ['support', 'notes', 'gone'], 'history kept, statement dropped');
+});
+
+test('a statement gets no evaluator cell, and the blocks after it still evaluate', () => {
+  const cells = cellsFromVals(SCRIPTED, { support: 'yes', pitch: 'stray', goodbye: 'typed', notes: 'n' });
+  assert.deepEqual(Object.keys(cells), ['support', 'notes']);
+  // The composer walks the FULL list with these cells: a gated statement still shows on its path.
+  assert.deepEqual([...visibleQuestionKeys(SCRIPTED, cells)], ['support', 'pitch', 'goodbye', 'notes']);
+  const noCells = cellsFromVals(SCRIPTED, { support: 'no' });
+  assert.deepEqual([...visibleQuestionKeys(SCRIPTED, noCells)], ['support', 'goodbye', 'notes']);
 });
 
 test('cellsFromVals never carries text into a CHOICE question', () => {

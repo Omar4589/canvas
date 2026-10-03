@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { Button, Card, Modal, Skeleton } from '../ui/index.js';
 import SurveyAnswerComposer from './SurveyAnswerComposer.jsx';
 import { buildAnswers, dropEmptyAnswers } from '../../lib/surveyAnswerForm.js';
+import { isAnswerable } from '../../lib/surveyRunner.js';
 
 // Door-by-door desk entry: a bulk SELECTION, entered one address at a time so each voter gets
 // their own real answers instead of everyone getting the same one.
@@ -84,8 +85,9 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
     return () => ac.abort();
   }, [actionId, campaignId, run.id]);
 
+  // Answerable blocks only: a statement is read aloud at the door and never posts a row.
   const questions = useMemo(
-    () => (template?.questions || []).filter((q) => !q.retired),
+    () => (template?.questions || []).filter((q) => !q.retired && isAnswerable(q)),
     [template]
   );
 

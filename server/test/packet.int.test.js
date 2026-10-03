@@ -548,3 +548,162 @@ test('over the cap the request is REFUSED, never truncated', { skip }, async () 
   assert.equal(json.doorCount, PACKET_DOOR_CAP + 1);
   assert.match(json.message, /two batches/i);
 });
+
+// Scripted surveys (docs/PROPOSAL_SURVEY_SCRIPT_FLOW.md §I). A statement — a read-aloud block or
+// a closing — records nothing, but paper prints each one once on the "What to say" page with its
+// gate, so it stays in the payload IN PLACE, carrying what the print model reads: the template's
+// flow, each block's role, title, links and route, each answer's route. A canvasser note never
+// prints (ruling 10), so it must not reach the payload at all. Each book gets its own walk list,
+// because the survey a book prints is resolved through its pass's effort.
+const surveyBook = async (name, surveyTemplateId) => {
+  const effort = await Effort.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, name, surveyTemplateId,
+  });
+  const pass = await Pass.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: effort._id,
+    roundNumber: 1, name: 'Round 1', status: 'active',
+  });
+  const door = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: effort._id,
+    addressLine1: `1 ${name} Way`, city: 'Town', state: 'FL', zipCode: '34741',
+    normalizedAddress: `survey-book-${name}`,
+    location: { type: 'Point', coordinates: [-81.45, 28.35] }, isActive: true,
+  });
+  return Turf.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: pass._id,
+    name, mode: 'geometric', status: 'published', householdIds: [door._id], doorCount: 1,
+  });
+};
+
+const reachedBy = (questionKey, ...optionIds) => ({
+  logic: 'any', rules: [{ questionKey, op: 'any_of', optionIds }],
+});
+
+test('a scripted survey prints its statements in place, with role, title, links and routes — never a note', { skip }, async () => {
+  const notes = [
+    'Knock once more if the porch light is on.',
+    'Could share this with them if the situation feels appropriate.',
+    'Both links are also on the push card.',
+  ];
+  const tpl = await SurveyTemplate.create({
+    organizationId: ctx.org._id, name: 'Burton script', isActive: true, flow: 'script', presentation: 'steps',
+    intro: 'Hi, my name is {{canvasser}}.',
+    closing: 'Thank you for your time today.',
+    questions: [
+      { key: 'q1', label: 'Can Paul count on your support?', type: 'single_choice', required: true, order: 1,
+        otherOption: true, otherGoTo: '__end__', note: notes[0],
+        options: [
+          { id: 'yes', text: 'Yes', order: 1, goTo: 'close_4' },
+          // An empty route is what a cleared select sends: it reads as no route, never as a jump.
+          { id: 'no', text: 'No', order: 2, goTo: '' },
+          { id: 'undecided', text: 'Undecided', order: 3, goTo: 's1', script: 'That is fair.' },
+          { id: 'gone', text: 'Retired answer', order: 4, retired: true, goTo: '__end__' },
+        ] },
+      { key: 'q2', label: 'Is there a particular reason?', type: 'text', order: 2, goTo: '__end__',
+        visibleIf: reachedBy('q1', 'no') },
+      { key: 's1', label: "That's completely understandable.\n\nCommon sense, right?", type: 'statement',
+        role: 'statement', title: 'Statement 1', order: 3, note: notes[1],
+        links: [{ label: 'Opponent ledger', url: 'https://example.org/ledger' }],
+        visibleIf: reachedBy('q1', 'undecided') },
+      { key: 'close_4', label: 'For more information, visit the website.', type: 'statement', role: 'closing',
+        title: 'Close 4', order: 4, goTo: '__end__', note: notes[2],
+        links: [{ label: 'Website', url: 'https://burton.example.org' }, { url: 'https://vote.example.org/lookup' }],
+        visibleIf: reachedBy('q1', 'yes', 'undecided') },
+      { key: 'close_old', label: 'An old goodbye.', type: 'statement', role: 'closing', order: 5, retired: true },
+    ],
+  });
+  const turf = await surveyBook('Scripted', tpl._id);
+
+  const { status, json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.equal(status, 200);
+  const survey = json.books[0].survey;
+  assert.equal(survey.name, 'Burton script');
+  assert.equal(survey.flow, 'script');
+  // The opening and the default closing travel as before: paper fills {{canvasser}} with a blank.
+  assert.equal(survey.intro, 'Hi, my name is {{canvasser}}.');
+  assert.equal(survey.closing, 'Thank you for your time today.');
+  // Field by field, so every existing projected field is pinned unchanged beside the new ones,
+  // and an extra key (a note above all) fails the comparison.
+  const block = (fields) => ({
+    required: false, otherOption: false, refusalOption: false, visibleIf: null,
+    role: null, title: null, links: [], goTo: null, otherGoTo: null, options: [], ...fields,
+  });
+  assert.deepStrictEqual(survey.questions, [
+    block({
+      key: 'q1', label: 'Can Paul count on your support?', type: 'single_choice', required: true,
+      otherOption: true, otherGoTo: '__end__',
+      options: [
+        { id: 'yes', text: 'Yes', script: null, goTo: 'close_4' },
+        { id: 'no', text: 'No', script: null, goTo: null },
+        { id: 'undecided', text: 'Undecided', script: 'That is fair.', goTo: 's1' },
+      ],
+    }),
+    block({
+      key: 'q2', label: 'Is there a particular reason?', type: 'text', goTo: '__end__',
+      visibleIf: reachedBy('q1', 'no'),
+    }),
+    // A statement keeps its position and its paragraphs; its body is the label, as on the phone.
+    block({
+      key: 's1', label: "That's completely understandable.\n\nCommon sense, right?", type: 'statement',
+      role: 'statement', title: 'Statement 1',
+      links: [{ label: 'Opponent ledger', url: 'https://example.org/ledger' }],
+      visibleIf: reachedBy('q1', 'undecided'),
+    }),
+    block({
+      key: 'close_4', label: 'For more information, visit the website.', type: 'statement',
+      role: 'closing', title: 'Close 4', goTo: '__end__',
+      // A link with no label still prints: the URL is the paper hand-off.
+      links: [{ label: 'Website', url: 'https://burton.example.org' }, { label: null, url: 'https://vote.example.org/lookup' }],
+      visibleIf: reachedBy('q1', 'yes', 'undecided'),
+    }),
+  ]);
+  // No note anywhere in the payload, on a statement or on a question.
+  const body = JSON.stringify(json);
+  for (const note of notes) assert.ok(!body.includes(note), `a canvasser note leaked into the packet: ${note}`);
+  assert.ok(!body.includes('An old goodbye.'), 'a retired statement never reaches the field');
+});
+
+test('a survey saved before scripted surveys prints with every new field read as its default', { skip }, async () => {
+  // Written past Mongoose, the way a template stored before Script flow looks: no flow, no
+  // title, links or routes. The packet's template read is lean, so no schema default fills them.
+  const { insertedId } = await SurveyTemplate.collection.insertOne({
+    organizationId: ctx.org._id, name: 'Legacy survey', isActive: true, version: 1,
+    intro: 'Hello.', closing: 'Thanks.',
+    questions: [
+      { key: 'support', label: 'Support?', type: 'single_choice', required: true, order: 1, retired: false,
+        options: [
+          { id: 'yes', text: 'Yes', order: 1, retired: false, script: 'Great!' },
+          { id: 'no', text: 'No', order: 2, retired: false },
+        ] },
+      { key: 'why', label: 'Why?', type: 'text', order: 2, retired: false,
+        visibleIf: { logic: 'all', rules: [{ questionKey: 'support', op: 'is', optionIds: ['no'] }] } },
+    ],
+  });
+  const turf = await surveyBook('Legacy', insertedId);
+
+  const { status, json } = await call(
+    `/admin/campaigns/${ctx.camp._id}/packets/data?turfIds=${turf._id}`,
+    { token: ctx.adminTok, orgId: ctx.org._id }
+  );
+  assert.equal(status, 200);
+  const survey = json.books[0].survey;
+  assert.equal(survey.flow, 'list');
+  assert.deepStrictEqual(survey.questions, [
+    {
+      key: 'support', label: 'Support?', type: 'single_choice', required: true, otherOption: false,
+      refusalOption: false, visibleIf: null, role: null, title: null, links: [], goTo: null, otherGoTo: null,
+      options: [
+        { id: 'yes', text: 'Yes', script: 'Great!', goTo: null },
+        { id: 'no', text: 'No', script: null, goTo: null },
+      ],
+    },
+    {
+      key: 'why', label: 'Why?', type: 'text', required: false, otherOption: false, refusalOption: false,
+      visibleIf: { logic: 'all', rules: [{ questionKey: 'support', op: 'is', optionIds: ['no'] }] },
+      role: null, title: null, links: [], goTo: null, otherGoTo: null, options: [],
+    },
+  ]);
+});

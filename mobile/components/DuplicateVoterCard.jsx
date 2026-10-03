@@ -169,7 +169,8 @@ function makeStyles(t) {
     pillText_neutral: { color: colors.textPrimary },
     pillText_danger: { color: colors.dangerFg },
     pillText_warn: { color: colors.warnFg },
-    // There is no infoFg token; textPrimary on infoBg keeps the web's blue at ~14:1.
+    // textPrimary on infoBg (~14:1) rather than the newer infoFg token (~7:1, added for survey
+    // notes): at 11pt in a pill the stronger contrast reads better, and it matches the web's blue.
     pillText_info: { color: colors.textPrimary },
 
     expanded: {

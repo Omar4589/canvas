@@ -15,7 +15,9 @@ right shape.
 
 Related: [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting the books a packet prints),
 [WALKLISTS.md](WALKLISTS.md) (saved searches, the other door source), [SURVEYS.md](SURVEYS.md)
-(the questions that appear on the survey layout), [EXPORTS.md](EXPORTS.md) (the CSV/ZIP Export
+(the questions that appear on the survey layout), [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md)
+(scripted surveys: the statements, closings and arrows paper prints, and ruling 10 — notes never
+print), [EXPORTS.md](EXPORTS.md) (the CSV/ZIP Export
 Center, which this is deliberately *not* part of), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
 (the code-verified record of what leaves the system).
 
@@ -80,6 +82,29 @@ studio map, and as the stripe on the printed page.
 are **dashed lines you write on**. Conditional questions print as an indented block with the
 condition in plain English above it, and the question before the run gets a skip instruction
 ("→ If not "Definitely" or "Probably", skip to Q5").
+
+**A scripted survey prints the same way, with two differences.** Its read-aloud **statements** and
+**closings** never print beside a door — they go once on the *What to say* page, below — and the door
+questions are numbered over the questions alone, as the builder numbers them, so a statement never
+takes a number. And in a survey written with **then go to** arrows, each answer of a question whose
+answers carry arrows prints where it leads instead of a skip line: "-> Q4", "-> Close 2" (a statement
+or closing goes by its title, an untitled one by its first words in quotes), "-> End". A question
+with no arrows on its answers (or a free-text question) goes one way whatever the answer, so it
+prints one such line under its answers — and only when it doesn't simply carry on to the next
+question down the page.
+
+**What to say.** With **What to say** ticked in the Design panel (survey packets only), the script
+prints **once**, at the top of the first door page, rather than beside every door — it shares that
+page with the doors, so it costs no extra paper. It runs in the order the conversation does: the
+**opening**; each **statement** and **closing**, headed with its name and the condition it needs
+(say, CLOSING: CLOSE 2 — ONLY IF Q5 = "ELECTION DAY" OR "VOTING EARLY" OR …); the read-aloud line under each
+answer; and the survey's own closing last, headed *when no closing block applies* once the survey has
+closing blocks. A statement's or closing's links print as **Label: address**, because paper can't be
+tapped — a question's links don't print, so a link volunteers need on paper belongs on a statement or
+closing — and in a Go to survey each statement and closing also says where it goes next
+("-> Close 4"). **Canvasser notes never print.** Where the script says `{{canvasser}}`, paper prints
+a blank line (______) for the volunteer to say their own name: a packet isn't personal to one
+canvasser, and no canvasser's name is ever printed.
 
 **Field list** drops the questions entirely: address, who lives there, what happened, and lines
 to write on — with the **notes beside** the residents and outcome boxes rather than under them.
@@ -282,10 +307,13 @@ client/src/pages/PrintPacketsPage.jsx        the studio (three panes, full-bleed
   components/packet/PaperPreview.jsx         the real PDF blob in an <iframe>
   lib/packet/packetPdf.js                    the renderer
   lib/packet/packetTheme.js                  ink, type scale, page geometry, the pin
-  lib/packet/surveyPrintModel.js             survey -> printable questions + skip logic
+  lib/packet/surveyPrintModel.js             survey -> printable questions + skip logic / Go to arrows + the What to say sequence
   lib/packet/packetSettings.js               defaults, layouts, per-campaign persistence
   lib/packet/splitBooks.js                   print-time split into ~N-door packets
   lib/pdfText.js                             asciiSafe / countUnprintable / scanUnprintableNames
+  lib/surveyConditionText.js                 one wording for a gate: "Only if" here, "Reached when" / "Shown when" on screen
+  lib/surveyRouting.js                       compiler mirror: isBranching, resolveDefaultTarget, blockName, END_KEY for arrows
+  lib/surveyScriptText.js                    fillScript, so {{canvasser}} prints as the blank line ______
 
 server/src/routes/admin/packets.js           GET /sources, GET /data
 server/src/services/packet/buildPacket.js    assembly: order, suppression, survey, age
@@ -329,7 +357,7 @@ falls back to `'Walk list'` when a pass has no effort.
     streets: [{ name, count }],      // cover orientation list, derived from addressLine1
     omitted: { total, reasons: { doNotContact, alreadyVoted, excluded, inactive, missing } },
     orderProvenance: 'book' | 'computed',
-    survey: { id, name, intro, closing, questions: [...] } | null,
+    survey: { id, name, intro, closing, flow, questions: [...] } | null,  // see Survey resolution
     doors: [{
       id, seq, addressLine1, addressLine2, city, state, zipCode,
       status, lastActionAt,          // PER-ROUND, via getPassStatusMap
@@ -523,13 +551,50 @@ The script opens the **first door page** and the doors flow underneath it — it
 sheet of its own. Measured on a 207-door survey packet, that makes it free: 105 pages with the
 script and 105 without, because it fits in space that page already had.
 
-Two things it must not do, both of which it used to:
+**What it prints** is the print model's `script` sequence, built in authoring order by
+`buildSurveyPrintModel` ([surveyPrintModel.js](../client/src/lib/packet/surveyPrintModel.js)) and
+walked by `drawScriptPage` in [packetPdf.js](../client/src/lib/packet/packetPdf.js):
+
+| Entry `kind` | Heading (printed upper-case, micro bold) | Body |
+|---|---|---|
+| `opening` | `Opening` | the template's `intro` |
+| `statement` / `closing` | `Statement` or `Closing`, then `: ‹title›` when titled, then — `Only if …` when gated | the read-aloud `label`; each link as `Label: URL` (or the bare URL); in Script flow a `-> ‹target›` line (`Q5`, a title, a quoted excerpt for an untitled block, `End`) |
+| `option` | `‹question› — if they say "‹option›"` | the option's read-aloud `script` |
+| `default-closing` | `Closing`, or `Closing — when no closing block applies` once any closing block exists (`closingIsFallback`) | the template's `closing` |
+
+Every text goes through `asciiSafe`, and script text through `fillScript` with **no** canvasser name,
+so `{{canvasser}}` prints as `______` (a packet is not personal to one canvasser). A statement prints
+**once** here and never beside a door, so the atomic-door page math is untouched; it joins the
+sequence only when it has text or a link to print. **Canvasser notes never print** (ruling 10 in
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md)): `buildPacket.js` never carries
+`note`, and nothing in the print model reads one. The gates come from the one shared formatter,
+`formatVisibleIf` in [surveyConditionText.js](../client/src/lib/surveyConditionText.js), with paper's
+`asciiSafe` transform and the `Only if` prefix — the builder ("Reached when") and the preview
+("Shown when") word a gate with the same function, so the three can never disagree. The model keeps
+its old `scripts` array (the option scripts alone) beside `script`. The page gate in
+`renderPacketPdf` tests the sequence —
+`layout === 'survey' && ctx.survey && settings.showScriptPage && ctx.survey.script.length`, where it
+used to test `intro || closing || scripts.length` — so a script of statements alone, with no opening,
+closing or option scripts, still gets its page.
+
+Three things it must not do, all of which it used to:
 
 - **Collide with the band.** A 24pt heading on `BODY_TOP` put its cap height straight through
   the header band's WALKED BY rule. It is now 15pt, started 12pt lower, with 17pt of clearance.
 - **Break onto a bare page.** Overflow used to call `doc.addPage()` directly, so a long script
   continued onto a page with no header band, no footer and no entry in `pageOwner` — unbranded
   and unnumbered. It now takes the renderer's own `newPage` as a callback.
+- **Lose its face after a break.** `newPage` draws the next page's band and footer, which leave the
+  footer's 7.5pt light-grey face set, and the old `para` set the body face only once — so the rest of
+  any paragraph that crossed a page break printed in footer type, a real risk now that one statement
+  can run to 5000 characters. `lines()` re-sets the face after each break, and a heading wraps like
+  the body (a long gate no longer runs off the edge; one that fits prints exactly as before).
+
+Pinned by `packetPdf.test.js` (statements leave the door form and print once here, numbering skips
+them, answers carry arrows, List flow keeps its skip lines, statements alone still earn the page, a
+statement longer than a page keeps its type across the break) and `packet.int.test.js` (statements
+reach the payload in place with role, title, links and routes but never a note; a template saved
+before scripted surveys reads every new field as its default).
 
 ## The cover's type scale
 
@@ -648,16 +713,51 @@ the same assertion shape as `voterPrivacy.int.test.js:155`.
 Per book, because two books can sit on passes belonging to different efforts:
 `pass.effortId → Effort.surveyTemplateId`, falling back to `Campaign.surveyTemplateId`. A
 `lit_drop` campaign resolves to `null` (the model nulls `surveyTemplateId` for that type), so it
-gets the field layout. Retired questions and retired options are filtered out; `otherOption` and
-`refusalOption` are flags on the question, not rows in `options`, so `surveyPrintModel` has to
-materialise them or the paper offers fewer choices than the app.
+gets the field layout. Retired questions and retired options are filtered out; `otherOption` is a
+flag on the question, not a row in `options`, so `surveyPrintModel` has to materialise it or the
+paper offers fewer choices than the app.
 
-Conditional logic is printable **because** `routes/admin/surveys.js:157` guarantees every
-`visibleIf` rule references a strictly earlier non-retired question. That makes the graph a DAG
+`refusalOption` is a flag too, and paper is the **only** surface that shows it: `surveyPrintModel`
+materialises it as a muted **Refused** bubble (`SUBTLE` ink; in Script flow it never gets an arrow).
+That bubble is a leftover, **not a feature**. By owner ruling (2026-10-02) a refusal is recorded only
+from the door screen's **Refused** button, never as a survey answer. The API still accepts and stores
+the flag (never on a statement), the builder has no control for it, and the phone and the reports
+ignore it — so the app never records the choice the bubble offers, and since nothing on paper comes
+back, circling it records nothing either. [ADMIN_APP.md](ADMIN_APP.md) and
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) §N say the same.
+
+**The payload's survey** is `toPrintableSurvey` in `buildPacket.js`, a field-level picker over a lean
+read: `{ id, name, intro, closing, flow, questions }`, each question carrying
+`{ key, label, type, required, otherOption, refusalOption, visibleIf, role, title, links, goTo, otherGoTo, options }`
+and each option `{ id, text, script, goTo }`. Statements (`type: 'statement'`) stay in `questions`,
+in place: the print model needs their position to number the questions around them and to print
+each one once, with its gate. `role` is set from the type (`'closing'` or `'statement'` on a
+statement, `null` on a question — the field has no schema default), links without a URL are dropped
+(a question's links ride along but never print: only a statement's or closing's join the What to say
+sequence), and **`note` is never carried**: canvasser notes never print. A template saved before
+these fields existed arrives without them, and each reads absent as its default (`flow` → `'list'`,
+an empty-string route → no route).
+
+Conditional logic is printable **because** `validateVisibleIfIntegrity` in `routes/admin/surveys.js`
+guarantees every `visibleIf` rule references a strictly earlier non-retired question — compiled
+Script-flow rules included, and never a statement. That makes the graph a DAG
 in authoring order, so the form is one top-to-bottom column and a skip instruction can only ever
 point forward. A skip line is emitted only for a run of **2+** consecutive questions sharing one
 condition, and only when the question directly above the run is the one the rule references —
 otherwise "if not" is ambiguous about which answer it means.
+
+**Numbering and arrows.** The door form is the answerable blocks only, numbered 1..N in authoring
+order — `buildConditionIndex`'s numbering, the builder's, so a statement never takes a number, and
+the "Only if" gate above a door question names its parents by those numbers. Skip lines are **List
+flow only**. In Script flow (`flow: 'script'`) every answer of a **branching** question (one whose
+live answers or Other carry a route) prints the arrow it follows beside its box — a fall-through one
+included, because a row where some answers point and the rest say nothing reads as unfinished:
+`-> Q5`, a statement or closing by its title (an untitled one by a quoted excerpt), or `-> End`. Any
+other question goes one way whatever the answer (a text question to its own `goTo`, a plain choice
+question to the block after it) and earns a single `-> …` line under its answers only when that
+isn't simply the next question down the page. Arrows point forward because the compiler refuses a
+route to an earlier block; a key that names no printed block gets no arrow, since no arrow beats a
+wrong one.
 
 ## The renderer
 

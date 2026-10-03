@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,20 +10,65 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  BackHandler,
+  Keyboard,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { shouldConfirmResurvey, buildResurveyPrompt } from '../../../../lib/resurvey';
 import { changePrompt, buildChangePrompt } from '../../../../lib/doorChange';
 import { surveyPath } from '../../../../lib/doorPaths';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { optimisticSubmit } from '../../../../lib/recordAction';
-import { makeCell, visibleQuestionKeys } from '../../../../lib/surveyVisibility';
+import {
+  buildSubmitRows,
+  canAdvance,
+  canSkip,
+  clampScreenId,
+  isClosingBlock,
+  isScripted,
+  isStatement,
+  nextScreenId,
+  prevScreenId,
+  progress,
+  questionNumbers,
+  requiredPending,
+  saveScreenId,
+  screenKind,
+  screens,
+  showDefaultClosing,
+  skipAnswer,
+  visibleBlocks,
+} from '../../../../lib/surveyRunner';
+import { fillScript } from '../../../../lib/surveyScriptText';
+import SurveyNoteAndLinks from '../../../../components/SurveyNoteAndLinks';
 import { radius, spacing } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 
-function SingleChoice({ q, value, onChange, otherText, onOtherText }) {
+// One block per screen: a step control (Back, Next, Skip, Save, the jump to an unanswered
+// question) pressed within this long of the last step is ignored. The footer sits in one place
+// on every screen, so the second touch of a double-tap would otherwise land on the NEXT screen's
+// control: Next on Close 2 becomes Save on Close 4, saving before the canvasser reads it, and
+// Back on the second screen becomes Back on the first, which leaves the survey.
+const STEP_GUARD_MS = 400;
+// A negative gap is the phone's clock set back after the step (an automatic time correction), not
+// a double-tap: counted as one, it would hold every step control until the clock caught up.
+const justStepped = (stepAtRef) => {
+  const sinceStep = Date.now() - stepAtRef.current;
+  return sinceStep >= 0 && sinceStep < STEP_GUARD_MS;
+};
+
+// The single page of a SCRIPTED survey (isScripted): a block a tap revealed is scrolled into view
+// only when its top landed in the bottom quarter of the screen or below, and is then parked a
+// third of the way down, with a third of a screen still in view above it. Every other survey keeps
+// the page it has always had, which never moves on its own (an existing survey keeps working
+// unchanged), so a Show-only-if follow-up far below the answer that shows it never drags that
+// answer and its read-aloud line off the top.
+const REVEAL_FOLD = 0.75;
+const REVEAL_AT = 1 / 3;
+
+function SingleChoice({ q, value, onChange, otherText, onOtherText, fill }) {
   const styles = useThemedStyles(makeStyles);
   // Real options plus a synthetic "Other (specify)" when the question allows it.
   const opts = q.options.filter((o) => !o.retired);
@@ -48,7 +93,7 @@ function SingleChoice({ q, value, onChange, otherText, onOtherText }) {
             {selected && opt.id !== '__other__' && opt.script ? (
               <View style={styles.scriptBlock}>
                 <Text style={styles.scriptLabel}>Read aloud</Text>
-                <Text style={styles.scriptText}>{opt.script}</Text>
+                <Text style={styles.scriptText}>{fill(opt.script)}</Text>
               </View>
             ) : null}
             {selected && opt.id === '__other__' ? (
@@ -61,7 +106,7 @@ function SingleChoice({ q, value, onChange, otherText, onOtherText }) {
   );
 }
 
-function MultipleChoice({ q, value, onChange, otherText, onOtherText }) {
+function MultipleChoice({ q, value, onChange, otherText, onOtherText, fill }) {
   const styles = useThemedStyles(makeStyles);
   const selected = Array.isArray(value) ? value : [];
   function toggle(id) {
@@ -91,7 +136,7 @@ function MultipleChoice({ q, value, onChange, otherText, onOtherText }) {
             {isOn && opt.id !== '__other__' && opt.script ? (
               <View style={styles.scriptBlock}>
                 <Text style={styles.scriptLabel}>Read aloud</Text>
-                <Text style={styles.scriptText}>{opt.script}</Text>
+                <Text style={styles.scriptText}>{fill(opt.script)}</Text>
               </View>
             ) : null}
             {isOn && opt.id === '__other__' ? (
@@ -119,12 +164,83 @@ function FreeText({ value, onChange, placeholder }) {
   );
 }
 
+// A statement or a closing block: read-aloud text in the house amber, captioned with what it is
+// and, when the author named it, its title ("Closing · Close 2"). The body is 18/26 on both
+// presentations, read at arm's length; newlines in it are the author's paragraphs. `text` is the
+// block's label, already filled.
+const StatementBlock = ({ block, text }) => {
+  const styles = useThemedStyles(makeStyles);
+  const title = typeof block.title === 'string' ? block.title.trim() : '';
+  const caption = isClosingBlock(block) ? 'Closing' : 'Read aloud';
+  return (
+    <View style={[styles.scriptBlock, styles.inStack]}>
+      <Text style={styles.scriptLabel}>{title ? `${caption} · ${title}` : caption}</Text>
+      <Text style={styles.scriptBody}>{text}</Text>
+    </View>
+  );
+};
+
+// A question card. On the single page it is the card it has always been, its badge numbered over
+// the visible questions only (a statement takes no number). One block per screen drops the badge,
+// since the progress caption carries "Question N", and sets the question in 18px. The label is
+// never filled: it is snapshotted onto every stored answer, so the server refuses `{{` in it.
+const QuestionCard = ({ q, number, large, value, onChange, otherText, onOtherText, fill }) => {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  const selectMode =
+    q.type === 'single_choice'
+      ? '(Select one)'
+      : q.type === 'multiple_choice'
+      ? '(Select all that apply)'
+      : '';
+  return (
+    <View style={styles.questionCard}>
+      <View style={styles.questionHeader}>
+        {large ? null : (
+          <View style={styles.questionBadge}>
+            <Text style={styles.questionBadgeText}>{number}</Text>
+          </View>
+        )}
+        <Text style={[styles.questionLabel, large && styles.questionLabelLarge]}>
+          {q.label}
+          {q.required && <Text style={{ color: colors.brand }}> *</Text>}
+        </Text>
+        {selectMode ? (
+          <Text style={styles.questionMode}>{selectMode}</Text>
+        ) : null}
+      </View>
+      {q.type === 'single_choice' && (
+        <SingleChoice
+          q={q}
+          value={value}
+          onChange={onChange}
+          otherText={otherText}
+          onOtherText={onOtherText}
+          fill={fill}
+        />
+      )}
+      {q.type === 'multiple_choice' && (
+        <MultipleChoice
+          q={q}
+          value={value}
+          onChange={onChange}
+          otherText={otherText}
+          onOtherText={onOtherText}
+          fill={fill}
+        />
+      )}
+      {q.type === 'text' && <FreeText value={value} onChange={onChange} />}
+    </View>
+  );
+};
+
 export default function VoterSurvey() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets(); // edges={['top']} omits bottom; the step footer clears it
 
   // Pure reader (see household/[id].jsx): no auto-refetch on mount, so a stale
   // bootstrap fetch can't revert the optimistic recolor after a survey submit.
@@ -160,6 +276,18 @@ export default function VoterSurvey() {
   // The door-change check runs ONCE, the first time the door is known — never later, when a
   // teammate's delta could otherwise pop it up in the middle of a survey.
   const doorCheckedRef = useRef(false);
+  // One block per screen: the cursor is a screen id (the opening, a block key, or the end), held
+  // here rather than as a route per block, so the stack depth dismiss(2) relies on never changes.
+  // It is never trusted as stored: every read goes through clampScreenId (below).
+  const [cursor, setCursor] = useState(null);
+  const stepAtRef = useRef(0);
+  // The single page's scroll-to-reveal bookkeeping. Refs, not state: none of it is drawn.
+  const scrollRef = useRef(null);
+  const scrollYRef = useRef(0);
+  const viewportHRef = useRef(0);
+  const blockYRef = useRef({}); // block key → y of its row in the scroll content
+  const shownKeysRef = useRef(null); // the visible keys at the last diff; null = no diff yet
+  const revealKeyRef = useRef(null); // a block waiting for its first layout to be revealed
 
   // Smart re-survey confirm — at mount, before any answer is entered, once per visit. Fires
   // ONLY when a TEAMMATE surveyed this voter this round (surveyedByMe === false); an own
@@ -197,32 +325,104 @@ export default function VoterSurvey() {
     ]);
   }, [voter, household, router, colors]);
 
-  // Live visibility: recompute which questions show as answers change. Feed the
-  // pure evaluator a normalized cell per non-retired question (choice → optionIds,
-  // text → text); it hides questions whose visibleIf fails and withholds hidden
-  // questions' answers from later questions. Declared before the early return so
-  // the hook order stays stable regardless of voter/survey availability.
-  const visibleQuestions = useMemo(() => {
-    if (!survey) return [];
-    const rawAnswersByKey = {};
-    for (const q of survey.questions) {
-      if (q.retired) continue;
-      const v = answers[q.key];
-      let ids = [];
-      let textFromState = null;
-      if (q.type === 'multiple_choice') {
-        ids = Array.isArray(v) ? v : [];
-      } else if (q.type === 'text') {
-        ids = [];
-        textFromState = v;
-      } else {
-        ids = v != null ? [v] : [];
-      }
-      rawAnswersByKey[q.key] = makeCell(q.type, ids, textFromState);
+  // Live visibility: the blocks (questions and statements) that show for the answers so far, in
+  // list order. lib/surveyRunner.js runs the shared evaluator over the template's stored
+  // visibleIf, the same thing the server re-runs at save, so the phone and the server can never
+  // disagree about what a canvasser was shown; "then go to" routes were compiled into visibleIf
+  // when the survey was saved. A block that goes hidden keeps its answer in state (changing the
+  // earlier answer back restores it) but is withheld from later rules and never posted. Declared
+  // before the early return so the hook order stays stable regardless of voter/survey availability.
+  const visible = useMemo(() => (survey ? visibleBlocks(survey, answers) : []), [survey, answers]);
+
+  // ---- One block per screen (presentation 'steps', PROPOSAL §H2) ----
+  // The builder sets it on scripted surveys; every other survey keeps the single page. Never
+  // while the do-not-contact wall or the not-found screen shows, so Back stays plain there.
+  const formShown = !!voter && !voter.dnc && !!survey;
+  const stepped = formShown && survey.presentation === 'steps';
+  // The screen on display: the cursor while it is still a screen for these answers, else the
+  // screen before its place (a template refresh can retire or hide the block under it). The cursor
+  // then follows it, in RENDER (never an effect) so no answer change can land in between: left on
+  // the vanished block, the next answer would be measured from there, and any screen that answer
+  // revealed in between would take over. clampScreenId keeps a screen it returns, so one extra
+  // pass settles it. A tap only changes the answer on the current screen, and a block's
+  // visibility depends only on EARLIER answers, so a canvasser's own tap never moves this.
+  const screenId = stepped ? clampScreenId(survey, answers, cursor) : null;
+  if (stepped && cursor !== screenId) setCursor(screenId);
+
+  // Every step goes through here: it stamps the double-tap guard and drops the keyboard, whose
+  // text box leaves with the screen.
+  const stepTo = useCallback((nextId) => {
+    stepAtRef.current = Date.now();
+    Keyboard.dismiss();
+    setCursor(nextId);
+  }, []);
+
+  // Back, for the header and Android's back button. true = handled (stepped back, or swallowed the
+  // second half of a double-tap); false = this is the first screen, so the caller leaves the
+  // survey exactly as Back always has.
+  const stepBack = useCallback(() => {
+    if (!stepped) return false;
+    if (justStepped(stepAtRef)) return true;
+    const prev = prevScreenId(survey, answers, screenId);
+    if (prev == null) return false;
+    stepTo(prev);
+    return true;
+  }, [stepped, survey, answers, screenId, stepTo]);
+
+  // Android's hardware back steps back too. Registered on focus, so it is live only while this
+  // screen is on top, and removed through the subscription it returns. Returning false on the
+  // first screen lets the stack pop the route, as today. (iOS has no hardware back; its swipe
+  // pops the route and discards the form, as it always has.)
+  useFocusEffect(
+    useCallback(() => {
+      if (!stepped) return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', stepBack);
+      return () => sub.remove();
+    }, [stepped, stepBack])
+  );
+
+  // Each screen starts at its top: one ScrollView serves every screen, and a long statement read
+  // to its end would otherwise hand that offset to the next screen.
+  useEffect(() => {
+    if (stepped) scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [stepped, screenId]);
+
+  // ---- The single page: scroll a block a tap revealed into view (PROPOSAL §H3) ----
+  // Scripted surveys only (see REVEAL_FOLD): every other survey keeps the page it has always had.
+  const reveals = formShown && !stepped && isScripted(survey);
+  // Called from the visibility diff below AND from the block's own onLayout, whichever comes
+  // second: layout events and effects have no fixed order, and a just-mounted block has no y
+  // until its layout lands.
+  const revealBlock = useCallback((key) => {
+    const y = blockYRef.current[key];
+    if (y == null) return; // not laid out yet; its onLayout calls back
+    revealKeyRef.current = null;
+    const height = viewportHRef.current;
+    if (!height || y < scrollYRef.current + height * REVEAL_FOLD) return; // already in view
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - height * REVEAL_AT), animated: true });
+  }, []);
+
+  useEffect(() => {
+    revealKeyRef.current = null; // a newer change supersedes a reveal still waiting on layout
+    if (!reveals) {
+      // No single page on screen, or one that never scrolls on its own: start over from the next
+      // page that does.
+      shownKeysRef.current = null;
+      blockYRef.current = {};
+      return;
     }
-    const vis = visibleQuestionKeys(survey.questions, rawAnswersByKey);
-    return survey.questions.filter((q) => !q.retired && vis.has(q.key));
-  }, [answers, otherTexts, survey]);
+    const keys = visible.map((q) => q.key);
+    const before = shownKeysRef.current;
+    shownKeysRef.current = new Set(keys);
+    if (!before) return; // the page's first render revealed nothing
+    // A block that hid has unmounted; forget its y so its return can't read a stale one.
+    for (const k of before) if (!shownKeysRef.current.has(k)) delete blockYRef.current[k];
+    const first = keys.find((k) => !before.has(k));
+    // Never move the page under someone typing: the keyboard already decides what is on screen.
+    if (!first || TextInput.State?.currentlyFocusedInput?.()) return;
+    revealKeyRef.current = first;
+    revealBlock(first);
+  }, [reveals, visible, revealBlock]);
 
   // Do-not-contact wall: the server 403s the submit anyway — this is the
   // courteous version, before any answers get typed. After the hooks above so
@@ -256,30 +456,6 @@ export default function VoterSurvey() {
     );
   }
 
-  // Sentinel-aware answered check, closing over answers + otherTexts. A selection
-  // of '__other__' only counts as answered once its free-text is non-empty.
-  function isAnsweredNow(q) {
-    const v = answers[q.key];
-    if (q.type === 'multiple_choice') {
-      const arr = Array.isArray(v) ? v : [];
-      if (arr.length === 0) return false;
-      if (arr.includes('__other__')) {
-        const t = otherTexts[q.key];
-        const otherOk = typeof t === 'string' && t.trim().length > 0;
-        // Other-only selection requires its text; any real option also counts.
-        if (arr.length === 1) return otherOk;
-        return true;
-      }
-      return true;
-    }
-    if (q.type === 'text') return typeof v === 'string' && v.trim().length > 0;
-    if (v === '__other__') {
-      const t = otherTexts[q.key];
-      return typeof t === 'string' && t.trim().length > 0;
-    }
-    return v != null && v !== '';
-  }
-
   function setAnswer(key, value) {
     setAnswers((prev) => ({ ...prev, [key]: value }));
   }
@@ -288,20 +464,25 @@ export default function VoterSurvey() {
     setOtherTexts((prev) => ({ ...prev, [key]: value }));
   }
 
+  // The first visible required question still unanswered. The runner decides "answered" (an
+  // Other pick counts once its typed text is non-blank) and skips statements, which never block
+  // Save. On one block per screen Save only shows at the end of a complete path, so there the
+  // alert below is the backstop for a template refresh that lands between a render and the tap.
+  const pending = requiredPending(visible, answers, otherTexts);
+
   function validate() {
-    for (const q of visibleQuestions) {
-      if (!q.required) continue;
-      if (!isAnsweredNow(q)) {
-        return `Please answer: ${q.label}`;
-      }
-    }
-    return null;
+    return pending ? `Please answer: ${pending.label}` : null;
   }
 
-  const totalQuestions = visibleQuestions.length;
-  const answeredCount = visibleQuestions.filter((q) => isAnsweredNow(q)).length;
-  const percent =
-    totalQuestions === 0 ? 100 : Math.round((answeredCount / totalQuestions) * 100);
+  // {{canvasser}} reads as the signed-in canvasser's first name, in script text only: the
+  // greeting, the closings, statements, answer scripts and notes. Never in a question's label or
+  // an answer's text, which are stored with every response (lib/surveyScriptText.js).
+  const fill = (text) => fillScript(text, { canvasserFirstName: bootstrap?.user?.firstName });
+
+  // Numbers and progress run over the visible ANSWERABLE questions: a statement takes no number
+  // and never counts toward progress.
+  const numbers = questionNumbers(visible);
+  const prog = progress(visible, answers, otherTexts);
 
   // Gate-then-optimistic: optimisticSubmit first acquires the GPS stamp (no location =
   // no survey), then marks the voter surveyed + recolors the household and fires
@@ -321,26 +502,10 @@ export default function VoterSurvey() {
       path: surveyPath(id),
       body: {
         surveyTemplateId: survey._id,
-        answers: visibleQuestions.map((q) => {
-          const v = answers[q.key];
-          if (q.type === 'text') {
-            // Always emit otherText (null here) to match the answer schema.
-            return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [], otherText: null };
-          }
-          // Choice: answer state holds option id(s) — incl. the '__other__'
-          // sentinel when picked. Send the ids + a text snapshot.
-          const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v != null ? [v] : [];
-          const hasOther = ids.includes('__other__');
-          const otherText = hasOther ? (otherTexts[q.key] ?? null) : null;
-          const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
-          // Map real ids to their labels; the '__other__' sentinel snapshots its
-          // free-text (fallback 'Other') since it has no real option label.
-          const texts = ids
-            .map((id) => (id === '__other__' ? (otherTexts[q.key] || 'Other') : byId.get(id)))
-            .filter((t) => t != null);
-          const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
-          return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids, otherText };
-        }),
+        // One row per visible ANSWERABLE question, shaped exactly as before (ids, the '__other__'
+        // sentinel, a text snapshot). A statement never posts a row: the old inline map posted an
+        // empty one per visible block. Hidden questions' answers stay behind in state, unposted.
+        answers: buildSubmitRows(visible, answers, otherTexts),
         note: note.trim() || null,
       },
       optimisticPatch: (prev) => ({
@@ -405,10 +570,121 @@ export default function VoterSurvey() {
       });
   }
 
+  // ---- Pieces both presentations draw ----
+
+  // One block: a statement's amber read-aloud box or a question card, then the canvasser's note
+  // and links beneath it (nothing when the block has neither).
+  const renderBlock = (q) => (
+    <>
+      {isStatement(q) ? (
+        <StatementBlock block={q} text={fill(q.label)} />
+      ) : (
+        <QuestionCard
+          q={q}
+          number={numbers.get(q.key)}
+          large={stepped}
+          value={answers[q.key]}
+          onChange={(v) => setAnswer(q.key, v)}
+          otherText={otherTexts[q.key]}
+          onOtherText={(t) => setOtherText(q.key, t)}
+          fill={fill}
+        />
+      )}
+      <SurveyNoteAndLinks note={fill(q.note)} links={q.links} />
+    </>
+  );
+
+  const noteField = (
+    <>
+      <Text style={styles.noteLabel}>Note (optional)</Text>
+      <TextInput
+        value={note}
+        onChangeText={setNote}
+        placeholder="Anything worth remembering"
+        placeholderTextColor={colors.textMuted}
+        multiline
+        style={styles.textInput}
+      />
+    </>
+  );
+
+  // Save: at the end of the single page, or in the step footer on the last screen, where it
+  // shares the double-tap guard.
+  const onSavePress = () => {
+    if (stepped && justStepped(stepAtRef)) return;
+    onSubmit();
+  };
+  const saveButton = (
+    <Pressable
+      onPress={onSavePress}
+      disabled={isSubmitting}
+      style={({ pressed }) => [
+        styles.submitButton,
+        stepped && styles.footerButton,
+        { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+      ]}
+    >
+      {isSubmitting ? (
+        <ActivityIndicator color="#fff" />
+      ) : (
+        <Text style={styles.submitButtonText}>Save Response</Text>
+      )}
+    </Pressable>
+  );
+
+  // ---- One block per screen: the screen on display and its controls ----
+  const stepScreen = stepped ? screens(survey, answers).find((s) => s.id === screenId) : null;
+  const stepKind = screenKind(stepScreen);
+  // The LAST screen carries Note and Save: the end screen, or a closing that is the last visible
+  // block. A closing with a block still visible after it (Close 2 before Close 4) has Next.
+  const onSaveScreen = stepped && screenId === saveScreenId(survey, answers);
+  const nextOk = stepped && canAdvance(survey, answers, otherTexts, screenId);
+  const skipOk = stepped && canSkip(survey, answers, screenId);
+
+  // Header Back: the previous screen on the stepper. On the first screen, and on the single
+  // page, it leaves the survey, as it always has.
+  const onBack = () => {
+    if (!stepBack()) router.back();
+  };
+
+  // A tap on an answer only SELECTS it (its read-aloud line and the Other box have to stay on
+  // screen); Next advances. It is disabled on a blank required question, and re-checked here in
+  // case a press lands on a stale render.
+  const onNext = () => {
+    if (justStepped(stepAtRef) || !canAdvance(survey, answers, otherTexts, screenId)) return;
+    const next = nextScreenId(survey, answers, screenId);
+    if (next) stepTo(next);
+  };
+
+  // Skip, on optional questions only, discards the answer and advances, which is how it differs
+  // from Next when a value is present. The next screen comes from the answers Skip is about to
+  // store, never from this render's list: clearing an answer can hide the blocks after it.
+  const onSkip = () => {
+    if (justStepped(stepAtRef) || !canSkip(survey, answers, screenId)) return;
+    const skipped = skipAnswer(answers, otherTexts, screenId);
+    setAnswers(skipped.answers);
+    setOtherTexts(skipped.otherTexts);
+    const next = nextScreenId(survey, skipped.answers, screenId);
+    if (next) stepTo(next);
+  };
+
+  // The last screen's backstop. Next never passes a blank required question, so this shows only
+  // when a template refresh mid-walk left one behind the cursor: Save gives way to a jump to it.
+  const onJumpToPending = () => {
+    if (justStepped(stepAtRef) || !pending) return;
+    stepTo(pending.key);
+  };
+
+  // The single page records where each block row sits, for the scroll-to-reveal above.
+  const onBlockLayout = (key, e) => {
+    blockYRef.current[key] = e.nativeEvent.layout.y;
+    if (revealKeyRef.current === key) revealBlock(key);
+  };
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
+        <Pressable onPress={onBack} hitSlop={8}>
           <Text style={styles.back}>‹ Back</Text>
         </Pressable>
       </View>
@@ -419,12 +695,21 @@ export default function VoterSurvey() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={{
           paddingHorizontal: spacing.lg,
-          paddingBottom: 40,
+          // The single page ends on Save; the stepper's controls sit in the footer below.
+          paddingBottom: stepped ? spacing.lg : 40,
         }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onLayout={(e) => {
+          viewportHRef.current = e.nativeEvent.layout.height;
+        }}
+        onScroll={(e) => {
+          scrollYRef.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
       >
         {/* Voter header card */}
         <View style={styles.voterHeader}>
@@ -455,106 +740,148 @@ export default function VoterSurvey() {
           </View>
         </View>
 
-        {/* Progress */}
-        <View style={styles.progressRow}>
-          <Text style={styles.progressLeftText}>
-            Question {Math.min(answeredCount + 1, totalQuestions)} of{' '}
-            {totalQuestions}
-          </Text>
-          <Text style={styles.progressRightText}>{percent}% Complete</Text>
-        </View>
+        {/* Progress, over the visible questions that record an answer. One block per screen has
+            no "of M" (a path's length is not known until it is walked) and names the question
+            only on a question screen; the row keeps its height so the bar never jumps. */}
+        {stepped ? (
+          <View style={styles.stepProgressRow}>
+            {stepKind === 'question' ? (
+              <Text style={styles.progressLeftText}>Question {numbers.get(screenId)}</Text>
+            ) : null}
+          </View>
+        ) : (
+          <View style={styles.progressRow}>
+            <Text style={styles.progressLeftText}>
+              Question {Math.min(prog.answered + 1, prog.total)} of{' '}
+              {prog.total}
+            </Text>
+            <Text style={styles.progressRightText}>{prog.percent}% Complete</Text>
+          </View>
+        )}
         <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${percent}%` }]} />
+          <View style={[styles.progressFill, { width: `${prog.percent}%` }]} />
         </View>
 
-        {survey.intro ? (
-          <View style={styles.scriptBlock}>
-            <Text style={styles.scriptLabel}>Greeting</Text>
-            <Text style={styles.scriptText}>{survey.intro}</Text>
-          </View>
-        ) : null}
-
-        {visibleQuestions.map((q, i) => {
-          const selectMode =
-            q.type === 'single_choice'
-              ? '(Select one)'
-              : q.type === 'multiple_choice'
-              ? '(Select all that apply)'
-              : '';
-          return (
-            <View key={q.key} style={styles.questionCard}>
-              <View style={styles.questionHeader}>
-                <View style={styles.questionBadge}>
-                  <Text style={styles.questionBadgeText}>{i + 1}</Text>
-                </View>
-                <Text style={styles.questionLabel}>
-                  {q.label}
-                  {q.required && <Text style={{ color: colors.brand }}> *</Text>}
-                </Text>
-                {selectMode ? (
-                  <Text style={styles.questionMode}>{selectMode}</Text>
-                ) : null}
+        {stepped ? (
+          // One screen: the opening, one block, or the end. Keyed by screen so each one mounts
+          // fresh, with no press state or focus carried over from the last.
+          <View key={screenId}>
+            {stepKind === 'intro' ? (
+              <View style={styles.scriptBlock}>
+                <Text style={styles.scriptLabel}>Greeting</Text>
+                <Text style={styles.scriptBody}>{fill(survey.intro)}</Text>
               </View>
-              {q.type === 'single_choice' && (
-                <SingleChoice
-                  q={q}
-                  value={answers[q.key]}
-                  onChange={(v) => setAnswer(q.key, v)}
-                  otherText={otherTexts[q.key]}
-                  onOtherText={(t) => setOtherText(q.key, t)}
-                />
-              )}
-              {q.type === 'multiple_choice' && (
-                <MultipleChoice
-                  q={q}
-                  value={answers[q.key]}
-                  onChange={(v) => setAnswer(q.key, v)}
-                  otherText={otherTexts[q.key]}
-                  onOtherText={(t) => setOtherText(q.key, t)}
-                />
-              )}
-              {q.type === 'text' && (
-                <FreeText
-                  value={answers[q.key]}
-                  onChange={(v) => setAnswer(q.key, v)}
-                />
-              )}
-            </View>
-          );
-        })}
+            ) : null}
 
-        {survey.closing ? (
-          <View style={styles.scriptBlock}>
-            <Text style={styles.scriptLabel}>Closing</Text>
-            <Text style={styles.scriptText}>{survey.closing}</Text>
+            {stepScreen?.block ? (
+              <View style={styles.blockStack}>{renderBlock(stepScreen.block)}</View>
+            ) : null}
+
+            {/* The end screen follows a path that did not finish on a closing block: the
+                survey's default closing when it applies, else just the word that it is over. */}
+            {stepKind === 'end' ? (
+              showDefaultClosing(survey, visible, answers, otherTexts) ? (
+                <View style={styles.scriptBlock}>
+                  <Text style={styles.scriptLabel}>Closing</Text>
+                  <Text style={styles.scriptBody}>{fill(survey.closing)}</Text>
+                </View>
+              ) : (
+                <Text style={styles.doneText}>Done — end of the survey.</Text>
+              )
+            ) : null}
+
+            {onSaveScreen ? noteField : null}
           </View>
-        ) : null}
+        ) : (
+          <>
+            {survey.intro ? (
+              <View style={styles.scriptBlock}>
+                <Text style={styles.scriptLabel}>Greeting</Text>
+                <Text style={styles.scriptText}>{fill(survey.intro)}</Text>
+              </View>
+            ) : null}
 
-        <Text style={styles.noteLabel}>Note (optional)</Text>
-        <TextInput
-          value={note}
-          onChangeText={setNote}
-          placeholder="Anything worth remembering"
-          placeholderTextColor={colors.textMuted}
-          multiline
-          style={styles.textInput}
-        />
+            {/* Each block row is a direct child of the scroll content, so its onLayout y is
+                the scroll offset the reveal needs. */}
+            {visible.map((q) => (
+              <View key={q.key} style={styles.blockStack} onLayout={(e) => onBlockLayout(q.key, e)}>
+                {renderBlock(q)}
+              </View>
+            ))}
 
-        <Pressable
-          onPress={onSubmit}
-          disabled={isSubmitting}
-          style={({ pressed }) => [
-            styles.submitButton,
-            { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
-          ]}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.submitButtonText}>Save Response</Text>
-          )}
-        </Pressable>
+            {/* The default closing. An ordinary survey shows it whenever it has text, as always;
+                a scripted one hides it under an explicit closing block and holds it until every
+                visible required question is answered, so nobody reads the goodbye above a
+                question they are still asking (lib/surveyRunner.js showDefaultClosing). */}
+            {showDefaultClosing(survey, visible, answers, otherTexts) ? (
+              <View style={styles.scriptBlock}>
+                <Text style={styles.scriptLabel}>Closing</Text>
+                <Text style={styles.scriptText}>{fill(survey.closing)}</Text>
+              </View>
+            ) : null}
+
+            {noteField}
+
+            {saveButton}
+          </>
+        )}
       </ScrollView>
+
+      {/* One block per screen: Next / Skip, or Save on the last screen, docked under the scroll
+          and inside the KeyboardAvoidingView, so the keyboard never covers them. */}
+      {stepped ? (
+        <View style={[styles.stepFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+          {onSaveScreen ? (
+            pending ? (
+              <Pressable
+                onPress={onJumpToPending}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.stepButton,
+                  styles.stepButtonSecondary,
+                  pressed && styles.stepButtonPressed,
+                ]}
+              >
+                <Text style={styles.stepButtonSecondaryText}>
+                  Answer Question {numbers.get(pending.key)} to finish
+                </Text>
+              </Pressable>
+            ) : (
+              saveButton
+            )
+          ) : (
+            <>
+              {skipOk ? (
+                <Pressable
+                  onPress={onSkip}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.stepButton,
+                    styles.stepButtonSecondary,
+                    pressed && styles.stepButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.stepButtonSecondaryText}>Skip</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={onNext}
+                disabled={!nextOk}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !nextOk }}
+                style={({ pressed }) => [
+                  styles.stepButton,
+                  styles.stepButtonNext,
+                  !nextOk && styles.stepButtonDisabled,
+                  pressed && nextOk && styles.stepButtonPressed,
+                ]}
+              >
+                <Text style={styles.submitButtonText}>Next</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -654,6 +981,12 @@ function makeStyles(t) {
     backgroundColor: colors.brand,
     borderRadius: radius.pill,
   },
+  // One block per screen: the caption row holds its height on screens with no caption.
+  stepProgressRow: {
+    minHeight: 18,
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
 
   scriptBlock: {
     backgroundColor: colors.warnBg,
@@ -669,12 +1002,23 @@ function makeStyles(t) {
     marginBottom: 6,
   },
   scriptText: { fontSize: 14, color: colors.warnFg, lineHeight: 20 },
+  // A statement's or closing's body: read at arm's length, so larger than an answer's script.
+  scriptBody: { fontSize: 18, color: colors.warnFg, lineHeight: 26 },
+  // A block inside blockStack, which owns the spacing below the block.
+  inStack: { marginBottom: 0 },
+
+  // One block and its note/links: the block, then what it carries for the canvasser beneath it.
+  // The bottom margin is the gap the question card used to carry, so a plain survey's cards sit
+  // exactly as far apart as before.
+  blockStack: {
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
 
   questionCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
@@ -705,6 +1049,8 @@ function makeStyles(t) {
     fontWeight: '700',
     color: colors.textPrimary,
   },
+  // One block per screen: the question alone on its screen, asked at arm's length.
+  questionLabelLarge: { fontSize: 18, lineHeight: 26 },
   questionMode: {
     color: colors.textMuted,
     fontSize: 12,
@@ -817,6 +1163,54 @@ function makeStyles(t) {
     fontWeight: '800',
     fontSize: 16,
   },
+
+  // One block per screen. The end screen's word when no default closing applies.
+  doneText: {
+    ...type.caption,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  // The step footer: the app's docked-bar idiom (card + top rule, as admin/audit.jsx's bulkBar
+  // and admin/books.jsx's actionBar), in the flow under the scroll rather than absolute, so the
+  // KeyboardAvoidingView lifts it over the keyboard. The bottom inset is added inline.
+  stepFooter: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  // Same geometry as the Save button, so Next and Save land in the same place on every screen.
+  stepButton: {
+    flex: 1,
+    backgroundColor: colors.brand,
+    paddingVertical: spacing.md + 4,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepButtonNext: { flex: 2 },
+  // Skip, and the jump back to an unanswered question: an action, not the way forward.
+  stepButtonSecondary: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  stepButtonSecondaryText: {
+    color: colors.brand,
+    fontWeight: '800',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  stepButtonDisabled: { opacity: 0.5 },
+  stepButtonPressed: { opacity: 0.85 },
+  // Save in the footer: the row sets its place, not the single page's top margin.
+  footerButton: { flex: 1, marginTop: 0 },
+
   primaryButton: {
     backgroundColor: colors.brand,
     paddingHorizontal: spacing.lg,

@@ -1,19 +1,24 @@
 # Surveys
 
 How surveys are built, run at the door, stored, and reported — including conditional questions,
-read-aloud option scripts, "Other (specify)", and the (now much more permissive) rules for editing a
-survey that's already collecting answers.
+read-aloud option scripts, "Other (specify)", **scripted surveys** (read-aloud statements, several
+closings, "then go to" routing, a default closing, canvasser notes, tappable links, the
+`{{canvasser}}` placeholder, one block per screen on the phone), and the (now much more permissive)
+rules for editing a survey that's already collecting answers.
 
 - **Part 1 — For everyone** is plain language: what a survey is, how to build one (including
-  branching logic, per-option scripts, and **tags** that group answers across questions), what
-  you can safely change once it has answers, and **auditing answers** — drilling from any count to
-  the voters behind it, who *recorded* each entry and when, and the Survey Explorer page.
+  branching logic written as "then go to" arrows or as "Show only if" conditions, statements and
+  closings, per-option scripts, notes and links for the canvasser, and **tags** that group answers
+  across questions), what the canvasser sees in each of the two phone layouts, what you can safely
+  change once it has answers, and **auditing answers** — drilling from any count to the voters
+  behind it, who *recorded* each entry and when, and the Survey Explorer page.
 - **Part 2 — Technical reference** is for developers (and Claude): the data model, dual-read
   reporting, the soft-retire reconcile, the shared visibility evaluator, answer normalization, the
   migrations, the **tags** story — the org-level `Tag` library + management API, the
-  cross-question rollup, by-tag walk lists, and CSV export — and the **answer drill-in** endpoints
+  cross-question rollup, by-tag walk lists, and CSV export — the **answer drill-in** endpoints
   (per-canvasser breakdown, the voters-by-answer CSV, the response detail) with their counting
-  contract (§J).
+  contract (§J), and scripted surveys: the "then go to" compiler (§L) and the shared door runner and
+  `{{canvasser}}` filler (§M).
 
 Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (one survey per voter **per pass**),
@@ -21,7 +26,12 @@ Related: [METRICS.md](METRICS.md) ("Surveys" and "Surveyed voters" definitions),
 survey wins, falling back to the campaign default),
 [VOTERS.md](VOTERS.md) (editing a single response on a voter's profile),
 [EXPORTS.md](EXPORTS.md) (full survey results at scale — wide + long CSVs; the in-page
-voters-by-answer CSV stays as the interactive drill).
+voters-by-answer CSV stays as the interactive drill),
+[WALK_PACKETS.md](WALK_PACKETS.md) (what a survey prints on paper, including statements and
+closings on the "What to say" page),
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (the design and the owner's rulings
+behind scripted surveys: the client script that prompted them, the proof that "then go to" compiles
+into the existing rule grammar, and the rejected alternatives).
 
 ---
 
@@ -33,13 +43,29 @@ A **survey** is the questionnaire a canvasser runs at the door. One survey (we c
 template") belongs to your **organization** and can be attached to one or more **campaigns**. It
 has:
 
-- an **intro** and a **closing** — short scripts the canvasser reads,
-- a list of **questions**, each one of three types:
+- an **intro** — the opening the canvasser reads (the builder calls it the **Greeting**),
+- a list of **blocks**, in the order the conversation runs. Most blocks are **questions**, each one
+  of three types:
   - **Single choice** — pick one option,
   - **Multiple choice** — pick any number of options,
   - **Text** — free typing.
 
-Each question can be marked **required** and has an **order** (where it appears in the list).
+  A block can also be a **statement** or a **closing**: words the canvasser reads aloud that take no
+  answer — a paragraph about the candidate, a reminder of the dates, a goodbye for one path through
+  the conversation (see *Statements and closings* below),
+- a **closing** — the **default closing**: the goodbye on any path that reaches none of the survey's
+  closing blocks. A survey with no closing blocks (every survey built before they existed) simply
+  reads it at the end, as it always has.
+
+Each question can be marked **required** and has an **order** (where it appears in the list). Only
+questions record anything: statements and closings are script, not data, so they never appear in
+results, exports, client reports or a voter's record.
+
+A survey that reads as a script — it has statements, closing blocks, or answers that say where to go
+next — is a **scripted survey**. Nothing about it is a separate kind of survey: it is built in the
+same builder, attached the same way, and counted the same way. What changes is how it reads at the
+door, which is why a scripted survey is shown one block per screen on the phone unless you turn that
+off (see *One block per screen* below).
 
 Survey campaigns use a survey; **lit-drop campaigns** don't — they just record that literature was
 dropped. (See [METRICS.md](METRICS.md) for how the two campaign types count.)
@@ -54,20 +80,29 @@ are they doing?" at a glance, with authoring split out onto its own pages:
 - A **search box** and an **Active / Archived / All** filter over the list.
 - One **row per survey**: name + created date, **everywhere it's used** — campaigns *and* walk-list
   overrides (a survey used only on a walk list used to show as unused; it doesn't anymore) — question
-  count (what canvassers actually see; retired questions don't inflate it), response count, and a
-  version badge.
+  count (what canvassers actually answer; retired questions and read-aloud statements don't inflate
+  it), response count, and a version badge.
 - **Click a row** to open the **quick view** — a side panel with the survey's dates, everywhere it's
-  used (each linking straight to that campaign's results), response totals **per campaign**, and a
-  read-only preview of every question. It's the fast way to *see* a survey without opening the
-  builder; **View full results →** jumps to the campaign dashboard's Survey-results section.
+  used (each linking straight to that campaign's results), response totals **per campaign**, its
+  question count (with "· 3 statements" beside it when it has any), and a read-only preview of every
+  block, with **Try it** to walk through it as a canvasser (see *One block per screen* below). It's
+  the fast way to *see* a survey without opening the builder; **View full results →** jumps to the
+  campaign dashboard's Survey-results section.
 - **Actions** live on each row (⋮ menu) and in the quick view: **Edit**, **Duplicate**, and
   **Archive** or **Delete** (see below).
 
 **Creating and editing** happen on dedicated pages — **+ New survey** opens `/surveys/new` and
 **Edit** opens `/surveys/<id>/edit`, both hosting the full builder; save or cancel returns you to
-the library. In the builder you give the survey a name, write the intro/closing, then add questions —
-wording, type, options, required. When you attach the survey to a campaign, canvassers on that
-campaign start seeing it.
+the library. In the builder you give the survey a name, write the **Greeting** (the intro) and the
+**Closing** (the default closing), then add blocks with the three buttons under the list: **+ Add
+question** (wording, type, options, required), **+ Add statement** and **+ Add closing**. The count
+above the list says what you have — "6 questions · 4 statements", closings counted as statements,
+retired blocks not counted. Any block can also carry a note to the canvasser and links (see
+*Canvasser notes and links* below). The builder checks as you type: a misspelt placeholder, an
+arrow pointing the wrong way or a link that isn't a web address turns red on its card, and Save
+waits until nothing is red. A survey needs at least one question that records an answer: one made
+only of statements and closings is refused, because every visit would file an empty survey. When
+you attach the survey to a campaign, canvassers on that campaign start seeing it.
 
 ### Archiving and deleting
 
@@ -81,12 +116,81 @@ campaign start seeing it.
   server refuses an in-use delete with the specific reasons. Delete is permanent; it exists so an
   abandoned draft doesn't live forever.
 
-Beyond plain questions and options, the builder supports three extras:
+Beyond plain questions and options, the builder supports these extras:
 
-### Conditional questions ("Show only if…")
+### Statements and closings
 
-You can make a question appear **only when an earlier answer matches**. On any question (after the
-first), open **Show only if…** and add one or more rules. A rule reads:
+Some of a door script isn't a question at all: a paragraph about the candidate, a reminder of the
+dates, a thank-you. Those are **statements** — blocks the canvasser reads aloud that take no answer.
+**+ Add statement** adds one to the end of the list; **+ Add closing** adds a **closing**, a statement
+that ends the conversation on the path that reaches it. Move either one up or down like a question.
+
+- **What you type** is the **Read aloud** text — paragraphs are fine, up to 5,000 characters — and
+  an optional **Title** such as "Statement 1" or "Close 2". The title names the block in the "then go
+  to" menus, on the phone and on paper; left blank, the first words of the text are used instead.
+- **They record nothing.** A statement or closing never takes a question number, never counts toward
+  the progress bar, can't be required, has no answers, and never appears in results, exports, client
+  reports, a voter's record or the desk tools for entering answers. If the text asks the voter
+  something ("what is your most important issue?"), that is conversation; to keep the answer, add a
+  question after it.
+- **Each closing belongs to a path.** A closing block shows only on the path that leads to it — an
+  arrow (see the next section) or its own "Show only if" — so a supporter can hear the voting pitch
+  while someone who already voted hears a thank-you. One closing can lead on to another ("Close 2",
+  then "Close 4") with a "then go to". Which closing a voter heard is never recorded: their answers
+  already say which path they took.
+
+**The default closing.** The **Closing** box at the bottom of the builder is the goodbye for any path
+that reaches none of your closing blocks — "Thank you for your time" for the voter who said no. A
+survey with no closing blocks reads it at the end of every conversation, exactly as before. On a
+survey with closing blocks or "then go to" arrows it also waits until every required question that is
+showing has been answered, so a canvasser never reads "Thank you for your time" above a question
+they're still asking. Once a survey has closing blocks, its preview captions this one "Closing — when
+no closing block applies".
+
+### Conditional questions — "then go to", or "Show only if…"
+
+Not every voter should hear every block. There are two ways to say which ones do, and each survey
+uses one of them.
+
+**Write it as a script: each answer says where to go next.** Under every answer there's a small
+**then go to →** menu: continue to the next block, any block further down the list, or **End the
+conversation**. That is how door scripts are usually written ("Yes → Q4, No → Q2"), and it is the
+easy way to build one with statements and several closings. The "Other (specify)" answer and every
+text question have the same menu; in a script, so does every statement and closing. Setting your
+first "then go to" makes the survey a **Go to** survey — a blue banner above the list says so — so
+there is no setting to find first.
+
+Three rules keep a script predictable:
+
+- **No arrow means "carry on to the next block".** An answer left on *Continue* goes to whatever
+  block sits below its question, and the menu names it ("Continue to next block (Q3 · …)"). **End the
+  conversation** goes straight to the goodbye: the default closing.
+- **Arrows only point down the list,** so a script can never loop. The menu offers later blocks only,
+  and if you move a block so that an arrow would point backwards, the card says so in red until you
+  move it back or pick another target.
+- **Every block needs a way in.** A block nothing leads to is an error ("Nothing leads to …"), never
+  silently hidden. Removing a block that arrows point to sends each of those arrows back to
+  *Continue*, and a one-line notice says how many.
+
+Each card in a Go to survey also shows, in grey:
+
+- **Reached when …** — who gets this block, worked out from the arrows: *Reached when Q1 =
+  "Undecided" or Q4 = "Election Day"*. It is exactly the rule the phone follows.
+- **Continues to …** — where the block goes when nothing on it says otherwise. Watch this line on
+  statements and closings: a closing left on *Continue* runs straight into whatever block is below
+  it, so a supporter could hear Close 2 and then Close 3. That is why a new closing in a Go to survey
+  starts on **End the conversation**, and why Close 2 needs an arrow to Close 4 if it should lead
+  there.
+
+A question whose answers carry arrows needs an answer to know where to go: if it isn't required and
+the canvasser skips it, the conversation ends there, at the default closing. The builder warns you
+on such a question ("Mark it Required or add a 'Declined to say' answer"). A question with no arrows
+on any answer is different — skipping it simply carries on to the next block, as on any ordinary
+survey.
+
+**Or write conditions: "Show only if…".** The other style puts the condition on the block that
+should appear. On any block (after the first), open **Show only if…** and add one or more rules. A
+rule reads:
 
 > *"`<earlier question>` **is / is not / is any of** `<option(s)>`"* — or, for a text question,
 > *"is answered / is not answered."*
@@ -95,17 +199,111 @@ With multiple rules you choose **Match ALL** (every rule must hold) or **Match A
 Rules can reference **only earlier questions** — the builder won't let you point at a later or the
 same question — so the survey can never tangle itself into a loop. This one mechanism covers all the
 common shapes: **branch** ("show the follow-up only if they picked X"), **skip** ("hide this unless
-they're a supporter"), and **skip-to-end** (the last questions simply don't appear).
+they're a supporter"), and **skip-to-end** (the last questions simply don't appear). A statement or
+closing can carry its own "Show only if" too, but a rule can only test a question: a statement has
+no answer to test.
 
-At the door, hidden questions never show, and **their answers aren't saved** — a question someone
-never sees can't accidentally count in your reports.
+**One style per survey.** Both styles describe the same branching from opposite ends — arrows on the
+answers, or conditions on the blocks they lead to — and a survey that mixed them could contradict
+itself with no way to say which wins. So a survey uses one or the other, and you never pick it from a
+menu:
+
+- **Your first arrow switches the survey to Go to.** A block still carrying a hand-written "Show only
+  if" then shows an error until you re-express it as an arrow or remove it (the card has a **Remove
+  condition** button), and Save waits until none are left. It is never deleted for you, because some
+  conditions — "is not", "Match ALL" — can't be written as arrows.
+- **"Switch back to Show only if"** (the banner's button) takes the survey out of Go to. On a survey
+  that was still a "Show only if" survey when you opened it — its arrows are new and not yet saved —
+  it is an **undo**: the arrows are cleared and every block gets back the condition it had when you
+  opened the survey (a block added since gets none), so it is never refused. On a survey already
+  saved with Go to, or a new one, it **converts**: every block keeps exactly the condition its arrows
+  produced, now editable by hand, and the arrows are cleared. The survey shows exactly what its
+  arrows showed, so this is always allowed — except while an arrow has an error, which the banner
+  names so you can fix it first. On a survey that already has answers it asks you to confirm,
+  because of the next rule. Either way, a block still carrying a hand-written condition keeps it.
+- **Once a survey has answers, it can't switch to Go to.** Redrawing the branching as arrows could
+  change who is asked what, so later visits would record differently from earlier ones. The "then go
+  to" menus are greyed out on such a survey; **Duplicate** it and build the script on the copy —
+  from the **Surveys** list, or at the top of the campaign's **Edit survey** page, which is where a
+  team lead finds it (see *Editing a survey* below). Every survey that existed before Go to is a
+  "Show only if" survey, and stays one until someone sets an arrow.
+
+At the door, blocks that don't apply never show, and **their answers aren't saved** — a question
+someone never sees can't accidentally count in your reports.
 
 ### Read-aloud option scripts
 
 Any choice option can carry a short **read-aloud script** — a line the canvasser sees the moment
 they pick that option. Add it with **+ read-aloud script** under the option. It's perfect for
 follow-up prompts ("Great — what would change your mind?") or rebuttals tied to a specific answer.
-It's guidance for the canvasser only; nothing about it changes how the answer is stored or counted.
+It's words to say, not data: nothing about it changes how the answer is stored or counted.
+
+**A script or a statement?** An answer's script belongs to that one answer: it appears under the
+answer, inside the question, only once the answer is picked. A **statement** is a step of its own in
+the conversation, with its own place in the list, its own way in, and (on one block per screen) its
+own screen. Use a script for a quick reply to one answer ("Oh great! Well thank you for
+participating." under *Already voted*); use a statement for a paragraph that several answers lead
+to, or anything that should be its own step. The preview shows each answer's script under it, and a
+walk packet prints them all once on its "What to say" page.
+
+### Canvasser notes and links
+
+Any block — a question, a statement or a closing — can carry two things meant for the canvasser
+rather than the voter:
+
+- **A note to the canvasser** (**+ note to canvasser (not read aloud)** on the card), such as "Could
+  share this with them if the situation feels appropriate." On the phone it sits in a blue box
+  labelled **For you — not read aloud**, so it can never be mistaken for the amber read-aloud text.
+  Notes never print on walk packets and never appear in results, exports or reports.
+- **Links** (**+ link**, up to five per block): a label and a web address starting with `https://`
+  (or `http://`). On the phone each link is a row the canvasser taps to open the page in the phone's
+  browser and show it to the voter; a link saved without a label shows the site's name. Nothing is
+  fetched ahead of time, and nothing about the voter or the door is added to the address. On paper a
+  statement's or closing's link prints as "Label: address" on the walk packet's *What to say* page; a
+  question's links don't print, so put a link your paper volunteers need on a statement or closing. A
+  link row with a label but no address is an error; a row left completely blank is simply dropped
+  when you save.
+
+There is no QR code on the phone, by design: the QR code belongs on your printed literature.
+
+### The canvasser's name: `{{canvasser}}`
+
+Type `{{canvasser}}` in any text that's read aloud — the greeting, a statement or closing, the
+default closing, an answer's read-aloud script — or in a note, and each canvasser sees their own
+first name there: "Hi, my name is {{canvasser}}" reads "Hi, my name is Maria" on Maria's phone. The
+preview fills in *your* first name. On a walk packet it prints as a blank line (`______`) for the
+volunteer to say their own name, since a packet isn't personal to one canvasser and never prints a
+name; a canvasser with no first name on file sees the same blank line.
+
+It is the only placeholder. Dates and everything else are typed by hand, as before. A misspelling
+(`{{Canvasser}}`, `{{name}}`) or a `{{` with no closing `}}` is refused when you save, so it can never
+reach a phone as stray braces. And it can't go in a question's wording or an answer — both are stored
+with every response and become your report labels and spreadsheet cells, where nothing fills it in —
+nor in a block's title or a link's label, which show exactly as typed.
+
+### One block per screen
+
+A long script reads better one step at a time. With **One block per screen** ticked (in **Survey
+settings** at the top of the builder), the phone shows one thing at a time in large type: the
+greeting, then each question, statement or closing on its own screen, with **Next** at the bottom.
+The builder ticks it for you when a survey that wasn't a script when you opened it gets a statement,
+a closing block or a "then go to" — judged on the survey as it will be saved, so adding a statement
+and removing it again leaves the setting as it was. Tick or untick it yourself and your choice
+stands. Every survey that existed before stays on the single page it always had: one block per
+screen is meant for scripted surveys. Either way the phone shows the same blocks and saves
+the same answers; only the layout differs (see *What a canvasser sees (mobile)* below).
+
+**Try it.** A survey's preview — the quick view on the **Surveys** page, or **Preview** on a
+campaign's **Survey** tab — has an **Overview | Try it** switch:
+
+- **Overview** shows the whole survey at once: the greeting, every block in order with the questions
+  numbered (statements take no number), a grey **Shown when …** line over each block that doesn't
+  always show, each answer's read-aloud script under it, notes in a blue **Canvasser note · not read
+  aloud** box, links you can click, and the closing.
+- **Try it** lets you answer as a canvasser would and walk any path — one screen at a time with
+  **Back**, **Next** and **Skip** if the survey uses one block per screen, otherwise on one live page
+  — using the same logic the phone runs, so it branches, numbers and closes exactly as the door will.
+  Nothing is saved; **Start over** clears your answers.
 
 ### "Other (specify)"
 
@@ -133,9 +331,19 @@ If you also create a normal option literally named "Other" on the same question,
 separate — the write-in then reads **Other (specify)** so the two are told apart. It's usually a sign
 you want one or the other, not both.
 
-> **Note — "Refused to answer" is not built yet.** A per-question "Refused" choice is a planned,
-> separate **door-outcome** feature; it does not exist today. Don't expect a Refused toggle in the
-> builder.
+> **Note — a refusal is the door's Refused button, never a survey answer** (owner ruling,
+> 2026-10-02). When a voter won't talk, the canvasser backs out of the survey and taps **Refused** on
+> the door screen: that records someone who answered the door and declined, which counts as a knock
+> and a contact but never as a survey (see [METRICS.md](METRICS.md)). The one exception: a canvasser
+> who already surveyed someone else at that door this round leaves the door as it is, because a
+> Refused tap would replace their result there and delete those answers (the app warns first). Don't
+> add an answer named "Refused" to stand in for a refusal — picking any answer and saving files a
+> **completed survey**, turns the door green and raises the connection rate, the opposite of a
+> refusal. A voter who takes the survey but won't answer one question is different: give that
+> question an ordinary answer such as "Declined to answer". Some surveys carry a leftover **refusal
+> flag** from an earlier, abandoned plan: the API still accepts it and a printed walk packet shows it
+> as a faint "Refused" bubble, but the builder has no control for it, the app never shows or records
+> it, and it is not a feature.
 
 ### Tags (group answers across questions)
 
@@ -209,6 +417,15 @@ Once options are tagged, tags show up in four places:
 > and a round-2 flip is invisible — the latest answer *in that scope* is the round-1 one. The
 > all-rounds view is the one that answers "current supporters, today."
 
+> **Tags on a scripted survey: "current" is decided question by question.** A later visit changes
+> it only at a tagged question that visit actually asks again. So on a script with several paths, a
+> voter who said *Yes* after the pitch in round one, and in round two took a path that never reaches
+> that question (a *No* at the first question, say), still counts as a current supporter through the
+> round-one answer. "Identified" is unaffected. Tagging the "yes" on every path that has one (the
+> first support question, the one after the pitch, "already voted for our candidate") narrows this,
+> because a supporter then re-earns the tag on more of the paths a later visit can take — but it is
+> worth knowing before you quote the current figure on a multi-round scripted campaign.
+
 ## The campaign's "Survey" tab (every survey this campaign uses)
 
 Each campaign has its own **Survey** tab (open a campaign, then **Survey** in the sidebar). It's a
@@ -256,7 +473,10 @@ From the main card you can:
 - **Edit survey** — open the builder **right here in the campaign** to edit the attached survey's
   questions; saving returns you to this tab. If that survey is **shared by other campaigns**, the
   builder warns you that edits apply to all of them and offers a one-click **Duplicate** so you can
-  edit just this campaign's own copy.
+  edit just this campaign's own copy. If it **has answers**, the same box offers **Duplicate** too
+  — the way to change a question's answer type or make it a Go to script; this box is where a team
+  lead finds Duplicate — and the copy replaces it on this campaign at once, so do it between shifts
+  (see *Editing a survey* below).
 
 A few rules this tab enforces:
 
@@ -451,17 +671,59 @@ By-team card, no By-canvasser tab and no map link, with the reason stated on scr
 
 ## What a canvasser sees (mobile)
 
-At a voter, the canvasser opens the survey, reads the intro, and answers the questions. As they go:
+At a voter, the canvasser opens the survey and works through it in one of two layouts, chosen by the
+survey (see *One block per screen* above). Both show the same blocks for the same answers and save
+the same answers; only the layout differs.
 
-- **Conditional questions appear and disappear live** — answer the parent and any dependent question
-  reveals itself (or hides) immediately.
+**The single page** — every survey built before scripted surveys, and any survey with *One block per
+screen* off. The greeting sits at the top, then the blocks, then the note box and **Save Response**.
+
+- **Blocks appear and disappear live** — answer a question and anything that depends on it reveals
+  itself (or hides) immediately. On a scripted survey (one with statements, closings or "then go to"
+  arrows), when a block that just appeared lands near the bottom of the screen, the page scrolls it
+  up to about a third of the way down — but never while the canvasser is typing in a box. Every
+  other survey's page never moves on its own, as before.
+- Statements and closings sit between the questions in amber read-aloud boxes.
+- The **default closing** comes last. It doesn't show at all when the path reached a closing block,
+  and on a survey that uses "then go to" arrows or closing blocks it waits until every required
+  question showing is answered.
+
+**One block per screen.** Each screen shows one thing, in large type: the greeting, one question,
+statement or closing, or the end. A thin progress bar runs across the top, with "Question N" on
+question screens (no "of M": how long a path is isn't known until it's walked).
+
+- **Tapping an answer selects it** — its read-aloud line, or the "Please specify" box for Other,
+  appears under it — and **Next** moves on to wherever that answer leads. Next stays greyed out on a
+  required question until it's answered.
+- **Skip** shows on optional questions only: it clears any answer there and moves on.
+- **Back** (top left, and the Android back button) steps back one screen; on the first screen it
+  leaves the survey, as it always has. Changing an earlier answer drops the part of the path that no
+  longer applies, and anything typed there isn't saved.
+- **The last screen carries the note box and Save Response**: the closing the conversation reached,
+  or — on a path that reached no closing block — an end screen with the default closing (or *Done —
+  end of the survey.* when there is nothing to read). In the rare case a required question behind
+  them is still blank (the survey was updated mid-walk), Save gives way to an **Answer Question N to
+  finish** button that jumps back to it.
+- A second tap on Back, Next, Skip or Save within a split second of the last is ignored, so a
+  double-tap can't skip past a screen or save before the closing is read.
+
+On both layouts:
+
 - When they pick an option that has a **read-aloud script**, that line shows up right under the
   choice.
 - An **Other** choice pops a "Please specify" box for free text.
+- A **For you — not read aloud** note and any links sit under their block; tapping a link opens it in
+  the phone's browser. `{{canvasser}}` reads as the canvasser's own first name.
 - Required questions must be filled — but **only the questions that are actually showing**. A hidden
-  question is never required and is never saved.
+  question is never required and is never saved, and a statement or closing never is.
+- **If the voter refuses partway through,** the canvasser backs out of the survey (Back, until it
+  leaves) and taps **Refused** on the door screen. Nothing from the unfinished survey is saved; a
+  refusal is never a survey answer (see the Refused note above). If they already surveyed someone
+  else at this door this round, they leave the door as it is instead: tapping Refused would replace
+  their result for the door and delete those answers (the app asks first, and **Keep my survey**
+  keeps them).
 
-They can add a free-form note and submit. Surveys submitted while offline are queued and sync later.
+They can add a free-form note and save. Surveys submitted while offline are queued and sync later.
 **One survey is kept per voter, per pass** — if a canvasser re-submits for the same voter in the
 same pass, the new one replaces the old. When the earlier response belongs to **another canvasser**,
 the app asks before opening the survey ("Already surveyed this round") — and if they go ahead, the
@@ -489,19 +751,40 @@ people already gave still appear in your reports under a clearly labeled "retire
 
 Once a survey has responses:
 
-- **Safe (do it freely):** rename the survey, edit the **intro/closing**, **reword** a question,
-  **rename** an option, toggle **Required**, **reorder** questions, **add** a question or option,
-  **remove** a question or option (it's retired, not deleted), and add/edit **conditions**,
-  **read-aloud scripts**, or **Other (specify)**.
-- **The one blocked change:** changing a question's **answer type** (e.g. single-choice → text). The
-  stored answers were recorded in the old shape and can't be re-totaled in the new one, so the type
-  control is locked and the server refuses the change.
+- **Safe (do it freely):** rename the survey, edit the **greeting/closing**, **reword** a question,
+  **rename** an option, toggle **Required**, **reorder** blocks, **add** a question or option,
+  **remove** a question, option, statement or closing (it's retired, not deleted), add/edit
+  **conditions**, **read-aloud scripts**, or **Other (specify)**, and add or edit **statements**,
+  **closings**, **notes**, **links** and titles. On a survey that already uses **Go to**, adding or
+  changing its arrows is safe too.
+- **Blocked: changing a question's answer type** (e.g. single-choice → text). The stored answers were
+  recorded in the old shape and can't be re-totaled in the new one, so the type control is locked
+  and the server refuses the change. Turning a question into a statement counts as a type change as
+  well (the builder never offers it; add a statement and retire the question instead).
+- **Blocked: switching a "Show only if" survey to Go to.** Its first "then go to" would redraw the
+  branching, so later visits could record differently from earlier ones; the menus are greyed out and
+  the server refuses it. The other way — **Switch back to Show only if** — is always allowed, because
+  it keeps exactly the same conditions.
 
-**Need to change a question's type?** Use **Duplicate** on the Surveys list. It makes a fresh,
-fully-editable copy (reset to v1); point your campaign at the copy on the Campaigns page. The
-original stays intact so its existing reports keep working. Note: after you repoint a campaign, that
-campaign's new answers report under the **copy**, separate from the answers already gathered under
-the original — the Campaigns page shows a heads-up when you pick a survey that already has responses.
+**Need to change a question's type, or turn a survey with answers into a Go to script?** Use
+**Duplicate** on the Surveys list. It makes a fresh, fully-editable copy (reset to v1) that keeps
+everything — blocks, arrows, notes, links, tags and the one-block-per-screen setting; point your
+campaign at the copy on the Campaigns page. On a campaign's **Edit survey** page the box at the top
+does both in one step whenever the survey has answers or is shared with other campaigns: its
+**Duplicate** button makes the copy and switches this campaign to it — the way for a team lead, who
+has no Surveys list. Either way, switch between shifts: a phone keeps the survey it loaded until it
+next refreshes, and once the campaign has switched the server refuses a survey saved under the old
+one (one still queued offline included), so the phone drops it. The original stays intact so its
+existing reports keep working. Note: after you repoint a campaign, that campaign's new answers report
+under the **copy**, separate from the answers already gathered under the original — the Campaigns
+page shows a heads-up when you pick a survey that already has responses.
+
+**Change arrows and conditions between shifts, not during one.** A phone keeps the copy of the
+survey it loaded until it next refreshes, so a canvasser in the middle of a shift can still be
+walking the old branching. If your edit now hides a question they answered, that answer is quietly
+dropped when the survey reaches the server. Re-pointed arrows, new or changed conditions, and blocks
+added or moved in the middle of a path can all change which questions show; rewording, notes and
+links are safe at any time.
 
 ---
 
@@ -509,21 +792,25 @@ the original — the Campaigns page shows a heads-up when you pick a survey that
 
 The implementation lives in
 [`server/src/routes/admin/surveys.js`](../server/src/routes/admin/surveys.js) (authoring,
-reconcile + rule-graph validation),
+reconcile + rule-graph validation, the Script-flow compile step),
 [`server/src/routes/mobile/canvass.js`](../server/src/routes/mobile/canvass.js) (submission), the
 shared [`server/src/services/surveys/`](../server/src/services/surveys/) helpers (visibility,
-normalization, dual-read aggregation, edit classification), and the `survey-results` handler in
+normalization, dual-read aggregation, edit classification, the "then go to" compiler `routing.js`
+(§L) and the `{{canvasser}}` filler `scriptText.js` (§M)), the shared door runner
+[`mobile/lib/surveyRunner.js`](../mobile/lib/surveyRunner.js) (§M) that the phone and the web
+preview's Try it both walk, and the `survey-results` handler in
 [`server/src/routes/admin/reports.js`](../server/src/routes/admin/reports.js) (reporting).
 
 ## A. Data model
 
 | Model | File | Fields that matter |
 |---|---|---|
-| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro`, `closing`, `questions[]`, **`tags: [String]`** (a per-survey **palette** — the distinct display casings of the tags its options use; **derived/kept-in-sync on save**, no longer the source of truth — the org-level **`Tag`** library is, see §I), **`archivedAt`** (`Date \| null`, indexed — soft-archive; hides the template from the Active list + all pickers unless currently selected, touches nothing else; no migration needed, existing docs default `null`), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
+| `SurveyTemplate` | [models/SurveyTemplate.js](../server/src/models/SurveyTemplate.js) | `organizationId`, `name`, `isActive`, `version` (default 1), `intro` (the greeting), `closing` (since scripted surveys, the **default closing** — see the callout below the table), `questions[]` (questions **and statements**, one ordered list), **`flow`** + **`presentation`** (next row), **`tags: [String]`** (a per-survey **palette** — the distinct display casings of the tags its options use; **derived/kept-in-sync on save**, no longer the source of truth — the org-level **`Tag`** library is, see §I), **`archivedAt`** (`Date \| null`, indexed — soft-archive; hides the template from the Active list + all pickers unless currently selected, touches nothing else; no migration needed, existing docs default `null`), `createdBy`. Org-scoped, **not** campaign-scoped (a campaign points at a template via `Campaign.surveyTemplateId`). |
+| `SurveyTemplate.flow` · `.presentation` | same | **`flow`** (`'list'` \| `'script'`, default `'list'`) says how the stored `visibleIf` came to be: `list` = hand-authored "Show only if" conditions, stored as sent (a route on a live block is a 400); `script` = **compiled from the routes at every save** (§L), any incoming `visibleIf` on a live block ignored and overwritten. **Stored, not inferred** from "any route exists", so one stray route can never flip recording semantics, and a GET → PATCH round-trip can tell compiled rules from hand ones. The builder sets it, never the author: the first route → `script`, the banner's **Switch back** → `list`; entering `script` is refused once the survey has responses (§B). **`presentation`** (`'scroll'` \| `'steps'`, default `'scroll'`): the phone's layout — the single page, or one block per screen (§M). Pure presentation: both walk the same evaluator-visible list, so stored answers cannot differ. The builder sends `steps` when the survey as it will be saved reads as a script and the survey as opened did not, otherwise the stored value, until the admin ticks or unticks it (`autoPresentation`, §G: worked out on every render, never latched on a keystroke); a PATCH may carry it alone (no `questions`, no version bump). Both are absent on lean reads of older templates and read as their defaults (`flow === 'script'` is the only test, never `!== 'list'`). |
 | `Tag` | [models/Tag.js](../server/src/models/Tag.js) | The **org-level managed tag library** (Phase 3.1): `organizationId`, `name` (canonical display), **`normalizedName`** (trim+lowercase dedupe key), `color` (reserved for a future colored-chip UI, default `null`), `createdBy`, timestamps. **Unique index `{ organizationId, normalizedName }`** makes duplicate tags structurally impossible. Survey options still reference a tag by its display `name` **as a string** (`option.tag`); this collection is the picklist + the target of rename/merge/delete (see §I). |
-| `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | `key` (stable per-survey slug, **the join handle** — never reused once retired), `label`, `type` (`single_choice`/`multiple_choice`/`text`), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole question), **`visibleIf`** (conditional display, default `null`), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — reserved for a future door-outcome feature; **no UI, not wired**). |
-| `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`. |
-| `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. |
+| `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | Every **block** — questions and statements in one ordered array, so ordering, reconcile, duplicate, the bootstrap and the evaluator need no second plumbing. `key` (stable per-survey slug, **the join handle** — never reused once retired; no two blocks may share one, retired ones included; a client-sent key may not start with `__`), `label` (a question's wording, ≤1000 — or, on a **statement, the read-aloud body itself**, ≤5000: chosen over a separate `body` field so a phone on an older bundle, which prints only `label`, still reads the whole closing), `type` (`single_choice`/`multiple_choice`/`text`/**`statement`**), **`role`** (`'statement'` \| `'closing'`, statements only, **no schema default** — see below), **`title`** (≤80, default `null`; a statement's short name, "Close 2", for the phone header, the builder, the "then go to" lists, paper and every message that names it), **`note`** (≤2000, default `null`; canvasser-only, on any block; never exported, reported, printed or shown in the desk tools), **`links[]`** (`{ label, url }`, ≤5, default `[]`; on any block; `url` ≤2000 and must match `^https?://`, case-insensitive; label ≤120, optional), **`goTo`** (default `null`; a statement's or text question's route — `null` = the following live block, a later block's key, or `'__end__'`; refused on a choice question, which routes through its options), **`otherGoTo`** (default `null`; the `'__other__'` pick's route, kept only on a choice question while `otherOption` is on), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole block), **`visibleIf`** (conditional display, default `null`; compiled output in Script flow), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — **dormant, not a feature**: the API accepts it on a question and the walk packet prints it as a muted "Refused" bubble, but no builder control sets it and the app never renders or records it; by owner ruling 2026-10-02 a refusal is the door screen's Refused button, never a survey answer). |
+| `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`, **`goTo`** (default `null`; the answer's "then go to" — `null` = the following live block, a later block's key, or `'__end__'`; on a multiple-choice question every picked answer's route is followed; read only by the compiler, §L). A client-sent `id` may not start with `__`; `text` ≤500 and, on a live answer, may hold no `{{`; a question holds at most 200 answers, retired ones included (§B). |
+| `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question — never a statement), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. In Script flow the stored value is the compiler's output and only ever `{ logic: 'any', rules: [ any_of … ] }` (§L). |
 | `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt`, **`deskEntry`** (`{runId, byUserId, at, source:'converted_outcome', fromOutcome}` — set ONLY by an admin outcome→Surveyed conversion; **absence is the field-submission marker**, so every pre-existing reader is unaffected and `{deskEntry:{$exists:true}}` is the exact query — see §K). Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`; partial index `{'deskEntry.runId'}` (revert sweep). |
 | `SurveyResponse.answers[]` | same (`answerSchema`, `{ _id: false }`) | `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** at submit), **`optionIds[]`** (stable id(s) chosen — the id-native tracking key; single → 1, multi → N, empty for free-text), **`otherText`** (free text typed into the `__other__` option), `answer` (Mixed — string \| string[] \| free text; **kept as a human-readable snapshot AND the legacy reporting fallback** for rows recorded before stable ids existed). |
 | `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (`'submit'` = a different canvasser's field submission; `'restore'` = an admin restore displaced it; **`'outcome_convert'`** = an admin converted the door away from Surveyed, §K) and **`conversionRunId`** (set by that third producer only; revert reads it) — never accepted from a request body. **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. **Growth is bounded for `submit`/`restore` only:** an `outcome_convert` run nobody reverts leaves its rows in place indefinitely — that IS the recoverability promise, not a leak, and tenant deletion still reaches them. See §F, §K. |
@@ -531,6 +818,41 @@ normalization, dual-read aggregation, edit classification), and the `survey-resu
 The `key` is derived in the builder by slugifying the label, with collision suffixes
 (`top_issue`, `top_issue_2`, …); option `id`s are derived the same way within a question. Both are
 minted once and held immutable so conditions and stored answers keep pointing at the right thing.
+A statement's key is slugged from its `title` when it has one, else its read-aloud text
+(`deriveKey` in [SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx)).
+
+> **Statements, `role` and the default closing (scripted surveys, 2026-10).**
+>
+> - **A statement's shape is enforced on the server**, by the zod `.transform()` (`shapeBlock` in
+>   [surveys.js](../server/src/routes/admin/surveys.js)), whatever a client sends: `options: []`,
+>   `required: false`, `otherOption` and `refusalOption: false`, `otherGoTo: null`, `role` defaulted
+>   to `'statement'`, and an empty `title`/`note` stored as `null`. A question loses any `role` or
+>   `title` sent with it, and its `otherGoTo` is nulled unless it is a choice question with
+>   `otherOption` on (the only place the compiler follows one). Load-bearing: every reader of stored
+>   answers relies on a statement recording nothing, and a phone on an older bundle would block Save
+>   forever on a `required` statement.
+> - **`role` has no Mongoose default, on purpose.** A subdocument default is stamped onto every array
+>   element on hydrate, so a default would bring every plain question back as `role: 'statement'`.
+>   Every reader checks `type === 'statement'` first and trusts `role` only on a statement
+>   (`isClosingBlock`).
+> - **`closing` is the default closing.** It renders after the last visible block only when no
+>   visible block is a closing-role statement, and on a template in Script flow or with any closing
+>   block it also waits until every visible required question is answered (`showDefaultClosing`,
+>   §M). A template with no closing blocks — every one saved before them — renders it exactly as
+>   before. Whitespace-only reads as none.
+> - **`SurveyResponse` is unchanged.** A statement never produces an `answers[]` row (§E), and nothing
+>   records which closing was reached: the path is inferable from the answers. Every counting
+>   contract in §C/§J therefore holds by construction.
+> - **No migration, no index.** The lean readers (the surveys list, the bootstrap, duplicate, the
+>   conversion service, exports, the print pipeline, the voter profile) apply no Mongoose defaults, so
+>   an older template arrives with every new field absent; every consumer reads absence as the
+>   default (`flow ?? 'list'`, `links ?? []`, `type !== 'statement'`). A stored template's blocks gain
+>   the new default keys on the first PATCH that sends questions, since that replaces the array.
+> - **Reserved `__` names.** `'__end__'` (the End route, and the phone's end screen) and `'__intro__'`
+>   (the phone's opening screen) can never collide with a real key, and `'__other__'` never with a
+>   real option id: every generator strips leading underscores, and the route refuses a client-sent
+>   key or option id starting with `__` (400 `A block key can't start with "__" — that prefix is
+>   reserved.`, or `An answer id can't …` for an option id).
 
 ## B. Endpoints (authoring)
 
@@ -546,9 +868,9 @@ campaign default **or** any `Effort` walk-list override). Archive/unarchive/dele
 | Method · path | Purpose |
 |---|---|
 | `GET /admin/surveys` | List templates; each annotated with `usedByCampaigns: [{id, name, isActive}]` (campaign **defaults**), **`usedByWalkLists: [{campaignId, campaignName, effortId, effortName}]`** (every `Effort` whose `surveyTemplateId` points here — a survey used *only* as a walk-list override previously showed no usage at all), **`responseCount`** / **`hasResponses`** (org-wide `SurveyResponse.aggregate`), and **`responseCountByCampaign: [{campaignId, campaignName, count}]`** (a second aggregate grouped by `{surveyTemplateId, campaignId}`; a legacy null-`campaignId` bucket is labeled "No campaign"). `archivedAt` flows through — **archived templates are still returned**; Active/Archived filtering is client-side so one `['surveys']` cache serves the list and every picker. **Lead rows are scoped (2026-08-08)**: the find filter is `$or [{createdBy: caller}, {_id ∈ attachedSurveyTemplateIds(managed)}]`, the three usage annotations are narrowed to managed campaigns (the null-campaign bucket drops), `responseCount`/`hasResponses` re-derive from the narrowed buckets, and **`usedElsewhere: true`** (bare boolean) marks a template also attached beyond the lead's campaigns so the builder's shared-edit warning still fires. Admin rows are byte-identical to before. |
-| `POST /admin/surveys` | Create (admin **or lead** — no per-survey scope needed; nothing is attached yet, `createdBy` is stamped as the caller, and the follow-on campaign/effort attach is separately campaign-manager-scoped). Zod `upsertSchema` (optional `tags: [String]` palette); `assignOptionIds` mints ids for any id-less option, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(withIds, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. **Then `ensureTags(orgId, tags, userId)`** auto-upserts org `Tag` docs (see §I). |
-| `PATCH /admin/surveys/:surveyId` | Update (admin, or a **lead** who passes `canManageSurvey` → else `403`). When `questions` are present: if the survey **has responses**, `classifyQuestionEdits` blocks **only a question type change** → `409 { code: 'survey-has-responses', reasons }`. Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options), `validateVisibleIfIntegrity`, then `canonicalizeTags(reconciled, data.tags ?? existing.tags)`, apply, and bump `version`. After save, **`ensureTags`** auto-upserts the library (see §I). |
-| `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim, `createdBy` = caller so a lead can then edit their copy). Admin, or a **lead** who passes `canManageSurvey` → else `403` (the answer-type-change escape hatch must work for leads on their campaign's surveys). |
+| `POST /admin/surveys` | Create (admin **or lead** — no per-survey scope needed; nothing is attached yet, `createdBy` is stamped as the caller, and the follow-on campaign/effort attach is separately campaign-manager-scoped). Zod `upsertSchema` (optional `tags: [String]` palette, `flow`, `presentation`; at most 500 blocks and 200 answers a question, retired ones included, and no two blocks sharing a key — see the scripted-survey callout below); `assignOptionIds` mints ids for any id-less option, **`applyFlow`** (a POST with `flow: 'script'` is *entering* Script flow — see the scripted-survey callout below), the one-answerable-question check, `validateVisibleIfIntegrity` checks the rule graph, then `canonicalizeTags(…, data.tags)` collapses the palette + every `option.tag` to one case-insensitive casing (see §I), and sets `version: 1`, `createdBy`. **Then `ensureTags(orgId, tags, userId)`** auto-upserts org `Tag` docs (see §I). An empty `questions` array is still accepted (a template is often created blank). |
+| `PATCH /admin/surveys/:surveyId` | Update (admin, or a **lead** who passes `canManageSurvey` → else `403`). A body carrying `flow` without `questions` → `400` (*Send the questions with a flow change.*); `presentation` alone is fine (saved, no version bump). The effective flow is `data.flow ?? existing.flow ?? 'list'`, and the save is **entering** Script flow when the stored flow is not `script` and the effective one is. When `questions` are present: if the survey **has responses**, entering Script flow → its own `409 { code: 'survey-has-responses' }` (no `reasons`), and `classifyQuestionEdits` blocks a question type change → `409 { code: 'survey-has-responses', reasons }` (retyping a question into a statement is one). Otherwise `reconcileQuestions` (soft-retire absent items, mint ids for new options; it never re-appends dropped options onto a **statement**), `sizeError` (the same 500-block and 200-answer caps on the reconciled list, which also holds every block and answer the payload left out: the builder sends them all back on the next save), **`applyFlow`** (a questions-only PATCH on a Script-flow template compiles too), the one-answerable-question check, `validateVisibleIfIntegrity`, then `canonicalizeTags(…, data.tags ?? existing.tags)`, apply, and bump `version`. After save, **`ensureTags`** auto-upserts the library (see §I). |
+| `POST /admin/surveys/:surveyId/duplicate` | Clone into a fresh template (`name: "<name> (Copy)"`, `version: 1`, `isActive: false`, no campaign link, questions copied verbatim — so roles, titles, notes, links, routes and compiled conditions travel — plus **`flow`**, **`presentation`** and **`tags`**, `createdBy` = caller so a lead can then edit their copy). The three template fields are copied, never defaulted: an uncopied `flow` would leave a scripted copy's compiled conditions reading as hand ones with its routes unfollowed, an uncopied `presentation` would put it back on a single page, and `tags` used to be dropped here. Admin, or a **lead** who passes `canManageSurvey` → else `403` (the answer-type-change escape hatch must work for leads on their campaign's surveys). |
 | `POST /admin/surveys/:surveyId/archive` · `POST /admin/surveys/:surveyId/unarchive` | Set/clear `archivedAt`. **Idempotent** (re-archiving keeps the original timestamp). Deliberately separate POSTs — not a PATCH flag — so the upsert/reconcile/version-bump path never sees archive state. Attaching an archived survey is only blocked in the UI (pickers hide it); the API still allows it, keeping unarchive-then-attach trivial. |
 | `DELETE /admin/surveys/:surveyId` | Hard-delete, **only when truly unused**. Guard = `SurveyResponse.exists` ∨ `Campaign.exists({surveyTemplateId})` ∨ `Effort.exists({surveyTemplateId})` → `409 { code: 'survey-in-use', reasons: [...] }` naming each reference; otherwise `200 { ok: true }`. Wrong-org / missing id → `404`. |
 
@@ -576,22 +898,82 @@ campaign default **or** any `Effort` walk-list override). Archive/unarchive/dele
 > ones by `key`, **preserves existing option ids**, mints ids for new (id-less) options, and
 > **re-appends as `retired: true`** any existing option a question dropped and any existing question
 > the payload dropped — ids and text preserved. So removing/renaming/reordering questions and
-> options is non-destructive: history is kept, reports keep counting it.
+> options is non-destructive: history is kept, reports keep counting it. The one exception: dropped
+> options are never re-appended onto an incoming **statement** (the transform empties a statement's
+> options), so a question retyped into a statement keeps none of its answers, not even as retired
+> and tagged ones.
 
-> **The one hard block.** `classifyQuestionEdits(old, new)`
+> **The two hard blocks once responses exist** — both `409 { code: 'survey-has-responses' }`, both
+> answered with **Duplicate**. (1) `classifyQuestionEdits(old, new)`
 > ([services/surveys/diffQuestions.js](../server/src/services/surveys/diffQuestions.js)) walks
 > still-present questions (matched by `key`) and returns a reason **only** when a question's `type`
-> changed — the stored answer shape can no longer be aggregated. That's the lone `409` once responses
-> exist; the builder mirrors it by locking the type control and offering **Duplicate**.
+> changed — the stored answer shape can no longer be aggregated. Retyping a question into a
+> statement is one (`Question "Why not?" changed type (text → statement).`). The builder mirrors it
+> by locking the type control. (2) **Entering Script flow**, a separate check beside it because
+> `classifyQuestionEdits` only compares two question arrays: `error` *This survey has responses, so
+> it can't switch to Go to routing. Duplicate it to build the scripted version.*, no `reasons`.
+> Re-expressing the branching as routes may compile to different rules, so later visits could record
+> differently from earlier ones. **Leaving** Script flow is always allowed: "Switch back" stores the
+> compiled conditions as hand ones (`switchToList`, §L), so the phone evaluates the same rules and
+> recording cannot change. The builder mirrors it by disabling every "then go to" select on a
+> Show-only-if survey with responses.
 
-> **Rule-graph validation (on save, after reconcile).** `validateVisibleIfIntegrity(questions)`
-> enforces, over the **final reconciled** questions, that every rule on a non-retired question:
+> **Rule-graph validation (on save, after reconcile and compile).** `validateVisibleIfIntegrity(questions)`
+> enforces, over the **final** questions (reconciled, and in Script flow compiled, so a compiler bug
+> fails loudly as a 400 instead of reaching a phone), that every rule on a non-retired block:
 > references a **strictly earlier non-retired** question (forward/self/dangling → error, which also
-> makes cycles impossible); uses an op valid for the referenced type (`text` questions support only
-> `answered`/`not_answered`); and (for `is`/`is_not`/`any_of`) names `optionIds` that exist on the
-> referenced question (retired-inclusive) or the `'__other__'` sentinel when it allows Other. Any
-> violation → `400`. The Zod `ruleSchema` additionally requires exactly one `optionId` for
-> `is`/`is_not` and at least one for `any_of`.
+> makes cycles impossible) that is **not a statement** (a statement has no answer cell: `answered` on
+> one is always false and `is_not`/`not_answered` always true, so a rule on it is degenerate); uses
+> an op valid for the referenced type (`text` questions support only `answered`/`not_answered`); and
+> (for `is`/`is_not`/`any_of`) names `optionIds` that exist on the referenced question
+> (retired-inclusive) or the `'__other__'` sentinel when it allows Other. Any violation → `400`. The
+> Zod `ruleSchema` additionally requires exactly one `optionId` for `is`/`is_not` and at least one
+> for `any_of`. A statement is named by its title or first sixty characters, never its full text
+> (`Closing "Close 2" has a condition referencing …`); a question's messages are unchanged.
+
+> **Scripted-survey authoring (2026-10).** Every rule below is enforced on the server; the builder
+> (§G) checks the same things live as an early warning, never as the guarantee. **Save order**, POST
+> and PATCH alike: zod parse (the per-block `checkBlock` refine, then the `shapeBlock` transform; on
+> the questions array, the 500-block cap and `refuseSharedKeys`) → `assignOptionIds` (POST) /
+> `reconcileQuestions` then `sizeError` (PATCH) → **`applyFlow`** → the one-answerable-question
+> check → `validateVisibleIfIntegrity` → `canonicalizeTags`. `applyFlow` is where the design's
+> separate "validate routing" step landed: in Script flow it refuses a hand condition on the way in
+> and a script over 200 live blocks, then runs `compileRouting` (§L), whose errors are the route
+> checks, and refuses a compile whose conditions hold more than 50,000 answer ids; in List flow it
+> refuses a live route. Every cross-field rule lives in the handler rather than a top-level zod
+> `superRefine`, because a `ZodEffects` has no `.partial()` and would break the PATCH parser.
+>
+> | Check | Where | Response |
+> |---|---|---|
+> | A question's wording over 1000 characters; a statement's read-aloud text over 5000 | `checkBlock` | 400 *A question's wording can be at most 1000 characters.* / *Read-aloud text can be at most 5000 characters.* |
+> | `{{` anywhere in a live question's wording or a live answer's text | `checkBlock` | 400 *Placeholders like {{canvasser}} can't go in a question's wording or an answer — they're stored with every answer.* |
+> | `{{` in a live statement's `title` or a live block's link label — both show on the phone exactly as typed, never filled | `checkBlock` | 400 *A title can't contain "{{" — placeholders like {{canvasser}} work only in text that is read aloud.* / the same for *A link label* |
+> | An unknown or unclosed placeholder in script text (intro, closing, a statement's text, an option `script`, a `note`) — tested as "does any `{{` survive `fillScript`", so this check and the phone cannot disagree | `scriptText()` refine (intro, closing); `checkBlock` (the rest) | 400 *Unknown placeholder {{x}} — the only placeholder is {{canvasser}}.* / *Unfinished placeholder: every {{ needs a matching }} — the only placeholder is {{canvasser}}.* |
+> | Any placeholder rule above, on a **retired** block or answer | `checkBlock` | **Skipped**, as in the builder: a retired entry never reaches a phone or paper, its text is already snapshotted on the answers it collected, and the builder sends it back on every save, so a survey whose retired history predates these rules stays saveable. The length caps and the `__` rule still hold for every entry. |
+> | `title` over 80, `note` over 2000, more than 5 links, a link label over 120, a URL over 2000 | field refines | 400 naming the cap (*A title can be at most 80 characters.*, *A block can have at most 5 links.*, …) |
+> | A link URL not matching `^https?://` (case-insensitive) — `javascript:`, `ftp:` | `linkSchema` | 400 *A link must start with http:// or https://.* |
+> | A key or option id starting with `__` | refines | 400 (§A) |
+> | More than 500 blocks, or a question with more than 200 answers — retired ones included, in the payload and, on a PATCH, in the reconciled list (an edit stores whatever it leaves out as retired, and the builder sends all of it back next time, so a survey stored over a cap could never be saved again). Without a bound, one request from any lead could stall or crash the server for every org | `upsertSchema` refines; `sizeError` (PATCH) | 400 *A survey can have at most 500 blocks, retired ones included.* / *A question can have at most 200 answers, retired ones included.* |
+> | Two blocks sharing a key, live or retired: every reader finds a block by its key, so a statement sharing a question's key would swallow its answers, and the stepper would hold on one screen | `refuseSharedKeys` | 400 *Two blocks share the key "q1".* (naming the key) |
+> | `flow` sent without `questions` (PATCH) | handler | 400 *Send the questions with a flow change.* |
+> | Live blocks present, none of them answerable | handler | 400 *Add at least one question that records an answer.* An empty array stays allowed. |
+> | List flow: a route on a live block, a live answer or a live Other | `applyFlow` | 400 *Go to is only available in Script flow.* Routes on retired blocks or answers are cleared silently (nobody can see or edit them, and a later switch would revive them); an `otherGoTo` is dropped by `shapeBlock` unless the block is a choice question with Other on. |
+> | Entering Script flow (stored `list` or absent → `script`; every POST in Script flow) while a live block still carries a `visibleIf` | `applyFlow` | 400 *Remove the Show-only-if conditions before switching to Go to.* Never overwritten: the compiler cannot express `is_not`, `not_answered` or Match ALL. |
+> | Already in Script flow: an incoming `visibleIf` on a live block | `applyFlow` | **Ignored and overwritten** by the compile, so a GET → PATCH round-trip keeps working. |
+> | Script flow: more than 200 live blocks (checked before the compile), or a compile whose conditions hold more than 50,000 answer ids in all — a continue carries its source's whole condition forward, so the output grows with blocks × branching (the Burton script compiles to 20) | `applyFlow` | 400 *A survey in Script flow can have at most 200 blocks.* / *This script branches too much to save. Split it into two surveys.* |
+> | A backward or self route, a route to a removed block, a block nothing leads to, a `goTo` on a choice question | `compileRouting` | 400 `{ error: <first message>, routeErrors: [{ key, optionId?, message }] }` — the messages are in §L |
+> | A rule referencing a statement (either flow) | `validateVisibleIfIntegrity` | 400 `… has a condition on statement "…", which is read aloud and has no answer — condition on the answers that led there instead.` |
+> | Entering Script flow on a survey with responses | handler | 409 (above) |
+>
+> **The 400 body changed.** A zod failure used to answer `{ error: 'Invalid input', issues }`
+> regardless; `zodErrorBody` now puts the **first custom issue's message** in `error` — every zod
+> rule in the table is a custom issue, because team leads author surveys and read these in the
+> builder's error block — and keeps `'Invalid input'` only when every issue is one of zod's
+> built-ins. `issues` is unchanged. (The handler and `applyFlow` checks answer with their own
+> `{ error }` and never went through zod.) The builder (§G) runs the same placeholder checks live,
+> on live blocks and answers only, title and link label included, so its warnings and these 400s
+> agree. It does not check the size caps or the compile bound; those reach the author only as the
+> 400's sentence in the error box under the form.
 
 ## C. Dual-read reporting (stable id, legacy text fallback)
 
@@ -633,6 +1015,13 @@ Consumers:
   and `GET /admin/households` ([routes/admin/households.js](../server/src/routes/admin/households.js))
   — `answerFilterClause` / `voterAnswerClause` for per-question survey-answer targeting, and
   `answerTagClause` for the cross-question **`answerTagFilters`** (see §I).
+
+**Statements never appear in results.** The `survey-results` question loop `continue`s on
+`isStatement(q)` before building any pipeline, so no card, no tag member and no wasted aggregation
+ever exists for one (the web dashboard, the Survey Explorer and the phone's campaign screen all read
+that payload); no stored answer row ever carries a statement key (§E); `computeSurveyBreakdowns`
+already reads choice questions only, and `publicPointAnswer` returns `null` for a statement as a
+guard against a stray stored row.
 
 **Consequences:** renaming an option **keeps its count** (the id is stable); removing one surfaces
 its past answers as a **retired** bucket rather than dropping them. Each response still snapshots
@@ -706,6 +1095,21 @@ Exported API:
   **later or self** active question **fails CLOSED** (the question hides). Returns a `Set` of visible
   keys.
 
+> **Unchanged by scripted surveys — zero bytes in the mirrored body.** The evaluator never reads
+> `type`, so a statement is just another keyed block: it is visible when its `visibleIf` holds, and
+> it contributes an empty cell (`buildCells` in the runner, §M) that no rule may reference (§B).
+> "Then go to" arrows reach the evaluator only as the compiled `any_of` rules of §L, an op every
+> shipped phone already evaluates — which is why a phone on an older bundle routes a scripted survey
+> correctly. Everything scripted surveys add on top of the visible set lives in the door runner
+> (§M): what counts as answerable, numbering, the Save gate, the stepper, and the default-closing
+> rule, whose two predicates `isScripted` and `needsClosingGuard` are runner exports, not evaluator
+> ones. The three-copy drift guard is untouched. The fixtures gained six scripted cases: a statement
+> gated like a question (shown when its condition holds, with an ungated first statement always
+> shown; hidden when another answer is picked; hidden while the question is unanswered) and a
+> closing block reached from two sources (straight from Q1; through Q2; and with a stale hidden
+> answer withheld, so Q2's old pick does not reach it). The scripted paths are also pinned against
+> this evaluator by `burtonScript.test.js` and the routing fixtures (§L).
+
 ## E. Answer normalization & dropHidden modes
 
 > **Three callers now**, not two: the mobile submit (`dropHidden:true`), the admin in-place edit
@@ -724,6 +1128,19 @@ Both write paths funnel through `normalizeAndFilterAnswers(template, rawAnswers,
 **can't drift**. It **never throws / never 400s**:
 
 - Drops rows whose `questionKey` is unknown to the template.
+- **Drops rows whose question is a statement** — in **both** `dropHidden` modes, with or without
+  `rebuildAnswerText`, for every caller (the mobile submit, the admin edit, the conversion worker,
+  and the demo generator in [demoActivity.js](../server/src/services/platform/demoActivity.js)).
+  New code, not a side effect of an existing rule: a reached statement is a known, visible key, so
+  no other rule here would drop its empty row. Today's clients post none (`buildSubmitRows`,
+  §M; the desk composer filters statements out), so this is the backstop for a phone on an older
+  bundle — which renders a statement as a numbered card and posts `{ answer: null, optionIds: [] }`
+  for it — for an offline replay queued before the update, and for any hand-rolled API call. It is
+  what keeps every reader of stored answers (exports, the response detail, the voter profile,
+  `answerScope` counts, the conversion manifest) free of statement rows without a filter of its
+  own. Pinned by [normalizeAnswers.test.js](../server/src/services/surveys/normalizeAnswers.test.js)
+  and, end to end through both write routes, by
+  [surveyBlocks.int.test.js](../server/test/surveyBlocks.int.test.js).
 - Computes valid ids = the question's option ids **plus `'__other__'`** when `otherOption` is on;
   **keeps retired ids**, drops ids the template doesn't recognize.
 - Phase-1 backfill: a row with no `optionIds` but an `answer` snapshot maps each answer text to an
@@ -858,16 +1275,19 @@ the wire), [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndO
 
 | File | Renders |
 |---|---|
-| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | The org **Surveys library** — a pure **list + quick-view** page (authoring lives on `SurveyEditorPage`). `StatCard` row (surveys / total responses / in use / drafts), search + `Segmented` **Active/Archived/All** filter (client-side over `archivedAt`), and a `DataTable` with one row per template: name + created date, **Used in** (campaign names *and* `"{campaign} · {walk list}"` override labels from `usedByWalkLists`), **question count excluding retired questions**, `responseCount`, version/Archived badge, and a `RowMenu` (⋮) with **Edit / Duplicate / Archive-or-Delete** (Delete only when `responseCount === 0` and unused — the server re-checks). Row click opens the **`SurveyQuickView`** drawer. Owns the `duplicate`/`archive`/`unarchive`/`delete` mutations, all invalidating **`['surveys']`** — the one cache key every survey consumer now shares (EffortsPage/CampaignsPage previously used a divergent `['admin','surveys']`; TagsPage's post-delete invalidation had been silently pointing at that dead key). Back-compat: `/surveys?attachTo=<id>` redirects to `/surveys/new?attachTo=<id>`. |
-| [client/src/components/SurveyQuickView.jsx](../client/src/components/SurveyQuickView.jsx) | The row-click **quick view**, built on the design-system `ui/Drawer` (right-side slide-over). Sections: version + In use/Draft/Archived badges; created/updated dates + active question count; **Used in** — campaign defaults and walk-list overrides, each linking to `/campaigns/:id?survey=<templateId>` (the dashboard deep-link); **Responses** — org-wide total + the per-campaign split from `responseCountByCampaign` (null-campaign bucket labeled, never linked); a `SurveyPreview` of the questions; and a sticky action bar — **Edit survey** (→ `/surveys/:id/edit`), **Duplicate**, and **Delete** (confirm; only when unused) or **Archive/Unarchive**. Surfaces a delete `409`'s `reasons[]` if one races through the client-side gate. **View full results →** renders one link per campaign in the union of current attachments and campaigns with responses. |
-| [client/src/pages/SurveyEditorPage.jsx](../client/src/pages/SurveyEditorPage.jsx) | The **dedicated org builder host** — routes `/surveys/new` and `/surveys/:surveyId/edit` (both in the `requireOrgAdmin` group). Renders the shared `SurveyForm` from [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`QuestionCard`/`OptionRow`/`ConditionEditor`; derives question `key` via `deriveKey` and option `id` by slugify-with-collision-suffix, minted once and held immutable; per-option **read-aloud script**, **Other (specify)**, **Show only if…** with live `ruleError` validation mirroring the server; on a survey with responses only the **type** control locks and removals soft-retire with **Restore**; surfaces the PATCH `409 reasons`). Loads the org tag library (`['admin','tags']`) for the `TagPicker`, same as the in-campaign builder. Edit mode finds its survey in the cached `['surveys']` list (no single-survey GET; load errors render instead of silently bouncing). Two hand-off flows on the create route: **`?attachTo=<campaignId>`** — create → `PATCH /admin/campaigns/:id { surveyTemplateId }` (campaign default) → back to that Survey tab; **`?assignEffort=<effortId>&campaignId=<id>`** — create → `PATCH /admin/campaigns/:id/efforts/:effortId { surveyTemplateId }` (walk-list override) → back to that Survey tab. Plain visits return to `/surveys`. No `refusalOption` UI. |
+| [client/src/pages/SurveysPage.jsx](../client/src/pages/SurveysPage.jsx) | The org **Surveys library** — a pure **list + quick-view** page (authoring lives on `SurveyEditorPage`). `StatCard` row (surveys / total responses / in use / drafts), search + `Segmented` **Active/Archived/All** filter (client-side over `archivedAt`), and a `DataTable` with one row per template: name + created date, **Used in** (campaign names *and* `"{campaign} · {walk list}"` override labels from `usedByWalkLists`), **question count — answerable questions only** (`answerableQuestions(activeBlocks(s))` from the runner, §M: retired questions and statements excluded), `responseCount`, version/Archived badge, and a `RowMenu` (⋮) with **Edit / Duplicate / Archive-or-Delete** (Delete only when `responseCount === 0` and unused — the server re-checks). Row click opens the **`SurveyQuickView`** drawer. Owns the `duplicate`/`archive`/`unarchive`/`delete` mutations, all invalidating **`['surveys']`** — the one cache key every survey consumer now shares (EffortsPage/CampaignsPage previously used a divergent `['admin','surveys']`; TagsPage's post-delete invalidation had been silently pointing at that dead key). Back-compat: `/surveys?attachTo=<id>` redirects to `/surveys/new?attachTo=<id>`. |
+| [client/src/components/SurveyQuickView.jsx](../client/src/components/SurveyQuickView.jsx) | The row-click **quick view**, built on the design-system `ui/Drawer` (right-side slide-over). Sections: version + In use/Draft/Archived badges; created/updated dates + question count (answerable blocks only, with "· N statements" beside it when the survey has any); **Used in** — campaign defaults and walk-list overrides, each linking to `/campaigns/:id?survey=<templateId>` (the dashboard deep-link); **Responses** — org-wide total + the per-campaign split from `responseCountByCampaign` (null-campaign bucket labeled, never linked); a `SurveyPreview` of the questions; and a sticky action bar — **Edit survey** (→ `/surveys/:id/edit`), **Duplicate**, and **Delete** (confirm; only when unused) or **Archive/Unarchive**. Surfaces a delete `409`'s `reasons[]` if one races through the client-side gate. **View full results →** renders one link per campaign in the union of current attachments and campaigns with responses. |
+| [client/src/pages/SurveyEditorPage.jsx](../client/src/pages/SurveyEditorPage.jsx) | The **dedicated org builder host** — routes `/surveys/new` and `/surveys/:surveyId/edit` (both in the `requireOrgAdmin` group). Renders the shared `SurveyForm` from [components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) (`QuestionCard`/`OptionRow`/`ConditionEditor`; derives question `key` via `deriveKey` and option `id` by slugify-with-collision-suffix, minted once and held immutable; per-option **read-aloud script**, **Other (specify)**, **Show only if…** with live `ruleError` validation mirroring the server, and the scripted-survey blocks and controls described in the next row; on a survey with responses the **type** control locks (and, on a Show-only-if survey, every **then go to** select) and removals soft-retire with **Restore**; surfaces the PATCH `409 reasons` and, through its existing error block, every server 400's plain-English `error`). Loads the org tag library (`['admin','tags']`) for the `TagPicker`, same as the in-campaign builder. Edit mode finds its survey in the cached `['surveys']` list (no single-survey GET; load errors render instead of silently bouncing). Two hand-off flows on the create route: **`?attachTo=<campaignId>`** — create → `PATCH /admin/campaigns/:id { surveyTemplateId }` (campaign default) → back to that Survey tab; **`?assignEffort=<effortId>&campaignId=<id>`** — create → `PATCH /admin/campaigns/:id/efforts/:effortId { surveyTemplateId }` (walk-list override) → back to that Survey tab. Plain visits return to `/surveys`. No `refusalOption` UI. |
+| [client/src/components/SurveyBuilder.jsx](../client/src/components/SurveyBuilder.jsx) + [client/src/lib/surveyBuilderRules.js](../client/src/lib/surveyBuilderRules.js) | The builder (`SurveyForm`), shared by the org editor and the in-campaign builder. **The rules live in `surveyBuilderRules.js`** — pure, pinned by `node --test` ([surveyBuilderRules.test.js](../client/src/lib/surveyBuilderRules.test.js)) — and the component wires them. Block palette **+ Add question / + Add statement / + Add closing** (`BLOCK_KINDS`; a statement is never one of `QUESTION_TYPES`, so it is never retyped); `StatementCard` (badge *Statement* or *Closing*, **Read aloud** textarea = `label`, optional **Title**; no number, Required or Other); `BlockExtras` on every card (**+ note to canvasser (not read aloud)** in an info-tinted box, **+ link** rows up to `MAX_LINKS` = 5). `RouteSelect` (**then go to →**: *Continue to next block (‹target›)* from `continueLabel`, every later live block from `routeTargets`, *End the conversation*, and a stored route it no longer offers shown as what it is via `staleRouteLabel`) sits on every answer, the Other row and a text question **in both styles** — setting the first one is how a survey enters Go to — and on a statement or closing in Go to only; it is disabled while `locked && flow !== 'script'`, its tooltip `routesLockedHint(duplicateAt)` saying where Duplicate is on this page (`SurveyForm`'s `duplicateAt` prop: `DUPLICATE_IN_LIST`, "from the survey list", by default; "at the top of this page" from the in-campaign builder; the locked banner says the same). State: `flow` (`flowOf`, absent → `list`; reset with the form; sent on save), `presentationChoice` (the admin's own tick or untick, `null` until they make one; reset with the form) and `questions` loaded through `questionsForEditing` (drops the stored compiled `visibleIf` in Script flow, drops a route on a choice question itself, clears every route on a List survey so a Restore can't revive one). `entersScript` flips `flow` to `script` on the first route (the blue banner); **One block per screen** is `autoPresentation({ loaded, questions, flow, choice })`, worked out on every render and never latched: the admin's choice once they make one; otherwise `steps` when the blocks as Save sends them (`blocksAsSaved`) read as a script — the compiler's `isScripted(questions)`, a live statement or arrow — and the survey as opened (`loaded`, `null` for a new survey) did not; otherwise the stored value. The checkbox shows it and Save sends it, so a statement added and removed again leaves an existing single-page survey on its single page. `surveyIssues` recomputes every live check on each change: `scriptTextError` (intro, closing, statement text, option scripts, notes), `plainTextError` (`{{` in a question label, an answer, a **title** or a **link label** — the server refuses all four too), `linkError` (a label with no address is an error, a wholly blank row is dropped by `cleanBlock`, spaces are refused, and `https?://` matches in any case, as on the server and the phone), `ruleError` (List flow; a statement is never a valid target) or `handRuleError` (Script flow: a leftover hand condition, shown with **Remove condition**), the compile preview `previewRouting` and `branchingWarning` on a non-required branching question, both over `blocksAsSaved` — the blocks exactly as `cleanBlock` will send them, so an arrow on an answer with no text yet, which Save drops, counts nowhere, as on the server (errors mapped onto the card, the answer or the Other row; stand-in keys for keyless cards) — and `NO_ANSWERABLE`, on the server's rule (live blocks, none answerable: a survey whose every block is retired still saves). `hasBlockingIssues` gates Save (warnings never do); `emptyIssues` waits for a Save attempt, whose blank-field marks are remapped when a card is removed or retired, swapped when one moves and cleared when the form resets, and a card shows one only while a fresh `validate()` still finds it, so the footer never claims an error that isn't on screen. In Go to, cards show **Reached when …** (`reachedWhen` → `formatVisibleIf`) and **Continues to: …** (`continuesToName`, on blocks the compile shows with an implicit exit; `text-fg-muted`, as is the select's label). Removing or retiring a route target runs `repointRoutes` (routes into it back to Continue, a one-line notice with the count). **Switch back to Show only if** runs `switchBack(questions, loaded)`. On a survey stored in List flow (`switchBackUndoes(loaded)`: its arrows were never saved) it is an undo: every route cleared and each live block given back the condition it was opened with, by key (none for a block added since); never refused, never confirmed. On a new survey or one stored in Script flow it converts through `switchToList` (§L): refused with the compiler's first message while one stands (the banner shows the first arrow error until none is left; one that turns up after that never reads as a refusal), and a `window.confirm` on a survey with responses, which can't return to Go to once saved. Either way a leftover hand condition is kept rather than the restored or compiled one. `blankStatement` starts a new closing on End in Go to. Save sends `cleanBlock` output — a statement with no options and never required, routes as `null` or a key, no `visibleIf` at all in Script flow — plus `flow` and `presentation`. `displayNum` and `countLabel` number and count answerable blocks only ("N questions · M statements", retired blocks excluded). |
 | [client/src/components/WalkListSurveySelect.jsx](../client/src/components/WalkListSurveySelect.jsx) | The **one** walk-list survey-override picker, shared by `CampaignSurveyPage` and `EffortsPage` so the archived-hiding rule lives in a single place: first option **"Campaign default"** (`''` → `onChange(null)`), then `surveys.filter(s => !s.archivedAt \|\| String(s._id) === current)` — an effort already pinned to a now-archived survey keeps its option (labeled `· archived`) instead of silently reading "Campaign default". A stale/unknown id renders an "Unknown survey" option rather than crashing. |
 | [client/src/components/TagPicker.jsx](../client/src/components/TagPicker.jsx) | The per-option tag combobox used by the survey builder's `OptionRow`. Filters the org `tags` prop case-insensitively; selecting an existing tag is the default. The **"Create '…'" action** appears only when nothing matches **and `onCreate` is provided** — so when the builder withholds `onCreateTag` (a **team lead**, since `POST /admin/tags` is admin-only) it becomes pick-only and the placeholder drops "or create one". Renders a selected tag as a clearable chip. |
 | [client/src/pages/TagsPage.jsx](../client/src/pages/TagsPage.jsx) | The **org-level Tags management page** (route `/tags`, an `ORG_NAV` entry — [navItems.js](../client/src/components/navItems.js)). Lists every org `Tag` from `GET /admin/tags` with a `usageSummary` ("on M options, across N surveys, K saved searches"), plus search. **Create** (`POST /admin/tags`), inline **Rename** (`PATCH /admin/tags/:id`; a `409 { code: 'tag-exists' }` surfaces a **"merge into it"** button targeting the clashing `tagId`), **Merge** (`POST /admin/tags/:id/merge { targetId }` via a target picker), and **Delete** (`DELETE /admin/tags/:id` behind a usage-aware `confirm`). Delete also invalidates `['surveys']` since the builder reads tagged options. |
 | [client/src/pages/CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx) | In-campaign **Survey** tab (`/campaigns/:campaignId/survey`) — the **coverage view**. Header holds a top-level **New survey** button (→ `/campaigns/:id/survey/new`). Section 1: the **main survey card** (badge `Default`, `SurveyPreview` behind a **Preview** toggle collapsed by default so the walk-list table stays above the fold, **Change survey** / **Edit survey** → `/campaigns/:id/survey/edit`) whose response count is the **coverage count** (`intakeResponseCount + Σ responseCount` of no-override efforts — see §B), not the template's org-wide total. Section 2: the **Walk list coverage** `DataTable` — per effort: status badge, doors, a `WalkListSurveySelect` wired to `PATCH …/efforts/:id { surveyTemplateId }` (invalidates `['admin','efforts',campaignId]`, the same key `EffortsPage` reads), its `responseCount`; an **Intake** row appears when null-`effortId` responses exist. A `?created=<id>` param (set by the builder after creating a survey that isn't the main) shows a dismissible "assign it to a walk list" banner. States: no default + overrides → warning; no walk lists → pointer to the Walk Lists page; **lit-drop** unchanged. **Authoring affordances (New/Edit) gate on `canManage` = `isOrgAdmin || managedCampaignIds.includes(campaignId)`** — so campaign-managing **leads** author too; the server (`canManageSurvey`) is the real scope gate. Attach/change = `PATCH /admin/campaigns/:id { surveyTemplateId }`; the Change-survey picker hides archived templates unless attached. |
-| [client/src/pages/CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx) | **In-drill-in survey builder** (`/campaigns/:campaignId/survey/new` and `/survey/edit`) — **now in the console route group, so campaign-managing leads reach it** (was admin-only). Renders the shared `SurveyForm` inside the campaign so authoring never bounces to the org list. **New (conditional attach):** `POST /admin/surveys`, then **attach as the campaign default only when it has none yet** (`!campaign.surveyTemplateId`) — a new survey never silently replaces the main; either way it returns to the Survey tab with `?created=<id>`. **Edit**: `PATCH /admin/surveys/:id`; when the template is **shared by other campaigns** it warns and offers **Duplicate** (works for leads too — `canManageSurvey` permits editing/duplicating a survey attached to their managed campaign). Loads the org tag library; passes `onCreateTag` **only when `isOrgAdmin`** so leads pick existing tags but the "Create tag" affordance is hidden (`POST /admin/tags` is admin-only). |
-| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template (intro · questions sorted by `order` · closing); choice options as radio/checkbox glyphs, text as a placeholder. **Filters out retired questions and retired options** — the preview shows what canvassers actually see in the field. |
-| [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — powers the builder's live condition validity and any preview gating. |
+| [client/src/pages/CampaignSurveyBuilderPage.jsx](../client/src/pages/CampaignSurveyBuilderPage.jsx) | **In-drill-in survey builder** (`/campaigns/:campaignId/survey/new` and `/survey/edit`) — **now in the console route group, so campaign-managing leads reach it** (was admin-only). Renders the shared `SurveyForm` inside the campaign so authoring never bounces to the org list. **New (conditional attach):** `POST /admin/surveys`, then **attach as the campaign default only when it has none yet** (`!campaign.surveyTemplateId`) — a new survey never silently replaces the main; either way it returns to the Survey tab with `?created=<id>`. **Edit**: `PATCH /admin/surveys/:id`; when the template is **shared by other campaigns** (for a lead, also the bare `usedElsewhere`) it warns, and when it **has responses** — so a question's answer type or a switch to Go to needs a copy — it says what Duplicate does; either way the box at the top offers **Duplicate** (`POST …/duplicate`, then attach the copy as this campaign's default), with a line to do it between shifts (a phone still on the old survey has its saves refused and dropped) and the error when it fails. It works for leads too — `canManageSurvey` permits editing/duplicating a survey attached to their managed campaign — and a lead has no Surveys list, so this box is their Duplicate; `SurveyForm` gets `duplicateAt="at the top of this page"` for its hint and locked banner. Loads the org tag library; passes `onCreateTag` **only when `isOrgAdmin`** so leads pick existing tags but the "Create tag" affordance is hidden (`POST /admin/tags` is admin-only). |
+| [client/src/components/SurveyPreview.jsx](../client/src/components/SurveyPreview.jsx) | Read-only render of a template, used by the library quick view and the campaign Survey tab's **Preview**. Once the survey has a live block, an **Overview \| Try it** `Segmented` switch sits above it. **Overview**: intro · blocks sorted by `order` · closing; choice options as radio/checkbox glyphs, text as a placeholder; **filters out retired blocks and retired options** — the preview shows what canvassers actually see in the field. The Overview numbers every active answerable block (`questionNumbers` over the non-retired blocks), so a statement takes no number and its Q numbers match the builder and paper; the phone and Try it number the visible path instead, so on a conditional path the two can differ, as §M says. A statement or closing renders as the italic read-aloud paragraph under a *Statement* or *Closing* caption ("· ‹title›" appended when it has one; an untitled block gets the bare caption). Every gated block carries a grey **Shown when …** line (`formatVisibleIf` with prefix *Shown when*, over `buildConditionIndex`); each answer's read-aloud script now renders under it ("Read aloud: …"); a note renders in an info box captioned *Canvasser note · not read aloud*, and links as anchors (http(s) only, re-checked here; anything else stays plain text). The template closing is captioned *Closing — when no closing block applies* once any closing block exists. `{{canvasser}}` is filled with the **viewer's own** `user.firstName` (the blank line when they have none). **Try it** (`SurveyTryIt`, exported for the smoke test) walks the **client mirror of the door runner** (§M): with `presentation: 'steps'` one screen at a time (progress bar; **‹ Back** / **Skip** / **Next**, Next disabled on a blank required question; the end screen's default closing via `showDefaultClosing`; *Done — nothing is saved.* and **Start over** on the last screen), otherwise the live single page (`ScrollTryIt`: only the reached blocks, the guarded default closing, *Answer Question N to finish.*). A tap selects and never moves the cursor; Skip computes the next screen from the new answers (`skipAnswer` → `nextScreenId`). Answers live in component state; nothing is ever saved. A survey with no statements, conditions, option scripts, notes or links renders exactly as before ([surveyPreviewRender.smoke.test.js](../client/src/lib/surveyPreviewRender.smoke.test.js) pins it against a frozen copy of the old render). |
+| [client/src/lib/surveyVisibility.js](../client/src/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — read by the desk composer and the voter-page editor (`surveyAnswerForm.js`), and by the client door-runner mirror (`surveyRunner.js`) behind the preview's Try it. |
+| [client/src/lib/surveyRunner.js](../client/src/lib/surveyRunner.js) · [surveyRouting.js](../client/src/lib/surveyRouting.js) · [surveyScriptText.js](../client/src/lib/surveyScriptText.js) | Byte-identical mirrors (below the `// ==== BEGIN MIRRORED BODY ====` marker) of the door runner (canonical on mobile), the "then go to" compiler and the `{{canvasser}}` filler (canonical on the server) — see §L and §M for what each owns and which test guards each copy. The builder compiles live with the routing mirror so its "Reached when" lines match what the server stores; Try it walks the runner mirror so it steps exactly like the phone. |
+| [client/src/lib/surveyConditionText.js](../client/src/lib/surveyConditionText.js) | **One plain-English wording for a gate**, shared by three surfaces that each pick only a prefix and a text transform: paper (`Only if`, with `asciiSafe`), the builder (`Reached when`) and the preview (`Shown when`), so no two surfaces word one gate differently. Lifted out of the print model; a screen never gets `asciiSafe`, which drops what jsPDF's cp1252 faces cannot print (a non-Latin option label would come out blank). `formatVisibleIf(question, index, { transform, prefix })` follows the evaluator, not the builder's controls: `any` joins clauses with "or", anything else with "and", and `is`/`is_not` name only the first option id. `buildConditionIndex(questions, { numberAnswerableOnly = true })` numbers answerable blocks only (statements take no Q number) while `byKey` keeps every keyed block, retired ones and statements included, so a rule naming one still reads by name — a statement by its title, else its first sixty characters. Tests: [surveyConditionText.test.js](../client/src/lib/surveyConditionText.test.js). |
 | [client/src/pages/CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) | Survey-template dropdown (in `components/campaigns/CampaignFormDrawer.jsx`) shows a heads-up when the chosen survey already has responses (repointing reports new answers separately). Hides **archived** templates unless attached — anchored to the survey attached **when the drawer opened**, so deselecting an archived one mid-edit doesn't make it vanish from the options. |
 | [client/src/components/QuestionResults.jsx](../client/src/components/QuestionResults.jsx) | Per-question result charts from `survey-results` (retired/legacy buckets included). **Row layout (2026-08-10): one line, intrinsic widths.** `OptionRow`/`TagRow` were `grid-cols-12 gap-3` split 4 label / 6 bar / 2 numbers. That failed for two compounding reasons: the tracks were fixed **proportions**, and the eleven gutters cost a flat **132px at every width** — so in a 568px card the label got ~168px (≈22 chars, hard-truncated) while the numbers needed more than their own 78px cell and painted over the bar. Now one `flex items-center gap-3` row: chevron, then the label as the **sole `flex-1`** (`line-clamp-2 min-w-0`, no `truncate` — it wraps rather than truncating, and only past ~66 chars at a 780px card), then the `Retired` `Badge`, then an `h-2 w-24` bar, then `min-w-[3.5rem] shrink-0 text-right tabular-nums` tracks for the percent and count. Because the label is the only flexible item, the bar and numbers land on the same x in every row — that, not a grid, is what makes the percentages a column. Row padding is `px-2 py-1.5` → **32px**, the tight end of the console's range (cf. `BookAssignmentPanel.jsx:402`, `OrgBillingPanel.jsx:629`).
 > **The bar is a fixed 96px column, and web diverges from mobile here on purpose.** `docs/ADMIN_APP.md` records mobile's rule that `RowBar` always takes full row width because a squeezed proportional bar loses data — that is an inset-group idiom for ~44px touch rows. A web results card is scanned in bulk, and an earlier pass at this (label on one line, full-width bar on a second) cost 50px per option and made the section unreadable at two cards per screen. The web precedent for an inline fixed-width bar beside a printed number already exists: `campaigns/CampaignsTable.jsx:67` (`h-1.5 w-16`), `CoverageBar.jsx:33` and `PassManager.jsx:29` (`h-2 w-40`). **Do not "restore" the full-width bar here.** Track is **`bg-border`** not `bg-sunken` (per [THEMING.md](THEMING.md) — sunken-on-card is 1.10:1 light / 1.04:1 dark), fill is **`bg-brand-600`** not `bg-brand-500` (500 is the fixed ramp's *danger* step), and the fill carries a **3px `minWidth` floor conditioned on `count > 0`** — a px floor, not a percentage floor, so it rescues sub-pixel bars without distorting small values, and a true zero still paints nothing. A retired row keeps a **full-strength label** and lets the `Retired` `Badge` carry the state — the old `opacity-50` on the whole row measured 1.98:1 on the label and 1.50:1 on the chip (its bar goes `bg-fg-muted`, not `bg-fg-subtle`, which would sit ~1.9:1 against the track and read as empty). Row children are **`<span>`** — a `<button>`'s content model is phrasing content. Both disclosure rows carry `aria-expanded`; the caret is `IconChevronRight`, not a `▸` text node the screen reader announced. The card root is `flex h-full flex-col`, with the hint footer on `mt-auto` so a card stretched to a tall row's height reads as deliberate. The header is **one wrapping line** — `flex flex-wrap items-baseline justify-between` with the `h3` on `min-w-0 flex-1 basis-48` and the meta chip `shrink-0`, so the chip drops to its own line only when it truly cannot share. (It was briefly stacked instead; that fixed the starving but cost every card a line. The starving was never caused by sharing the line — it was `shrink-0` against a title with no width floor.) Both headings here moved to **`text-sm font-semibold`**: the bare `font-medium` they used to carry made them the only in-card headings in `client/src` still inheriting 16px from body. The counting caveat moved from a hover-only `title=` into an **`InfoHint`**, whose 16px trigger fits the `text-xs` line box without growing the row. A **`text`** question's header no longer claims "N answered": those options are the server's `$limit: 10` top-ten, so it reads **"top 10 answers"** (or "N distinct answers" under ten) — see §C. Exports **`TagResults`** — the **"Tags"** panel: one `TagRow` per `tags[]` entry showing **both voter units** ("N voters · M current"; the bar stays scaled to identified — current is text only, since these are counts, not shares; `currentVoterCount` absent from an old server renders nothing rather than a fake 0), contributing options labelled "(N answers)" (response-unit, said out loud), expandable to `TagDrill` — the **`TagTeamTable`** ([TagTeamTable.jsx](../client/src/components/TagTeamTable.jsx), the first-finder by-team split from `/tag-teams`, §I) plus an inline `VoterList` that drills via `voters-by-answer?tag=<tag>&surveyTemplateId=<id>` and opens with **its own unit line** ("N entries — one per round…"). `TagResults` also takes `onTagClick` — the Survey Explorer passes it so a row click deep-links to `?tag=` instead of expanding inline. Each expanded option/tag hosts the **answer drill-in** (`OptionDrill`/`TagDrill` — canvasser filter, Voters \| By-canvasser toggle, enriched rows, response drawer, Open-full-view link) — see §J. All drills thread `passId` (the Dashboard round picker). |
@@ -876,8 +1296,11 @@ the wire), [perCanvasserAndOverlaps.int.test.js](../server/test/perCanvasserAndO
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The saved-search / targeted-round answer-filter chips. Beyond per-question `answerFilters`, it renders a **"By tag"** chip row from the `tags` palette prop (falling back to the case-insensitive union of option tags) and emits selected tags to the parent via `onTagChange` as **`answerTagFilters: [{ tag }]`** (case-insensitive, display-cased). |
 | [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | Saved-search builder. Wires `AnswerFilters` with `tags={surveyTags}` (from `survey-results` `tags[]`) + `answerTagFilters` into the filter (sent to `resolveWalkList`). Per saved search, **Export CSV** (`exportCsv`) does an **authenticated blob download**: `fetch` the export endpoint with `Authorization: Bearer` + `X-Org-Id` headers, read `res.blob()`, then click a synthetic `<a download>` (filename from `Content-Disposition`). |
 | [client/src/components/CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx) | A canvasser's individual responses (shows template `version`). |
-| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form. Imports `makeCell` + `visibleQuestionKeys` and recomputes `visibleQuestions` live as answers change; renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box. Required-validation runs over **visible** questions only. Submits `{ optionIds, answer (snapshot), otherText, questionKey, questionLabel }` per visible answer; offline queue + optimistic recolor via `optimisticSubmit`. At mount, before any answer, at most **one** confirm per visit: the cross-canvasser re-survey prompt ([resurvey.js](../mobile/lib/resurvey.js)), else the door-change prompt (`changePrompt` kind `survey` → `buildChangePrompt`, [doorChange.js](../mobile/lib/doorChange.js)), checked once, the first time the door is known, so a teammate's delta can never pop it mid-survey; a DNC voter's wall suppresses both. |
-| [mobile/lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded). |
+| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | The at-the-door form, in **two presentations that share every piece of logic** through [mobile/lib/surveyRunner.js](../mobile/lib/surveyRunner.js) (§M): `visibleBlocks` recomputes the visible list live as answers change; `questionNumbers`, `progress` and `requiredPending` run over visible **answerable** blocks; `showDefaultClosing` decides the default closing; Save posts `buildSubmitRows` (`{ questionKey, questionLabel, answer (snapshot), optionIds, otherText }` per visible answerable question — never a statement row; required-validation over **visible** questions only, as before); offline queue + optimistic recolor via `optimisticSubmit`, and `router.dismiss(2)` unchanged. Renders single/multiple/text, inline **option scripts** on the picked option, the synthetic **`__other__`** choice with a "Please specify" box; a statement or closing as `StatementBlock` (the amber `scriptBlock`, captioned *Read aloud* or *Closing*, "· ‹title›" appended when set, body in the 18/26 `scriptBody` on both presentations); each block's note and links through `SurveyNoteAndLinks`, beneath the block (for a question, beneath its card); every script text through `fillScript` with `bootstrap.user.firstName`. **Single page** (`presentation` absent or `'scroll'`): the old screen with the blocks woven in, "Question X of Y · N% Complete", the note box and **Save Response** at the end. On a scripted survey only (the runner's `isScripted`), a block a tap reveals is scrolled into view only when its top lands in the bottom quarter of the viewport or below, then parked a third of the way down (a ScrollView ref, a per-block `onLayout` y-map and a visible-keys diff), and never while a `TextInput` is focused (`TextInput.State.currentlyFocusedInput()`); every other single-page survey never scrolls on its own, as before. **One block per screen** (`'steps'`): a cursor — a screen id in component state, not a route per block, so the stack depth `dismiss(2)` relies on is unchanged, read only through `clampScreenId`, and set to the clamped screen during render whenever the two differ (a template refresh), so an answer is never measured from a vanished block — over `screens()`: the opening (*Greeting*, 18/26) only when the intro has text, one screen per visible block (the question in 18px, no badge), then the end screen (the default closing in 18/26, or *Done — end of the survey.*) unless the last visible block is a closing. A docked footer inside the `KeyboardAvoidingView` holds **Skip** (`canSkip`; clears through `skipAnswer`, the next screen computed from the new answers) and **Next** (`canAdvance`; disabled on a blank required question) or, on the save screen (`saveScreenId`), the note box above and **Save Response** — replaced by an outlined **Answer Question N to finish** that jumps there when `requiredPending` finds a blank required question behind the cursor (a template refresh mid-walk). Progress reads "Question N" on question screens only, no "of M". The header **‹ Back** steps back (`prevScreenId`) and exits on the first screen; Android's hardware back does the same through `BackHandler`, registered in `useFocusEffect` and removed by its cleanup. Back, Next, Skip, Save and the jump ignore a press within **400 ms** of the last step (`STEP_GUARD_MS`; a negative gap, the clock set back, never counts), so a double-tap's second touch can't land on the next screen's control; each step also dismisses the keyboard and starts the new screen at its top. At mount, before any answer, at most **one** confirm per visit: the cross-canvasser re-survey prompt ([resurvey.js](../mobile/lib/resurvey.js)), else the door-change prompt (`changePrompt` kind `survey` → `buildChangePrompt`, [doorChange.js](../mobile/lib/doorChange.js)), checked once, the first time the door is known, so a teammate's delta can never pop it mid-survey; a DNC voter's wall suppresses both. |
+| [mobile/lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js) | Byte-identical mirror of the canonical evaluator (drift-guarded) — read only by `mobile/lib/surveyRunner.js`; the screen never imports it directly. |
+| [mobile/lib/surveyRunner.js](../mobile/lib/surveyRunner.js) · [mobile/lib/surveyScriptText.js](../mobile/lib/surveyScriptText.js) | The **canonical** door runner (its client copy is the mirror) and the phone's mirror of the `{{canvasser}}` filler — §M. |
+| [mobile/components/SurveyNoteAndLinks.jsx](../mobile/components/SurveyNoteAndLinks.jsx) | A block's canvasser note and links, drawn under a statement, a closing or a question's card on both presentations, so the two can never present a note differently. The note: an `infoBg` well with a 4pt `info` left rule, the label *For you — not read aloud*, text in the new **`infoFg`** token ([theme.js](../mobile/lib/theme.js): `#1E40AF` light, 7.15:1 on `infoBg`; `#93C5FD` dark, 8.63:1 — raw `info` on `infoBg` measures 3.01:1 in light). Everything read aloud is amber, so a note can never pass for script. Links: `InsetGroup` action rows labelled with the link's label, else its host ("example.org"); http(s) only (anything else, from an older template, is dropped rather than handed to the OS); opened only on a tap with `Linking.openURL(url).catch(() => {})` — never `canOpenURL`, never prefetched or previewed, nothing appended to the URL (the two conditions that keep a link out of the privacy policy). No QR, by ruling. Renders nothing when the block has neither. |
+| [client/src/lib/packet/surveyPrintModel.js](../client/src/lib/packet/surveyPrintModel.js) + [packetPdf.js](../client/src/lib/packet/packetPdf.js), payload from [buildPacket.js](../server/src/services/packet/buildPacket.js) | The walk packet's survey ([WALK_PACKETS.md](WALK_PACKETS.md)). `toPrintableSurvey` (server; a field-level picker over a lean read, every absent field read as its default) now also carries the template's `flow`, each block's `role` (type checked first), `title`, `links` (URL-bearing only) and `goTo`/`otherGoTo`, and each option's `goTo` — **never `note`**: canvasser notes never print (owner ruling). Statements stay in `questions`, in place. `buildSurveyPrintModel` numbers the **answerable** blocks only (a statement never prints beside a door) and builds the ordered `script` sequence for the **What to say** page: the opening; each statement and closing **once**, under its *Only if …* gate (`formatVisibleIf` with `asciiSafe`), its links as "Label: URL" (only a statement's or closing's: a question's links ride in the payload but never print) and, in Script flow, where it goes next; each answer's read-aloud line; then the template closing, captioned *Closing — when no closing block applies* once any closing block exists (`closingIsFallback`). `scripts` (answer lines only) keeps its old shape. In Script flow every answer of a branching question prints its arrow (`-> Q4`, `-> Close 2` — an untitled statement by its quoted first words — or `-> End`), a non-branching question prints one only when it doesn't simply continue to the next question on the page, and the List-flow skip hints are not computed; List flow keeps its skip hints and prints no arrows. `{{canvasser}}` prints as `______` (`fillScript` with no name). The dormant `refusalOption` still prints its muted "Refused" bubble, with no arrow. `drawScriptPage` prints the sequence, and its page gate now tests `script.length`, so a script of statements alone still earns the page. Fixed in passing: text continuing past a page break on that page printed in the footer's small grey type, because the new page's band and footer leave that face set; the wrapper now restores the face after every break (a statement can run to 5000 characters, longer than a page). |
 
 ## H. Migrations
 
@@ -1151,6 +1574,10 @@ carries `campaignId` unconditionally. All date windows resolve in the **campaign
 >   present them as two numbers — the headline "Answers" stat vs the list's own "Showing N of M
 >   entries" — and never equate them.
 
+**Statements never appear in a drill.** They get no `survey-results` card to drill from (§C) and no
+stored answer row to match (§E), so every endpoint above reads answerable questions only; the
+voter-profile snapshot and the desk-entry conversion payloads drop them too (`isAnswerable`).
+
 **Frontend (web).**
 
 | File | Role |
@@ -1361,4 +1788,217 @@ and leaving them in dumped every reverted door into an operator's duplicate queu
 
 **Reporting rule: a desk-entered response counts identically to a field one** in every rate and
 total. The stamp is provenance, not arithmetic.
+
+## L. The "then go to" compiler (Script flow)
+
+**Module:** canonical [`server/src/services/surveys/routing.js`](../server/src/services/surveys/routing.js),
+mirrored byte-for-byte below the `// ==== BEGIN MIRRORED BODY ====` marker into
+[`client/src/lib/surveyRouting.js`](../client/src/lib/surveyRouting.js) — **two copies, not three**:
+the phone never compiles, it evaluates the stored `visibleIf`. The body takes no imports (a relative
+path would resolve into two different trees), which is why it repeats `'__other__'` as `OTHER_ID`
+instead of importing `OTHER_OPTION_ID` (a test pins the two equal). **Fixtures:**
+[`__fixtures__/routing.fixtures.json`](../server/src/services/surveys/__fixtures__/routing.fixtures.json),
+twenty cases with the final Burton graph among them. **Callers:** `applyFlow` in
+[routes/admin/surveys.js](../server/src/routes/admin/surveys.js) on every Script-flow save (§B); the
+builder's live preview and Switch back (§G); the print model; and, for the block predicates alone,
+`normalizeAndFilterAnswers`, `/survey-results`, `templateAnswerPlan`, `voterProfile`, the conversion
+payloads, `computeReport` and `buildPacket`. Design and proof:
+[PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) Part 2 §C and §F.
+
+**Why compile instead of walking a path at runtime.** The arrows become the `visibleIf` the evaluator
+already reads, so the evaluator stays byte-for-byte unchanged (§D), `normalizeAndFilterAnswers`,
+`dropHidden` and every report keep working untouched, and a phone on an older bundle routes
+**correctly**, because the compiled rules use only `any_of`. A runtime path walker would have edited
+the mirrored evaluator in three places and made every shipped phone disagree with the server about
+which rows to keep. A compiled condition means exactly "the conversation reached this block": the
+evaluator withholds a hidden block's answer from every later rule, so `q4 any_of […]` already carries
+"and Q4 was reached", and a block reached several ways is a flat `any` with no nesting. **Only
+positive `any_of` atoms are ever emitted** — `is_not` and `not_answered` are true on a block that was
+never reached, and would leak a closing onto a branch that never asked the question.
+
+**`compileRouting(questions) → { questions, errors }`** — pure, deterministic, idempotent:
+
+| # | Rule |
+|---|---|
+| 1 | Walk the **live** (non-retired) blocks in list order, the evaluator's own order. The first live block is always reached. |
+| 2 | A **branching** choice question (`isBranching`: a live answer carries a route, `'__end__'` included, or Other does while `otherOption` is on): each **picked** answer reaches `goTo ?? the following live block`, `'__end__'` reaches nothing, and an **unanswered** branching question reaches nothing. A **plain** choice question (no arrows): the following block is reached whenever the question was, answered or not — compiled as a copy of the question's own reach — so an optional question mid-script never ends the path when skipped, and Switch back of a linear survey produces no bogus "any of every answer" conditions. Retired answers neither fire nor count as a way in. A `goTo` on the choice question itself is an error, never a route. |
+| 3 | Multiple choice is a **union**: every picked answer's route is followed, and `'__end__'` on one pick never suppresses another's. |
+| 4 | A **text question or statement** continues to `goTo ?? the following block` whether or not anything was typed, by copying its own reach into the target — sound because that reach reads only earlier questions, whose answers can no longer change by the time the conversation gets there. |
+| 5 | A block's condition is the OR of everything that reaches it: `{ logic: 'any', rules: [ one { questionKey, op: 'any_of', optionIds } per source question ] }`, atoms ordered by the source's list position and ids by that question's option order with `'__other__'` last — a stated order, so an unchanged survey compiles to byte-identical rules on every save and the builder's preview matches the stored document. A direct route and a passed-on reach from the same question merge into one atom. Reached unconditionally → `visibleIf: null`. |
+| 6 | A route must point at a **later** live block — the mirror of the earlier-only rule for conditions, so cycles are impossible and `validateVisibleIfIntegrity` and the evaluator's fail-closed check hold by construction. An earlier, self, removed or retired target is an error. The last live block falls through to End. |
+| 7 | A live block **nothing reaches** is an error — never silently hidden, never compiled to empty rules (which the evaluator would read as always visible). |
+| 8 | Retired blocks pass through untouched, in place. |
+
+An incoming `visibleIf` on a live block is ignored and overwritten, which is what makes the compile
+idempotent and the GET → PATCH round-trip work. An empty string in any route field (what a cleared
+select sends) reads as no route.
+
+**The error contract.** `errors` is `[{ key, optionId?, message }]` in list order, in plain English,
+because team leads read them — live in the builder, and as the server's 400 (`error` = the first
+message, `routeErrors` = all of them). The questions returned **beside** errors are a preview only and
+are never stored: an erring route is dropped, and an unreached block compiles as if the conversation
+started there. A block is named by `blockName` — its title, else the first sixty characters of its
+text on one line, never the full body; a card still being typed reads "Untitled question",
+"Untitled statement" or "Untitled closing". A route's subject is the block itself,
+`The answer "‹text›" on "‹block›"`, or `The "Other (specify)" answer on "‹block›"`.
+
+| Error | Message |
+|---|---|
+| Route to a removed block | `‹subject› goes to a block that has been removed — pick another target.` |
+| Route back to its own block | `‹subject› can only go to a later block, not back to "‹block›" itself — pick another target.` |
+| Route to an earlier block | `‹subject› can only go to a later block, and "‹target›" comes before it — move "‹target›" down or pick another target.` |
+| A live block nothing leads to | `Nothing leads to "‹block›". Route an answer to it, or move it where the flow reaches it.` |
+| `goTo` on a choice question itself | `"‹block›" is a choice question, so its Go to belongs on each answer — remove the one on the question itself.` |
+
+**The other exports** (both copies): `END_KEY` (`'__end__'`) and `OTHER_ID`; the block predicates
+`isStatement`, `isAnswerable` (anything but a statement — deliberately not a whitelist of today's
+three types, so it agrees with the server's backstop), `isChoice` and `isClosingBlock` (type first,
+`role` second); `blockName`; `isBranching`; `hasActiveRoutes` (the arrows the compiler **follows** — a
+`goTo` on a choice question itself is not one); `isScripted(questions)` (a live statement or a live
+arrow — the builder's trigger for one block per screen, distinct from the runner's
+`isScripted(survey)`, §M); `resolveDefaultTarget` (where a block falls through: the next live block's
+key, `END_KEY` after the last, `null` for a retired block — behind the builder's "Continues to" line
+and the print model's arrows); `clearRoutes` (every route nulled on every block and answer, retired
+ones included, nothing else touched); and **`switchToList`**, the builder's "Switch back to Show only
+if" on a new survey or one stored in Script flow (on a survey still stored in List flow, Switch back
+is an undo that never compiles, §G): compile, then clear every route, so each live block keeps
+exactly the condition its arrows produced, now as an ordinary hand condition. Lossless exactly when `errors` is empty; with errors the
+kept conditions are only the preview, so the builder refuses the switch and shows the first message.
+
+**The Burton survey** — the client door script that prompted all of this — is authored and compiled
+in [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) Part 1 and §F, and kept as the
+first routing fixture. Every closing carries an explicit exit (Close 4 → End; Close 2 and Close 3 →
+Close 4), because a closing left on Continue falls into the next one — the fall-through trap: a
+supporter would read Close 2, then Close 3, then Close 4. Close 1 is the default closing, not a block.
+
+**Tests.** [routing.test.js](../server/src/services/surveys/routing.test.js): one test per fixture,
+well-formed output, determinism, idempotence and purity, degenerate input, the message wording,
+**agreement with walking the arrows on 500 seeded random surveys**, the predicates, `blockName`,
+`resolveDefaultTarget`, `clearRoutes`, `switchToList` (Burton keeps its exact conditions), and the
+**two-copy drift guard** (byte-identical bodies, neither importing anything) plus "the client mirror
+compiles every fixture identically". [burtonScript.test.js](../server/src/services/surveys/burtonScript.test.js):
+the Burton graph compiled, then walked on the real evaluator down the twenty paths of the design's
+proof (every answer, both ways into Question 4, the default closing exactly on the paths that reach
+no closing block and never while a required question is blank, three changed-earlier-answer cases),
+in both styles — compiled, and switched back. Both run with `npm test` in `server/`.
+
+## M. The door runner and the `{{canvasser}}` filler (shared modules)
+
+### The door runner — `surveyRunner.js`
+
+**Module:** canonical [`mobile/lib/surveyRunner.js`](../mobile/lib/surveyRunner.js), mirrored
+byte-for-byte below the marker into [`client/src/lib/surveyRunner.js`](../client/src/lib/surveyRunner.js),
+so the web preview's **Try it** walks the same code as the phone. Its one import sits **above** the
+marker on purpose: each copy reads its own sibling evaluator mirror (`./surveyVisibility.js`). Pure data
+in, data out — no React, no react-native — and `answers` (`{ [key]: optionId | optionId[] | text }`)
+and `otherTexts` (`{ [key]: text }`) are the screen's own state shapes, never mutated. **Tests:** the
+drift guard (plus a Try-it smoke) is [client/src/lib/surveyRunner.test.js](../client/src/lib/surveyRunner.test.js),
+run by CI's client unit job; the behaviour is pinned by
+[mobile/lib/surveyRunner.test.js](../mobile/lib/surveyRunner.test.js), which keeps a frozen copy of
+the old inline screen code as its oracle, through `npm run test:mobile` at the repo root — a step
+CI's checks job runs too.
+
+**Invariants.** (1) **One routing engine.** What shows is the evaluator's visible set over the
+template's stored `visibleIf` — the same thing the server re-runs at save — so nothing here follows
+`goTo`: the stepper is a cursor over the visible list, never a second path walker. (2) **A statement
+records nothing:** it never takes a number, never counts toward progress, never posts a row and never
+blocks Save, even if one were stored `required: true`. (3) **For a survey with no statements every
+function returns exactly what the old screen computed inline** — the cell build, `isAnsweredNow`,
+progress, `validate()` and the POST rows moved here unchanged.
+
+| Export | What it decides |
+|---|---|
+| `isStatement`, `isAnswerable`, `isClosingBlock` | Block kinds, by `type` first; `role` is trusted only on a statement. |
+| `activeBlocks(survey)` | The non-retired blocks in authoring order, the evaluator's walk. |
+| `buildCells(blocks, answers)` | The evaluator's cells; a statement always gets an empty one, and `makeCell`'s no-text-on-choice contract applies. |
+| `visibleBlocks(survey, answers)` | The blocks that show, in list order. A block that goes hidden keeps its answer in state (changing the earlier answer back restores it), but the answer is withheld from later rules and never posted. |
+| `isAnswered(q, answers, otherTexts)` | An Other pick counts only once its typed text is non-blank (whitespace-only is blank); on multiple choice a real pick beside it already counts; a statement is never answered. |
+| `answerableQuestions`, `questionNumbers` | The visible answerable blocks, numbered 1-based. Numbers follow the path, as the phone always has; the builder and paper number every active question, so the two can differ on a conditional path, as they always could. |
+| `requiredPending`, `pathComplete`, `progress` | The first visible required question still blank (the old `validate()`, returned as data so the caller words it); the Save gate; `{ answered, total, percent }` over the visible answerable questions (100% when there are none). |
+| `buildSubmitRows` | The POST's `answers` rows, for visible answerable questions only. Field order is part of the contract: rows are frozen into the offline queue and replayed later. An Other pick snapshots its typed text, or `'Other'` when nothing was typed. |
+| `closingReached` | A visible closing block exists. |
+| `isScripted(survey)` | A statement, a closing or a live route on an active block, **or `flow === 'script'`**. The phone's single page calls it to decide whether a block a tap revealed is scrolled into view, which happens on a scripted survey only; the builder's automatic one block per screen uses the compiler's `isScripted(questions)` (§L), which never reads `flow`. |
+| `needsClosingGuard(survey)` | Script flow or any closing block — narrower than `isScripted` on purpose: a statement alone never changes where the goodbye renders, and an existing survey must render exactly as before. |
+| `showDefaultClosing(survey, blocks, answers, otherTexts)` | Show `template.closing` when it has text (whitespace-only is none; the old screen drew an empty Closing box for it), no closing block is visible, and — when `needsClosingGuard` — the path is complete. A plain survey keeps the old rule: shown whenever it has text. |
+
+**The stepper** (one block per screen, on the phone and in Try it):
+
+| Export | Behaviour |
+|---|---|
+| `INTRO_SCREEN_ID`, `END_SCREEN_ID` | `'__intro__'` and `'__end__'`. Reserved `__` names because a block key is a slug of its label, so a question labelled "End" is keyed `end`; no generated key can start with `__`, and the server refuses a hand-sent one. |
+| `screens(survey, answers)` | The opening (only when the intro has text), one screen per visible block, then the end screen — unless the last visible block is a closing, which is then the last screen. |
+| `saveScreenId` | The screen that carries Note and Save: always the last one. A closing that is not last — Close 2 before Close 4, or a closing a multiple-choice union left above a later block — gets Next like any statement. |
+| `screenKind(screen)` | `'intro'`, `'question'`, `'statement'`, `'closing'` or `'end'`. |
+| `clampScreenId(survey, answers, id)` | The cursor for these answers: `id` while it is still a screen; otherwise the last screen **before** the block's place in authoring order (retired blocks keep their index; the opening counts as first and the end as last), so a canvasser whose block vanished under them — a template refresh — lands on the block they came from. `null` or an unknown id gives the first screen. |
+| `canAdvance`, `canSkip` | Next is available unless the clamped screen is a visible required question with no answer; Skip only on an optional question. |
+| `nextScreenId`, `prevScreenId` | The neighbouring screen for **these** answers; `null` on the last screen (it has Save, not Next) and on the first (where Back leaves the survey). |
+| `skipAnswer(answers, otherTexts, key)` | Removes the answer and its Other text, as if never touched, without mutating. **Handlers pass the new answers:** Skip calls `nextScreenId` with `skipAnswer(…).answers`, never the render's memoized list, or a Skip that hid the following blocks would advance into one of them. |
+
+A tap only **selects** (the read-aloud line under the picked answer and the "Please specify" box have
+to stay on screen); Next advances. Advancing automatically on a single-choice tap was rejected: it
+would hide the read-aloud line the moment it appeared, make Other untypable, leave a screen reached by
+Back with no forward control, and let a double-tap's second touch land on the next screen.
+
+### The `{{canvasser}}` filler — `scriptText.js`
+
+**Module:** canonical [`server/src/services/surveys/scriptText.js`](../server/src/services/surveys/scriptText.js),
+mirrored byte-for-byte below the marker into [`client/src/lib/surveyScriptText.js`](../client/src/lib/surveyScriptText.js)
+and [`mobile/lib/surveyScriptText.js`](../mobile/lib/surveyScriptText.js) — three copies, no imports in
+the body. **Tests:** [scriptText.test.js](../server/src/services/surveys/scriptText.test.js), with the
+three-copy drift guard.
+
+| Export | Behaviour |
+|---|---|
+| `PLACEHOLDER_TOKENS` | Frozen `['canvasser']` — one token by owner ruling (2026-10-02); dates stay typed by hand. Frozen because the server's save check reads it, and a stray push would make a typo legal. |
+| `BLANK` | `'______'`, the client's own "say your name here" convention. |
+| `fillScript(text, { canvasserFirstName })` | Replaces every `{{canvasser}}` (whitespace inside the braces tolerated) with the trimmed first name; a missing, blank or non-string name reads as `BLANK`. Unknown tokens stay exactly as typed (the save check refuses them, so one only arrives from a template saved before it existed). The name goes in through a replacer **function**, because a replacement string would expand `$&`, and filled text is never re-scanned. `null` → `''`. |
+| `unknownPlaceholders(text)` | The distinct unknown names in order of first appearance, trimmed and **case-sensitive** (`{{Canvasser}}` is a typo). Only a closed pair counts; an unclosed `{{` is caught by the server's stricter "does any `{{` survive `fillScript`" test (§B). |
+| `hasPlaceholderSyntax(text)` | Any `{{` at all — the test for a question's wording and an answer's text, which are snapshotted onto every stored answer row (`questionLabel`, `answer`) and become results labels and CSV cells that nothing fills. |
+
+**Where it is filled:** the intro, the default closing, a statement's read-aloud `label`, an option
+`script` and a `note` — never a question's `label` or an option's `text`. The phone fills with
+`bootstrap.user.firstName` (the bootstrap's `user` already carries it); the web preview with the
+**viewing** admin's own first name; paper with no name, so it prints `BLANK` — a packet is not personal
+to one canvasser, and no canvasser name is ever printed ([WALK_PACKETS.md](WALK_PACKETS.md)). The demo
+tenant's greeting already contained a literal `{{canvasser}}`
+([seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js)); it now reads as the canvasser's
+name, with no seed change.
+
+### Compatibility and tests
+
+**No client-version gate.** Everything is additive on the wire: new optional fields, a wider `type`
+enum, a row filter; the survey POST keeps its request and response shape. A phone on an **older
+bundle** given a scripted template (checked against the committed screen): a statement renders as a
+numbered card showing `label` — the full read-aloud text, which is why the body lives there — with no
+control; it counts as unanswered, so "Question N of M" is inflated and the percent stays below 100;
+it posts `{ answer: null, optionIds: [], otherText: null }`, which the server drops (§E); the default
+closing shows under every path; placeholders show as braces; notes and links are invisible. **Routing
+is correct**, because the compiled rules use only `any_of`. The one hard failure — a `required`
+statement, which would block that screen's Save forever — cannot be stored. The mobile change is
+JavaScript only with no new dependency, so it ships over the air.
+
+**A phone refreshes templates only with a full bootstrap** (`/mobile/changes` never carries them), so a
+canvasser mid-shift keeps the pre-edit template. An in-place edit is tolerated — unknown keys are
+dropped and the template id still matches the door's — but when an edit changes a gate (a re-pointed
+route, a hand condition, a block added in a path), rows the phone posts for a block the new template
+hides are dropped silently by `dropHidden`, with a 201. Change routes between shifts, not during one,
+as Part 1 says.
+
+**Tests for scripted surveys:**
+
+| Test | Pins |
+|---|---|
+| [server/test/surveyBlocks.int.test.js](../server/test/surveyBlocks.int.test.js) (30, `npm run test:int`) | A statement stored answer-less with a role, whatever is sent; the 1000/5000 label caps; the title, note and link caps and the http(s) rule; `{{canvasser}}` only in script text, and no `{{` at all in a statement's title or a link's label; the placeholder rules skipping retired blocks and answers, so an older survey still saves; reserved `__` ids; no two blocks sharing a key, retired ones included; the one-answerable-question rule (an empty survey still allowed); no rule on a statement, and statements named by title or first words; List flow refusing live routes and clearing retired ones; an Other route kept only on a choice question with Other on; Script flow refusing an unreachable block, a backward route and a choice-level `goTo`; the size bounds (500 blocks and 200 answers a question, retired ones included, on a PATCH's reconciled list too; 200 live blocks and 50,000 compiled answer ids in Script flow); entering Script flow with a hand condition refused, never overwritten; a flow change needing the questions while `presentation` changes alone; a questions-only PATCH compiling; with responses, leaving Script flow keeping identical conditions and entering it a 409; retyping into a statement as the answer-type 409; reconcile never re-appending options onto a statement; the Burton survey built through the API compiling to the §F listing; a GET → PATCH round-trip recompiled; duplicate copying `flow`, `presentation`, `tags` and every block field; no statement rows from the phone's submit (an older-bundle body included) or the admin edit; the answerable-only voter-profile snapshot, `/survey-results` and all four conversion payloads; and a client report's breakdowns (`computeSurveyBreakdowns`, `computeWindowStats`) and public map answers (`publicPointAnswer`) carrying no statement, even from a stray stored row under its key. |
+| [normalizeAnswers.test.js](../server/src/services/surveys/normalizeAnswers.test.js) | Statement rows dropped in both modes, with `rebuildAnswerText`, on lean and hydrated templates; unknown keys still dropped; retired ids still kept; statement-free surveys normalized exactly as before. |
+| [routing.test.js](../server/src/services/surveys/routing.test.js), [burtonScript.test.js](../server/src/services/surveys/burtonScript.test.js), [scriptText.test.js](../server/src/services/surveys/scriptText.test.js) | §L and the filler above, with their drift guards. |
+| [visibility.fixtures.json](../server/src/services/surveys/__fixtures__/visibility.fixtures.json) through [visibility.test.js](../server/src/services/surveys/visibility.test.js) | Six scripted cases on the unchanged evaluator (§D): a statement gated like a question, and a closing block reached from two sources, a stale hidden answer withheld. |
+| [surveyColumns.test.js](../server/test/surveyColumns.test.js) | A statement is not an export column; `known` still covers statement keys, so a stray stored statement row never becomes an orphan column; a statement sharing a question's label doesn't decorate that question's header; template order kept. |
+| [packet.int.test.js](../server/test/packet.int.test.js), [packetPdf.test.js](../client/src/lib/packet/packetPdf.test.js) | Statements reach the print payload in place with role, title, links and routes but never a note; an older template prints with every new field read as its default; the scripted print model (numbering skips statements, answers carry arrows); each statement printed once on the "What to say" page, never beside a door; statements alone earning the page; List flow keeping its skip hints with no arrows; type kept across a page break. |
+| [surveyBuilderRules.test.js](../client/src/lib/surveyBuilderRules.test.js) (36) | Loading (older templates, dropped compiled conditions, routes cleared off a List survey), numbering and counts, `ruleError` and `handRuleError`, the placeholder and link checks (a link address in any case), the first-route switch, the automatic one block per screen following the survey as Save sends it (an edit taken back takes it back), the greyed-out hint naming where this page offers Duplicate, the select's targets and Continue label, "Continues to", Burton's "Reached when", where errors land, the backward-move error, the live compile over the blocks as Save sends them (an arrow on an answer with no text yet counts nowhere), the branching warning, re-pointing on retire or remove, Switch back (converting losslessly, refused on errors, keeping a hand condition; on a survey saved in Show only if an undo to its opened conditions, never refused), new closings on End, what Save sends, the answerable rule (a survey whose every block is retired still saves), `hasBlockingIssues`. |
+| [mobile/lib/surveyRunner.test.js](../mobile/lib/surveyRunner.test.js) (23), [client/src/lib/surveyRunner.test.js](../client/src/lib/surveyRunner.test.js) | The runner against the old screen code on statement-free surveys; Other and whitespace; the POST rows; block kinds; statements taking no number, progress, row or Save gate; the closing guard; `isScripted`; Burton walks, numbering, the Next and Skip rules, terminal closings, the end screen's default closing, stale paths dropped and the cursor clamped, no intro screen for a blank intro; a closing left above a later block showing Next; Skip computed from the new answers; the drift guard. |
+| [surveyConditionText.test.js](../client/src/lib/surveyConditionText.test.js), [surveyPreviewRender.smoke.test.js](../client/src/lib/surveyPreviewRender.smoke.test.js), `surveyAnswerForm.test.js`, `surveyChoices.test.js` | The shared gate wording (paper byte-identical to before); the preview rendering an old survey exactly as before, then statements, notes, links, gates and the default closing; the blank-name fill; Try it's first screen in both presentations; the desk composer drawing no input for a statement; statements producing no form slot, row, cell or choices. |
+
+The design's §L also lists device checks to run before a production release (every Burton path on
+iOS and Android in both presentations, a link opening in the browser, an older build still saving);
+those are manual.
 

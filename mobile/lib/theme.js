@@ -149,6 +149,7 @@ export const lightColors = {
 
   info: '#3B82F6',
   infoBg: '#DBEAFE',
+  infoFg: '#1E40AF',     // readable info text on infoBg — 7.15:1 (raw `info` is 3.01:1)
 
   dangerBorder: '#FCA5A5',
 
@@ -211,6 +212,7 @@ export const darkColors = {
 
   info: '#60A5FA',
   infoBg: '#12243F',
+  infoFg: '#93C5FD',     // readable info text on the dark infoBg — 8.63:1
 
   dangerBorder: '#7F1D1D',
 
