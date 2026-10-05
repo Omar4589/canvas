@@ -8,7 +8,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { deriveSetupSteps } from './setupSteps.js';
 import { AUDIT_WINDOW_MAX_DAYS } from '../audit/flagThresholds.js';
-import { NEEDS_PIN_FIX } from '../households/confirmHouseholdLocation.js';
+import { NEEDS_PIN_FIX, UNPLACED_PIN } from '../households/confirmHouseholdLocation.js';
 
 // One round-trip of cheap grouped counts for a set of campaigns, turned into the
 // per-campaign setup-progress + management state used by the campaigns list, the
@@ -24,7 +24,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix, unplacedPins] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -62,6 +62,9 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       // by the partial {campaignId, locationConfirmedAt} interpolated-only index — strictly
       // smaller than the two full-universe Household aggregates above.
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, ...NEEDS_PIN_FIX } }, group]),
+      // …plus doors on a map spot shared with other addresses that nobody vouched for (UNPLACED_PIN,
+      // the list's second set — disjoint, so the badge is the sum). Its own partial index.
+      Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, ...UNPLACED_PIN } }, group]),
     ]);
 
   const canvassedByStats = new Map(); // idStr → boolean, trusted stats only
@@ -110,6 +113,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   const assignBy = map(assignments);
   const activeBy = map(activePasses);
   const pinsToFixBy = map(pinsToFix);
+  for (const [k, n] of map(unplacedPins)) pinsToFixBy.set(k, (pinsToFixBy.get(k) || 0) + n);
 
   for (const campaign of campaigns) {
     const k = String(campaign._id);

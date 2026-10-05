@@ -105,8 +105,9 @@ export default function Layout() {
   // Mock-GPS nudge: open mock-location flags for this campaign (61-day window, server-
   // computed). Drives the red badge on the Audit nav item below.
   const openMockFlags = currentCampaign?.openMockFlags || 0;
-  // Approximate pins still awaiting a fix or confirm (campaignSummaries.pinsToFix, the same
-  // predicate the Pin Fixes page lists). Drives the amber badge on the Pin Fixes item.
+  // Pins still awaiting a fix or confirm — approximate geocodes plus homes with no exact map
+  // spot (campaignSummaries.pinsToFix, the same predicates the Pin Fixes page lists). Drives the
+  // amber badge on the Pin Fixes item.
   const pinsToFix = currentCampaign?.pinsToFix || 0;
   // The switcher LISTS active campaigns only — archived ones live on the Campaigns and
   // Overview pages, which is also where you reactivate them. It deliberately does NOT
@@ -139,7 +140,7 @@ export default function Layout() {
     const flagNote = mockBadge
       ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
       : pinBadge
-        ? `${pinsToFix} approximate pin${pinsToFix === 1 ? '' : 's'} to fix`
+        ? `${pinsToFix} pin${pinsToFix === 1 ? '' : 's'} to fix`
         : '';
     const badgeCount = mockBadge ? openMockFlags : pinBadge ? pinsToFix : 0;
     const hasBadge = mockBadge || pinBadge;

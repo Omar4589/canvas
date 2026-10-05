@@ -2,8 +2,8 @@
 // live flag detector (flagDetection.js) and the legacy "far knock" counters in
 // routes/admin/reports.js import FAR_WARN_M so "far" means ONE thing everywhere
 // (historically the server flagged >50m while the client ping panel called >100m
-// "far"). The client keeps a byte-parallel mirror at client/src/lib/flagThresholds.js
-// (the browser can't import server ESM) — keep the two in sync.
+// "far"). The client keeps a mirror, FLAG_THRESHOLDS inside client/src/lib/flags.js (the
+// browser can't import server ESM); server/test/flagsMirror.test.js pins the two together.
 //
 // These are deliberately tunable in ONE place; calibrate against real field data.
 export const FLAG_THRESHOLDS = {

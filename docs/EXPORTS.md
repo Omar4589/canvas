@@ -1069,7 +1069,9 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
 - **`activity-log.csv`** — Timestamp (ISO), Date, Time (tz), Action; Address block (line 1/2,
   City, State, Zip, County); **State voter ID, UID**, Voter first/last name, Party (filled only
   when the event named a voter; blanked for DNC); Canvasser first/last/status, Team; Walk list,
-  Pass, Pass name, Via (field|bulk), Offline submission; Latitude, Longitude, GPS accuracy (m),
+  Pass, Pass name, Via (field|bulk), Offline submission; Latitude, Longitude, GPS accuracy (m)
+  (blank when the phone reported no usable estimate: the server stores a zero, negative or non-finite
+  accuracy as null from 2026-10 on, so only older rows can still show a 0 or a negative),
   Distance from house (m); Replaces earlier action, Replaced at (ISO), Note; Household DB id,
   Voter DB id, Activity DB id. **`activity-log-by-voter.csv`** (`perVoterRows`) — the SAME 34
   columns in the same order; each voter-less event repeats once per kept voter at its door with

@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
-import { formatInTz } from '../lib/datetime.js';
+import { formatInTz, formatDateInTz } from '../lib/datetime.js';
 import {
   REVIEW_STATUS_META,
   correctionContextText,
   isDowngradedCorrection,
   isPinDowngraded,
   pinCorrectionText,
+  pinPrecisionText,
 } from '../lib/flags.js';
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
@@ -44,6 +45,7 @@ export default function FlaggedEntryList({
         const status = e.review?.status || 'open';
         const meta = REVIEW_STATUS_META[status] || REVIEW_STATUS_META.open;
         const correction = correctionContextText(e);
+        const pinPrecision = pinPrecisionText(e.household, (d) => formatDateInTz(d, tz));
         const mapHref =
           `/campaigns/${campaignId}/map?flag=1&focusActivityId=${e.actionId}` +
           `&userId=${e.userId}` +
@@ -71,6 +73,11 @@ export default function FlaggedEntryList({
                 <div className="min-w-0">
                   <div className="font-medium text-fg">{e.canvasser?.name || 'Canvasser'}</div>
                   <div className="truncate text-sm text-fg-muted">{houseLine(e.household)}</div>
+                  {pinPrecision && (
+                    <div className={'text-xs ' + (e.household?.locationConfirmedAt ? 'text-fg-muted' : 'text-warning-fg')}>
+                      {pinPrecision}
+                    </div>
+                  )}
                   <div className="text-xs text-fg-subtle">
                     {formatInTz(
                       e.timestamp,
@@ -92,7 +99,7 @@ export default function FlaggedEntryList({
               </div>
             </div>
             <div className="mt-2">
-              <FlagReasonBadges reasons={e.reasons} />
+              <FlagReasonBadges reasons={e.reasons} entry={e} />
             </div>
             {correction && (
               <div className="mt-1 text-xs text-fg-muted">

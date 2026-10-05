@@ -5,6 +5,7 @@ import StatCard from '../components/StatCard.jsx';
 import Pager from '../components/Pager.jsx';
 import { fmtUsd } from '../lib/billingStatus.jsx';
 import { saveCsvRows } from '../lib/downloadFile.js';
+import { pinCheckBadge } from '../lib/importPins.js';
 
 const LIMIT = 50;
 
@@ -29,7 +30,8 @@ const inputCls =
 
 // Count-truth copy for the two headline numbers whose populations aren't obvious.
 const COST_HELP =
-  'An internal estimate: new lookups × the assumed per-1,000 rate. It is NOT Geocodio’s invoice — ' +
+  'An internal estimate: new lookups (geocoding plus map-pin lookups) × the assumed per-1,000 rate. ' +
+  'It is NOT Geocodio’s invoice — ' +
   'reconcile against the real bill. Each import’s cost is rounded on its own, so row costs may not ' +
   'add up exactly to this total (the total rounds the sum).';
 const HOUSEHOLDS_HELP =
@@ -93,7 +95,7 @@ export default function SuperAdminImportsPage() {
     if (view === 'import') {
       saveCsvRows(
         [
-          ['When', 'Organization', 'File', 'Campaign', 'By', 'Status', 'Undone', 'Households', 'With coords', 'New lookups', 'Cached', 'Unplaceable', 'Cost'],
+          ['When', 'Organization', 'File', 'Campaign', 'By', 'Status', 'Undone', 'Households', 'With coords', 'New lookups', 'Cached', 'Unplaceable', 'Pin lookups', 'Pin check', 'Cost'],
           ...rows.map((r) => [
             r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : '',
             r.organizationName,
@@ -107,6 +109,8 @@ export default function SuperAdminImportsPage() {
             r.geocodedNew,
             r.geocodedCached,
             r.geocodeUnmatched + r.geocodeFailed,
+            r.pinLookupsNew || 0,
+            r.pinPassCause || (r.pinLookupsOverCap > 0 ? `${r.pinLookupsOverCap} over cap` : ''),
             (r.costCents / 100).toFixed(2),
           ]),
         ],
@@ -115,7 +119,7 @@ export default function SuperAdminImportsPage() {
     } else {
       saveCsvRows(
         [
-          [view === 'month' ? 'Month' : 'Organization', 'Imports', 'Households', 'New lookups', 'Cached', 'Unplaceable', 'Cost'],
+          [view === 'month' ? 'Month' : 'Organization', 'Imports', 'Households', 'New lookups', 'Cached', 'Unplaceable', 'Pin lookups', 'Cost'],
           ...groups.map((g) => [
             g.label,
             g.imports,
@@ -123,6 +127,7 @@ export default function SuperAdminImportsPage() {
             g.geocodedNew,
             g.geocodedCached,
             g.geocodeUnmatched + g.geocodeFailed,
+            g.pinLookupsNew || 0,
             (g.costCents / 100).toFixed(2),
           ]),
         ],
@@ -223,7 +228,13 @@ export default function SuperAdminImportsPage() {
           <StatCard compact label="Households" value={fmt(totals.households)} help={HOUSEHOLDS_HELP} />
           <StatCard compact label="With coords" value={fmt(totals.withFileCoords)} hint="no lookup" accent="green" />
           <StatCard compact label="Needed geocoding" value={fmt(totals.neededGeocoding)} />
-          <StatCard compact label="New lookups" value={fmt(totals.geocodedNew)} hint="billable" accent="amber" />
+          <StatCard
+            compact
+            label="New lookups"
+            value={fmt(totals.geocodedNew + (totals.pinLookupsNew || 0))}
+            hint={totals.pinLookupsNew > 0 ? `billable · ${fmt(totals.pinLookupsNew)} for map pins` : 'billable'}
+            accent="amber"
+          />
           <StatCard
             compact
             label="Cache savings"
@@ -341,6 +352,17 @@ export default function SuperAdminImportsPage() {
                           undone
                         </span>
                       )}
+                      {(() => {
+                        const badge = pinCheckBadge(r);
+                        return badge ? (
+                          <span
+                            className="ml-1 rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-fg"
+                            title={badge.title}
+                          >
+                            {badge.label}
+                          </span>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-fg">{fmt(r.uniqueHouseholds)}</td>
                     <td
@@ -351,6 +373,11 @@ export default function SuperAdminImportsPage() {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-fg-muted">
                       {fmt(r.geocodedNew)} / {fmt(r.geocodedCached)}
+                      {(r.pinLookupsNew > 0 || r.pinLookupsCached > 0) && (
+                        <div className="text-xs text-fg-subtle" title="Homes on a shared map spot, looked up by address after the import">
+                          pins {fmt(r.pinLookupsNew)} / {fmt(r.pinLookupsCached)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-fg-muted">
                       {r.geocodeUnmatched + r.geocodeFailed > 0

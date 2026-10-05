@@ -245,6 +245,189 @@ export const DUPLICATE_IN_LIST = 'from the survey list';
 export const routesLockedHint = (duplicateAt = DUPLICATE_IN_LIST) =>
   `This survey has responses, so it can’t switch to Go to routing. Use Duplicate ${duplicateAt} to build the scripted version.`;
 
+// ---- The locked banner -------------------------------------------------------------------------
+
+// Whether the locked banner may call changes to the Go to routes safe: only on a survey saved in Go to
+// that still uses it. The server refuses ENTERING Go to once a survey has responses (the PATCH's 409
+// survey-has-responses), so a survey saved in Show only if that has taken its first arrow since — the
+// race a refused save ends — still needs a fresh copy for that, and the banner says so, as the refusal
+// does. `loaded` is the template as the builder opened it, null for a new survey.
+export const savedInGoTo = (flow, loaded) => flow === 'script' && flowOf(loaded) === 'script';
+
+// ---- A failed save -----------------------------------------------------------------------------
+
+// The failed save a builder page shows on its form: the last one, if it was sent for the survey now
+// on the form. A page outlives a change of the survey it edits (a campaign's Duplicate swaps it in
+// place, and the sidebar's campaign switcher keeps /survey/edit), while a mutation keeps its last
+// error until the next attempt, so another survey's 409 survey-has-responses would lock, and speak
+// for, a survey the server never refused, one with no answers anywhere included. `mutation` is the
+// page's PATCH mutation, whose variables are { id, body }; null when there is nothing to show.
+export const saveErrorFor = (mutation, surveyId) =>
+  mutation?.error && surveyId != null && String(mutation.variables?.id) === String(surveyId)
+    ? mutation.error
+    : null;
+
+// ---- Responses, as the viewer may see them -----------------------------------------------------
+
+// How a survey's responses read to the person looking. An org admin's row counts the whole
+// organization: "35 responses". A team lead's counts cover only the campaigns they manage
+// (routes/admin/surveys.js narrows them), so their number says so: "10 responses in your campaigns".
+// On a survey on their campaigns none of whose answers are counted in them, the server sends the bare
+// yes/no alone (owner ruling 2026-10-03), so the phrase has no number — and never says "elsewhere":
+// rows saved before responses carried a campaign may be this campaign's own. null when there is nothing
+// to say. Lead wording is the default, so a host that forgets isOrgAdmin under-states an admin's
+// total rather than passing a lead's count off as the survey's.
+export const responsesPhrase = (survey, { isOrgAdmin = false } = {}) => {
+  const count = survey?.responseCount || 0;
+  const counted = `${count.toLocaleString()} response${count === 1 ? '' : 's'}`;
+  if (isOrgAdmin) return count > 0 ? counted : null;
+  if (count > 0) return `${counted} in your campaigns`;
+  return survey?.hasResponses ? 'responses in your organization' : null;
+};
+
+// The Survey tab's Preview note opens with the survey's responses, worded for its reader: an org
+// admin's are the survey's total ("35 responses across all campaigns"), a lead's their own or the bare
+// yes/no ("This survey has 10 responses in your campaigns", "This survey has responses in your
+// organization"). null = nothing to say, which is exactly when hasResponses is false: an admin's
+// hasResponses is their count > 0, and a lead's narrowed count > 0 implies the yes/no.
+export const responsesNoteOpening = (survey, { isOrgAdmin = false } = {}) => {
+  const phrase = responsesPhrase(survey, { isOrgAdmin });
+  if (!phrase) return null;
+  return isOrgAdmin ? `${phrase} across all campaigns` : `This survey has ${phrase}`;
+};
+
+// A copy's name. A survey's name is at most 200 characters (the POST's and the PATCH's own limit,
+// counted in UTF-16 code units), so a long one is cut to leave room for the suffix — never between
+// the two halves of an emoji, whose lone first half would be stored as U+FFFD. The server's duplicate
+// route caps the same way.
+export const COPY_SUFFIX = ' (Copy)';
+export const copyName = (name) =>
+  `${String(name ?? '')
+    .trim()
+    .slice(0, 200 - COPY_SUFFIX.length)
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .trimEnd()}${COPY_SUFFIX}`;
+
+// The survey as the builder opened it, by stored block key: each block's type, its words (a
+// question's wording, a statement's read-aloud text), and its answers and their ids (retired ones
+// included), in the form questionsForEditing loads them.
+// What a survey with responses protects is what was SAVED, as on the server — classifyQuestionEdits
+// compares stored keys only, and reconcileQuestions retires only stored items — so a block or answer
+// added since stays fully editable and is removed outright. Empty for a new survey.
+export const savedShape = (loaded) =>
+  new Map(
+    questionsForEditing(loaded)
+      .filter((q) => q && q.key)
+      .map((q) => [
+        q.key,
+        {
+          type: q.type,
+          label: q.label ?? '',
+          options: q.options || [],
+          answerIds: new Set((q.options || []).map((o) => o && o.id).filter(Boolean)),
+        },
+      ])
+  );
+
+// A question changing type. What the change clears stays on the card as `retyped`: a choice question's
+// answers when it goes to Free text, a Free-text question's own then go to when it goes to a choice
+// type (single to multiple choice and back clears nothing, so what is kept stays). A saved question
+// going back to the type it was saved with gets exactly that back: the card's own answers or arrow as
+// they stood just before the switch, edits included, and never the survey as saved, so an answer
+// removed before the switch stays gone. Answers come back only when the card holds no typed answer (it
+// came from Free text, or through blank ones), so nothing typed is ever replaced, and only once: back
+// at the saved type the kept answers leave `retyped`, whether they come back or typed answers win, so
+// answers blanked by hand later can't bring them back. (The kept route needs no such rule: every change
+// away from Free text keeps the card's arrow afresh.) A route comes back only while the survey as it
+// stands uses Go to (`flow`), and only to a block the card can still point at (`targets`, the keys its
+// "then go to" selects offer, or End); any other goes back to Continue. In
+// Show only if a restored arrow would switch the survey to Go to (entersScript): after Switch back,
+// which clears every route on the cards but not what they keep, it would undo the switch and leave
+// every condition the switch converted as a hand condition that blocks Save. Returns what to merge
+// into the card, its `retyped` always plus whatever comes back, or null when the type doesn't change.
+// `saved` is the block's savedShape entry (null for a block added since the survey was opened, which
+// keeps but gets nothing back); `block` is the card as it stands, before the change. `retyped` never
+// leaves the builder: cleanBlock drops it, and a builder opened again starts without it.
+export const restoredOnRetype = (saved, block, toType, { flow = 'list', targets = [] } = {}) => {
+  if (!block || block.type === toType) return null;
+  const retyped = { ...block.retyped };
+  if (toType === 'text' && isChoice(block)) retyped.options = block.options || [];
+  if (block.type === 'text' && isChoice({ type: toType })) retyped.goTo = block.goTo ?? null;
+  if (!saved || toType !== saved.type) return { retyped };
+  const route = (to) =>
+    flow === 'script' && to != null && (to === END_KEY || targets.includes(to)) ? to : null;
+  if (toType === 'text') {
+    const goTo = route(block.retyped?.goTo);
+    return goTo == null ? { retyped } : { retyped, goTo };
+  }
+  const { options: back, ...keeps } = retyped;
+  const typed = (block.options || []).some((o) => o && (o.text || '').trim());
+  return typed || !back ? { retyped: keeps } : { retyped: keeps, options: back.map((o) => ({ ...o, goTo: route(o.goTo) })) };
+};
+
+// The card a type pill makes (QuestionCard's setType): `card` at `toType`, with what the change clears
+// kept and whatever comes back merged on top (restoredOnRetype). Free text drops every answer. A
+// Free-text question going to a choice type starts from two blank answers (`blankAnswers` mints them)
+// and drops its own then go to: a choice question routes through its answers only, and the server
+// refuses a question-level route there. Between the two choice types the answers stay. What comes back
+// is spread last, so a restore lands over the blank answers, never under them. `route` is the card's
+// routeFor object: its `flow` is the form's as it stands, and its `targets` are the { value, label }
+// choices its "then go to" selects offer, matched here by value.
+export const retypedCard = (saved, card, toType, route, blankAnswers) => {
+  const restored = restoredOnRetype(saved, card, toType, {
+    flow: route.flow,
+    targets: route.targets.map((t) => t.value),
+  });
+  if (toType === 'text') return { ...card, type: toType, options: [], ...restored };
+  if (!isChoice(card)) return { ...card, type: toType, goTo: null, options: blankAnswers(), ...restored };
+  return { ...card, type: toType, ...restored };
+};
+
+// Removing an answer from a saved question on a survey with responses. An answer the survey was saved
+// with retires — kept, so its past answers still report — and keeps words: the card's when it has any,
+// else the saved ones, the same words the server keeps for an answer a save leaves out
+// (reconcileQuestions). A retired answer still goes to the server, which refuses one with no text as a
+// bare 400. An answer added since the survey was opened gets null: never saved, it simply goes.
+// `saved` is the block's savedShape entry.
+export const retireOption = (o, saved) => {
+  if (!o || !o.id || !saved || !saved.answerIds.has(o.id)) return null;
+  const savedText = saved.options.find((s) => s && s.id === o.id)?.text;
+  return { ...o, text: (o.text || '').trim() ? o.text : savedText ?? o.text, retired: true };
+};
+
+// Whether Remove retires a block rather than taking it out: only while the survey is locked (it has
+// responses, or a save was refused because it has), and only a block it was saved with, by stored key
+// (savedShape), the server's own test (reconcileQuestions matches by key). A block added since, or a
+// card still being typed (no key yet), is removed outright.
+export const retiresOnRemove = (locked, savedBlocks, key) => !!locked && savedBlocks.has(key);
+
+// Retiring a saved block on a survey with responses — a question, a statement or a closing. It stays,
+// so its past answers still report, and keeps words: the card's when it has any, else the saved ones,
+// the words the server keeps for a block a save leaves out (reconcileQuestions). A retired block still
+// goes to the server, which refuses one with no label as a bare 400 'Invalid input', and the builder's
+// own checks skip a retired block, so nothing would have warned. The server's type check covers
+// retired blocks too (classifyQuestionEdits), so a question retyped before the lock came on goes back
+// to the type it was saved with, as that type's pill would put it back (restoredOnRetype, as in Show
+// only if): its own answers, or what its switch to Free text cleared — never the saved ones over them,
+// since Restore brings the block back exactly as it was retired. Only its type has to go back for the
+// server, which puts back as retired any saved answer the save leaves out (reconcileQuestions). Then
+// every arrow goes: a retired block's are never followed, and one brought back by Restore in Show only
+// if would switch the survey to Go to. `saved` is the block's savedShape entry; the caller retires
+// only a block that has one.
+export const retireBlock = (q, saved) => {
+  const label = (q.label || '').trim() ? q.label : saved?.label ?? q.label;
+  if (!saved || q.type === saved.type) return { ...q, retired: true, label };
+  const back = { ...q, type: saved.type, ...(isChoice(saved) ? {} : { options: [] }), ...restoredOnRetype(saved, q, saved.type) };
+  return {
+    ...back,
+    retired: true,
+    label,
+    options: (back.options || []).map((o) => ({ ...o, goTo: null })),
+    goTo: null,
+    otherGoTo: null,
+  };
+};
+
 // The choices a "then go to" select offers beside Continue and End: later live blocks only. A route
 // can point forward and nowhere else (the compiler's rule 6), so the select never offers a target
 // the save would refuse. A card with no key yet can't be pointed at; it gets one with its text.
@@ -463,8 +646,11 @@ export const cleanBlock = (q, { key, flow }) => {
   const links = (Array.isArray(q.links) ? q.links : [])
     .map((l) => ({ label: (l?.label || '').trim(), url: (l?.url || '').trim() }))
     .filter((l) => l.url);
+  // What a type change cleared, kept on the card for going back (restoredOnRetype), is the builder's
+  // alone: never sent.
+  const { retyped, ...card } = q;
   const block = {
-    ...q,
+    ...card,
     key,
     options,
     visibleIf,

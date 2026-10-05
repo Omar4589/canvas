@@ -132,6 +132,15 @@ const campaignSchema = new mongoose.Schema(
       heartbeatAt: { type: Date, default: null },
       error: { type: String, default: null },
     },
+    // One placing pass per campaign at a time (services/households/placeStackedPins.js): the lease an
+    // import holds while it looks up homes on shared map spots and moves their pins, so two imports
+    // can't each accept a different address onto one point. `owner` is a random token per pass run;
+    // `heartbeatAt` is renewed every 30 s on the pass's own timer, and a lease silent for 90 s is taken
+    // over. Every write uses timestamps:false. No personal data.
+    pinPass: {
+      type: new mongoose.Schema({ owner: { type: String }, heartbeatAt: { type: Date } }, { _id: false }),
+      default: undefined,
+    },
     // Denormalized ALL-TIME ledger counters, maintained by services/reports/campaignCounters.js
     // so the no-date-window dashboards (rollup "All time", campaigns list) read the campaign doc
     // instead of re-aggregating the whole CanvassActivity/SurveyResponse ledgers on every load.

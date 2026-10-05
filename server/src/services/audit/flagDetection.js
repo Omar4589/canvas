@@ -49,11 +49,13 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
   // address/geometry to every entry without a second fetch. The correction provenance
   // (coordSource/correctedAt/correctedBy) rides along for the far pin-downgrade — see §B.7;
   // drop those three from this projection and the downgrade silently stops firing while every
-  // unit test that passes an empty pinFixMap keeps passing.
+  // unit test that passes an empty pinFixMap keeps passing. coordConfidence and locationConfirmedAt ride
+  // along for the reviewer's pin-precision line ONLY: they go into entry.household for display and never
+  // into buildPinFixMap or farAssessment (§B.7: a pin confirmed in place is still the geocoder's answer).
   const householdIds = [...new Set(rows.map((r) => String(r.householdId)))];
   const households = await Household.find(
     { _id: { $in: householdIds }, organizationId },
-    'addressLine1 addressLine2 city state zipCode location coordSource correctedAt correctedBy'
+    'addressLine1 addressLine2 city state zipCode location coordSource correctedAt correctedBy coordConfidence locationConfirmedAt'
   ).lean();
   const hInfoMap = new Map(households.map((h) => [String(h._id), h]));
   const pinMap = new Map(households.map((h) => [String(h._id), pinLngLat(h)]));
@@ -109,6 +111,10 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
             state: h.state || '',
             zipCode: h.zipCode || '',
             location: pinMap.get(String(h._id)) || null,
+            // Display only (the pin-precision line). Never add correctedBy or locationConfirmedBy:
+            // no client has ever received a raw staff User id from this endpoint.
+            coordConfidence: h.coordConfidence || null,
+            locationConfirmedAt: h.locationConfirmedAt || null,
           }
         : null,
       reasons: reasonList,
@@ -246,6 +252,14 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS, pinFi
   return { acc, byUser };
 }
 
+// Distance left after allowing for the phone's accuracy. A radius only ever discounts: stamps written
+// since the accuracy rule never hold a zero or negative one (canvass.js usableAccuracy), but an older row
+// can, and d − (−x) would ADD distance. Clamped, effective ≤ d holds for every row, which farKpi.js's
+// raw-distance prefilter relies on. Monotone on purpose: it can only lower an old row's effective
+// distance, never raise a flag. Used at all four places the far rule subtracts an accuracy (the three
+// checks below and the replaced snapshot's nearest pick in routes/mobile/canvass.js).
+export const effectiveMeters = (meters, accuracy) => Math.max(0, meters - Math.max(0, accuracy ?? 0));
+
 // The ONE far rule — pure, no DB, no side effects. `row` is a lean CanvassActivity-shaped doc
 // (distanceFromHouseMeters, location{lat,lng,accuracy}, replaced{…nearest}, timestamp, userId);
 // `fix` is the household's buildPinFixMap entry ({lat,lng,correctedAt,correctedBy}) or undefined.
@@ -257,18 +271,21 @@ export function computeReasons(rows, pinMap, thresholds = FLAG_THRESHOLDS, pinFi
 //   'low'        — downgraded: detail.downgraded (honest replaced-chain correction) or
 //                  detail.pinDowngraded (pin corrected after the knock, GPS beside it).
 //
-// TWO CALLERS, one implementation — that is the point. computeReasons (the audit page / map
-// flags) and the per-canvasser far KPI (services/audit/farKpi.js — "far" = med/high, "forgiven"
-// = pinDowngraded) both call this, so the profile tiles can never disagree with the detector.
+// ONE implementation for every caller — that is the point. computeReasons (the audit page / map
+// flags), the per-canvasser far KPI and the admin map's ping verdict (both through
+// services/audit/farKpi.js — "far" = med/high, "forgiven" = pinDowngraded) all call this, so the
+// profile tiles and the map can never disagree with the detector.
 // acc_m/missing are recomputed here (two null-safe reads) rather than taken as parameters, so
-// no caller can feed a drifted derivation.
-export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS) => {
+// no caller can feed a drifted derivation. `toEffective` is for the count script alone
+// (migrations/auditGpsStamps.js), which re-runs the rule with the arithmetic the clamp replaced to
+// measure what the clamp changed; every other caller takes the default.
+export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS, toEffective = effectiveMeters) => {
   const T = thresholds;
   const d = row.distanceFromHouseMeters;
   if (d == null) return null; // unknown ≠ far
   const acc_m = row.location?.accuracy;
   const missing = !row.location || row.location.lat == null || row.location.lng == null;
-  const effective = Math.max(0, d - (acc_m ?? 0));
+  const effective = toEffective(d, acc_m);
   let farSev = null;
   if (effective > T.FAR_CONFIRM_M) farSev = 'high';
   else if (effective > T.FAR_WARN_M) farSev = 'med';
@@ -290,7 +307,7 @@ export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS) => {
     // >= 0 guard denies the downgrade on reversed clocks (offline flush skew).
     const near = row.replaced.nearest;
     if (near && near.distanceFromHouseMeters != null && near.timestamp) {
-      const nearEff = Math.max(0, near.distanceFromHouseMeters - (near.accuracy ?? 0));
+      const nearEff = toEffective(near.distanceFromHouseMeters, near.accuracy);
       const sinceNearMin = (new Date(row.timestamp) - new Date(near.timestamp)) / 60000;
       if (nearEff <= T.FAR_WARN_M && sinceNearMin >= 0 && sinceNearMin <= T.FAR_CORRECTION_WINDOW_MIN) {
         farSev = 'low';
@@ -316,7 +333,7 @@ export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS) => {
     const liveM = Math.round(haversineMeters(row.location.lat, row.location.lng, fix.lat, fix.lng));
     detail.pinCorrectedMeters = liveM;
     detail.pinCorrectedAt = fix.correctedAt;
-    if (Math.max(0, liveM - (acc_m ?? 0)) <= T.FAR_WARN_M) {
+    if (toEffective(liveM, acc_m) <= T.FAR_WARN_M) {
       if (fix.correctedBy && fix.correctedBy === String(row.userId)) {
         // The flagged canvasser moved the pin themselves. Withhold the downgrade — nobody
         // grades their own work — but say so rather than staying silent. WITHHOLD, NOT

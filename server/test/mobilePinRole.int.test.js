@@ -110,9 +110,13 @@ before(async () => {
     hh(org._id, A._id, effortA._id, 1, PIN),
     hh(org._id, A._id, effortA._id, 2, PIN),
     hh(org._id, A._id, effortA._id, 3, PIN),
-    hh(org._id, A._id, effortA._id, 4, PIN),
-    hh(org._id, A._id, effortA._id, 5, PIN),
+    // d4 and d5 are two units of ONE street address, both flagged as sitting on a shared map spot:
+    // "Whole building" moves an address's units together, flags and all.
+    { ...hh(org._id, A._id, effortA._id, 4, PIN), addressLine1: '4 Pin Way Apt 1', normalizedAddress: '4 PIN WAY APT 1|TOWN|KY|40202', pinSuspect: 'placeholder' },
+    { ...hh(org._id, A._id, effortA._id, 5, PIN), addressLine1: '4 Pin Way Apt 2', normalizedAddress: '4 PIN WAY APT 2|TOWN|KY|40202', pinSuspect: 'placeholder' },
     hh(org._id, B._id, effortB._id, 6, PIN),
+    // A different street address on the same pin: never carried along by d4's building move.
+    hh(org._id, A._id, effortA._id, 7, PIN),
   ]);
   const foreign = await Household.create(hh(other._id, A._id, effortA._id, 9, PIN));
 
@@ -128,7 +132,7 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
     org, other, A, B, admin, lead, canv, supe, foreign,
-    d1: homes[0], d2: homes[1], d3: homes[2], d4: homes[3], d5: homes[4], dB: homes[5],
+    d1: homes[0], d2: homes[1], d3: homes[2], d4: homes[3], d5: homes[4], dB: homes[5], d7: homes[6],
     adminTok: signUserToken(admin),
     leadTok: signUserToken(lead),
     canvTok: signUserToken(canv),
@@ -236,15 +240,21 @@ test('the WEB pin endpoint applies the identical policy', { skip }, async () => 
   assert.strictEqual(asLead.status, 200, JSON.stringify(asLead.json));
 });
 
-test('scope:building moves every unit sharing the pin, each with its own audit row', { skip }, async () => {
-  // d4 and d5 were seeded on the same coordinate.
+test('scope:building moves the units of one street address on the pin, each with its own audit row — never another address', { skip }, async () => {
+  // d4 and d5 (units of 4 Pin Way) and d7 (7 Pin Way) were seeded on the same coordinate.
   const res = await movePin(ctx.d4._id, ctx.adminTok, ctx.org._id, { scope: 'building' });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
-  assert.ok(res.json.moved >= 2, `expected the sibling to move too, got ${res.json.moved}`);
+  assert.strictEqual(res.json.moved, 2, 'the two units, not the other address');
+  assert.strictEqual(res.json.household.pinSuspect, undefined, 'a door just fixed carries no shared-spot flag');
 
   const sibling = await Household.findById(ctx.d5._id).lean();
   assert.strictEqual(sibling.coordSource, 'corrected', 'the co-located unit moved as well');
+  assert.strictEqual(sibling.pinSuspect, undefined, 'its flag cleared in the same write');
+  assert.strictEqual(sibling.pinPlacement.by, 'person', 'the spot it left is recorded');
+  assert.deepStrictEqual(sibling.pinPlacement.from, [PIN.lng, PIN.lat]);
   assert.strictEqual(await HouseholdLocationChange.countDocuments({ householdId: ctx.d5._id }), 1);
+  const other = await Household.findById(ctx.d7._id).lean();
+  assert.deepStrictEqual(other.location.coordinates, [PIN.lng, PIN.lat], 'another street address stays put');
 });
 
 test('a drag outside the door\'s state is refused by the bounds guardrail', { skip }, async () => {

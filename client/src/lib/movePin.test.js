@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { movePinCopy, movePinErrorMessage, movePinInvalidationKeys, movePinToast } from './movePin.js';
+import {
+  movePinCopy,
+  movePinErrorMessage,
+  movePinInvalidationKeys,
+  movePinToast,
+  canSaveMove,
+  metersBetween,
+  NOTHING_MOVED,
+  NO_MOVE_METERS,
+} from './movePin.js';
 
 // movePin.js is the pure half of "Move pin" shared by the Map page panel and the Turf Cutting
 // pop-ups. Under lock here: the card's wording per scope, which server error reads as what,
@@ -70,6 +79,8 @@ test('invalidation keys: the exact cross-page prefix set, in order', () => {
     // Pin Fixes: a moved pin leaves the needs-fixing queue and the sidebar badge counts down.
     ['admin', 'pin-fixes', 'c1'],
     ['admin', 'campaigns'],
+    // Turf Cutting's Remove apartments line: a moved pin changes which doors share a spot.
+    ['apartment-preview', 'c1'],
   ]);
   // Prefixes only — never a passId or a date window, which would miss the other page's key.
   for (const k of movePinInvalidationKeys('c1')) assert.ok(k.length <= 3);
@@ -81,4 +92,26 @@ test('toast: one door vs a building with the server count', () => {
   assert.equal(movePinToast('building', 12), 'Building pin moved · 12 units');
   assert.equal(movePinToast('building', 1), 'Building pin moved · 1 unit');
   assert.equal(movePinToast('building', undefined), 'Building pin moved · 0 units');
+});
+
+test('a save that moved nothing says so instead of claiming a move', () => {
+  assert.equal(NOTHING_MOVED, 'Nothing moved — drag the pin onto the house');
+  assert.equal(movePinToast('unit', 0), NOTHING_MOVED);
+  assert.equal(movePinToast('building', 0), NOTHING_MOVED);
+});
+
+test('Save gate: a home without an exact map spot saves only once dragged clearly off it', () => {
+  const at = { lat: 36.2, lng: -116.0 };
+  // ~1 m and ~3 m north (1e-5 deg of latitude is ~1.11 m).
+  const near = { lat: 36.2 + 0.9e-5, lng: -116.0 };
+  const far = { lat: 36.2 + 2.7e-5, lng: -116.0 };
+  assert.ok(metersBetween(at, near) < NO_MOVE_METERS);
+  assert.ok(metersBetween(at, far) > NO_MOVE_METERS);
+  assert.equal(canSaveMove({ ...at, unplaced: true }, near), false);
+  assert.equal(canSaveMove({ ...at, unplaced: true }, far), true);
+  // An approximate pin with an exact spot of its own: any drag can be saved, as today.
+  assert.equal(canSaveMove({ ...at, unplaced: false }, near), true);
+  // Nothing armed, or no drag yet: nothing to save.
+  assert.equal(canSaveMove(null, far), false);
+  assert.equal(canSaveMove({ ...at, unplaced: true }, null), false);
 });

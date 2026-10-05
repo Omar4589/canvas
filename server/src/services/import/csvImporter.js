@@ -8,8 +8,9 @@ import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress, haversineMeters } from '../../utils/normalizeAddress.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
-import { baseAddressOf } from '../../utils/streetName.js';
+import { stackBaseOf, homeKeyOf } from '../../utils/streetName.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
+import { isPlacedByLookup } from '../households/pinState.js';
 import { classifyStackedPins } from '../../utils/stackedPins.js';
 import { DEFAULT_PROFILE_MAPPING } from './canonicalFields.js';
 import { streamParse } from './parseUpload.js';
@@ -351,21 +352,32 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
   const finish = () => {
     const coordConflictStats = resolveCoordConflicts(householdMap, coordConflicts);
     // Placeholder-pin detection, CROSS-household: a vendor that can't place an address stamps
-    // a ZIP/area centroid, so doors from many different streets pile onto one identical dot.
-    // Runs after coordinate resolution so it judges the coords that will actually be written.
-    // Detection only — the coords are never nulled here: nulling would hand these doors to the
-    // geocoder, which DROPS what it can't place, and placeholder-stamped addresses (rural
-    // routes, brand-new streets) are exactly the ones geocoders fail on. A suspect pin walks;
-    // a dropped door doesn't. repair:import-pins adjudicates them after import, cache-first,
-    // with no drop semantics.
-    const pinDoors = [];
-    for (const [normAddr, h] of householdMap) {
+    // a ZIP/area centroid, so different homes pile onto one identical dot. Runs after coordinate
+    // resolution so it judges the coords that will actually be written. Detection only — the
+    // coords are never nulled here (a geocoder DROPS what it can't place, and a suspect pin walks
+    // while a dropped door doesn't). After the import, services/households/placeStackedPins.js marks
+    // these homes and looks each one up by its own address.
+    //
+    // One member per HOME (homeKeyOf), keyed by street address (stackBaseOf) — the rule the
+    // placement pass judges spots by, so the preview counts what the pass will find: units of one
+    // street address are a building, two records of one home count once. Counts stay per door.
+    const homes = new Map();
+    for (const [, h] of householdMap) {
       if (h.latitude == null || h.longitude == null) continue;
-      // Base address (number kept, unit stripped): one house number with many units is a
-      // building; many house numbers on one dot is a placeholder — even on ONE street.
-      pinDoors.push({ id: normAddr, street: baseAddressOf(h.addressLine1), pinKey: buildingKeyForCoords([h.longitude, h.latitude]) });
+      const pinKey = buildingKeyForCoords([h.longitude, h.latitude]);
+      const id = `${pinKey}#${homeKeyOf(h)}`;
+      const home = homes.get(id);
+      if (home) home.doors += 1;
+      else homes.set(id, { id, street: stackBaseOf(h.addressLine1), pinKey, doors: 1 });
     }
-    const stacked = classifyStackedPins(pinDoors);
+    const stacked = classifyStackedPins([...homes.values()]);
+    let placeholderPinDoors = 0;
+    let strayPinDoors = 0;
+    for (const home of homes.values()) {
+      const kind = stacked.suspects.get(home.id)?.kind;
+      if (kind === 'placeholder') placeholderPinDoors += home.doors;
+      else if (kind === 'stray') strayPinDoors += home.doors;
+    }
     return {
       totalRows,
       errors,
@@ -379,11 +391,12 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       // silent first-row-wins can never happen again.
       coordConflicts: coordConflictStats.resolved,
       coordConflictTies: coordConflictStats.ties,
-      // Placeholder coordinates: pins where no street holds a majority, plus stray doors
-      // parked on some other street's building. suspects.size = every door worth a second
-      // look. Same preview/ImportJob plumbing as coordConflicts.
+      // Placeholder coordinates: spots where no street address holds a majority (and the doors on
+      // them), plus stray doors parked on some other address's building. Same preview/ImportJob
+      // plumbing as coordConflicts.
       placeholderPins: stacked.placeholderPins,
-      placeholderPinDoors: stacked.suspects.size,
+      placeholderPinDoors,
+      strayPinDoors,
     };
   };
   return { push, finish, resolved };
@@ -775,6 +788,27 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     }
   }
 
+  // 0.6. Shared map spots (services/households/placeStackedPins.js). Doors the address lookup placed,
+  // or that sit flagged on a shared spot, need their own rules (below), so they are prefetched
+  // unconditionally — the shield's prefetch above is skipped under overwriteHandEdits, and a
+  // lookup's placement is not a hand edit. On a campaign with none, this finds nothing.
+  const pinState = new Map();
+  {
+    const addrs = householdValues.map((h) => h.normalizedAddress);
+    for (let i = 0; i < addrs.length; i += batchSize) {
+      const docs = await Household.find(
+        {
+          campaignId,
+          normalizedAddress: { $in: addrs.slice(i, i + batchSize) },
+          $or: [{ 'pinPlacement.at': { $exists: true } }, { pinSuspect: { $type: 'string' } }],
+        },
+        { normalizedAddress: 1, location: 1, coordSource: 1, locationConfirmedAt: 1, pinPlacement: 1, pinSuspect: 1 }
+      ).lean();
+      for (const d of docs) pinState.set(d.normalizedAddress, d);
+    }
+  }
+  const pinNow = new Date();
+
   // Standing do-not-knock requests covering any address in this batch. A door imported into a
   // BRAND-NEW campaign must arrive already suppressed, not be knockable until something
   // recomputes it — the address request is org-wide and predates this campaign existing. Mirrors
@@ -786,6 +820,7 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
 
   let keptPins = 0;
   let keptConfirmed = 0;
+  let keptPlacements = 0;
   const householdOps = householdValues.map((h) => {
     const set = {
       organizationId: orgId,
@@ -817,13 +852,54 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     // doNotKnock ever appears in the $set spread, every re-import silently un-suppresses every
     // door we promised never to visit again.
     if (suppressedAddresses.has(h.normalizedAddress)) setOnInsert.doNotKnock = true;
-    // Corrected or confirmed pin: move the location trio to $setOnInsert. The existing row
-    // keeps its human-placed (or human-vouched) pin; a row deleted between the prefetch and
-    // this write still inserts complete coords. A field must never appear in both operators —
-    // Mongo rejects the conflict.
+    // Corrected or confirmed pin: the existing row keeps its human-placed (or human-vouched) pin.
+    let keepLocation = false;
+    const unset = {};
     if (correctedAddresses.has(h.normalizedAddress) || confirmedAddresses.has(h.normalizedAddress)) {
+      keepLocation = true;
       if (correctedAddresses.has(h.normalizedAddress)) keptPins += 1;
       else keptConfirmed += 1;
+    } else if (set.location && pinState.has(h.normalizedAddress)) {
+      // A door the address lookup placed, or one flagged on a shared spot (docs/PROPOSAL_PLACEHOLDER_PINS.md §F).
+      const prior = pinState.get(h.normalizedAddress);
+      const human = prior.coordSource === 'corrected' || !!prior.locationConfirmedAt;
+      const curKey = buildingKeyForCoords(prior.location?.coordinates);
+      const newKey = buildingKeyForCoords(set.location.coordinates);
+      const placed = isPlacedByLookup(prior);
+      if (!human && (newKey === curKey || h.coordSource === 'geocodio')) {
+        // The file repeats the spot the door already has, or gave no coordinate at all (the
+        // geocoder filled it): nothing new to say. Its flag and its placement record stand.
+        keepLocation = true;
+      } else if (placed && newKey === buildingKeyForCoords(prior.pinPlacement.from)) {
+        // An echo of the vendor's old shared spot (a re-import of the same file, an export
+        // re-uploaded): keep the placed pin. Under overwriteHandEdits too — a lookup's placement is
+        // not a hand edit.
+        keepLocation = true;
+        keptPlacements += 1;
+      } else if (placed) {
+        // The vendor changed the coordinate: the file wins, and the placement is released.
+        set['pinPlacement.releasedAt'] = pinNow;
+        unset.pinSuspect = 1;
+      } else if (prior.pinSuspect) {
+        // A flagged door the file moves somewhere new: the file wins, and the spot it left is recorded
+        // (the pass reads that `from` as a home that left the shared spot).
+        set.pinPlacement = {
+          from: prior.location?.coordinates,
+          to: set.location.coordinates,
+          at: pinNow,
+          kind: prior.pinSuspect,
+          by: 'file',
+          releasedAt: pinNow,
+        };
+        unset.pinSuspect = 1;
+      } else if (prior.pinPlacement?.at && newKey !== curKey) {
+        set['pinPlacement.releasedAt'] = pinNow;
+      }
+    }
+    // Keeping the location: move the trio to $setOnInsert, so a row deleted between the prefetch and
+    // this write still inserts complete coords. A field must never appear in both operators — Mongo
+    // rejects the conflict.
+    if (keepLocation) {
       for (const f of ['location', 'coordSource', 'coordConfidence']) {
         setOnInsert[f] = set[f];
         delete set[f];
@@ -832,7 +908,7 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     return {
       updateOne: {
         filter: { campaignId, normalizedAddress: h.normalizedAddress },
-        update: { $set: set, $setOnInsert: setOnInsert },
+        update: { $set: set, $setOnInsert: setOnInsert, ...(Object.keys(unset).length ? { $unset: unset } : {}) },
         upsert: true,
       },
     };
@@ -995,6 +1071,8 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
     keptPins,
     // Households whose confirm-in-place vouched pin this import left alone (same toggle).
     keptConfirmed,
+    // Doors whose lookup placement the file merely echoed back, so the placed pin was kept.
+    keptPlacements,
     // Exact docs inserted this run (for "undo import"). Empty on an idempotent retry.
     insertedHouseholdIds,
     insertedVoterIds,

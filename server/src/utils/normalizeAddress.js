@@ -10,8 +10,9 @@ export function normalizeAddress({ addressLine1, addressLine2, city, state, zipC
 }
 
 // Expand common street-suffix + directional abbreviations to a single canonical form
-// so formatting drift collapses ("ST"→"STREET", "N"→"NORTH").
-const STREET_WORDS = {
+// so formatting drift collapses ("ST"→"STREET", "N"→"NORTH"). Exported for streetName.js's
+// stackBaseOf, so the geocode cache key and the same-street-address key read one table.
+export const STREET_WORDS = {
   ST: 'STREET', STR: 'STREET', AVE: 'AVENUE', AV: 'AVENUE', RD: 'ROAD', DR: 'DRIVE',
   BLVD: 'BOULEVARD', LN: 'LANE', CT: 'COURT', PL: 'PLACE', TER: 'TERRACE', TERR: 'TERRACE',
   CIR: 'CIRCLE', PKWY: 'PARKWAY', HWY: 'HIGHWAY', SQ: 'SQUARE', TRL: 'TRAIL', PT: 'POINT',

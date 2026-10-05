@@ -1,17 +1,20 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
-import { formatInTz } from '../lib/datetime.js';
+import { formatInTz, formatDateInTz } from '../lib/datetime.js';
 import {
-  FAR_WARN_M,
+  ACCURACY_CIRCLE_CAPTION,
   correctionContextText,
+  farDowngradeLines,
+  farLabelState,
   formatDistanceImperial,
-  isDowngradedCorrection,
-  isPinDowngraded,
-  isSelfMovedPin,
+  gpsAccuracyText,
+  hasUsableAccuracy,
   pinCorrectionText,
   pinMovedAfterReview,
+  pinPrecisionText,
   primaryReason,
   reasonColor,
 } from '../lib/flags.js';
+import { ACCURACY_RING_MAX_M, ringRadiusM } from '../lib/accuracyRing.js';
 import FlagReasonBadges from './FlagReasonBadges.jsx';
 import FlagReviewControl from './FlagReviewControl.jsx';
 import FlagLegend from './FlagLegend.jsx';
@@ -27,9 +30,14 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
   if (!entry) return null;
 
   const dist = entry.distanceFromHouseMeters;
-  const distFar = dist != null && dist > FAR_WARN_M;
+  // "far" only when the audit says so: its own far reason, never the raw distance (the panel used
+  // to call any knock past ~250 ft far, even one the phone's accuracy explained).
+  const farState = farLabelState(entry);
+  const acc = entry.location?.accuracy;
+  const accuracyLine = gpsAccuracyText(dist, acc);
   const accentColor = reasonColor(primaryReason(entry)?.type);
   const h = household || entry.household;
+  const pinPrecision = pinPrecisionText(h, (d) => formatDateInTz(d, zone));
   // The pin may have been corrected since this door was recorded. `dist` is frozen against the
   // pin as it stood then, while the map's leader line is drawn to the pin as it stands NOW — so
   // whenever the two differ, both numbers are labelled rather than letting the panel and the map
@@ -82,6 +90,9 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
           <div className="text-xs text-fg-muted">
             {h.city}, {h.state} {h.zipCode}
           </div>
+          {pinPrecision && (
+            <div className={'mt-1.5 text-xs ' + (h.locationConfirmedAt ? 'text-fg-muted' : 'text-warning-fg')}>{pinPrecision}</div>
+          )}
         </div>
       )}
 
@@ -90,18 +101,20 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
         {dist == null ? (
           <div className="mt-1 text-fg-muted">unknown</div>
         ) : (
-          <div className={'mt-1 font-medium ' + (distFar ? 'text-danger' : 'text-fg')}>
+          <div className={'mt-1 font-medium ' + (farState === 'far' ? 'text-danger' : 'text-fg')}>
             {formatDistanceImperial(dist)} from {pinDist == null ? 'house' : 'the pin at the time'}
-            {distFar ? ' — far' : ''}
+            {farState === 'far' ? ' — far' : farState === 'low' ? ' — far, flagged low' : ''}
           </div>
         )}
+        {accuracyLine && <div className="text-xs text-fg-muted">{accuracyLine}</div>}
+        {hasUsableAccuracy(acc) && acc > ACCURACY_RING_MAX_M && (
+          <div className="text-xs text-fg-muted">Too wide to draw on the map</div>
+        )}
+        {ringRadiusM(acc) != null && <div className="mt-1 text-xs text-fg-muted">{ACCURACY_CIRCLE_CAPTION}</div>}
         {pinDist != null && (
           <div className="mt-0.5 font-medium text-fg">
             {formatDistanceImperial(pinDist)} from the pin's current spot
           </div>
-        )}
-        {entry.location?.accuracy != null && (
-          <div className="text-xs text-fg-muted">GPS accuracy ±{formatDistanceImperial(entry.location.accuracy)}</div>
         )}
         {correctionContextText(entry) && (
           <div className="mt-1 text-xs text-fg-muted">{correctionContextText(entry)}</div>
@@ -109,21 +122,11 @@ export default function FlaggedEntryPanel({ entry, household, onOpenHousehold, o
         {pinCorrectionText(entry) && (
           <div className="mt-1 text-xs text-fg-muted">{pinCorrectionText(entry)}</div>
         )}
-        {isDowngradedCorrection(entry) && (
-          <div className="mt-1 text-xs text-fg-subtle">
-            The earlier entry was recorded at the door — this correction is flagged low for reference.
+        {farDowngradeLines(entry).map((t) => (
+          <div key={t} className="mt-1 text-xs text-fg-muted">
+            {t}
           </div>
-        )}
-        {isPinDowngraded(entry) && (
-          <div className="mt-1 text-xs text-fg-subtle">
-            The pin was corrected to a spot this entry sits next to — flagged low for reference.
-          </div>
-        )}
-        {isSelfMovedPin(entry) && (
-          <div className="mt-1 text-xs text-fg-subtle">
-            The person who recorded this door also moved the pin — kept at full severity for review.
-          </div>
-        )}
+        ))}
         {pinMovedAfterReview(entry) && (
           <div className="mt-1 text-xs text-fg-subtle">The pin was moved after this was reviewed.</div>
         )}

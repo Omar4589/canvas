@@ -8,6 +8,7 @@ import { columnSamples, sampleWarning } from '../lib/columnSamples.js';
 import { zeroGateText } from '../lib/idListPreview.js';
 import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
+import { importPinLine, isCheckingPins, PINS_STAGE_LABEL } from '../lib/importPins.js';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // server-enforced upload cap
 // Previews always run on the worker (enqueued + polled) — the old 15 MB sync/async
@@ -60,10 +61,12 @@ function StatusBadge({ job }) {
     failed: 'bg-danger-tint text-danger',
   }[job.status] || 'bg-sunken text-fg-muted';
   const inProgress = ACTIVE_STATUSES.includes(job.status);
-  const showPct = inProgress && job.progress != null;
+  // The map-pin check after the write is its own stage, without a percent (lib/importPins.js).
+  const checkingPins = isCheckingPins(job);
+  const showPct = inProgress && job.progress != null && !checkingPins;
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${cls}`}>
-      {STATUS_LABEL[job.status] || job.status}
+      {checkingPins ? PINS_STAGE_LABEL : STATUS_LABEL[job.status] || job.status}
       {showPct ? ` ${job.progress}%` : ''}
     </span>
   );
@@ -231,29 +234,41 @@ function ReviewPanel({ diff }) {
           {spreadsheetErrors > 0 && <div>{fmt(spreadsheetErrors)} rows with a spreadsheet error value (=#NUM!, #REF!, …) as their Voter ID</div>}
         </SampleList>
         {/* Kept doors whose PIN is suspect — nothing here is skipped (a suspect pin walks; a
-            dropped door doesn't). These import as-is and are what `repair:import-pins` cleans
-            up afterward. The gate and the count use the SAME expression: only what still needs
-            a human's attention (unsettled ties + placeholder-pin doors) — a disagreement the
-            majority vote already settled is resolved, not suspect. Old persisted diffs lack
-            the fields, hence the || 0 guards. */}
-        {(rowIssues.coordConflictTies || 0) + (rowIssues.placeholderPinDoors || 0) > 0 && (
+            dropped door doesn't). Rows that disagreed about a house's pin with nothing to settle
+            it import with the first pin and are what `repair:import-pins` adjudicates; a
+            disagreement the majority vote already settled is resolved, not suspect. Old
+            persisted diffs lack the fields, hence the || 0 guards. */}
+        {(rowIssues.coordConflictTies || 0) > 0 && (
+          <SampleList title="Doors imported with a suspect map pin" count={rowIssues.coordConflictTies}>
+            <div>
+              {fmt(rowIssues.coordConflictTies)}{' '}
+              {rowIssues.coordConflictTies === 1 ? 'address' : 'addresses'} had rows disagreeing about where
+              the house is, with nothing to settle it — the first pin was kept
+            </div>
+          </SampleList>
+        )}
+        {/* Homes on a coordinate shared with other addresses (finish() in csvImporter.js, per door):
+            no address holds the spot (placeholder), or a home sits on another address's building
+            (stray). After the import, services/households/placeStackedPins.js marks every one and,
+            with lookups on, looks each up by its own address; what it can't place stays on the spot
+            and is listed in Pin Fixes. The count is both kinds — the homes the pass will mark. */}
+        {(rowIssues.placeholderPinDoors || 0) + (rowIssues.strayPinDoors || 0) > 0 && (
           <SampleList
-            title="Doors imported with a suspect map pin"
-            count={(rowIssues.coordConflictTies || 0) + (rowIssues.placeholderPinDoors || 0)}
+            title="Homes that share a map spot with other addresses"
+            count={(rowIssues.placeholderPinDoors || 0) + (rowIssues.strayPinDoors || 0)}
           >
-            {(rowIssues.coordConflictTies || 0) > 0 && (
-              <div>
-                {fmt(rowIssues.coordConflictTies)}{' '}
-                {rowIssues.coordConflictTies === 1 ? 'address' : 'addresses'} had rows disagreeing about where
-                the house is, with nothing to settle it — the first pin was kept
-              </div>
-            )}
-            {(rowIssues.placeholderPinDoors || 0) > 0 && (
-              <div>
-                {fmt(rowIssues.placeholderPinDoors)} {rowIssues.placeholderPinDoors === 1 ? 'door sits' : 'doors sit'} on
-                an exact map spot shared with doors from <em>other streets</em> — usually placeholder coordinates the
-                vendor stamped on addresses it couldn&apos;t place. They import and stay walkable, but on the wrong
-                dot; ask your Doorline contact to run the pin repair before cutting turf.
+            <div>
+              These homes were all given the same coordinate, so they can&apos;t each be on the map.{' '}
+              {diff.geocoding?.enabled
+                ? 'After import, Doorline looks each one up by its address. Any it can’t place keep that spot and are listed in Pin Fixes.'
+                : 'Doorline marks them, and they’re listed in Pin Fixes.'}
+            </div>
+            {(rowIssues.strayPinDoors || 0) > 0 && (
+              <div className="mt-1">
+                {fmt(rowIssues.strayPinDoors)}{' '}
+                {rowIssues.strayPinDoors === 1
+                  ? 'home sits on an apartment building’s or park’s spot but has a different address.'
+                  : 'homes sit on an apartment building’s or park’s spot but have a different address.'}
               </div>
             )}
           </SampleList>
@@ -394,7 +409,9 @@ function DetectionPanel({ detection, explode, onToggleExplode, busy }) {
   );
 }
 
-function GeocodingPanel({ geocoding, result, onCheck, checking }) {
+// sharedSpotHomes: the preview's homes on a map spot shared with other addresses — the import looks
+// those up by address afterwards, so "free" has to say it covers only the geocoding done here.
+function GeocodingPanel({ geocoding, result, onCheck, checking, sharedSpotHomes = 0 }) {
   if (!geocoding || !geocoding.uniqueNeedingGeocode) return null;
   const { uniqueNeedingGeocode, cachedMatched, newToGeocode, badZip } = geocoding;
   return (
@@ -431,7 +448,10 @@ function GeocodingPanel({ geocoding, result, onCheck, checking }) {
             {result.failed > 0 && <> {fmt(result.failed)} hit a temporary error (re-import retries).</>}
           </p>
           <p className="mt-1 text-xs text-fg-muted">
-            Geocoded {fmt(result.geocodedNew)} new + {fmt(result.geocodedCached)} cached. The import is now free (cached).
+            Geocoded {fmt(result.geocodedNew)} new + {fmt(result.geocodedCached)} cached.{' '}
+            {sharedSpotHomes > 0
+              ? 'This geocoding is now free (cached); homes that share a map spot are still looked up when you import.'
+              : 'The import is now free (cached).'}
           </p>
           {result.sample?.length > 0 && (
             <details className="mt-2 rounded border border-border bg-sunken">
@@ -975,6 +995,7 @@ export default function ImportPage() {
             result={geocodeCheckResult}
             onCheck={() => runGeocodeCheck.mutate({ file, campaignId, mapping, explode })}
             checking={geocodeChecking}
+            sharedSpotHomes={(diff.rowIssues?.placeholderPinDoors || 0) + (diff.rowIssues?.strayPinDoors || 0)}
           />
         )}
         {step === 'review' && diff && <ReviewPanel diff={diff} />}
@@ -1156,6 +1177,27 @@ export default function ImportPage() {
                         {j.geocodeFailed > 0 ? ` · ${fmt(j.geocodeFailed)} retry` : ''}
                       </div>
                     )}
+                    {(() => {
+                      // Homes that shared a map spot: what the import's lookup did with them.
+                      const pinLine = j.undone ? null : importPinLine(j);
+                      if (!pinLine) return null;
+                      return (
+                        <div className={`mt-0.5 text-xs ${pinLine.failed ? 'text-warning-fg' : 'text-fg-muted'}`}>
+                          {pinLine.text}
+                          {pinLine.pinFixes && j.campaignId?._id && (
+                            <>
+                              {' '}
+                              <button
+                                onClick={() => navigate(`/campaigns/${j.campaignId._id}/pin-fixes`)}
+                                className="font-medium text-brand-accent hover:underline"
+                              >
+                                (Pin Fixes →)
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {j.revisitHouseholdCount > 0 && !j.undone && (
                       <div className="mt-0.5 text-xs text-fg-muted">
                         {fmt(j.revisitHouseholdCount)} already-worked home{j.revisitHouseholdCount === 1 ? '' : 's'} gained a new voter

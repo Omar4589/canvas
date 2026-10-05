@@ -719,12 +719,13 @@ goodbyes, and "go to" arrows:
   and every block gets back the condition it was opened with. On a survey saved with Go to, or a new
   one, it turns the arrows into ordinary conditions and removes them, so the survey shows exactly
   what its arrows did; that waits while an arrow has an error. **Leaving Go to is always allowed;
-  entering it is blocked once a survey has responses** — on such a survey the **then go to** selects
-  are greyed out with the hint to Duplicate the survey and build the scripted version there (from the
-  Surveys list, or at the top of a campaign's **Edit survey** page, where team leads find it). (So on
-  a survey with responses, Switch back asks first: once saved, there's no way back to Go to.) A
-  Show-only-if condition still on a block when the first arrow is set has to be re-expressed as an
-  arrow or removed before the survey saves — nothing is silently deleted.
+  entering it is blocked once a survey has responses anywhere in the organization** — on such a
+  survey the **then go to** selects are greyed out with the hint to Duplicate the survey and build
+  the scripted version there (from the Surveys list, or at the top of a campaign's **Edit survey**
+  page, where team leads find it; a lead sees the lock even when none of the answers are counted in
+  their own campaigns). (So on a survey with responses, Switch back asks first: once saved, there's
+  no way back to Go to.) A Show-only-if condition still on a block when the first arrow is set has
+  to be re-expressed as an arrow or removed before the survey saves — nothing is silently deleted.
 - **Canvasser notes and links**, on every block. **+ note to canvasser (not read aloud)** shows on the
   phone in a blue "For you — not read aloud" box; it is never read aloud, and never printed, exported
   or shown in results. **+ link** adds up to five web links, each starting with https:// or http:// (a

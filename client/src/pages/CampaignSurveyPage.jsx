@@ -9,6 +9,7 @@ import Modal from '../components/ui/Modal.jsx';
 import SurveyPreview from '../components/SurveyPreview.jsx';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
 import { activeBlocks, answerableQuestions } from '../lib/surveyRunner.js';
+import { responsesPhrase, responsesNoteOpening } from '../lib/surveyBuilderRules.js';
 
 // In-campaign Survey screen (/campaigns/:campaignId/survey). Surveys are reusable
 // org-level templates; this screen manages the campaign's survey COVERAGE:
@@ -24,7 +25,8 @@ function usedByOthers(survey, campaignId) {
   return (survey?.usedByCampaigns || []).filter((c) => String(c.id) !== String(campaignId)).length;
 }
 
-function ChangeSurveyModal({ surveys, currentId, onClose, onAttach, saving, error }) {
+// `isOrgAdmin` words the counts: a lead's cover their campaigns only (responsesPhrase).
+export const ChangeSurveyModal = ({ surveys, currentId, onClose, onAttach, saving, error, isOrgAdmin = false }) => {
   const [sel, setSel] = useState(currentId ? String(currentId) : '');
   const chosen = surveys.find((s) => String(s._id) === String(sel));
   const isSame = String(sel) === String(currentId || '');
@@ -39,17 +41,18 @@ function ChangeSurveyModal({ surveys, currentId, onClose, onAttach, saving, erro
           {pickable.map((s) => (
             <option key={s._id} value={s._id}>
               {s.name} (v{s.version || 1}
-              {s.responseCount > 0 ? `, ${s.responseCount} response${s.responseCount === 1 ? '' : 's'}` : ''}
+              {s.responseCount > 0 ? `, ${responsesPhrase(s, { isOrgAdmin })}` : ''}
               {s.archivedAt ? ', archived' : ''})
             </option>
           ))}
         </Select>
 
+        {/* Gated on the count, not hasResponses: this is about reporting, and a lead's reports are
+            campaign-scoped, so their narrowed count is the honest one here. */}
         {chosen?.responseCount > 0 && !isSame && (
           <p className="rounded border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
-            This survey already has {chosen.responseCount.toLocaleString()} response
-            {chosen.responseCount === 1 ? '' : 's'}. New answers for this campaign report alongside them — separate
-            from any survey this campaign used before.
+            This survey already has {responsesPhrase(chosen, { isOrgAdmin })}. New answers for this campaign report
+            alongside them — separate from any survey this campaign used before.
           </p>
         )}
         {!pickable.length && (
@@ -70,7 +73,7 @@ function ChangeSurveyModal({ surveys, currentId, onClose, onAttach, saving, erro
       </div>
     </Modal>
   );
-}
+};
 
 const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
 // Compact token field for the in-row override select (mirrors EffortsPage).
@@ -98,9 +101,16 @@ export default function CampaignSurveyPage() {
     enabled: !!campaignId,
   });
 
+  // Both writes carry the campaign they were started on (`vars.campaignId`), the campaign builder's
+  // rule: the sidebar's campaign switcher keeps this page, and a request paused offline runs the
+  // latest render's mutationFn once the connection returns, so a URL built from this render's
+  // `campaignId` would write to the campaign switched to meanwhile.
   const attach = useMutation({
-    mutationFn: (surveyTemplateId) =>
-      api(`/admin/campaigns/${campaignId}`, { method: 'PATCH', body: { surveyTemplateId } }),
+    mutationFn: (vars) =>
+      api(`/admin/campaigns/${vars.campaignId}`, {
+        method: 'PATCH',
+        body: { surveyTemplateId: vars.surveyTemplateId },
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
       qc.invalidateQueries({ queryKey: ['surveys'] });
@@ -108,13 +118,13 @@ export default function CampaignSurveyPage() {
     },
   });
   const setOverride = useMutation({
-    mutationFn: ({ effortId, surveyTemplateId }) =>
-      api(`/admin/campaigns/${campaignId}/efforts/${effortId}`, {
+    mutationFn: (vars) =>
+      api(`/admin/campaigns/${vars.campaignId}/efforts/${vars.effortId}`, {
         method: 'PATCH',
-        body: { surveyTemplateId },
+        body: { surveyTemplateId: vars.surveyTemplateId },
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'efforts', vars.campaignId] });
       qc.invalidateQueries({ queryKey: ['surveys'] }); // usage annotations changed
     },
   });
@@ -184,7 +194,9 @@ export default function CampaignSurveyPage() {
         <div className="mb-4 flex items-start justify-between gap-3 rounded border border-info/30 bg-info-tint px-4 py-3 text-sm text-info-fg">
           <span>
             <strong className="font-medium">{createdSurvey.name}</strong> was created and added to your library.
-            Assign it to a walk list below to run it on those doors.
+            Assign it to a walk list below to run it on those doors, or make it this campaign's default with{' '}
+            <strong className="font-medium">{attachedSurvey ? 'Change survey' : 'Pick a survey'}</strong>. Do either
+            between shifts: surveys still queued on phones under the survey those doors use now would be dropped.
           </span>
           <button onClick={dismissCreated} className="shrink-0 text-info-fg hover:opacity-70" aria-label="Dismiss">
             ×
@@ -249,12 +261,14 @@ export default function CampaignSurveyPage() {
 
               {showPreview && (
                 <>
-                  {attachedSurvey.responseCount > 0 && (
+                  {/* Shown whenever the survey has answers anywhere it counts — for a lead that includes
+                      answers not counted in their campaigns, which is exactly when the builder locks. Only
+                      an org admin's count is the survey's total. */}
+                  {attachedSurvey.hasResponses && (
                     <div className="border-b border-border bg-sunken px-5 py-2 text-xs text-fg-muted">
-                      {attachedSurvey.responseCount.toLocaleString()} response
-                      {attachedSurvey.responseCount === 1 ? '' : 's'} across all campaigns — editing keeps past
-                      answers; only changing a question&apos;s <strong className="font-medium text-fg">answer
-                      type</strong>
+                      {responsesNoteOpening(attachedSurvey, { isOrgAdmin })}{' '}
+                      — editing keeps past answers; only changing a question&apos;s{' '}
+                      <strong className="font-medium text-fg">answer type</strong>
                       {attachedSurvey.flow !== 'script' && (
                         <>
                           , or switching it to <strong className="font-medium text-fg">Go to</strong>,
@@ -350,7 +364,7 @@ export default function CampaignSurveyPage() {
                           surveys={surveys}
                           disabled={setOverride.isPending}
                           className={COMPACT}
-                          onChange={(id) => setOverride.mutate({ effortId: e._id, surveyTemplateId: id })}
+                          onChange={(id) => setOverride.mutate({ effortId: e._id, surveyTemplateId: id, campaignId })}
                         />
                         {!e.surveyTemplateId && (
                           <span className="text-xs text-fg-subtle">
@@ -392,9 +406,10 @@ export default function CampaignSurveyPage() {
           surveys={surveys}
           currentId={attachedId}
           onClose={() => setChanging(false)}
-          onAttach={(id) => attach.mutate(id)}
+          onAttach={(id) => attach.mutate({ surveyTemplateId: id, campaignId })}
           saving={attach.isPending}
           error={attach.error}
+          isOrgAdmin={isOrgAdmin}
         />
       )}
     </div>

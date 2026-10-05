@@ -35,7 +35,11 @@ be *the client's own campaign manager*, granted their one campaign. That trust m
 wall below exists: a client's rep never sees billing or the fields that drive what the firm invoices,
 never touches another client's campaign, never sets an org-wide fact like Do-Not-Contact — and their
 **survey library shows only what they authored or what's already on their campaigns**, never another
-client's scripts, campaign names, or volumes.
+client's scripts, campaign names, or volumes. Two plain yes-or-no facts about a survey in that
+library do reach a lead — never which campaign, never how many: whether a campaign they don't
+manage has it attached (an archived one counts), and, for a survey on one of their campaigns,
+whether it already has answers anywhere in the organization (owner ruling 2026-10-03). The second
+decides whether its answer types and Go to are locked; the save would refuse those changes anyway.
 
 Inside a campaign they're granted, a lead is **as powerful as an admin**: import the voter file, build
 and attach a survey (authoring their own templates, not just picking from the library), build walk
@@ -326,11 +330,19 @@ Archive, unarchive, and `DELETE` carry `requireOrgRole('admin')`.
 The **LIST** (`GET /`) applies the same predicate as a set: for a lead the find filter is
 `$or [{createdBy}, {_id ∈ attachedSurveyTemplateIds(managed)}]` (the set-form helper lives beside
 `canManageSurvey` so the two can't drift), and the usage metadata is narrowed to their campaigns —
-`usedByCampaigns`, `usedByWalkLists`, and `responseCountByCampaign` are filtered, `responseCount` /
-`hasResponses` re-derive from the narrowed buckets, and a bare **`usedElsewhere` boolean** (no
-names, no volumes) tells the builder to keep its shared-edit warning honest when a template is also
-used beyond the lead's view. Without the scoping, the list handed a client-side lead every
-template's full question content plus other clients' campaign names and response volumes.
+`usedByCampaigns`, `usedByWalkLists`, and `responseCountByCampaign` are filtered, `responseCount`
+re-derives from the narrowed buckets, and exactly two bare booleans cross that line (no names, no
+volumes): **`usedElsewhere`** — on every row in the library, authored ones included: the template is
+attached beyond the lead's campaigns right now (archived campaigns and walk lists count; neither
+list behind it is filtered by status) — keeps the builder's shared-edit warning honest, and
+**`hasResponses`** is org-wide for a template attached to a managed campaign
+(`attachedSurveyTemplateIds`; owner ruling 2026-10-03, verbatim *"as long as its part of their
+campaigns, yes"*) — the rows the `PATCH`'s `409 survey-has-responses` checks, legacy no-campaign
+rows included — so the builder's answer-type and Go to locks match the save; a template in the
+library only through `createdBy` keeps the narrowed yes/no. Recorded in
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 26. Without the scoping, the list handed a
+client-side lead every template's full question content plus other clients' campaign names and
+response volumes.
 
 **ATTACH is guarded the same way, server-side** — the list scoping alone would be cosmetic since
 attach went by id: the campaign default (`PATCH /admin/campaigns/:id`,
@@ -703,7 +715,12 @@ test:int`):
   on the same for B, on campaign create/archive/delete, on tag creation, on survey
   archive/unarchive/delete, and on the org voter directory. Survey **create** is asserted **201** —
   leads author — and edit/duplicate follow the `canManageSurvey` scope (own or managed-attached yes,
-  unmanaged-attached no). `GET /admin/memberships` is asserted **200 lead-scoped** (since
+  unmanaged-attached no). The lead's survey list carries `hasResponses` org-wide for a survey on
+  their campaigns — as a walk-list survey or as the campaign's own (another campaign's answers, a
+  legacy no-campaign row) — and narrowed for one they only authored; on every survey on their
+  campaigns it agrees with the `PATCH`'s 409 (the authored-only one keeps its narrowed false while
+  its save still refuses, by ruling); it never names another campaign, and carries exactly six
+  annotation keys. `GET /admin/memberships` is asserted **200 lead-scoped** (since
   2026-07-23); the full Users boundary matrix is
   [`leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js)'s job. `.../crew`
   is 200/201, `GET /admin/campaigns` returns only A, and role 403s carry `code: 'FORBIDDEN_ROLE'` at

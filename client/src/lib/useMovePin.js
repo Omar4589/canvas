@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import mapboxgl from './mapboxInit.js';
 import { api } from '../api/client.js';
 import { invalidateFlagCaches } from './bulkReview.js';
-import { movePinCopy, movePinErrorMessage, movePinInvalidationKeys } from './movePin.js';
+import { canSaveMove, movePinCopy, movePinErrorMessage, movePinInvalidationKeys, NOTHING_MOVED } from './movePin.js';
 
 // "Move pin" mode, shared by the Map page and the Turf Cutting page: a draggable blue marker
 // dropped at the door's current spot, Save PATCHes the new location, and every cache a moved
@@ -17,8 +17,11 @@ import { movePinCopy, movePinErrorMessage, movePinInvalidationKeys } from './mov
 //   onSaved     — (res, target, coords) => void, after the caches are dropped and before reset
 //
 // Returns { armed, target, coords, copy, saving, error, armedRef, start, cancel, save }.
-//   start({ id, addressLine1, lng, lat, scope:'unit'|'building', count }) arms it — ignored when
-//   lng/lat are not finite (a ghost door with no pin cannot be moved). `armedRef` is for the
+//   start({ id, addressLine1, lng, lat, scope:'unit'|'building', count, unplaced }) arms it — ignored
+//   when lng/lat are not finite (a ghost door with no pin cannot be moved). `unplaced`: the door (or
+//   an address unit the move carries) has no exact map spot, so Save stays off until the drag clears
+//   the spot (`canSave`). A save the server answers with `moved: 0` keeps the card armed with
+//   "Nothing moved" and never calls onSaved, so a page never advances past it. `armedRef` is for the
 //   pages' ONCE-bound map handlers (layer clicks, the fullscreen Esc): they must read
 //   `movePin.armedRef.current` at event time, never `movePin.armed`, which their closure froze.
 export const useMovePin = ({ mapRef, campaignId, onSaved }) => {
@@ -49,6 +52,7 @@ export const useMovePin = ({ mapRef, campaignId, onSaved }) => {
       lat,
       scope: next.scope === 'building' ? 'building' : 'unit',
       count: Number(next.count) || 1,
+      unplaced: !!next.unplaced,
     });
     return true;
   }, []);
@@ -97,6 +101,11 @@ export const useMovePin = ({ mapRef, campaignId, onSaved }) => {
         method: 'PATCH',
         body: { lat: coords.lat, lng: coords.lng, scope: target.scope },
       });
+      if (res?.moved === 0 || res?.unchanged) {
+        // The server moved nothing: stay armed so the admin can drag it properly.
+        setError(NOTHING_MOVED);
+        return;
+      }
       // Awaited, so the card reads "Saving…" until the dots (and the re-hulled outlines) have
       // actually refetched — the marker and the old dot never overlap for a beat.
       await Promise.all(movePinInvalidationKeys(campaignId).map((queryKey) => qc.invalidateQueries({ queryKey })));
@@ -116,6 +125,7 @@ export const useMovePin = ({ mapRef, campaignId, onSaved }) => {
     target,
     coords,
     copy: target ? movePinCopy(target) : null,
+    canSave: canSaveMove(target, coords),
     saving,
     error,
     armedRef,

@@ -53,6 +53,11 @@ Both are **on by default** and both are independent — tick either, both, or ne
 non-destructive: the homes stay in the campaign and in every count, they're just left out of *this
 round's* books, and they come back automatically if someone re-records the door later.
 
+**Remove apartments** (shown until you accept the round's books) holds out apartment units: pick a number of units, and the
+line under it says exactly what the button will take — *"Holds out 441 homes on 61 spots (4+ units at
+one address, or a unit address on a spot of 4+)."* It goes by address, so separate houses a voter file
+put on one shared spot are never taken. **Re-include** puts them all back.
+
 On a survey campaign that has had **Not a target voter** turned on, there's no checkbox for those doors — like
 refusals, they're cut back in and knocked again next round. Instead, the **Target doors** and **Exclude
 doors** status lists offer it: target those doors to go back for the listed voters nobody reached there,
@@ -167,8 +172,8 @@ miles from its street. You don't have to go to the Map page to fix it. **Click t
 **Move pin →** in its popup: the popups step aside, a blue marker appears on the dot, and a small card
 tells you whose pin you're moving. Drag the marker to the right spot and click **Save location** (or
 **Cancel**, or press **Esc**, to back out). That moves **one door**. For an apartment building, click the
-building and choose **Move building pin →** — that moves **every unit at that pin together**, and the
-card says how many. While a move is armed, clicks elsewhere on the map do nothing, so you can't select
+building and choose **Move building pin →** — that moves **every unit of that address together**, and the
+card says how many (a house that merely shares the dot moves on its own). While a move is armed, clicks elsewhere on the map do nothing, so you can't select
 a book by accident.
 
 When it saves, the dot moves and the **book outline redraws around it** — the door's own book, and any

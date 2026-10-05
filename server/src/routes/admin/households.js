@@ -22,6 +22,7 @@ import { setDoNotKnock, clearDoNotKnock } from '../../services/dnc/doNotKnock.js
 import { currentDeskPassForDoor } from '../../services/canvass/deskRestrict.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
+import { farKpiForRows, farVerdictForWire } from '../../services/audit/farKpi.js';
 
 const router = Router();
 // Team leads reach the campaign Map (and its household-activity popup), so both routes
@@ -542,12 +543,25 @@ router.get('/map', async (req, res, next) => {
             // pings at house coords. The date-narrowing above stays inclusive, so a
             // Today-filtered map still surfaces just-desk-marked doors.
             { ...activityMatch, householdId: { $in: householdIds }, via: { $ne: 'bulk' } },
-            'householdId userId actionType timestamp location distanceFromHouseMeters'
+            // `replaced` feeds the far verdict's honest-correction downgrade below and is read
+            // server-side only: the activities map at the end ships named fields, never it.
+            'householdId userId actionType timestamp location distanceFromHouseMeters replaced'
           )
             .populate('userId', 'firstName lastName')
             .lean()
         : Promise.resolve([]),
     ]);
+
+    // Each ping carries the audit's own far verdict (farAssessment, through the per-canvasser KPI's path),
+    // so a ping panel can never call far what the audit lowered or cleared. Rows go in with the RAW userId:
+    // the self-move guard compares String(row.userId) with the pin's correctedBy, and a populated user doc
+    // stringifies to [object Object], which would silently forgive a canvasser's own pin move.
+    const { assessmentsByActionId } = activities.length
+      ? await farKpiForRows(
+          activities.map((a) => ({ ...a, userId: a.userId?._id ?? a.userId })),
+          { organizationId: orgId }
+        )
+      : { assessmentsByActionId: new Map() };
 
     const votersByHh = new Map();
     for (const v of voters) {
@@ -661,6 +675,7 @@ router.get('/map', async (req, res, next) => {
           ? { lng: a.location.lng, lat: a.location.lat, accuracy: a.location.accuracy }
           : null,
         distanceFromHouseMeters: a.distanceFromHouseMeters,
+        far: farVerdictForWire(assessmentsByActionId.get(String(a._id))),
         canvasser: a.userId
           ? {
               id: String(a.userId._id),

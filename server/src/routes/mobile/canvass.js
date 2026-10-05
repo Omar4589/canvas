@@ -14,6 +14,8 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
+import { isFiniteLatLng } from '../../utils/stateBounds.js';
+import { effectiveMeters } from '../../services/audit/flagDetection.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
@@ -24,6 +26,7 @@ import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswe
 import { effectiveSurveyTemplateId } from '../../services/surveys/effectiveTemplate.js';
 import { archiveOverwrittenResponse } from '../../services/surveys/archiveOverwrite.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
+import { effectivePinSuspect } from '../../services/households/pinState.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { struckByUnknock } from '../../services/canvass/unknock.js';
@@ -113,25 +116,40 @@ async function assertHouseholdAccess(req, household) {
   return {};
 }
 
+// An accuracy is a radius in meters, so only a finite number above zero is one. Android reports 0.0 when a
+// fix carries no estimate, an iPhone's negative horizontalAccuracy marks the fix itself invalid, and JSON
+// turns 1e400 into Infinity. Each is stored as null (unknown), never refused: a refused offline replay is a
+// knock the phone silently drops (offlineQueue.js deletes it on a 4xx).
+const usableAccuracy = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+
 const locationSchema = z.object({
   lat: z.number(),
   lng: z.number(),
-  accuracy: z.number().nullable().optional(),
+  accuracy: z.number().nullable().optional().transform(usableAccuracy),
   // Provenance for the GPS audit (new clients send these; old clients omit them):
   // mocked = Android's isFromMockProvider (fake-GPS apps; null = unknown/iOS),
   // fixTimestamp = when the OS computed the fix (vs `timestamp`, the tap).
   mocked: z.boolean().nullable().optional(),
   fixTimestamp: z.string().datetime().nullable().optional(),
-});
+}).refine(
+  // Unreachable today, because missingLocation runs first on every route that nests this schema; it
+  // keeps the rule if the schema is ever reused. zod's z.number() accepts Infinity.
+  (loc) => isFiniteLatLng(loc.lat, loc.lng),
+  { message: 'Coordinates must be finite numbers', path: ['lat'] }
+);
 
 // No location = no knock. The mobile app hard-gates recording on a fresh GPS fix; this
 // is the server backstop for bypassed or old clients. Machine-readable `code` follows
 // the ORG_CONTEXT convention (mobile api.js parses it; recordAction.js maps it to a
-// specific alert). Checked BEFORE zod so the client gets this message, not a zod dump.
-function missingLocation(body) {
+// specific alert). Checked BEFORE zod so the client gets this message, not a zod dump. A coordinate that
+// isn't a finite number is no location either: a JSON 1e400 used to pass the typeof check, and on the
+// door-result path the replace then deleted the canvasser's earlier entry before the create failed with a
+// 500, which a phone would queue and retry forever (GPS_ACCURACY.md F-26). Finite values off the Earth are
+// still accepted here until the stored stamps have been counted (docs/PROPOSAL_GPS_UPGRADES.md §I.1).
+const missingLocation = (body) => {
   const loc = body?.location;
-  return !loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number';
-}
+  return !loc || !isFiniteLatLng(loc.lat, loc.lng);
+};
 const LOCATION_REQUIRED = {
   status: 400,
   code: 'LOCATION_REQUIRED',
@@ -206,28 +224,32 @@ const REPLACEABLE_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_sub
 // evidence across the whole replacement chain (min effective distance = distance − accuracy),
 // so a second correction can't lose the proof the first one preserved. flagDetection.js
 // downgrades a far flag to low when `nearest` proves the canvasser was at the door recently.
-// MUST be built from the pre-read rows (before the deleteMany), never a re-query.
-function buildReplacedSnapshot(mineRows) {
+// MUST be built from the pre-read rows (before the deleteMany), never a re-query. A row written before
+// the accuracy rule can hold a zero or negative radius; the snapshot copies every accuracy through the
+// same usableAccuracy as a fresh stamp, so nothing written from now on carries one, and the nearest pick
+// reads them with the audit's own effectiveMeters.
+const buildReplacedSnapshot = (mineRows) => {
   if (!mineRows.length) return null;
   const prior = [...mineRows].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
-  const effective = (c) => Math.max(0, c.distanceFromHouseMeters - (c.accuracy ?? 0));
+  const effective = (c) => effectiveMeters(c.distanceFromHouseMeters, c.accuracy);
   const candidates = [];
   if (prior.distanceFromHouseMeters != null) {
     candidates.push({
       distanceFromHouseMeters: prior.distanceFromHouseMeters,
-      accuracy: prior.location?.accuracy ?? null,
+      accuracy: usableAccuracy(prior.location?.accuracy),
       timestamp: prior.timestamp ?? null,
     });
   }
-  if (prior.replaced?.nearest?.distanceFromHouseMeters != null) candidates.push(prior.replaced.nearest);
+  const near = prior.replaced?.nearest;
+  if (near?.distanceFromHouseMeters != null) candidates.push({ ...near, accuracy: usableAccuracy(near.accuracy) });
   return {
     actionType: prior.actionType,
     timestamp: prior.timestamp ?? null,
-    location: prior.location ?? null,
+    location: prior.location ? { ...prior.location, accuracy: usableAccuracy(prior.location.accuracy) } : null,
     distanceFromHouseMeters: prior.distanceFromHouseMeters ?? null,
     nearest: candidates.length ? candidates.reduce((a, b) => (effective(b) < effective(a) ? b : a)) : null,
   };
-}
+};
 
 // Has a QUEUED REPLAY arrived after the door already moved on?
 //
@@ -479,7 +501,8 @@ const locationCorrectionSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   source: z.enum(['gps', 'drag']),
-  accuracy: z.number().nullable().optional(),
+  // The audit row's accuracy follows the stamp rule: a zero or negative radius is stored as unknown.
+  accuracy: z.number().nullable().optional().transform(usableAccuracy),
   scope: z.enum(['unit', 'building']).optional(),
 });
 
@@ -514,7 +537,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
 
     const data = locationCorrectionSchema.parse(req.body);
     try {
-      const { updated, turfsRecomputed } = await updateHouseholdLocation(
+      const { updated, moved, turfsRecomputed } = await updateHouseholdLocation(
         household,
         { lat: data.lat, lng: data.lng },
         { source: data.source, byUserId: req.user._id, accuracy: data.accuracy ?? null, scope: data.scope || 'unit' }
@@ -524,14 +547,17 @@ router.post('/households/:householdId/location', async (req, res, next) => {
       // has no status semantics — but the raw doc over-shipped (previousLocation,
       // correctedBy, normalizedAddress...). turfsRecomputed mirrors the web PATCH.
       const h = updated[0];
+      const pinSuspect = effectivePinSuspect(h);
       return res.status(201).json({
         household: {
           _id: String(h._id),
           location: h.location,
           coordSource: h.coordSource,
           coordConfidence: h.coordConfidence,
+          ...(pinSuspect ? { pinSuspect } : {}),
         },
-        moved: updated.length,
+        // 0 when the save moved nothing (services/households/updateHouseholdLocation.js no-op cases).
+        moved,
         turfsRecomputed,
       });
     } catch (err) {
@@ -1003,7 +1029,10 @@ const addVoterSchema = z.object({
 
 router.post('/households/:householdId/voters', async (req, res, next) => {
   try {
-    // Adding a person is a door write like every other — the GPS stamp evidences the visit.
+    // Adding a person is a door write like every other, so it is gated on a live location like every
+    // other. The stamp is REQUIRED but NOT stored: no ledger row is written for an add-person, so nothing
+    // here evidences the visit afterwards. Keeping it would be a new retained datum and needs the privacy
+    // cascade first (GPS_ACCURACY.md F-23).
     if (missingLocation(req.body)) return sendRouteError(res, LOCATION_REQUIRED);
     const data = addVoterSchema.parse(req.body);
     const voterId = data.voterId.toLowerCase();

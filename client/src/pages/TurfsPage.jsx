@@ -24,6 +24,8 @@ import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { crewCounts } from '../lib/turfCrewCounts.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
 import { buildingKeyForCoords } from '../lib/buildings.js';
+import { apartmentPreviewCounts, apartmentPreviewLine } from '../lib/apartmentPreview.js';
+import { stackBaseOf } from '../lib/streetName.js';
 import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
 import { useLassoDraw } from '../lib/useLassoDraw.js';
 import { useMapStyle } from '../lib/mapStyles.js';
@@ -1563,22 +1565,24 @@ export default function TurfsPage() {
   const doNotKnockDoorCount = turfsQ.data?.doNotKnockDoorCount || 0;
   const excludedApartmentCount = turfsQ.data?.excludedApartmentCount || 0;
   const knockCount = turfsQ.data?.knockCount || 0;
-  // "Remove apartments": preview how many doors sit in buildings of N+ units (same
-  // rounded-geocode key the server uses), so we can persistently exclude them.
-  const aptPreview = useMemo(() => {
-    const byKey = new Map();
-    for (const d of doorsQ.data?.doors || []) {
-      const key = `${Math.round(d.lat * 1e5)}|${Math.round(d.lng * 1e5)}`;
-      byKey.set(key, (byKey.get(key) || 0) + 1);
-    }
-    let doors = 0;
-    let buildings = 0;
-    for (const c of byKey.values()) if (c >= aptThreshold) { doors += c; buildings += 1; }
-    return { doors, buildings };
-  }, [doorsQ.data, aptThreshold]);
+  // "Remove apartments": what the button holds out at the chosen threshold. The server answers
+  // once for every threshold from the same function the exclude POST runs
+  // (services/turf/apartmentStacks.js), so the line counts what the button really takes — units of
+  // one address, or unit addresses on a crowded spot, never separate houses that merely share a
+  // coordinate. Moving a pin changes it (movePinInvalidationKeys).
+  const aptPreviewQ = useQuery({
+    queryKey: ['apartment-preview', campaignId, passId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/apartment-preview?passId=${passId}`),
+    enabled: !!campaignId && !!passId,
+  });
+  const aptPreview = useMemo(
+    () => apartmentPreviewCounts(aptPreviewQ.data?.candidates, aptThreshold),
+    [aptPreviewQ.data, aptThreshold]
+  );
   const invalidateCut = () => {
     qc.invalidateQueries({ queryKey: ['turf-doors', campaignId, passId] });
     qc.invalidateQueries({ queryKey: ['turfs', campaignId, passId] });
+    qc.invalidateQueries({ queryKey: ['apartment-preview', campaignId, passId] });
   };
   // Every desk-mark write — one door, a building, or whole books — drops the same caches: the cut
   // (turf-doors → each dot's passStatus + restrictedDoorCount; turfs → bulkRestrictedCount), the
@@ -3243,25 +3247,30 @@ export default function TurfsPage() {
                   <button onClick={() => includeApts.mutate()} disabled={includeApts.isPending} className="shrink-0 font-semibold text-brand-accent hover:underline disabled:opacity-50">Re-include</button>
                 </div>
               ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-fg-muted">
-                    Remove apartments (
+                <div>
+                  <div className="text-fg-muted">
+                    Remove apartments
                     <input
                       type="number"
                       min="2"
                       value={aptThreshold}
                       onChange={(e) => setAptThreshold(Math.max(2, parseInt(e.target.value, 10) || 4))}
-                      className="mx-0.5 w-10 rounded border border-border-strong bg-card px-1 py-0.5 text-center text-fg"
+                      className="mx-1 w-10 rounded border border-border-strong bg-card px-1 py-0.5 text-center text-fg"
                     />
-                    + units)
-                  </span>
-                  <button
-                    onClick={() => excludeApts.mutate()}
-                    disabled={excludeApts.isPending || aptPreview.doors === 0}
-                    className="shrink-0 font-semibold text-brand-accent hover:underline disabled:opacity-40"
-                  >
-                    {aptPreview.doors > 0 ? `Exclude ${aptPreview.doors.toLocaleString()} · ${aptPreview.buildings} bldg` : 'None found'}
-                  </button>
+                    units or more
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <span className="text-fg-muted">
+                      {aptPreviewQ.isLoading ? '…' : apartmentPreviewLine(aptPreview, aptThreshold)}
+                    </span>
+                    <button
+                      onClick={() => excludeApts.mutate()}
+                      disabled={excludeApts.isPending || aptPreviewQ.isLoading || aptPreview.doors === 0}
+                      className="shrink-0 font-semibold text-brand-accent hover:underline disabled:opacity-40"
+                    >
+                      Remove apartments
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -3810,16 +3819,25 @@ export default function TurfsPage() {
               restrictError={restrictDoors.error || unrestrictDoors.error}
               onMovePin={
                 selected?.isActive !== false
-                  ? () => beginMovePin({
-                      // Any unit's id — the server's scope:'building' fan-out moves every unit at
-                      // that coordinate; the toast count comes back as res.moved.
-                      id: String(popupBuilding.units[0].id),
-                      addressLine1: popupBuilding.addressLine1,
-                      lng: popupBuilding.lng,
-                      lat: popupBuilding.lat,
-                      scope: 'building',
-                      count: popupBuilding.total,
-                    })
+                  ? () => {
+                      // The first unit's id — the server's scope:'building' fan-out moves the units of
+                      // ITS street address at that coordinate, never separate houses that merely share
+                      // the spot (docs/PROPOSAL_PLACEHOLDER_PINS.md §G), so the card counts those units,
+                      // and a door alone at its address moves as one door. The toast count comes back
+                      // as res.moved.
+                      const first = popupBuilding.units[0];
+                      const sameAddress = popupBuilding.units.filter(
+                        (u) => stackBaseOf(u.addressLine1) === stackBaseOf(first.addressLine1)
+                      ).length;
+                      beginMovePin({
+                        id: String(first.id),
+                        addressLine1: sameAddress > 1 ? popupBuilding.addressLine1 : first.addressLine1,
+                        lng: popupBuilding.lng,
+                        lat: popupBuilding.lat,
+                        scope: sameAddress > 1 ? 'building' : 'unit',
+                        count: sameAddress,
+                      });
+                    }
                   : undefined
               }
               moveDisabled={jobBusy || generate.isPending}

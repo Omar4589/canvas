@@ -22,6 +22,12 @@ import {
   confirmToast,
   confirmErrorMessage,
   confirmInvalidationKeys,
+  confirmNeedsRefetch,
+  confirmLabel,
+  pickSpotRow,
+  popupKeyAction,
+  popupHint,
+  UNPLACED_CONFIRM_PROMPT,
 } from '../lib/pinFixes.js';
 
 // Both pin layers registerLayers creates — click handling has to cover BOTH or every
@@ -60,6 +66,9 @@ const PinFixPopup = ({ row, index, count, confirmBusy, mapReady, onMove, onConfi
             {row.sub ? `${row.sub} · ` : ''}
             {row.door.city}, {row.door.state} {row.door.zipCode}
           </div>
+          {row.unplaced && (
+            <div className="mt-0.5 text-xs text-fg-muted">Its coordinate was shared with other addresses.</div>
+          )}
         </div>
         <button
           type="button"
@@ -99,7 +108,7 @@ const PinFixPopup = ({ row, index, count, confirmBusy, mapReady, onMove, onConfi
           disabled={confirmBusy}
           className="rounded-md border border-border-strong px-2.5 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-60"
         >
-          {confirmBusy ? 'Saving…' : 'Looks right — confirm'}
+          {confirmBusy ? 'Saving…' : confirmLabel(row)}
         </button>
         <a
           href={googleMapsUrl(row.door)}
@@ -133,16 +142,17 @@ const PinFixPopup = ({ row, index, count, confirmBusy, mapReady, onMove, onConfi
           →
         </button>
       </div>
-      <div className="border-t border-border px-3 py-1 text-[10px] text-fg-subtle">
-        Enter confirm · ← → next / prev · G maps · Esc close
-      </div>
+      <div className="border-t border-border px-3 py-1 text-[10px] text-fg-subtle">{popupHint(row)}</div>
     </div>
   );
 };
 
 // Pin Fixes — the work queue for approximate-geocode pins (the amber rings): every active
 // door whose coordinate came from a street-level match (coordConfidence 'interpolated') and
-// no human has vouched for yet. Two action surfaces, one selection: a MAP pin click opens
+// no human has vouched for yet — plus every home with no exact map spot (its coordinate was
+// shared with other addresses and the import's lookup couldn't place it; UNPLACED_PIN on the
+// server). Those rows never confirm on Enter, and Looks right asks once before vouching.
+// Two action surfaces, one selection: a MAP pin click opens
 // the top-right action popup (with Next/Prev and keyboard triage), a LIST row click expands
 // that row's inline buttons — and after any completed move or confirm the page auto-advances
 // to the next pin in popup mode. Lead-allowed like the Map and Turf pin tools — the server's
@@ -168,6 +178,7 @@ const PinFixesPage = () => {
   const selectionRef = useRef(null);
   selectionRef.current = selection;
   const idToRowKeyRef = useRef(new Map());
+  const spotRowKeysRef = useRef(new Map());
   const rowRefs = useRef(new Map());
   const [toast, setToast] = useState(null); // { text, tone?, undo? }
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -207,10 +218,13 @@ const PinFixesPage = () => {
   // Street-grouped queue rows (one row per pin — buildings collapse), the flat order the
   // arrows/advance walk, and the id → row map the pin-click handler reads. Pure
   // (lib/pinFixes.js) so the shapes are unit-tested.
-  const { groups, rowCount, rowKeys, idToRowKey } = useMemo(() => buildStreetGroups(households), [households]);
+  const { groups, rowCount, rowKeys, idToRowKey, spotRowKeys } = useMemo(() => buildStreetGroups(households), [households]);
   useEffect(() => {
     idToRowKeyRef.current = idToRowKey;
   }, [idToRowKey]);
+  useEffect(() => {
+    spotRowKeysRef.current = spotRowKeys;
+  }, [spotRowKeys]);
   const rowsByKey = useMemo(() => {
     const m = new Map();
     for (const g of groups) for (const r of g.rows) m.set(r.rowKey, r);
@@ -232,8 +246,9 @@ const PinFixesPage = () => {
     if (selection && !rowsByKey.has(selection.key)) setSelection(null);
   }, [selection, rowsByKey]);
 
-  // Map glyph grouping for the map source (same helper the row builder uses — the two must
-  // agree on what a building is, and do, because both call groupHouseholds).
+  // Map glyph grouping for the map source: one glyph per map spot (groupHouseholds), as on every
+  // admin map. The rows split a spot by street address, so a glyph can hold several rows — a glyph
+  // click goes through spotRowKeys (pickSpotRow), both keyed by the same buildingKeyForCoords.
   const { buildings, stackedIds } = useMemo(() => groupHouseholds(households), [households]);
 
   // ── Auto-advance ────────────────────────────────────────────────────────────────────────
@@ -366,7 +381,10 @@ const PinFixesPage = () => {
         const rk = idToRowKeyRef.current.get(String(props.id));
         if (rk) setSelection({ key: rk, source: 'map' });
       } else if (props.key) {
-        setSelection({ key: `b:${props.key}`, source: 'map' });
+        // A spot glyph can hold several rows (homes with different addresses on one shared spot):
+        // each click selects the next one.
+        const rk = pickSpotRow(spotRowKeysRef.current, props.key, selectionRef.current?.key);
+        if (rk) setSelection({ key: rk, source: 'map' });
       }
     };
     const enter = () => { map.getCanvas().style.cursor = 'pointer'; };
@@ -467,14 +485,19 @@ const PinFixesPage = () => {
     Promise.all(confirmInvalidationKeys(campaignId).map((queryKey) => qc.invalidateQueries({ queryKey })));
 
   // Confirm in place: the pin checks out against the imagery, so vouch it without moving it.
+  // A home with no exact map spot asks once first (the click is the only way there — Enter
+  // sits out on those rows). expectedCoordinates is the pin this page drew: if an import or
+  // another lead has moved it since, the server refuses (PIN_CHANGED) instead of vouching for
+  // a spot nobody looked at, and the list reloads.
   const confirmLocation = async (target, rowKey) => {
     if (!target || confirmBusy) return;
+    if (target.unplaced && !window.confirm(UNPLACED_CONFIRM_PROMPT)) return;
     captureAdvance(rowKey);
     setConfirmBusy(true);
     try {
       const res = await api(`/admin/campaigns/${campaignId}/households/${target.id}/confirm-location`, {
         method: 'POST',
-        body: { scope: target.scope },
+        body: { scope: target.scope, expectedCoordinates: [target.lng, target.lat] },
       });
       await refreshVouchCaches();
       setToast({ text: confirmToast(target.scope, res?.updated), undo: { id: target.id, scope: target.scope } });
@@ -482,6 +505,7 @@ const PinFixesPage = () => {
     } catch (err) {
       advanceRef.current = null; // a failed confirm must never advance later
       setToast({ text: confirmErrorMessage(err), tone: 'error' });
+      if (confirmNeedsRefetch(err)) listQ.refetch();
     } finally {
       setConfirmBusy(false);
     }
@@ -509,9 +533,11 @@ const PinFixesPage = () => {
   // closes. CAPTURE phase + stopPropagation: mapbox's keyboard handler (bubble phase, on the
   // canvas container) pans on arrows and never checks defaultPrevented, so halting the
   // capture descent is the load-bearing call (the DoorSelectionBar convention). Enter sits
-  // out on interactive targets so a focused button activates natively exactly once; Space is
-  // untouched (buttons activate on Space KEYUP — the documented TurfsPage trap). No dep
-  // array on purpose: the handler re-binds each render, so every closure is fresh.
+  // out on interactive targets so a focused button activates natively exactly once, and on
+  // homes with no exact map spot altogether (popupKeyAction answers null — their confirm is
+  // the click that asks first); Space is untouched (buttons activate on Space KEYUP — the
+  // documented TurfsPage trap). No dep array on purpose: the handler re-binds each render,
+  // so every closure is fresh.
   useEffect(() => {
     if (!selection || selection.source !== 'map' || !selectedRow) return undefined;
     const onKey = (e) => {
@@ -519,22 +545,23 @@ const PinFixesPage = () => {
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const t = e.target;
       const onControl = !!(t && (t.closest?.('button, a, input, textarea, select') || t.isContentEditable));
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const action = popupKeyAction(e.key, selectedRow);
+      if (action === 'prev' || action === 'next') {
         e.preventDefault();
         e.stopPropagation();
         const keys = rowKeysRef.current;
         const i = keys.indexOf(selection.key);
-        const next = e.key === 'ArrowLeft' ? keys[i - 1] : keys[i + 1];
+        const next = action === 'prev' ? keys[i - 1] : keys[i + 1];
         if (next) goToKey(next);
-      } else if (e.key === 'Enter') {
+      } else if (action === 'confirm') {
         if (onControl || confirmBusy) return; // native activation must run exactly once
         confirmLocation(selectedRow.target, selectedRow.rowKey);
-      } else if (e.key === 'g' || e.key === 'G') {
+      } else if (action === 'maps') {
         if (onControl) return;
         // Synchronous inside the keydown — a trusted user gesture, so no popup blocker
         // (deferring past an await WOULD get blocked); the rowNavigation.js convention.
         window.open(googleMapsUrl(selectedRow.door), '_blank', 'noopener');
-      } else if (e.key === 'Escape') {
+      } else if (action === 'close') {
         // The Esc ladder: an armed drag never reaches here (guard above); an open basemap
         // menu owns its own document Esc (MapStyleControl) — sit out via the MapPage ref
         // sniff so one press never does two things.
@@ -567,10 +594,11 @@ const PinFixesPage = () => {
           <div className="border-b border-border p-4">
             <h1 className="text-base font-semibold text-fg">Pin Fixes</h1>
             <p className="mt-1 text-xs text-fg-muted">
-              These pins were placed from the street address, not the exact building (the amber
-              rings). Click a pin on the map to work it from the popup — or a row here — then
-              drag it to the real building, or confirm it if it already sits right. Switch the
-              map to <strong>Hybrid</strong> for satellite imagery.
+              These homes need a pin check. Some were placed from the street address (the amber
+              rings); others have no exact map spot, because their coordinate was shared with
+              other addresses. Click a pin or a row, then drag it onto the real house, or confirm
+              it if it's already right. Switch the map to <strong>Hybrid</strong> for satellite
+              imagery.
             </p>
             <div className="mt-2 text-sm font-medium text-fg">
               {listQ.isLoading
@@ -610,7 +638,8 @@ const PinFixesPage = () => {
           ) : !listQ.isLoading && total === 0 ? (
             <div className="p-4 text-sm text-fg-muted">
               Nothing to fix — every door's pin is rooftop-accurate, hand-corrected, or
-              confirmed. New imports with street-level geocodes will show up here.
+              confirmed, and every home that shared a map spot has been placed or confirmed.
+              New imports with street-level geocodes will show up here.
             </div>
           ) : (
             groups.map((g) => (
@@ -659,7 +688,7 @@ const PinFixesPage = () => {
                               disabled={confirmBusy || movePin.armed}
                               className="rounded-md border border-border-strong px-2.5 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-60"
                             >
-                              {confirmBusy ? 'Saving…' : 'Looks right — confirm'}
+                              {confirmBusy ? 'Saving…' : confirmLabel(row)}
                             </button>
                             <a
                               href={googleMapsUrl(row.door)}
@@ -714,6 +743,7 @@ const PinFixesPage = () => {
             copy={movePin.copy}
             error={movePin.error}
             saving={movePin.saving}
+            canSave={movePin.canSave}
             onCancel={movePin.cancel}
             onSave={movePin.save}
             className="absolute right-3 top-3 z-10 w-72"

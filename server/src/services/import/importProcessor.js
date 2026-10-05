@@ -22,6 +22,7 @@ import { zeroOnlyMatchesForMisses } from '../voters/voterIdLookup.js';
 import { reapplyDoNotKnock } from '../dnc/doNotKnock.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 import { collectRevisitHomes } from './collectRevisitHomes.js';
+import { placeStackedPins, PIN_PASS_FAILED } from '../households/placeStackedPins.js';
 
 // Chunk a large $in lookup so a 25k-element query document never balloons memory.
 // Returns the same lean docs as the inline query it replaces, just fetched in pages.
@@ -97,7 +98,7 @@ export async function processImportJob(job) {
     const buffer = await loadRawImport(importJobId);
     const useSpill = importJob.kind !== 'preview' && importJob.kind !== 'geocode_check';
     if (useSpill) fs.writeFileSync(spillRaw, '');
-    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors } = await buildImportRows(
+    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors } = await buildImportRows(
       buffer,
       importJob.filename,
       importJob.fieldMapping || {},
@@ -142,7 +143,7 @@ export async function processImportJob(job) {
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
       await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'diffing', heartbeatAt: new Date() } });
-      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors });
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors });
       diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },
@@ -393,6 +394,35 @@ export async function processImportJob(job) {
     const touchedHhIds = [...new Set([...sourceHhIds, ...destHouseholds.map((h) => String(h._id))])];
     const { deactivated: deactivatedDoors } = await recomputeHouseholdActive(campaign._id, touchedHhIds);
 
+    // Homes on a shared map spot (services/households/placeStackedPins.js): mark them across the
+    // campaign, and — when address lookup is on — look THIS file's ones up by their own address and
+    // place the ones whose answer can be trusted. Non-fatal: a failure leaves the marks, says so on
+    // the import's line (pinPassError, generic; the full cause only in pinPassCause for super-admins,
+    // never in lastError), and importing the file again finishes the job. Its own stage, and its own
+    // heartbeat: a provider batch can wait 180 s, longer than the stale-job sweep's patience.
+    const paidScope = new Set(householdMap.keys());
+    householdMap.clear(); // nothing below reads it; the pass holds the campaign's doors instead
+    await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'pins', heartbeatAt: new Date() } });
+    let pins;
+    const pinBeat = setInterval(() => {
+      ImportJob.updateOne({ _id: importJobId }, { $set: { heartbeatAt: new Date() } }).catch(() => {});
+    }, 30_000);
+    pinBeat.unref?.();
+    try {
+      pins = await placeStackedPins({
+        campaign,
+        importJob,
+        paidScope,
+        tallyIds: destHouseholds.map((h) => String(h._id)),
+        allowPaid: process.env.GEOCODE_ENABLED === 'true' && !!process.env.GEOCODIO_API_KEY,
+      });
+    } catch (err) {
+      console.error('[import] map pin check failed (non-fatal):', err?.message);
+      pins = { pinPassError: PIN_PASS_FAILED, pinPassCause: String(err?.message || err).slice(0, 300) };
+    } finally {
+      clearInterval(pinBeat);
+    }
+
     // Opt-in: collect already-worked homes that gained a new target voter into a saved
     // search so the admin can cut a fresh (billable) revisit round. Non-fatal — a hiccup
     // here must never fail an otherwise-successful import.
@@ -425,6 +455,14 @@ export async function processImportJob(job) {
           coordConflictTies: coordConflictTies || 0,
           placeholderPins: placeholderPins || 0,
           placeholderPinDoors: placeholderPinDoors || 0,
+          strayPinDoors: strayPinDoors || 0,
+          pinsPlacedExact: pins?.pinsPlacedExact || 0,
+          pinsConfirmedInPlace: pins?.pinsConfirmedInPlace || 0,
+          pinsStillUnplaced: pins?.pinsStillUnplaced || 0,
+          pinLookupsCached: pins?.pinLookupsCached || 0,
+          pinLookupsOverCap: pins?.pinLookupsOverCap || 0,
+          pinPassError: pins?.pinPassError || null,
+          pinPassCause: pins?.pinPassCause || null,
           ...(geoStats || {}),
           ...(revisit ? { revisitSavedSearchId: revisit.savedSearchId, revisitHouseholdCount: revisit.householdCount } : {}),
         },
@@ -437,6 +475,7 @@ export async function processImportJob(job) {
           overwrittenHandEdits: counts.overwrittenHandEdits || 0,
           keptPins: counts.keptPins || 0,
           keptConfirmed: counts.keptConfirmed || 0,
+          keptPlacements: counts.keptPlacements || 0,
         },
       }
     );

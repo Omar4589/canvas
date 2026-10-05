@@ -90,7 +90,7 @@ async function forecastPersons(validRows, uidSource, orgId) {
  * a person who exists only in a SIBLING campaign forecasts as a NEW voter here (their
  * row here will be an insert), and never as a move/orphan.
  */
-export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null, coordConflicts = 0, coordConflictTies = 0, placeholderPins = 0, placeholderPinDoors = 0 }) {
+export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null, coordConflicts = 0, coordConflictTies = 0, placeholderPins = 0, placeholderPinDoors = 0, strayPinDoors = 0 }) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
@@ -305,6 +305,7 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       coordConflictTies,
       placeholderPins,
       placeholderPinDoors,
+      strayPinDoors,
     },
     samples: {
       moved,

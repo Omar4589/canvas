@@ -163,6 +163,10 @@ export default function CampaignsPage() {
       // above — a stale invoice after saving the drawer reads as "the toggle didn't work".
       // They all share the ['reports', …] prefix, so one invalidation catches the lot.
       qc.invalidateQueries({ queryKey: ['reports'] });
+      // A drawer save can attach or swap the campaign's survey, which changes the survey list's usage
+      // (usedByCampaigns, usedElsewhere) and, for a lead, which surveys count organization-wide
+      // (hasResponses, owner ruling 2026-10-03): refresh it, as the Survey tab's attach does.
+      qc.invalidateQueries({ queryKey: ['surveys'] });
       setEditing(null);
     },
   });

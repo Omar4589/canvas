@@ -8,8 +8,8 @@ import mongoose from 'mongoose';
 // Proves: the ONE needs-fixing predicate (interpolated + unconfirmed + active) drives the
 // list, and the campaigns-rollup pinsToFix badge equals it; confirm-in-place stamps WITHOUT
 // touching coordSource/coordConfidence and writes a from==to 'confirm' audit row; the
-// building fan-out stamps only interpolated siblings (a corrected or exact door on the same
-// pin is never vouched — the repair-script latest-row invariant); undo clears the stamp and
+// building fan-out stamps only the same street address's interpolated units (a corrected or exact
+// unit, or another address on the same pin, is never vouched — the repair-script latest-row invariant); undo clears the stamp and
 // writes no row; a real MOVE clears the stamp; confirm refuses non-approximate doors
 // (NOT_APPROXIMATE), canvassers (403), and archived campaigns (409); and the re-import pin
 // shield keeps a confirmed door's pin (keptConfirmed, not keptPins) until overwriteHandEdits
@@ -73,20 +73,25 @@ before(async () => {
   await CampaignManager.create({ campaignId: camp._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
   await Subscription.create({ organizationId: org._id, status: 'internal' });
 
-  const [h1, h2, h3, h4, h5, h6, h7, h8, h9] = await Household.insertMany([
+  const [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10] = await Household.insertMany([
     // In the queue: interpolated, unconfirmed, active.
     hh(org._id, camp._id, 1, { coords: [-81.41, 28.31] }),
-    hh(org._id, camp._id, 2, { coords: STACK }),
-    hh(org._id, camp._id, 3, { coords: STACK }),
-    // Same pin as h2/h3 but NOT eligible: hand-corrected and rooftop-exact — the building
+    // h2..h5 are units of ONE street address (2 Approx Way) on one pin — the building fan-outs act on
+    // one street address, never on every door sharing the pin (docs/PROPOSAL_PLACEHOLDER_PINS.md §G).
+    hh(org._id, camp._id, 2, { coords: STACK, extra: { addressLine1: '2 Approx Way Apt 1', normalizedAddress: '2 APPROX WAY APT 1|TOWN|FL|34741' } }),
+    hh(org._id, camp._id, 3, { coords: STACK, extra: { addressLine1: '2 Approx Way Apt 2', normalizedAddress: '2 APPROX WAY APT 2|TOWN|FL|34741' } }),
+    // Same address and pin as h2/h3 but NOT eligible: hand-corrected and rooftop-exact — the building
     // fan-out must leave both alone.
-    hh(org._id, camp._id, 4, { coords: STACK, coordSource: 'corrected', coordConfidence: null, extra: { correctedAt: new Date() } }),
-    hh(org._id, camp._id, 5, { coords: STACK, coordConfidence: 'exact' }),
+    hh(org._id, camp._id, 4, { coords: STACK, coordSource: 'corrected', coordConfidence: null, extra: { addressLine1: '2 Approx Way Apt 3', normalizedAddress: '2 APPROX WAY APT 3|TOWN|FL|34741', correctedAt: new Date() } }),
+    hh(org._id, camp._id, 5, { coords: STACK, coordConfidence: 'exact', extra: { addressLine1: '2 Approx Way Apt 4', normalizedAddress: '2 APPROX WAY APT 4|TOWN|FL|34741' } }),
     // Out of the queue for every other reason:
     hh(org._id, camp._id, 6, { coords: [-81.42, 28.32], coordConfidence: 'exact' }),
     hh(org._id, camp._id, 7, { coords: [-81.43, 28.33], coordSource: 'corrected', coordConfidence: null, extra: { correctedAt: new Date() } }),
     hh(org._id, camp._id, 8, { coords: [-81.44, 28.34], extra: { locationConfirmedBy: admin._id, locationConfirmedAt: new Date() } }),
     hh(org._id, camp._id, 9, { coords: [-81.45, 28.35], extra: { isActive: false } }),
+    // A DIFFERENT street address on the same pin, interpolated and unconfirmed: in the queue, and never
+    // vouched by 2 Approx Way's building confirm.
+    hh(org._id, camp._id, 10, { coords: STACK, extra: { addressLine1: '10 Other Rd', normalizedAddress: '10 OTHER RD|TOWN|FL|34741' } }),
   ]);
 
   const app = createApp();
@@ -94,7 +99,7 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(ctx, {
-    org, camp, admin, lead, canv, h1, h2, h3, h4, h5, h6, h7, h8, h9,
+    org, camp, admin, lead, canv, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10,
     adminTok: signUserToken(admin), leadTok: signUserToken(lead), canvTok: signUserToken(canv),
   });
 });
@@ -145,10 +150,10 @@ test('1. the queue is exactly the needs-fixing set, for admins and granted leads
   const ids = new Set(r.json.households.map((h) => h.id));
   assert.deepStrictEqual(
     [...ids].sort(),
-    [ctx.h1._id, ctx.h2._id, ctx.h3._id].map(String).sort(),
+    [ctx.h1._id, ctx.h2._id, ctx.h3._id, ctx.h10._id].map(String).sort(),
     'interpolated+unconfirmed+active only — never corrected (h4/h7), exact (h5/h6), confirmed (h8), inactive (h9)'
   );
-  assert.strictEqual(r.json.total, 3);
+  assert.strictEqual(r.json.total, 4);
   assert.strictEqual(r.json.truncated, false);
 
   const asLead = await listQueue(ctx.leadTok);
@@ -158,7 +163,7 @@ test('1. the queue is exactly the needs-fixing set, for admins and granted leads
 });
 
 test('2. the sidebar badge (campaigns rollup pinsToFix) equals the queue total', { skip }, async () => {
-  assert.strictEqual(await badgeCount(), 3);
+  assert.strictEqual(await badgeCount(), 4);
 });
 
 test('3. confirm-in-place stamps without touching provenance, from==to audit row; queue + badge drop', { skip }, async () => {
@@ -178,8 +183,8 @@ test('3. confirm-in-place stamps without touching provenance, from==to audit row
   assert.deepStrictEqual(rows[0].from.coordinates, rows[0].to.coordinates, 'nothing moved: from == to');
 
   const q = await listQueue();
-  assert.strictEqual(q.json.total, 2);
-  assert.strictEqual(await badgeCount(), 2);
+  assert.strictEqual(q.json.total, 3);
+  assert.strictEqual(await badgeCount(), 3);
 });
 
 test('4. confirm refuses a door that is not approximate (exact and corrected alike)', { skip }, async () => {
@@ -190,25 +195,26 @@ test('4. confirm refuses a door that is not approximate (exact and corrected ali
   }
 });
 
-test('5. building confirm fans out to interpolated siblings ONLY — corrected/exact doors on the pin stay unvouched', { skip }, async () => {
+test('5. building confirm fans out to interpolated units of the same street address ONLY — corrected/exact units and other addresses stay unvouched', { skip }, async () => {
   const r = await confirm(ctx.h2._id, { scope: 'building' }, ctx.leadTok);
   assert.strictEqual(r.status, 200, 'a granted lead can confirm');
   assert.strictEqual(r.json.updated, 2, 'h2 + its interpolated sibling h3');
 
-  const [h2, h3, h4, h5] = await Promise.all(
-    [ctx.h2, ctx.h3, ctx.h4, ctx.h5].map((h) => Household.findById(h._id).lean())
+  const [h2, h3, h4, h5, h10] = await Promise.all(
+    [ctx.h2, ctx.h3, ctx.h4, ctx.h5, ctx.h10].map((h) => Household.findById(h._id).lean())
   );
   assert.ok(h2.locationConfirmedAt && h3.locationConfirmedAt);
   assert.strictEqual(h4.locationConfirmedAt, null, 'the hand-corrected sibling is never vouched');
   assert.strictEqual(h5.locationConfirmedAt, null, 'the rooftop-exact sibling was never in question');
+  assert.strictEqual(h10.locationConfirmedAt, null, 'another street address on the same pin is never vouched with it');
   // No 'confirm' row may ever land on a corrected door — repair:import-pins reverts its own
   // work only while the LATEST audit row is import_repair, and a confirm row would mask it.
   assert.strictEqual(await HouseholdLocationChange.countDocuments({ householdId: ctx.h4._id, source: 'confirm' }), 0);
   assert.strictEqual(await HouseholdLocationChange.countDocuments({ source: 'confirm' }), 3, 'h1 + h2 + h3, nothing else');
 
   const q = await listQueue();
-  assert.strictEqual(q.json.total, 0, 'queue cleared');
-  assert.strictEqual(await badgeCount(), 0);
+  assert.strictEqual(q.json.total, 1, 'only 10 Other Rd is left');
+  assert.strictEqual(await badgeCount(), 1);
 });
 
 test('6. undo clears the stamp, writes NO audit row, and the door re-enters the queue', { skip }, async () => {
@@ -224,7 +230,7 @@ test('6. undo clears the stamp, writes NO audit row, and the door re-enters the 
     'un-stamping is not a location event — the confirm row stands alone'
   );
   const q = await listQueue();
-  assert.strictEqual(q.json.total, 1, 'h1 is back');
+  assert.strictEqual(q.json.total, 2, 'h1 is back, beside 10 Other Rd');
 });
 
 test('7. a real MOVE clears the stamp — the vouch described the old spot', { skip }, async () => {
@@ -238,7 +244,7 @@ test('7. a real MOVE clears the stamp — the vouch described the old spot', { s
   assert.strictEqual(h.locationConfirmedAt, null, 'the move superseded the vouch');
   assert.strictEqual(h.locationConfirmedBy, null);
   const q = await listQueue();
-  assert.strictEqual(q.json.total, 0, 'a corrected door leaves the queue via coordConfidence null');
+  assert.strictEqual(q.json.total, 1, 'a corrected door leaves the queue via coordConfidence null (10 Other Rd stays)');
 });
 
 test('8. re-import pin shield: a confirmed pin survives by omission (keptConfirmed, not keptPins); overwriteHandEdits takes the file pin AND clears the stamp', { skip }, async () => {

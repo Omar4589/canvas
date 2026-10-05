@@ -65,7 +65,8 @@ button and an **Open dashboard →** link; **table** is the dense many-campaigns
 info and actions. A **search box** (name or state) and a **sort** menu (recent, name, households,
 knocked %, setup progress) sit above the list, and **archived campaigns collapse into their own
 section** at the bottom so finished work doesn't crowd the live view. Each card/row's **⋮ menu**
-holds View dashboard, Assignments, and — for org admins — Edit, Archive/Reactivate, and Delete.
+holds View dashboard, Assignments, History and Edit — the Edit drawer opens for team leads too, with
+the org-admin-only fields greyed out — and, for org admins, Archive/Reactivate and Delete.
 
 Archived campaigns are reachable from the **phone** too: the mobile admin Overview has a **Show
 archived campaigns** reveal (rows tagged *Read-only*), and every campaign-scoped admin screen's
@@ -248,7 +249,8 @@ pass with **0 canvassers assigned**.
 Open **Campaigns** and use a card/row's **⋮ menu** (Edit / Archive / Delete — the edit form opens
 in the drawer). The rules protect your data once canvassing has started:
 
-- **Name, state** — always editable.
+- **Name** — always editable.
+- **State** — always editable, **org admins only**.
 - **Key dates + note** — always editable, **org admins only** (a lead can edit the campaign's name,
   survey, timezone, and door goal, but not its dates).
 - **Door goal + goal date** — always editable, **by org admins AND team leads.** The deliberate
@@ -270,8 +272,14 @@ in the drawer). The rules protect your data once canvassing has started:
   on survey campaigns), and History records the switch-off.
 - **Survey template** — the campaign's **Survey** tab (`/campaigns/:id/survey`) is where you attach,
   change, or preview the survey. Repointing a survey campaign warns you if the chosen survey already
-  has responses (new answers report alongside the old ones). To change questions, duplicate the
-  survey on the Surveys page and pick the copy. See [SURVEYS.md](SURVEYS.md).
+  has responses (new answers report alongside the old ones) — for a team lead the warning counts only
+  the responses in their own campaigns, and shows only when there are some. To change questions, an
+  org admin duplicates the survey on the Surveys page and picks the copy; a team lead, who has no
+  Surveys page, attaches it with **Change survey** on the campaign's Survey tab, then uses
+  **Duplicate** at the top of the campaign's **Edit survey** page. A team lead never leaves a
+  campaign with no survey: the Survey tab can change a campaign's survey but not remove it, and the
+  **Edit** drawer offers a lead its empty survey choice only while the campaign has no survey yet.
+  See [SURVEYS.md](SURVEYS.md).
 - **Door outcomes** — always editable, **by org admins AND team leads** (same reasoning as the door
   goal: whoever runs the campaign owns what canvassers can record). Lives on the **App
   Customization** page — see the section below. **The one exception is an outcome that starts
@@ -1218,7 +1226,20 @@ The cold-start readiness chain is a pure derivation in
 - **The edit drawer is open to LEADS**, not just org admins — the server has always accepted
   `name`/`surveyTemplateId`/`timeZone` from them and now takes the goal too, so withholding the
   drawer entirely left a lead unable to reach a field they own. `canEditAdminFields={isOrgAdmin}`
-  renders the org-admin-only inputs disabled with a one-line reason rather than hiding them.
+  renders the org-admin-only inputs disabled with a one-line reason rather than hiding them. Every
+  org-admin-only control reads `canEditAdminFields`, **Active** and **Restricted doors on invoices**
+  included (only since 2026-10-03, though this sentence already said so), and for a lead the survey
+  select offers its empty choice only while the campaign has no survey, so a lead can swap the
+  survey here but never detach it — the Survey tab's own rule, where *Attach survey* needs a choice.
+  Save sends a lead only `name`, `surveyTemplateId`, `timeZone`, `doorGoal` and `goalDate`
+  (`lib/campaignPatch.js`): the `PATCH` 403s each field on its admin-only list — `isActive`, `type`,
+  `state`, the three key dates, `datesNote`, `billRestrictedDoors`, `enabledOutcomes` (campaigns.js
+  :497) — when a lead sends it, even unchanged, and until 2026-10-03 the drawer sent them all, so a
+  lead's Save was always refused. (`disabledOutcomes` and `doorAddPolicy` are lead-editable too, on
+  App Customization; they aren't drawer fields.) Pinned by
+  [campaignPatch.test.js](../client/src/lib/campaignPatch.test.js), against the server's refused
+  list, and by [campaignGoal.int.test.js](../server/test/campaignGoal.int.test.js), which sends a
+  body shaped like the drawer's through the real `PATCH`, whole and then through `campaignPatchFor`.
 - **App Customization:** [AppCustomizationPage.jsx](../client/src/pages/AppCustomizationPage.jsx)
   and its phone twin [admin/app-customization.jsx](../mobile/app/(app)/admin/app-customization.jsx).
   The "Off until you turn it on" section derives one of three states from the campaigns response's

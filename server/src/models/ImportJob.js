@@ -63,6 +63,31 @@ const importJobSchema = new mongoose.Schema(
     // a geocoder-dropped door doesn't).
     placeholderPins: { type: Number, default: 0 },
     placeholderPinDoors: { type: Number, default: 0 },
+    // Doors on an apartment building's or park's spot with a different street address (the preview's
+    // "N homes sit on a building's spot" line). Placeholder doors are placeholderPinDoors above.
+    strayPinDoors: { type: Number, default: 0 },
+    // The placement pass's outcome for THIS file's homes (services/households/placeStackedPins.js),
+    // $set from state at the end: placed by the address lookup at a rooftop or point; placed "in
+    // place" (the lookup confirmed the spot they already had); still without an exact spot (Pin Fixes).
+    pinsPlacedExact: { type: Number, default: 0 },
+    pinsConfirmedInPlace: { type: Number, default: 0 },
+    pinsStillUnplaced: { type: Number, default: 0 },
+    // Lookup spend for the pass. New = bought ($inc after each provider chunk); cached and over-ceiling
+    // are a final $set (an $inc would double-count cache hits on a retry). Hidden from organizations.
+    pinLookupsNew: { type: Number, default: 0 },
+    pinLookupsCached: { type: Number, default: 0 },
+    pinLookupsOverCap: { type: Number, default: 0 },
+    // The ceiling's ledger: household ids already sent to the provider by this import ($addToSet per
+    // chunk), so a retried job never charges the same home twice. Hidden everywhere.
+    pinProbedIds: { type: [String], default: undefined },
+    // Doors whose lookup placement this import's file merely echoed back, so the placed pin was kept.
+    keptPlacements: { type: Number, default: 0 },
+    // The pass's org-visible line when it didn't finish (generic, never a provider message), and the
+    // full cause for the super-admin page only: a fixed provider cause ("HTTP 401", "timeout",
+    // "network: ENOTFOUND", "bad response (not JSON)", an error name), "busy: …", or a thrown
+    // non-provider message. Never written to lastError, which organizations read.
+    pinPassError: { type: String, default: null },
+    pinPassCause: { type: String, default: null },
     // Households the incoming voters lived at BEFORE this import (captured pre-apply).
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.

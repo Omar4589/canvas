@@ -21,6 +21,18 @@ import {
   autoPresentation,
   DUPLICATE_IN_LIST,
   routesLockedHint,
+  savedInGoTo,
+  saveErrorFor,
+  responsesPhrase,
+  responsesNoteOpening,
+  COPY_SUFFIX,
+  copyName,
+  savedShape,
+  restoredOnRetype,
+  retypedCard,
+  retireOption,
+  retiresOnRemove,
+  retireBlock,
   routeTargets,
   defaultTargetAt,
   continueLabel,
@@ -801,4 +813,420 @@ test('hasBlockingIssues: any live error blocks Save; warnings never do', () => {
   assert.equal(hasBlockingIssues({ intro: 'x', blocks: [] }), true);
   assert.equal(hasBlockingIssues({ closing: 'x', blocks: [] }), true);
   assert.equal(hasBlockingIssues({ blocks: [{}, { note: 'x' }] }), true);
+});
+
+// ---- Responses, locks and copies (docs/PROPOSAL_LEAD_SURVEY_LOCKS.md) --------------------------
+
+// A survey saved in Go to, as the survey list sends it: Yes routes to the closing, a retired answer is
+// kept for reports, the Free-text question routes too, and the closing ends the conversation.
+const SAVED = {
+  _id: 's1',
+  name: 'Door script',
+  flow: 'script',
+  questions: [
+    {
+      ...choice('support', 'Can we count on your support?', []),
+      options: [
+        { id: 'yes', text: 'Yes', goTo: 'close_2' },
+        { id: 'no', text: 'No', goTo: null },
+        { id: 'old', text: 'Maybe later', goTo: null, retired: true },
+      ],
+    },
+    text('why_not', 'Why not?', { goTo: 'close_2' }),
+    closingBlock('close_2', 'Close 2', 'Thanks for your time!', END_KEY),
+  ],
+};
+
+// The card a type pill makes: QuestionCard's setType is retypedCard, given the card's routeFor object
+// and the two blank answers SurveyBuilder.jsx mints (optionId's first two ids). With no route, the
+// form is in Show only if and the card offers no target.
+const blankAnswers = () => [{ id: 'opt', text: '' }, { id: 'opt_2', text: '' }];
+const retype = (saved, card, t, route = { flow: 'list', targets: [] }) => retypedCard(saved, card, t, route, blankAnswers);
+// A card's route as routeFor builds it: the form's flow, and the { value, label } targets its selects offer.
+const routeAt = (questions, index, flow = 'script') => ({ flow, targets: routeTargets(questions, index) });
+
+test('responses read for whoever is looking: an admin’s total, a lead’s own, never “elsewhere”', () => {
+  const admin = { isOrgAdmin: true };
+  assert.equal(responsesPhrase({ responseCount: 35, hasResponses: true }, admin), '35 responses');
+  assert.equal(responsesPhrase({ responseCount: 1, hasResponses: true }, admin), '1 response');
+  assert.equal(responsesPhrase({ responseCount: 1234, hasResponses: true }, admin), `${(1234).toLocaleString()} responses`);
+  assert.equal(responsesPhrase({ responseCount: 0, hasResponses: false }, admin), null);
+  const lead = { isOrgAdmin: false };
+  assert.equal(responsesPhrase({ responseCount: 10, hasResponses: true }, lead), '10 responses in your campaigns');
+  assert.equal(responsesPhrase({ responseCount: 1, hasResponses: true }, lead), '1 response in your campaigns');
+  // A survey on the lead's campaigns none of whose answers are counted in them: the bare yes/no.
+  assert.equal(responsesPhrase({ responseCount: 0, hasResponses: true }, lead), 'responses in your organization');
+  assert.equal(responsesPhrase({ responseCount: 0, hasResponses: false }, lead), null);
+  // Lead wording is the default, so a host that forgets the flag never passes a lead's count off as
+  // the survey's.
+  assert.equal(responsesPhrase({ responseCount: 10, hasResponses: true }), '10 responses in your campaigns');
+  assert.equal(responsesPhrase(null), null);
+  for (const responseCount of [0, 1, 10]) {
+    for (const hasResponses of [true, false]) {
+      const phrase = responsesPhrase({ responseCount, hasResponses }, lead) || '';
+      assert.ok(!phrase.startsWith('0 '), `no "0 responses" for ${responseCount}/${hasResponses}`);
+      assert.ok(!phrase.includes('elsewhere'), `never "elsewhere" for ${responseCount}/${hasResponses}`);
+    }
+  }
+});
+
+test('a copy is named “… (Copy)”, cut to the 200-character limit, never between an emoji’s halves', () => {
+  assert.equal(copyName('Door script'), 'Door script (Copy)');
+  assert.equal(copyName('  Door script  '), 'Door script (Copy)');
+  assert.equal(copyName('x'.repeat(200)).length, 200);
+  const fits = 'x'.repeat(193);
+  assert.equal(copyName(fits), `${fits}${COPY_SUFFIX}`);
+  assert.equal(copyName(`${'a'.repeat(192)} bbbbbbbbb`), `${'a'.repeat(192)} (Copy)`, 'no double space at the cut');
+  // An emoji astride the cut goes whole: its lone first half would be stored as U+FFFD.
+  const astride = copyName(`${'a'.repeat(192)}😀${'b'.repeat(10)}`);
+  assert.equal(astride, `${'a'.repeat(192)} (Copy)`);
+  assert.equal(astride.length, 199);
+  assert.ok(!/[\uD800-\uDFFF]/.test(astride), 'no lone surrogate');
+  // One that fits stays whole.
+  const whole = copyName(`${'a'.repeat(191)}😀${'b'.repeat(10)}`);
+  assert.equal(whole, `${'a'.repeat(191)}😀 (Copy)`);
+  assert.equal(whole.length, 200);
+});
+
+test('savedShape is the survey as opened, by stored key: each block’s type, words and answer ids', () => {
+  const shape = savedShape(SAVED);
+  assert.deepEqual([...shape.keys()], ['support', 'why_not', 'close_2']);
+  assert.equal(shape.get('support').type, 'single_choice');
+  assert.equal(shape.get('close_2').type, 'statement');
+  assert.deepEqual([...shape.get('support').answerIds], ['yes', 'no', 'old'], 'a retired answer is still a saved one');
+  assert.equal(shape.get('support').options[0].goTo, 'close_2', 'an answer as loaded, its route included');
+  assert.equal(shape.get('support').label, 'Can we count on your support?');
+  assert.equal(shape.get('why_not').label, 'Why not?');
+  assert.equal(shape.get('close_2').label, 'Thanks for your time!', 'a closing’s words are its read-aloud text');
+  // A block's own route is never read back from it: a restore reads what the card kept, and a retired
+  // block goes with no arrow.
+  for (const [key, entry] of shape) assert.equal('goTo' in entry, false, key);
+  // A Show-only-if survey opens with no routes, a stray stored one included (questionsForEditing).
+  const list = savedShape({
+    _id: 'p',
+    flow: 'list',
+    questions: [choice('support', 'Support?', [['yes', 'Yes', 'why_not'], ['no', 'No']]), text('why_not', 'Why not?')],
+  });
+  assert.equal(list.get('support').options[0].goTo, null);
+  assert.equal(savedShape(null).size, 0, 'a new survey has nothing saved');
+});
+
+test('a question put back to its saved type gets what the switch cleared, as it stood, once, and never the survey as saved', () => {
+  // An unlocked Show-only-if survey whose question was saved with Yes / No / Maybe later.
+  const opened = {
+    _id: 'p',
+    flow: 'list',
+    questions: [
+      choice('support', 'Can we count on your support?', [['yes', 'Yes'], ['no', 'No'], ['maybe_later', 'Maybe later']]),
+      text('why_not', 'Why not?'),
+    ],
+  };
+  const saved = savedShape(opened).get('support');
+  const [card] = questionsForEditing(opened);
+
+  // Yes reworded, Unsure added and Maybe later removed outright, then Free text and back: exactly
+  // those answers, never the survey as saved.
+  const edited = {
+    ...card,
+    options: [{ ...card.options[0], text: 'Yes, definitely' }, card.options[1], { id: 'unsure', text: 'Unsure', goTo: null }],
+  };
+  const asText = retype(saved, edited, 'text');
+  assert.deepEqual(asText.options, []);
+  assert.deepEqual(asText.retyped.options, edited.options, 'the card keeps exactly what the switch cleared');
+  const back = retype(saved, asText, 'single_choice');
+  assert.deepEqual(back.options, edited.options);
+  assert.notEqual(back.options[0], edited.options[0], 'as copies');
+  assert.deepEqual(back.options.map((o) => o.id), ['yes', 'no', 'unsure'], 'Maybe later, removed before the switch, stays gone');
+  assert.deepEqual(emptyIssues(back), {});
+  assert.equal('retyped' in cleanBlock(back, { key: 'support', flow: 'list' }), false, 'Save never sends what a card keeps');
+
+  // In Go to an arrow comes back while its target is offered; one to a block removed since, or now
+  // above the card, comes back as Continue.
+  const goTo = {
+    _id: 'g',
+    flow: 'script',
+    questions: [
+      choice('support', 'Support?', [['yes', 'Yes', 'close_a'], ['no', 'No', END_KEY], ['maybe', 'Maybe', 'close_b'], ['unsure', 'Unsure', 'why_not']]),
+      text('why_not', 'Why not?', { goTo: 'close_a' }),
+      closingBlock('close_a', 'Close A', 'Thanks!', END_KEY),
+      closingBlock('close_b', 'Close B', 'Bye!', END_KEY),
+    ],
+  };
+  const goToSaved = savedShape(goTo);
+  const loaded = questionsForEditing(goTo);
+  const [support, whyNot, closeA, closeB] = loaded;
+  const supportAsText = retype(goToSaved.get('support'), support, 'text', routeAt(loaded, 0));
+  const moved = [whyNot, supportAsText, closeA]; // Close B removed, Why not? moved above the card
+  assert.deepEqual(
+    retype(goToSaved.get('support'), supportAsText, 'single_choice', routeAt(moved, 1)).options.map((o) => [o.id, o.goTo]),
+    [['yes', 'close_a'], ['no', END_KEY], ['maybe', null], ['unsure', null]]
+  );
+  // A Free-text question whose arrow was re-pointed to End, taken to a choice type and back: End, not
+  // its saved target.
+  const repointed = [support, { ...whyNot, goTo: END_KEY }, closeA, closeB];
+  const whyAsChoice = retype(goToSaved.get('why_not'), repointed[1], 'single_choice', routeAt(repointed, 1));
+  assert.equal(whyAsChoice.goTo, null);
+  assert.equal(retype(goToSaved.get('why_not'), whyAsChoice, 'text', routeAt(repointed, 1)).goTo, END_KEY);
+
+  // After the real Switch back (Close B removed first: nothing leads to it now, and the compiler would
+  // refuse), which clears the cards' routes but not what they keep, nothing comes back with an arrow:
+  // one would switch the survey straight back to Go to.
+  const { questions: switched, errors } = switchBack([supportAsText, whyAsChoice, closeA], goTo);
+  assert.deepEqual(errors, []);
+  assert.equal(switched[0].retyped.options[0].goTo, 'close_a', 'what the card keeps still has its arrows');
+  const answersBack = retype(goToSaved.get('support'), switched[0], 'single_choice', routeAt(switched, 0, 'list'));
+  assert.deepEqual(answersBack.options.map((o) => [o.id, o.goTo]), [['yes', null], ['no', null], ['maybe', null], ['unsure', null]]);
+  assert.equal(entersScript('list', answersBack), false);
+  const routeBack = restoredOnRetype(goToSaved.get('why_not'), switched[1], 'text', {
+    flow: 'list',
+    targets: routeTargets(switched, 1).map((t) => t.value),
+  });
+  assert.equal('goTo' in routeBack, false, 'the Free-text question gets no arrow back');
+  assert.equal(entersScript('list', retype(goToSaved.get('why_not'), switched[1], 'text', routeAt(switched, 1, 'list'))), false);
+
+  // Typed answers are never replaced: Multiple back to the saved Single gives only what the card keeps.
+  assert.deepEqual(restoredOnRetype(saved, retype(saved, card, 'multiple_choice'), 'single_choice'), { retyped: {} });
+  // Through blank answers (Free text → Multiple → Single) the kept ones come back.
+  const viaBlanks = retype(saved, retype(saved, retype(saved, card, 'text'), 'multiple_choice'), 'single_choice');
+  assert.deepEqual(viaBlanks.options, card.options);
+  // With nothing kept (answers blanked by hand, Single → Multiple → Single) nothing comes back, and
+  // never the saved answers.
+  const blanked = { ...card, options: card.options.map((o) => ({ ...o, text: '' })) };
+  assert.deepEqual(restoredOnRetype(saved, retype(saved, blanked, 'multiple_choice'), 'single_choice'), { retyped: {} });
+
+  // Used once: back at the saved type the kept answers leave the card, whether they came back or typed
+  // answers won. Free text and back, an edit, Multiple, every answer blanked, back to Single: the blanks
+  // stay.
+  const undone = retype(saved, retype(saved, card, 'text'), 'single_choice');
+  assert.deepEqual(undone.options, card.options, 'the exact undo');
+  assert.equal('options' in undone.retyped, false);
+  const reworded = { ...undone, options: [{ ...undone.options[0], text: 'Yes!' }, ...undone.options.slice(1)] };
+  const multiple = retype(saved, reworded, 'multiple_choice');
+  const allBlank = { ...multiple, options: multiple.options.map((o) => ({ ...o, text: '' })) };
+  const blanksStay = restoredOnRetype(saved, allBlank, 'single_choice');
+  assert.deepEqual(Object.keys(blanksStay), ['retyped']);
+  assert.equal('options' in blanksStay.retyped, false);
+  // Free text → Multiple → A, B typed → Single → both blanked → Multiple → Single: the blanks stay.
+  const fresh = retype(saved, retype(saved, card, 'text'), 'multiple_choice');
+  const typedAB = retype(saved, { ...fresh, options: [{ id: 'opt', text: 'A' }, { id: 'opt_2', text: 'B' }] }, 'single_choice');
+  assert.deepEqual(typedAB.options.map((o) => o.text), ['A', 'B'], 'typed answers win');
+  assert.equal('options' in typedAB.retyped, false, 'and the kept ones leave the card');
+  const blankAB = { ...typedAB, options: typedAB.options.map((o) => ({ ...o, text: '' })) };
+  assert.deepEqual(Object.keys(restoredOnRetype(saved, retype(saved, blankAB, 'multiple_choice'), 'single_choice')), ['retyped']);
+  // ...while a second Free text and back restores the answers as they stood just before it.
+  assert.deepEqual(
+    retype(saved, retype(saved, reworded, 'text'), 'single_choice').options.map((o) => o.text),
+    ['Yes!', 'No', 'Maybe later']
+  );
+
+  // A retired answer's words count as typed: kept answers never replace a card that has one.
+  const withRetired = {
+    ...fresh,
+    options: [{ id: 'opt', text: '' }, { id: 'maybe_later', text: 'Maybe later', retired: true }],
+  };
+  assert.deepEqual(Object.keys(restoredOnRetype(saved, withRetired, 'single_choice')), ['retyped']);
+  // A block added since the survey was opened keeps what it clears but gets nothing back.
+  const added = choice('', 'New question', [['opt', 'A']]);
+  const addedAsText = retype(null, added, 'text');
+  assert.deepEqual(addedAsText.retyped.options, added.options);
+  assert.deepEqual(Object.keys(restoredOnRetype(null, addedAsText, 'single_choice')), ['retyped']);
+  // A type other than the saved one gets only what the card keeps; the same type changes nothing.
+  assert.deepEqual(Object.keys(restoredOnRetype(saved, retype(saved, card, 'text'), 'multiple_choice')), ['retyped']);
+  assert.equal(restoredOnRetype(saved, card, 'single_choice'), null);
+
+  // Free text before a lock flip, then back by the saved type's pill: the answers with their saved ids.
+  const lockSaved = savedShape(SAVED).get('support');
+  const [lockCard] = questionsForEditing(SAVED);
+  assert.deepEqual(
+    retype(lockSaved, retype(lockSaved, lockCard, 'text'), 'single_choice').options.map((o) => o.id),
+    ['yes', 'no', 'old']
+  );
+});
+
+test('the Survey tab’s Preview note opens with the responses worded for its reader', () => {
+  assert.equal(responsesNoteOpening({ responseCount: 35, hasResponses: true }, { isOrgAdmin: true }), '35 responses across all campaigns');
+  assert.equal(
+    responsesNoteOpening({ responseCount: 10, hasResponses: true }, { isOrgAdmin: false }),
+    'This survey has 10 responses in your campaigns'
+  );
+  assert.equal(
+    responsesNoteOpening({ responseCount: 0, hasResponses: true }, { isOrgAdmin: false }),
+    'This survey has responses in your organization'
+  );
+  // Nothing to say.
+  assert.equal(responsesNoteOpening({ responseCount: 0, hasResponses: false }, { isOrgAdmin: true }), null);
+  assert.equal(responsesNoteOpening({ responseCount: 0, hasResponses: false }, { isOrgAdmin: false }), null);
+  assert.equal(responsesNoteOpening(null), null);
+});
+
+test('a saved answer retires with its saved words if the card’s were cleared; one added since just goes', () => {
+  const saved = savedShape(SAVED).get('support');
+  const cleared = Object.freeze({ id: 'yes', text: '' });
+  assert.deepEqual(retireOption(cleared, saved), { id: 'yes', text: 'Yes', retired: true });
+  assert.deepEqual(retireOption({ id: 'yes', text: '   ' }, saved), { id: 'yes', text: 'Yes', retired: true });
+  assert.deepEqual(retireOption({ id: 'yes', text: 'Yes, definitely' }, saved), { id: 'yes', text: 'Yes, definitely', retired: true });
+  assert.equal(retireOption({ id: 'yes_2', text: '' }, saved), null, 'never saved: it simply goes');
+  assert.equal(retireOption({ id: 'yes', text: '' }, null), null, 'a block added since has no saved entry');
+  assert.equal(retireOption({ text: 'No id' }, saved), null);
+  assert.deepEqual(cleared, { id: 'yes', text: '' }, 'the card’s answer is never mutated');
+});
+
+test('a saved block retires with words and at the type it was saved with, keeping the card’s own answers', () => {
+  const saved = savedShape(SAVED);
+  const snapshot = () =>
+    [...saved.values()].map((e) => ({ ...e, options: structuredClone(e.options), answerIds: [...e.answerIds] }));
+  const before = snapshot();
+  const loaded = questionsForEditing(SAVED);
+  const [support, whyNot, close] = loaded;
+
+  // Words cleared, then retired: the saved words, the server's rule for every block, retired or not.
+  const cleared = Object.freeze({ ...whyNot, label: '' });
+  const retiredWhy = retireBlock(cleared, saved.get('why_not'));
+  assert.equal(retiredWhy.retired, true);
+  assert.equal(retiredWhy.label, 'Why not?');
+  assert.equal(cleared.label, '', 'the card is never mutated');
+  const retiredClose = retireBlock({ ...close, label: '   ' }, saved.get('close_2'));
+  assert.equal(retiredClose.label, 'Thanks for your time!');
+  assert.equal(retireBlock({ ...whyNot, label: 'Why not, exactly?' }, saved.get('why_not')).label, 'Why not, exactly?');
+  for (const [block, key] of [[retiredWhy, 'why_not'], [retiredClose, 'close_2']]) {
+    assert.ok(cleanBlock(block, { key, flow: 'script' }).label.trim(), `${key} goes with words`);
+  }
+
+  // Taken to Free text before the lock came on, then retired: Single choice again, with the answers that
+  // switch kept (here its saved ids and words) and no arrow anywhere, so the server's type check passes.
+  const supportAsText = retype(saved.get('support'), support, 'text', routeAt(loaded, 0));
+  const retiredSupport = retireBlock(supportAsText, saved.get('support'));
+  assert.equal(retiredSupport.type, 'single_choice');
+  assert.equal(retiredSupport.retired, true);
+  assert.deepEqual(retiredSupport.options.map((o) => [o.id, o.text, o.goTo]), [['yes', 'Yes', null], ['no', 'No', null], ['old', 'Maybe later', null]]);
+  assert.equal(retiredSupport.goTo, null);
+  assert.equal(retiredSupport.otherGoTo, null);
+  assert.equal('options' in retiredSupport.retyped, false);
+  assert.equal(cleanBlock(retiredSupport, { key: 'support', flow: 'script' }).type, 'single_choice');
+
+  // Single → Multiple with Yes reworded and Unsure added, then retired: the card's own answers, never
+  // the saved ones, and Restore brings exactly those back with no arrow.
+  const own = [{ ...support.options[0], text: 'Yes, definitely' }, support.options[1], support.options[2], { id: 'unsure', text: 'Unsure', goTo: null }];
+  const retiredMultiple = retireBlock(retype(saved.get('support'), { ...support, options: own }, 'multiple_choice', routeAt(loaded, 0)), saved.get('support'));
+  assert.equal(retiredMultiple.type, 'single_choice');
+  assert.deepEqual(retiredMultiple.options.map((o) => o.text), ['Yes, definitely', 'No', 'Maybe later', 'Unsure']);
+  const restored = { ...retiredMultiple, retired: false };
+  assert.deepEqual(restored.options.map((o) => o.text), ['Yes, definitely', 'No', 'Maybe later', 'Unsure']);
+  assert.equal(entersScript('list', restored), false);
+  // Reworded before a switch to Free text, then retired: the reworded answers.
+  const rewordedAsText = retype(saved.get('support'), { ...support, options: own.slice(0, 3) }, 'text', routeAt(loaded, 0));
+  assert.deepEqual(retireBlock(rewordedAsText, saved.get('support')).options.map((o) => o.text), ['Yes, definitely', 'No', 'Maybe later']);
+  // Every live answer blanked with nothing kept: the blank answers, which Save drops (the server keeps
+  // the saved ones, as retired).
+  const blanked = { ...support, options: support.options.map((o) => (o.retired ? o : { ...o, text: '' })) };
+  const retiredBlank = retireBlock(retype(saved.get('support'), blanked, 'multiple_choice', routeAt(loaded, 0)), saved.get('support'));
+  assert.equal(retiredBlank.type, 'single_choice');
+  assert.deepEqual(retiredBlank.options.map((o) => o.text), ['', '', 'Maybe later']);
+  assert.deepEqual(cleanBlock(retiredBlank, { key: 'support', flow: 'script' }).options.map((o) => o.id), ['old']);
+  // A saved Free-text question taken to Single choice and retired: Free text again, no answers, no arrow.
+  const retiredWhyChoice = retireBlock(retype(saved.get('why_not'), whyNot, 'single_choice', routeAt(loaded, 1)), saved.get('why_not'));
+  assert.equal(retiredWhyChoice.type, 'text');
+  assert.deepEqual(retiredWhyChoice.options, []);
+  assert.equal(retiredWhyChoice.goTo, null);
+
+  // A block still at its saved type keeps its own answers, and the saved shape is never touched.
+  assert.deepEqual(retireBlock({ ...support, options: own }, saved.get('support')).options, own);
+  assert.deepEqual(snapshot(), before);
+});
+
+test('the locked banner calls Go to route changes safe only on a survey saved in Go to that still uses it', () => {
+  assert.equal(savedInGoTo('script', { flow: 'script' }), true);
+  assert.equal(savedInGoTo('script', { flow: 'list' }), false, 'saved in Show only if, with an arrow taken since: the refused save');
+  assert.equal(savedInGoTo('list', { flow: 'script' }), false, 'after Switch back');
+  assert.equal(savedInGoTo('script', {}), false, 'a template from before Go to');
+  assert.equal(savedInGoTo('script', null), false, 'a new survey');
+});
+
+test('a type pill makes the card: what comes back lands over the cleared field, with an arrow only in Go to', () => {
+  const opened = {
+    _id: 'g',
+    flow: 'script',
+    questions: [
+      choice('support', 'Support?', [['yes', 'Yes', 'close_a'], ['no', 'No']]),
+      text('why_not', 'Why not?', { goTo: END_KEY }),
+      closingBlock('close_a', 'Close A', 'Thanks!', END_KEY),
+    ],
+  };
+  const saved = savedShape(opened);
+  const loaded = questionsForEditing(opened);
+  const [support, whyNot] = loaded.map((q) => Object.freeze(q)); // never mutated
+  let minted = 0;
+  const mint = () => {
+    minted += 1;
+    return blankAnswers();
+  };
+
+  // Free text clears every answer, and the card keeps them.
+  const asText = retypedCard(saved.get('support'), support, 'text', routeAt(loaded, 0), mint);
+  assert.equal(asText.type, 'text');
+  assert.deepEqual(asText.options, []);
+  assert.deepEqual(asText.retyped.options, support.options);
+  // Back at its saved type in Go to: the kept answers, arrows included, over the two blank answers a
+  // Free-text card starts a choice type with — and used once.
+  const back = retypedCard(saved.get('support'), asText, 'single_choice', routeAt(loaded, 0), mint);
+  assert.equal(back.type, 'single_choice');
+  assert.deepEqual(back.options.map((o) => [o.id, o.text, o.goTo]), [['yes', 'Yes', 'close_a'], ['no', 'No', null]]);
+  assert.equal(back.goTo, null);
+  assert.equal('options' in back.retyped, false);
+  // The card's targets are routeFor's { value, label } choices: an arrow to one it no longer offers
+  // comes back as Continue.
+  const offered = routeAt(loaded, 0);
+  const withoutCloseA = { ...offered, targets: offered.targets.filter((t) => t.value !== 'close_a') };
+  assert.equal(retypedCard(saved.get('support'), asText, 'single_choice', withoutCloseA, mint).options[0].goTo, null);
+  // In Show only if (after Switch back) the same answers come back with no arrow, so the survey stays
+  // in Show only if.
+  const listBack = retypedCard(saved.get('support'), asText, 'single_choice', routeAt(loaded, 0, 'list'), mint);
+  assert.deepEqual(listBack.options.map((o) => [o.id, o.goTo]), [['yes', null], ['no', null]]);
+  assert.equal(entersScript('list', listBack), false);
+
+  // A Free-text question going to a choice type: two blank answers, and its own then go to dropped
+  // (a choice question routes through its answers only) and kept on the card.
+  const whyChoice = retypedCard(saved.get('why_not'), whyNot, 'multiple_choice', routeAt(loaded, 1), mint);
+  assert.equal(whyChoice.type, 'multiple_choice');
+  assert.deepEqual(whyChoice.options, blankAnswers());
+  assert.equal(whyChoice.goTo, null);
+  assert.equal(whyChoice.retyped.goTo, END_KEY);
+  // ...and back at Free text, its arrow.
+  assert.equal(retypedCard(saved.get('why_not'), whyChoice, 'text', routeAt(loaded, 1), mint).goTo, END_KEY);
+
+  // Between the two choice types the answers stay; the type a card already has changes nothing.
+  const multiple = retypedCard(saved.get('support'), support, 'multiple_choice', routeAt(loaded, 0), mint);
+  assert.equal(multiple.type, 'multiple_choice');
+  assert.deepEqual(multiple.options, support.options);
+  assert.deepEqual(retypedCard(saved.get('support'), support, 'single_choice', routeAt(loaded, 0), mint), support);
+  // Only a Free-text card going to a choice type mints blank answers: here, the four such changes.
+  assert.equal(minted, 4);
+});
+
+test('Remove retires a block only on a locked survey, and only one it was saved with', () => {
+  const saved = savedShape(SAVED);
+  assert.equal(retiresOnRemove(true, saved, 'support'), true);
+  assert.equal(retiresOnRemove(true, saved, 'close_2'), true, 'a closing too');
+  assert.equal(retiresOnRemove(true, saved, 'support_2'), false, 'a block added since goes outright');
+  assert.equal(retiresOnRemove(true, saved, ''), false, 'and so does a card still being typed (no key yet)');
+  assert.equal(retiresOnRemove(true, saved, undefined), false);
+  assert.equal(retiresOnRemove(false, saved, 'support'), false, 'nothing retires on a survey with no responses');
+  assert.equal(retiresOnRemove(true, savedShape(null), 'support'), false, 'a new survey has nothing saved');
+});
+
+test('a failed save speaks only for the survey it was sent for, never for one the page shows later', () => {
+  const refused = Object.assign(new Error('This survey has responses, so it can’t switch to Go to routing.'), {
+    status: 409,
+    code: 'survey-has-responses',
+  });
+  const update = { error: refused, variables: { id: 's1', body: {} } };
+  assert.equal(saveErrorFor(update, 's1'), refused);
+  // The page now shows Duplicate's copy, or another campaign's survey: another survey's refusal never
+  // locks it (a survey with no answers anywhere included).
+  assert.equal(saveErrorFor(update, 'copy1'), null);
+  // Ids compare as strings.
+  assert.equal(saveErrorFor({ error: refused, variables: { id: { toString: () => 's1' } } }, 's1'), refused);
+  assert.equal(saveErrorFor({ error: null, variables: { id: 's1' } }, 's1'), null, 'no failure, nothing to show');
+  assert.equal(saveErrorFor({ error: refused }, undefined), null, 'no survey on the form, nothing to show');
+  assert.equal(saveErrorFor(undefined, 's1'), null);
 });

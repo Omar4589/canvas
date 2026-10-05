@@ -8,6 +8,23 @@ const pointSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// The record of the latest time this door left a judged shared spot (pinPlacement below). A
+// sub-schema with `default: undefined` rather than a plain nested path: a nested path would give
+// every household `from: []`, and presence is always tested on `.at`.
+const pinPlacementSchema = new mongoose.Schema(
+  {
+    from: { type: [Number], default: undefined }, // [lng, lat] it left
+    to: { type: [Number], default: undefined }, // [lng, lat] it went to
+    at: { type: Date },
+    kind: { type: String, enum: ['placeholder', 'stray'] },
+    by: { type: String, enum: ['lookup', 'person', 'file'] },
+    accuracyType: { type: String }, // the lookup's answer type; lookup only
+    stackSize: { type: Number }, // the spot's other homes at that moment
+    releasedAt: { type: Date }, // it later left `to` without a person moving it
+  },
+  { _id: false }
+);
+
 const householdSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -53,6 +70,22 @@ const householdSchema = new mongoose.Schema(
     // the pin when the hand-edit shield is disarmed (csvImporter, overwriteHandEdits).
     locationConfirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     locationConfirmedAt: { type: Date, default: null },
+    // Shared map spots (services/households/placeStackedPins.js; docs/PROPOSAL_PLACEHOLDER_PINS.md §C).
+    // pinSuspect: this door's coordinate was judged to be one of several different homes a vendor
+    // stamped with one coordinate ('placeholder'), or a different address on a building's spot
+    // ('stray'), and nothing has positively cleared it since. NO default: mongoose writes schema
+    // defaults into bulk upsert inserts. Sticky — only a writer that moves the door off the spot
+    // clears it, and the pass only on positive evidence. A confirm keeps it: "unplaced now" is
+    // pinSuspect && !locationConfirmedAt (isPinUnplaced), so an Undo of the confirm restores the door.
+    pinSuspect: { type: String, enum: ['placeholder', 'stray'] },
+    // Written by the pass when it places the door (by 'lookup'), by updateHouseholdLocation when a
+    // person moves a flagged door ('person'), and by an import whose file moves a flagged door
+    // ('file'). Never $unset. "Currently placed by the lookup" = by 'lookup', no releasedAt, and
+    // coordSource still 'geocodio'.
+    pinPlacement: { type: pinPlacementSchema, default: undefined },
+    // Building keys the collapse check distrusted for this door: an answer landing on one is refused,
+    // so a re-import can't put the door back on a point two addresses claimed. $addToSet only.
+    pinDistrustedKeys: { type: [String], default: undefined },
 
     status: {
       type: String,
@@ -153,6 +186,12 @@ householdSchema.index({ campaignId: 1, isActive: 1 });
 householdSchema.index(
   { campaignId: 1, locationConfirmedAt: 1 },
   { partialFilterExpression: { coordConfidence: 'interpolated' } }
+);
+// Pin Fixes' second set: doors on a shared spot (pinSuspect) not yet confirmed. A distinct key
+// pattern from the index above, for the same buildIndexes dedupe reason.
+householdSchema.index(
+  { campaignId: 1, pinSuspect: 1 },
+  { partialFilterExpression: { pinSuspect: { $type: 'string' } } }
 );
 
 export const Household = mongoose.model('Household', householdSchema);

@@ -58,10 +58,34 @@ export const movePinInvalidationKeys = (campaignId) => [
   ['admin', 'packet-data', campaignId], // print packets with geo
   ['admin', 'pin-fixes', campaignId], // Pin Fixes queue — a moved pin leaves the needs-fixing set
   ['admin', 'campaigns'], // sidebar Pin Fixes badge (pinsToFix rides the campaigns rollup)
+  ['apartment-preview', campaignId], // Turf Cutting's Remove apartments line counts doors per map spot
 ];
+
+// The server's answer when a save moved nothing (res.moved === 0): still on an unplaced home's own
+// pin, or back onto the shared spot a placed home left. The card stays open and the page doesn't
+// advance (useMovePin.js).
+export const NOTHING_MOVED = 'Nothing moved — drag the pin onto the house';
+
+// A save closer than this to a home's own pin moved nothing. On a home without an exact map spot
+// (pinSuspect), Save stays off until the drag clears it: mapbox starts a marker drag only past its
+// 3 px click tolerance, ~1.45 m at zoom 17, so a nudge would otherwise enable Save and no-op.
+export const NO_MOVE_METERS = 1.5;
+const toRad = (d) => (d * Math.PI) / 180;
+export const metersBetween = (a, b) => {
+  if (!a || !b) return Infinity;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(x));
+};
+// May this drag be saved? Always for a door with an exact spot (nudging an approximate pin is the
+// common case); for a home without one, only once it is clearly off the spot.
+export const canSaveMove = (target, coords) =>
+  !!target && !!coords && (!target.unplaced || metersBetween(target, coords) > NO_MOVE_METERS);
 
 // Toast after a save. `moved` is the server's count of doors it moved (res.moved).
 export const movePinToast = (scope, moved) => {
+  if (Number(moved) === 0) return NOTHING_MOVED;
   if (scope !== 'building') return 'Pin moved.';
   const n = Number(moved) || 0;
   return `Building pin moved · ${n.toLocaleString()} ${pluralize(n, 'unit')}`;

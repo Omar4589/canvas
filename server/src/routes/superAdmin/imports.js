@@ -71,7 +71,14 @@ function shape(job) {
     // excludeUndone toggle can drop it from the cost math).
     undone: !!job.undone,
     undoneAt: job.undoneAt || null,
-    costCents: geocodeCostCents(geocodedNew),
+    // The map-pin pass (services/households/placeStackedPins.js): homes on a shared map spot looked up
+    // by address. Bought lookups cost like any other; the cause is shown here only, never to orgs.
+    pinLookupsNew: job.pinLookupsNew || 0,
+    pinLookupsCached: job.pinLookupsCached || 0,
+    pinLookupsOverCap: job.pinLookupsOverCap || 0,
+    pinPassError: job.pinPassError || null,
+    pinPassCause: job.pinPassCause || null,
+    costCents: geocodeCostCents(geocodedNew + (job.pinLookupsNew || 0)),
   };
 }
 
@@ -84,6 +91,7 @@ const GROUP_SUMS = {
   geocodeUnmatched: { $sum: { $ifNull: ['$geocodeUnmatched', 0] } },
   geocodeFailed: { $sum: { $ifNull: ['$geocodeFailed', 0] } },
   withFileCoords: { $sum: WITH_FILE_COORDS_EXPR },
+  pinLookupsNew: { $sum: { $ifNull: ['$pinLookupsNew', 0] } },
 };
 
 function shapeGroup(g) {
@@ -96,7 +104,8 @@ function shapeGroup(g) {
     geocodedCached: g.geocodedCached,
     geocodeUnmatched: g.geocodeUnmatched,
     geocodeFailed: g.geocodeFailed || 0,
-    costCents: geocodeCostCents(g.geocodedNew),
+    pinLookupsNew: g.pinLookupsNew || 0,
+    costCents: geocodeCostCents(g.geocodedNew + (g.pinLookupsNew || 0)),
   };
 }
 
@@ -148,7 +157,8 @@ router.get('/', async (req, res, next) => {
 
     const [total, jobs, aggRows, groupRows] = await Promise.all([
       ImportJob.countDocuments(filter),
-      ImportJob.find(filter)
+      // pinProbedIds is the pass's ledger (up to 25,000 ids per import): never shipped.
+      ImportJob.find(filter, { pinProbedIds: 0 })
         .sort(sortSpec)
         .skip(skip)
         .limit(limit)

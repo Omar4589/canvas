@@ -24,6 +24,7 @@
     "audit:voted-doors": "npm --prefix server run audit:voted-doors --",
     "audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
     "audit:voter-id-spellings": "npm --prefix server run audit:voter-id-spellings --",
+    "audit:gps-stamps": "npm --prefix server run audit:gps-stamps --",
     "remirror:pass": "npm --prefix server run remirror:pass --",
     "repair:orphan-attribution": "npm --prefix server run repair:orphan-attribution --",
     "sweep:raw-imports": "npm --prefix server run sweep:raw-imports --",

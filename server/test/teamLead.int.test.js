@@ -487,6 +487,97 @@ test('lead ATTACH is scoped like edit: campaign default and walk-list override',
   );
 });
 
+test('a lead\'s survey list says whether a survey on their campaigns has answers anywhere in the org — never whose or how many', { skip }, async () => {
+  const { leadTok, adminTok, org, A, B, admin, lead } = ctx;
+  const opt = { token: leadTok, orgId: org._id };
+  const questions = [
+    { key: 'support', label: 'Can we count on your support?', type: 'single_choice', options: [{ id: 'yes', text: 'Yes' }, { id: 'no', text: 'No' }] },
+    { key: 'why_not', label: 'Why not?', type: 'text', options: [] },
+    { key: 'anything_else', label: 'Anything else?', type: 'text', options: [] },
+  ];
+  // The builder's own first "then go to" on a Show-only-if survey (accepted on one with no answers).
+  const firstRoute = {
+    flow: 'script',
+    questions: [{ ...questions[0], options: [{ id: 'yes', text: 'Yes', goTo: 'anything_else' }, { id: 'no', text: 'No' }] }, questions[1], questions[2]],
+  };
+  const mk = (name, createdBy) => SurveyTemplate.create({ organizationId: org._id, name, createdBy, version: 1, flow: 'list', questions });
+  const [elsewhere, legacy, mixed, none, authored, main] = await Promise.all([
+    mk('Gap elsewhere', admin._id), mk('Gap legacy', admin._id), mk('Gap mixed', admin._id), mk('Gap none', admin._id),
+    mk('Gap authored', lead._id), // in the lead's library only because they wrote it: on none of their campaigns
+    mk('Gap main', admin._id), // A's main survey for the length of this test (set inside the try)
+  ]);
+  const ids = [elsewhere, legacy, mixed, none, authored, main].map((s) => s._id);
+  // Four on A as walk-list overrides; `main` is A's own survey, the arm a lead's builder opens.
+  const efforts = await Effort.create([elsewhere, legacy, mixed, none].map((s) => ({
+    organizationId: org._id, campaignId: A._id, name: `WL ${s.name}`, surveyTemplateId: s._id,
+  })));
+  // Raw rows with REAL ObjectIds everywhere: the list keys its counts by String(), so a string id would
+  // still count there while the PATCH's ObjectId-cast exists missed it — a fake disagreement. A fresh
+  // voterId and passId per row keep the {voterId, passId} unique index quiet. campaignId null is a
+  // legacy row, which the schema now refuses (SurveyResponse.js :43-48) — hence the raw insert.
+  const row = (s, campaignId) => ({
+    organizationId: org._id, campaignId, surveyTemplateId: s._id,
+    voterId: new mongoose.Types.ObjectId(), passId: new mongoose.Types.ObjectId(), submittedAt: new Date(),
+  });
+  await SurveyResponse.collection.insertMany([
+    row(elsewhere, B._id), row(elsewhere, B._id),
+    row(legacy, null),
+    row(mixed, A._id), row(mixed, B._id), row(mixed, B._id),
+    row(authored, B._id),
+    row(main, B._id),
+  ]);
+  try {
+    // The attach test above left A with no main survey; `finally` puts that back.
+    await Campaign.updateOne({ _id: A._id }, { $set: { surveyTemplateId: main._id } });
+    const leadList = await call('GET', '/api/admin/surveys', opt);
+    assert.strictEqual(leadList.status, 200);
+    const mine = new Map(leadList.json.surveys.map((s) => [String(s._id), s]));
+    const of = (s) => mine.get(String(s._id));
+    for (const s of [elsewhere, legacy, mixed, main]) assert.strictEqual(of(s).hasResponses, true, `${s.name}: answers somewhere in the org lock it`);
+    assert.strictEqual(of(none).hasResponses, false, 'no answers anywhere: never locked');
+    assert.strictEqual(of(authored).hasResponses, false, 'only authored, on none of their campaigns: narrowed (owner ruling 2026-10-03)');
+    for (const s of [elsewhere, legacy, authored, main]) {
+      assert.strictEqual(of(s).responseCount, 0, `${s.name}: counts stay theirs`);
+      assert.deepStrictEqual(of(s).responseCountByCampaign, []);
+    }
+    assert.strictEqual(of(mixed).responseCount, 1);
+    assert.deepStrictEqual(of(mixed).responseCountByCampaign.map((b) => [b.campaignName, b.count]), [['Campaign A', 1]]);
+    const text = JSON.stringify(leadList.json);
+    assert.ok(!text.includes('Campaign B'), 'no other campaign anywhere in the payload');
+    assert.ok(!text.includes('No campaign'), 'no legacy bucket either');
+    // Exactly the two bare booleans and the narrowed annotations — a future org-wide number would fail here.
+    const stored = await SurveyTemplate.findById(mixed._id).lean();
+    assert.deepStrictEqual(
+      Object.keys(of(mixed)).filter((k) => !(k in stored)).sort(),
+      ['hasResponses', 'responseCount', 'responseCountByCampaign', 'usedByCampaigns', 'usedByWalkLists', 'usedElsewhere']
+    );
+
+    // The list and the save agree on every survey on the lead's campaigns…
+    for (const s of [elsewhere, legacy, mixed, main]) {
+      const res = await call('PATCH', `/api/admin/surveys/${s._id}`, { ...opt, body: firstRoute });
+      assert.strictEqual(res.status, 409, `${s.name}: ${JSON.stringify(res.json)}`);
+      assert.strictEqual(res.json.code, 'survey-has-responses');
+    }
+    const free = await call('PATCH', `/api/admin/surveys/${none._id}`, { ...opt, body: firstRoute });
+    assert.strictEqual(free.status, 200, JSON.stringify(free.json));
+    // …and the save still guards the one the ruling leaves narrowed (no lead builder opens it).
+    const guarded = await call('PATCH', `/api/admin/surveys/${authored._id}`, { ...opt, body: firstRoute });
+    assert.strictEqual(guarded.status, 409);
+
+    // The admin branch is unchanged: org-wide counts (never assert bucket order — it is unsorted).
+    const adminList = await call('GET', '/api/admin/surveys', { token: adminTok, orgId: org._id });
+    const all = new Map(adminList.json.surveys.map((s) => [String(s._id), s]));
+    assert.deepStrictEqual([elsewhere, legacy, mixed, none, main].map((s) => all.get(String(s._id)).responseCount), [2, 1, 3, 0, 1]);
+    assert.strictEqual(all.get(String(none._id)).hasResponses, false);
+    assert.ok(!('usedElsewhere' in all.get(String(mixed._id))), 'admin rows carry no usedElsewhere');
+  } finally {
+    await Campaign.updateOne({ _id: A._id }, { $set: { surveyTemplateId: null } });
+    await SurveyResponse.deleteMany({ surveyTemplateId: { $in: ids } });
+    await Effort.deleteMany({ _id: { $in: efforts.map((e) => e._id) } });
+    await SurveyTemplate.deleteMany({ _id: { $in: ids } });
+  }
+});
+
 test('lead can create a canvasser onto a managed campaign via /crew, not onto B', { skip }, async () => {
   const { leadTok, org, A, B } = ctx;
   const opt = { token: leadTok, orgId: org._id };

@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import TagPicker from './TagPicker.jsx';
 import InfoHint from './InfoHint.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { END_KEY, isStatement, isClosingBlock, blockName } from '../lib/surveyRouting.js';
 import { formatVisibleIf, buildConditionIndex } from '../lib/surveyConditionText.js';
 import {
@@ -14,6 +15,14 @@ import {
   autoPresentation,
   DUPLICATE_IN_LIST,
   routesLockedHint,
+  responsesPhrase,
+  copyName,
+  savedShape,
+  retireOption,
+  retiresOnRemove,
+  retireBlock,
+  retypedCard,
+  savedInGoTo,
   routeTargets,
   END_LABEL,
   continueLabel,
@@ -119,31 +128,32 @@ function optionId(text, used) {
   return id;
 }
 
-function TypePills({ value, onChange, disabled }) {
-  return (
-    <div className="inline-flex rounded-md border border-border-strong bg-sunken p-0.5">
-      {QUESTION_TYPES.map((t) => {
-        const active = value === t.value;
-        return (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => onChange(t.value)}
-            disabled={disabled && !active}
-            className={
-              'rounded px-3 py-1.5 text-xs font-medium transition ' +
-              (active
-                ? 'bg-card text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-fg-muted')
-            }
-          >
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// A question's type. Once the survey has responses a saved question's type is locked, but the pill of
+// the type it was saved with stays pickable (`savedType`), so the question can always be put back —
+// even when the lock comes on mid-edit, as a reconnect's refetch of the survey list can do.
+export const TypePills = ({ value, onChange, disabled, savedType = null }) => (
+  <div className="inline-flex rounded-md border border-border-strong bg-sunken p-0.5">
+    {QUESTION_TYPES.map((t) => {
+      const active = value === t.value;
+      return (
+        <button
+          key={t.value}
+          type="button"
+          onClick={() => onChange(t.value)}
+          disabled={disabled && !active && t.value !== savedType}
+          className={
+            'rounded px-3 py-1.5 text-xs font-medium transition ' +
+            (active
+              ? 'bg-card text-fg shadow-sm'
+              : 'text-fg-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-fg-muted')
+          }
+        >
+          {t.label}
+        </button>
+      );
+    })}
+  </div>
+);
 
 function OptionRow({ index, value, onChange, onRemove, tags = [], onCreateTag, routeControl = null, error = null }) {
   const retired = !!value.retired;
@@ -634,7 +644,9 @@ const FlowSection = ({ value, onChange, route, priorQuestions, error }) => {
   );
 };
 
-function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, priorQuestions = [], tags = [], onCreateTag, error, route, warning = null }) {
+// `hasResponses` = the survey has responses AND this block was saved: its type locks, and removing it
+// or a saved answer retires instead. `saved` is its savedShape entry, null for a block added since.
+function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onMoveUp, onMoveDown, hasResponses = false, saved = null, priorQuestions = [], tags = [], onCreateTag, error, route, warning = null }) {
   const isChoice = value.type === 'single_choice' || value.type === 'multiple_choice';
 
   function updateOption(optIdx, next) {
@@ -648,27 +660,32 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
     onChange({ ...value, options: [...value.options, { id: optionId('', used), text: '' }] });
   }
 
-  function removeOption(optIdx) {
-    const o = value.options[optIdx];
-    if (hasResponses && o.id) {
-      // Soft-retire an existing option — kept so its past answers still report.
+  const removeOption = (optIdx) => {
+    // On a survey with responses a saved answer retires — kept so its past answers still report, with
+    // its saved words if the card's were cleared first (retireOption). An answer added since the survey
+    // was opened was never saved: it simply goes.
+    const retired = hasResponses ? retireOption(value.options[optIdx], saved) : null;
+    if (retired) {
       const options = value.options.slice();
-      options[optIdx] = { ...o, retired: true };
+      options[optIdx] = retired;
       onChange({ ...value, options });
     } else {
       onChange({ ...value, options: value.options.filter((_, i) => i !== optIdx) });
     }
-  }
+  };
 
-  function setType(t) {
-    if (t === 'text') onChange({ ...value, type: t, options: [] });
-    else if (!isChoice) {
-      const used = new Set();
-      // A text question's own Go to has no place on a choice question, which routes through its
-      // answers only (the server refuses a question-level route there).
-      onChange({ ...value, type: t, goTo: null, options: [{ id: optionId('', used), text: '' }, { id: optionId('', used), text: '' }] });
-    } else onChange({ ...value, type: t });
-  }
+  // What the change clears stays on the card (`retyped`, never sent), and back at the type it was saved
+  // with a question gets exactly that back, once: never the survey as saved, never over a typed answer,
+  // and a "then go to" only while the survey uses Go to, and only to a block this card can still point
+  // at. The whole change is retypedCard's (surveyBuilderRules.js, pinned by its tests); this card only
+  // mints the two blank answers a Free-text question starts a choice type with.
+  const setType = (t) =>
+    onChange(
+      retypedCard(saved, value, t, route, () => {
+        const used = new Set();
+        return [{ id: optionId('', used), text: '' }, { id: optionId('', used), text: '' }];
+      })
+    );
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm">
@@ -711,7 +728,7 @@ function QuestionCard({ index, displayNum, total, value, onChange, onRemove, onM
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted">
               Type
             </label>
-            <TypePills value={value.type} onChange={setType} disabled={hasResponses} />
+            <TypePills value={value.type} onChange={setType} disabled={hasResponses} savedType={saved?.type ?? null} />
             {hasResponses && (
               <p className="mt-1 text-[11px] text-fg-subtle">Type is locked once there are responses — Duplicate to change it.</p>
             )}
@@ -894,8 +911,17 @@ const StatementCard = ({ index, total, value, onChange, onRemove, onMoveUp, onMo
 };
 
 // `duplicateAt` says where the host page offers Duplicate, for the locked banner and the greyed-out
-// "then go to" hint: the org editor's is in the survey list, a campaign's builder has its own.
-function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateTag, duplicateAt = DUPLICATE_IN_LIST }) {
+// "then go to" hint: the org editor's is in the survey list, a campaign's builder has its own, which
+// also switches the campaign to the copy at once (`duplicateSwitches`), so a refusal's guidance says so.
+// `saveError` is the host's last failed save of the survey on the form (saveErrorFor: never another
+// survey's, which would lock this one) and `copyError` its last failed copy, both shown at the end of
+// the form; `onSaveAsCopy`, when the host gives it, takes a refused save's body — the form as it
+// stands, already named as a copy — and POSTs it as a new survey that nothing is switched to. `busy`
+// holds both save buttons while the host runs something else on this survey (a campaign's Duplicate).
+function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateTag, duplicateAt = DUPLICATE_IN_LIST, duplicateSwitches = false, saveError = null, copyError = null, onSaveAsCopy, savingCopy = false, busy = false }) {
+  // The locked banner phrases the response count for whoever is looking (responsesPhrase): a lead's
+  // count covers their campaigns only. Read here, never passed, so no host can forget it.
+  const { isOrgAdmin } = useAuth();
   const [name, setName] = useState(initial?.name || '');
   const [intro, setIntro] = useState(initial?.intro || '');
   const [closing, setClosing] = useState(initial?.closing || '');
@@ -927,22 +953,27 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
     setSwitchTried(false);
   }, [initial?._id]);
 
-  // Once responses exist, the existing question structure is locked to protect
-  // reports (mirrors the server guard). Safe edits stay open: rename, greeting/
-  // closing, label/required, reorder, ADD questions, ADD options. Destructive
-  // ones (remove question/option, rename option, change type) are locked per
-  // existing question; brand-new questions added here are fully editable.
-  const locked = !!initial?.hasResponses;
-  const originalByKey = useMemo(() => {
-    const m = new Map();
-    if (initial?.hasResponses) {
-      for (const q of initial.questions || []) m.set(q.key, q);
-    }
-    return m;
-  }, [initial?._id]);
+  // Once responses exist, what the survey was SAVED with is protected, mirroring the server: a saved
+  // question's answer type is locked, and a saved block or answer is retired rather than removed, so
+  // its past answers keep reporting. Everything else stays open — rename, reword, reorder, Required,
+  // add — and a block or answer added since the survey was opened is fully editable, type included,
+  // and removed outright. `hasResponses` counts the whole organization for every survey a builder
+  // opens (a lead's builder opens only their campaign's own survey: owner ruling 2026-10-03), so
+  // these locks match the server's 409. Commit 16b0c87 swapped this per-block rule for a lock on
+  // every card; it is restored here. A save the server refused because the survey has responses
+  // locks the form too: the row was read before that first answer arrived, and the 409 is the server
+  // finding it. The refusal lasts until the next save attempt.
+  const refusedForResponses = saveError?.code === 'survey-has-responses';
+  const locked = !!initial?.hasResponses || refusedForResponses;
   // The template as the builder opened it (null for a new survey): what One block per screen and
   // Switch back measure the survey against.
   const loaded = useMemo(() => (initial?._id ? initial : null), [initial?._id]);
+  // That template by stored key (savedShape): exactly what the two locks above cover.
+  const savedBlocks = useMemo(() => savedShape(loaded), [loaded]);
+  // Whether the locked banner may call changes to the Go to routes safe (savedInGoTo): only on a survey
+  // saved in Go to that still uses it. A refused Go to save leaves the form in Go to on a survey saved
+  // in Show only if, and there the banner has to say what the refusal says.
+  const goToSaved = savedInGoTo(flow, loaded);
 
   // Everything checked as the author types (surveyBuilderRules.surveyIssues), recomputed on every
   // change so a move, a removal or a retyped answer re-runs every check at once; in Go to it also
@@ -965,6 +996,18 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
   useEffect(() => {
     if (switchTried && !issues.routing?.errors.length) setSwitchTried(false);
   }, [switchTried, issues.routing]);
+
+  // A failed save's message sits at the end of the form, just above the fixed footer (below the form,
+  // where the hosts used to put it, the footer covered it on desktop): bring each new one into view.
+  // The frame waits for it to render; the cleanup cancels it if the message changes or the form goes.
+  const refusalRef = useRef(null);
+  useEffect(() => {
+    if (!saveError && !copyError) return undefined;
+    const frame = requestAnimationFrame(() =>
+      refusalRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [saveError, copyError]);
 
   function updateQuestion(index, q) {
     // The first "then go to" makes this a Go to survey (the banner says so), and only Switch back
@@ -997,13 +1040,14 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
     setQuestions((prev) => {
       const q = prev[index];
       const rest = repointRoutes(prev, q?.key).questions;
-      if (initial?.hasResponses && q?.key) {
-        // Soft-retire an existing question — kept so its past answers still report.
-        return rest.map((p, i) => (i === index ? { ...p, retired: true } : p));
+      if (retiresOnRemove(locked, savedBlocks, q?.key)) {
+        // Soft-retire a saved block — kept so its past answers still report, with its saved words if
+        // the card's were cleared (retireBlock): the server refuses a block with none, retired or not.
+        return rest.map((p, i) => (i === index ? retireBlock(p, savedBlocks.get(p.key)) : p));
       }
       return reorder(rest.filter((_, i) => i !== index));
     });
-    const retires = !!(initial?.hasResponses && leaving?.key);
+    const retires = retiresOnRemove(locked, savedBlocks, leaving?.key);
     setErrors((p) => ({ ...p, questions: errorsWithout(p.questions, index, !retires) }));
     setNotice(
       count
@@ -1106,12 +1150,13 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
     !!(errors.noQuestions && fresh.noQuestions) ||
     questions.some((_, i) => Object.keys(blankAt(i)).length > 0);
 
-  const submit = (e) => {
-    e.preventDefault();
+  // What Save sends, or null after marking what stops it. Save and Save my changes as a copy both run
+  // it on the form as it stands, so a copy never skips a check the survey itself would fail.
+  const bodyToSave = () => {
     const v = validate();
     if (v.name || v.noQuestions || Object.keys(v.questions).length || hasBlockingIssues(issues)) {
       setErrors({ ...v, attempted: true });
-      return;
+      return null;
     }
     setErrors({ questions: {} });
     // cleanBlock keeps text-bearing + retired options with their stable ids, sends routes as null
@@ -1130,21 +1175,36 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
         if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
       }
     }
-    onSave({ name, intro, closing, questions: reorder(cleaned), tags: Array.from(seen.values()), flow, presentation });
+    return { name, intro, closing, questions: reorder(cleaned), tags: Array.from(seen.values()), flow, presentation };
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    const body = bodyToSave();
+    if (body) onSave(body);
+  };
+
+  // A save refused because the survey has responses (`refusedForResponses`, read with `locked`) can
+  // still keep everything: the form as it stands, the refused change included, goes to the library as a
+  // NEW survey (copyName). Nothing is switched to it — phones still queued under this survey would have
+  // those surveys refused and dropped — so moving a campaign onto the copy stays the author's own step,
+  // between shifts.
+  const canCopy = !!onSaveAsCopy && refusedForResponses;
+  const saveCopy = () => {
+    const body = bodyToSave();
+    if (body) onSaveAsCopy({ ...body, name: copyName(body.name) });
   };
 
   return (
     <form onSubmit={submit} className="space-y-6 pb-24">
       {locked && (
         <div className="rounded-lg border-l-4 border-warning/40 bg-warning-tint px-4 py-3 text-sm text-warning-fg">
-          <p className="font-medium">
-            This survey has {initial.responseCount} response{initial.responseCount === 1 ? '' : 's'}.
-          </p>
+          <p className="font-medium">This survey has {responsesPhrase(initial, { isOrgAdmin }) || 'responses'}.</p>
           <p className="mt-1 text-warning-fg">
             You can freely rename it, reword questions and options, reorder, add questions or options, and
             retire ones you no longer ask (retired items stay in your reports). Statements, closings, notes
-            and links are safe to add too{flow === 'script' ? ', and so are changes to its Go to routes' : ''}.{' '}
-            {flow === 'script' ? (
+            and links are safe to add too{goToSaved ? ', and so are changes to its Go to routes' : ''}.{' '}
+            {goToSaved ? (
               <>
                 The only change that needs a fresh copy is changing a question's <strong>type</strong> — use{' '}
                 <strong>Duplicate</strong> {duplicateAt} for that.
@@ -1174,7 +1234,11 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
           />
           {errors.name
             ? <p className="mt-1 text-xs text-danger">{errors.name}</p>
-            : <p className="mt-2 text-xs text-fg-muted">Surveys are linked to campaigns on the Campaigns page.</p>}
+            : <p className="mt-2 text-xs text-fg-muted">
+                {isOrgAdmin
+                  ? 'Surveys are linked to campaigns on the Campaigns page.'
+                  : 'Surveys are linked to a campaign with Change survey on its Survey tab.'}
+              </p>}
         </div>
         <label className="mt-4 flex cursor-pointer items-start gap-2">
           <input
@@ -1283,6 +1347,9 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
             const live = issues.blocks[i] || {};
             const blank = blankAt(i);
             const error = { ...live, label: live.label || blank.label, options: blank.options };
+            // The block as saved, null for one added since the survey was opened: only a saved block's
+            // type locks, and only a saved block retires instead of going.
+            const saved = savedBlocks.get(q.key) || null;
             if (isStatement(q)) {
               return (
                 <StatementCard
@@ -1294,7 +1361,7 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
                   onRemove={() => removeQuestion(i)}
                   onMoveUp={() => move(i, -1)}
                   onMoveDown={() => move(i, 1)}
-                  hasResponses={locked}
+                  hasResponses={locked && !!saved}
                   priorQuestions={priorQuestions}
                   route={routeFor(q, i)}
                   error={error}
@@ -1312,7 +1379,8 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
                 onRemove={() => removeQuestion(i)}
                 onMoveUp={() => move(i, -1)}
                 onMoveDown={() => move(i, 1)}
-                hasResponses={locked}
+                hasResponses={locked && !!saved}
+                saved={saved}
                 priorQuestions={priorQuestions}
                 tags={orgTags}
                 onCreateTag={onCreateTag}
@@ -1365,11 +1433,54 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
         {issues.closing && <p className="mt-1 text-xs text-danger">{issues.closing}</p>}
       </section>
 
-      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-card px-6 py-3 shadow-lg">
-        <div className="mx-auto flex max-w-5xl items-center justify-end gap-3">
-          {errors.attempted && stillBlocked && (
-            <p className="mr-auto text-xs text-danger">Can’t save yet: fix what’s marked in red above.</p>
+      {(saveError || copyError) && (
+        <div
+          ref={refusalRef}
+          role="alert"
+          className="rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger"
+        >
+          {saveError && <p>{saveError.message}</p>}
+          {saveError?.data?.reasons?.length > 0 && (
+            <ul className="mt-1 list-inside list-disc">
+              {saveError.data.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
           )}
+          {refusedForResponses && (
+            <p className="mt-2">
+              Your changes are still here.{' '}
+              {saveError.data?.reasons?.length > 0
+                ? 'Set those questions back to the answer type they were saved with and save again'
+                : 'Switch back to Show only if (on the blue Go to banner above) and save again'}
+              {canCopy ? ', or keep all of it, the refused change included, with Save my changes as a copy.' : '.'}{' '}
+              {/* The server's sentence says to Duplicate, and Duplicate copies the STORED survey. A campaign's
+                  Duplicate also switches the campaign to the copy at once (duplicateSwitches), which drops
+                  surveys still queued on phones, so the sentence the page scrolls to says so. */}
+              Duplicate {duplicateAt} copies the survey as last saved, without these changes
+              {duplicateSwitches
+                ? `, and switches this campaign to the copy at once, so do it only between shifts.${canCopy ? ' Save my changes as a copy switches nothing.' : ''}`
+                : '.'}
+            </p>
+          )}
+          {canCopy && (
+            <p className="mt-1 text-xs">
+              The copy is a new survey in your library, “{copyName(name)}”. Nothing switches to it: whatever uses
+              this survey keeps it until you change it — between shifts, because surveys still queued on phones
+              under this one would be dropped.
+            </p>
+          )}
+          {copyError && <p className="mt-2">Couldn’t save the copy: {copyError.message}</p>}
+        </div>
+      )}
+
+      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-card px-6 py-3 shadow-lg">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-end gap-3">
+          {errors.attempted && stillBlocked ? (
+            <p className="mr-auto text-xs text-danger">Can’t save yet: fix what’s marked in red above.</p>
+          ) : saveError || copyError ? (
+            <p className="mr-auto text-xs text-danger">Not saved — see the message at the end of the form.</p>
+          ) : null}
           <button
             type="button"
             onClick={onCancel}
@@ -1377,9 +1488,19 @@ function SurveyForm({ initial, onSave, onCancel, saving, orgTags = [], onCreateT
           >
             Cancel
           </button>
+          {canCopy && (
+            <button
+              type="button"
+              onClick={saveCopy}
+              disabled={saving || savingCopy || busy}
+              className="rounded-md border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-sunken disabled:opacity-60"
+            >
+              {savingCopy ? 'Saving copy…' : 'Save my changes as a copy'}
+            </button>
+          )}
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || savingCopy || busy}
             className="rounded-md bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
           >
             {saving ? 'Saving…' : 'Save survey'}

@@ -9,6 +9,7 @@ import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { Household } from '../../models/Household.js';
+import { apartmentCandidates, apartmentThreshold } from '../../services/turf/apartmentStacks.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -705,38 +706,46 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// Remove apartments: persistently exclude households in multi-unit buildings (N+ at
-// one geocode) from cutting / the map / counts / the canvasser list (mirrors the
-// fully-voted exclusion). Scoped to the pass's effort. Re-includable.
+// Remove apartments: persistently exclude the effort's apartment doors from cutting / the map /
+// counts / the canvasser list (mirrors the fully-voted exclusion). Re-includable. The rule is
+// services/turf/apartmentStacks.js: a street address with N+ units on its spot, or a unit-addressed
+// door on a spot of N+ — never a separate house that merely shares a vendor's coordinate.
 router.post('/exclude-apartments', async (req, res, next) => {
   try {
     const { passId, threshold } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
-    const n = Math.max(2, parseInt(threshold, 10) || 4);
+    const n = apartmentThreshold(threshold);
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
 
-    const households = await Household.find(
-      { campaignId: req.campaign._id, effortId: pass.effortId, isActive: true, 'location.coordinates': { $exists: true, $ne: null } },
-      { _id: 1, location: 1 }
-    ).lean();
-    // Group by rounded geocode (5 decimals ≈ 1m) — same key the client groupDoors uses.
-    const byKey = new Map();
-    for (const h of households) {
-      const c = h.location?.coordinates;
-      if (!c || c.length !== 2) continue;
-      const key = `${Math.round(c[1] * 1e5)}|${Math.round(c[0] * 1e5)}`;
-      const arr = byKey.get(key) || [];
-      arr.push(h._id);
-      byKey.set(key, arr);
-    }
-    const ids = [];
-    let buildings = 0;
-    for (const arr of byKey.values()) {
-      if (arr.length >= n) { buildings += 1; ids.push(...arr); }
-    }
+    const taken = (await apartmentCandidates({ campaignId: req.campaign._id, effortId: pass.effortId })).filter((c) => c.takenUpTo >= n);
+    const ids = taken.map((c) => c.id);
     if (ids.length) await Household.updateMany({ _id: { $in: ids } }, { $set: { excludedFromTurf: true } });
-    res.json({ excluded: ids.length, buildings });
+    // `buildings`: map spots with any door taken.
+    res.json({ excluded: ids.length, buildings: new Set(taken.map((c) => c.spot)).size });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The Remove apartments preview: every door the rule would take at some threshold, as parallel arrays
+// (no repeated field names): `takenUpTo` = the largest N that still takes it, `spot` = its map spot's
+// index in this response. The client counts "N homes on N spots" for any threshold from one response,
+// so typing a new number never refetches. A GET because archived campaigns allow only -preview POSTs.
+router.get('/apartment-preview', async (req, res, next) => {
+  try {
+    const { passId } = req.query || {};
+    if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    const all = await apartmentCandidates({ campaignId: req.campaign._id, effortId: pass.effortId });
+    res.json({
+      candidates: {
+        ids: all.map((c) => String(c.id)),
+        takenUpTo: all.map((c) => c.takenUpTo),
+        spot: all.map((c) => c.spot),
+      },
+    });
   } catch (err) {
     next(err);
   }

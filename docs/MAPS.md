@@ -124,17 +124,19 @@ Two doors that are *near* each other but not identical still get their own pins.
 screen and your click hits both, the map now opens the same list instead of silently picking one.
 
 **When the "building" is really a bad pin.** A genuine building is one street address with many
-units. If the doors inside a stack come from **different streets with no street holding a clear
+units. If the doors inside a stack have **different addresses with no address holding a clear
 majority**, that's not a building — the voter file stamped a placeholder coordinate on addresses it
-couldn't place, and unrelated houses piled onto one dot. (A stack where one street *does* hold the
+couldn't place, and unrelated houses piled onto one dot. (A stack where one address *does* hold the
 majority is a real building carrying a few oddly-typed rows — an 89-door park with two typo'd lots —
-and both the panel and the repair treat it that way: the building stands, only the strays are checked.) The panel says so in as many words (amber note: *"different street addresses but
-identical map coordinates … the dot is what's wrong"*) instead of pretending it's a tower, the import
-preview warns when a file arrives carrying such pins, and `repair:import-pins` re-places the doors
-from their addresses (see [IMPORTS.md](IMPORTS.md) → *Fixing pins that came in wrong*). Watch for the
-knock-on: **Remove apartments** keys on geocode stacking, so it will exclude a fake stack from books
-exactly as if it were a tower — real single-family homes silently out of the walk universe until the
-pins are fixed and the doors re-included.
+and it's treated that way: the building stands, only the odd doors are marked.) Each import now looks
+those homes up by their own address and moves the ones it can place with confidence; the rest stay on
+the dot, marked **No exact map spot**, and are listed in **Pin Fixes** (see [IMPORTS.md](IMPORTS.md) →
+*Homes that share a map spot with other addresses*). Until they're fixed, this map still draws the dot
+as one marker, and the panel says so in as many words (amber note: *"different addresses but identical
+map coordinates … the dot is what's wrong"*) instead of pretending it's a tower. **Remove apartments**
+goes by address too: it holds out the units of one address, or unit addresses on a crowded spot, and
+never separate houses that merely share a dot (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)). Older
+imports can still be cleaned up by the pin repair (*Fixing pins that came in wrong* in IMPORTS.md).
 
 **Building grouping is not clustering.** A building sits at the doors' real location, never merges
 with the building next door, and never dissolves as you zoom. Doorline does not cluster map pins.
@@ -284,6 +286,16 @@ An organizer sees the whole campaign at once:
   marked from far away, in rapid succession, all from one spot, or with weak GPS — each a colored dot
   with a line back to the house, reviewable in place. The overlay opens on **Today** with the rest of
   the map; the full detection rules and a dedicated Audit page are in [AUDIT.md](AUDIT.md).
+- **How sure each recorded location is.** Zoom in to street level and every canvasser location and
+  flag on the web map shows a faint circle the size of the phone's own accuracy estimate when that door
+  was recorded. It's a guide, not a boundary: honest readings often land outside it (on Android about
+  one in three), so a house outside the circle isn't evidence on its own. A reading wider than ~820 ft
+  gets no circle (its panel says *Too wide to draw on the map*), and with more than 500 on screen the
+  circles are left off, with a note under the toggle to zoom in. A circle never takes a click: clicking
+  inside one still opens whatever pin or flag you clicked. The location panels call a door **far** only
+  when the audit does, and say what is left of the distance after allowing for GPS accuracy (see
+  [AUDIT.md](AUDIT.md)). The mobile admin map keeps its older far label, and draws no circles, until
+  its next update.
 - **Overlaps.** Turn on **"Show overlaps"** to ring the doors that **more than one canvasser knocked in
   the same pass** — a turf collision worth a look, since once a door is knocked in a pass nobody should
   return until the next one. Each such door gets a hollow **amber ring** around its pin, the header
@@ -347,28 +359,38 @@ disappears and the door reads **"Pin corrected."**
 ### The Pin Fixes page — work the whole backlog in one place
 
 Hunting rings on a busy map doesn't scale, so the campaign has a dedicated **Pin Fixes** page
-(sidebar → Quality). It lists **every** approximate pin in the campaign — including ones the map
-literally can't ring, like doors stacked inside an apartment-building marker — **grouped by street**,
-with a map beside the list and a live **"N doors to review"** count (the same number as the amber
-badge on the sidebar item). There are two ways to work a pin, sharing one selection:
+(sidebar → Quality). It lists **every** pin that needs a check — every approximate pin in the campaign,
+including ones the map literally can't ring, like doors stacked inside an apartment-building marker, and
+every home with **No exact map spot** (its coordinate was shared with other addresses and the import's
+lookup couldn't place it) — **grouped by street**, with a map beside the list and a live **"N doors to
+review"** count (the same number as the amber badge on the sidebar item, *"N pins to fix"*). Units of
+one address on one spot share a row; separate homes never do, even when they sit on one dot. There are
+two ways to work a pin, sharing one selection:
 
 - **Click a pin on the map** and an **action popup opens at the top-right of the map** — the same
   corner the Move-pin card uses — with the address (and, for a building, the scrollable list of its
   units), the three actions below, **← / → arrows** to step through the queue with an *n of N pins*
-  position, and the keyboard hints. The matching list row highlights and scrolls into view.
+  position, and the keyboard hints. The matching list row highlights and scrolls into view. A dot that
+  holds several homes opens the first one; click it again for the next.
 - **Click a row in the list** and the map flies to that pin with the same three actions expanded
   inline under the row.
 
 The three actions, either way:
 
 - **Move pin** — the same drag-the-blue-marker flow as everywhere else. A building moves every
-  unit at the pin together.
+  unit of its address at the pin together. On a home with **No exact map spot**, **Save** stays off
+  until the pin is dragged clearly off the shared spot (more than about 5 ft); if the server still
+  finds nothing moved, the card says *"Nothing moved — drag the pin onto the house"* and stays open.
 - **Looks right — confirm** — for pins that check out: the door leaves the queue and the ring goes
   out **without** pretending anyone moved anything. The door then reads **"Location confirmed"**
   instead of "Approximate location", the fix is attributed and timestamped, and a re-imported file
   can't silently yank the pin you vouched for (same protection corrected pins get). There's an
   **Undo** on the toast if you mis-click. Confirming a building confirms every *approximate* unit
-  at the pin — a unit someone already hand-corrected is left alone.
+  of its address at the pin — a unit someone already hand-corrected is left alone. On a home with **No
+  exact map spot** the button reads **Looks right — the home is here** and asks once first (*"This
+  home's map spot was shared with other addresses. Confirm the home is really here?"*). If the pin
+  changed since the page loaded (another lead moved it, or an import placed it), the confirm is refused
+  — *"This pin changed since the page loaded — reloading."* — and the list reloads.
 - **Google Maps ↗** — opens the door's *address* in a Google Maps search in a new tab, for the cases
   the imagery alone can't settle. This only happens on your own action — a click, or the **G**
   shortcut — exactly like googling the address yourself.
@@ -378,8 +400,9 @@ street order and opens its popup, so a big backlog is one decision per house —
 keeps score with a **"X doors cleared this session · Y left"** progress bar. (Picked a different row
 while a save was still settling? Your pick wins — the page never yanks a selection you just made.)
 While the popup is open, the keyboard works the queue too: **Enter** confirms, **← / →** step
-prev/next, **G** opens Google Maps, **Esc** closes the popup. A **blank click on the map** also
-closes it, by design.
+prev/next, **G** opens Google Maps, **Esc** closes the popup. On a home with **No exact map spot**,
+**Enter does nothing** (and the hint leaves it out): confirming one always takes the click that asks
+first. A **blank click on the map** also closes it, by design.
 
 Most pins never need the link: switch the map to **Hybrid** (the basemap picker — satellite imagery
 with street labels) and you can usually drop the pin on the right roof without leaving the page.
@@ -453,7 +476,16 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   `updateHouseholdLocation` service ([services/households/updateHouseholdLocation.js](../server/src/services/households/updateHouseholdLocation.js)),
   which validates a **state-bounding-box** guardrail, sets `coordSource='corrected'` + provenance
   (`correctedBy`/`correctedAt`/`previousLocation`), and logs a `HouseholdLocationChange` audit row. A
-  `scope:'building'` move repositions every unit sharing the pin. **A correction never changes book
+  `scope:'building'` move repositions every active unit of the **same street address** on the pin
+  (`sameAddressDoors`: a 3 m `$geoWithin` on the 2dsphere index, then the exact ~1.1 m key and the same
+  `stackBaseOf`) — never the separate houses a vendor stamped with the same coordinate
+  ([PROPOSAL_PLACEHOLDER_PINS.md](PROPOSAL_PLACEHOLDER_PINS.md) §G). Each door is one pipeline
+  `findOneAndUpdate` that also `$unset`s `pinSuspect` and, on a flagged door, records the spot it left
+  (`pinPlacement { from, to, at, kind, by: 'person' }`). Two saves move nothing and write nothing,
+  answering `moved: 0, unchanged: true` (the web card then says *"Nothing moved — drag the pin onto the
+  house"* and stays armed): a save within `NO_MOVE_METERS` (1.5 m) of an unplaced door's own pin (for a
+  building, any unit it would move), and a save back onto the shared spot a lookup-placed door left
+  (unless it was placed in place). **A correction never changes book
   membership, walk order or status** — `turfId` is set at cut, not derived from coordinates, and
   `walkOrder`/`status` are untouched — **but it DOES redraw the affected book outlines, best-effort**:
   after the coordinates + audit rows are committed, the service calls
@@ -477,26 +509,38 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   semantics (pin-shield, far-flag downgrade, "Pin corrected" badges) that must stay reserved for pins a
   human actually PLACED. A confirm sets only `locationConfirmedBy`/`locationConfirmedAt` on the
   Household; `coordSource`/`coordConfidence` are untouched — the geocoder's verdict stays honest — and
-  a from==to `HouseholdLocationChange` row with `source:'confirm'` logs the vouch. **The building
-  fan-out is narrower than the move's**: it stamps only `interpolated` siblings on the ~1.1m key —
-  never a `corrected` sibling (a `'confirm'` row on one would become its latest audit row and mask
-  `repair:import-pins`' self-revert, which keys on the latest row being `import_repair`) and never an
-  `exact` one (nobody was asked about it). `confirmed:false` is the undo: stamps cleared, **no** audit
-  row (un-stamping isn't a location event). A later real move clears the stamp (the vouch described the
+  a from==to `HouseholdLocationChange` row with `source:'confirm'` logs the vouch. It also vouches for
+  a door **unplaced now** (`isConfirmable`: interpolated, or `pinSuspect` with no stamp) — "the home
+  really is here" — and keeps `pinSuspect` under the stamp, so an Undo restores the door exactly. **The
+  building fan-out is narrower than the move's**: the same street address's units on the ~1.1m key
+  (`sameAddressDoors`) that need a vouch — `interpolated` or flagged — never a `corrected` sibling (a
+  `'confirm'` row on one would become its latest audit row and mask `repair:import-pins`' self-revert,
+  which keys on the latest row being `import_repair`) and never an `exact` one (nobody was asked about
+  it). Every stamp is a **conditional write on the pin as loaded**, and the route compares the body's
+  `expectedCoordinates` (the pin Pin Fixes drew) with the door's current key first: a placement or move
+  that landed since answers `409 PIN_CHANGED` (its own code — this router's other 409s mean an archived
+  or deleting campaign) and the page refetches. `confirmed:false` is the undo: it clears the primary's
+  stamp and only siblings stamped by the same confirm (same timestamp), with **no** audit row
+  (un-stamping isn't a location event). A later real move clears the stamp (the vouch described the
   old spot), and so does an `overwriteHandEdits` re-import; a default re-import shields a confirmed
   pin exactly like a corrected one (counted separately as `keptConfirmed` — see [IMPORTS.md](IMPORTS.md)).
   Badge precedence everywhere: **corrected > confirmed > approximate**. Refusals: `400 NOT_APPROXIMATE`
-  for a door that isn't interpolated, the usual `403 FORBIDDEN_ROLE` / `409 campaign-archived`.
-  Covered end-to-end by `server/test/pinFixes.int.test.js`.
-- **The ONE needs-fixing predicate** is `NEEDS_PIN_FIX` (exported beside the confirm writer):
-  `isActive + coordConfidence:'interpolated' + locationConfirmedAt:null`. It is spread verbatim by the
-  Pin Fixes list (`GET /admin/campaigns/:id/households/pin-fixes` — cap `PIN_FIX_LIST_CAP`, default
-  10 000, with `{ total, truncated, cap }` on the /map convention) and by the campaigns-rollup badge
-  count (`campaignSummaries.pinsToFix`, a live derived aggregate — deliberately NOT a `Campaign.stats`
-  counter, whose nightly reconcile reads only the activity/survey ledgers and could never repair a
-  Household field-state number). One predicate, so the badge, the list and the page's map can never
-  disagree. Served by a partial index — `{ campaignId: 1, locationConfirmedAt: 1 }` with
-  `partialFilterExpression: { coordConfidence: 'interpolated' }` — which makes
+  for a door that is neither interpolated nor unplaced, `409 PIN_CHANGED`, the usual
+  `403 FORBIDDEN_ROLE` / `409 campaign-archived`. Covered end-to-end by `server/test/pinFixes.int.test.js`
+  and `server/test/placeholderPinWriters.int.test.js`.
+- **The needs-fixing predicates** are `NEEDS_PIN_FIX` and `UNPLACED_PIN` (both exported beside the
+  confirm writer). `NEEDS_PIN_FIX`: `isActive + coordConfidence:'interpolated' + locationConfirmedAt:null`.
+  `UNPLACED_PIN`: `isActive + pinSuspect is a string + locationConfirmedAt:null + coordConfidence ≠
+  'interpolated'` — disjoint from the first by construction, so the Pin Fixes list
+  (`GET /admin/campaigns/:id/households/pin-fixes` — cap `PIN_FIX_LIST_CAP`, default 10 000, applied
+  to the merged rows, with `{ total, truncated, cap }` on the /map convention) and the campaigns-rollup
+  badge count (`campaignSummaries.pinsToFix`, a live derived aggregate — deliberately NOT a
+  `Campaign.stats` counter, whose nightly reconcile reads only the activity/survey ledgers and could
+  never repair a Household field-state number) each run two queries and add them — no `$or`, which would
+  defeat both partial indexes. The same two predicates everywhere, so the badge, the list and the page's
+  map can never disagree. Served by two partial indexes — `{ campaignId: 1, locationConfirmedAt: 1 }`
+  with `partialFilterExpression: { coordConfidence: 'interpolated' }`, and `{ campaignId: 1,
+  pinSuspect: 1 }` with `partialFilterExpression: { pinSuspect: { $type: 'string' } }` — which makes
   `npm run migrate:build-indexes -- --apply` a **deploy gate** for this feature.
 - **Both paths enforce the SAME policy: `canManageCampaign`** — org admin (or super, who still needs a
   support grant to enter the org at all), or a team lead for a campaign they manage. The web route gets
@@ -554,7 +598,9 @@ the gate was put back in front of the recolor on 2026-07-14, see [AUDIT.md](AUDI
    itself is in [CAMPAIGNS.md](CAMPAIGNS.md).)
 4. **Server.** Creates a `CanvassActivity` (stamping `distanceFromHouseMeters` = haversine from the
    house), runs `recomputeHouseholdStatus`, and sets `household.status` / `lastActionAt` / `lastActionBy`
-   (the save bumps `updatedAt`). Re-knocking the same door **in the same round deletes + replaces** the
+   (the save bumps `updatedAt`). A coordinate that isn't a finite number is refused as
+   `LOCATION_REQUIRED` before any write, and the stamp's `accuracy` is stored only when it is a finite
+   number above zero, else `null` ([AUDIT.md](AUDIT.md) §B.6). Re-knocking the same door **in the same round deletes + replaces** the
    prior activity (important for delta logic — see F).
 5. **Reconcile.** On a successful online write the helper re-patches the cache with the server's
    authoritative status. On a **hard** (4xx/5xx) failure it invalidates `['bootstrap']` to pull server
@@ -591,11 +637,17 @@ the reconnect listener drains it the moment signal returns, without the canvasse
 | `GET /admin/reports/flags` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | `{ summary, entries[], … }` | The GPS-audit **flag overlay** — a *separate* query MapPage runs only when "Show flagged entries" is on, so toggling flags never refetches households. Live-detected, not stored. Full spec in [AUDIT.md](AUDIT.md). |
 | `GET /admin/reports/overlap-doors` | [routes/admin/reports.js](../server/src/routes/admin/reports.js) | `{ householdIds:[…], doors:[{ householdId, passes:[{ passId, roundLabel, canvassers:[{userId,name}] }] }], total }` | The **Overlaps** overlay's data — doors knocked by **2+ distinct canvassers in the same pass** (`computeOverlapDoors`, [services/reports/overlaps.js](../server/src/services/reports/overlaps.js)). **Detection is ANCHORED, not windowed** (2026-07-19): the pipeline groups over the **whole pass** but surfaces a collision only when **at least one of its knocks falls inside `[from, to)`** — so a door knocked the 5th and again the 11th rings while you view the 11th, and `doors[].passes[].canvassers[]` carries each canvasser's `lastAt` + an `inRange` flag so the UI can name the *earlier* knock. Each door is **self-contained** — an org-scoped `household{…}` (address + `location`), a `totalCanvassers` count, and per-canvasser `firstName`/`lastName`/`actionType` deliberately mirroring `/overlaps`' field names so ONE card component (`client/src/components/OverlapDoorCard.jsx`) renders both the Timeline's windowed reconciliation list and the anchored **Overlaps report** (`/campaigns/:campaignId/overlaps`, and mobile's `admin/overlaps`, which now carries the shared `CampaignChip` — this endpoint's required `campaignId` had no on-screen source there before). The per-canvasser action comes from a `$max` over a composite `{at, action}` object — BSON compares objects field-by-field, so it yields the latest knock *and* its action without a `$sort` stage or `$top` (unused elsewhere in this codebase, so its server support is unproven). Collisions with no in-window knock are returned as **`outOfRangeTotal`** (the "+N outside your dates" hint) rather than dropped. The date test is an expression inside `$group`, never a `$match` — filtering first would make the cross-day case invisible instead of countable. Params: **`campaignId` is REQUIRED** (400 otherwise; unscoped this aggregated the org's entire ledger), plus optional `effortId`/`passId`/`from`/`to`/**`userId`** (collisions *involving* that canvasser — applied after grouping, since narrowing rows to one person first would leave nothing to collide). Lead-gated like its neighbors. Each pass entry also carries **`effortName`**, and `roundLabel` is prefixed with the walk-list name (*North · Pass 2 · GOTV*) **only when the campaign has 2+ efforts** — `roundNumber` restarts per walk list, so "Pass 2" alone is ambiguous there; single-list campaigns keep the short label (the shared `passLabeler` in [overlaps.js](../server/src/services/reports/overlaps.js) does the same for `/overlaps` and the timeline reconciliation; an org-wide match with no `campaignId` falls back to "the surfaced passes span 2+ efforts"). A *separate* query both maps run only when "Show overlaps" is on (so toggling it never refetches households). **It is NOT polled** (2026-07-19): a whole-pass aggregation whose answer barely moves minute to minute was re-running every 20s for as long as the layer stayed open; it now fetches once per scope change, so it is deliberately outside the live-poll set on both clients. It still catches the cross-day collisions the date-scoped `/overlaps` structurally cannot see (see the anchoring note above). The endpoint returns **ids only**: each map rings whichever of those doors are currently loaded in the viewport (coordinates come from the loaded households via `overlapDoorsToGeoJSON`), so the `total` count can legitimately exceed the number of rings visible at a given zoom/pan. Full model + the two-surfaces comparison in [METRICS.md](METRICS.md) §D. |
 | `GET /admin/households/map/counts` | [routes/admin/households.js](../server/src/routes/admin/households.js) | `{ universe:{ total, excludedFromTurf, doNotKnock }, matching:{ total, excludedFromTurf, doNotKnock }, byStatus:{ unknocked, not_home, surveyed, refused, restricted, no_soliciting, not_target, wrong_address, lit_dropped }, statusMode }` | The numbers behind both admin maps' header/chip. `byStatus` is seeded from `emptyStatusCounts()` ([passStatus.js](../server/src/services/passes/passStatus.js)), and that literal is also a **whitelist**: a stored status it doesn't seed is skipped by the tally and by the `matching` sum's status selection, so a door status missing there silently vanishes from the header — `not_target` was added to it with the outcome (2026-10-02), and `mapCounts.int.test.js` hand-lists the nine keys on purpose. Same params as `/map` minus `bbox` / `includeActivities` / `includeBounds` (accepted, ignored) — the client keys it on filters-minus-bbox so panning never refetches it. **`universe`** is every active geocoded door in the campaign (or in the selected walk list when `effortId` is set; the org when neither) — filter-independent: pass / import / saved-search / date / canvasser / answer / status / bbox never move it, and it deliberately does NOT apply `KNOCKABLE_DOOR_FILTER` (the map shows excluded + do-not-knock doors, so the denominator is what the map can show; the two sub-counts ride along). **`matching`** honors every filter incl. `status`, campaign-wide — the header's primary number. **`byStatus`** honors every filter EXCEPT `status` ("what would I get if I clicked this chip"); statuses are mutually exclusive per door, so `Σ byStatus == matching.total` with no status filter and `matching == Σ byStatus[selected]` otherwise — **derived on the server**, so web and mobile print the same number. Per-user / per-pass modes (`statusMode: 'user' \| 'pass'`) resolve status through the same `getUserStatusMap` / `getPassStatusMap` as `/map`, so the chips agree with the pin colors; an early-exit door set answers zeros + a real universe. Global mode = two index-backed `$group`s; user/pass mode = one slim `find` over the (bbox-free) scope ids + one activity aggregate. Lead-gated identically; polled at 20s under the Live pill on both clients. |
-| `GET /admin/campaigns/:campaignId/households/pin-fixes` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ households:[{ id, addressLine1, addressLine2, city, state, zipCode, location, status, coordSource, coordConfidence }], total, truncated, cap }` | The **Pin Fixes queue**: every door matching `NEEDS_PIN_FIX` (active + `interpolated` + unconfirmed) — the same predicate the rollup's `pinsToFix` badge counts, so list and badge can never disagree. `requireCampaignManager` (leads with a grant included); readable on an **archived** campaign (the router's `requireActiveCampaign` gates only writes). Cap `PIN_FIX_LIST_CAP` (default 10 000, env read at call time) with the `/map` `{ total, truncated, cap }` convention — the page's list and map both consume the whole set at once (the Turf-page hybrid pattern), not a pager. |
-| `POST /admin/campaigns/:campaignId/households/:householdId/confirm-location` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ household:{ id, locationConfirmedAt }, updated }` | Confirm-in-place (**Pin Fixes**): body `{ scope?: 'unit'\|'building', confirmed?: boolean }` (default `confirmed: true`; `false` = undo). Stamps `locationConfirmedBy/At` via `confirmHouseholdLocation` — never the move writer — and logs a from==to `HouseholdLocationChange` (`source:'confirm'`). Building scope fans out to **interpolated** siblings on the ~1.1m key only. Refuses `400 NOT_APPROXIMATE` on a non-interpolated door (undo skips that check), plus the router's usual 403/409. Full semantics in §B. |
+| `GET /admin/campaigns/:campaignId/households/pin-fixes` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ households:[{ id, addressLine1, addressLine2, city, state, zipCode, location, status, coordSource, coordConfidence, pinSuspect? }], total, truncated, cap }` | The **Pin Fixes queue**: every door matching `NEEDS_PIN_FIX` (active + `interpolated` + unconfirmed) plus every door matching `UNPLACED_PIN` (a shared-spot flag nobody vouched for; `pinSuspect: 'placeholder'\|'stray'` on those rows only) — two queries merged, the same predicates the rollup's `pinsToFix` badge counts, so list and badge can never disagree. `requireCampaignManager` (leads with a grant included); readable on an **archived** campaign (the router's `requireActiveCampaign` gates only writes). Cap `PIN_FIX_LIST_CAP` (default 10 000, env read at call time) with the `/map` `{ total, truncated, cap }` convention — the page's list and map both consume the whole set at once (the Turf-page hybrid pattern), not a pager. |
+| `POST /admin/campaigns/:campaignId/households/:householdId/confirm-location` | [routes/admin/campaignHouseholds.js](../server/src/routes/admin/campaignHouseholds.js) | `{ household:{ id, locationConfirmedAt }, updated }` | Confirm-in-place (**Pin Fixes**): body `{ scope?: 'unit'\|'building', confirmed?: boolean, expectedCoordinates?: [lng, lat] }` (default `confirmed: true`; `false` = undo). Stamps `locationConfirmedBy/At` via `confirmHouseholdLocation` — never the move writer — and logs a from==to `HouseholdLocationChange` (`source:'confirm'`). Building scope fans out to the same street address's units on the ~1.1m key that need a vouch (interpolated or flagged). Refuses `409 PIN_CHANGED` when `expectedCoordinates` no longer matches the door's pin (or the conditional stamp matched nothing), `400 NOT_APPROXIMATE` on a door neither interpolated nor unplaced (undo skips that check), plus the router's usual 403/409. Full semantics in §B. |
 
 `GET /admin/households/map` activity shape: `{ id, householdId, actionType, timestamp,
-location:{lng,lat,accuracy}, distanceFromHouseMeters, canvasser:{id,firstName,lastName} }`.
+location:{lng,lat,accuracy}, distanceFromHouseMeters, far, canvasser:{id,firstName,lastName} }`.
+**`far`** (additive) is `null` or `{ severity, detail }`, the audit's own far verdict for that ping,
+computed by `farAssessment` through `farKpiForRows` and whitelisted by `farVerdictForWire`
+([AUDIT.md](AUDIT.md) §D). The web ping panel labels from it; an older payload without the key is
+judged by the same arithmetic. `location.accuracy` is passed through as stored, so a row from before
+the accuracy rule can still carry a `0` or a negative; every client treats only a finite number above
+zero as a radius.
 
 Each `GET /admin/households/map` household row also carries **`locationConfirmedAt`** (2026-08-28,
 additive): the Pin Fixes confirm stamp. Both admin maps' ring layers skip confirmed doors, and the
@@ -645,7 +697,8 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
 - **Web (Mapbox GL JS):** GeoJSON **sources + layers** — a symbol layer for household icons, a circle
   layer for pings, a line layer for ping→house links. House icons are drawn to a canvas at runtime,
   one per `STATUS_COLORS` key (`registerLayers` loops over it, so `house-not_target` registers itself);
-  the `households-symbols` `icon-image` match and the ping `circle-color` match still name each status.
+  the `households-symbols` `icon-image` match still names each status, and the ping `circle-color`
+  match is built from `PING_COLOR_BY_ACTION`, the one table the accuracy circles colour from too.
   Updates call `source.setData(...)`, so a refresh re-paints features **without** recreating DOM
   markers or moving the camera (auto-fit runs once via a `_didFitBounds` flag).
 - **Mobile (`@rnmapbox/maps`):** native **`ShapeSource` + `SymbolLayer`** driven by **one** GeoJSON
@@ -668,6 +721,25 @@ plus two coordination params: **`scid`** (the seeding campaign's id) and
   default — the unknocked house — with no error. Building & book progress
   markers (grey/yellow/green) are
   generated by [scripts/genMarkerIcons.js](../mobile/scripts/genMarkerIcons.js) (SVG→PNG via `sharp`).
+- **Accuracy circles (web admin map):** [client/src/lib/accuracyRing.js](../client/src/lib/accuracyRing.js)
+  (no imports, so the phone can carry a byte-identical copy) turns each recorded ping and flag into a
+  64-vertex geodesic polygon of radius `location.accuracy` (Earth radius 6,371 km, the server's
+  haversine; within 0.1 m of true). `ringInputsFromPoints` reads the ping and flag point sets MapPage
+  already builds (a stamp that is both gets one circle, in its flag colour; pings in
+  `PING_COLOR_BY_ACTION`); `activitiesToPingsGeoJSON` and `flagsToGeoJSON` stamp `accuracy` only when
+  it is a finite number above zero. `accuracyRingsGeoJSON` draws nothing below `ACCURACY_RING_MIN_ZOOM`
+  (13, where even a 250 m circle is smaller than its dot), nothing wider than `ACCURACY_RING_MAX_M`
+  (250 m, the Weak GPS high line), only stamps inside the padded view (`padBounds`: a quarter of the
+  view on each side, at least 0.003°), and none at all when more than `ACCURACY_RING_CAP` (500) qualify
+  (`withheld`, which `MapFilters` turns into `RINGS_WITHHELD_NOTE`), because a partial set would read as
+  "no circle = a perfect fix". `registerLayers` adds the `accuracy-rings` source and its
+  `accuracy-rings-fill` / `-line` layers (`minzoom` 13, colour from each feature, fainter once
+  reviewed) before `household-approx-ring`, so they are the bottom of the app's own stack, below every
+  house, building, ping and flag layer; the flag's fixed-pixel halo stays the alert. Polygons, not a
+  `circle` layer, because circle layers clip at the tile buffer past about 128 px. Registered only
+  when `withCanvassers` is on, so the client-report and answer maps never get them; the packet and Pin
+  Fixes maps register the empty layers and never fill them. Tests: `accuracyRing.test.js`,
+  `mapRender.test.js`.
 - **Buildings grouping:** [mobile/lib/buildings.js](../mobile/lib/buildings.js) rounds coordinates to ~1m
   and collapses ≥2 units at one spot into a single building marker with `total`/`done`/`status`. The
   web mirror is [client/src/lib/buildings.js](../client/src/lib/buildings.js) — `buildingKeyForCoords(lng, lat)`
@@ -940,6 +1012,23 @@ constants). A small legend labels the two rings when they're shown.
 
 ## I. Invariants / gotchas
 
+- **An accuracy circle never takes a click, and never stands for the live dot.** No handler is ever
+  bound to `accuracy-rings-fill` / `-line`: MapPage binds only per-layer delegates, and Mapbox GL JS
+  delegates query only their own layers, so a click inside a circle reaches the pin or flag under it
+  (never read `e.features[0]` of an unfiltered query). The circles are for RECORDED stamps. The
+  canvasser's live blue dot is a different thing: its ring, when it ships, is the map engine's own,
+  never a JS-drawn circle ([GPS_ACCURACY.md](GPS_ACCURACY.md) §H).
+- **The circles' camera comes from their own `moveend` handler.** `onRingView` in `MapPage.jsx` is
+  bound to every `moveend`, ungated, and called once on `load`; it hands `map.getZoom()` and the view
+  to `nextRingView`. Never move it into the bbox handler, which skips every move before the first
+  auto-fit and every move that stays inside the last padded fetch box, which every zoom-in does: a zoom
+  recorded there stays at the overview and no circle ever draws at street zoom.
+  `mapRender.test.js` pins the binding; `accuracyRing.test.js` drives the auto-fit and two zoom-ins.
+- **All the circles or none.** Over the cap the set is withheld whole and the sidebar says so
+  (*Too many locations on screen to draw accuracy circles — zoom in.*). The "Show canvasser locations"
+  description says what the circle is: *Zoom in and each dot shows a faint circle: the phone's own
+  accuracy estimate, a guide, not a boundary.*
+
 - **Coordinates are imported or geocoded (Geocodio), and can be corrected** (see §B); rows with no
   usable point never reach a map. A pin correction is deterministic (`updateHouseholdLocation`),
   **never changes book membership, `walkOrder` or `status`** — it redraws the affected book outlines
@@ -1097,14 +1186,16 @@ constants). A small legend labels the two rings when they're shown.
 
 | File | Renders |
 |---|---|
-| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters (incl. the in-page walk-list `<select>` on 2+-effort campaigns — see §D's deep-link row), the `/map/counts` query + header door count (`MapDoorCount`), Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)), and the opt-in **Overlaps** ring overlay (`/overlap-doors` query + `overlap-doors-ring` layer + the header "N overlaps" chip). Also **"Select doors"** (§K): `selectMode` / `selectTool` / `spaceHeld` / `selection` state, the `selectedDoors` memo that resolves the id `Set` against `shownHouseholds`, the plan + off-walk-list pre-drop + `selectionNote` disclosures, the Esc and Space effects, the `door-selection` push, the two mutations and the top-center result toast. **Move pin** is no longer page-local: the panel's *Move pin →* calls `useMovePin().start(…)` and the page renders the shared `MovePinCard`; every once-bound layer click handler and the fullscreen-Esc effect bail on `armedRef.current` while a move is armed, and a save invalidates the cross-page set from `movePinInvalidationKeys` (not just this page's households query). |
-| [client/src/lib/movePin.js](../client/src/lib/movePin.js) | Move-pin, pure half (no React / api / mapbox imports): `movePinCopy({ scope, count, addressLine1 })` → the card's title/body/caveat/save label for `unit` vs `building`; `movePinErrorMessage(err)` (`out_of_bounds` → the server's "That spot is outside NE.", `invalid_coords`, archived-campaign 409, `FORBIDDEN_ROLE`, 404 → "no longer in the campaign", else the message); `movePinInvalidationKeys(campaignId)` — the cross-page contract: `['turf-doors', id]`, `['turfs', id]` (re-hulled boundaries), `['turf-household', id]`, `['admin','households-map', id]`, `['admin','packet-data', id]`, `['admin','pin-fixes', id]` (the queue — a moved pin leaves the needs-fixing set), `['admin','campaigns']` (the sidebar `pinsToFix` badge) (callers also run `invalidateFlagCaches` — the far-flag downgrade is computed live server-side); `movePinToast(scope, moved)` (*Pin moved.* / *Building pin moved · N units*). Tested in [movePin.test.js](../client/src/lib/movePin.test.js). |
-| [client/src/lib/useMovePin.js](../client/src/lib/useMovePin.js) | The hook both web maps share: `useMovePin({ mapRef, campaignId, onSaved })` → `{ armed, target, coords, copy, saving, error, armedRef, start, cancel, save }`. `start({ id, addressLine1, lng, lat, scope, count })` arms it (non-finite coords refused); the effect drops a draggable blue `mapboxgl.Marker` and removes it on cleanup; Esc cancels while armed; `save()` → `PATCH …/households/:id/location { lat, lng, scope }` → the `movePinInvalidationKeys` prefixes + `invalidateFlagCaches` → `onSaved(res, target, coords)` → reset. `armedRef` is the ref-indirection for once-bound map handlers — read `armedRef.current`, never `armed`, inside them. |
-| [client/src/components/MovePinCard.jsx](../client/src/components/MovePinCard.jsx) | The floating "Move pin" card (title, body with the address in `<strong>`, the amber caveat, inline `text-danger` error, Cancel / Save location). Presentational — the hook owns state; MapPage renders it where its inline card used to be, TurfsPage top-right over the cut map after the popups (which hide while armed), and PinFixesPage top-right over its map — where its own PinFixPopup shares the slot and likewise hides while armed. |
-| [client/src/pages/PinFixesPage.jsx](../client/src/pages/PinFixesPage.jsx) | The **Pin Fixes** queue (`/campaigns/:id/pin-fixes`, full-bleed, Quality nav group, amber `pinsToFix` sidebar badge): street-grouped list of every needs-fixing door (buildings collapse to one row) beside a map running the full default `registerLayers` (single-door queue pins ring amber by construction; stacked doors draw as the building glyph, which carries no ring — the list is what surfaces those; `selected-household` highlights the picked row) and the shared basemap picker (Hybrid for roof-placing). **Selection is `{ key, source: 'list'\|'map' }`** — the source decides the action surface: a LIST row click expands the row's inline buttons; a MAP pin click (resolved through the id→row map — stacked units land on their building row), an arrow-key step, or an auto-advance opens **PinFixPopup** in the shared top-right slot (address, a building's sorted+capped unit list, the 3 actions — **Move pin** via the shared `useMovePin`, **Looks right — confirm** with the Undo toast, **Google Maps ↗** — plus ←/→ with *n of N* over `rowKeys`, hints, close X; hidden while the MovePinCard is armed). **Auto-advance**: neighbor keys are captured into a ref at action start (both Move entry points go through one `armMove` that stashes only when `start()` arms; a cancelled drag leaves an inert stash) and consumed only after the awaited refetch — candidates resolved against the **refetched query cache** (`qc.getQueryData` + a fresh `buildStreetGroups`; the await resolves before React commits the refetched render, so the effect-mirrored refs are still pre-action), never the acted row itself. A different row picked mid-flight wins, an ARMED drag suppresses the advance entirely (the stash stays for that move's own onSaved, and Move buttons disable during a settling confirm so the two can't share a stash), and an explicit close (X / Esc / blank click) cancels the pending advance via `closePopup`. **Keyboard** (mounted only while the popup is open): capture-phase window listener where `stopPropagation` is the load-bearing call (mapbox's bubble-phase canvas handler pans on arrows and never checks `defaultPrevented`); Enter sits out on interactive targets, Space untouched, G calls `window.open(..., 'noopener')` synchronously, Esc defers to an armed drag and an open basemap menu (the `styleControlRef` `.animate-pop-in` sniff). **Session progress**: a render-assigned `{campaignId, startTotal}` ref written only while `listQ.data` exists (doors, not rows — total is the untruncated metric), whole-record reset on campaign switch, rebased upward on mid-session imports. Render-smoked in [pinFixesRender.smoke.test.js](../client/src/lib/pinFixesRender.smoke.test.js) (the doorOutcomes recipe + a css-stub esbuild plugin for `mapbox-gl.css`). |
-| [client/src/lib/pinFixes.js](../client/src/lib/pinFixes.js) | Pin Fixes, pure half (no React / api / mapbox): `buildStreetGroups(households)` → `{ groups, rowCount, rowKeys, idToRowKey }` (one row per PIN via the shared `groupHouseholds` + `streetName.js`; numeric-aware street sort, house-number row sort; building rows carry their full `units` list for the popup, door rows `units: null`; `rowKeys` is the ONE flattened order Next/Prev and auto-advance walk); `googleMapsUrl(door)` (the ADDRESS search — never a coordinate link, which would just show Google our own possibly-wrong spot); `confirmToast` / `confirmErrorMessage` (incl. `NOT_APPROXIMATE`); `confirmInvalidationKeys(campaignId)` — the confirm twin of `movePinInvalidationKeys`: `['admin','pin-fixes',id]`, `['admin','households-map',id]`, `['turf-household',id]`, `['admin','campaigns']` (the sidebar badge). Tested in [pinFixes.test.js](../client/src/lib/pinFixes.test.js). |
+| [client/src/pages/MapPage.jsx](../client/src/pages/MapPage.jsx) | Web admin map: sources/layers, filters (incl. the in-page walk-list `<select>` on 2+-effort campaigns — see §D's deep-link row), the `/map/counts` query + header door count (`MapDoorCount`), Live toggle, household + ping detail panels, first/last-knock rings (single canvasser), the GPS-audit flag overlay + [FlaggedEntryPanel](../client/src/components/FlaggedEntryPanel.jsx) review panel ([AUDIT.md](AUDIT.md)), and the opt-in **Overlaps** ring overlay (`/overlap-doors` query + `overlap-doors-ring` layer + the header "N overlaps" chip), and the accuracy circles (the `ringView` state set by `onRingView`, the `pingFC` / `flagFC` / `rings` memos and the `accuracy-rings` push). Also **"Select doors"** (§K): `selectMode` / `selectTool` / `spaceHeld` / `selection` state, the `selectedDoors` memo that resolves the id `Set` against `shownHouseholds`, the plan + off-walk-list pre-drop + `selectionNote` disclosures, the Esc and Space effects, the `door-selection` push, the two mutations and the top-center result toast. **Move pin** is no longer page-local: the panel's *Move pin →* calls `useMovePin().start(…)` and the page renders the shared `MovePinCard`; every once-bound layer click handler and the fullscreen-Esc effect bail on `armedRef.current` while a move is armed, and a save invalidates the cross-page set from `movePinInvalidationKeys` (not just this page's households query). |
+| [client/src/lib/movePin.js](../client/src/lib/movePin.js) | Move-pin, pure half (no React / api / mapbox imports): `movePinCopy({ scope, count, addressLine1 })` → the card's title/body/caveat/save label for `unit` vs `building`; `movePinErrorMessage(err)` (`out_of_bounds` → the server's "That spot is outside NE.", `invalid_coords`, archived-campaign 409, `FORBIDDEN_ROLE`, 404 → "no longer in the campaign", else the message); `movePinInvalidationKeys(campaignId)` — the cross-page contract: `['turf-doors', id]`, `['turfs', id]` (re-hulled boundaries), `['turf-household', id]`, `['admin','households-map', id]`, `['admin','packet-data', id]`, `['admin','pin-fixes', id]` (the queue — a moved pin leaves the needs-fixing set), `['admin','campaigns']` (the sidebar `pinsToFix` badge), `['apartment-preview', id]` (Turf Cutting's Remove apartments line) (callers also run `invalidateFlagCaches` — the far-flag downgrade is computed live server-side); `movePinToast(scope, moved)` (*Pin moved.* / *Building pin moved · N units*, and `NOTHING_MOVED` for `moved: 0`); the Save gate `canSaveMove(target, coords)` — always for a door with an exact spot, and for an `unplaced` target only once `metersBetween` exceeds `NO_MOVE_METERS` (1.5 m, the server's no-op radius; mapbox starts a drag only past its 3 px click tolerance, ~1.45 m at zoom 17). Tested in [movePin.test.js](../client/src/lib/movePin.test.js). |
+| [client/src/lib/useMovePin.js](../client/src/lib/useMovePin.js) | The hook both web maps share: `useMovePin({ mapRef, campaignId, onSaved })` → `{ armed, target, coords, copy, canSave, saving, error, armedRef, start, cancel, save }`. `start({ id, addressLine1, lng, lat, scope, count, unplaced })` arms it (non-finite coords refused); a save the server answers with `moved: 0` / `unchanged` stays armed with `NOTHING_MOVED` and never calls `onSaved` (so Pin Fixes never advances past it); the effect drops a draggable blue `mapboxgl.Marker` and removes it on cleanup; Esc cancels while armed; `save()` → `PATCH …/households/:id/location { lat, lng, scope }` → the `movePinInvalidationKeys` prefixes + `invalidateFlagCaches` → `onSaved(res, target, coords)` → reset. `armedRef` is the ref-indirection for once-bound map handlers — read `armedRef.current`, never `armed`, inside them. |
+| [client/src/components/MovePinCard.jsx](../client/src/components/MovePinCard.jsx) | The floating "Move pin" card (title, body with the address in `<strong>`, the amber caveat, inline `text-danger` error, Cancel / Save location; `canSave`, default true, disables Save — Pin Fixes passes the hook's gate). Presentational — the hook owns state; MapPage renders it where its inline card used to be, TurfsPage top-right over the cut map after the popups (which hide while armed), and PinFixesPage top-right over its map — where its own PinFixPopup shares the slot and likewise hides while armed. |
+| [client/src/pages/PinFixesPage.jsx](../client/src/pages/PinFixesPage.jsx) | The **Pin Fixes** queue (`/campaigns/:id/pin-fixes`, full-bleed, Quality nav group, amber `pinsToFix` sidebar badge): street-grouped list of every needs-fixing door (the units of one street address on a pin collapse to one row; separate homes on a shared spot stay separate rows, sub-lined *No exact map spot*) beside a map running the full default `registerLayers` (single-door queue pins ring amber by construction; stacked doors draw as the building glyph, which carries no ring — the list is what surfaces those; `selected-household` highlights the picked row) and the shared basemap picker (Hybrid for roof-placing). **Selection is `{ key, source: 'list'\|'map' }`** — the source decides the action surface: a LIST row click expands the row's inline buttons; a MAP pin click (resolved through the id→row map — stacked units land on their building row; a spot glyph resolves through `spotRowKeys` + `pickSpotRow`, the spot's first row and then the next on each click), an arrow-key step, or an auto-advance opens **PinFixPopup** in the shared top-right slot (address, a building's sorted+capped unit list, the 3 actions — **Move pin** via the shared `useMovePin`, **Looks right** with the Undo toast (`confirmLabel`: *the home is here* on unplaced rows, which also show *Its coordinate was shared with other addresses.* and ask `window.confirm(UNPLACED_CONFIRM_PROMPT)` first; the POST carries `expectedCoordinates`, and a `PIN_CHANGED` / `NOT_APPROXIMATE` refusal refetches the list via `confirmNeedsRefetch`), **Google Maps ↗** — plus ←/→ with *n of N* over `rowKeys`, hints, close X; hidden while the MovePinCard is armed). **Auto-advance**: neighbor keys are captured into a ref at action start (both Move entry points go through one `armMove` that stashes only when `start()` arms; a cancelled drag leaves an inert stash) and consumed only after the awaited refetch — candidates resolved against the **refetched query cache** (`qc.getQueryData` + a fresh `buildStreetGroups`; the await resolves before React commits the refetched render, so the effect-mirrored refs are still pre-action), never the acted row itself. A different row picked mid-flight wins, an ARMED drag suppresses the advance entirely (the stash stays for that move's own onSaved, and Move buttons disable during a settling confirm so the two can't share a stash), and an explicit close (X / Esc / blank click) cancels the pending advance via `closePopup`. **Keyboard** (mounted only while the popup is open; keys mapped by the pure `popupKeyAction`, whose Enter is `enterAction` — null on unplaced rows, so Enter never confirms a shared-spot home and the `popupHint` footer drops it): capture-phase window listener where `stopPropagation` is the load-bearing call (mapbox's bubble-phase canvas handler pans on arrows and never checks `defaultPrevented`); Enter sits out on interactive targets, Space untouched, G calls `window.open(..., 'noopener')` synchronously, Esc defers to an armed drag and an open basemap menu (the `styleControlRef` `.animate-pop-in` sniff). **Session progress**: a render-assigned `{campaignId, startTotal}` ref written only while `listQ.data` exists (doors, not rows — total is the untruncated metric), whole-record reset on campaign switch, rebased upward on mid-session imports. Render-smoked in [pinFixesRender.smoke.test.js](../client/src/lib/pinFixesRender.smoke.test.js) (the doorOutcomes recipe + a css-stub esbuild plugin for `mapbox-gl.css`). |
+| [client/src/lib/pinFixes.js](../client/src/lib/pinFixes.js) | Pin Fixes, pure half (no React / api / mapbox): `buildStreetGroups(households)` → `{ groups, rowCount, rowKeys, idToRowKey, spotRowKeys }` (one row per street address per PIN — `buildingKeyForCoords` + `stackBaseOf`, the set the server's move and confirm fan-outs act on; rows carry `unplaced` (any door with `pinSuspect`) and `spot`, and their `target` carries `unplaced` for the Save gate; numeric-aware street sort, house-number row sort; building rows carry their full `units` list for the popup, door rows `units: null`; `rowKeys` is the ONE flattened order Next/Prev and auto-advance walk; `spotRowKeys` maps a map spot to its rows in that order); `pickSpotRow` (a spot glyph click: first row, then the next, wrapping); `enterAction` / `popupKeyAction` / `popupHint` (the key map, pure because the render smoke never attaches listeners); `UNPLACED_CONFIRM_PROMPT` / `confirmLabel`; `confirmNeedsRefetch`; `googleMapsUrl(door)` (the ADDRESS search — never a coordinate link, which would just show Google our own possibly-wrong spot); `confirmToast` / `confirmErrorMessage` (`PIN_CHANGED` first, then `NOT_APPROXIMATE`, then the bare 409); `confirmInvalidationKeys(campaignId)` — the confirm twin of `movePinInvalidationKeys`: `['admin','pin-fixes',id]`, `['admin','households-map',id]`, `['turf-household',id]`, `['admin','campaigns']` (the sidebar badge). Tested in [pinFixes.test.js](../client/src/lib/pinFixes.test.js). |
 | [client/src/components/HouseholdDetailPanel.jsx](../client/src/components/HouseholdDetailPanel.jsx) | Web admin map's tapped-door panel: header status/address, last action, **History by pass** (from the lazy `/activity` rounds), voters, surveys (answers lazy-loaded from `/surveys`), and the inline **⚠ Overlap** badge — computed no-new-fetch from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in one pass), with an "Also worked by …" line and a per-pass overlap pill in the history. Also the **Restricted access** section (`RestrictedSection`, right after the do-not-knock section): desk / field / unmarked states read from the same `activityQ` via [lib/restrictMark.js](../client/src/lib/restrictMark.js) (`pickRound(rounds, scopePassId \|\| currentPassId)`), Mark → `POST …/turfs/restrict-doors` (sends `passId` only in per-pass mode), Unmark → `unrestrict-doors` with the mark's own `passId`, the `PASS_REQUIRED` round picker (fed by `['admin','passes',campaignId]`, filtered to the door's `effortId`, non-archived), Intake / Not-in-books disabled hints, and *desk* tags on history rows + Last action (`lastAction.via`). Invalidates the households-map + counts prefixes, `['household-activity', id]`, `['campaign-rollup']` + the `['reports','campaign-rollup']` predicate, and the cross-page `['turf-doors']` / `['turf-progress']` / `['turfs']` prefixes, then `onChanged?.()` (MapPage passes `campaignId`). |
-| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`), the overlap-ring layer (`overlapDoorsToGeoJSON` → `overlap-doors-ring`), and the building layer (`drawBuildingIcon` / `buildingColorsForTheme` / `buildingsToGeoJSON` → `building-symbols`); and the selection rings (`doorSelectionToGeoJSON` → `door-selection-halo` + `door-selection-ring`, colors `SELECTION_MARK_COLOR` / `SELECTION_SKIP_COLOR`). |
+| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) | Shared pin rendering (`drawHouseIcon` / `householdsToGeoJSON` / `registerLayers`) used by both the admin map and the client-report map; also the flag-overlay layers (`flagsToGeoJSON` / `flagsToLinesGeoJSON`), the overlap-ring layer (`overlapDoorsToGeoJSON` → `overlap-doors-ring`), and the building layer (`drawBuildingIcon` / `buildingColorsForTheme` / `buildingsToGeoJSON` → `building-symbols`); and the selection rings (`doorSelectionToGeoJSON` → `door-selection-halo` + `door-selection-ring`, colors `SELECTION_MARK_COLOR` / `SELECTION_SKIP_COLOR`); the ping colour table `PING_COLOR_BY_ACTION` / `pingColorFor`, and the `accuracy-rings` source with its fill and line layers. |
+| [client/src/lib/accuracyRing.js](../client/src/lib/accuracyRing.js) | The accuracy circles, pure and import-free: `ringRadiusM`, `geodesicCircle`, `ringInputsFromPoints`, `padBounds`, `nextRingView`, `accuracyRingsGeoJSON` and the constants (`ACCURACY_RING_MIN_ZOOM`, `_MAX_M`, `_CAP`, `RINGS_WITHHELD_NOTE`). Tested in [accuracyRing.test.js](../client/src/lib/accuracyRing.test.js). |
+| [client/src/components/CanvasserPingPanel.jsx](../client/src/components/CanvasserPingPanel.jsx) · [FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) | The map's ping and flag panels: the far label from the audit's verdict, the accuracy line, the circle caption or "Too wide to draw on the map", the pin line (flag panel) and the downgrade sentences ([AUDIT.md](AUDIT.md) §E). Render-smoked in [flagPanelsRender.smoke.test.js](../client/src/lib/flagPanelsRender.smoke.test.js). |
 | [client/src/lib/lassoSelect.js](../client/src/lib/lassoSelect.js) | "Select doors", pure half: `pointInRing` (even-odd ray cast, half-open boundary), `ringBBox` (one pass — never `Math.min(...xs)` on a densified ring), `doorsInRing` (bounds-prefiltered; default accessors read BOTH payload shapes — `d.location ? d.location.lng : d.lng` — so MapPage passes `/map` rows and TurfsPage `/doors` rows unchanged), `snapBuildings`, `applySelection` (`SELECTION_CAP = 1000`, over-cap ⇒ refused whole, original `Set` back by reference), `planDoorSelection` (the breakdown + the two payloads). **No dependencies** — the `@turf/*` packages under `client/node_modules` are transitive via `mapbox-gl-draw` and must never be imported. Tested in [lassoSelect.test.js](../client/src/lib/lassoSelect.test.js). |
 | [client/src/lib/useLassoDraw.js](../client/src/lib/useLassoDraw.js) | The drag half: pointer capture, the rubber band (its own `lasso-draw` source + fill/line layers, tinted from `SELECTION_MARK_COLOR` / `SELECTION_SKIP_COLOR`), `onRing(ring, { mode, tool })` in **lng/lat** (projecting 50k doors per lasso would cost more than the drag), a box densified to 64 vertices (four screen corners unproject to a curved quad under bearing/pitch), and `cancelDrag()` for the Esc ladder. Snapshots and restores `dragPan`/`boxZoom`/`doubleClickZoom` (never a blind `.enable()` — MapboxDraw disables `boxZoom` on the Turf page). 3 px threshold = mapbox's own `clickTolerance`, and it eats the one synthetic click a closed freehand loop would fire. |
 | [client/src/components/DoorSelectionBar.jsx](../client/src/components/DoorSelectionBar.jsx) | The bottom-center selection bar (`absolute`, inside the map section so fullscreen can't bury it): "N doors selected", the breakdown + ⓘ, the over-cap banner, Mark / Unmark / Clear, and the whole confirm ladder — inline ≤ 25, else `RestrictDoorsModal` (also exported) with the typed-`restrict` gate and the scope radio. **Always** confirms, and freezes the plan synchronously in the click handler. Presentational: the page owns the selection, the mutations and the result copy. |

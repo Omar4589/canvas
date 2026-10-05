@@ -1,9 +1,11 @@
-import { reasonColor, reasonLabel, reasonDetailText } from '../lib/flags.js';
+import { reasonColor, reasonLabel, reasonDetailText, weakGpsDistanceText } from '../lib/flags.js';
 
 // Renders an entry's flag reasons as colored pills with a human detail (e.g. "Far from
-// house · 205 ft from house"). Shared by the Map flag panel and the Audit drill-in list.
-export default function FlagReasonBadges({ reasons = [] }) {
+// house · 205 ft from house"). Shared by the Map flag panel and the Audit drill-in list. With the
+// optional `entry`, a Weak GPS "±" reading also shows the raw distance, as the phone's card does.
+export default function FlagReasonBadges({ reasons = [], entry = null }) {
   if (!reasons.length) return null;
+  const weakDist = entry ? weakGpsDistanceText(entry) : null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {reasons.map((r) => (
@@ -13,7 +15,10 @@ export default function FlagReasonBadges({ reasons = [] }) {
         >
           <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: reasonColor(r.type) }} />
           <span className="font-medium text-fg">{reasonLabel(r.type)}</span>
-          <span className="text-fg-subtle">· {reasonDetailText(r)}</span>
+          <span className="text-fg-subtle">
+            · {reasonDetailText(r)}
+            {r.type === 'weak_gps' && weakDist ? ` · ${weakDist}` : ''}
+          </span>
         </span>
       ))}
     </div>

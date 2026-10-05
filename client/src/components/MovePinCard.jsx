@@ -7,9 +7,9 @@ import { Fragment } from 'react';
 // Cutting page render this one card; they differ only in where they pin it (className / style).
 //
 //   <MovePinCard copy={movePin.copy} error={movePin.error} saving={movePin.saving}
-//                onCancel={movePin.cancel} onSave={movePin.save}
+//                canSave={movePin.canSave} onCancel={movePin.cancel} onSave={movePin.save}
 //                className="absolute right-3 top-3 z-10 w-72" />
-const MovePinCard = ({ copy, error, saving, onCancel, onSave, className = '', style }) => {
+const MovePinCard = ({ copy, error, saving, canSave = true, onCancel, onSave, className = '', style }) => {
   if (!copy) return null;
   return (
     <div style={style} className={`rounded-lg border border-border bg-card p-4 shadow-lg ${className}`}>
@@ -35,7 +35,7 @@ const MovePinCard = ({ copy, error, saving, onCancel, onSave, className = '', st
         <button
           type="button"
           onClick={onSave}
-          disabled={saving}
+          disabled={saving || !canSave}
           className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
         >
           {saving ? 'Saving…' : copy.saveLabel}

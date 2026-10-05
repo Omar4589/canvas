@@ -11,7 +11,7 @@ tags: team lead, getting started, campaign, permissions, roles
 
 ## What a team lead is
 
-A team lead is a **campaign-scoped admin**. Inside the campaigns an admin has handed you, you have full run of the place. Outside them, you see nothing at all.
+A team lead is a **campaign-scoped admin**. Inside the campaigns an admin has handed you, you have full run of the place. Outside them you see almost nothing. Two yes-or-no facts about a survey in your library do reach you — never which campaign, never how many: whether a campaign you don't run has it attached (an archived one counts), and, for a survey on your campaigns, whether it already has answers anywhere in the organization (see [Building and assigning surveys](surveys)).
 
 Admins usually create and set up a campaign, then hand it off to you to run end-to-end. You report to them, and they keep the org-wide controls. If you're weighing what falls to you versus an admin, see [team lead vs admin](team-lead-vs-admin).
 

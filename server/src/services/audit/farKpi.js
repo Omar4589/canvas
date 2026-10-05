@@ -23,7 +23,8 @@ import { FLAG_THRESHOLDS } from './flagThresholds.js';
 export const farKpiForRows = async (rows, { organizationId, thresholds = FLAG_THRESHOLDS } = {}) => {
   const hidOf = (r) => String(r.householdId?._id ?? r.householdId);
 
-  // Only rows whose RAW distance clears FAR_WARN_M can ever be far: effective = d − accuracy ≤ d.
+  // Only rows whose RAW distance clears FAR_WARN_M can ever be far: effective = d − max(0, accuracy) ≤ d
+  // (flagDetection.js effectiveMeters clamps a stored negative radius, which used to break this).
   // So the pin lookup is narrowed to exactly the candidate-far households — provably safe, and it
   // keeps the Household fetch tiny.
   const candidates = rows.filter(
@@ -51,6 +52,26 @@ export const farKpiForRows = async (rows, { organizationId, thresholds = FLAG_TH
     if (fa.detail.pinDowngraded) farForgivenByPinCount += 1;
   }
   return { farCount, farForgivenByPinCount, assessmentsByActionId };
+};
+
+// A far verdict trimmed to what a map ping panel renders (GET /admin/households/map). The
+// replaced-entry snapshot (prior*, nearest*) stays on the audit's own surfaces, and farAssessment never
+// emits correctedBy, only the derived pinMovedBySelf, which the same roles already see on the audit page.
+export const farVerdictForWire = (fa) => {
+  if (!fa) return null;
+  const d = fa.detail;
+  return {
+    severity: fa.severity,
+    detail: {
+      meters: d.meters,
+      effectiveMeters: d.effectiveMeters,
+      accuracy: d.accuracy,
+      ...(d.downgraded ? { downgraded: true } : {}),
+      ...(d.pinCorrectedMeters != null ? { pinCorrectedMeters: d.pinCorrectedMeters, pinCorrectedAt: d.pinCorrectedAt } : {}),
+      ...(d.pinDowngraded ? { pinDowngraded: true } : {}),
+      ...(d.pinMovedBySelf ? { pinMovedBySelf: true } : {}),
+    },
+  };
 };
 
 // Fetch-and-assess for the KPI endpoints. Takes the endpoint's OWN activityMatch object (never

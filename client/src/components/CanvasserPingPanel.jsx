@@ -1,6 +1,16 @@
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { FAR_WARN_M, formatDistanceImperial } from '../lib/flags.js';
+import {
+  ACCURACY_CIRCLE_CAPTION,
+  farDowngradeLines,
+  farLabelState,
+  farRowOf,
+  formatDistanceImperial,
+  gpsAccuracyText,
+  hasUsableAccuracy,
+  pinCorrectionText,
+} from '../lib/flags.js';
+import { ACCURACY_RING_MAX_M, ringRadiusM } from '../lib/accuracyRing.js';
 import { actionLabel } from '../lib/statusColors.js';
 
 function formatDateTime(d, tz) {
@@ -33,7 +43,13 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
   const zone = tz || orgTz;
   if (!activity) return null;
   const dist = activity.distanceFromHouseMeters;
-  const distFar = dist != null && dist > FAR_WARN_M;
+  // The ping carries the audit's own far verdict (GET /admin/households/map); an older server's
+  // payload has no `far` key and is judged by the same arithmetic the audit uses.
+  const farRow = farRowOf(activity);
+  const farState = farLabelState(farRow);
+  const pinDist = (farRow.reasons || []).find((r) => r.type === 'far')?.detail?.pinCorrectedMeters ?? null;
+  const acc = activity.location?.accuracy;
+  const accuracyLine = gpsAccuracyText(dist, acc);
 
   return (
     <div>
@@ -82,15 +98,27 @@ export default function CanvasserPingPanel({ activity, household, onOpenHousehol
         {dist == null ? (
           <div className="mt-1 text-fg-muted">unknown</div>
         ) : (
-          <div className={'mt-1 font-medium ' + (distFar ? 'text-danger' : 'text-fg')}>
-            {formatDistanceImperial(dist)} from house{distFar ? ' — far' : ''}
+          <div className={'mt-1 font-medium ' + (farState === 'far' ? 'text-danger' : 'text-fg')}>
+            {formatDistanceImperial(dist)} from {pinDist == null ? 'house' : 'the pin at the time'}
+            {farState === 'far' ? ' — far' : farState === 'low' ? ' — far, flagged low' : ''}
           </div>
         )}
-        {activity.location?.accuracy != null && (
-          <div className="text-xs text-fg-muted">
-            GPS accuracy ±{formatDistanceImperial(activity.location.accuracy)}
+        {accuracyLine && <div className="text-xs text-fg-muted">{accuracyLine}</div>}
+        {hasUsableAccuracy(acc) && acc > ACCURACY_RING_MAX_M && (
+          <div className="text-xs text-fg-muted">Too wide to draw on the map</div>
+        )}
+        {ringRadiusM(acc) != null && <div className="mt-1 text-xs text-fg-muted">{ACCURACY_CIRCLE_CAPTION}</div>}
+        {pinDist != null && (
+          <div className="mt-0.5 font-medium text-fg">
+            {formatDistanceImperial(pinDist)} from the pin's current spot
           </div>
         )}
+        {pinCorrectionText(farRow) && <div className="mt-1 text-xs text-fg-muted">{pinCorrectionText(farRow)}</div>}
+        {farDowngradeLines(farRow).map((t) => (
+          <div key={t} className="mt-1 text-xs text-fg-muted">
+            {t}
+          </div>
+        ))}
       </div>
 
       {household && onOpenHousehold && (

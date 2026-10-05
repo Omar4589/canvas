@@ -126,7 +126,8 @@ the distance to the house before judging anything. A door is called **Far from h
 left is more than about 250 feet, and **Weak GPS** when the phone's own radius is worse than about 330
 feet. A dot across the street is 50 to 110 feet off. It cannot, on its own, earn a far flag. A knock
 recorded in the first seconds after unlocking may carry a coarser reading, and the audit allows for that
-too, because the coarser reading says so about itself.
+too, because the coarser reading says so about itself. A stamp whose phone reported no usable estimate (no
+number at all, or one the phone itself marks invalid) is kept as "accuracy unknown" and gets no allowance.
 
 ## What to check on the phone
 
@@ -167,6 +168,13 @@ not the app, that needs sky.
   Everyone's number widens under porches.
 - Hard-to-explain patterns, not single porch flags, are the conversation: a run of high far flags with
   tight accuracy numbers, doors logged seconds apart, or a whole street from one spot.
+- On the web map, the flag and canvasser-location panels say **far** only on what is left after
+  subtracting the phone's radius, and show that remainder; *Not far after allowing for GPS accuracy*
+  means the radius explains the distance. Zoom in and each recorded location shows a faint circle the
+  size of its accuracy estimate: a guide, not a boundary, since honest readings often land outside it
+  (on Android about one time in three). The flag panel and the Audit cards also say when the house pin
+  is approximate. The phone's admin map keeps the older label, and has no circles, until its next
+  update.
 
 ## What Google Maps and Apple Maps do differently
 
@@ -304,10 +312,14 @@ is suspended and resumes when it runs again. Backgrounding deliberately does not
 | Gate fast-path accuracy | ≤ 20 | ≤ ~65 | `location.js` |
 | iOS reduced-accuracy inference | accuracy > 1000 | > ~3,280 | `IOS_REDUCED_ACCURACY_MIN_M` |
 
-`effective = max(0, distance − (accuracy ?? 0))` ([flagDetection.js](../server/src/services/audit/flagDetection.js)
-`farAssessment`, shared with the per-canvasser Far KPI in [farKpi.js](../server/src/services/audit/farKpi.js)).
-Far and Weak GPS are independent: a poor fix far from the pin can carry both. A null accuracy gives no
-discount and never flags on its own. Residential geometry for scale: curb to curb 28–39 ft, front setbacks
+`effective = max(0, distance − max(0, accuracy ?? 0))`: `effectiveMeters` in
+[flagDetection.js](../server/src/services/audit/flagDetection.js), used by `farAssessment` (shared with the
+per-canvasser Far KPI in [farKpi.js](../server/src/services/audit/farKpi.js) and the admin map's ping
+verdict) and by the `replaced` snapshot's nearest pick in `canvass.js`. A negative radius gives no discount
+and never adds distance. Far and Weak GPS are independent: a poor fix far from the pin can carry both. A
+null accuracy gives no discount and never flags on its own; the server stores a zero, negative or
+non-finite accuracy as null (`usableAccuracy` in `canvass.js`), on new stamps and in every snapshot it
+writes. Stamps stored before that rule can still hold a zero or a negative, read as no discount. Residential geometry for scale: curb to curb 28–39 ft, front setbacks
 15–30 ft, porch to the far curb ~50–70 ft (15–22 m), porch to the opposite porch ~80–110 ft (24–34 m).
 
 ## F. The 2026-10-03 audit: verified findings and non-issues
@@ -367,7 +379,7 @@ practitioner). 43 of 45 claims survived; the two refuted ones are listed last.
 | F-05 | med | No doc or Help article explains GPS accuracy. | This doc and the two FAQs. |
 | F-06 | med | MAPS.md, PERFORMANCE.md, CANVASSER_APP.md and PRIVACY_VERIFICATION §C10 contradicted the code (gate order, function name, "no continuous feed", unbounded fallback). | Corrected 2026-10-03 in the same change as this doc. |
 | F-07 | med → low | Lead-facing docs never stated the accuracy-subtraction rule. | AUDIT.md Part 1 and the audit guide now do; AUDIT.md's "low flags still count in the Far KPI" sentence was wrong (the per-canvasser KPI counts medium and high only) and is fixed. |
-| F-08 | low | A negative (invalid) iOS `horizontalAccuracy` passes the ≤ 20 m fast path and is stamped; a 0.0 accuracy would read as perfect. | Upheld as hardening. Android exposure is theoretical (the platform rejects locations without accuracy). |
+| F-08 | low | A negative (invalid) iOS `horizontalAccuracy` passes the ≤ 20 m fast path and is stamped; a 0.0 accuracy would read as perfect. | Upheld as hardening. Android exposure is theoretical (the platform rejects locations without accuracy). Server half built 2026-10-05 (W1): a zero, negative or non-finite accuracy is stored as null and gets no allowance, never refused, because a refused offline replay is a knock the phone silently drops; in practice a zero comes from a mock-location app or an emulator. The phone-side guard is §G item 4. |
 | F-09 | low | Knock stamps have no lat/lng range validation. | Upheld for the coordinate bounds only. The proposed future-timestamp clamp was refuted (it would let a stale offline replay out-rank a fast-clock phone's newer action). |
 | F-11 | low | The iOS Precise-off early-warning banner probably cannot trip: it needs 6 coarse fixes with gaps ≤ 30 s, while reduced accuracy delivers "at most a few times per hour" and the feed's restart cadence is ~30 s. | Likely (WWDC 2020: "recomputed about four times per hour"). The hard gate still blocks every coarse tap, so no bad data. Help copy that promised "you'll usually see it coming" is corrected; the retune waits for a two-minute device log. |
 | F-12 | low | rnmapbox Android drops a puck enable while the MapView is detached (lifecycle `CREATED`). | Upstream defect, confirmed; reachable only if a style finishes loading while the map is covered. Monitor; an upstream PR is the fix. |
@@ -382,6 +394,7 @@ practitioner). 43 of 45 claims survived; the two refuted ones are listed last.
 | F-22 | low | Flag entries do not say when the house pin is an approximate geocode. | Upheld. Project `coordConfidence` and `locationConfirmedAt` into the entry's household, render a three-way line in both flag panels, never feed the far downgrade with it. |
 | F-23 | low | The add-person route comment says the stamp "evidences the visit" but nothing stores it. | Comment fix only; persisting it would be a new retained datum needing the privacy cascade. |
 | F-24 | low | Code comments overstate the pulse and misattribute the warm fix cache. | Comment fixes, with the next OTA. |
+| F-26 | med | Found while designing the upgrades (docs/PROPOSAL_GPS_UPGRADES.md). A hand-made knock with a non-finite coordinate (JSON `1e400` parses to Infinity) passed the server's `typeof` check; on the door-result path the replace deleted the canvasser's earlier entry for that door, then the create failed with a 500 that a phone would queue and retry forever. No app can send one (JSON writes infinity as null). Reproduced on a throwaway database. | Fixed 2026-10-05 (W1): a coordinate that isn't a finite number is `400 LOCATION_REQUIRED` before any write on all three stamped routes (`isFiniteLatLng`), pinned by `locationGate.int.test.js` (the earlier entry survives). Finite values off the Earth are still accepted until `npm run audit:gps-stamps` shows none stored (§G item 14). |
 
 **Refuted**
 
@@ -396,7 +409,9 @@ practitioner). 43 of 45 claims survived; the two refuted ones are listed last.
 
 ## G. Recommended changes, by ship vehicle
 
-Nothing below is built as of 2026-10-03; it is the design the audit produced, for the owner to approve.
+Nothing below was built as of 2026-10-03; it is the design the audit produced, approved with the
+implementation plan [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) on 2026-10-05. The web and server
+halves of items 11-15 were built on 2026-10-05 (the plan's step W1); each item says what is left.
 Every item keeps the rulings in §H. None changes what is collected, kept, shown to a new audience, or sent
 to a third party except where marked.
 
@@ -462,26 +477,40 @@ to a third party except where marked.
 
 11. **Flag panels judge "far" like the server (F-04).** `FlaggedEntryPanel.jsx`, `CanvasserPingPanel.jsx`
     and the mobile admin map sheet label "far" on `max(0, distance − (accuracy ?? 0)) > FAR_WARN_M`, with
-    the "after allowing for GPS accuracy" wording the legend already uses.
+    the "after allowing for GPS accuracy" wording the legend already uses. **Web built 2026-10-05:** both
+    panels label from the server's own verdict (the flag's far reason; a new `far` field on each map
+    ping), falling back to that arithmetic only for a payload without one ([AUDIT.md](AUDIT.md) §E).
+    Left: the mobile admin map sheet (the plan's §H.5).
 12. **Accuracy radius on the admin maps (F-04).** `activitiesToPingsGeoJSON` and `flagsToGeoJSON` carry
     `accuracy` (omit the key when null or ≤ 0); add ring layers below the ping layers, drawn as geodesic
     polygons in a fill layer (a 64-vertex circle; a `circle` layer clips at tile buffers once the radius
     exceeds ~128 px) with `fill-opacity` ~0.1 and a 1 px stroke in the feature colour; keep the
     fixed-pixel halo as the alert affordance at overview zooms; cap or text-fallback above ~250 m. Verify
     once against a known street width. Mobile admin map: the same via `ShapeSource` + `FillLayer`, OTA,
-    after the owner has seen the web version.
+    after the owner has seen the web version. **Web built 2026-10-05** ([MAPS.md](MAPS.md) §E): from zoom
+    13, none wider than 250 m (the panel says "Too wide to draw on the map"), all or none over 500 on
+    screen. Left: the street-width check in a browser, and the mobile admin map (§H.6).
 13. **Pin precision on flag entries (F-22).** Add `coordConfidence` and `locationConfirmedAt` to the
-    detector's Household projection and `entry.household`; a copy helper in the byte-identical
-    `client/src/lib/flags.js` == `mobile/lib/flags.js` pair ("House pin is an approximate geocode, placed
-    on the street in front of the lot; a Pin Fixes check can settle it" / "approximate but confirmed in
-    place on <date>"); render in `FlaggedEntryPanel` and `FlaggedEntryCard`. Display only; never into
-    `buildPinFixMap` or `farAssessment` (AUDIT.md §B.7).
+    detector's Household projection and `entry.household`; a copy helper in the
+    `client/src/lib/flags.js` / `mobile/lib/flags.js` mirrors; render in `FlaggedEntryPanel` and
+    `FlaggedEntryCard`. Display only; never into `buildPinFixMap` or `farAssessment` (AUDIT.md §B.7).
+    **Server and web built 2026-10-05:** `pinPrecisionText` reads "House pin is approximate (placed by
+    address lookup) — check the pin before asking the canvasser." or "House pin is approximate but was
+    confirmed in place on <date>.", in the flag panel and on the Audit cards. Left: the phone's helper
+    copy and `FlaggedEntryCard`.
 14. **Coordinate bounds (F-09).** `locationSchema`: `lat: z.number().min(-90).max(90)`,
     `lng: z.number().min(-180).max(180)` (one edit covers knock, survey and add-person). No timestamp
     clamp. Server backstop for F-08: `accuracy` transformed to `null` unless finite and `> 0`.
-    Integration case: lat 200 → 400, zero rows written.
+    Integration case: lat 200 → 400, zero rows written. **Partly built 2026-10-05:** non-finite
+    coordinates are refused as `LOCATION_REQUIRED` before any write (F-26), the accuracy backstop is in
+    (on both ledgers, the `replaced` snapshot and the pin route's audit row), and the far discount is
+    clamped (`effectiveMeters`, §E). Left: finite values off the Earth, refused only once
+    `npm run audit:gps-stamps` shows none stored, because a refused offline replay is a silently dropped
+    knock (the plan's W1-offEarth).
 15. **Mobile flag card parity (F-03 residue).** `FlaggedEntryCard` shows the raw distance beside the Weak
-    GPS detail, as the web panel does. Comment fix at `canvass.js:1006` (F-23).
+    GPS detail, as the web panel does. Comment fix at `canvass.js:1006` (F-23). **The comment fix and the
+    web Audit cards' Weak GPS distance were built 2026-10-05** (`weakGpsDistanceText`). Left: the phone's
+    `FlaggedEntryCard`.
 
 **Next native build cycle (four builds; fold in, never a cycle of their own)**
 
@@ -515,6 +544,14 @@ to a third party except where marked.
 - **Native changes cost four builds** and must fold into a cycle the team already has to cut.
 - **Display cues never change data.** A ring, a readout or a grey dot informs the canvasser; the stamp
   and the flags are untouched.
+- **The admin maps' accuracy circles are for recorded stamps only.** Each is drawn from the stamp's own
+  accuracy, is a guide and never a boundary (on Android one honest stamp in three lies outside its own
+  circle), and never takes a click. They are not the live dot's ring, which stays the engine's own (F-01).
+- **A panel never re-judges the server's far verdict.** It labels from the verdict the row carries and
+  falls back to `farAssessment`'s arithmetic only for a payload without one; `server/test/flagsMirror.test.js`
+  pins the label to the server on 192 boundary cases.
+- **An accuracy is a finite radius above zero, or it is unknown.** The server stores anything else as
+  null and never refuses the stamp for it; the far discount never goes negative (`effectiveMeters`).
 
 ## I. Open questions that need a phone, not a reader
 
@@ -543,7 +580,10 @@ to a third party except where marked.
 | [mobile/lib/location.js](../mobile/lib/location.js) · [mobile/lib/locationGate.js](../mobile/lib/locationGate.js) · [locationGate.test.js](../mobile/lib/locationGate.test.js) | The knock gate ladder, the Precise-off predicates and probe, the structural pins. |
 | [mobile/components/LocationBlockedBanner.jsx](../mobile/components/LocationBlockedBanner.jsx) | The advisory banner (services / permission / precise). |
 | [mobile/lib/recordAction.js](../mobile/lib/recordAction.js) | `optimisticSubmit`: gate, then patch, then submit or queue; the per-code alerts. |
-| [server/src/routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) | `locationSchema`, the `LOCATION_REQUIRED` backstop, `distanceFromHouseMeters`, the `replaced` snapshot. |
-| [server/src/services/audit/flagThresholds.js](../server/src/services/audit/flagThresholds.js) · [flagDetection.js](../server/src/services/audit/flagDetection.js) · [farKpi.js](../server/src/services/audit/farKpi.js) | Thresholds, `farAssessment`, the five detectors, the per-canvasser Far KPI. |
-| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) · [client/src/components/FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) · [client/src/lib/flags.js](../client/src/lib/flags.js) == [mobile/lib/flags.js](../mobile/lib/flags.js) | Pings, leader lines, halos; the review panel; the user-facing flag copy (byte-identical mirrors). |
+| [server/src/routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) | `locationSchema` (with `usableAccuracy`), the `LOCATION_REQUIRED` backstop, `distanceFromHouseMeters`, the `replaced` snapshot. |
+| [server/src/utils/stateBounds.js](../server/src/utils/stateBounds.js) | `isFiniteLatLng` (the knock routes' backstop) and `isValidLatLng` (finite and on the Earth: the pin-move service today, the knock routes once off-Earth stamps are counted). |
+| [server/src/migrations/auditGpsStamps.js](../server/src/migrations/auditGpsStamps.js) | `npm run audit:gps-stamps`: the read-only count of stored stamps by accuracy and coordinate category, and what the far clamp changes ([OPERATIONS.md](OPERATIONS.md)). |
+| [server/src/services/audit/flagThresholds.js](../server/src/services/audit/flagThresholds.js) · [flagDetection.js](../server/src/services/audit/flagDetection.js) · [farKpi.js](../server/src/services/audit/farKpi.js) | Thresholds, `effectiveMeters`, `farAssessment`, the five detectors, the per-canvasser Far KPI and the map pings' `farVerdictForWire`. |
+| [client/src/lib/mapRender.js](../client/src/lib/mapRender.js) · [client/src/lib/accuracyRing.js](../client/src/lib/accuracyRing.js) · [client/src/components/FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) · [client/src/components/CanvasserPingPanel.jsx](../client/src/components/CanvasserPingPanel.jsx) | Pings, leader lines, halos and the accuracy circles; the flag and ping panels. |
+| [client/src/lib/flags.js](../client/src/lib/flags.js) · [mobile/lib/flags.js](../mobile/lib/flags.js) · [server/test/flagsMirror.test.js](../server/test/flagsMirror.test.js) | The user-facing flag copy. Hand mirrors, not byte-identical (they differ in imports and the distance formatter's name); the test pins the web far label to the server and the shared constants, shared helpers and legend footers of the two files to each other. The web file has the far-label and pin-line helpers; the phone's copy gets them with its next update. |
 | [server/src/content/help/faq/blue-dot-not-where-i-am.md](../server/src/content/help/faq/blue-dot-not-where-i-am.md) · [faq/canvasser-dot-off-will-it-flag.md](../server/src/content/help/faq/canvasser-dot-off-will-it-flag.md) | The canvasser and lead Help Center articles derived from Part 1. |

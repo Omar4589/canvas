@@ -104,8 +104,10 @@ before(async () => {
   // grid (the building-scope case). B: nine grid doors east.
   const aDocs = await Household.insertMany([
     ...grid(PIN).map((pt, i) => hh(org._id, C._id, effort._id, i + 1, pt)),
-    hh(org._id, C._id, effort._id, 10, UNIT_PIN),
-    hh(org._id, C._id, effort._id, 11, UNIT_PIN),
+    // Two units of ONE street address on one pin: "Whole building" moves the units of one address
+    // (docs/PROPOSAL_PLACEHOLDER_PINS.md §G), never separate houses that merely share a coordinate.
+    { ...hh(org._id, C._id, effort._id, 10, UNIT_PIN), addressLine1: '10 Pin Way Apt 1', normalizedAddress: '10 PIN WAY APT 1|TOWN|KY|40202' },
+    { ...hh(org._id, C._id, effort._id, 11, UNIT_PIN), addressLine1: '10 Pin Way Apt 2', normalizedAddress: '10 PIN WAY APT 2|TOWN|KY|40202' },
   ]);
   const bDocs = await Household.insertMany(grid(B_ORIGIN).map((pt, i) => hh(org._id, C._id, effort._id, 21 + i, pt)));
 

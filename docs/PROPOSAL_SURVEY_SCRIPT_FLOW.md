@@ -1,8 +1,11 @@
 # Proposal: Scripted surveys — statements, several closings, and "go to" routing
 
 > **Status: BUILT 2026-10-02 to the design agreed with the owner that day (three rounds of rulings),
-> with a five-angle review's fixes folded in on 2026-10-03; uncommitted at time of writing, not
-> deployed; no ruling open.** Where the build differs from the plan, the code wins: every difference
+> with a five-angle review's fixes folded in on 2026-10-03; committed in 5cb42b2 and deployed to the
+> server 2026-10-03, with the phone's over-the-air update waiting on the owner's device checks. No
+> ruling open: the team-lead lock gap at the end of §O was ruled on 2026-10-03 and fixed by
+> [PROPOSAL_LEAD_SURVEY_LOCKS.md](PROPOSAL_LEAD_SURVEY_LOCKS.md).** Where the build differs from the
+> plan, the code wins: every difference
 > is listed in [§O, "As built"](#o-as-built-2026-10-02) at the end, with the gaps still known, and
 > §H1 carries the names the stepper shipped with. Everything else below is the plan as
 > agreed, so Part 2's line references and its "today" describe the tree before the build.
@@ -1230,7 +1233,8 @@ is **lead-visible and lead-authorable** (the in-campaign builder is lead-reachab
 ## O. As built (2026-10-02)
 
 Built 2026-10-02; a five-angle adversarial review's fixes were folded in on 2026-10-03, and the
-bullets below describe the tree with them. Uncommitted at time of writing. Where the build differs
+bullets below describe the tree with them, as committed in 5cb42b2 and deployed to the server on
+2026-10-03. Where the build differs
 from the text above, the code wins and this section says how; where the text above uses a name that
 did not ship, read it as the shipped one. Everything else above is the plan as agreed.
 
@@ -1392,13 +1396,69 @@ job now runs `npm run test:mobile`, as §J asked. §K's reasoning is recorded as
 [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 26, whose client-report claim that assertion
 now pins.
 
-**Known gap (2026-10-03).** Found by the review and not fixed in this build. A team lead's
-builder locks "then go to" (and a question's answer type) from the survey list's `hasResponses`,
-which `GET /admin/surveys` narrows to the lead's own campaigns, while the PATCH checks responses
-org-wide: on a survey whose responses all sit on campaigns the lead can't see, the selects stay open
-and Save answers the 409 instead. The same gap already existed for the answer-type lock. (The web
-preview's Try it had the phone's stale-cursor bug too; it now syncs the stored cursor to the screen
-shown, exactly as the phone does.)
+**Known gap (2026-10-03) — fixed 2026-10-03 by
+[PROPOSAL_LEAD_SURVEY_LOCKS.md](PROPOSAL_LEAD_SURVEY_LOCKS.md).** Found by the review and not fixed
+in this build. A team lead's builder locks "then go to" (and a question's answer type) from the
+survey list's `hasResponses`, which `GET /admin/surveys` narrows to the lead's own campaigns, while
+the PATCH checks responses org-wide: on a survey whose responses all sit on campaigns the lead can't
+see, the selects stay open and Save answers the 409 instead. The same gap already existed for the
+answer-type lock. (The web preview's Try it had the phone's stale-cursor bug too; it now syncs the
+stored cursor to the screen shown, exactly as the phone does.)
+
+*Investigated 2026-10-03, after the commit; ruled the same day.* Reproduced over the real API on a
+throwaway database and traced through every page that reads the survey list:
+
+- **Where it bites.** Only a team lead, only in the campaign builder (the org library and its
+  editor are admin-only), and only on a campaign's main survey that has responses somewhere in the
+  organization but none on the lead's campaigns: answered by a campaign the lead doesn't manage, by
+  one that has since switched surveys or dropped a walk-list override, or by legacy rows with no
+  campaign. The lead branch of `GET /admin/surveys`
+  ([surveys.js](../server/src/routes/admin/surveys.js)) drops all of these; the PATCH's
+  `SurveyResponse.exists` sees them.
+- **What the lead meets.** No banner, open answer-type pills and open "then go to" selects; Save then
+  answers the 409, and the edits stay on the page. When no other campaign currently uses the survey
+  (`usedElsewhere` reads current attachments only), the page shows no Duplicate at all, while the
+  409 says to Duplicate. Switch back on a Go to survey skips its confirmation, so a lead can leave Go
+  to for good without warning. The Survey tab prints the lead's own count followed by "across all
+  campaigns".
+- **What it never does.** Lock a survey that has no responses anywhere: the lead's buckets are a
+  subset of the same aggregate, so the narrowed flag can only under-lock. Nothing unsafe is stored,
+  because the server refuses both changes.
+- **The fix, if ruled in.** The lead branch sends `hasResponses` from the org-wide count the handler
+  already computes for every caller (`counts`, from the org-scoped aggregate), while
+  `responseCount` and `responseCountByCampaign` stay narrowed. A lead's numbers then read "in your
+  campaigns", and a locked survey with none of their own says it has responses in the organization,
+  with no count and no campaign. Tried on a patched copy: the lead's list and the PATCH agreed on all
+  six test surveys, and the one with no responses stayed unlocked. No new query, no index, no phone
+  change.
+- **The ruling it needs.** The 2026-08-08 client-lead scoping, ruled strict by the owner, derived
+  `hasResponses` from the narrowed buckets and recorded "0 responses, yet the 409 fires" as by design
+  ([SURVEYS.md](SURVEYS.md) Part 1, [ROLES.md](ROLES.md) Part 2). The fix lets a second bare yes/no
+  cross that line beside `usedElsewhere`. A lead already learns the same bit from the 409, and can
+  learn it without saving anything; a lead may be the client, so it is judged as customer-facing. It
+  would get a dated [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) stamp for the owner to
+  confirm. No Privacy Policy, Terms or DPA text changes.
+- **Found on the way, older than this build.** Commit 16b0c87 (2026-06-27) swapped the builder's
+  per-question lock (`locked && !!original`) for a lock on every card, so a locked survey's new
+  questions can't pick a type the server would accept; the unused `originalByKey` memo is what is
+  left of it. In a locked builder, removing an answer added in the same session stores it retired,
+  and a blank one fails the save with a 400. The refusal box renders under the form, behind the
+  fixed Save footer on desktop. Duplicate from the campaign builder can briefly land on the Create
+  survey page while the lists refetch. A save-as-copy on refusal was considered for the load-to-Save
+  race, which reaches admins too: it must never switch the campaign itself, because surveys queued on
+  phones under the old one would be refused and dropped.
+
+*Fixed 2026-10-03* (owner rulings 2026-10-03: *"as long as its part of their campaigns, yes"* and
+*"sure why not?"*). A lead's survey list now says whether a survey on their campaigns has answers
+anywhere in the organization — a bare yes/no, counts still theirs — so the builder locks up front.
+As ruled, that is only for a survey attached to a campaign the lead manages: one they only wrote
+keeps the narrowed yes/no, and its save still refuses
+([PROPOSAL_LEAD_SURVEY_LOCKS.md](PROPOSAL_LEAD_SURVEY_LOCKS.md) §K.2), which is narrower than the
+*"fix, if ruled in"* above, where every lead row widened. The lead's banner, Survey-tab note, picker
+and campaign drawer word the count as theirs; the type lock and Retire cover only what the survey
+was saved with (`16b0c87`'s per-question rule restored); a refused save shows its reason above the
+footer with **Save my changes as a copy** (library only); Duplicate's swap waits instead of landing
+on *Create survey*; and a duplicate's name is capped at 200 characters.
 
 **Rulings that stand as built.** Refused is never a survey answer: a refusal is the door screen's
 Refused button. There is no QR code on the phone; the QR is on the printed literature. Dates are

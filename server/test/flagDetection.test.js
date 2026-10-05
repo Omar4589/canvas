@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { computeReasons, summarize } from '../src/services/audit/flagDetection.js';
+import { readFileSync } from 'node:fs';
+import { computeReasons, summarize, farAssessment, effectiveMeters, buildPinFixMap } from '../src/services/audit/flagDetection.js';
+import { farKpiForRows, farVerdictForWire } from '../src/services/audit/farKpi.js';
 import { FLAG_THRESHOLDS } from '../src/services/audit/flagThresholds.js';
 
 // Pure detection tests — no DB. computeReasons() takes lean CanvassActivity-shaped rows and a
@@ -533,4 +535,94 @@ test('summarize: mockGps counts open-only, like every other reason', () => {
   const { totals, byCanvasser } = summarize(entries, new Map([['u1', []]]), (id) => id);
   assert.equal(totals.mockGps, 1, 'only the open mock flag counts');
   assert.equal(byCanvasser.find((u) => u.userId === 'u1').mockGps, 1);
+});
+
+// ── The accuracy clamp (docs/PROPOSAL_GPS_UPGRADES.md §I.2) ─────────────────────────────────────
+// A stored negative accuracy used to ADD distance (d − (−x)). effectiveMeters reads it as no discount
+// at every far check, so a flag can only get milder, never harsher.
+
+test('far: a legacy negative accuracy adds no distance (clamped to no discount)', () => {
+  const rows = [
+    mkRow({ _id: 'N1', userId: 'n1', householdId: 'hn1', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: -10 }, distanceFromHouseMeters: 70 }),
+    mkRow({ _id: 'N2', userId: 'n2', householdId: 'hn2', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: -10 }, distanceFromHouseMeters: 100 }),
+    mkRow({ _id: 'N3', userId: 'n3', householdId: 'hn3', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: -20 }, distanceFromHouseMeters: 260 }),
+  ];
+  const { acc } = computeReasons(rows, new Map());
+  assert.equal(has(acc, 'N1', 'far'), false, '70 m at -10 was 80 m and med; now it is 70 m and not far');
+  assert.equal(sevOf(acc, 'N2', 'far'), 'med');
+  assert.equal(farDetail(acc, 'N2').effectiveMeters, 100);
+  assert.equal(sevOf(acc, 'N3', 'far'), 'high');
+  assert.equal(farDetail(acc, 'N3').effectiveMeters, 260);
+});
+
+test('far: a zero accuracy reads exactly like null (no discount, no weak_gps)', () => {
+  const zero = mkRow({ _id: 'Z0', userId: 'z0', householdId: 'hz0', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: 0 }, distanceFromHouseMeters: 100 });
+  const unknown = mkRow({ _id: 'Z1', userId: 'z1', householdId: 'hz1', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: null }, distanceFromHouseMeters: 100 });
+  const { acc } = computeReasons([zero, unknown], new Map());
+  assert.equal(sevOf(acc, 'Z0', 'far'), sevOf(acc, 'Z1', 'far'));
+  assert.equal(farDetail(acc, 'Z0').effectiveMeters, farDetail(acc, 'Z1').effectiveMeters);
+  assert.equal(has(acc, 'Z0', 'weak_gps'), false);
+  assert.equal(has(acc, 'Z1', 'weak_gps'), false);
+});
+
+test('far correction: a negative accuracy on the nearest evidence no longer denies the downgrade', () => {
+  const row = correction({ _id: 'NC', sec: 3600, dist: 300, replaced: { actionType: 'not_home', timestamp: at(1800), distanceFromHouseMeters: 300, location: { lat: 30, lng: -95, accuracy: 5 }, nearest: nearest(3600, 30, 70, -10) } });
+  const { acc } = computeReasons([row], new Map());
+  assert.equal(sevOf(acc, 'NC', 'far'), 'low', 'the nearest stamp was 70 m; its -10 used to make it 80 m and deny the downgrade');
+  assert.equal(farDetail(acc, 'NC').downgraded, true);
+});
+
+test('pin correction: a negative accuracy no longer denies the pin downgrade', () => {
+  // ~67 m north of the corrected pin: inside FAR_WARN_M, but 77 m while -10 still added distance.
+  const rows = [pinRow({ _id: 'NP', sec: 0, dist: 400, latOffset: 0.0006, accuracy: -10 })];
+  const { acc } = computeReasons(rows, new Map(), FLAG_THRESHOLDS, fixMap('NP', pinFix({ atSec: 3600 })));
+  assert.equal(sevOf(acc, 'NP', 'far'), 'low');
+  assert.equal(farDetail(acc, 'NP').pinDowngraded, true);
+});
+
+test('effectiveMeters: never negative, never above the raw distance', () => {
+  for (const d of [0, 1, 74.9, 75, 120, 250, 1000]) {
+    for (const a of [-50, -1, 0, null, undefined, 3, 75, 1e9, Infinity]) {
+      const e = effectiveMeters(d, a);
+      assert.ok(e >= 0 && e <= d, `effectiveMeters(${d}, ${a}) = ${e}`);
+    }
+  }
+  assert.equal(effectiveMeters(100, -10), 100);
+  assert.equal(effectiveMeters(100, 30), 70);
+  assert.equal(effectiveMeters(100, null), 100);
+});
+
+test('the per-canvasser Far count and the detector agree on a legacy negative accuracy', async () => {
+  const row = mkRow({ _id: 'KA', userId: 'ka', householdId: 'hka', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: -10 }, distanceFromHouseMeters: 70 });
+  // 70 m is under FAR_WARN_M, so farKpiForRows has no candidate and runs no query.
+  const kpi = await farKpiForRows([row], { organizationId: 'org' });
+  const { acc } = computeReasons([row], new Map());
+  assert.equal(kpi.farCount, 0);
+  assert.equal(has(acc, 'KA', 'far'), false, 'the detector used to call this med while the KPI said 0');
+});
+
+test('farVerdictForWire keeps severity and the panel fields, drops the snapshot', () => {
+  assert.equal(farVerdictForWire(null), null);
+  const row = correction({ _id: 'FW', sec: 3600, dist: 300, replaced: { actionType: 'refused', timestamp: at(1800), distanceFromHouseMeters: 280, location: { lat: 30, lng: -95, accuracy: 9 }, nearest: nearest(3600, 30, 20) } });
+  const fa = farAssessment(row, undefined);
+  assert.ok(fa.detail.priorActionType && fa.detail.nearestMeters != null, 'the audit verdict carries the snapshot');
+  const wire = farVerdictForWire(fa);
+  assert.equal(wire.severity, fa.severity);
+  assert.deepEqual(Object.keys(wire.detail).sort(), ['accuracy', 'downgraded', 'effectiveMeters', 'meters']);
+  assert.ok(!JSON.stringify(wire).includes('correctedBy'));
+});
+
+test('buildPinFixMap ignores a confirm-in-place stamp and the geocoder precision (AUDIT.md §B.7)', () => {
+  const confirmed = { _id: 'h1', coordSource: 'geocodio', coordConfidence: 'interpolated', locationConfirmedAt: at(0), location: { type: 'Point', coordinates: [-95, 30] } };
+  assert.equal(buildPinFixMap([confirmed]).size, 0);
+  const corrected = { _id: 'h2', coordSource: 'corrected', correctedAt: at(0), correctedBy: 'lead', coordConfidence: null, locationConfirmedAt: at(0), location: { type: 'Point', coordinates: [-95, 30] } };
+  assert.deepEqual(Object.keys(buildPinFixMap([corrected]).get('h2')).sort(), ['correctedAt', 'correctedBy', 'lat', 'lng']);
+});
+
+test('the detector projects pin precision for display and never ships a staff id', () => {
+  const src = readFileSync(new URL('../src/services/audit/flagDetection.js', import.meta.url), 'utf8');
+  assert.match(src, /'addressLine1 addressLine2 city state zipCode location coordSource correctedAt correctedBy coordConfidence locationConfirmedAt'/);
+  const household = src.slice(src.indexOf('household: h\n'), src.indexOf('reasons: reasonList'));
+  assert.ok(household.includes('coordConfidence') && household.includes('locationConfirmedAt'));
+  assert.ok(!/correctedBy|locationConfirmedBy/.test(household.replace(/\/\/.*$/gm, '')), 'no staff id in entry.household');
 });

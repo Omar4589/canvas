@@ -275,9 +275,9 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     // Destructure and pass the coordinate-quality counters too, or the SYNC preview stays
     // silent about disagreeing/placeholder pins while the worker preview warns — the two
     // previews must tell the same story.
-    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors } =
+    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors } =
       await buildImportRows(fs.readFileSync(req.file.path), req.file.originalname, resolved.mapping, { explode });
-    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors });
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {
@@ -433,7 +433,7 @@ router.get('/', async (req, res, next) => {
         filter.campaignId = { $in: managed };
       }
     }
-    const jobs = await ImportJob.find(filter, { errors: 0 })
+    const jobs = await ImportJob.find(filter, { errors: 0, ...ORG_HIDDEN_IMPORT_FIELDS })
       .sort({ createdAt: -1 })
       .limit(50)
       .populate('uploadedBy', 'firstName lastName email')
@@ -447,7 +447,21 @@ router.get('/', async (req, res, next) => {
 // Big-array fields the 1.5s poller must not re-download every tick; undo reads
 // them from the DB, never from this response. (On a 100k-row import the inserted-id
 // arrays alone are ~5 MB of JSON.)
+// Placement-pass bookkeeping organizations never see (docs/PROPOSAL_PLACEHOLDER_PINS.md §O, Change 3).
+// The address cache is shared across customers, so a count of which homes were bought vs served from
+// cache, and the ledger of probed ids, would tell an organization which addresses someone else's
+// import had already looked up; the full pass cause is for super-admins only. Spread into every
+// org-facing import read: the list, the detail, and the cancel route.
+const ORG_HIDDEN_IMPORT_FIELDS = {
+  pinProbedIds: 0,
+  pinLookupsNew: 0,
+  pinLookupsCached: 0,
+  pinLookupsOverCap: 0,
+  pinPassCause: 0,
+};
+
 const IMPORT_DETAIL_PROJECTION = {
+  ...ORG_HIDDEN_IMPORT_FIELDS,
   insertedHouseholdIds: 0,
   insertedVoterIds: 0,
   sourceHouseholdIds: 0,
@@ -492,10 +506,10 @@ router.post('/:importId/cancel', async (req, res, next) => {
     if (!mongoose.isValidObjectId(req.params.importId)) {
       return res.status(400).json({ error: 'Invalid import id' });
     }
-    const job = await ImportJob.findOne({
-      _id: req.params.importId,
-      organizationId: activeOrgId(req),
-    });
+    const job = await ImportJob.findOne(
+      { _id: req.params.importId, organizationId: activeOrgId(req) },
+      ORG_HIDDEN_IMPORT_FIELDS
+    );
     if (!job) return res.status(404).json({ error: 'Import not found' });
     if (!(await manages(req, res, job.campaignId))) return;
     if (['completed', 'failed'].includes(job.status)) {

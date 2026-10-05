@@ -28,6 +28,10 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { recomputeCampaignStats } = await import('../src/services/reports/campaignCounters.js');
 
+// The campaign Edit drawer's own filter — plain ESM with no React, so node loads it here (the
+// metricHelp.test.js pattern) and this suite sends a body shaped like the drawer's through it.
+const { campaignPatchFor } = await import(new URL('../../client/src/lib/campaignPatch.js', import.meta.url).href);
+
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
 
@@ -252,6 +256,33 @@ test('a TEAM LEAD may set the goal but still cannot touch the key dates', { skip
     body: { datesNote: 'nope' },
   });
   assert.strictEqual(note.status, 403);
+});
+
+test('a TEAM LEAD\'s Edit-drawer Save lands once it sends only the fields a lead owns', { skip }, async () => {
+  // A body shaped like the one CampaignFormDrawer.submit builds (this suite can't render the drawer):
+  // every field, the admin-only ones sent back unchanged, the goal changed.
+  const stored = await Campaign.findById(ctx.campaign._id).lean();
+  const drawer = {
+    name: stored.name, type: stored.type, state: stored.state, surveyTemplateId: stored.surveyTemplateId || null,
+    isActive: stored.isActive, timeZone: stored.timeZone, electionDay: stored.electionDay || null,
+    earlyVotingStart: stored.earlyVotingStart || null, earlyVotingEnd: stored.earlyVotingEnd || null,
+    datesNote: stored.datesNote || '', doorGoal: 250, goalDate: shift(todayIn(TZ), 20),
+    billRestrictedDoors: stored.billRestrictedDoors ?? null,
+  };
+  try {
+    const whole = await call('PATCH', `/admin/campaigns/${ctx.campaign._id}`, { ...leadAuth(), body: drawer });
+    assert.strictEqual(whole.status, 403, 'refused on the first admin-only field, unchanged or not');
+    assert.strictEqual(whole.json.error, "Only an org admin can change a campaign's isActive.");
+    const owned = await call('PATCH', `/admin/campaigns/${ctx.campaign._id}`, {
+      ...leadAuth(),
+      body: campaignPatchFor(drawer, { isOrgAdmin: false }),
+    });
+    assert.strictEqual(owned.status, 200, JSON.stringify(owned.json));
+    assert.strictEqual(owned.json.campaign.doorGoal, 250);
+  } finally {
+    // Straight to the model, so the restore adds no History row.
+    await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { doorGoal: stored.doorGoal ?? null, goalDate: stored.goalDate ?? null } });
+  }
 });
 
 test('done is BILLABLE doors and moves with the billRestrictedDoors policy', { skip }, async () => {

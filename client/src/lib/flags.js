@@ -59,8 +59,13 @@ export const FLAG_LEGEND = [
     ],
   },
 ];
-export const FLAG_LEGEND_FOOTER =
-  'Severity: low is context worth a glance, medium is worth a look, high is a strong signal. Counts show OPEN flags — reviewing, dismissing, or confirming clears them from the count, never the data.';
+// Under the GPS accuracy line in both map panels, and in the legend footer: what the map's faint
+// circle is (docs/PROPOSAL_GPS_UPGRADES.md §H.1). The phone's footer gains it only when its admin
+// map draws circles, so until then the web footer is the phone's plus this sentence
+// (server/test/flagsMirror.test.js).
+export const ACCURACY_CIRCLE_CAPTION =
+  "The faint circle shows the phone's own accuracy estimate. It's a guide, not a boundary: honest readings often land outside it, so a house outside the circle isn't evidence on its own.";
+export const FLAG_LEGEND_FOOTER = `Severity: low is context worth a glance, medium is worth a look, high is a strong signal. Counts show OPEN flags — reviewing, dismissing, or confirming clears them from the count, never the data. ${ACCURACY_CIRCLE_CAPTION}`;
 
 export const SEV_RANK = { low: 1, med: 2, high: 3 };
 
@@ -194,3 +199,83 @@ export function pinMovedAfterReview(entry) {
   const reviewedAt = entry?.review?.reviewedAt;
   return !!(at && reviewedAt && new Date(at) > new Date(reviewedAt));
 }
+
+// ── Far labels that agree with the audit (docs/PROPOSAL_GPS_UPGRADES.md §H.1) ───────────────────
+// The panels used to call a knock far on its RAW distance, while the audit subtracts the phone's own
+// accuracy first. These judge the way the audit does. Labels only: no count, KPI, filter or query
+// reads them. server/test/flagsMirror.test.js pins them against the server's farAssessment.
+
+// A real radius: a finite number above zero. An Android 0 (no estimate) or an iPhone negative
+// (invalid fix) is no radius, so no "GPS accuracy ±" line prints for it.
+export const hasUsableAccuracy = (accuracyM) => Number.isFinite(accuracyM) && accuracyM > 0;
+
+// The server's arithmetic (flagDetection.js effectiveMeters): what's left of the distance after
+// allowing for the phone's accuracy, with a stored negative radius read as no discount.
+export const effectiveDistanceMeters = (distanceM, accuracyM) =>
+  distanceM == null || !Number.isFinite(distanceM) ? null : Math.max(0, distanceM - Math.max(0, accuracyM ?? 0));
+
+// A map ping (GET /admin/households/map) in the flag-entry shape, so the same helpers read both. A
+// ping's `far` is the audit's own verdict; a payload without the key passes through unchanged and is
+// judged by the arithmetic.
+export const farRowOf = (activity) =>
+  activity && 'far' in activity ? { ...activity, reasons: activity.far ? [{ type: 'far', ...activity.far }] : [] } : activity;
+
+// 'far', 'low' (the audit lowered it) or null. The server's verdict wins whenever the row carries one.
+export const farLabelState = (row) => {
+  if (Array.isArray(row?.reasons)) {
+    const far = row.reasons.find((r) => r.type === 'far');
+    if (!far) return null;
+    return far.severity === 'low' ? 'low' : 'far';
+  }
+  const eff = effectiveDistanceMeters(row?.distanceFromHouseMeters, row?.location?.accuracy);
+  return eff != null && eff > FAR_WARN_M ? 'far' : null;
+};
+
+// The line under the distance. Plain at or under ~250 ft. Past it: what's left after allowing for
+// the radius while that is still far; "Not far" when a radius of at most ~330 ft covers the
+// distance; "Too imprecise" when a wider one does (the audit can't call that far, and nothing can
+// call it near). Nothing for an unusable accuracy.
+export const gpsAccuracyText = (distanceM, accuracyM) => {
+  if (!hasUsableAccuracy(accuracyM)) return null;
+  const pm = `±${formatDistanceImperial(accuracyM)}`;
+  if (distanceM == null || !Number.isFinite(distanceM) || distanceM <= FAR_WARN_M) return `GPS accuracy ${pm}`;
+  const eff = effectiveDistanceMeters(distanceM, accuracyM);
+  if (eff > FAR_WARN_M) return `${formatDistanceImperial(eff)} after allowing for GPS accuracy (${pm})`;
+  if (accuracyM <= FLAG_THRESHOLDS.GPS_ACCURACY_WARN_M) return `Not far after allowing for GPS accuracy (${pm})`;
+  return `Too imprecise to judge the distance (${pm})`;
+};
+
+// The sentences under a far verdict the audit lowered, or kept despite a pin move.
+export const farDowngradeLines = (row) => {
+  const d = farDetailOf(row);
+  if (!d) return [];
+  const lines = [];
+  if (d.downgraded) lines.push('The earlier entry was recorded at the door — this correction is flagged low for reference.');
+  if (d.pinDowngraded) lines.push('The pin was corrected to a spot this entry sits next to — flagged low for reference.');
+  if (d.pinMovedBySelf) lines.push('The person who recorded this door also moved the pin — kept at full severity for review.');
+  return lines;
+};
+
+// The flag card's pin line, with the pin badges' precedence (corrected > confirmed > approximate).
+// `formatDate` is the caller's timezone-aware formatter, so this file stays timezone-free. Nothing
+// for an exact, file-supplied or corrected pin.
+export const pinPrecisionText = (h, formatDate) => {
+  if (!h || h.coordSource === 'corrected' || h.coordConfidence !== 'interpolated') return null;
+  if (h.locationConfirmedAt) {
+    const on = formatDate?.(h.locationConfirmedAt) || '';
+    return `House pin is approximate but was confirmed in place${on ? ` on ${on}` : ''}.`;
+  }
+  return 'House pin is approximate (placed by address lookup) — check the pin before asking the canvasser.';
+};
+
+// The raw distance beside a Weak GPS reading, as the phone's flag card shows it. Only when the badge
+// reads the "±" (reasonDetailText's branch order) and no far reason already prints a distance.
+export const weakGpsDistanceText = (entry) => {
+  const reasons = entry?.reasons || [];
+  if (reasons.some((r) => r.type === 'far')) return null;
+  const d = reasons.find((r) => r.type === 'weak_gps')?.detail;
+  if (!d || d.missing || (d.stale && d.fixAgeSec != null)) return null;
+  if (!(d.accuracy != null && d.accuracy > FLAG_THRESHOLDS.GPS_ACCURACY_WARN_M)) return null;
+  const m = entry.distanceFromHouseMeters;
+  return m == null || !Number.isFinite(m) ? null : `${formatDistanceImperial(m)} from house`;
+};

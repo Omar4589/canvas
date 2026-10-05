@@ -483,6 +483,34 @@ code doesn't count those doors as knocked; and a release old enough not to know 
 save of those doors — even an unrelated pin fix, whose error then holds up that lead's offline queue.
 To take the button away, unset `OPT_IN_OUTCOMES` and fix forward.
 
+### Release: homes that share a map spot are placed by address (October 2026)
+
+Imports now look up the homes a voter file stamped with one shared coordinate, and place each one by its
+own address ([IMPORTS.md](IMPORTS.md) → *Homes that share a map spot with other addresses*). Nothing runs
+by itself after the deploy; do these in order:
+
+1. **Build the new index** (Run console). The Pin Fixes list and its sidebar badge read it:
+
+   ```
+   npm run migrate:build-indexes -- --apply
+   ```
+
+2. **Check two config vars** (Heroku dashboard → Settings → Reveal Config Vars): `GEOCODE_ENABLED` is
+   `true` and `GEOCODIO_API_KEY` is set. With either missing, imports still mark these homes and list them
+   in Pin Fixes, but look nothing up.
+3. **Import the Nye file again** from the campaign's Import page. Its status reads **Checking map pins**
+   while it works, and the line under the file then says how many homes were placed by address, how many
+   were confirmed at their spot, and how many wait in Pin Fixes.
+4. **Leads work Pin Fixes** until it's empty for Nye.
+5. **Turf.** If **Remove apartments** was used on the round before this release, press **Re-include**, use
+   Remove apartments again (it now takes only real apartments), then cut.
+
+**If the line under the file says the pins weren't placed, or weren't checked:** import the same file again.
+Nothing already placed is undone, and an address already looked up is answered from the cache for free.
+
+`PIN_PLACEMENT_MAX_HOMES` (config var, default 25,000) is the most homes one import will look up; any more
+stay marked in Pin Fixes, and importing the file again looks up the rest.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -711,6 +739,7 @@ fraud audit).
 | `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
 | `npm run audit:voter-id-spellings` | **Read-only.** Per campaign: share of voter IDs starting with 0, ID widths (mixed widths = rows already lost zeros); per organization: one person stored under two spellings, the same person twice in one campaign, Person-directory keys that would collide once zeros are ignored, parked early-vote / do-not-contact IDs matching a voter only after ignoring zeros. `--org <slug>`, `--json`, `--samples N`. Rule in [`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js); test `auditVoterIdSpellings.int.test.js` runs it as a child process over the real script |
+| `npm run audit:gps-stamps` | **Read-only.** Stored GPS stamps the stamp rules in [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I refuse, store as unknown or judge differently for new stamps (or, for off-Earth coordinates, would refuse once that step ships): per ledger, negative, zero (by month and mock-location flag) and non-finite accuracies, non-finite, off-Earth and (0, 0) coordinates, each against the rows scanned; and what the read-side clamp changes (audit far reasons removed, severities that drop, the per-canvasser Far count and forgiven), measured by running the far rule with the old arithmetic and with the current one. Counts only, never a coordinate, name or id. One collection scan per ledger, so run it late in the evening. `-- --since=<time>` limits it to rows created at or after a full time with its UTC offset (`2026-10-13T23:45-05:00`) or a date read as 00:00 UTC; a time without an offset, an impossible date and a future time are refused. Test `auditGpsStamps.int.test.js` runs it as a child process over the real script |
 | `npm run migrate:campaign-stats` | **Read-only.** Recomputes every campaign's `Campaign.stats` from the ledgers and lists the ones that differ (`DRIFTED`) or were never seeded (`UNSEEDED`) — [see below](#contactknockcount-and-the-required-recompute-migratecampaign-stats) |
 | `npm run migrate:campaign-stats -- --apply` | **Once, straight after the Not-a-target release deploy** (seeds `contactKnockCount`); otherwise any time counter drift is suspected. Recomputes and stamps **every** campaign — the same code as the nightly `reconcile-campaign-stats` job |
 
@@ -985,6 +1014,19 @@ re-run printed `All campaign stats match the ledgers. Nothing to do.` Re-disposi
 to Not home through the real hot-path delta before the recompute made the same line read
 `contactKnockCount -1→1`. Skipped, the nightly job seeds it and warns once:
 `[maintenance] reconcile-campaign-stats: repaired <D> drifted, seeded 0 of <M> campaign(s) — <name> (contactKnockCount 0→<N>); …`.
+
+### The map-pin pass after every import (`placeStackedPins`)
+
+[`placeStackedPins.js`](../server/src/services/households/placeStackedPins.js) runs inside the import worker
+after the write (`ImportJob.phase: 'pins'`, its own 30 s heartbeat) — no scheduler entry and no script.
+One pass per campaign at a time holds `Campaign.pinPass` (beat 30 s, taken over after 90 s stale); a second
+import meanwhile marks only and stores `PIN_PASS_BUSY`. Lookups run only when `GEOCODE_ENABLED === 'true'`
+and `GEOCODIO_API_KEY` is set, through `geocodeService.resolve` (shared cache and cost accounting), capped
+per import by `PIN_PLACEMENT_MAX_HOMES` and ledgered in `ImportJob.pinProbedIds`. Failures are non-fatal:
+the import completes, `pinPassError` carries the generic sentence and `pinPassCause` the reason
+(super-admin Imports page only). The recovery is always the same import again — idempotent by design. The
+new partial index `{ campaignId: 1, pinSuspect: 1 }` makes `migrate:build-indexes -- --apply` a gate:
+without it the Pin Fixes list and the `pinsToFix` badge scan. Full rules: [IMPORTS.md](IMPORTS.md) §H.
 
 ## Why `autoIndex` is off in production
 

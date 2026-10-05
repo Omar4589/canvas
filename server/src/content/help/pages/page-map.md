@@ -23,6 +23,8 @@ The **Map** page shows all of your campaign's doors, colored by status, so you c
 
 Two filters are worth knowing: **filter to a single canvasser** and the doors recolor to show just **that person's own work** (green only where *they* surveyed, and so on); and **Show overlaps** rings the doors that **more than one canvasser knocked in the same pass** — even across different days. On a campaign with more than one [walk list](walk-lists), an **All walk lists** select also lets you scope the whole map to one list.
 
+**Faint circles show how sure each recorded location is.** Turn on canvasser pings or flagged entries and zoom in to street level: on the web map each dot gets a faint circle the size of the phone's own accuracy estimate when that door was recorded. It's a guide, not a boundary: honest readings often land outside it, so a house outside the circle isn't evidence on its own. With more than 500 on screen the circles are left off, with a note to zoom in. The web now labels a door's distance after allowing for GPS accuracy: a ping or flag panel says **far** only when the audit does, so some older entries now read differently while their flags stayed the same. The phone's admin map keeps the older label, and has no circles, until its next update. More in [The GPS audit](audit).
+
 **Amber rings mark approximate pins** — doors whose spot was looked up from the address rather than read from your file. The [Pin Fixes page](page-pin-fixes) is where you work through them — move each to the right building, or confirm it's already right.
 
 For the full walkthrough, see [Using the maps](maps).

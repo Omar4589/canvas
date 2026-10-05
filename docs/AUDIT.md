@@ -72,6 +72,17 @@ time in three; iPhones report the radius without a stated confidence. Under open
 canvasser's typical ± against the crew's on the same streets, not against zero. The physics and the
 phone settings behind the number are in [GPS_ACCURACY.md](GPS_ACCURACY.md).
 
+**The map panels judge the same way.** On the web map, the flag panel and the canvasser-location panel
+call a door **far** only when the audit does, and print what is left after allowing for GPS accuracy
+(*853 ft after allowing for GPS accuracy (±131 ft)*). When the phone's own radius explains the distance
+they say *Not far after allowing for GPS accuracy*, and when that radius is over ~330 ft, *Too imprecise
+to judge the distance*: the audit can't call it far, and nothing can call it near. A flag the audit
+lowered (an honest correction, or a pin corrected after the knock) reads **far, flagged low**, with the
+reason underneath. A stamp whose phone reported no usable estimate gets no allowance. These are labels:
+no flag or count moved with them. The panels used to call anything past ~250 ft far on the raw
+distance, so some older entries now read differently while their flags stayed the same. The phone's
+admin map keeps the older label until its next update.
+
 **Corrections don't punish honesty.** Changing your answer at a door you already visited — say you
 tapped Restricted by mistake, walked off, and fixed it to Not home from down the street — would
 otherwise look like a door marked from far away, because the newer entry (recorded where you now
@@ -142,7 +153,9 @@ low, unless its location was also poor or stale.)
   here, the rewrite happens there — the link carries the canvasser and this page's date window
   as deep-link seeds ([CAMPAIGNS.md](CAMPAIGNS.md) → *Door Outcomes*).
 - **The entries list** — one card per flagged door: who, the address, the time, the reason(s) with the
-  actual number (e.g. *205 ft from house*, *8 s after the previous door*), and the review buttons. Each
+  actual number (e.g. *205 ft from house*, *8 s after the previous door*), and the review buttons. A
+  Weak GPS reading shows the distance beside the ± (*GPS ±492 ft · 394 ft from house*), and a card says
+  when the house pin is approximate (placed by address lookup) or was confirmed in place. Each
   card has a **"View on map"** link that jumps to the map focused on that exact entry — **on mobile
   too**: the mobile audit card's link opens the admin map with the flag layer on, selects the entry
   and flies to its GPS point (already-reviewed entries still focus — the map widens to all review
@@ -156,7 +169,11 @@ per-canvasser table, and the entries list.
 **2) The map** (the same admin map you already use). Turn on **"Show flagged entries"** in the left
 panel and each flag appears as a colored dot at the spot it was recorded, with a line back to the
 house — so you can *see* the geography (on the street? across the block? all from one corner?). The
-reason chips show the counts; clicking a flag opens a panel to review it right there.
+reason chips show the counts; clicking a flag opens a panel to review it right there. Zoom in to street
+level and each flag and canvasser location on the web map shows a faint circle the size of the phone's
+own accuracy estimate. It's a guide, not a boundary: honest readings often land outside it (on Android
+about one in three), so a house outside the circle isn't evidence on its own. With more than 500 on
+screen the circles are left off, with a note to zoom in.
 
 Each surface carries a small **(i)** legend (web `FlagLegend.jsx`, mobile audit header) explaining
 all five flag types, the four weak-GPS sub-kinds, and what the severities mean — copy centralized in
@@ -302,7 +319,7 @@ the numbers below are the defaults — tune them in that one file.
 
 | Flag | Rule | Guard |
 |---|---|---|
-| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. **Pin-correction downgrade:** a far entry whose household pin was corrected AFTER the knock, and whose GPS is within `FAR_WARN_M` effective of the **corrected** pin, drops to **low** with `detail.pinDowngraded` — unless `correctedBy` is the flagged user, in which case severity is kept and `detail.pinMovedBySelf` says why. **Never upgrades:** the check lives inside `if (farSev)` and only ever assigns `'low'`, so a pin dragged away can't create or worsen a flag — see §B.7. |
+| **far** | `distanceFromHouseMeters` (already stamped at record time) tiered on **`distance − accuracy`**: `> 250 m` (~820 ft) → high, `> 75 m` (~250 ft) → medium. The subtraction is `effectiveMeters(d, acc) = max(0, d − max(0, acc ?? 0))`, the one helper behind all four uses (the tier, the chain's `nearest`, the pin-fix live distance, and the snapshot's `nearest` pick in `canvass.js`): a negative accuracy, which older iPhone stamps carry to mark an invalid fix, gives no allowance and never adds distance. | **Null distance is never far** (unknown ≠ far). Subtracting accuracy means a big distance from a *poor* fix reads as **weak_gps**, not far — so bad GPS can't masquerade as bad canvassing. **Correction downgrade:** a far entry whose `replaced.nearest` proves a near visit (effective ≤ `FAR_WARN_M`) within `FAR_CORRECTION_WINDOW_MIN` (720 min) drops to **low** with `detail.downgraded` — see §B.5. **Pin-correction downgrade:** a far entry whose household pin was corrected AFTER the knock, and whose GPS is within `FAR_WARN_M` effective of the **corrected** pin, drops to **low** with `detail.pinDowngraded` — unless `correctedBy` is the flagged user, in which case severity is kept and `detail.pinMovedBySelf` says why. **Never upgrades:** the check lives inside `if (farSev)` and only ever assigns `'low'`, so a pin dragged away can't create or worsen a flag — see §B.7. |
 | **weak_gps** | Missing location → high; accuracy `> 250 m` → high, `> 100 m` → medium; else an offline submission → low. **Stale-fix escalation:** when `location.fixTimestamp` is present and the fix predates the tap by `> STALE_FIX_HIGH_SEC` (30 min) → high, `> STALE_FIX_MED_SEC` (5 min) → med (`detail.stale` + `fixAgeSec`); the client caps reused fixes at 2 min, so an honest new client can never trip this — it catches bypassed/old clients and forged payloads. | A **null** accuracy alone is *not* flagged (unknown ≠ bad — it would flood on legacy rows). Absent `fixTimestamp` (legacy rows, old clients) and negative gaps (clock skew) never flag. |
 | **mock_gps** | `location.mocked === true` (Android's `isFromMockProvider`, captured on every fix by the app) → **high**, always. | `false`/`null`/absent (iOS, legacy rows, old clients) never flags. Detection is **silent by design**: the canvasser app never blocks or hints on a mocked fix, so the evidence accumulates instead of tipping the cheater off to switch methods. |
 | **rapid** | Per canvasser, walk consecutive **distinct-door** actions on the travel timeline; a gap `< 20 s` flags the later action (`< 8 s` → high). | Same-household consecutive actions (a correction) are skipped; notes are excluded; an **identical-timestamp offline pair** is suppressed (that's a sync artifact, not real behavior). |
@@ -315,14 +332,17 @@ An entry can carry several reasons; its `maxSeverity` is the worst. `haversineMe
 ### One threshold, everywhere
 
 `FAR_WARN_M` (75 m) is now the **single** "far" threshold. The `flaggedOnly` activity feed and the
-`/quality` flagged list in [reports.js](../server/src/routes/admin/reports.js), the
-`CanvasserPingPanel` "— far" label on web, and its mobile counterparts — `ActivityRow` and the admin
-map's ping-detail sheet ([mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx)) — all
-reference it (server) / its client mirror ([client/src/lib/flags.js](../client/src/lib/flags.js)) or
-mobile mirror ([mobile/lib/flags.js](../mobile/lib/flags.js)) — resolving an old 50 m-server /
+`/quality` flagged list in [reports.js](../server/src/routes/admin/reports.js), and on the phone
+`ActivityRow` and the admin map's ping-detail sheet
+([mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx)), all reference it (server) or its
+mobile mirror ([mobile/lib/flags.js](../mobile/lib/flags.js)), resolving an old 50 m-server /
 100 m-client split so "far" means one thing across the app. (The mobile ping sheet was the last
 straggler on 100 m; `/quality`'s far *count* was the last on 50 m, quietly contradicting its own
-75 m flagged list until it moved to the shared rule below.)
+75 m flagged list until it moved to the shared rule below.) The web's two map panels go further: they
+show the audit's own verdict (§E), and the phone's ping sheet follows with its next update
+([PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §H.5). The phone's canvasser activity feed
+(`ActivityRow`) deliberately stays on the raw threshold: its screen's "Only flagged (offline or > 250
+ft)" toggle states the raw definition, and the filtered total is a count.
 
 **The per-canvasser far KPIs go further than the threshold — they share the full rule.**
 `farFromHouseCount`/`farFromHousePercent` on `/canvassers/:id/summary` and `/quality` are computed by
@@ -363,7 +383,10 @@ replaced: {
 
 - **`nearest` carries the chain forward:** it's the min-**effective**-distance (`distance − accuracy`)
   candidate among the prior row's own stamp and the prior row's `replaced.nearest`. So A (at door) →
-  B (correction from afar) → C (second correction from afar) still proves the A visit on C.
+  B (correction from afar) → C (second correction from afar) still proves the A visit on C. The pick
+  uses the audit's own `effectiveMeters`, and every accuracy the snapshot copies (the prior stamp's,
+  `location.accuracy` and the carried `nearest`) goes through the same `usableAccuracy` as a fresh stamp
+  (§B.6), so an older row's zero or negative radius is written forward as `null`.
 - **Detection** ([flagDetection.js](../server/src/services/audit/flagDetection.js)): every far
   correction gets `detail.priorActionType/priorMeters/priorAccuracy/minutesSincePrior` (the UI
   context line renders on *every* correction, downgraded or not). The severity drops to **low** +
@@ -421,18 +444,23 @@ geometry as well, in the one direction that can only help.
   audit queue and in every flagged list, visibly marked `forgiven`; a pin-forgiven entry does leave
   the per-canvasser far *count*, but `farForgivenByPinCount` keeps the forgiveness volume itself
   observable) and by `HouseholdLocationChange`, which logs who moved what, from where, when.
-- **Two callers, one implementation.** The far rule is the exported `farAssessment(row, fix,
-  thresholds)`; `computeReasons` (this detector) and the per-canvasser KPI helper
-  ([services/audit/farKpi.js](../server/src/services/audit/farKpi.js)) both call it, and the
+- **Three callers, one implementation.** The far rule is the exported `farAssessment(row, fix,
+  thresholds)`; `computeReasons` (this detector), the per-canvasser KPI helper
+  ([services/audit/farKpi.js](../server/src/services/audit/farKpi.js)) and, through that helper's
+  `farKpiForRows`, the map's ping verdict on `GET /admin/households/map` (§D) all call it, and the
   corrected-pin filter is the shared `buildPinFixMap`. Change the rule in one place and every far
   surface moves together; there is no second implementation to drift.
 - **The household projection is load-bearing, exactly like the `replaced` one above.** It must carry
   `coordSource correctedAt correctedBy` — drop them and the downgrade silently stops firing while every
   unit test that passes an empty `pinFixMap` keeps passing. `server/test/mobilePinRole.int.test.js` and
-  the flags-endpoint assertions are what catch it.
-- The UI lines are `pinCorrectionText` / `isPinDowngraded` / `isSelfMovedPin` in the two `flags.js`
-  mirrors; `FlaggedEntryPanel` prints both distances side by side, because the map's leader line is
-  drawn to the **current** pin and used to silently contradict the frozen label.
+  the flags-endpoint assertions are what catch it. It also carries `coordConfidence locationConfirmedAt`,
+  copied into `entry.household` for the pin line only (`pinPrecisionText`, §E) and never read by
+  `buildPinFixMap` or `farAssessment`; `correctedBy` and `locationConfirmedBy` never leave the detector
+  (`server/test/locationGate.int.test.js` pins the exact `household` key list).
+- The UI lines are `pinCorrectionText` and `farDowngradeLines` on the web (the phone keeps
+  `isPinDowngraded` / `isSelfMovedPin` until its next update); `FlaggedEntryPanel` and
+  `CanvasserPingPanel` print both distances side by side, because the map's leader line is drawn to the
+  **current** pin and used to silently contradict the frozen label.
 
 ### B.6 Location-required enforcement (no location = no knock)
 
@@ -453,9 +481,23 @@ Recording a disposition or survey **requires a live GPS fix**, enforced twice:
   *location* gate only. Pin correction is separately restricted by **role** — leads/admins/supers, see
   [MAPS.md](MAPS.md) — so "map hygiene" now names a lead's job, not a canvasser's.)
 - **Server backstop** — [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) rejects a
-  missing/degenerate `location` on both write paths with `400 { error, code: 'LOCATION_REQUIRED' }`
-  **before** zod (so clients get the typed message, not a zod dump). This replaces the accidental
-  blocking the old zod schema provided, and catches bypassed or old clients.
+  missing/degenerate `location` on all three write paths (door results, the survey route and the
+  add-person route) with `400 { error, code: 'LOCATION_REQUIRED' }` **before** zod (so clients get the
+  typed message, not a zod dump). This replaces the accidental blocking the old zod schema provided, and
+  catches bypassed or old clients. A coordinate that isn't a finite number counts as missing
+  (`isFiniteLatLng` in [utils/stateBounds.js](../server/src/utils/stateBounds.js)): JSON's `1e400`
+  parses to Infinity, which used to pass, and on the door-result path the replace then deleted the
+  canvasser's earlier entry before the create failed with a 500 that a phone would retry forever
+  ([GPS_ACCURACY.md](GPS_ACCURACY.md) F-26). Finite coordinates off the Earth are still accepted until
+  the stored stamps have been counted (`npm run audit:gps-stamps`, [OPERATIONS.md](OPERATIONS.md));
+  that refusal is held as its own step ([PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I.1). The
+  add-person route requires the stamp but stores none (F-23).
+- **The accuracy is sanitised, never refused.** `usableAccuracy` stores only a finite radius above zero;
+  an Android `0` (no estimate), an iPhone negative (invalid fix) or a non-finite value is stored as
+  `null` (unknown), on both ledgers, in the `replaced` snapshot and on the pin-correction audit row
+  (`HouseholdLocationChange`). Refusing would cost a knock: the phone deletes a queued item the server
+  answers with a 4xx (offlineQueue.js). A `null` accuracy gets no far allowance and no Weak GPS flag
+  (unknown ≠ bad).
 
 Every stamp now carries provenance, nested in `location`: **`mocked`** (Android
 `isFromMockProvider`; null = unknown/iOS) and **`fixTimestamp`** (when the OS computed the fix, vs
@@ -559,6 +601,21 @@ gate, and anchor-tz resolution.
 Filtering by `open` happens **after** the live join (it isn't a DB status), so the endpoint slices the
 computed+joined list in memory and returns the pre-slice `total`.
 
+Each entry's `household` is `{ id, addressLine1, addressLine2, city, state, zipCode, location,
+coordConfidence, locationConfirmedAt }`; the last two drive the pin line (§E) and nothing else.
+
+**The map's pings carry the same verdict.** `GET /admin/households/map` (the admin map's households and
+canvasser pings, [MAPS.md](MAPS.md) §D) passes its activity rows through `farKpiForRows`, so each ping
+carries `far: null | { severity, detail }`, the audit's own far verdict. `farVerdictForWire` whitelists
+the detail (`meters`, `effectiveMeters`, `accuracy`, and when set `downgraded`, `pinCorrectedMeters` with
+`pinCorrectedAt`, `pinDowngraded`, `pinMovedBySelf`): never the `replaced` snapshot and never
+`correctedBy`. The activity projection reads `replaced` server-side only (without it an honest
+correction would read far on the ping panel while the audit says low), and rows go in with the raw
+`userId`, because the route populates it and a populated document stringifies to `[object Object]`,
+which would silently forgive a canvasser's own pin move. One extra indexed Household query per map
+refresh while pings are on, limited to raw-far candidates. `server/test/mapPingVerdict.int.test.js`
+compares every ping's verdict with `/flags` for five seeded doors.
+
 ## E. Frontend
 
 - **Audit page** — [AuditPage.jsx](../client/src/pages/AuditPage.jsx) at `/campaigns/:campaignId/audit`
@@ -584,8 +641,34 @@ computed+joined list in memory and returns the pre-slice `total`.
   the URL (turns the layer on, scopes to the canvasser + window, defaults status to **all** so a
   reviewed entry still shows, and flies to the flagged point once its data lands).
 - **Reason/severity/status display metadata** (colors, labels, human detail text) is centralized in
-  [client/src/lib/flags.js](../client/src/lib/flags.js), which also mirrors the two thresholds the
-  client needs.
+  [client/src/lib/flags.js](../client/src/lib/flags.js), which also mirrors the thresholds the client
+  needs.
+- **Far labels that agree with the audit** — `farLabelState`, `farRowOf`, `effectiveDistanceMeters`,
+  `gpsAccuracyText`, `farDowngradeLines` and `hasUsableAccuracy` in
+  [client/src/lib/flags.js](../client/src/lib/flags.js), rendered by
+  [FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) and
+  [CanvasserPingPanel.jsx](../client/src/components/CanvasserPingPanel.jsx). The label is the server's
+  verdict whenever the row carries one (a flag entry's own far reason; a ping's `far` field, through
+  `farRowOf`); only a verdict-less payload, an older server's, is judged by `effectiveDistanceMeters`,
+  `farAssessment`'s arithmetic. The red goes only with **far**; a lowered verdict reads "far, flagged
+  low". Under the distance: plain "GPS accuracy ±N" at or under 75 m; past it, the remainder while still
+  far, "Not far after allowing for GPS accuracy" when a radius of at most 100 m covers the distance, and
+  "Too imprecise to judge the distance" when a wider one does; nothing for an unusable radius. Below
+  that, the circle caption (`ACCURACY_CIRCLE_CAPTION`, also the end of the web `FLAG_LEGEND_FOOTER`) when
+  the radius is one the map can draw (above 0, at most 250 m), or "Too wide to draw on the map" past 250 m. `server/test/flagsMirror.test.js` pins
+  the label against `farAssessment` on 192 boundary cases, the web thresholds against the server's, and
+  the web and phone `flags.js` against each other (shared constants, the existing shared helpers, and
+  the footers: the web one is the phone's plus the circle sentence until the phone draws circles). The
+  phone copies these helpers with its next update.
+- **Pin line** — `pinPrecisionText(h, formatDate)` (approximate, confirmed in place on a date, or
+  nothing for an exact, file-supplied or corrected pin; the pin badges' precedence) under the house in
+  `FlaggedEntryPanel` and on each [FlaggedEntryList.jsx](../client/src/components/FlaggedEntryList.jsx)
+  card, in `text-warning-fg` until confirmed.
+- **Weak GPS distance** — `weakGpsDistanceText(entry)`: the Audit cards pass `entry` to
+  `FlagReasonBadges`, and a Weak GPS badge that reads "GPS ±N" gains the raw distance, unless a far
+  badge already prints one.
+- **Accuracy circles** on the web map — [client/src/lib/accuracyRing.js](../client/src/lib/accuracyRing.js),
+  [MAPS.md](MAPS.md) §E.
 - **Bulk review client plumbing** lives in the twin helpers
   [client/src/lib/bulkReview.js](../client/src/lib/bulkReview.js) /
   [mobile/lib/bulkReview.js](../mobile/lib/bulkReview.js) (`postBulkReview`, `countBulkReview` for
@@ -616,6 +699,13 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Read `CanvassActivity` only.** Unioning `SurveyResponse` would double-count surveys and manufacture
   false Rapid flags (see §B / [METRICS.md](METRICS.md)).
 - **Weak GPS ≠ far.** `far` tiers on `distance − accuracy`; a large distance from a poor fix is `weak_gps`.
+- **The accuracy discount never adds distance.** `effectiveMeters` clamps a negative radius to zero at
+  every site, and a stamp's accuracy is stored only when it is a finite number above zero (`null`
+  otherwise, never a 400). Don't reintroduce `d - (acc ?? 0)` anywhere.
+- **Panels never re-judge a verdict the server sent.** Only a verdict-less payload falls back to
+  `effectiveDistanceMeters`, which is `farAssessment`'s arithmetic verbatim
+  (`server/test/flagsMirror.test.js`). Never key a far label, or its red, on the raw distance again.
+  The labels are display only: no count, KPI, filter or query reads them.
 - **The far discount is the client's own accuracy claim**, and that is an accepted trade-off, not a bug
   to arithmetic away. The server has no second opinion on `accuracy`, so a tampered client asserting
   100 m is unflagged anywhere within 175 m of the pin and one asserting 250 m draws only Weak GPS out to

@@ -46,7 +46,9 @@ import {
   FIRST_KNOCK_COLOR,
   LAST_KNOCK_COLOR,
   registerLayers,
+  pingColorFor,
 } from '../lib/mapRender.js';
+import { accuracyRingsGeoJSON, ringInputsFromPoints, nextRingView } from '../lib/accuracyRing.js';
 
 const DEFAULT_CENTER = [-95.7129, 37.0902]; // continental US
 const DEFAULT_ZOOM = 3.5;
@@ -133,6 +135,8 @@ export default function MapPage() {
   const mapRef = useRef(null);
   const qc = useQueryClient();
   const [mapReady, setMapReady] = useState(false);
+  // The accuracy circles' camera: zoom plus the padded visible area (lib/accuracyRing.js).
+  const [ringView, setRingView] = useState({ zoom: null, bounds: null });
   // Fullscreen the map, matching the Turf Cutting page. Purely a container resize — see the
   // ResizeObserver and the Esc handler below.
   const [mapFullscreen, setMapFullscreen] = useState(false);
@@ -807,10 +811,23 @@ export default function MapPage() {
       }, 400);
     });
 
+    // The accuracy circles read their zoom and view from their own handler, never the bbox handler
+    // above: that one skips every move before the first auto-fit and every move that stays inside the
+    // last padded fetch box, which every zoom-in does, so a zoom recorded there would stay at the
+    // overview and no circle would ever draw at street zoom. Bound to every moveend, ungated (the
+    // auto-fit's included, which fires synchronously), and called once on load.
+    const onRingView = () => {
+      const b = map.getBounds();
+      const zoom = map.getZoom();
+      setRingView((prev) => nextRingView(prev, zoom, { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() }));
+    };
+    map.on('moveend', onRingView);
+
     map.on('load', () => {
       registerLayers(map, darkBase);
       mapRef.current = map;
       setMapReady(true);
+      onRingView();
     });
     return () => {
       clearTimeout(bboxTimer);
@@ -1229,16 +1246,29 @@ export default function MapPage() {
     return m;
   }, [households]);
 
+  // The ping and flag points, built once: the map layers and the accuracy circles read the same sets.
+  const pingFC = useMemo(() => activitiesToPingsGeoJSON(showCanvasserPins ? activities : []), [activities, showCanvasserPins]);
+  const flagFC = useMemo(() => flagsToGeoJSON(showFlags ? shownFlags : []), [shownFlags, showFlags]);
+  const rings = useMemo(
+    () => accuracyRingsGeoJSON(ringInputsFromPoints(pingFC, flagFC, pingColorFor), { bounds: ringView.bounds, zoom: ringView.zoom }),
+    [pingFC, flagFC, ringView]
+  );
+
   // Push canvasser activity GPS points + connecting lines.
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const pingsSrc = mapRef.current.getSource('canvasser-pings');
     const linesSrc = mapRef.current.getSource('canvasser-lines');
     if (!pingsSrc || !linesSrc) return;
-    const list = showCanvasserPins ? activities : [];
-    pingsSrc.setData(activitiesToPingsGeoJSON(list));
-    linesSrc.setData(activitiesToLinesGeoJSON(list, householdsById));
-  }, [activities, householdsById, showCanvasserPins, mapReady, styleEpoch]);
+    pingsSrc.setData(pingFC);
+    linesSrc.setData(activitiesToLinesGeoJSON(showCanvasserPins ? activities : [], householdsById));
+  }, [pingFC, activities, householdsById, showCanvasserPins, mapReady, styleEpoch]);
+
+  // Push the accuracy circles: empty below the zoom floor, or when the cap withholds them.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    mapRef.current.getSource('accuracy-rings')?.setData(rings.fc);
+  }, [rings, mapReady, styleEpoch]);
 
   // Toggle layer visibility — instant, no refetch.
   useEffect(() => {
@@ -1279,10 +1309,9 @@ export default function MapPage() {
     const pingsSrc = mapRef.current.getSource('flagged-pings');
     const linesSrc = mapRef.current.getSource('flagged-lines');
     if (!pingsSrc || !linesSrc) return;
-    const list = showFlags ? shownFlags : [];
-    pingsSrc.setData(flagsToGeoJSON(list));
-    linesSrc.setData(flagsToLinesGeoJSON(list));
-  }, [shownFlags, showFlags, mapReady, styleEpoch]);
+    pingsSrc.setData(flagFC);
+    linesSrc.setData(flagsToLinesGeoJSON(showFlags ? shownFlags : []));
+  }, [flagFC, shownFlags, showFlags, mapReady, styleEpoch]);
 
   // Push the overlap ring overlay — rings the loaded doors whose id is in the overlap set.
   // Re-runs when the set changes OR when households change (a viewport refetch loads new doors
@@ -1558,6 +1587,7 @@ export default function MapPage() {
             buildingCount={buildings.length}
             stackedDoorCount={stackedIds.size}
             showCanvasserPins={showCanvasserPins}
+            accuracyRingsWithheld={rings.withheld}
             onShowCanvasserPinsChange={setShowCanvasserPins}
             showOverlaps={showOverlaps}
             onShowOverlapsChange={setShowOverlaps}

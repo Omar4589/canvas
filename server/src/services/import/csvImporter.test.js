@@ -227,7 +227,7 @@ test('a real building — one street line, units in the address — is not a pla
   assert.equal(r.placeholderPinDoors, 0);
 });
 
-test('a dominant-street building with one stray counts only the stray', () => {
+test('a dominant-street building with one stray counts only the stray, as a stray', () => {
   const rows = [
     at('A', '900 Aqua Isles Blvd Lot 1', 26.76, -81.452),
     at('B', '900 Aqua Isles Blvd Lot 2', 26.76, -81.452),
@@ -236,7 +236,22 @@ test('a dominant-street building with one stray counts only the stray', () => {
   ];
   const r = validateRows(rows, MAPPING, HEADERS);
   assert.equal(r.placeholderPins, 0, 'the park is not a placeholder');
-  assert.equal(r.placeholderPinDoors, 1, 'only the stray is suspect');
+  assert.equal(r.placeholderPinDoors, 0, 'no placeholder doors');
+  assert.equal(r.strayPinDoors, 1, 'only the stray is suspect, counted apart');
+});
+
+test('two records of one home on a shared spot count as one home, so they make no building', () => {
+  // "Unit A" and "Apt A" are one home written two ways; with the other address's single home that is
+  // two homes on the spot, one each: a placeholder, not "100 Main St's building" plus a stray.
+  const rows = [
+    at('A', '100 Main St Unit A', 26.5, -81.5),
+    at('B', '100 Main St Apt A', 26.5, -81.5),
+    at('C', '102 Main St', 26.5, -81.5),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.placeholderPins, 1);
+  assert.equal(r.placeholderPinDoors, 3, 'counted per door');
+  assert.equal(r.strayPinDoors, 0);
 });
 
 test('placeholder detection runs on RESOLVED coordinates — after the per-household vote', () => {

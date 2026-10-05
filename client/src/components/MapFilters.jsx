@@ -1,6 +1,7 @@
 import { REASON_META } from '../lib/flags.js';
 import FlagLegend from './FlagLegend.jsx';
 import Segmented from './ui/Segmented.jsx';
+import { RINGS_WITHHELD_NOTE } from '../lib/accuracyRing.js';
 
 const DEFAULT_STATUSES = ['surveyed', 'refused', 'not_target', 'restricted', 'no_soliciting', 'lit_dropped', 'not_home', 'wrong_address', 'unknocked'];
 
@@ -68,6 +69,7 @@ export default function MapFilters({
   buildingCount = 0,
   stackedDoorCount = 0,
   showCanvasserPins = false,
+  accuracyRingsWithheld = false,
   onShowCanvasserPinsChange,
   // Overlap overlay (admin map only): doors worked by 2+ canvassers in the same pass.
   showOverlaps = false,
@@ -171,8 +173,12 @@ export default function MapFilters({
           </label>
           <div className="mt-1 text-xs text-fg-muted">
             Where each survey, not-home, or wrong-address was submitted from, labeled
-            with the canvasser&apos;s initials.
+            with the canvasser&apos;s initials. Zoom in and each dot shows a faint circle: the
+            phone&apos;s own accuracy estimate, a guide, not a boundary.
           </div>
+          {showCanvasserPins && accuracyRingsWithheld && (
+            <div className="mt-1 text-xs text-fg-muted">{RINGS_WITHHELD_NOTE}</div>
+          )}
 
           <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
             <input
@@ -260,6 +266,9 @@ export default function MapFilters({
               </span>
             )}
           </label>
+          {showFlags && !showCanvasserPins && accuracyRingsWithheld && (
+            <div className="mt-1 text-xs text-fg-muted">{RINGS_WITHHELD_NOTE}</div>
+          )}
           {showFlags && (
             <div className="mt-3 space-y-3">
               <div className="flex flex-wrap gap-1">

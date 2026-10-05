@@ -13,6 +13,8 @@ The **Audit** page surfaces doors the app flagged for a quality check — a mark
 
 Facing a backlog? Filter the list, tick the checkboxes (or **Select all shown**), and apply one decision to the whole set — with a confirmation that names the exact count, and an **Undo** right after.
 
+Each card says when the house pin is approximate (placed by address lookup) or was confirmed in place, so check the pin before asking the canvasser, and a Weak GPS card shows the distance beside the phone's accuracy (*GPS ±492 ft · 394 ft from house*). The audit allows for that accuracy before it calls a door far. **View on map** opens the web map, where a zoomed-in flag shows a faint circle the size of the phone's accuracy estimate: a guide, not a boundary, so a house outside the circle isn't evidence on its own.
+
 Reviewing flags records a decision; it never changes what an entry *says*. When a drilled-in canvasser's entries turn out to need actual correcting, **Correct their entries in Door Outcomes** (org admins, shown while drilled into one canvasser) carries them and this page's date window straight to the Door Outcomes page.
 
 For the full walkthrough, see [The GPS audit](audit).

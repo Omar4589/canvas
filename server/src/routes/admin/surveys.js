@@ -518,13 +518,16 @@ router.get('/', async (req, res, next) => {
     const orgId = activeOrgId(req);
     // A LEAD's library is scoped: templates they authored, or attached to a campaign
     // they manage (the set form of canManageSurvey). managedSet doubles as the
-    // narrowing key for the usage maps below — null means admin, no narrowing.
+    // narrowing key for the usage maps below — null means admin, no narrowing — and
+    // attachedSet says which templates are on their campaigns (hasResponses, below).
     let templateFilter = { organizationId: orgId };
     let managedSet = null;
+    let attachedSet = null;
     if (!isOrgAdmin(req)) {
       const managed = await managedCampaignIds(req);
       managedSet = new Set(managed.map(String));
       const attached = await attachedSurveyTemplateIds(req, managed);
+      attachedSet = new Set(attached.map(String));
       templateFilter = {
         organizationId: orgId,
         $or: [{ createdBy: req.user._id }, { _id: { $in: attached } }],
@@ -606,9 +609,14 @@ router.get('/', async (req, res, next) => {
           };
         }
         // Lead view: usage and volumes narrowed to their campaigns (the null-campaign
-        // legacy bucket drops too — it's unattributable org-wide volume). One bare
-        // boolean says "also used beyond your campaigns" so the shared-edit warning
-        // can still fire without leaking whose campaigns or how much.
+        // legacy bucket drops too — it's unattributable org-wide volume). Two bare booleans
+        // cross that line, never whose campaigns or how much: usedElsewhere ("also used
+        // beyond your campaigns", on every row in the library) keeps the shared-edit warning
+        // honest, and hasResponses, on a template attached to a campaign they manage, counts
+        // the WHOLE org — legacy no-campaign rows included, the very rows the PATCH's 409
+        // checks — so the builder's answer-type and Go to locks match the save (owner ruling
+        // 2026-10-03: "as long as its part of their campaigns, yes"). A template in the
+        // library only because they wrote it keeps the narrowed yes/no.
         const usedByCampaigns = allCampaignUses.filter((c) => managedSet.has(c.id));
         const usedByWalkLists = allWalkUses.filter((w) => managedSet.has(w.campaignId));
         const responseCountByCampaign = allByCampaign.filter(
@@ -620,7 +628,7 @@ router.get('/', async (req, res, next) => {
           usedByCampaigns,
           usedByWalkLists,
           responseCount,
-          hasResponses: responseCount > 0,
+          hasResponses: attachedSet.has(id) ? (counts.get(id) || 0) > 0 : responseCount > 0,
           responseCountByCampaign,
           usedElsewhere:
             usedByCampaigns.length < allCampaignUses.length ||
@@ -746,6 +754,19 @@ router.patch('/:surveyId', async (req, res, next) => {
   }
 });
 
+// A copy's name. A name is at most 200 characters (upsertSchema), and a copy named past that
+// could never be saved again — its next PATCH is a bare 400 'Invalid input' — so a long name is
+// cut to leave room for the suffix. The limit counts UTF-16 code units, as zod does, so the cut can
+// fall inside an emoji: its lone first half is dropped rather than stored as U+FFFD. The builder's
+// Save my changes as a copy names its copy the same way (copyName, client/src/lib/surveyBuilderRules.js).
+const COPY_SUFFIX = ' (Copy)';
+const copyName = (name) =>
+  `${String(name ?? '')
+    .trim()
+    .slice(0, 200 - COPY_SUFFIX.length)
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .trimEnd()}${COPY_SUFFIX}`;
+
 // Clone a survey into a fresh, fully-editable template (version reset, inactive,
 // no campaign link). Used as the escape hatch when an in-use survey needs
 // structural changes — the original stays intact so its reports keep working.
@@ -764,7 +785,7 @@ router.post('/:surveyId/duplicate', async (req, res, next) => {
 
     const copy = await SurveyTemplate.create({
       organizationId: orgId,
-      name: `${original.name} (Copy)`,
+      name: copyName(original.name),
       isActive: false,
       version: 1,
       intro: original.intro || '',

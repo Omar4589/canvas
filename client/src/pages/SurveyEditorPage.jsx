@@ -2,6 +2,7 @@ import { useParams, useNavigate, Navigate, useSearchParams } from 'react-router-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import SurveyForm from '../components/SurveyBuilder.jsx';
+import { saveErrorFor } from '../lib/surveyBuilderRules.js';
 
 // Org-library survey builder behind dedicated routes (/surveys/new and
 // /surveys/:surveyId/edit) — the Surveys page itself stays a pure list + quick-view.
@@ -73,6 +74,16 @@ export default function SurveyEditorPage({ mode }) {
     },
   });
 
+  // Save my changes as a copy (edit mode only): a NEW survey in the library, attached and assigned to
+  // nothing; it lands on /surveys, where the copy is listed. Its own mutation, so no attach can run.
+  const copy = useMutation({
+    mutationFn: (body) => api('/admin/surveys', { method: 'POST', body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['surveys'] });
+      navigate('/surveys');
+    },
+  });
+
   const update = useMutation({
     mutationFn: ({ id, body }) => api(`/admin/surveys/${id}`, { method: 'PATCH', body }),
     onSuccess: () => {
@@ -97,6 +108,9 @@ export default function SurveyEditorPage({ mode }) {
   if (mode === 'edit' && !survey) return <Navigate to="/surveys" replace />;
 
   const editing = mode === 'edit';
+  // The last failed save, only if it was sent for this survey (saveErrorFor): a refusal never locks,
+  // or speaks for, another survey this page shows later.
+  const saveError = editing ? saveErrorFor(update, survey._id) : create.error;
 
   return (
     <div>
@@ -118,25 +132,20 @@ export default function SurveyEditorPage({ mode }) {
 
       <SurveyForm
         initial={editing ? survey : { name: '', intro: '', closing: '', questions: [] }}
-        onSave={(body) => (editing ? update.mutate({ id: survey._id, body }) : create.mutate(body))}
+        onSave={(body) => {
+          if (!editing) return create.mutate(body);
+          copy.reset();
+          return update.mutate({ id: survey._id, body });
+        }}
         onCancel={back}
         saving={editing ? update.isPending : create.isPending}
         orgTags={orgTags}
         onCreateTag={createTag}
+        saveError={saveError}
+        copyError={saveError ? copy.error : null}
+        onSaveAsCopy={editing ? (body) => copy.mutate(body) : undefined}
+        savingCopy={editing && copy.isPending}
       />
-
-      {(create.error || update.error) && (
-        <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-          <p>{(create.error || update.error).message}</p>
-          {update.error?.data?.reasons?.length > 0 && (
-            <ul className="mt-1 list-inside list-disc text-danger">
-              {update.error.data.reasons.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
     </div>
   );
 }

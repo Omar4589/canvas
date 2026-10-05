@@ -261,3 +261,42 @@ test('a walk-list override is validated: bad ids and foreign-org templates are 4
   assert.strictEqual((await patch(String(surveyC._id))).status, 200, 'valid override set');
   assert.strictEqual((await patch(null)).status, 200, 'override cleared');
 });
+
+test('a duplicate\'s name fits the 200 characters a save accepts', { skip }, async () => {
+  const { adminTok, org } = ctx;
+  const opt = { token: adminTok, orgId: org._id };
+  // Made on the model, which sets no length limit (SurveyTemplate.js :99): the builder caps a name at
+  // 200, and " (Copy)" used to push one past it.
+  const long = await SurveyTemplate.create({ organizationId: org._id, name: 'x'.repeat(200), questions: [] });
+  // Cut at a space: the server's copyName must trim it, exactly as the client's does (G.3's same input).
+  const gap = await SurveyTemplate.create({ organizationId: org._id, name: `${'a'.repeat(192)} bbbbbbbbb`, questions: [] });
+  const short = await SurveyTemplate.create({ organizationId: org._id, name: 'Door script', questions: [] });
+  // An emoji astride the cut (code units 193-194): never half of it, since a lone half is stored as U+FFFD.
+  const astral = await SurveyTemplate.create({ organizationId: org._id, name: `${'a'.repeat(192)}😀${'b'.repeat(10)}`, questions: [] });
+  const made = [];
+  try {
+    const dupLong = await call('POST', `/api/admin/surveys/${long._id}/duplicate`, opt);
+    assert.strictEqual(dupLong.status, 201);
+    made.push(dupLong.json.survey._id);
+    assert.strictEqual(dupLong.json.survey.name, `${'x'.repeat(193)} (Copy)`);
+    const resave = await call('PATCH', `/api/admin/surveys/${dupLong.json.survey._id}`, { ...opt, body: { name: dupLong.json.survey.name } });
+    assert.strictEqual(resave.status, 200, 'the copy saves again');
+    const dupGap = await call('POST', `/api/admin/surveys/${gap._id}/duplicate`, opt);
+    assert.strictEqual(dupGap.status, 201);
+    made.push(dupGap.json.survey._id);
+    assert.strictEqual(dupGap.json.survey.name, `${'a'.repeat(192)} (Copy)`, 'no double space at the cut');
+    const dupShort = await call('POST', `/api/admin/surveys/${short._id}/duplicate`, opt);
+    assert.strictEqual(dupShort.status, 201);
+    made.push(dupShort.json.survey._id);
+    assert.strictEqual(dupShort.json.survey.name, 'Door script (Copy)', 'a short name is unchanged');
+    const dupAstral = await call('POST', `/api/admin/surveys/${astral._id}/duplicate`, opt);
+    assert.strictEqual(dupAstral.status, 201);
+    made.push(dupAstral.json.survey._id);
+    // Read back from the database: a lone half would have come back as U+FFFD.
+    const storedAstral = await SurveyTemplate.findById(dupAstral.json.survey._id).lean();
+    assert.strictEqual(storedAstral.name, `${'a'.repeat(192)} (Copy)`, 'the emoji goes whole, never half of it');
+    assert.ok(!storedAstral.name.includes('\uFFFD'));
+  } finally {
+    await SurveyTemplate.deleteMany({ _id: { $in: [long._id, gap._id, short._id, astral._id, ...made] } });
+  }
+});

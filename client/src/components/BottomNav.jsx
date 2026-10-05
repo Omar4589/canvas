@@ -61,8 +61,8 @@ export default function BottomNav() {
     (c) => String(c._id) === String(campaignId)
   );
   const openMockFlags = currentCampaign?.openMockFlags || 0;
-  // Approximate pins awaiting a fix/confirm — the amber pill on the Pin Fixes sheet item
-  // (same rollup field the desktop sidebar badge reads).
+  // Pins awaiting a fix/confirm (approximate geocodes and homes with no exact map spot) — the
+  // amber pill on the Pin Fixes sheet item (same rollup field the desktop sidebar badge reads).
   const pinsToFix = currentCampaign?.pinsToFix || 0;
 
   function close() {

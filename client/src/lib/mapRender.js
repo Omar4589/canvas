@@ -6,6 +6,25 @@
 
 import { STATUS_COLORS } from './statusColors.js';
 import { REASON_BY_KEY, primaryReason } from './flags.js';
+import { ACCURACY_RING_MIN_ZOOM } from './accuracyRing.js';
+
+// A stamp's accuracy rides on its ping or flag point only when it is a real radius (a finite number
+// above zero), so the accuracy circles (lib/accuracyRing.js) never draw a sentinel.
+const accuracyProp = (acc) => (Number.isFinite(acc) && acc > 0 ? { accuracy: acc } : {});
+
+// The ping dot's colour per action — one table drives both the dot and its accuracy circle.
+export const PING_COLOR_BY_ACTION = {
+  survey_submitted: STATUS_COLORS.surveyed,
+  not_home: STATUS_COLORS.not_home,
+  wrong_address: STATUS_COLORS.wrong_address,
+  refused: STATUS_COLORS.refused,
+  restricted: STATUS_COLORS.restricted,
+  no_soliciting: STATUS_COLORS.no_soliciting,
+  not_target: STATUS_COLORS.not_target,
+  lit_dropped: STATUS_COLORS.lit_dropped,
+};
+export const PING_COLOR_DEFAULT = '#6b7280';
+export const pingColorFor = (actionType) => PING_COLOR_BY_ACTION[actionType] || PING_COLOR_DEFAULT;
 
 // Render a modern two-tone house icon — rounded body in the status color, a
 // slightly darker roof, a small white door + window, and a soft drop shadow.
@@ -281,6 +300,7 @@ export function activitiesToPingsGeoJSON(activities) {
           activityId: a.id,
           actionType: a.actionType,
           initials: initialsFor(a.canvasser),
+          ...accuracyProp(a.location.accuracy),
         },
       })),
   };
@@ -327,6 +347,7 @@ export function flagsToGeoJSON(entries) {
             color: REASON_BY_KEY[pr?.type]?.color || '#ef4444',
             severity: e.maxSeverity || 'med',
             reviewed: e.review?.status && e.review.status !== 'open' ? 1 : 0,
+            ...accuracyProp(e.location.accuracy),
           },
         };
       }),
@@ -516,6 +537,42 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
 
   if (!withCanvassers) return;
 
+  // Accuracy circles for recorded stamps (lib/accuracyRing.js) — context, not an alert: the flag's
+  // fixed-pixel halo stays the alert. The BOTTOM of the app's own stack (below the approximate-pin
+  // ring, the ping lines, pings, houses and every flag layer), and NO handler may ever be bound to
+  // these layers: MapPage binds only per-layer delegates, which query only their own layers, so a
+  // circle can never take a click. Polygons, not a `circle` layer, because a circle layer clips at
+  // the tile buffer past about 128 px. Paint reads each feature's own palette colour (Mapbox can't
+  // read CSS tokens).
+  map.addSource('accuracy-rings', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer(
+    {
+      id: 'accuracy-rings-fill',
+      type: 'fill',
+      source: 'accuracy-rings',
+      minzoom: ACCURACY_RING_MIN_ZOOM,
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': ['case', ['==', ['get', 'reviewed'], 1], dark ? 0.08 : 0.05, dark ? 0.16 : 0.1],
+      },
+    },
+    'household-approx-ring'
+  );
+  map.addLayer(
+    {
+      id: 'accuracy-rings-line',
+      type: 'line',
+      source: 'accuracy-rings',
+      minzoom: ACCURACY_RING_MIN_ZOOM,
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 1,
+        'line-opacity': ['case', ['==', ['get', 'reviewed'], 1], 0.3, 0.6],
+      },
+    },
+    'household-approx-ring'
+  );
+
   // Canvasser GPS pings + dashed lines, inserted BELOW the household symbols.
   map.addSource('canvasser-lines', { type: 'geojson', data: EMPTY_FC });
   map.addLayer(
@@ -541,18 +598,7 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       source: 'canvasser-pings',
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 7, 13, 10, 16, 13, 18, 15],
-        'circle-color': [
-          'match', ['get', 'actionType'],
-          'survey_submitted', STATUS_COLORS.surveyed,
-          'not_home', STATUS_COLORS.not_home,
-          'wrong_address', STATUS_COLORS.wrong_address,
-          'refused', STATUS_COLORS.refused,
-          'restricted', STATUS_COLORS.restricted,
-          'no_soliciting', STATUS_COLORS.no_soliciting,
-          'not_target', STATUS_COLORS.not_target,
-          'lit_dropped', STATUS_COLORS.lit_dropped,
-          '#6b7280',
-        ],
+        'circle-color': ['match', ['get', 'actionType'], ...Object.entries(PING_COLOR_BY_ACTION).flat(), PING_COLOR_DEFAULT],
         'circle-stroke-color': '#ffffff',
         'circle-stroke-width': 1.5,
       },

@@ -1465,8 +1465,8 @@ alert:
   refused with a 4xx is deleted from the phone's queue without a trace
   ([`offlineQueue.js`](../mobile/lib/offlineQueue.js) `:120-125`). Apple doesn't document
   `kCLLocationCoordinate2DInvalid`'s value, and expo-location never checks a fix's coordinates, so an old
-  iPhone sending such a sentinel can't be ruled out from source. This part is kept as its own small patch,
-  W1-offEarth, outside the shared folder (§N rule 1), applied only if the night's count is clean; held,
+  iPhone sending such a sentinel can't be ruled out from source. This part is its own small step,
+  W1-offEarth, built only after the count's first run (§N rule 1) and only if that run is clean; held,
   it becomes M2s.
 
 A zod `.refine` with the same predicate guards future reuse; the pin-move service calls the same
@@ -2058,23 +2058,17 @@ files alone (rule 1).
 CLAUDE.md (D36), in their own docs commit as soon as the owner approves and before D28's production
 publish. Rules 1, 5, 6 and 8 are this plan's own.
 
-1. **GPS work stays out of the shared folder until its step ships.** `git add -A` commits everything in
-   the folder, so the session building a step keeps it, and tests it, in its own clone at
-   `~/Desktop/canvass-gps` (never under `/tmp`, which macOS empties of files untouched for three days),
-   saves each finished step as a patch file in `~/Desktop/canvass-gps-patches/` (`W1.patch`,
-   `W1-offEarth.patch`, `M1.patch` and so on, each named in its hand-off), and applies it to the shared
-   folder only in the sitting where you ship it (for a phone update, the sitting
-   where it goes to staging). An ordinary commit for other work can then never carry a GPS step early.
-   W1's off-Earth refusal is kept as its own small patch, W1-offEarth: on W1's night it is applied along
-   with W1 only if the count re-run found no off-Earth rows; otherwise it waits, unchanged, as M2s. A
-   step's commit holds that step alone, because every rollback here reverts it and rule 2 reads commit
-   lists: other ready work is committed first, in its own commit (and, before a server step, deployed),
-   and if some of it isn't ready, the hand-off's commands commit the step's files alone instead of `git
-   add -A`. Before committing a step, `git status --short` should list only the files the hand-off
-   names; for a file another session also edited (PRIVACY_VERIFICATION.md, README.md, `faq/_INBOX.md`),
-   the hand-off stages only the step's lines (`git apply --cached <step>.patch`). After the commit, `git
-   show --stat HEAD` must list only the step's files. When W1-offEarth goes out on W1's night, it is a
-   second commit after W1's.
+1. **Each step is built straight into the project folder, and ships with your usual routine.** (Your
+   ruling of 2026-10-05, which replaced this rule's first version: no clones, worktrees or patch folders
+   for building a step. The two separate copies §J asks for in the native build cycle, `canvass-native`
+   and `canvass-hotfix`, come back to you as a question before N1.) A step is built in the folder only
+   once you say go, and stays uncommitted until its session tells you it is built and tested; you then
+   `git add -A`, commit, push and deploy or publish. `git add -A` takes everything in the folder, so each hand-off names any other
+   session's unfinished work sitting there at that moment, for you to have finished or committed first.
+   Before a commit, `git status --short` shows what it will carry; after it, `git show --stat HEAD`.
+   W1's off-Earth refusal (W1-offEarth) is not built with W1: the count script ships in W1's deploy, so
+   its first run comes after that deploy. If it finds no off-Earth rows, W1-offEarth is built then and
+   ships as its own small commit and deploy; otherwise it waits as M2s.
 2. **Before any publish or deploy, look at what goes out.** Run every `npm run ota:*` and every other
    `eas` command in `mobile/`, never in the repository root (where eas offers to create a new project).
    Before a phone publish, `git status --short .` in `mobile/` must print nothing: eas sends the files on
@@ -2176,7 +2170,7 @@ publish. Rules 1, 5, 6 and 8 are this plan's own.
 |---|---|---|---|
 | B0 | today's GPS_ACCURACY.md and its README row, the doc corrections, the two new FAQs, the edits to six Help articles, two `faq/_INBOX.md` lines and three privacy-record stamps (already written; one records the permission-string mismatch now); this plan and its own README row go in their own commit after approval | commit and push now (the hand-off's commands); it needs no approval of this plan, and it goes live with the next server deploy, whoever makes it (its Help is true on every phone today) | `helpLinks.test.js` and `npm --prefix server test`, run on a fresh copy before the hand-off |
 | W0 | the read-only count script (§I.3), its root proxy, its OPERATIONS.md row and `auditGpsStamps.int.test.js` | applied, committed, pushed and deployed in one sitting (rule 1), by about 2026-10-08 | `npm --prefix server test`; `auditGpsStamps.int.test.js` through `test:int`; both console forms rehearsed from the repo root (§I.3); rule 2's look at what the deploy carries; then `npm run audit:gps-stamps` in the Run console, late evening |
-| W1 | W1: §I.1-I.2 (validation without the finite off-Earth refusal; the clamp), §H.1-H.4 and H.7 (web panels, ping verdict, pin precision, web circles) and the web-only lead Help copy; and the separate W1-offEarth patch, the off-Earth refusal with its cases; nothing under `mobile/` | applied, committed, pushed and deployed in one late-evening sitting (rule 1), no later than 2026-10-23; W1-offEarth applied with it only if that night's count re-run found no off-Earth rows, otherwise it waits as M2s | the count re-run immediately before applying, which decides W1-offEarth; the owner's confirmation of the item 27 lines W1 adds (§L); rule 2's look at what the deploy carries, `npm run audit:mobile-api -- <deployed commit>` and the hand reading in §I.4; `npm --prefix server test`; the `test:int` marathon, with and without W1-offEarth; `npm --prefix client test` and build; browser walk (circles sized against a street and drawn after zooming in from the overview, clicks inside circles, basemap switch, the caption and "Too wide" lines); the phone smoke test and next-morning log watch (rule 8); afterwards `npm run audit:gps-stamps -- --since=<the deploy's finish time>` (§I.3) |
+| W1 | W1: §I.1-I.2 (validation without the finite off-Earth refusal; the clamp), §H.1-H.4 and H.7 (web panels, ping verdict, pin precision, web circles) and the web-only lead Help copy, shipping with W0's count script; nothing under `mobile/`. W1-offEarth (the off-Earth refusal with its cases) is built only after the count's first run (rule 1) | committed, pushed and deployed in one late-evening sitting (rule 1), no later than 2026-10-23; W1-offEarth follows as its own commit and deploy only if the count's first run after W1's deploy finds no off-Earth rows, otherwise it waits as M2s | the count's first run after the deploy, which decides W1-offEarth; the owner's confirmation of the item 27 lines W1 adds (§L); rule 2's look at what the deploy carries, `npm run audit:mobile-api -- <deployed commit>` and the hand reading in §I.4; `npm --prefix server test`; the `test:int` marathon, with and without W1-offEarth; `npm --prefix client test` and build; browser walk (circles sized against a street and drawn after zooming in from the overview, clicks inside circles, basemap switch, the caption and "Too wide" lines); the phone smoke test and next-morning log watch (rule 8); afterwards `npm run audit:gps-stamps -- --since=<the deploy's finish time>` (§I.3) |
 | M1 | §C, §D.1-D.4, D.6-D.7, §E.1-E.4, §G, §F.4 comments; §H.1's phone mirror and §H.5 only if W1 is on `main` when M1's contents are fixed (rule 8) | applied after D28's production publish, committed and pushed; `npm run ota:staging`; device checks; `npm run ota:production -- --rollout-percentage=20`; the raise to 100 % (rule 6) | D28 out first; D35's dated checkpoints; `npm run test:mobile`; `npm --prefix server test` (the phone half of `flagsMirror.test.js` when M1 carries §H.5); `npx expo export` parse smoke (output outside the tree); rules 2 and 3; the Profile build stamp shows the new update ID, not the group ID (rule 5), before any device check; §O.9 first, then §O.1 (with the Android 7-8 phone, or the owner's recorded waiver of that check, if D10 is approved) and §O.2 pass; the owner's confirmation of the item 27 lines M1 adds (§L) |
 | M1h | Help copy for M1 | post-release commit, then a server deploy | M1's rollout at 100 % on both platforms and the update confirmed on a phone of each (rule 5) |
 | — | device tests on Location check | — | §O protocol; results recorded in GPS_ACCURACY.md §I |

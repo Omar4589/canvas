@@ -1171,6 +1171,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     (`privacy.html`) needs no edit — Google already appears in both documents for app
     distribution and device location services. If this link is ever automated (prefetch,
     server-side geocoding via Google, embedded Google tiles), THAT change is a §6 event.
+    *(v6 2026-10-05, item 28: the same confirm now also vouches for a home with no exact map spot —
+    one whose coordinate was shared with other addresses — "the home really is here". Same fields,
+    same `source:'confirm'` audit row, same roles; (a) now covers shared-spot pins too.)*
 
 16. **[v6 2026-08-29 — ⚠️ WALK-UP VOTERS: a NEW COLLECTION CHANNEL and a NEW DATA CATEGORY —
     NEEDS AN OWNER DECISION on `privacy.html` BEFORE the production mobile release.]** Canvassers
@@ -1964,6 +1967,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     Owner to confirm before the production deploy, as with items 17-24 — specifically the note ruling
     in (a), together with this reading of `:91`.
 
+    *[v6 2026-10-03 anchor refresh: the scripted-surveys commit (5cb42b2, item 26) added imports above
+    four of this item's anchors. `services/reports/computeReport.js:188` → `:189` (`notTargetKnocks`),
+    `:174` → `:175` (the breakdown's `not_target` count), `:256` → `:260` (`buildFrozenMapPoints`), and
+    `routes/admin/campaigns.js:1106` → `:1107` (`outcome-entries.csv`). Nothing they point at changed.]*
+
 26. **[v6 2026-10-02 — Scripted surveys: read-aloud statements and closing blocks, "then go to"
     routing, canvasser-only notes, tappable web links and the `{{canvasser}}` placeholder.
     Customer-authored TEMPLATE content plus a user-initiated hand-off of a URL to the device browser
@@ -1984,6 +1992,12 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     (`services/surveys/scriptText.js`, mirrored to the client and the phone). Docs:
     [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (§K walks the triggers; §O, "As
     built", records where the build differs from the plan), [SURVEYS.md](SURVEYS.md).
+    *[v6 2026-10-03 status: committed in 5cb42b2; the server deployed 2026-10-03; the production OTA
+    is pending the owner's device checks. The owner's confirmation this item asks for at its end
+    (the lead-visible, lead-authorable note in (c)) was due before the production deploy and OTA. It
+    was given on 2026-10-03, with the approval of
+    [PROPOSAL_LEAD_SURVEY_LOCKS.md](PROPOSAL_LEAD_SURVEY_LOCKS.md), after that day's server deploy,
+    which went ahead without it on record.]*
 
     **(a) What we collect — nothing new about anyone.** `SurveyResponse` is unchanged. A statement or
     closing records nothing: the phone posts no row for one (`buildSubmitRows`,
@@ -2028,6 +2042,96 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     one attached to a campaign they manage, through the in-campaign builder and the campaign's Survey
     tab, and a lead may be the paying client. The Burton note is opposition research about the other
     candidate. This was put to the owner in the plan (§K).
+
+    **[v6 2026-10-03 — recorded under (c), whose readers of template text are unchanged: by owner
+    ruling, a team lead's survey list now says whether a survey on their campaigns has answers
+    anywhere in the organization — a bare yes/no, never whose or how many. A "who can access
+    customer data" change, said out loud here as the repo invariant requires: no new data, no new
+    recipient, no subprocessor, no policy edit. Docs:
+    [PROPOSAL_LEAD_SURVEY_LOCKS.md](PROPOSAL_LEAD_SURVEY_LOCKS.md).]** This record never described a
+    lead's row in `GET /admin/surveys` (`routes/admin/surveys.js`): the 2026-08-08 client-lead
+    survey scoping, which the owner ruled strict, appears here only as (c)'s parenthesis on who reads
+    template text. This is the first full account of it.
+
+    **What a lead's row carries.** Whole template documents, and only for the surveys in their library:
+    ones they authored (`createdBy`), or ones attached to a campaign they manage, as its main survey or
+    a walk-list override, archived campaigns and walk lists included (`attachedSurveyTemplateIds`, the
+    set form of `canManageSurvey`, `services/authz/campaignManagement.js`). On every row, usage
+    (`usedByCampaigns`, `usedByWalkLists`) and counts (`responseCountByCampaign`, and `responseCount`,
+    their sum) cover the lead's campaigns only, and the bucket of legacy responses with no campaign is
+    dropped, so no other campaign's name and no other campaign's volume appears. Exactly two bare
+    booleans cross that line, never names or counts. `usedElsewhere`, on every row in the library,
+    authored ones included: the template is attached beyond their campaigns right now (current
+    attachments only, archived campaigns and walk lists included). And `hasResponses`: for a template
+    attached to a campaign they manage, **any response anywhere in the organization, legacy rows with
+    no campaign included** (new); for a template in the library only because they wrote it, whether it
+    has answers on their campaigns, as before. The ruling, verbatim: *"as long as its part of their
+    campaigns, yes"* (owner, 2026-10-03), read as "attached to a campaign they manage, as its main
+    survey or a walk-list override", an archived campaign or walk list of theirs included, as for the
+    library itself; the owner confirmed that reading on 2026-10-03, as the proposal's Part 1 sets it
+    out.
+
+    **Why.** The builder locks a saved question's answer type, and the switch to Go to, from
+    `hasResponses`, while the save refuses both (`409 survey-has-responses`) whenever
+    `SurveyResponse.exists({ surveyTemplateId })` finds a response anywhere. Narrowed, the yes/no
+    let a lead build changes that the save then refused, on a survey none of whose answers were
+    counted in their campaigns (another campaign's, or legacy rows) — and, once no other campaign
+    used it, with no Duplicate in reach
+    ([PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) §O, "Known gap (2026-10-03)").
+
+    **Already disclosed, except while the organization is read-only.** That 409 already gives the
+    same lead the same yes/no for every survey in their library, authored ones too:
+    `canManageSurvey` runs before the response check, and a refused save stores nothing. (For a
+    survey in the library only because the lead wrote it, the list now says less than the save does,
+    by the ruling.) The exception: while an organization is read-only (paused, trial ended,
+    canceled), a lead's save is answered 402 before the survey router runs (`requireEntitlement`,
+    `middleware/entitlement.js`, mounted ahead of it in `routes/index.js`), so there the list is the
+    only place a lead sees it. The responses that can arrive meanwhile are few: phone submissions
+    recorded before the pause (the gate's grace for them), a desk conversion an admin started before
+    it and still running in the background (the conversion worker,
+    `services/canvass/conversionProcessor.js`, checks no entitlement), and anything Doorline staff
+    record under support access (super-admins are exempt from the gate).
+
+    **Against item 24(d).** There, a voter outside the lead's campaign answers 404
+    `VOTER_NOT_IN_CAMPAIGN` so that a client-lead cannot probe other campaigns' voter ids and learn
+    that they exist. This goes the other way on purpose, and it does reveal what 24(d) would not:
+    for a survey on the lead's campaigns whose answers their own campaigns don't account for, **that
+    such answers exist** — another campaign's, or legacy rows with no campaign. It never names a
+    campaign, a voter, a count or a time (read again and again, it could date the first such answer,
+    as retrying a save already could), and it covers only surveys on the lead's own campaigns, which
+    a lead can't pick at will: they can attach only a survey already in their library. Any
+    organization-wide edit guard reveals the same bit by accepting or refusing a save (the 409
+    above). 24(d) protects something different: whether an identified person is in another client's
+    campaign, which could be tested for any id. The alternative that reveals nothing, narrowing the
+    409 to the lead's campaigns, was rejected: a lead could then retype a question or redraw the
+    branching under answers other campaigns collected, which breaks how those answers add up and
+    changes what later visits record.
+
+    **Copies.** *Save my changes as a copy*, new in the same change, saves through the existing
+    `POST /admin/surveys`, which stamps the caller as `createdBy` exactly as Duplicate
+    (`POST /admin/surveys/:surveyId/duplicate`) does. A lead who saves one becomes its author; the
+    copy carries the form's notes and links, as a Duplicate carries the original's; and it stays in
+    that lead's library through `createdBy` for as long as they are a lead in the organization,
+    whatever happens to their campaign grants. Nothing here is new beyond Duplicate and *New
+    survey*, both already open to leads; it is recorded because this change steers leads toward
+    copies.
+
+    **Assessment: no Privacy Policy / ToS / DPA text edit is required; not a DPA §6 event.** No new
+    data category, field, recipient, export, report, share link, retention or deletion change.
+    `privacy.html:105` (information is available "to authorized users of the customer organization
+    you belong to, according to their role", and customer data is not visible to other customer
+    organizations: the sentence item 22's lead-visibility assessment rests on) and the closing
+    sentence of `:91` ("Access is limited to that customer's authorized users") both stay true: a
+    lead, client or not, is an authorized user of that organization holding that role, and the
+    yes/no is computed from that organization's responses only (the list's aggregate matches on
+    `organizationId`), so nothing crosses tenants (`DPA.md` §4, tenant isolation). `:90` (canvassing
+    activity, "such as a survey response", which "authorized administrators within the same
+    organization may review") stays true as well: a lead is a scoped administrator of that
+    organization (`services/authz/campaignManagement.js`), and a bare yes/no is less than reviewing
+    the activity. A lead may be the paying client (lead-visible = client-visible, the standing
+    ruling items 22 and 24 record), which is why this is recorded rather than assumed. **Owner
+    confirmed 2026-10-03, before the production deploy, this stamp on its own:** it is not the
+    confirmation item 26 asks for at its end, and that one does not cover it.
 
     **(d) Sharing / subprocessors — none. Not a DPA §6 event.** A link is a USER-INITIATED hand-off,
     the class items 15 and 20 recorded, on the two conditions those items set, both met in code. (i)
@@ -2086,6 +2190,101 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     voter says (Close 3's referral names are the likely first ask). Owner to confirm before the
     production deploy and OTA, as with items 17-25 — specifically the lead-visible, lead-authorable
     note in (c).
+
+27. **[v6 2026-10-05 — GPS upgrades, step W1 (server and web): the web admin map draws each recorded
+    stamp's accuracy as a faint circle; the map's flag and location panels label "far" from the audit's
+    own verdict, which the map's pings now carry; flag entries say when the house pin is approximate;
+    the server stores an unusable accuracy as unknown and refuses a non-finite coordinate; and a
+    read-only operator count of stored stamps. Display and validation only. Plan:
+    [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §H, §I and §L.]** Said out loud, as the repo
+    invariant requires: this touches *who can access customer data* (two admin routes return fields
+    they did not before) and *what we collect* (the server now stores less). Nothing new is collected
+    about anyone, nothing is kept longer, there is no new recipient or subprocessor, and no new export,
+    report or share link.
+
+    **(a) The same data to the same roles.** `GET /admin/households/map` and `GET /admin/reports/flags`
+    keep their gates: org admins, team leads for the campaigns they manage (a lead may be the paying
+    client), and super-admins under the existing grant rules.
+    - The circles draw `location.accuracy`, which both payloads already carried to those roles. They are
+      built in the browser (`client/src/lib/accuracyRing.js`) and drawn as a local map layer; Mapbox's
+      servers receive only the tile requests they already did.
+    - Each ping's new `far` field is the verdict `/admin/reports/flags` already shows those roles for
+      the same entry, cut down by the whitelist `farVerdictForWire` (`services/audit/farKpi.js`): the
+      distance, the distance left after the accuracy allowance, the accuracy, and the downgrade markers
+      with the corrected-pin distance and date. Never the `replaced` snapshot, and never `correctedBy`
+      (a raw staff User id no client has received): only the derived boolean `pinMovedBySelf`.
+    - Each flag entry's `household` gains `coordConfidence` and `locationConfirmedAt`, which the same
+      roles already receive on every `GET /admin/households/map` household row. Never `correctedBy` or
+      `locationConfirmedBy` (`services/audit/flagDetection.js`; `locationGate.int.test.js` pins the
+      exact key list).
+    - The far labels, the "after allowing for GPS accuracy" lines and the pin line are computed in the
+      browser from those fields (`client/src/lib/flags.js`). No count, report figure or filter reads them.
+
+    **(b) The server stores less, never more.** `routes/mobile/canvass.js` stores an accuracy only when it
+    is a finite number above zero; a zero, negative or non-finite one is stored as `null` (unknown), on
+    `CanvassActivity` and `SurveyResponse`, in every `replaced` snapshot it writes, and on the pin
+    route's `HouseholdLocationChange` row. A knock, survey or add-person request whose coordinate is not
+    a finite number is refused with `400 LOCATION_REQUIRED` before any write (bug F-26: such a request
+    used to delete the canvasser's earlier entry for that door). Finite coordinates off the Earth are
+    still accepted; refusing them waits for the count in (c) (W1-offEarth), because a refused offline
+    replay is a knock the phone silently drops. Stored rows are not rewritten. The far rule now reads a
+    stored negative accuracy as no allowance instead of extra distance, so some legacy flags drop or
+    clear. Flags are computed live; a review stores only its decision and the reasons it saw
+    (`FlagReview`), as before.
+
+    **(c) A read-only operator count.** `npm run audit:gps-stamps` (`migrations/auditGpsStamps.js`),
+    run by the owner from the Heroku dashboard's Run console, counts odd stamps per ledger and what the
+    far clamp changes. It prints counts only, never a coordinate, name or id (pinned by
+    `auditGpsStamps.int.test.js`), writes nothing, and reaches no one who cannot already read the
+    database.
+
+    **No published sentence becomes false.** `privacy.html:94` ("we collect the device's location and
+    reported accuracy at that moment"; "only at the time an action is recorded"; the live position is
+    not transmitted) stays true: the knock still sends what it sent, and an unusable accuracy is now
+    kept as unknown, which is less. `:106` (service providers) gains nobody. `:128` (recorded locations
+    stay part of the organization's records) is unchanged. **Assessment: no Privacy Policy / ToS / DPA
+    text edit is required.** The phone's labels, circles and pin line come with later steps (M1 or M2,
+    and M2 for the phone circles); each adds its lines here. **Reopen this item** if a circle, verdict
+    or pin line ever reaches a client report, an export or a share link, if `correctedBy` or
+    `locationConfirmedBy` ever joins a payload, or if stored rows are ever rewritten by a backfill.
+    Owner to confirm before the production deploy, as with items 17-26.
+
+28. **[v6 2026-10-05 — Homes that share a map spot are looked up by their own address at import
+    (placeholder pins, release 1). Plan: [PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md);
+    the full reference, [PROPOSAL_PLACEHOLDER_PINS.md](PROPOSAL_PLACEHOLDER_PINS.md) §O.]** Said out
+    loud, as the repo invariant requires: this changes *when* customer data goes to an existing
+    subprocessor. Not a new subprocessor, not a new data category, not a new export, report or link:
+    **no DPA §6 notice.**
+    **(a) Sharing.** Addresses that arrived *with* coordinates now go to Geocodio when the file put
+    them on a map spot shared with other addresses, or on a building's spot with a different address:
+    automatically at import, for that file's own homes only, when `GEOCODE_ENABLED === 'true'` and a
+    key is set; at most `PIN_PLACEMENT_MAX_HOMES` (25,000) per import. Fields: line 1 as the file gave
+    it (any unit written there included), city, state, ZIP5 — never line 2, never a name. Recorded on
+    "GEOCODIO — the loud one" (v6 2026-10-05 stamp).
+    **(b) Retention.** `GeocodeCache` holds those addresses too, under the unchanged 540-day disuse TTL;
+    the pass stops buying on any of three deletion signals. Recorded on EXCEPTION 1 (v6 2026-10-05).
+    **(c) Who can see what.** The pass's lookup counters, ledger and cause are hidden from organizations
+    (`ORG_HIDDEN_IMPORT_FIELDS`); one failure-time residual is recorded on EXCEPTION 2 (v6 2026-10-05),
+    with an assessment for the owner to confirm. Organizations see only the outcome counts (`pinsPlacedExact`,
+    `pinsConfirmedInPlace`, `pinsStillUnplaced`) and a generic sentence when the pass was busy or failed.
+    **(d) New household fields.** `pinSuspect` (`'placeholder' | 'stray'`, a data-quality mark on the pin),
+    `pinPlacement { from, to, at, kind, by, accuracyType, stackSize, releasedAt }` and `pinDistrustedKeys`:
+    the coordinates the household already had, the lookup's answer, and spots refused for it — no new
+    personal data. Deleted with the household (campaign and org deletion cascades; an import's undo deletes
+    the doors it inserted). No route returns `pinPlacement` or `pinDistrustedKeys`; `pinSuspect` reaches the
+    same `canManageCampaign` roles through the Pin Fixes list and the pin-move responses. Also new:
+    `Campaign.pinPass` (a lease: a random owner token and a heartbeat, no personal data) and the ImportJob
+    counters above.
+    **(e) Who vouched.** Pin Fixes' confirm now also covers homes with no exact map spot (item 15 stamp).
+    **(f) What reports and exports show.** A report published after a home was placed shows it at its own
+    spot, and exports' Latitude/Longitude carry the placed pin — more accurate, not a new exposure (D11
+    stamp).
+    **No published sentence becomes false:** `privacy.html:106` ("we send only the street address — never
+    anyone's name") says nothing about only addresses missing coordinates; `:122`'s 18-month disuse expiry
+    is unchanged; `:85` and `terms.html:91` (processing only to provide the service) stay true.
+    **Assessment: no Privacy Policy / ToS / DPA text edit is required.** **Reopen this item** if lookups
+    ever run for homes outside the file being imported, send line 2 or a name, or if `pinPlacement`
+    joins a payload, export or report. Owner to confirm before the production deploy, as with items 17-27.
 
 ---
 
@@ -2416,6 +2615,18 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 
 > **Do NOT write:** *"When your organization is deleted, we delete all of your data,"* or *"we delete household and address data on account deletion."* Both are false while `GeocodeCache` exists as written.
 
+> **[v6 2026-10-05 — the import's map-pin pass (item 28) adds entries the same way imports always have.]**
+> Addresses the pass looks up land in `GeocodeCache` under the same 540-day disuse TTL, and each probe of a
+> cached answer refreshes it like any import does. The pass stops buying — re-checked before every chunk of
+> lookups — on any of three signals: `Campaign.deletion.requestedAt`, `Organization.deletion.requestedAt`
+> (set only once a deletion executes), or an `OrgDeletionRequest` with `{ organizationId, status:
+> 'scheduled' }` (the customer's filed request, which can wait up to the 30-day SLA): `deletionRequested`
+> in `placeStackedPins.js`. The existing import guard checks only the first two
+> (`importProcessor.js`); the pass checks all three so it never keeps buying after a customer asked for
+> deletion. Separately, a comment in `routes/superAdmin/organizations.js` says a running import is failed
+> on the three retention paths; the reference plan's review (§O) found nothing implementing that. That gap
+> predates this release and was not re-checked here.
+
 ### EXCEPTION 2 — Identity snapshots can be orphaned. **VERIFIED.**
 
 `PersonMergeCandidate`, `PersonEditProposal` (by personId) and `PersonMergeLog` are deleted **only inside a loop over `personIds` collected from that org's Voter rows** (`deleteOrganization.js:74-77`, `:119-127`). The belt-and-braces `Person.deleteMany({organizationId})` at `:130` cascades **nothing**. `PersonMergeLog` and `PersonMergeCandidate` carry **no organizationId** of their own, so nothing else can reach them.
@@ -2716,6 +2927,7 @@ Two of your own findings conflict here and I am telling you which is right.
 
 **Precision — VERIFIED: RAW, FULL-PRECISION, NEVER COARSENED.**
 `CanvassActivity.location` is `{lat: Number (required), lng: Number (required), accuracy: Number}` (`models/CanvassActivity.js:3-10`, `:39`). The device values pass straight through (`mobile/lib/location.js:10-16`), the zod schema accepts any `z.number()` (`canvass.js:70-74`), and the write assigns `location: data.location` verbatim (`canvass.js:168`; `:434`/`:489` for surveys). **No rounding, truncation, quantisation, jitter or grid-snapping is applied at write time or read time.** Surveys persist the coordinate **twice** (a `CanvassActivity` row and a `SurveyResponse` row).
+*[v6 2026-10-05 (GPS upgrades step W1; item 27 of "Remaining honest gaps"): two clauses above are no longer true for `accuracy`. The zod schema no longer "accepts any `z.number()`" for it: `locationSchema.accuracy` and the pin route's `locationCorrectionSchema.accuracy` pass through `usableAccuracy` (`routes/mobile/canvass.js`), which keeps a finite number above zero and turns zero, negative and non-finite values into `null`. And the write no longer "assigns `location` verbatim": the parsed location carries that sanitised accuracy, and `buildReplacedSnapshot` copies prior accuracies through the same function. The coordinate itself is still stored raw and unrounded, but a coordinate that is not a finite number is now refused (`400 LOCATION_REQUIRED`, before any write). Finite coordinates off the Earth are still accepted until `npm run audit:gps-stamps` has counted the stored ones. Stores less, never more; stored rows are not rewritten. The before numbers from that count's first production run, and the `--since` numbers after the deploy, are added here in a later docs change. The web admin map now also draws each recorded stamp's accuracy as a circle: display only, from the field the map payload already carried to the same roles.]*
 
 `distanceFromHouseMeters` is stored **in addition** to the raw coordinate, as `Math.round(haversineMeters(...))` (`canvass.js:83-86`). It does not replace or coarsen the raw lat/lng. It is null when the household has no pin.
 
@@ -2782,6 +2994,13 @@ The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReport
 > One inference does change shape: a glyph now makes the *number* of canvassed doors at one coordinate
 > legible at a glance, where before it was N coincident icons. That is the same disclosure ("this
 > household was canvassed") already recorded below, rendered honestly rather than hidden under itself.
+
+> **[v6 2026-10-05 — homes placed by address at import (item 28): more accurate, nothing new exposed.]**
+> A report published after the import's map-pin pass placed a home shows that home at its own spot rather
+> than on a coordinate it shared with other addresses, so a glyph above stops lumping separate houses
+> together; exports' Latitude/Longitude columns carry the placed pin the same way. No field was added to
+> `ClientReportMapPoint` or any export, and a report published earlier keeps the map it was frozen with
+> until it is republished.
 
 > **[v5 2026-08-10 — "Voter groups" (tag) rows on published reports: NEW OPT-IN EXPOSURE, verified.]**
 > A published report can now carry a **Voter groups** section: per operator-ticked tag, the tag's
@@ -3105,6 +3324,22 @@ No `organizationId`. If org A geocodes an address and org B later imports the sa
 
 **It is weakly observable to a customer, as a count.** `ImportJob` stores `geocodedNew` and `geocodedCached` (`models/ImportJob.js:36-37`) and the org-scoped import routes return the whole job document (`routes/admin/imports.js:348`, `:359-368`), so a customer admin sees how many addresses in their import were **already present in the global cache** — including entries put there by other customers (`geocodeService.js:165`). It is a **count, never a list**, and it is confounded by the org's own prior imports. **My assessment that this could in principle be turned into a one-bit "has any Doorline customer ever geocoded this exact address?" oracle (import a single address, compare the two counters) is INFERENCE from the code path, not an observed exploit — I did not test it.** Low severity. But it is why I would not describe the cache as "purely internal and invisible to customers."
 
+> **[v6 2026-10-05 — the map-pin pass (item 28): its own counters are hidden from organizations; one
+> residual signal recorded honestly.]** The pass keeps bought-vs-cached counts (`pinLookupsNew`,
+> `pinLookupsCached`), its ceiling count (`pinLookupsOverCap`), the ledger of probed household ids
+> (`pinProbedIds`) and the provider cause (`pinPassCause`) on `ImportJob`; `ORG_HIDDEN_IMPORT_FIELDS`
+> (`routes/admin/imports.js`) strips all five from every org-facing import read — the list, the detail and
+> the cancel route — pinned by `test/orgImportFields.int.test.js`, and the cause is never written to the
+> org-visible `lastError`. Placement never comes from the cache alone: every in-budget candidate is probed
+> through `resolve()`, and the over-ceiling cutoff is by position, never by cache state. **Residual:**
+> during a provider failure, an import whose in-budget homes were all cached still places them, while one
+> with a miss places nothing and its org-visible line reads "Map pins weren't checked this time" — a
+> failure-time, count-level signal of the same kind as the existing `geocodedCached` precedent above.
+> **Assessment for the owner to confirm before the deploy:** this does not materially decrease protection
+> under DPA §4 (tenant isolation) or make `privacy.html:105` ("Customer data is not shared with, or
+> visible to, other customer organizations") false — no other customer's data, list or address is shown,
+> and the new counters that would have sharpened the existing signal are withheld.
+
 ### EXCEPTION 3 — The `User` account is a global, platform-wide record. **VERIFIED.**
 One human has **one** `User` row (name, email, phone, password hash) with a **globally unique email** (`models/User.js:4-60`), and holds a separate `Membership` per organization (`models/Membership.js:41`). A user can be an active member of multiple customer organizations simultaneously.
 
@@ -3209,6 +3444,23 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 > never the campaign. The bullet above — *"only households MISSING coordinates are sent"* — now has one
 > narrow, operator-initiated exception: a door that HAS coordinates believed to be wrong. That is the
 > only claim on this page the change touches, and this stamp is the correction.
+
+> **[v6 2026-10-05 — a third caller of this path: the import's map-pin pass (item 28). NOT a new
+> subprocessor, NOT a DPA §6 event.]** `server/src/services/households/placeStackedPins.js` runs at the end
+> of every apply import and sends, through the **same** `geocodeService.resolve()` and the same address
+> string, the addresses of **that file's** homes that the file put on a map spot shared with other
+> addresses (or on a building's spot with a different address): homes that HAVE coordinates, believed
+> wrong. It is gated exactly like import geocoding (`GEOCODE_ENABLED === 'true'` **plus**
+> `GEOCODIO_API_KEY`, `importProcessor.js` `allowPaid`), automatic rather than operator-initiated, and
+> capped at `PIN_PLACEMENT_MAX_HOMES` (default 25,000) homes per import. Two claims above are corrected by
+> this stamp: **(1)** *"Only households MISSING coordinates are sent"* is no longer true at import either,
+> and the v4 stamp's *"narrow, operator-initiated exception"* is no longer the only one; **(2)** *"The
+> unit/apartment number is deliberately omitted"* holds for **line 2 only** — `addressString`
+> (`geocodeService.js:64-69`) sends line 1 as the file gave it, so a unit written into line 1 ("100 Main St
+> Apt 4") is sent, as it always has been for addresses missing coordinates. Line 2 and names are never
+> sent. Same recipient, same data category, same purpose: `docs/DPA.md` §6 ("Geocodio (address
+> geocoding)") and `privacy.html:106` ("we send only the street address — never anyone's name") stay true.
+> `repair:import-pins` is unchanged by this release and still checks shared spots.
 
 **COULD NOT DETERMINE:** whether `GEOCODE_ENABLED` is `true` in production — it is an environment variable, not in the repo. A persistent `GeocodeCache` collection, a geocoding-cost model, and an owner-facing cost page all indicate it is in real use. **Treat as live and disclose.**
 

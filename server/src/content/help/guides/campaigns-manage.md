@@ -21,13 +21,13 @@ Once it's created, drill into the campaign and follow the **Setup progress** car
 
 ## The Campaigns page
 
-The Campaigns page opens on a summary strip — how many campaigns, how many active, total households and houses knocked — above the list. Toggle between **Cards** and **Table**, search by name or state, and sort by recent, name, households, knocked %, or setup progress. Finished campaigns tuck into an archived section at the bottom, and each card or row has a **⋮ menu** for View dashboard, Assignments, and (for admins) Edit, Archive, and Delete.
+The Campaigns page opens on a summary strip — how many campaigns, how many active, total households and houses knocked — above the list. Toggle between **Cards** and **Table**, search by name or state, and sort by recent, name, households, knocked %, or setup progress. Finished campaigns tuck into an archived section at the bottom, and each card or row has a **⋮ menu** for View dashboard, Assignments, History and Edit, plus Archive and Delete for admins.
 
 ## Editing — what you can change, and when
 
-The **Edit** drawer (in the ⋮ menu on Campaigns) is **admin-only**, like Archive and Delete. As a team lead the campaign setting you change yourself is its **survey** — attach or swap it from the campaign's Survey tab (see [surveys](surveys)); for the fields below, ask an admin.
+The **Edit** drawer (in the ⋮ menu on Campaigns) is open to team leads as well as admins. As a lead you change a campaign's name, timezone and door goal there, and can swap its survey for another in your library (removing it is left to an admin); the admin-only fields show but are greyed out — for those, ask an admin. You can also attach or swap the survey from the campaign's Survey tab (see [surveys](surveys)).
 
-- **Name and state** — always editable.
+- **Name and state** — always editable (the state by admins only).
 - **Timezone** — editable, but once there's field activity you'll see a warning: changing it re-buckets every past daily stat. Nothing is lost and all-time totals stay the same, but day-by-day numbers shift.
 - **Type (survey ↔ lit drop)** — locks the moment canvassing starts. To run a different type, create a new campaign instead.
 - **Key dates** — admins only. As a lead you can see them but not change them (see [Team lead vs admin](team-lead-vs-admin)).

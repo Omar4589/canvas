@@ -38,8 +38,8 @@ Up top, next to the door count, you'll see how many buildings there are and how 
 Two things this is *not*:
 
 - **It isn't clustering.** The building sits at the doors' real location, never merges with the building next door, and never breaks apart as you zoom in.
-- **It isn't always a real building.** Open one and check the addresses: a real building is one street address with many units. If the list shows **different addresses on one dot** — different streets, or different house numbers along one road —, your voter file stamped a placeholder coordinate on addresses it couldn't place — the doors are real, the dot is wrong, and the panel says so with an amber note. Ask your Doorline contact to run the pin repair; those doors are usually worth it, because [turf cutting](page-turf-cutting)'s Remove apartments will otherwise exclude them from books as if they were a tower.
-- **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments (N+ units)** option that keeps big buildings out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. See the next section.
+- **It isn't always a real building.** Open one and check the addresses: a real building is one street address with many units. If the list shows **different addresses on one dot** — different streets, or different house numbers along one road —, your voter file stamped a placeholder coordinate on addresses it couldn't place — the doors are real, the dot is wrong, and the panel says so with an amber note. Each import looks such homes up by their own address and moves the ones it can place; the rest are listed in [Pin Fixes](page-pin-fixes), marked "No exact map spot." (For a file imported before this, import it again.) [Turf cutting](page-turf-cutting)'s Remove apartments goes by address, so it never mistakes them for a tower.
+- **It isn't the same as excluding apartments when you cut turf.** [Turf cutting](page-turf-cutting) has a **Remove apartments** option (N units or more) that keeps apartment units out of your **books**. Those doors still exist and still show on the map — the map shows what you *have*, not what you cut. See the next section.
 
 ## Doors you left out of your books
 
@@ -61,6 +61,8 @@ Two things worth knowing before you go looking for a number to match:
 ## Canvasser pings and trails
 
 Turn pings on and each dot marks **where a canvasser stood** when they logged a knock, with a faint line back to the house. Filter to a **single canvasser** and the map rings two of their doors — a **Start** ring on their first knock and a **Latest** ring on their most recent — so you can trace their day. To flag GPS that looks off, see [Audit](audit).
+
+**How sure each dot is.** On the web map, zoom in to street level and each ping (and each flag) shows a faint circle the size of the phone's own accuracy estimate when that door was recorded. It's a guide, not a boundary: honest readings often land outside it (on Android about one in three), so a house outside the circle isn't evidence on its own. A reading too wide to draw gets no circle, and its panel says so; with more than 500 on screen the circles are left off, with a note under the toggle to zoom in. Clicking inside a circle still opens whatever dot or pin you clicked. Click a ping and its panel says **far** only when the audit does, after allowing for GPS accuracy (see [Audit](audit)). The phone's admin map keeps its older far label, and has no circles, until its next update.
 
 ## Filter to a canvasser to see just their work
 

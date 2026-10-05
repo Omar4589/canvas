@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { US_STATES } from '../../lib/validators.js';
 import { daysUntil, formatDateLabel } from '../../lib/electionDates.js';
 import { Drawer, Input, Select, Textarea, Button } from '../ui/index.js';
+import { responsesPhrase } from '../../lib/surveyBuilderRules.js';
+import { campaignPatchFor } from '../../lib/campaignPatch.js';
 
 const US_TIMEZONES = [
   { value: 'America/New_York', label: 'Eastern (New York)' },
@@ -21,10 +23,11 @@ export default function CampaignFormDrawer({
   saving,
   error,
   orgBillRestrictedDoors = false,
-  // Org admins edit everything. A LEAD reaches this drawer too (they can run a campaign), but the
-  // server only accepts name, survey, timezone and the door goal from them
-  // (routes/admin/campaigns.js) — so everything else renders read-only rather than letting them
-  // fill in a field the PATCH will 403. Create is admin-only, so this is an edit-mode concern.
+  // Org admins edit everything. A LEAD reaches this drawer too (they can run a campaign), but of this
+  // drawer's fields the server accepts only name, survey, timezone and the door goal from them
+  // (routes/admin/campaigns.js) — so everything else renders read-only (Active and the invoice policy
+  // included) rather than letting them fill in a field the PATCH will 403, and a lead never empties
+  // the survey once the campaign has one. Create is admin-only, so this is an edit-mode concern.
   canEditAdminFields = true,
 }) {
   const isEdit = !!initial?._id;
@@ -77,26 +80,33 @@ export default function CampaignFormDrawer({
     return `${remaining.toLocaleString()} doors left over the next ${days} ${days === 1 ? 'day' : 'days'} — about ${perDay.toLocaleString()} a day.`;
   })();
 
-  function submit(e) {
+  // A lead's Save sends only the fields a lead owns (campaignPatchFor): the server refuses an
+  // admin-only field from a lead even sent back unchanged, so the whole form would always 403.
+  const submit = (e) => {
     e.preventDefault();
-    onSave({
-      name: name.trim(),
-      type,
-      state: state.trim().toUpperCase(),
-      surveyTemplateId: type === 'survey' ? (surveyTemplateId || null) : null,
-      isActive,
-      timeZone: timeZone || undefined, // empty → server defaults from state
-      electionDay: electionDay || null, // date fields: '' ⇄ null — send null, never ''
-      earlyVotingStart: earlyVotingStart || null,
-      earlyVotingEnd: earlyVotingEnd || null,
-      datesNote: datesNote.trim(),
-      // Number or null — never '' and never 0. Clearing the goal clears its date with it, or
-      // the server rejects the pair (a countdown to a target that doesn't exist).
-      doorGoal: parsedGoal,
-      goalDate: parsedGoal ? goalDate || null : null,
-      billRestrictedDoors: billRestricted === 'yes' ? true : billRestricted === 'no' ? false : null,
-    });
-  }
+    onSave(
+      campaignPatchFor(
+        {
+          name: name.trim(),
+          type,
+          state: state.trim().toUpperCase(),
+          surveyTemplateId: type === 'survey' ? (surveyTemplateId || null) : null,
+          isActive,
+          timeZone: timeZone || undefined, // empty → server defaults from state
+          electionDay: electionDay || null, // date fields: '' ⇄ null — send null, never ''
+          earlyVotingStart: earlyVotingStart || null,
+          earlyVotingEnd: earlyVotingEnd || null,
+          datesNote: datesNote.trim(),
+          // Number or null — never '' and never 0. Clearing the goal clears its date with it, or
+          // the server rejects the pair (a countdown to a target that doesn't exist).
+          doorGoal: parsedGoal,
+          goalDate: parsedGoal ? goalDate || null : null,
+          billRestrictedDoors: billRestricted === 'yes' ? true : billRestricted === 'no' ? false : null,
+        },
+        { isOrgAdmin: canEditAdminFields }
+      )
+    );
+  };
 
   return (
     <Drawer title={isEdit ? 'Edit campaign' : 'New campaign'} onClose={onCancel}>
@@ -201,7 +211,15 @@ export default function CampaignFormDrawer({
               onChange={(e) => setSurveyTemplateId(e.target.value)}
               className="w-full"
             >
-              <option value="">— None yet (add later on the Surveys page) —</option>
+              {/* The empty choice detaches the survey. An org admin always has it; a lead has it only
+                  while the campaign has no survey yet. */}
+              {(canEditAdminFields || !initialSurveyId) && (
+                <option value="">
+                  {canEditAdminFields
+                    ? '— None yet (add later on the Surveys page) —'
+                    : '— None yet (add later on the campaign’s Survey tab) —'}
+                </option>
+              )}
               {/* Archived surveys stay pickable only when already attached. */}
               {(surveys || [])
                 .filter(
@@ -222,11 +240,15 @@ export default function CampaignFormDrawer({
             </p>
             {(() => {
               const chosen = (surveys || []).find((s) => s._id === surveyTemplateId);
+              // A lead's count covers their own campaigns (responsesPhrase), and a lead has no Surveys page:
+              // their Duplicate is at the top of the campaign's Edit survey page.
               return chosen?.responseCount > 0 ? (
                 <p className="mt-1 text-xs text-warning-fg">
-                  Heads up: this survey already has {chosen.responseCount.toLocaleString()} response
-                  {chosen.responseCount === 1 ? '' : 's'}. New answers will report under it alongside the
-                  existing ones. To run different questions, duplicate it on the Surveys page and pick the copy.
+                  Heads up: this survey already has {responsesPhrase(chosen, { isOrgAdmin: canEditAdminFields })}. New
+                  answers will report under it alongside the existing ones.{' '}
+                  {canEditAdminFields
+                    ? 'To run different questions, duplicate it on the Surveys page and pick the copy.'
+                    : 'To run different questions, save, then use Duplicate at the top of the campaign’s Edit survey page.'}
                 </p>
               ) : null;
             })()}
@@ -323,20 +345,32 @@ export default function CampaignFormDrawer({
           {goalPreview && <p className="text-xs text-fg-muted">{goalPreview}</p>}
         </div>
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={isActive}
-            onChange={(e) => setIsActive(e.target.checked)}
-          />
-          Active (visible to canvassers)
-        </label>
+        <div>
+          <label
+            className={`flex items-center gap-2 text-sm ${canEditAdminFields ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+          >
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              disabled={!canEditAdminFields}
+            />
+            Active (visible to canvassers)
+          </label>
+          {!canEditAdminFields && (
+            <p className="mt-1 text-xs text-fg-muted">Only an org admin can archive or reactivate a campaign.</p>
+          )}
+        </div>
 
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-muted">
             Restricted doors on invoices
           </label>
-          <Select value={billRestricted} onChange={(e) => setBillRestricted(e.target.value)}>
+          <Select
+            value={billRestricted}
+            onChange={(e) => setBillRestricted(e.target.value)}
+            disabled={!canEditAdminFields}
+          >
             <option value="inherit">
               Use organization default ({orgBillRestrictedDoors ? 'count them' : "don't count them"})
             </option>
@@ -349,6 +383,7 @@ export default function CampaignFormDrawer({
             since the trip still took time. It never changes your contact or survey rates, and it
             never changes what Doorline charges you.
           </p>
+          {!canEditAdminFields && <p className="mt-1 text-xs text-fg-muted">Only an org admin can change this.</p>}
         </div>
 
         {/* Reassurance on create only — no dollars, non-blocking. */}
