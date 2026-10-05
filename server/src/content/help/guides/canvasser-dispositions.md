@@ -9,7 +9,7 @@ summary: The outcomes you can record at each house and what each one means.
 tags: canvasser, disposition, not home, refused, restricted, no soliciting, not a target voter, add person, change result, confirm
 ---
 
-When you tap a house, you record what happened. Your pin recolors instantly so you always know what's done.
+When you tap a house, you record what happened. Your pin recolors as soon as the app has your location — usually instantly — so you always know what's done.
 
 ## The app needs your location
 

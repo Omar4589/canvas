@@ -242,6 +242,12 @@ location itself being off. If a "can't get your location" message is triggered r
 phone, it simply waits and shows the moment you're back — so you always find out when a door did
 **not** record, even if it happens in your pocket.
 
+**A dot that is a little off is not location being off.** Next to houses the blue dot can sit a few
+yards from where you stand, usually toward the street, and for a few seconds after you unlock the phone
+it shows where you were; that is normal GPS, it never blocks a door, and it never earns a flag by
+itself. Why it happens, what the app records when you tap, and which phone settings matter are in
+[GPS_ACCURACY.md](GPS_ACCURACY.md).
+
 Two data-trust notices can appear at the top of the map (same soft-banner family as the location
 notice): an **amber offline notice** when the app is showing the saved copy of your houses because
 it can't reach the server (with how old that copy is), and a **red storage notice** when your phone
@@ -252,8 +258,14 @@ will show older houses than you expect.
 puts your fix kilometres wide, which makes the distance between you and the door meaningless, so
 the app refuses the knock rather than recording one that can't be verified. Two things happen:
 
-- **Before you waste a tap**, a red notice appears reading "Precise Location is off for Doorline",
-  as soon as the app has seen a sustained run of coarse readings. One accurate reading clears it.
+- **A red notice** reading "Precise Location is off for Doorline" appears at the top of the map. On
+  Android it is there as soon as the map opens, because the app can see the Approximate permission.
+  On an iPhone the app can't read the setting, so the notice comes from a sustained run of coarse
+  readings or from a blocked tap, and in practice the first blocked tap is usually what lights it: an
+  iPhone with Precise off reports its position only a few times an hour, too rarely for the notice to
+  get ahead of the tap ([GPS_ACCURACY.md](GPS_ACCURACY.md) §F, F-11). One accurate reading clears it.
+  On an iPhone it can also vanish too early today, when the phone is locked and unlocked or the app
+  returns from Settings; a fix is planned.
 - **If you tap anyway**, the door is not recorded at all. Nothing is saved, nothing is queued for
   later, and nothing changes colour. You get an alert naming the exact setting to turn on, and a
   retry button.
@@ -1163,8 +1175,9 @@ pattern as `locationFeed.js`). Two rules, one per platform:
   even requested**.
 - **iOS** exposes no `accuracyAuthorization` in expo-location v19, so reduced accuracy is inferred
   from the fix: worse than `IOS_REDUCED_ACCURACY_MIN_M` (1000 m) is treated as Precise-off, because
-  reduced fixes cluster at 2–5 km while a genuine full-accuracy fix never approaches a kilometre
-  outdoors. A **null** accuracy is deliberately not treated as reduced — unknown is not bad, and
+  reduced fixes cluster at 2–5 km while a genuine full-accuracy fix rarely approaches a kilometre
+  outdoors — a cold, cell-only fix can, so the gate may report `PRECISE_OFF` once while GNSS warms up
+  and a retry clears it ([GPS_ACCURACY.md](GPS_ACCURACY.md) §F, F-21). A **null** accuracy is deliberately not treated as reduced — unknown is not bad, and
   blocking it would refuse honest knocks. Replace the heuristic when expo-location exposes the real
   API.
 

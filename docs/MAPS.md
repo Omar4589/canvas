@@ -12,7 +12,9 @@ Related: [IMPORTS.md](IMPORTS.md) (where coordinates come from), [PASSES_AND_TUR
 map), [METRICS.md](METRICS.md) (the numbers behind the pins), [DATE_FILTERS.md](DATE_FILTERS.md)
 (the date-range control — on the map a window narrows the pins to interacted-with doors; the admin map
 now opens on **Today**), [AUDIT.md](AUDIT.md) (the GPS-audit **flag overlay** + the Audit page that
-reviews it), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (the per-house **Directions** hand-off to the phone's maps app, and the lock-screen investigation).
+reviews it), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (the per-house **Directions** hand-off to the phone's maps app, and the lock-screen investigation),
+[GPS_ACCURACY.md](GPS_ACCURACY.md) (how accurate the blue dot and the knock stamp really are, why a dot
+can sit across the street, and the 2026-10-03 location audit).
 
 ---
 
@@ -147,9 +149,12 @@ A canvasser opens the app and sees the doors in the books assigned to them. They
   survey status. Voter files are patchy, so whatever's missing is simply left out. **Open** takes you
   into the door, where every voter reads exactly the same way — the sheet and the door screen used to
   disagree (one showed age, the other showed precinct), which confused people.
-- **Mark a door and see it instantly.** Tapping Not home / Wrong address / Refused / No soliciting /
-  Restricted / Survey / Lit drop recolors the pin **right away** — the GPS stamp and the save to the
-  server happen in the background, so you never wait on a spinner to know it registered. (Refused turns
+- **Mark a door and see it at once.** Tapping Not home / Wrong address / Refused / No soliciting /
+  Restricted / Survey / Lit drop recolors the pin as soon as the app has your location — usually that
+  same instant, because the map keeps a fresh fix warm; on a cold fix it can take a few seconds, and with
+  no location at all the door is **not recorded** (see [CANVASSER_APP.md](CANVASSER_APP.md) → Location is
+  required). The save to the server happens in the background, so you never wait on the network to know
+  it registered. (Refused turns
   the pin amber and is offered on survey campaigns only; Restricted turns it slate and is offered on all
   campaign types; **Not a target voter** turns it fuchsia, on survey campaigns that have it turned on —
   its filter chip and legend entry show only then, or while a door on your map still carries it.) A
@@ -509,12 +514,22 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
 
 ## C. How an action becomes a ping
 
-Recording is **optimistic-first**: the UI updates before the network, so the pin recolors the instant
-a canvasser taps an action — the GPS stamp and the server write happen in the background and never
-block the screen. (This replaced an older flow that awaited GPS **and** the full network round-trip
-before recoloring, which made doors feel unrecorded on weak signal — the bare fetch could hang ~60s.)
+Recording is **gate-then-optimistic**: the location gate runs first (no location = no knock), then the
+UI updates before the network, so the pin recolors as soon as the app has a fix — usually the instant
+the canvasser taps, because the map keeps the OS fix cache warm — and only the server write happens in
+the background. (This replaced an older flow that awaited GPS **and** the full network round-trip
+before recoloring, which made doors feel unrecorded on weak signal — the bare fetch could hang ~60s;
+the gate was put back in front of the recolor on 2026-07-14, see [AUDIT.md](AUDIT.md) §B.6.)
 
-1. **Instant (synchronous).** The tapped action patches the `['bootstrap']` React Query cache —
+1. **Gate — GPS (before anything visible).** [lib/location.js](../mobile/lib/location.js)
+   `getCanvassLocation()` runs inside `optimisticSubmit` before the cache patch: device location
+   services on, permission granted and precise, then a fix — a cached OS fix ≤ 15 s old and ≤ 20 m
+   accurate, else a fresh high-accuracy read raced against ~6 s, else the newest fix ≤ 2 min old; a
+   blocked tap records, recolors and queues nothing. The map's foreground location feed and the engine
+   puck keep that cache warm while a map screen is mounted — this is **not** "one fix, no continuous
+   GPS"; see [GPS_ACCURACY.md](GPS_ACCURACY.md) §A. Pin corrections use the best-effort
+   `getCurrentLocation()` instead and are never blocked.
+2. **Instant (synchronous).** The tapped action patches the `['bootstrap']` React Query cache —
    `household.status` (and the client-computed building aggregate) recolor this same frame — via the
    shared helper [lib/recordAction.js](../mobile/lib/recordAction.js) (`recordHouseholdAction` /
    `optimisticSubmit`). The cache is mirrored to a cache-directory file
@@ -522,10 +537,9 @@ before recoloring, which made doors feel unrecorded on weak signal — the bare 
    whose Android SQLite limits broke large turfs; the cache directory is backup-excluded on both
    OSes, which the privacy policy's device-storage disclosure relies on) so it survives a cold start. The screen
    returns to the map immediately; it never `await`s the network.
-2. **Background — GPS.** [lib/location.js](../mobile/lib/location.js) `getCurrentLocation()` captures
-   one fix (not continuous GPS): a warm recent OS fix when fresh/accurate, else a fresh high-accuracy
-   read **capped at ~6s** so a cold GPS can't stall the submit.
-3. **Background — submit/queue.** It POSTs `{ location: { lat, lng, accuracy }, timestamp, note }`:
+3. **Background — submit/queue.** It POSTs `{ location: { lat, lng, accuracy, mocked, fixTimestamp },
+   timestamp, note }` (the stamp from step 1; `timestamp` is the tap, minted once after the gate and
+   frozen into any queued body):
    `POST /mobile/households/:id/not-home` · `/wrong-address` · `/refused` · `/restricted` ·
    `/no-soliciting` · `/not-target` · `/lit-drop`, or
    `POST /mobile/voters/:voterId/survey` ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js))
@@ -1026,10 +1040,15 @@ constants). A small legend labels the two rings when they're shown.
     Two open consequences: `include-apartments` is an effort-wide reset, not a per-door lift, and a door
     returned to Intake (`effortId: null`) can never be un-excluded, because `Pass.effortId` is required.
 - **Fully-voted doors drop off** the canvasser's bootstrap/map (see EARLY_VOTING.md).
-- **Pings are per-action GPS stamps**, not live tracking — there is no continuous location feed.
-- **Recording is optimistic-first.** The pin recolors before the network call; GPS + submit run in the
-  background ([lib/recordAction.js](../mobile/lib/recordAction.js)). Never re-add an `await` before the
-  cache patch — that ordering was the cause of the field "did it register?" delay.
+- **Pings are per-action GPS stamps**, not live tracking. The canvasser houses map does run a continuous
+  **foreground** location feed while mounted ([useLocationFeed](../mobile/lib/useLocationFeed.js), the one
+  `watchPositionAsync` call site — [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) §C9) and the engine
+  draws the puck from its own provider, but neither leaves the phone: location reaches the server only
+  inside a recorded action or a pin fix. See [GPS_ACCURACY.md](GPS_ACCURACY.md).
+- **Recording is gate-then-optimistic.** The confirm step and `getCanvassLocation()` run before the cache
+  patch, and only the server write runs in the background ([lib/recordAction.js](../mobile/lib/recordAction.js)).
+  Never move the gate after the patch ([AUDIT.md](AUDIT.md) §B.6), and never re-add a network `await`
+  before the cache patch — that ordering was the cause of the field "did it register?" delay.
 - **An optimistic recolor can't be reverted by a refetch.** Three layers: every `['bootstrap']` reader
   sets `refetchOnMount: false` (no stale full refetch on screen (re)mount); `optimisticSubmit`
   `cancelQueries(['bootstrap'])` kills any in-flight refetch at record time; and the **pending overlay**
@@ -1060,7 +1079,9 @@ constants). A small legend labels the two rings when they're shown.
   as well as on focus / foreground / refresh / next-action. NetInfo is a native module — it ships only in
   a native build, never an OTA (a bundle importing it would crash an older binary).
 - **Mobile is battery-conscious** (delta + 30s/120s cadence + background pause; native location puck
-  with a subtle pulse, no compass/magnetometer; follow-mode auto-exits on pan/background). **Web is
+  with a subtle pulse and no heading beam — on Android that keeps the compass sensor idle, on iOS the
+  Mapbox SDK runs heading updates under any 2D puck regardless, so the saving there is rendering only;
+  follow-mode auto-exits on pan/background). **Web is
   live** (~20s) because admins are at a connected desk.
 - **An embedded map must re-measure itself.** The full-page admin map ([MapPage.jsx](../client/src/pages/MapPage.jsx))
   is `100vh` from the first paint, so its Mapbox container is stable. The client-report map
@@ -1099,7 +1120,7 @@ constants). A small legend labels the two rings when they're shown.
 | [mobile/app/(app)/admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Mobile admin overview map + canvasser-pings toggle + the walk-list `FilterChip` + menu (2+-effort campaigns; picking one clears pass/import scope — §D) + first/last-knock rings (single canvasser) + the `/map/counts` count chip (`match / universe doors`, "N in view" beneath, tap → explain menu) + campaign-wide counts in the Status menu and response counts in the answer menu; tapped-door sheet now at **web parity** (header status/address, last action, **History by pass**, voters, surveys with lazy answers) + the inline **⚠ Overlap** badge + the opt-in **Overlaps** ring toggle (`/overlap-doors`, rings beneath the pins) + the round-labelled **Mark / Unmark restricted** row above *Move pin* (`doorMarkState` from [mobile/lib/restrictBooks.js](../mobile/lib/restrictBooks.js) over the sheet's `/activity` rounds; `restrict-doors` / `unrestrict-doors`; see [ADMIN_APP.md](ADMIN_APP.md)). |
 | [mobile/app/(app)/admin/canvasser/[id]/map.jsx](../mobile/app/(app)/admin/canvasser/[id]/map.jsx) | One canvasser's path of action pings. |
 | [mobile/app/(app)/books.jsx](../mobile/app/(app)/books.jsx) | Books overview map (centroid markers). |
-| [mobile/lib/buildings.js](../mobile/lib/buildings.js) · [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) · [mobile/lib/location.js](../mobile/lib/location.js) | Buildings grouping · base-style switcher · per-action location capture. |
+| [mobile/lib/buildings.js](../mobile/lib/buildings.js) · [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) · [mobile/lib/location.js](../mobile/lib/location.js) | Buildings grouping · base-style switcher · the knock gate `getCanvassLocation` (services → permission → precise → fix ≤ 15 s/≤ 20 m → fresh read raced at 6 s → last-known ≤ 2 min), the best-effort `getCurrentLocation` for pin fixes, and the iOS Precise-off probe `reportFixAccuracy` — see [GPS_ACCURACY.md](GPS_ACCURACY.md). |
 | [mobile/components/AppLocationPuck.jsx](../mobile/components/AppLocationPuck.jsx) · [mobile/lib/useLocationFeed.js](../mobile/lib/useLocationFeed.js) · [mobile/lib/locationFeed.js](../mobile/lib/locationFeed.js) | The ONE engine-rendered blue-dot puck (never hide with `visible={false}` — unmount to stop GPS) · the canvasser map's owned GPS feed (foreground watcher + staleness watchdog) · its pure policy, tested in `locationFeed.test.js`. |
 | [mobile/lib/mapCounts.js](../mobile/lib/mapCounts.js) | Hand-mirrored subset of the web `mapCounts.js` (`fmtCount`, `inViewClip`, `describeMatch`, `explainCounts`, `MAP_HOUSEHOLD_CAP`) for the admin map's count chip — keep the sentences in step. |
 

@@ -15,7 +15,8 @@ a fresh GPS fix (see §B.6).
   endpoints, and the frontend.
 
 Related: [MAPS.md](MAPS.md) (the admin map this overlays — pins, pings, and the "far from house"
-distance a ping already shows), [METRICS.md](METRICS.md) (the overlap/duplicate-survey audits, a
+distance a ping already shows), [GPS_ACCURACY.md](GPS_ACCURACY.md) (how accurate a phone's fix really
+is next to houses, and how the far rule's accuracy subtraction absorbs it), [METRICS.md](METRICS.md) (the overlap/duplicate-survey audits, a
 sibling quality check), [DATE_FILTERS.md](DATE_FILTERS.md) (the date window that scopes the audit —
 the map now opens on **Today**), [ROLES.md](ROLES.md) (who can audit: admins, team leads for their
 campaigns, and super-admins), [TIMEZONES.md](TIMEZONES.md) (the campaign-day the window resolves in).
@@ -57,6 +58,20 @@ is blocked at the tap with a clear message — so "no GPS trail" is not an optio
 units is normal canvassing — those units share one map pin, so the app only flags a one-spot cluster
 when the **houses themselves are spread out** but the canvasser never moved.
 
+**How much GPS drift Far tolerates.** Every stamp carries the phone's own accuracy estimate (shown as
+*GPS ±N ft*), and the audit subtracts that radius from the distance before judging — for every entry,
+and for the per-canvasser Far count alike. Only what is left above ~250 ft flags (medium); above ~820
+ft is high. A fix worse than ~330 ft also draws **Weak GPS** (medium; high above ~820 ft), and Far
+still applies if the remainder after subtracting the radius is over 250 ft. On Android the ± number is
+the radius the phone is 68% confident in, so an honest stamp lands outside its own circle about one
+time in three; iPhones report the radius without a stated confidence. Under open sky phones read about
+±16 ft; next to houses, under porch roofs and trees, tens of feet is normal — so a dot across the street
+(50–110 ft) never trips Far on its own. Before asking the canvasser, check whether the pin reads
+**Approximate location** (address-looked-up pins sit at or near the street — see Pin Fixes in
+[MAPS.md](MAPS.md)) and whether it is an apartment building (every unit shares one pin), and read a
+canvasser's typical ± against the crew's on the same streets, not against zero. The physics and the
+phone settings behind the number are in [GPS_ACCURACY.md](GPS_ACCURACY.md).
+
 **Corrections don't punish honesty.** Changing your answer at a door you already visited — say you
 tapped Restricted by mistake, walked off, and fixed it to Not home from down the street — would
 otherwise look like a door marked from far away, because the newer entry (recorded where you now
@@ -65,8 +80,9 @@ made **within the same canvassing day** of a genuine at-the-door visit shows as 
 Far flag with a context line like *Replaced "Restricted" recorded 4 min earlier from 20 ft away*.
 The reviewer still sees it (corrections are downgraded, never hidden) — but it reads as an honest
 fix, not a phantom knock. A door rewritten from far away **without** a real earlier visit, or long
-after it, keeps its full flag. Don't be surprised that these low flags still count in the Far KPI —
-that's deliberate; dismiss them as you review.
+after it, keeps its full flag. These low flags stay in the flagged list and in the Audit page's open Far
+total until you review them, but the per-canvasser **Far knocks** number counts medium and high only, so
+a downgraded correction never inflates it; dismiss them as you review.
 
 **A wrong pin doesn't punish honesty either.** Some pins are looked up from the address rather than
 read from your file, and land a house or two off. A canvasser who walks to the *real* door gets
@@ -600,6 +616,13 @@ computed+joined list in memory and returns the pre-slice `total`.
 - **Read `CanvassActivity` only.** Unioning `SurveyResponse` would double-count surveys and manufacture
   false Rapid flags (see §B / [METRICS.md](METRICS.md)).
 - **Weak GPS ≠ far.** `far` tiers on `distance − accuracy`; a large distance from a poor fix is `weak_gps`.
+- **The far discount is the client's own accuracy claim**, and that is an accepted trade-off, not a bug
+  to arithmetic away. The server has no second opinion on `accuracy`, so a tampered client asserting
+  100 m is unflagged anywhere within 175 m of the pin and one asserting 250 m draws only Weak GPS out to
+  325 m. Honest fixes report ~3–30 m, so the band is tamper-only; closing it by escalating Weak GPS when
+  the raw distance is also large would upgrade a share of honest 150–250 m fixes (the false-positive
+  veto applies), and the behavioural flags — mock, rapid, one-spot (which ignores accuracy), stale fix —
+  cover the tampering side. Audit of 2026-10-03: [GPS_ACCURACY.md](GPS_ACCURACY.md) §F, F-03.
 - **The apartment guard is load-bearing** for `one_spot` — it requires spread-out house pins, not just
   distinct households at one coordinate.
 - **`summary` is always the full scope**; the list filters (reason/status/severity/userId) narrow only

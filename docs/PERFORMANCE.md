@@ -10,7 +10,9 @@ stops when it isn't, and the guardrails that keep background work honest. Writte
 
 Related: [CANVASSER_APP.md](CANVASSER_APP.md) (the map screen and offline recording),
 [ADMIN_APP.md](ADMIN_APP.md) (admin screens and live map), [MAPS.md](MAPS.md) (map architecture),
-[TIMEZONES.md](TIMEZONES.md) (date handling in polled reports), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (keep-screen-on and the lock-screen routes, and which of them would bend rule 1).
+[TIMEZONES.md](TIMEZONES.md) (date handling in polled reports), [LOCK_SCREEN_AND_DIRECTIONS.md](LOCK_SCREEN_AND_DIRECTIONS.md) (keep-screen-on and the lock-screen routes, and which of them would bend rule 1),
+[GPS_ACCURACY.md](GPS_ACCURACY.md) (what each location reader does while a screen is covered, and why
+the canvasser maps keep theirs running).
 
 ---
 
@@ -25,9 +27,12 @@ keep that from draining phones:
 1. **Backgrounded app → everything stops.** When the phone locks or the app leaves the foreground,
    all polling pauses (and resumes on return).
 2. **Covered screen → its polling stops.** Navigating away from a screen (another tab, a pushed
-   detail screen) pauses that screen's polling and its GPS dot. Coming back refreshes it
-   immediately and resumes. Before July 2026 this rule didn't exist — a visited admin map kept
-   polling all day behind other tabs. (The GPS-dot half of this rule only became genuinely true
+   detail screen) pauses that screen's polling — and, on the two admin maps, its GPS dot. Coming back
+   refreshes it immediately and resumes. The canvasser houses map and the Books map deliberately keep
+   their dot running (and the houses map its foreground location feed) under a pushed door or building
+   screen: that warm fix is what lets a tapped door record instantly instead of waiting on a cold GPS
+   read ([GPS_ACCURACY.md](GPS_ACCURACY.md) §A). Before July 2026 this rule didn't exist — a visited
+   admin map kept polling all day behind other tabs. (The GPS-dot half of this rule only became genuinely true
    on Android in August 2026: the old dot's `visible` gate never actually stopped the library's
    location engine there — a start/stop counter leak kept it hot — and the native-puck migration
    replaced the gate with real unmounting.)
@@ -61,7 +66,7 @@ it can't be double-billed, and a knock recorded *during* a flush can't be lost.
 |---|---|---|
 | App backgrounded | `focusManager.setFocused` wired to AppState | `mobile/app/_layout.jsx` |
 | Screen covered | `...useFocusedPoll()` on polled queries | each polling screen |
-| GPS dot | `{isFocused && <AppLocationPuck />}` — mount-gated: the native puck's `visible` prop hides pixels but does NOT stop the engine's location component; only unmount does | admin map, book map |
+| GPS dot | `{isFocused && <AppLocationPuck />}` — mount-gated: the native puck's `visible` prop hides pixels but does NOT stop the engine's location component; only unmount does | admin map, admin book map (the canvasser houses map and the Books map keep their puck — and the houses map its feed — mounted on purpose; see [GPS_ACCURACY.md](GPS_ACCURACY.md)) |
 
 **Why screens need their own gating:** expo-router keeps screens mounted — Tabs screens forever
 once visited (including `href:null` hidden ones), and stack base screens under everything pushed on

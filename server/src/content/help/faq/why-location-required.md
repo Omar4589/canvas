@@ -24,9 +24,11 @@ The message includes a Settings shortcut and a **Try again** button. Nothing was
 
 **Precise Location has to be on — approximate is not enough.** An approximate fix can be a mile or more wide, which makes the distance between you and the door meaningless. Rather than save a door nobody can verify, Doorline refuses the knock.
 
-You'll usually see it coming: a red notice appears saying **Precise Location is off for Doorline** once the app has seen a run of vague readings. If you tap a door anyway, nothing is recorded at all — no status, nothing saved to sync later — and you get an alert naming the setting to turn on, with a **Retry** button.
+If Precise Location is off, the first door you tap is blocked with an alert naming the setting to turn on, with a **Try again** button — nothing is recorded at all, no status, nothing saved to sync later — and a red notice saying **Precise Location is off for Doorline** appears at the top of the map. On Android the notice is there as soon as the map opens. On an iPhone the app can't read that setting ahead of time, so there it usually appears with the first blocked door.
 
 - **iPhone:** Settings → Privacy & Security → Location Services → Doorline → turn on **Precise Location**.
 - **Android:** Settings → Apps → Doorline → Permissions → Location → choose **Precise** rather than Approximate.
 
 Going offline doesn't get around it, because the check runs before anything is saved for later. It's also checked at every door, so turning it off partway through a shift stops you at the next house.
+
+**A dot that's a little off is a different thing.** Next to houses the blue dot can sit a few yards from where you stand — that's ordinary GPS, it never blocks a door, and it isn't this setting. See [Why is my blue dot across the street?](blue-dot-not-where-i-am).
