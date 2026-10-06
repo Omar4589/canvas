@@ -173,8 +173,10 @@ miles from its street. You don't have to go to the Map page to fix it. **Click t
 tells you whose pin you're moving. Drag the marker to the right spot and click **Save location** (or
 **Cancel**, or press **Esc**, to back out). That moves **one door**. For an apartment building, click the
 building and choose **Move building pin →** — that moves **every unit of that address together**, and the
-card says how many (a house that merely shares the dot moves on its own). While a move is armed, clicks elsewhere on the map do nothing, so you can't select
-a book by accident.
+card says how many (a house that merely shares the dot moves on its own). A dot that holds **different
+homes** rather than one building says so — "5 homes at one map spot" — and has no Move building pin: each of
+those homes is moved on its own, from the link to **Pin Fixes** in the pop-up. While a move is armed, clicks
+elsewhere on the map do nothing, so you can't select a book by accident.
 
 When it saves, the dot moves and the **book outline redraws around it** — the door's own book, and any
 other book whose shape covered the new spot — so the house still sits inside its book's shape (below).

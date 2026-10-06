@@ -12,6 +12,8 @@
 // This is grouping, not clustering — the key is the door's actual coordinate, at
 // every zoom, and a building never merges with the building next door.
 
+import { stackBaseOf, baseAddressOf } from './streetName.js';
+
 export const BUILDING_MIN_UNITS = 2;
 
 // Doors whose status counts as worked. Mirrors mobile/lib/buildings.js.
@@ -80,3 +82,28 @@ export function buildingLabel(building) {
   if (lines.size === 1) return [...lines][0];
   return lines.size > 1 ? `${building.total} doors at one pin` : 'Building';
 }
+
+// Move building pin on a stack: the units of the street address that holds MORE THAN HALF of the doors
+// on the pin (stackBaseOf, the key the server's scope:'building' fan-out uses — it moves exactly that
+// address's units, never the separate houses that merely share the coordinate). Returns
+// { primary, count, address } — any member of that address as the move's target, how many units it
+// carries here, and its street address for the copy — or null when no address holds a majority: a spot of
+// different homes, which are moved one at a time (Pin Fixes). The count is this payload's; the server's
+// answer (res.moved) can be larger when doors outside the payload share the address.
+export const buildingMovePrimary = (units) => {
+  const list = units || [];
+  if (list.length < 2) return null;
+  const byBase = new Map();
+  for (const u of list) {
+    const base = stackBaseOf(u.addressLine1);
+    const members = byBase.get(base);
+    if (members) members.push(u);
+    else byBase.set(base, [u]);
+  }
+  for (const members of byBase.values()) {
+    if (members.length >= 2 && members.length * 2 > list.length) {
+      return { primary: members[0], count: members.length, address: baseAddressOf(members[0].addressLine1) };
+    }
+  }
+  return null;
+};

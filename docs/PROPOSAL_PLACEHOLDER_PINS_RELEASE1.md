@@ -346,3 +346,8 @@ Built as planned: everything in A–C. Where the build differs, or adds somethin
      14 homes with no coordinates join on the second import.
    - Remove apartments at 4: 441 doors before placement, 429 after.
    The fake's split is invented; the real split depends on Geocodio's answers for Nye.
+9. **Production, 2026-10-05.** Deployed in `add84ba` (committed together with the GPS step W1 and the team-lead
+   locks). The Nye re-import's preview showed the same 482 homes on shared spots, 0 new doors, 0 emptied and 0 rows
+   skipped; its line read "Map pins: 418 placed by address · 64 without an exact spot". Every marked home is
+   accounted for (418 + 64 = 482), 87% placed on their own rooftops, none confirmed in place, no busy or failed
+   pass. The 64 wait in Pin Fixes.

@@ -527,7 +527,8 @@ A house pin in the wrong spot can be dragged to its correct location — an admi
 **Map** page (**"Move pin"**) or **right here on the Turf Cutting page** (click the house, choose
 **Move pin →** in its popup, drag the blue marker, **Save location**; an apartment building's popup has
 **Move building pin →**, which moves every unit of that address at that pin together — never the separate
-houses that merely share the spot), and a **team lead can do it in
+houses that merely share the spot; a dot of different homes has no Move building pin, and its pop-up points
+to Pin Fixes, where each home is moved on its own), and a **team lead can do it in
 the field** (**"Fix pin location,"** including "use my current GPS"). **Canvassers can't move pins** — a
 correction is a data change with an audit trail, so it is lead/admin-only ([MAPS.md](MAPS.md)); a
 canvasser who spots a bad pin tells their lead. Whichever way it's done, it corrects **only the

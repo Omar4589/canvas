@@ -320,11 +320,31 @@ test('a non-finite coordinate is no location: 400 LOCATION_REQUIRED on all three
   assert.strictEqual((await Household.findById(ctx.d3._id, 'status').lean()).status, 'unknocked');
 });
 
-test('Infinity over JSON (1e400) is refused before the replace runs: the earlier entry survives', { skip }, async () => {
+test('an off-Earth coordinate is no location: 400 LOCATION_REQUIRED on all three write paths, nothing written', { skip }, async () => {
+  const counts = async () => [await CanvassActivity.countDocuments({}), await SurveyResponse.countDocuments({}), await Voter.countDocuments({})];
+  const before = await counts();
+  // -180/-180 is the value Core Location's kCLLocationCoordinate2DInvalid is commonly reported as.
+  for (const [lat, lng] of [[200, D3.lng], [-90.0001, D3.lng], [D3.lat, 180.5], [D3.lat, -181], [-180, -180]]) {
+    const r = await knock(ctx.d3._id, 'not-home', { location: { lat, lng, accuracy: 5 } });
+    assert.strictEqual(r.status, 400, `${lat},${lng}`);
+    assert.strictEqual(r.json.code, 'LOCATION_REQUIRED', `${lat},${lng}`);
+  }
+  const s = await rawPost(`/mobile/voters/${ctx.voter2._id}/survey`, `{"surveyTemplateId":"${ctx.template._id}","answers":[],"timestamp":"${nextTs()}","location":${rawLoc(D6.lat, 181)}}`);
+  assert.strictEqual(s.json?.code, 'LOCATION_REQUIRED');
+  const a = await rawPost(`/mobile/households/${ctx.d8._id}/voters`, `{"voterId":"${new mongoose.Types.ObjectId()}","firstName":"Nu","lastName":"Person","timestamp":"${nextTs()}","location":${rawLoc(-91, D8.lng)}}`);
+  assert.strictEqual(a.json?.code, 'LOCATION_REQUIRED');
+  assert.deepStrictEqual(await counts(), before, 'nothing written on any ledger');
+  assert.strictEqual((await Household.findById(ctx.d3._id, 'status').lean()).status, 'unknocked');
+});
+
+test('Infinity over JSON (1e400) or an off-Earth value is refused before the replace runs: the earlier entry survives', { skip }, async () => {
   assert.strictEqual((await knock(ctx.d3._id, 'not-home', { location: near(D3) })).status, 201);
   const r = await rawPost(`/mobile/households/${ctx.d3._id}/refused`, `{"timestamp":"${nextTs()}","location":${rawLoc('1e400', D3.lng)}}`);
   assert.strictEqual(r.status, 400, 'used to be a 500 after the replace had deleted the earlier entry');
   assert.strictEqual(r.json.code, 'LOCATION_REQUIRED');
+  const off = await knock(ctx.d3._id, 'refused', { location: { lat: 200, lng: D3.lng, accuracy: 5 } });
+  assert.strictEqual(off.status, 400, 'used to replace the earlier entry with a stamp off the Earth');
+  assert.strictEqual(off.json.code, 'LOCATION_REQUIRED');
   const rows = await CanvassActivity.find({ householdId: ctx.d3._id }).lean();
   assert.strictEqual(rows.length, 1);
   assert.strictEqual(rows[0].actionType, 'not_home');

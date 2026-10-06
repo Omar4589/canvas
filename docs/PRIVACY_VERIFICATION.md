@@ -2249,6 +2249,17 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `locationConfirmedBy` ever joins a payload, or if stored rows are ever rewritten by a backfill.
     Owner to confirm before the production deploy, as with items 17-26.
 
+    *[v6 2026-10-05, evening — W1 deployed (commit add84ba) and the count in (c) run in production for
+    the first time: no odd stamp on any ledger. 0 of 86,672 door results, 0 of 16,251 survey responses,
+    0 of 51 replaced survey answers, 0 of 396 unknocked entries held for a revert and 0 of 5 GPS pin
+    fixes carry a zero, negative or non-finite accuracy, a non-finite or off-Earth coordinate, or
+    (0, 0); the clamp changes 0 door results. So the off-Earth refusal held back in (b) ships now
+    (W1-offEarth): a knock, survey or add-person stamp whose latitude is outside ±90 or longitude outside
+    ±180 gets `400 LOCATION_REQUIRED` before any write (`isValidLatLng`, `utils/stateBounds.js`, the
+    predicate the pin-move service already used). Stores less, never more; no published sentence
+    changes; the count above is why it can't silently drop a real phone's queued knock. This line also
+    needs the owner's confirmation before its production deploy.]*
+
 28. **[v6 2026-10-05 — Homes that share a map spot are looked up by their own address at import
     (placeholder pins, release 1). Plan: [PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md);
     the full reference, [PROPOSAL_PLACEHOLDER_PINS.md](PROPOSAL_PLACEHOLDER_PINS.md) §O.]** Said out
@@ -2928,6 +2939,8 @@ Two of your own findings conflict here and I am telling you which is right.
 **Precision — VERIFIED: RAW, FULL-PRECISION, NEVER COARSENED.**
 `CanvassActivity.location` is `{lat: Number (required), lng: Number (required), accuracy: Number}` (`models/CanvassActivity.js:3-10`, `:39`). The device values pass straight through (`mobile/lib/location.js:10-16`), the zod schema accepts any `z.number()` (`canvass.js:70-74`), and the write assigns `location: data.location` verbatim (`canvass.js:168`; `:434`/`:489` for surveys). **No rounding, truncation, quantisation, jitter or grid-snapping is applied at write time or read time.** Surveys persist the coordinate **twice** (a `CanvassActivity` row and a `SurveyResponse` row).
 *[v6 2026-10-05 (GPS upgrades step W1; item 27 of "Remaining honest gaps"): two clauses above are no longer true for `accuracy`. The zod schema no longer "accepts any `z.number()`" for it: `locationSchema.accuracy` and the pin route's `locationCorrectionSchema.accuracy` pass through `usableAccuracy` (`routes/mobile/canvass.js`), which keeps a finite number above zero and turns zero, negative and non-finite values into `null`. And the write no longer "assigns `location` verbatim": the parsed location carries that sanitised accuracy, and `buildReplacedSnapshot` copies prior accuracies through the same function. The coordinate itself is still stored raw and unrounded, but a coordinate that is not a finite number is now refused (`400 LOCATION_REQUIRED`, before any write). Finite coordinates off the Earth are still accepted until `npm run audit:gps-stamps` has counted the stored ones. Stores less, never more; stored rows are not rewritten. The before numbers from that count's first production run, and the `--since` numbers after the deploy, are added here in a later docs change. The web admin map now also draws each recorded stamp's accuracy as a circle: display only, from the field the map payload already carried to the same roles.]*
+
+*[v6 2026-10-05, evening (W1-offEarth; item 27): the before numbers the stamp above promised. The count's first production run, right after the W1 deploy, found no zero, negative or non-finite accuracy and no non-finite, off-Earth or (0, 0) coordinate on any ledger: 0 of 86,672 door results (replaced snapshots included), 0 of 16,251 survey responses, 0 of 51 replaced survey answers, 0 of 396 frozen unknocked rows, 0 of 5 GPS pin fixes. A coordinate off the Earth is now refused like a non-finite one (`400 LOCATION_REQUIRED`, before any write). The `--since` run a few days after the deploy remains the after check.]*
 
 `distanceFromHouseMeters` is stored **in addition** to the raw coordinate, as `Math.round(haversineMeters(...))` (`canvass.js:83-86`). It does not replace or coarsen the raw lat/lng. It is null when the household has no pin.
 

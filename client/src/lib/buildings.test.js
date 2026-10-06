@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildingKeyForCoords, groupHouseholds, buildingLabel } from './buildings.js';
+import { buildingKeyForCoords, groupHouseholds, buildingLabel, buildingMovePrimary } from './buildings.js';
 
 const door = (id, lng, lat, status = 'unknocked', extra = {}) => ({
   id,
@@ -111,4 +111,27 @@ test('buildingLabel uses the shared street line, or admits the units disagree', 
 test('groupHouseholds tolerates null/empty input', () => {
   assert.equal(groupHouseholds(null).buildings.length, 0);
   assert.equal(groupHouseholds([]).stackedIds.size, 0);
+});
+
+test('buildingMovePrimary: a building is the address holding most of the pin; separate homes have none', () => {
+  const at = (id, line1) => door(id, -116.0, 36.2, 'unknocked', { addressLine1: line1 });
+  // Four units of one address plus a stray: the four move together, the stray is not carried.
+  const tower = buildingMovePrimary([
+    at('a', '100 Main St Apt 1'),
+    at('b', '100 Main St Apt 2'),
+    at('c', '100 Main Street Apt 3'),
+    at('d', '100 Main St #4'),
+    at('e', '12 Pine St'),
+  ]);
+  assert.equal(tower.count, 4);
+  assert.equal(tower.primary.id, 'a');
+  assert.equal(tower.address, '100 Main St');
+  // Different houses a voter file put on one coordinate: no building to move.
+  assert.equal(buildingMovePrimary([at('m', '591 Mount Charleston Dr'), at('v', '1841 S Vineyard Dr'), at('n', '1084 Mount Charleston Dr')]), null);
+  assert.equal(buildingMovePrimary([at('x', '5016 E Monte Penne Way'), at('y', '5021 E Monte Penne Way')]), null);
+  // Exactly half is not a majority; a duplex is.
+  assert.equal(buildingMovePrimary([at('p', '7 Elm St Apt A'), at('q', '7 Elm St Apt B'), at('r', '9 Elm St'), at('s', '11 Elm St')]), null);
+  assert.equal(buildingMovePrimary([at('p', '7 Elm St Apt A'), at('q', '7 Elm St Apt B')]).count, 2);
+  assert.equal(buildingMovePrimary([at('z', '1 Solo Rd')]), null);
+  assert.equal(buildingMovePrimary(undefined), null);
 });

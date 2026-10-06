@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -23,9 +23,8 @@ import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimi
 import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { crewCounts } from '../lib/turfCrewCounts.js';
 import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
-import { buildingKeyForCoords } from '../lib/buildings.js';
+import { buildingKeyForCoords, buildingMovePrimary } from '../lib/buildings.js';
 import { apartmentPreviewCounts, apartmentPreviewLine } from '../lib/apartmentPreview.js';
-import { stackBaseOf } from '../lib/streetName.js';
 import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
 import { useLassoDraw } from '../lib/useLassoDraw.js';
 import { useMapStyle } from '../lib/mapStyles.js';
@@ -1197,7 +1196,10 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   );
 }
 
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled }) {
+// `movePlan` (buildingMovePrimary): the street address that holds most of the pin, whose units Move building
+// pin carries — or null on a spot of different homes, where the pop-up says so and points at Pin Fixes,
+// which moves them one at a time (`pinFixesHref`).
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled, movePlan, pinFixesHref }) {
   // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
   // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
   // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
@@ -1207,6 +1209,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
   const [confirmMark, setConfirmMark] = useState(false);
   if (!building) return null;
   const { addressLine1, city, state, zipCode, units, total } = building;
+  const separateHomes = !movePlan;
   const restrictedN = units.filter((u) => u.passStatus === 'restricted').length;
   const completedN = units.filter((u) => COMPLETED_STATUSES.has(u.passStatus)).length;
   const markableN = Math.max(0, total - restrictedN - completedN);
@@ -1223,10 +1226,26 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
             <span aria-hidden>🏢</span>
-            <span className="truncate">{addressLine1 || 'Apartment building'}</span>
+            <span className="truncate">{movePlan ? movePlan.address : separateHomes ? `${total} homes at one map spot` : addressLine1 || 'Apartment building'}</span>
           </div>
           <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
-          <div className="mt-0.5 text-[11px] font-semibold text-brand-accent">{total} units at this location</div>
+          {separateHomes ? (
+            <div className="mt-0.5 text-[11px] text-fg-muted">
+              These are different homes that share one map spot. Move each one to its house
+              {pinFixesHref ? (
+                <>
+                  {' '}in{' '}
+                  <Link to={pinFixesHref} className="font-semibold text-brand-accent hover:underline">
+                    Pin Fixes →
+                  </Link>
+                </>
+              ) : (
+                '.'
+              )}
+            </div>
+          ) : (
+            <div className="mt-0.5 text-[11px] font-semibold text-brand-accent">{total} units at this location</div>
+          )}
         </div>
         <button onClick={onClose} className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Close">✕</button>
       </div>
@@ -1307,8 +1326,9 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
       </div>
 
-      {/* Move pin for the whole stack (server scope 'building' — every unit at this coordinate
-          moves together). Offered whenever the caller passes onMovePin; a running cut disables it. */}
+      {/* Move pin for the building (server scope 'building' — the units of the majority street address at
+          this coordinate move together, never the other homes on it). Offered only when one address holds the
+          pin (movePlan) and the caller passes onMovePin; a running cut disables it. */}
       {onMovePin && (
         <div className="mt-2 border-t border-border pt-2">
           <button
@@ -1320,7 +1340,10 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
           >
             Move building pin →
           </button>
-          <p className="mt-1 text-[11px] text-fg-muted">Moves all {total} unit{total === 1 ? '' : 's'} together.</p>
+          <p className="mt-1 text-[11px] text-fg-muted">
+            Moves the {movePlan.count} units at {movePlan.address} together
+            {movePlan.count < total ? ` — not the ${total - movePlan.count} other ${total - movePlan.count === 1 ? 'home' : 'homes'} on this spot` : ''}.
+          </p>
         </div>
       )}
 
@@ -1630,6 +1653,8 @@ export default function TurfsPage() {
   const popupDoor = (doorsQ.data?.doors || []).find((d) => String(d.id) === String(popupHouseholdId));
   const popupBook = popupDoor?.turfId ? turfs.find((t) => String(t._id) === String(popupDoor.turfId)) || null : null;
   const popupBuilding = popupBuildingKey ? grouped.buildings.find((b) => b.key === popupBuildingKey) || null : null;
+  // The street address whose units Move building pin carries (null on a spot of different homes).
+  const popupMovePlan = useMemo(() => (popupBuilding ? buildingMovePrimary(popupBuilding.units) : null), [popupBuilding]);
 
   // Selected pass (shares react-query cache with PassPicker) — for the live flag
   // + whether Discard must confirm an active pass.
@@ -3817,27 +3842,23 @@ export default function TurfsPage() {
               onUnrestrict={(householdIds) => unrestrictDoors.mutate({ householdIds })}
               restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
               restrictError={restrictDoors.error || unrestrictDoors.error}
+              // The street address that holds most of the pin: the server's scope:'building' fan-out moves
+              // exactly its units (docs/PROPOSAL_PLACEHOLDER_PINS.md §G), so the target is one of them and the
+              // card counts them. On a spot of different homes there is no building to move — the pop-up
+              // points at Pin Fixes instead. The toast count comes back as res.moved.
+              movePlan={popupMovePlan}
+              pinFixesHref={campaignId ? `/campaigns/${campaignId}/pin-fixes` : null}
               onMovePin={
-                selected?.isActive !== false
-                  ? () => {
-                      // The first unit's id — the server's scope:'building' fan-out moves the units of
-                      // ITS street address at that coordinate, never separate houses that merely share
-                      // the spot (docs/PROPOSAL_PLACEHOLDER_PINS.md §G), so the card counts those units,
-                      // and a door alone at its address moves as one door. The toast count comes back
-                      // as res.moved.
-                      const first = popupBuilding.units[0];
-                      const sameAddress = popupBuilding.units.filter(
-                        (u) => stackBaseOf(u.addressLine1) === stackBaseOf(first.addressLine1)
-                      ).length;
+                selected?.isActive !== false && popupMovePlan
+                  ? () =>
                       beginMovePin({
-                        id: String(first.id),
-                        addressLine1: sameAddress > 1 ? popupBuilding.addressLine1 : first.addressLine1,
+                        id: String(popupMovePlan.primary.id),
+                        addressLine1: popupMovePlan.address,
                         lng: popupBuilding.lng,
                         lat: popupBuilding.lat,
-                        scope: sameAddress > 1 ? 'building' : 'unit',
-                        count: sameAddress,
-                      });
-                    }
+                        scope: 'building',
+                        count: popupMovePlan.count,
+                      })
                   : undefined
               }
               moveDisabled={jobBusy || generate.isPending}

@@ -352,8 +352,9 @@ A **looked-up (geocoded)** pin is a best guess — it can land a house or two of
 areas or on long roads. The web admin map flags these with a faint **amber ring** around the pin, and
 the door's detail panel shows **"Approximate location."** To fix one, an admin **drags the pin** to the
 right spot ("Move pin" → Save) — on this Map page, or on the **Turf Cutting** page from a house's popup
-(**Move pin →**) or a building's popup (**Move building pin →**, which moves every unit at that pin
-together); a team lead can also fix it from the field in the mobile app. Once it's moved the amber ring
+(**Move pin →**) or a building's popup (**Move building pin →**, which moves the units of the building's
+street address together; a dot of different homes offers no building move and points to Pin Fixes); a team
+lead can also fix it from the field in the mobile app. Once it's moved the amber ring
 disappears and the door reads **"Pin corrected."**
 
 ### The Pin Fixes page — work the whole backlog in one place
@@ -598,8 +599,8 @@ the gate was put back in front of the recolor on 2026-07-14, see [AUDIT.md](AUDI
    itself is in [CAMPAIGNS.md](CAMPAIGNS.md).)
 4. **Server.** Creates a `CanvassActivity` (stamping `distanceFromHouseMeters` = haversine from the
    house), runs `recomputeHouseholdStatus`, and sets `household.status` / `lastActionAt` / `lastActionBy`
-   (the save bumps `updatedAt`). A coordinate that isn't a finite number is refused as
-   `LOCATION_REQUIRED` before any write, and the stamp's `accuracy` is stored only when it is a finite
+   (the save bumps `updatedAt`). A coordinate that isn't a real place on Earth (not a finite number,
+   or beyond ±90° latitude or ±180° longitude) is refused as `LOCATION_REQUIRED` before any write, and the stamp's `accuracy` is stored only when it is a finite
    number above zero, else `null` ([AUDIT.md](AUDIT.md) §B.6). Re-knocking the same door **in the same round deletes + replaces** the
    prior activity (important for delta logic — see F).
 5. **Reconcile.** On a successful online write the helper re-patches the cache with the server's

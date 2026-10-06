@@ -27,16 +27,11 @@ const STATE_BOUNDS = {
 };
 
 // A real place on Earth: finite numbers, |lat| ≤ 90, |lng| ≤ 180 (the poles and the antimeridian
-// included). The ONE world-bounds predicate: the pin-move guard uses it today, and the knock-stamp
-// backstop will once its off-Earth half ships (docs/PROPOSAL_GPS_UPGRADES.md §I.1). Number.isFinite
-// also rejects '45', which a bare range check would coerce.
+// included). The ONE world-bounds predicate, shared by the pin-move guard (updateHouseholdLocation) and
+// the knock-stamp backstop (canvass.js missingLocation; docs/PROPOSAL_GPS_UPGRADES.md §I.1). Number.isFinite
+// also rejects '45', which a bare range check would coerce, and a JSON 1e400, which parses to Infinity.
 export const isValidLatLng = (lat, lng) =>
   Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-
-// Finite numbers, nothing more: the knock-stamp backstop today (canvass.js missingLocation). A JSON
-// 1e400 parses to Infinity, which passed the old typeof check; a finite value off the Earth is held
-// back from refusal until the stored stamps have been counted (npm run audit:gps-stamps).
-export const isFiniteLatLng = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng);
 
 export function inStateBounds(state, lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;

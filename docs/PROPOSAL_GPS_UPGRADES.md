@@ -1,10 +1,12 @@
 # Proposal: GPS upgrades — the pro-grade cues on the dot, the field fixes, and the instruments to prove it
 
 > **Status: PLAN + DESIGN, approved by the owner on 2026-10-05 with every recommendation as written
-> (written 2026-10-03). Nothing here is built yet.** It implements the recommended changes in
-> [GPS_ACCURACY.md](GPS_ACCURACY.md) §G (items 3-18), adds one new screen (**Location check**) that the
-> device tests in §O need, and fixes two bugs the design work found in shipped code (F-25 and F-26, in
-> Part 1's "Two bugs"). Each workstream was designed by an agent that read the exact code it would change
+> (written 2026-10-03). Built so far: B0, W0 and W1 shipped on 2026-10-05 (commit add84ba); the count's
+> first production run that evening found no odd stamp on any ledger, so W1-offEarth was built the same
+> day and M2s is not needed. The phone steps (M1, M2, N1) are not built.** It implements the
+> recommended changes in [GPS_ACCURACY.md](GPS_ACCURACY.md) §G (items 3-18), adds one new screen
+> (**Location check**) that the device tests in §O need, and fixes two bugs the design work found in
+> shipped code (F-25 and F-26, in Part 1's "Two bugs"). Each workstream was designed by an agent that read the exact code it would change
 > and prototyped its pure logic in a scratch copy of the tree, so each workstream's test counts and
 > "fails today, passes after" claims were run, not guessed; the merged suite, with every workstream in
 > one tree, has not been run yet. Where workstreams overlapped (three of them each designed a location

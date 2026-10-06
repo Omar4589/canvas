@@ -484,14 +484,15 @@ Recording a disposition or survey **requires a live GPS fix**, enforced twice:
   missing/degenerate `location` on all three write paths (door results, the survey route and the
   add-person route) with `400 { error, code: 'LOCATION_REQUIRED' }` **before** zod (so clients get the
   typed message, not a zod dump). This replaces the accidental blocking the old zod schema provided, and
-  catches bypassed or old clients. A coordinate that isn't a finite number counts as missing
-  (`isFiniteLatLng` in [utils/stateBounds.js](../server/src/utils/stateBounds.js)): JSON's `1e400`
-  parses to Infinity, which used to pass, and on the door-result path the replace then deleted the
-  canvasser's earlier entry before the create failed with a 500 that a phone would retry forever
-  ([GPS_ACCURACY.md](GPS_ACCURACY.md) F-26). Finite coordinates off the Earth are still accepted until
-  the stored stamps have been counted (`npm run audit:gps-stamps`, [OPERATIONS.md](OPERATIONS.md));
-  that refusal is held as its own step ([PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I.1). The
-  add-person route requires the stamp but stores none (F-23).
+  catches bypassed or old clients. A coordinate that isn't a real place on Earth counts as missing
+  (`isValidLatLng` in [utils/stateBounds.js](../server/src/utils/stateBounds.js): finite numbers,
+  |lat| ≤ 90, |lng| ≤ 180, the same check the pin-move service uses). JSON's `1e400` parses to Infinity,
+  which used to pass, and on the door-result path the replace then deleted the canvasser's earlier entry
+  before the create failed with a 500 that a phone would retry forever ([GPS_ACCURACY.md](GPS_ACCURACY.md)
+  F-26). Finite values off the Earth were refused a step later (2026-10-05), once the first production run
+  of `npm run audit:gps-stamps` ([OPERATIONS.md](OPERATIONS.md)) found none among the stored stamps
+  (86,672 door results, 16,251 survey responses), because a queued offline knock refused with a 4xx is
+  dropped from the phone. The add-person route requires the stamp but stores none (F-23).
 - **The accuracy is sanitised, never refused.** `usableAccuracy` stores only a finite radius above zero;
   an Android `0` (no estimate), an iPhone negative (invalid fix) or a non-finite value is stored as
   `null` (unknown), on both ledgers, in the `replaced` snapshot and on the pin-correction audit row

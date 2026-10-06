@@ -10,9 +10,9 @@ import { Household } from '../models/Household.js';
 import { farAssessment, buildPinFixMap } from '../services/audit/flagDetection.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK } from '../services/audit/flagThresholds.js';
 
-// Stored GPS stamps that the stamp rules in docs/PROPOSAL_GPS_UPGRADES.md §I refuse, store as unknown or
-// judge differently today, or would refuse once off-Earth coordinates are refused too (W1-offEarth).
-// READ-ONLY — this script never writes; the rules apply to new stamps only.
+// Stored GPS stamps that the stamp rules in docs/PROPOSAL_GPS_UPGRADES.md §I now refuse, store as unknown
+// or judge differently. READ-ONLY — this script never writes; the rules apply to new stamps only. Its
+// first production run (2026-10-05) found none on any ledger, which is what let the off-Earth refusal ship.
 //
 //   npm run audit:gps-stamps                                     # every stored row
 //   npm run audit:gps-stamps -- --since=2026-10-13T23:45-05:00   # rows created at or after that instant

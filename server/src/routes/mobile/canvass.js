@@ -14,7 +14,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
-import { isFiniteLatLng } from '../../utils/stateBounds.js';
+import { isValidLatLng } from '../../utils/stateBounds.js';
 import { effectiveMeters } from '../../services/audit/flagDetection.js';
 import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
@@ -133,22 +133,23 @@ const locationSchema = z.object({
   fixTimestamp: z.string().datetime().nullable().optional(),
 }).refine(
   // Unreachable today, because missingLocation runs first on every route that nests this schema; it
-  // keeps the rule if the schema is ever reused. zod's z.number() accepts Infinity.
-  (loc) => isFiniteLatLng(loc.lat, loc.lng),
-  { message: 'Coordinates must be finite numbers', path: ['lat'] }
+  // keeps the rule if the schema is ever reused. zod's z.number() accepts Infinity and any range.
+  (loc) => isValidLatLng(loc.lat, loc.lng),
+  { message: 'Coordinates must be a real place on Earth', path: ['lat'] }
 );
 
 // No location = no knock. The mobile app hard-gates recording on a fresh GPS fix; this
 // is the server backstop for bypassed or old clients. Machine-readable `code` follows
 // the ORG_CONTEXT convention (mobile api.js parses it; recordAction.js maps it to a
 // specific alert). Checked BEFORE zod so the client gets this message, not a zod dump. A coordinate that
-// isn't a finite number is no location either: a JSON 1e400 used to pass the typeof check, and on the
-// door-result path the replace then deleted the canvasser's earlier entry before the create failed with a
-// 500, which a phone would queue and retry forever (GPS_ACCURACY.md F-26). Finite values off the Earth are
-// still accepted here until the stored stamps have been counted (docs/PROPOSAL_GPS_UPGRADES.md §I.1).
+// isn't a real place on Earth is no location either. A JSON 1e400 used to pass the typeof check, and on
+// the door-result path the replace then deleted the canvasser's earlier entry before the create failed
+// with a 500, which a phone would queue and retry forever (GPS_ACCURACY.md F-26). A finite value off the
+// Earth (|lat| > 90, |lng| > 180) is refused too, since 2026-10-05: the count of every stored stamp found
+// none, so no phone sends one (npm run audit:gps-stamps; docs/PROPOSAL_GPS_UPGRADES.md §I.1).
 const missingLocation = (body) => {
   const loc = body?.location;
-  return !loc || !isFiniteLatLng(loc.lat, loc.lng);
+  return !loc || !isValidLatLng(loc.lat, loc.lng);
 };
 const LOCATION_REQUIRED = {
   status: 400,
