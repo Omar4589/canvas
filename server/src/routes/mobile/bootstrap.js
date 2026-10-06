@@ -19,6 +19,7 @@ import { activePassIds } from '../../services/passes/activePasses.js';
 import { doorStateFromDoorPass, surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
 import { canvasserScopeWithPasses, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
 import { availableOptInOutcomes, effectiveEnabledOutcomes, doorConfigStamp } from '../../services/canvass/outcomeToggles.js';
+import { effectivePinSuspect } from '../../services/households/pinState.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -51,6 +52,25 @@ export function toWireVoter(v, voted) {
 // the privacy-verified device cache). Never pass toWireVoter a full Voter doc; re-read
 // through this projection first. dateOfBirth is here only so toWireVoter can derive `age`
 // — it never survives into the response (see the comment block above).
+// A door's pin as the phone draws it — the ONE projection the bootstrap and the /changes delta both read, so
+// the two can't drift: provenance for the badges, the confirm stamp, and the shared-spot flag. The flag ships
+// only as setWirePinSuspect leaves it (effective — a vouched home never reaches a phone flagged).
+const HOUSEHOLD_PIN_PROJECTION = {
+  location: 1,
+  coordSource: 1, // pin provenance: 'file' | 'geocodio' | 'corrected'
+  coordConfidence: 1, // 'exact' | 'interpolated' | null (approximate-pin badge)
+  locationConfirmedAt: 1, // confirm-in-place stamp (Pin Fixes) — badge reads "confirmed"
+  pinSuspect: 1, // no exact map spot (its coordinate shared with other addresses)
+};
+
+// Rewrite a loaded door's pinSuspect to the value the phone may see: the raw flag while the door is unplaced
+// now, otherwise no field at all. On /changes the field's absence is how a phone learns the flag cleared.
+const setWirePinSuspect = (h) => {
+  const ps = effectivePinSuspect(h);
+  if (ps) h.pinSuspect = ps;
+  else delete h.pinSuspect;
+};
+
 export const MOBILE_VOTER_PROJECTION = {
   _id: 1,
   householdId: 1,
@@ -309,14 +329,11 @@ router.get('/bootstrap', async (req, res, next) => {
       city: 1,
       state: 1,
       zipCode: 1,
-      location: 1,
       status: 1,
       lastActionAt: 1,
       turfId: 1,
       walkOrder: 1, // list-view "walk order" sort
-      coordSource: 1, // pin provenance: 'file' | 'geocodio' | 'corrected'
-      coordConfidence: 1, // 'exact' | 'interpolated' | null (approximate-pin badge)
-      locationConfirmedAt: 1, // confirm-in-place stamp (Pin Fixes) — badge reads "confirmed"
+      ...HOUSEHOLD_PIN_PROJECTION,
     }).lean();
 
     const householdIds = households.map((h) => h._id);
@@ -330,6 +347,7 @@ router.get('/bootstrap', async (req, res, next) => {
     // global for admin/reports.
     const perRound = await doorStateFromDoorPass(doorPass, campaign.type);
     for (const h of households) {
+      setWirePinSuspect(h);
       const s = perRound.get(String(h._id));
       if (s) {
         h.status = s.status;
@@ -476,12 +494,12 @@ router.get('/changes', async (req, res, next) => {
       fullyVoted: 1, // client drops doors where everyone has now voted
       fullyDnc: 1, // client drops doors where everyone is do-not-contact
       doNotKnock: 1, // client drops doors whose address asked that nobody come back
-
-      location: 1, // so an admin pin-move (or another canvasser's fix) reflects live
-      coordSource: 1,
-      coordConfidence: 1,
-      locationConfirmedAt: 1, // mirrors the bootstrap projection (Pin Fixes confirm stamp)
+      // The pin, so an admin pin-move (or another canvasser's fix, or a confirm) reflects live — the same
+      // projection as the bootstrap.
+      ...HOUSEHOLD_PIN_PROJECTION,
     }).lean();
+    // Every changed door, not only those with a per-round entry below: a pin fix touches no round state.
+    for (const h of changedHouseholds) setWirePinSuspect(h);
     // Per-round status + last visit from the canvasser's book round (same as
     // bootstrap) so deltas don't re-introduce a global status — or a prior round's
     // "Last visit" — for a door fresh in its current round. Skipped entirely on the

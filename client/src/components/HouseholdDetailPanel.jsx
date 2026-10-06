@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { formatInTz } from '../lib/datetime.js';
 import { actionLabel } from '../lib/statusColors.js';
 import { pickRound, roundMarkFromEntries, completedInRound, isRestricted, unmarkButtonLabel } from '../lib/restrictMark.js';
+import { pinBadge, pinLine, needsScopeQuestion } from '../lib/pinBadges.js';
+import { baseAddressOf } from '../lib/streetName.js';
 
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
@@ -475,11 +477,17 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
   );
 }
 
+// onMovePin({ scope, count, addressLine1, unplaced }) arms the page's move. When other units of this door's
+// street address share its pin (the activity route's `sameAddress`), the panel first asks "Just this unit" or
+// "Whole building (N units)". `autoMove` starts that flow as soon as the count is known (a stack row's Move
+// pin opens the door and asks here); `onAutoMoveDone` lets the page clear its request.
 export default function HouseholdDetailPanel({
   household,
   campaignId,
   onClose,
   onMovePin,
+  autoMove = false,
+  onAutoMoveDone,
   onDoNotKnockChanged,
   onRestrictChanged,
   statusColors,
@@ -507,6 +515,41 @@ export default function HouseholdDetailPanel({
     enabled: !!h?.id,
   });
   const rounds = activityQ.data?.rounds || [];
+
+  // Move pin: one door, or the units of its street address on its pin. The building move's Save gate uses
+  // sameAddress.unplaced, so it stays off near the spot while ANY of those units has no exact spot — even one
+  // the date filter hides.
+  const sameAddress = activityQ.data?.sameAddress || null;
+  const [askScope, setAskScope] = useState(false);
+  const startMove = () => {
+    if (!onMovePin) return;
+    if (needsScopeQuestion(sameAddress)) {
+      setAskScope(true);
+      return;
+    }
+    onMovePin({ scope: 'unit', count: 1, addressLine1: h.addressLine1, unplaced: !!h.pinSuspect });
+  };
+  const moveBuilding = () => {
+    setAskScope(false);
+    onMovePin({ scope: 'building', count: sameAddress.count, addressLine1: baseAddressOf(h.addressLine1), unplaced: !!sameAddress.unplaced });
+  };
+  const moveUnit = () => {
+    setAskScope(false);
+    onMovePin({ scope: 'unit', count: 1, addressLine1: h.addressLine1, unplaced: !!h.pinSuspect });
+  };
+  // A new door closes the question.
+  useEffect(() => {
+    setAskScope(false);
+  }, [h?.id]);
+  // The page asked for a move on open (a stack row's Move pin): run it once the count is known.
+  const autoRanRef = useRef(null);
+  useEffect(() => {
+    if (!autoMove || !h?.id || activityQ.isLoading || autoRanRef.current === h.id) return;
+    autoRanRef.current = h.id;
+    onAutoMoveDone?.();
+    startMove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMove, h?.id, activityQ.isLoading]);
 
   // Overlap detection — day-agnostic, straight from the already-loaded activity rounds (no
   // extra fetch). Counted EXACTLY like the authoritative /overlap-doors ring so the badge and
@@ -597,29 +640,71 @@ export default function HouseholdDetailPanel({
               {overlapByPass.size > 1 ? 'in the same pass' : 'this pass'}
             </div>
           )}
-          {h.coordSource === 'corrected' ? (
-            <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
-              Pin corrected{h.correctedAt ? ` · ${formatInTz(h.correctedAt, zone, { month: 'short', day: 'numeric' }, false)}` : ''}
-            </div>
-          ) : h.coordConfidence === 'interpolated' && h.locationConfirmedAt ? (
-            // Confirm-in-place (Pin Fixes): still the geocoder's pin, but a person vouched it.
-            <div className="mt-1.5 inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
-              Location confirmed · {formatInTz(h.locationConfirmedAt, zone, { month: 'short', day: 'numeric' }, false)}
-            </div>
-          ) : h.coordConfidence === 'interpolated' ? (
-            <div className="mt-1.5 inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
-              Approximate location
-            </div>
-          ) : null}
+          {(() => {
+            // The pin badge (lib/pinBadges.js: no exact spot > confirmed > corrected > approximate) and the
+            // sentence that explains it, when one applies.
+            const shortDate = (d) => formatInTz(d, zone, { month: 'short', day: 'numeric' }, false);
+            const badge = pinBadge(h);
+            const line = pinLine(h, shortDate);
+            return (
+              <>
+                {badge && (
+                  <div
+                    className={
+                      'mt-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ' +
+                      (badge.tone === 'warning' ? 'bg-warning-tint text-warning-fg' : 'bg-brand-tint text-brand-accent')
+                    }
+                  >
+                    {badge.label}
+                    {badge.at ? ` · ${shortDate(badge.at)}` : ''}
+                  </div>
+                )}
+                {line && <div className="mt-1 text-xs text-fg-muted">{line}</div>}
+              </>
+            );
+          })()}
           {onMovePin && (
             <div className="mt-2">
-              <button
-                type="button"
-                onClick={onMovePin}
-                className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
-              >
-                Move pin →
-              </button>
+              {askScope ? (
+                <div className="rounded-md border border-border bg-sunken p-2">
+                  <div className="text-xs font-semibold text-fg">Move which pins?</div>
+                  <div className="mt-0.5 text-xs text-fg-muted">
+                    {baseAddressOf(h.addressLine1)} has {sameAddress.count.toLocaleString()} units on this map spot.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={moveUnit}
+                      className="rounded-md border border-border-strong bg-card px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken"
+                    >
+                      Just this unit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={moveBuilding}
+                      className="rounded-md bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+                    >
+                      Whole building ({sameAddress.count.toLocaleString()} units)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAskScope(false)}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-fg-muted hover:bg-card"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startMove}
+                  disabled={activityQ.isLoading}
+                  className="rounded-md border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-60"
+                >
+                  Move pin →
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -12,6 +12,9 @@ import { STREET_WORDS as SERVER_STREET_WORDS } from '../src/utils/normalizeAddre
 // 55 isUnitAddress cases and 25 homeKeyOf pairs, checked across the eleven voter files on disk.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const web = await import(path.resolve(here, '../../client/src/lib/streetName.js'));
+// The phone copy (placeholder pins, release 2): the same key decides the canvasser map's homes lists and
+// Fix pin's "Whole building". Self-contained ESM like the web copy.
+const mobile = await import(path.resolve(here, '../../mobile/lib/streetName.js'));
 
 const L1 = (l, e) => [{ addressLine1: l }, e];
 const H = (a1, a2) => ({ addressLine1: a1, addressLine2: a2 });
@@ -139,4 +142,18 @@ test('homeKeyOf: one home across re-spellings; different units and houses stay a
 test('the old unit regex is untouched (packets and the repair script read it)', () => {
   assert.equal(web.UNIT_SUFFIX.source, server.UNIT_SUFFIX.source);
   assert.equal(server.baseAddressOf('1801 Crawford Way Spc 205'), '1801 Crawford Way Spc 205');
+});
+
+test('the phone copy matches the server: the 130-case table, every word list and every street-word probe', () => {
+  for (const [line, want] of cases) assert.equal(mobile.stackBaseOf(line), want, `mobile: ${line}`);
+  assert.deepEqual(mobile.STREET_WORDS, SERVER_STREET_WORDS);
+  for (const k of ['DIRECTIONALS', 'EXTRA_STREET_TYPES', 'WITH_ID', 'GUARDED', 'STANDALONE']) {
+    assert.deepEqual(mobile[k], server[k], k);
+  }
+  for (const word of Object.keys(SERVER_STREET_WORDS)) {
+    const line = `100 Elm ${word} Apt 3`;
+    assert.equal(mobile.stackBaseOf(line), server.stackBaseOf(line), line);
+    assert.deepEqual(mobile.stripUnits(line), server.stripUnits(line), line);
+  }
+  assert.equal(mobile.UNIT_SUFFIX.source, server.UNIT_SUFFIX.source);
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from './buildingMarkers.js';
+import { inBoundsWithMargin, markerSig, markerLabel, diffMarkers, MAX_DOM_MARKERS } from './buildingMarkers.js';
 
 const B = { west: -80.3, south: 26.0, east: -80.1, north: 26.2 }; // 0.2° square
 
@@ -42,4 +42,14 @@ test('diffMarkers: remove gone, create missing, rebuild only on sig change', () 
 
 test('MAX_DOM_MARKERS is a sane ceiling', () => {
   assert.ok(MAX_DOM_MARKERS >= 100 && MAX_DOM_MARKERS <= 1000);
+});
+
+test('markerLabel and the homes glyph: N homes on a spot of different homes, N units on a building', () => {
+  assert.equal(markerLabel({ kind: 'unplaced', count: 5 }), '5 homes');
+  assert.equal(markerLabel({ kind: 'building', count: 12 }), '12 units');
+  assert.equal(markerLabel({ kind: 'unplaced', count: 5, badgeText: '2/5 hit' }), '2/5 hit', 'status mode keeps its badge');
+  assert.equal(markerLabel({ count: 1 }), '1 unit');
+  // The glyph differs, so the kind is part of the signature — and a building's signature is unchanged.
+  assert.equal(markerSig('#f00', null, false, false), markerSig('#f00', null, false, false, 'building'));
+  assert.notEqual(markerSig('#f00', null, false, false), markerSig('#f00', null, false, false, 'unplaced'));
 });

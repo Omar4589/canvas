@@ -4,6 +4,7 @@ import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
 import { saveBootstrap } from './cache';
 import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, ownSurveyedIds, restoreOwnSurveys } from './doorChange';
 import { ACTION_PATHS, addVoterPath, addVoterBody } from './doorPaths';
+import { reconcileLocationResponse } from './deltaFold';
 import { lightColors } from './theme';
 
 // Patch the ['bootstrap'] cache and persist it. The React Query update is
@@ -35,13 +36,21 @@ function setHouseholdStatus(prev, householdId, status) {
 }
 
 // Patch a household's coordinates in the bootstrap cache (pin-correction optimistic move).
-// coords are [lng, lat].
+// coords are [lng, lat]. As the server's real move does, the shared-spot flag and any confirm stamp go with
+// it: a moved home has its own spot, and a vouch described the old one.
 function setHouseholdLocation(prev, householdId, coords) {
   return {
     ...prev,
     households: (prev.households || []).map((h) =>
       String(h._id) === String(householdId)
-        ? { ...h, location: { type: 'Point', coordinates: coords }, coordSource: 'corrected', coordConfidence: null }
+        ? {
+            ...h,
+            location: { type: 'Point', coordinates: coords },
+            coordSource: 'corrected',
+            coordConfidence: null,
+            pinSuspect: null,
+            locationConfirmedAt: null,
+          }
         : h
     ),
   };
@@ -161,7 +170,15 @@ export function reconcilePendingLocations(households) {
       pendingLocations.delete(String(h._id)); // server caught up — stop overlaying
       return h;
     }
-    return { ...h, location: { type: 'Point', coordinates: p.coords }, coordSource: 'corrected', coordConfidence: null };
+    // The same state the optimistic move wrote (setHouseholdLocation): a moved home has its own spot.
+    return {
+      ...h,
+      location: { type: 'Point', coordinates: p.coords },
+      coordSource: 'corrected',
+      coordConfidence: null,
+      pinSuspect: null,
+      locationConfirmedAt: null,
+    };
   });
 }
 
@@ -549,10 +566,9 @@ export function recordLocationCorrection(qc, householdId, { lat, lng, source, ac
     path,
     body: { lat, lng, source, accuracy, scope },
     optimisticPatch: (prev) => setHouseholdLocation(prev, householdId, [lng, lat]),
-    reconcile: (prev, response) => {
-      const coords = response?.household?.location?.coordinates;
-      return coords ? setHouseholdLocation(prev, householdId, coords) : prev;
-    },
+    // The server's pin state wins either way (lib/deltaFold.js): a real move, or — `moved: 0` — the
+    // untouched pin, flag and stamp it answered with.
+    reconcile: (prev, response) => reconcileLocationResponse(prev, householdId, response),
     pending: [], // location overlay is handled by pendingLocations, not the status overlay
     hardFailTitle: 'Pin not saved',
     hardFailMessage: 'Could not move this pin. Please try again.',
@@ -565,6 +581,9 @@ export function recordLocationCorrection(qc, householdId, { lat, lng, source, ac
   // duplicate is not a reject — the first drag's submit still owns the overlay.
   p.then((result) => {
     if (result && !result.ok && !result.queued && !result.duplicate) clearPendingLocation(householdId);
+    // The server moved nothing (the pin was still on its shared spot, or back on the spot a placed home
+    // left): drop the overlay too, or it would hold the optimistic pin over every delta for its TTL.
+    if (result?.ok && result.response?.moved === 0) clearPendingLocation(householdId);
   }).catch(() => {});
   return p;
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildingKeyForCoords, groupHouseholds, buildingLabel, buildingMovePrimary } from './buildings.js';
+import { buildingKeyForCoords, groupHouseholds, buildingLabel, buildingMovePrimary, stackKind, addressGroups } from './buildings.js';
 
 const door = (id, lng, lat, status = 'unknocked', extra = {}) => ({
   id,
@@ -134,4 +134,53 @@ test('buildingMovePrimary: a building is the address holding most of the pin; se
   assert.equal(buildingMovePrimary([at('p', '7 Elm St Apt A'), at('q', '7 Elm St Apt B')]).count, 2);
   assert.equal(buildingMovePrimary([at('z', '1 Solo Rd')]), null);
   assert.equal(buildingMovePrimary(undefined), null);
+});
+
+test('stackKind: different homes on one spot vs a building with a stray', () => {
+  const u = (line1, pinSuspect) => ({ addressLine1: line1, ...(pinSuspect ? { pinSuspect } : {}) });
+  assert.equal(stackKind([u('5016 E Monte Penne Way', 'placeholder'), u('5021 E Monte Penne Way', 'placeholder')]), 'unplaced');
+  // One placeholder member is enough: the spot has no address that holds it.
+  assert.equal(stackKind([u('1 A St'), u('3 B St', 'placeholder')]), 'unplaced');
+  // Every member flagged, even as strays: no building stands there.
+  assert.equal(stackKind([u('1 A St', 'stray'), u('3 B St', 'stray')]), 'unplaced');
+  // A building with one stray on its spot stays a building.
+  assert.equal(stackKind([u('100 Main St Apt 1'), u('100 Main St Apt 2'), u('12 Pine St', 'stray')]), 'building');
+  // No flags at all: a building, exactly as before.
+  assert.equal(stackKind([u('100 Main St Apt 1'), u('100 Main St Apt 2')]), 'building');
+  assert.equal(stackKind([]), 'building');
+});
+
+test('groupHouseholds carries kind and strays; the building header skips its strays', () => {
+  const at = (id, line1, extra = {}) => door(id, -116.0, 36.2, 'unknocked', { addressLine1: line1, ...extra });
+  const { buildings } = groupHouseholds([
+    at('s', '12 Pine St', { pinSuspect: 'stray' }),
+    at('a', '100 Main St Apt 1'),
+    at('b', '100 Main St Apt 2'),
+  ]);
+  assert.equal(buildings[0].kind, 'building');
+  assert.deepEqual(buildings[0].strays.map((u) => u.id), ['s']);
+  assert.equal(buildings[0].addressLine1, '100 Main St Apt 1', 'the header is the first non-stray member');
+  assert.equal(buildings[0].total, 3, 'the stray still counts');
+
+  const homes = groupHouseholds([
+    at('m', '5016 E Monte Penne Way', { pinSuspect: 'placeholder' }),
+    at('n', '5021 E Monte Penne Way', { pinSuspect: 'placeholder' }),
+  ]).buildings[0];
+  assert.equal(homes.kind, 'unplaced');
+  assert.deepEqual(homes.strays, []);
+  assert.equal(buildingLabel(homes), '2 homes at one map spot');
+});
+
+test('addressGroups: one group per street address, streets then house numbers, units in unit order', () => {
+  const u = (id, line1, line2) => ({ id, addressLine1: line1, ...(line2 ? { addressLine2: line2 } : {}) });
+  const groups = addressGroups([
+    u('z', '5021 E Monte Penne Way'),
+    u('b2', '100 Main St', 'Apt 10'),
+    u('b1', '100 Main St', 'Apt 2'),
+    u('y', '5016 E Monte Penne Way'),
+    u('c', '100 Main Street Apt 3'),
+  ]);
+  assert.deepEqual(groups.map((g) => g.address), ['5016 E Monte Penne Way', '5021 E Monte Penne Way', '100 Main St']);
+  assert.deepEqual(groups[2].units.map((x) => x.id), ['c', 'b1', 'b2'], 'the St/Street spellings are one address; Apt 2 before Apt 10');
+  assert.deepEqual(addressGroups(undefined), []);
 });

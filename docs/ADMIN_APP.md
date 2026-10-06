@@ -496,9 +496,10 @@ opens the **response detail**, which now shows an *"Edited by …"* line when an
 
 ### The Map tab's door detail (now at web parity)
 Tapping a house on the mobile admin **Map** opens a bottom sheet that now matches the web console's
-door panel: the **status + address** header (with the pin-provenance chip when one applies — **Pin
-corrected**, **Location confirmed** for a Pin Fixes vouch, or **Approximate location**, in that
-precedence; the map's amber approximate ring likewise skips confirmed doors — [MAPS.md](MAPS.md)),
+door panel: the **status + address** header (with the pin-provenance chip when one applies — **No exact
+map spot** (the home's coordinate is shared with other addresses), **Location confirmed** for a Pin Fixes
+vouch, **Pin corrected**, or **Approximate location**, in that precedence; the map's amber ring marks
+approximate pins and homes with no exact spot, and skips confirmed doors — [MAPS.md](MAPS.md)),
 **Last action**, a **History by pass** list (every round
 the door was worked, so a door knocked in Round 1 *and* Round 2 shows both — the survey line names the
 voter, and it's **de-duped** so a survey never lists twice), its **voters**, and its **surveys** with
@@ -1028,6 +1029,17 @@ device — the badge set, the confirm copy, the error wording — live in
 [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) also hosts the tapped-door **bottom sheet at web
 parity** and the **Overlaps** overlay (Part 1 above). Both reuse the shipped server shapes, so this is
 client-only:
+
+- **A tap on a pin several doors share** (placeholder pins, release 2): every hit counts, and
+  `stackForTap` (`mobile/lib/buildings.js`) gathers every door at the tapped pin's ~1.1 m key from the payload.
+  Two or more open a chooser — "N homes at one map spot" (with the note that these are different homes) or "N
+  doors at this pin" — listing them grouped by street address (`addressGroupsOf`); a row opens that door's
+  sheet. **Move pin** waits for the door's `/activity` and, when its `sameAddress.count` is 2+, asks "Just
+  this unit" or "Whole building (N units)" (Android order via `androidAlertOrder`); the second PATCHes
+  `scope: 'building'`. The move bar refuses to post while the crosshair is still within 1.5 m of an unplaced
+  target's spot (`lib/fixPin.js moveBarNothing`) — *"Nothing moved — drag the map so the crosshair sits on
+  the house."* — keeps that note when the server answers `moved: 0`, and shows *"Moved N units"* (the
+  server's count) for 1.5 s after a building move before it closes. The badge comes from `lib/pinBadge.js`.
 
 - **Door sheet:** lazy-loads `GET /admin/households/:householdId/activity` (the per-round history,
   de-duped server-side to one entry per survey) and `GET /admin/households/:householdId/surveys` (answers

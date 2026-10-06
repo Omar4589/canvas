@@ -5,7 +5,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../api/client.js';
 import { useMapStyle } from '../lib/mapStyles.js';
 import { householdsToGeoJSON, buildingsToGeoJSON, registerLayers } from '../lib/mapRender.js';
-import { groupHouseholds } from '../lib/buildings.js';
+import { groupHouseholds, stackKind } from '../lib/buildings.js';
 import { IconButton } from './ui/index.js';
 import { IconExpand, IconMinimize } from './navIcons.jsx';
 import { formatInTz } from '../lib/datetime.js';
@@ -87,14 +87,16 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
     // layer handlers are keyed by layer ID and keep working across that — the same reason the
     // admin map binds its handlers at init.
     const onPinClick = (e) => {
-      const props = e.features?.[0]?.properties || {};
       // A door carries `id`; a building glyph carries `key` and stands for its whole stack
-      // (mapRender's two feature shapes). Handling only `id` would make every apartment inert.
-      if (props.id) return setSelectedIds([String(props.id)]);
-      if (props.key) {
-        const units = byKeyRef.current.get(props.key)?.units || [];
-        if (units.length) setSelectedIds(units.map((u) => String(u.id)));
+      // (mapRender's two feature shapes). Handling only `id` would make every apartment inert. Every
+      // hit counts, never just features[0]: two houses a metre apart both open.
+      const ids = new Set();
+      for (const f of e.features || []) {
+        const props = f.properties || {};
+        if (props.id) ids.add(String(props.id));
+        else if (props.key) for (const u of byKeyRef.current.get(props.key)?.units || []) ids.add(String(u.id));
       }
+      if (ids.size) setSelectedIds([...ids]);
     };
     const enter = () => { map.getCanvas().style.cursor = 'pointer'; };
     const leave = () => { map.getCanvas().style.cursor = ''; };
@@ -242,6 +244,8 @@ export default function AnswerMiniMap({ campaignId, questionKey, option, optionI
 // Everything here is already in the map payload — no extra fetch on click.
 function DoorCard({ doors, tz, onClose, onOpenResponse }) {
   const many = doors.length > 1;
+  // Different homes that share one map spot (lib/buildings.js stackKind) are not "units at this pin".
+  const homes = many && stackKind(doors) === 'unplaced';
   return (
     <div
       className="absolute right-3 top-3 z-20 w-80 max-w-[calc(100%-1.5rem)] overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
@@ -249,13 +253,15 @@ function DoorCard({ doors, tz, onClose, onOpenResponse }) {
     >
       <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-fg">{doors[0].addressLine1}</div>
+          <div className="truncate text-sm font-medium text-fg">
+            {homes ? `${doors.length} homes at one map spot` : doors[0].addressLine1}
+          </div>
           <div className="truncate text-xs text-fg-muted">
             {doors[0].city}, {doors[0].state} {doors[0].zipCode}
           </div>
           {many && (
             <div className="mt-0.5 text-[11px] font-medium text-brand-accent">
-              {doors.length} units at this pin
+              {homes ? 'Different homes whose coordinate is shared' : `${doors.length} units at this pin`}
             </div>
           )}
         </div>

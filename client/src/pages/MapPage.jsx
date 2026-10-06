@@ -29,7 +29,7 @@ import { STATUS_COLORS, STATUS_LABELS } from '../lib/statusColors.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
-import { groupHouseholds, buildingKeyForCoords } from '../lib/buildings.js';
+import { groupHouseholds, buildingKeyForCoords, stackKind } from '../lib/buildings.js';
 import { visibleMapDoors, countExcludedDoors } from '../lib/excludedDoors.js';
 import MapDoorCount from '../components/MapDoorCount.jsx';
 import { pluralize } from '../lib/mapCounts.js';
@@ -167,6 +167,12 @@ export default function MapPage() {
   // click that hit more than one house. The once-bound layer handlers can't read
   // the memo, so the lookup rides a ref.
   const [stackIds, setStackIds] = useState(null);
+  // Which click opened the list: a glyph (doors on one pin) or a click that hit separate houses a metre
+  // apart (`near`), whose list and Back bar say "near here" instead of "at this pin".
+  const [stackNear, setStackNear] = useState(false);
+  // A stack row's Move pin: the door opens and its panel starts the move once it knows how many units of
+  // the address share the pin (HouseholdDetailPanel autoMove).
+  const [pendingMoveId, setPendingMoveId] = useState(null);
   const buildingsByKeyRef = useRef(new Map());
 
   // "Select doors" mode: lasso (or click) the doors you mean and desk-mark them Restricted
@@ -742,6 +748,7 @@ export default function MapPage() {
       setSelectedActivityId(null);
       if (ids.length > 1) {
         setStackIds(ids);
+        setStackNear(true);
         setSelected(null);
       } else {
         setStackIds(null);
@@ -762,6 +769,7 @@ export default function MapPage() {
         return;
       }
       setStackIds(building.units.map((u) => u.id));
+      setStackNear(false);
       setSelected(null);
       setSelectedActivityId(null);
     });
@@ -901,6 +909,21 @@ export default function MapPage() {
     const g = groupHouseholds(shownHouseholds);
     return { buildings: g.buildings, stackedIds: g.stackedIds, buildingsByKey: g.byKey };
   }, [shownHouseholds]);
+  // Real buildings and spots of different homes (lib/buildings.js stackKind) are counted apart: "12
+  // buildings · 80 stacked doors" must never include houses that only share a vendor's coordinate.
+  const stackCounts = useMemo(() => {
+    const c = { buildingN: 0, buildingDoors: 0, homeSpots: 0, homeDoors: 0 };
+    for (const b of buildings) {
+      if (b.kind === 'unplaced') {
+        c.homeSpots += 1;
+        c.homeDoors += b.total;
+      } else {
+        c.buildingN += 1;
+        c.buildingDoors += b.total;
+      }
+    }
+    return c;
+  }, [buildings]);
   buildingsByKeyRef.current = buildingsByKey;
 
   // Push household features to the map source whenever data changes.
@@ -1484,10 +1507,14 @@ export default function MapPage() {
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
                 <span
-                  title={`Drawn on screen right now: ${buildings.length.toLocaleString()} ${pluralize(buildings.length, 'building')} standing for ${stackedIds.size.toLocaleString()} doors that share a pin with at least one other door. Click a building to see every door in it.`}
+                  title={`Drawn on screen right now: ${stackCounts.buildingN.toLocaleString()} ${pluralize(stackCounts.buildingN, 'building')} standing for ${stackCounts.buildingDoors.toLocaleString()} doors that share a pin${stackCounts.homeDoors ? `, and ${stackCounts.homeDoors.toLocaleString()} different ${pluralize(stackCounts.homeDoors, 'home')} on ${stackCounts.homeSpots.toLocaleString()} shared map ${pluralize(stackCounts.homeSpots, 'spot')} with no exact pin of their own` : ''}. Click one to see every door in it.`}
                   className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-0.5 font-medium text-fg-muted"
                 >
-                  {buildings.length.toLocaleString()} {pluralize(buildings.length, 'building')} · {stackedIds.size.toLocaleString()} stacked {pluralize(stackedIds.size, 'door')}
+                  {stackCounts.buildingN > 0 &&
+                    `${stackCounts.buildingN.toLocaleString()} ${pluralize(stackCounts.buildingN, 'building')} · ${stackCounts.buildingDoors.toLocaleString()} stacked ${pluralize(stackCounts.buildingDoors, 'door')}`}
+                  {stackCounts.buildingN > 0 && stackCounts.homeDoors > 0 && ' · '}
+                  {stackCounts.homeDoors > 0 &&
+                    `${stackCounts.homeDoors.toLocaleString()} ${pluralize(stackCounts.homeDoors, 'home')} without an exact spot`}
                 </span>
               </>
             )}
@@ -1584,8 +1611,9 @@ export default function MapPage() {
             statusColors={STATUS_COLORS}
             statusLabels={STATUS_LABELS}
             notTargetInUse={outcomeInUse(selectedCampaign, 'not_target')}
-            buildingCount={buildings.length}
-            stackedDoorCount={stackedIds.size}
+            buildingCount={stackCounts.buildingN}
+            stackedDoorCount={stackCounts.buildingDoors}
+            homesWithoutSpotCount={stackCounts.homeDoors}
             showCanvasserPins={showCanvasserPins}
             accuracyRingsWithheld={rings.withheld}
             onShowCanvasserPinsChange={setShowCanvasserPins}
@@ -1708,23 +1736,33 @@ export default function MapPage() {
                   }}
                   className="flex w-full items-center gap-1.5 border-b border-border bg-sunken px-4 py-2 text-left text-xs font-medium text-fg-muted hover:text-fg"
                 >
-                  ← Back to all {stackDoors.length.toLocaleString()} doors at this pin
+                  ← Back to all {stackDoors.length.toLocaleString()}{' '}
+                  {stackNear && stackIds
+                    ? 'doors near here'
+                    : stackKind(stackDoors) === 'unplaced'
+                      ? 'homes at this map spot'
+                      : 'doors at this pin'}
                 </button>
               )}
               <HouseholdDetailPanel
                 household={selectedHousehold}
                 campaignId={campaignId}
                 onClose={() => { setSelected(null); setStackIds(null); }}
-                onMovePin={() =>
+                // The panel decides the scope: one door, or — after "Whole building (N units)" — the units of
+                // its street address on its pin (N and `unplaced` from the server's sameAddress).
+                onMovePin={(opts = {}) =>
                   movePin.start({
                     id: selectedHousehold.id,
-                    addressLine1: selectedHousehold.addressLine1,
+                    addressLine1: opts.addressLine1 || selectedHousehold.addressLine1,
                     lng: selectedHousehold.location?.lng,
                     lat: selectedHousehold.location?.lat,
-                    scope: 'unit',
-                    count: 1,
+                    scope: opts.scope === 'building' ? 'building' : 'unit',
+                    count: opts.count || 1,
+                    unplaced: !!opts.unplaced,
                   })
                 }
+                autoMove={pendingMoveId === selectedHousehold.id}
+                onAutoMoveDone={() => setPendingMoveId(null)}
                 // A desk mark / unmark recolors this door: the panel already invalidates the
                 // map + counts keys; the refetch joins that in-flight fetch (react-query
                 // dedupes) so the open panel's snapshot refreshes as soon as it lands.
@@ -1754,8 +1792,14 @@ export default function MapPage() {
             >
               <DoorStackPanel
                 doors={stackDoors}
+                near={stackNear && !!stackIds}
                 selectedId={selected}
                 onSelect={(id) => setSelected(id)}
+                // A home's own Move pin: open it; its panel asks about the address's other units, then arms.
+                onMovePin={(d) => {
+                  setPendingMoveId(d.id);
+                  setSelected(d.id);
+                }}
                 onClose={() => setStackIds(null)}
                 statusColors={STATUS_COLORS}
                 statusLabels={STATUS_LABELS}
@@ -1769,6 +1813,7 @@ export default function MapPage() {
               error={movePin.error}
               saving={movePin.saving}
               onCancel={movePin.cancel}
+              canSave={movePin.canSave}
               onSave={movePin.save}
               style={{ position: 'absolute', right: 16, top: 16, zIndex: 11, width: 320, maxWidth: 'calc(100% - 32px)' }}
             />

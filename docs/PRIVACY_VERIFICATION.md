@@ -2296,6 +2296,16 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     **Assessment: no Privacy Policy / ToS / DPA text edit is required.** **Reopen this item** if lookups
     ever run for homes outside the file being imported, send line 2 or a name, or if `pinPlacement`
     joins a payload, export or report. Owner to confirm before the production deploy, as with items 17-27.
+    *(v6 2026-10-05, release 2 — the maps and phones show it. Said out loud: this touches **who sees
+    what**. Canvassers' phones now receive `pinSuspect` on the doors in their books (bootstrap and every
+    `/mobile/changes` door, effective only — never on a vouched home): a data-quality mark about a pin they
+    already hold, with the address they already see. `/admin/households/map` and the Turf drill add
+    `pinPlaced { at, inPlace, stackSize }` (the date the lookup placed the home, whether it was already on its
+    spot, how many other homes shared the old spot) and `/turfs/doors` adds `pinSuspect`, to the same admin
+    and lead roles that see those pins today; `/admin/households/:id/activity` adds `sameAddress { count,
+    unplaced }`, a count of the door's own address's units. Still no route returns `pinPlacement` or
+    `pinDistrustedKeys`. No new collection, recipient, export, report or link; no published sentence
+    changes. Plan: [PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md).)*
 
 ---
 

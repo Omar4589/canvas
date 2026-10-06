@@ -12,7 +12,7 @@
 // This is grouping, not clustering — the key is the door's actual coordinate, at
 // every zoom, and a building never merges with the building next door.
 
-import { stackBaseOf, baseAddressOf } from './streetName.js';
+import { stackBaseOf, baseAddressOf, streetOf } from './streetName.js';
 
 export const BUILDING_MIN_UNITS = 2;
 
@@ -24,9 +24,23 @@ export function buildingKeyForCoords(lng, lat) {
   return `${Math.round(lat * 1e5)}|${Math.round(lng * 1e5)}`;
 }
 
+// What a stack of doors on one pin is, from each door's effective `pinSuspect` (the payloads send it only
+// while the door has no exact map spot — server/src/services/households/pinState.js pinWireFields):
+//   'unplaced' — different homes that share one map spot: any member is 'placeholder', or every member is
+//                flagged. Drawn as "N homes", never as a building.
+//   'building' — anything else. Its 'stray' members (a different address sitting on the building's spot) are
+//                listed apart, and the building's header address comes from its first non-stray member.
+// The one rule on the web and the phone (docs/PROPOSAL_PLACEHOLDER_PINS.md §J).
+export const stackKind = (units) => {
+  const list = units || [];
+  if (!list.length) return 'building';
+  if (list.some((u) => u.pinSuspect === 'placeholder') || list.every((u) => !!u.pinSuspect)) return 'unplaced';
+  return 'building';
+};
+
 // households: the /admin/households/map shape — { id, location: { lng, lat }, status, … }.
 // Returns:
-//   buildings  — [{ key, lng, lat, units, total, done, touched, roll }] sorted biggest-first
+//   buildings  — [{ key, kind, lng, lat, units, strays, total, done, touched, roll }] sorted biggest-first
 //   stackedIds — Set of household ids that belong to a building (the ones the house
 //                layer must NOT draw, or the building glyph sits on top of hidden pins)
 //   byKey      — Map<key, building> for click lookup
@@ -52,9 +66,14 @@ export function groupHouseholds(households, minUnits = BUILDING_MIN_UNITS) {
       if (u.status && u.status !== 'unknocked') touched += 1;
       stackedIds.add(u.id);
     }
-    const first = units[0];
+    const kind = stackKind(units);
+    // Strays stay in `units`, `total` and the roll-up (every door on the pin is counted); a building's
+    // header comes from its first member that isn't one.
+    const strays = kind === 'building' ? units.filter((u) => u.pinSuspect === 'stray') : [];
+    const first = (kind === 'building' && units.find((u) => u.pinSuspect !== 'stray')) || units[0];
     buildings.push({
       key,
+      kind,
       lng: first.location.lng,
       lat: first.location.lat,
       addressLine1: first.addressLine1,
@@ -62,6 +81,7 @@ export function groupHouseholds(households, minUnits = BUILDING_MIN_UNITS) {
       state: first.state,
       zipCode: first.zipCode,
       units,
+      strays,
       total: units.length,
       done,
       touched,
@@ -78,6 +98,7 @@ export function groupHouseholds(households, minUnits = BUILDING_MIN_UNITS) {
 // in the normal case; if an import disagreed, say so rather than picking one.
 export function buildingLabel(building) {
   if (!building) return '';
+  if (building.kind === 'unplaced') return `${building.total} homes at one map spot`;
   const lines = new Set(building.units.map((u) => (u.addressLine1 || '').trim()).filter(Boolean));
   if (lines.size === 1) return [...lines][0];
   return lines.size > 1 ? `${building.total} doors at one pin` : 'Building';
@@ -106,4 +127,31 @@ export const buildingMovePrimary = (units) => {
     }
   }
   return null;
+};
+
+// The doors on one pin grouped by street address (stackBaseOf), for every list that shows a stack: each
+// group is one home, or one building's units. Groups sort by street, then house number; units inside a group
+// by their unit line, numeric-aware. Returns [{ base, address, units }].
+const houseNumber = (line1) => parseInt(String(line1 || ''), 10) || 0;
+const unitLine = (u) => String(u.addressLine2 || u.addressLine1 || '');
+export const addressGroups = (units) => {
+  const byBase = new Map();
+  for (const u of units || []) {
+    const base = stackBaseOf(u.addressLine1);
+    const list = byBase.get(base);
+    if (list) list.push(u);
+    else byBase.set(base, [u]);
+  }
+  const groups = [...byBase.entries()].map(([base, list]) => ({
+    base,
+    address: baseAddressOf(list[0].addressLine1),
+    units: [...list].sort((a, b) => unitLine(a).localeCompare(unitLine(b), undefined, { numeric: true })),
+  }));
+  groups.sort(
+    (a, b) =>
+      streetOf(a.units[0].addressLine1).localeCompare(streetOf(b.units[0].addressLine1), undefined, { numeric: true }) ||
+      houseNumber(a.units[0].addressLine1) - houseNumber(b.units[0].addressLine1) ||
+      a.address.localeCompare(b.address)
+  );
+  return groups;
 };

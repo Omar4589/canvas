@@ -6,6 +6,8 @@
 // The glyph paths mirror the original BuildingGlyph / BookGlyph SVGs; only the
 // fill is swapped per status. Output is 128x128 PNGs (matching the house-* pins)
 // into assets/icons/. Re-run after a design change:  node scripts/genMarkerIcons.js
+// An optional name filter regenerates only matching sprites, leaving the others' bytes alone:
+//   node scripts/genMarkerIcons.js homes      (just homes-grey/yellow/green)
 //
 // Requires `sharp` (already a dependency).
 
@@ -32,6 +34,16 @@ function buildingSvg(color) {
   </svg>`;
 }
 
+// Two small houses, one behind the other: a spot of DIFFERENT homes that share one map coordinate
+// (lib/buildings.js kind 'unplaced'). Deliberately not the tower: these are separate houses.
+function homesSvg(color) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 24 24">
+    <path d="M2.2 12.6 L7.4 7.4 L12.6 12.6 V20.4 H2.2 Z" fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round" opacity="0.78"/>
+    <path d="M10.2 13.6 L16 7.8 L21.8 13.6 V21.4 H10.2 Z" fill="${color}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round"/>
+    <rect x="14.6" y="16.4" width="2.8" height="5" rx="0.4" fill="#ffffff" opacity="0.92"/>
+  </svg>`;
+}
+
 function bookSvg(color) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 24 24">
     <rect x="4" y="3" width="15.5" height="18" rx="1.8" fill="${color}" stroke="#ffffff" stroke-width="1.4"/>
@@ -48,9 +60,12 @@ async function main() {
   const jobs = [];
   for (const [name, color] of Object.entries(STATUS_COLORS)) {
     jobs.push(['building-' + name, buildingSvg(color)]);
+    jobs.push(['homes-' + name, homesSvg(color)]);
     jobs.push(['book-' + name, bookSvg(color)]);
   }
+  const only = process.argv[2];
   for (const [file, svg] of jobs) {
+    if (only && !file.startsWith(only)) continue;
     const out = path.join(outDir, file + '.png');
     await sharp(Buffer.from(svg)).png().toFile(out);
     console.log('wrote', path.relative(path.join(__dirname, '..'), out));

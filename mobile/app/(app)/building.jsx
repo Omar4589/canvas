@@ -2,7 +2,7 @@ import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { groupBuildings } from '../../lib/buildings';
+import { groupBuildings, homesInOrder } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
 import DirectionsButton from '../../components/DirectionsButton';
 import { radius, spacing } from '../../lib/theme';
@@ -37,6 +37,49 @@ export default function BuildingScreen() {
 
   const quickAction = campaignType === 'lit_drop' ? 'lit_dropped' : 'not_home';
   const quickLabel = campaignType === 'lit_drop' ? 'Lit dropped' : 'Not home';
+  // Different homes that share one map spot (lib/buildings.js kind 'unplaced'): a homes list, each home with
+  // its own Directions — the pin isn't on any of them, so the address is the only way there. A real building
+  // lists its units, and any other address sitting on its spot under "Not part of this building".
+  const homes = building.kind === 'unplaced';
+  const mainUnits = homes ? homesInOrder(building.units) : building.units.filter((u) => u.pinSuspect !== 'stray');
+  const strays = homes ? [] : homesInOrder(building.strays || []);
+  const fullAddress = (u) => [u.addressLine1, u.addressLine2].filter(Boolean).join(' ');
+
+  // One door's card. `ownAddress`: a home that isn't one of the building's units (a home on a shared spot, or
+  // a stray) shows its whole address and its own Directions.
+  const unitCard = (u, ownAddress) => {
+    const voters = (bootstrap?.voters || []).filter((v) => String(v.householdId) === String(u._id));
+    const surveyed = voters.filter((v) => v.surveyStatus === 'surveyed').length;
+    const status = u.status || 'unknocked';
+    return (
+      <View key={u._id} style={styles.unitCard}>
+        <Pressable style={styles.unitMain} onPress={() => router.push(`/(app)/household/${u._id}`)}>
+          <Text style={styles.unitTitle}>{ownAddress ? fullAddress(u) : u.addressLine2 || u.addressLine1}</Text>
+          <View style={styles.unitMetaRow}>
+            <View style={[styles.dot, { backgroundColor: colors.status[status] || colors.textMuted }]} />
+            <Text style={styles.unitMeta}>
+              {colors.statusLabels[status] || 'Unknown'}
+              {campaignType === 'survey' && voters.length ? ` · ${surveyed}/${voters.length} surveyed` : ''}
+            </Text>
+          </View>
+          {ownAddress && <DirectionsButton household={u} style={{ marginTop: spacing.xs }} />}
+        </Pressable>
+        <Pressable
+          onPress={() => onQuick(u)}
+          style={({ pressed }) => [
+            styles.quickBtn,
+            campaignType === 'lit_drop' ? styles.quickLit : styles.quickNotHome,
+            { opacity: pressed ? 0.85 : 1 },
+          ]}
+        >
+          <Text style={styles.quickBtnText}>{quickLabel}</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push(`/(app)/household/${u._id}`)} hitSlop={6} style={styles.chevronWrap}>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
+      </View>
+    );
+  };
 
   // Optimistic-first: the unit's status dot (and the building's done/aggregate)
   // recolor this frame; the GPS stamp + network write run in the background.
@@ -53,53 +96,43 @@ export default function BuildingScreen() {
       </View>
 
       <View style={styles.addressCard}>
-        <Text style={styles.address}>{building.addressLine1}</Text>
-        <Text style={styles.addressSub}>
-          {building.city}, {building.state} {building.zipCode}
-        </Text>
-        <Text style={styles.summary}>
-          {building.total} units · {building.done} done
-        </Text>
-        {/* Whatever the header above shows: groupBuildings copies the first unit's
-            addressLine1, so `addressLine2` (the usual unit) is dropped, but a unit baked
-            into line 1 rides along. Either way both geocode to the same building, and the
-            link matches the address on screen. */}
-        <DirectionsButton household={building} style={{ marginTop: spacing.sm }} />
+        {homes ? (
+          <>
+            <Text style={styles.address}>{building.total} homes — no exact map spot</Text>
+            <Text style={styles.addressSub}>
+              {building.city}, {building.state} {building.zipCode}
+            </Text>
+            <Text style={styles.note}>These homes share one spot on the map. Use each home's Directions.</Text>
+            <Text style={styles.summary}>
+              {building.total} homes · {building.done} done
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.address}>{building.addressLine1}</Text>
+            <Text style={styles.addressSub}>
+              {building.city}, {building.state} {building.zipCode}
+            </Text>
+            <Text style={styles.summary}>
+              {building.total} units · {building.done} done
+            </Text>
+            {/* Whatever the header above shows: groupBuildings copies the first unit's
+                addressLine1 (never a stray's), so `addressLine2` (the usual unit) is dropped, but a
+                unit baked into line 1 rides along. Either way both geocode to the same building, and
+                the link matches the address on screen. */}
+            <DirectionsButton household={building} style={{ marginTop: spacing.sm }} />
+          </>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl + insets.bottom }}>
-        {building.units.map((u) => {
-          const voters = (bootstrap?.voters || []).filter((v) => String(v.householdId) === String(u._id));
-          const surveyed = voters.filter((v) => v.surveyStatus === 'surveyed').length;
-          const status = u.status || 'unknocked';
-          return (
-            <View key={u._id} style={styles.unitCard}>
-              <Pressable style={styles.unitMain} onPress={() => router.push(`/(app)/household/${u._id}`)}>
-                <Text style={styles.unitTitle}>{u.addressLine2 || u.addressLine1}</Text>
-                <View style={styles.unitMetaRow}>
-                  <View style={[styles.dot, { backgroundColor: colors.status[status] || colors.textMuted }]} />
-                  <Text style={styles.unitMeta}>
-                    {colors.statusLabels[status] || 'Unknown'}
-                    {campaignType === 'survey' && voters.length ? ` · ${surveyed}/${voters.length} surveyed` : ''}
-                  </Text>
-                </View>
-              </Pressable>
-              <Pressable
-                onPress={() => onQuick(u)}
-                style={({ pressed }) => [
-                  styles.quickBtn,
-                  campaignType === 'lit_drop' ? styles.quickLit : styles.quickNotHome,
-                  { opacity: pressed ? 0.85 : 1 },
-                ]}
-              >
-                <Text style={styles.quickBtnText}>{quickLabel}</Text>
-              </Pressable>
-              <Pressable onPress={() => router.push(`/(app)/household/${u._id}`)} hitSlop={6} style={styles.chevronWrap}>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
-            </View>
-          );
-        })}
+        {mainUnits.map((u) => unitCard(u, homes))}
+        {strays.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Not part of this building</Text>
+            {strays.map((u) => unitCard(u, true))}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -125,6 +158,8 @@ function makeStyles(t) {
   address: { ...type.h2, fontSize: 18 },
   addressSub: { ...type.caption, marginTop: 2 },
   summary: { ...type.caption, marginTop: spacing.sm, color: colors.textPrimary, fontWeight: '700' },
+  note: { ...type.caption, marginTop: spacing.sm, color: colors.warnFg },
+  sectionLabel: { ...type.caption, marginTop: spacing.md, marginBottom: spacing.sm, fontWeight: '700', color: colors.textSecondary },
   unitCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

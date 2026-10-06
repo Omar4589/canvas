@@ -1,6 +1,8 @@
 # Release 2: homes that share a map spot — the "N homes" marker and lists, and the phone's Fix pin
 
-> **Status: PLAN + DESIGN for the owner's OK, 2026-10-05. Nothing here is built.** Release 1
+> **Status: BUILT 2026-10-05 (uncommitted at time of writing), to this plan and design, which the owner approved
+> the same day ("fix it then lets do release 2"). A server deploy, then the phone update over the air (staging,
+> then production). Where the build differs from the plan is listed in "F. As built", at the end.** Release 1
 > ([PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md)) is deployed. This release is cut
 > from [PROPOSAL_PLACEHOLDER_PINS.md](PROPOSAL_PLACEHOLDER_PINS.md) (revision 7): its Screens 3–8, §J and §K, cited
 > below as "the reference". Only what Release 1's data supports is in; the rest is listed under "Not in this
@@ -285,3 +287,34 @@ address and no-ops a save onto the spot (Release 1). No `CLIENT_API_VERSION` bum
 MAPS.md (the marker, panels, badges, the Map Move pin question), PASSES_AND_TURF.md (the pop-up), CANVASSER_APP.md
 and ADMIN_APP.md (the phone screens), the privacy stamp; Help Center: guides/maps.md, pages/page-map.md,
 pages/page-turf-cutting.md, guides/canvasser-map.md, guides/fix-pin-location.md.
+
+## F. As built (2026-10-05)
+
+Built as planned: A–E. Where the build differs, or adds something the plan didn't name:
+
+1. **The order question resolved itself:** the GPS phone step was already committed (`d2903dc`), so the server,
+   web and phone parts were built together in one clean folder.
+2. **The phone admin map had no stack chooser at all** — a tap opened whichever pin was on top
+   (`e.features[0]`). It now gathers every door at the tapped pin's key (`stackForTap`) and lists them by
+   address (`addressGroupsOf`). The web survey mini-map (`AnswerMiniMap`) likewise reads every hit now.
+3. **A stack row's Move pin on the web Map** opens that door and starts its move once the server's
+   `sameAddress` is known (`HouseholdDetailPanel` `autoMove`), so the "Whole building (N units)" question always
+   uses the server's count. The panel's Move pin waits for that count.
+4. **The phone's pin POST answers `locationConfirmedAt`** as well, so `reconcileLocationResponse` restores the
+   whole pin state after a no-op. The pending-location overlay clears the flag and the stamp the same way the
+   optimistic move does.
+5. **Turf per-home Mark restricted…** asks with a one-line confirm per home; **Unmark** shows only on homes with
+   desk marks.
+6. **Help Center** articles say which phone parts arrive with the app update, because help copy goes live with
+   the server deploy.
+7. **Tests.** Server: `pinWire.int.test.js` (4), the phone copy added to `streetNameDrift.test.js`. Web:
+   `buildings.test.js` (+3), `pinBadges.test.js` (3), `mapRender.test.js` (+1), `buildingMarkers.test.js` (+1),
+   `stackPanelsRender.smoke.test.js` (3). Phone: `buildings.test.js` (6), `listEntries.test.js` (3),
+   `deltaFold.test.js` (+3), `fixPin.test.js` (4), `pinBadge.test.js` (1). **Not covered by automated tests:**
+   the Turf pop-up's render (the component is internal to the page) and the phone screens themselves — their
+   logic lives in the tested `mobile/lib` helpers, the screens were checked by a parse and an undefined-name
+   pass, and they need a run on a test phone in the staging lane before production.
+8. **Verification.** Web 565 of 565 and the build; server unit 477 pass, 0 fail; all 121 database suites, 1,375
+   tests, 0 fail; phone 181 of 181;
+   `npm run ota:check` matched the latest production and staging builds on both platforms (the new PNGs are
+   JavaScript assets).

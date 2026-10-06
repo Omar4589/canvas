@@ -40,3 +40,61 @@ export const changesPath = ({ campaignId, since, doorConfigStamp }) => {
   const stampParam = doorConfigStamp ? `&doorConfigStamp=${encodeURIComponent(doorConfigStamp)}` : '';
   return `/mobile/changes?campaignId=${campaignId}&since=${encodeURIComponent(since)}${stampParam}`;
 };
+
+// The household half of the same fold. A delta door that is archived, fully voted, fully do-not-contact, or
+// whose address asked that nobody come back is DROPPED — that is how a door suppressed mid-shift leaves a
+// running phone (the server bumps updatedAt on every recompute, so the delta always carries it). Otherwise the
+// delta's status, last visit, restricted provenance, confirm stamp and shared-spot flag replace the cached ones
+// — each copied on every fold, because a stale value lies: an absent `pinSuspect` means the home has an exact
+// map spot now — and its pin when the delta carries one. Doors not in the delta are untouched. The pending-
+// action overlays (map.jsx reconcilePendingHouseholds / reconcilePendingLocations) wrap this result.
+export const foldDeltaHouseholds = (prevHouseholds, deltaHouseholds) => {
+  const prev = prevHouseholds || [];
+  const delta = deltaHouseholds || [];
+  if (!delta.length) return prev;
+  const hMap = new Map(delta.map((h) => [String(h._id), h]));
+  return prev
+    .map((h) => {
+      const c = hMap.get(String(h._id));
+      if (!c) return h;
+      if (c.isActive === false || c.fullyVoted === true || c.fullyDnc === true || c.doNotKnock === true) return null;
+      return {
+        ...h,
+        status: c.status,
+        lastActionAt: c.lastActionAt,
+        // Per-round provenance of a Restricted mark ('desk' = the office's).
+        restrictedFrom: c.restrictedFrom ?? null,
+        // A Pin Fixes confirm/undo changes the stamp without moving the pin, and the badge must follow.
+        locationConfirmedAt: c.locationConfirmedAt ?? null,
+        // No exact map spot ('placeholder' | 'stray'), sent only while it is true.
+        pinSuspect: c.pinSuspect ?? null,
+        ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
+      };
+    })
+    .filter(Boolean);
+};
+
+// The reconcile after a pin fix's response (lib/recordAction.js recordLocationCorrection): the server's pin
+// state for that door — the pin, its provenance, the confirm stamp and the shared-spot flag — replaces the
+// optimistic patch in every case. A real move keeps the cleared stamp and flag; a save the server answered
+// with `moved: 0` restores everything it left as it was. Written directly, never through a helper that forces
+// coordConfidence to null, or an "Approximate location" badge would vanish until the next full bootstrap.
+export const reconcileLocationResponse = (prev, householdId, response) => {
+  const h = response?.household;
+  if (!prev || !h?.location?.coordinates) return prev;
+  return {
+    ...prev,
+    households: (prev.households || []).map((x) =>
+      String(x._id) === String(householdId)
+        ? {
+            ...x,
+            location: h.location,
+            coordSource: h.coordSource ?? x.coordSource,
+            coordConfidence: h.coordConfidence ?? null,
+            locationConfirmedAt: h.locationConfirmedAt ?? null,
+            pinSuspect: h.pinSuspect ?? null,
+          }
+        : x
+    ),
+  };
+};

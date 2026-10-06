@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { foldDeltaVoters, changesPath } from './deltaFold.js';
+import { foldDeltaVoters, foldDeltaHouseholds, reconcileLocationResponse, changesPath } from './deltaFold.js';
 
 const V = (_id, householdId, extra = {}) => ({ _id, householdId, fullName: `v${_id}`, ...extra });
 
@@ -77,4 +77,60 @@ test('changesPath encodes since too', () => {
   const path = changesPath({ campaignId: CAMPAIGN, since: SINCE });
   assert.ok(!path.includes(':'), path);
   assert.equal(query(path).get('since'), SINCE);
+});
+
+// ── Households (placeholder pins, release 2) ──
+const H = (_id, extra = {}) => ({ _id, status: 'unknocked', location: { type: 'Point', coordinates: [-116, 36.2] }, coordSource: 'file', coordConfidence: null, ...extra });
+
+test('a delta door folds its status, stamp and shared-spot flag; an absent flag clears it', () => {
+  const prev = [H('a', { pinSuspect: 'placeholder' }), H('b', { pinSuspect: 'stray' }), H('c')];
+  const delta = [
+    // a: a lead moved the pin — the delta carries the new spot and no flag.
+    { _id: 'a', status: 'unknocked', lastActionAt: null, location: { type: 'Point', coordinates: [-116.1, 36.3] }, coordSource: 'corrected', coordConfidence: null },
+    // b: still on the shared spot.
+    { _id: 'b', status: 'not_home', lastActionAt: '2026-10-05T18:00:00Z', pinSuspect: 'stray' },
+  ];
+  const out = foldDeltaHouseholds(prev, delta);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].pinSuspect, null);
+  assert.deepEqual(out[0].location.coordinates, [-116.1, 36.3]);
+  assert.equal(out[0].coordSource, 'corrected');
+  assert.equal(out[1].pinSuspect, 'stray');
+  assert.equal(out[1].status, 'not_home');
+  assert.deepEqual(out[1].location.coordinates, [-116, 36.2], 'no location in the delta: the pin stays');
+  assert.strictEqual(out[2], prev[2], 'a door outside the delta is untouched');
+});
+
+test('a door suppressed mid-shift leaves the phone; an empty delta changes nothing', () => {
+  const prev = [H('a'), H('b'), H('c'), H('d'), H('e')];
+  const out = foldDeltaHouseholds(prev, [
+    { _id: 'a', isActive: false },
+    { _id: 'b', fullyVoted: true },
+    { _id: 'c', fullyDnc: true },
+    { _id: 'd', doNotKnock: true },
+  ]);
+  assert.deepEqual(out.map((h) => h._id), ['e']);
+  assert.strictEqual(foldDeltaHouseholds(prev, []), prev);
+});
+
+test('the pin-fix reconcile: the server state wins, a no-op restores the flag and the stamp', () => {
+  const prev = { households: [H('a', { pinSuspect: null, coordSource: 'corrected', locationConfirmedAt: null }), H('b')] };
+  // Nothing moved: the server answers with the untouched pin, its flag and an approximate geocode.
+  const noop = reconcileLocationResponse(prev, 'a', {
+    moved: 0,
+    household: { _id: 'a', location: { type: 'Point', coordinates: [-116, 36.2] }, coordSource: 'geocodio', coordConfidence: 'interpolated', locationConfirmedAt: null, pinSuspect: 'placeholder' },
+  });
+  assert.equal(noop.households[0].pinSuspect, 'placeholder');
+  assert.equal(noop.households[0].coordSource, 'geocodio');
+  assert.equal(noop.households[0].coordConfidence, 'interpolated', 'an approximate badge survives the reconcile');
+  assert.strictEqual(noop.households[1], prev.households[1]);
+  // A real move: no flag, no stamp.
+  const moved = reconcileLocationResponse(prev, 'a', {
+    moved: 1,
+    household: { _id: 'a', location: { type: 'Point', coordinates: [-116.1, 36.3] }, coordSource: 'corrected', coordConfidence: null, locationConfirmedAt: null },
+  });
+  assert.equal(moved.households[0].pinSuspect, null);
+  assert.deepEqual(moved.households[0].location.coordinates, [-116.1, 36.3]);
+  // No pin in the response: nothing to reconcile.
+  assert.strictEqual(reconcileLocationResponse(prev, 'a', { ok: true }), prev);
 });

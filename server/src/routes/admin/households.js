@@ -23,6 +23,8 @@ import { currentDeskPassForDoor } from '../../services/canvass/deskRestrict.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { farKpiForRows, farVerdictForWire } from '../../services/audit/farKpi.js';
+import { pinWireFields, isPinUnplaced } from '../../services/households/pinState.js';
+import { sameAddressDoors } from '../../services/households/updateHouseholdLocation.js';
 
 const router = Router();
 // Team leads reach the campaign Map (and its household-activity popup), so both routes
@@ -473,7 +475,7 @@ router.get('/map', async (req, res, next) => {
 
     let households = await Household.find(
       mapFilter,
-      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt locationConfirmedAt doNotKnock excludedFromTurf effortId'
+      'addressLine1 addressLine2 city state zipCode location status lastActionAt lastActionBy coordSource coordConfidence correctedAt locationConfirmedAt pinSuspect pinPlacement doNotKnock excludedFromTurf effortId'
     )
       .limit(MAP_HOUSEHOLD_CAP)
       .lean();
@@ -660,6 +662,9 @@ router.get('/map', async (req, res, next) => {
         // Confirm-in-place stamp (Pin Fixes): an interpolated pin a manager vouched for. The
         // ring layers skip these; the detail badge reads "Location confirmed".
         locationConfirmedAt: h.locationConfirmedAt || null,
+        // Shared map spots: pinSuspect while the door has no exact spot, pinPlaced while the address
+        // lookup's placement stands (services/households/pinState.js). Set only when they apply.
+        ...pinWireFields(h),
       };
     });
 
@@ -784,7 +789,10 @@ router.get('/:householdId/activity', async (req, res, next) => {
     const hid = new mongoose.Types.ObjectId(householdId);
     // Loaded for everyone (campaignId + effortId feed `currentPassId` below); the
     // existence / management checks stay lead-only, as before.
-    const hh = await Household.findOne({ _id: hid, organizationId: orgId }, { campaignId: 1, effortId: 1 }).lean();
+    const hh = await Household.findOne(
+      { _id: hid, organizationId: orgId },
+      { campaignId: 1, effortId: 1, location: 1, addressLine1: 1 }
+    ).lean();
     // A lead may only see activity for a household in a campaign they manage.
     if (!isOrgAdmin(req)) {
       if (!hh) return res.status(404).json({ error: 'Household not found' });
@@ -860,7 +868,18 @@ router.get('/:householdId/activity', async (req, res, next) => {
       ? await currentDeskPassForDoor({ campaignId: hh.campaignId, effortId: hh.effortId })
       : null;
 
-    res.json({ rounds, currentPassId: currentPassId ? String(currentPassId) : null });
+    // The units of this door's street address on its pin — exactly the set a scope:'building' move carries
+    // (sameAddressDoors, the server's fan-out). The Map pages ask "Whole building (N units)" from this count,
+    // not from their own date-filtered payload, and keep Save off near the spot while any of them is unplaced.
+    const sameAddress = hh?.location?.coordinates?.length === 2
+      ? await sameAddressDoors({ campaignId: hh.campaignId, location: hh.location, addressLine1: hh.addressLine1 })
+      : [];
+
+    res.json({
+      rounds,
+      currentPassId: currentPassId ? String(currentPassId) : null,
+      sameAddress: { count: sameAddress.length, unplaced: sameAddress.some(isPinUnplaced) },
+    });
   } catch (err) {
     next(err);
   }

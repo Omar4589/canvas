@@ -16,7 +16,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
 import { isOutcomeOn } from '../../../lib/outcomeToggles';
 import { guardedPush } from '../../../lib/navGuard';
-import { buildingKey } from '../../../lib/buildings';
+import { sameAddressSiblings } from '../../../lib/buildings';
+import { pinBadge } from '../../../lib/pinBadge';
 import { loadRoleContext } from '../../../lib/role';
 import FixPinModal from '../../../components/FixPinModal';
 import AddPersonModal from '../../../components/AddPersonModal';
@@ -219,13 +220,13 @@ export default function HouseholdDetail() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const firedRef = useRef(false);
 
-  // Other units sharing this door's pin (for the "just this unit / whole building?" prompt).
-  const myKey = household ? buildingKey(household) : null;
-  const siblingCount = myKey
-    ? (bootstrap?.households || []).filter(
-        (h) => String(h._id) !== String(household._id) && buildingKey(h) === myKey
-      ).length
-    : 0;
+  // Other units of this door's STREET ADDRESS on its pin (for the "just this unit / whole building?" prompt) —
+  // the set the server's "Whole building" moves, never the separate homes that merely share the coordinate.
+  const siblings = household ? sameAddressSiblings(bootstrap?.households, household) : [];
+  const siblingCount = siblings.length;
+  // Fix pin's shared-spot rules apply when this door, or a unit of its address on the spot, has no exact spot.
+  const unplacedHere = !!household?.pinSuspect || siblings.some((h) => !!h.pinSuspect);
+  const badge = pinBadge(household);
 
   if (!household) {
     return (
@@ -317,6 +318,16 @@ export default function HouseholdDetail() {
             {/* Hands the ADDRESS to the canvasser's own maps app — the point is a second
                 opinion on where the house is when our pin looks wrong. */}
             <DirectionsButton household={household} style={{ marginTop: spacing.sm }} />
+            {/* The pin isn't on this house: its coordinate was shared with other addresses, so the
+                address — Directions — is the way there. */}
+            {household.pinSuspect ? (
+              <View style={styles.noSpotCard}>
+                <Text style={styles.noSpotTitle}>⚠ No exact map spot — use Directions.</Text>
+                <Text style={styles.noSpotBody}>
+                  This home's coordinate was shared with other addresses, so its pin isn't on the house.
+                </Text>
+              </View>
+            ) : null}
             {household.lastActionAt && (
               <View style={styles.lastVisitBlock}>
                 <Text style={styles.lastVisitLine}>
@@ -335,14 +346,12 @@ export default function HouseholdDetail() {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm }}>
-          {household.coordSource === 'corrected' ? (
-            <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>● Pin corrected</Text>
-          ) : household.coordConfidence === 'interpolated' && household.locationConfirmedAt ? (
-            /* Confirm-in-place (Pin Fixes). A stale bootstrap cache without the field simply
-               falls through to the approximate badge — fail-open, never a crash. */
-            <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>● Location confirmed</Text>
-          ) : household.coordConfidence === 'interpolated' ? (
-            <Text style={{ color: colors.warnFg, fontSize: 12, fontWeight: '700' }}>● Approximate location</Text>
+          {/* lib/pinBadge.js: no exact map spot > confirmed > corrected > approximate. A stale bootstrap
+              cache without a field simply falls through — fail-open, never a crash. */}
+          {badge ? (
+            <Text style={{ color: badge.tone === 'warning' ? colors.warnFg : colors.brand, fontSize: 12, fontWeight: '700' }}>
+              ● {badge.label}
+            </Text>
           ) : (
             <View />
           )}
@@ -365,6 +374,7 @@ export default function HouseholdDetail() {
             household={household}
             qc={qc}
             siblingCount={siblingCount}
+            unplaced={unplacedHere}
             onClose={() => setShowFixPin(false)}
           />
         )}
@@ -616,6 +626,14 @@ function makeStyles(t) {
   },
   address: { ...type.h2, fontSize: 18 },
   addressSub: { ...type.caption, marginTop: 2 },
+  noSpotCard: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.warnBg,
+  },
+  noSpotTitle: { fontSize: 13, fontWeight: '700', color: colors.warnFg },
+  noSpotBody: { fontSize: 12, marginTop: 2, color: colors.warnFg },
   lastVisitBlock: {
     marginTop: spacing.sm,
     paddingTop: spacing.sm,

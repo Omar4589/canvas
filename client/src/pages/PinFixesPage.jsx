@@ -596,9 +596,10 @@ const PinFixesPage = () => {
             <p className="mt-1 text-xs text-fg-muted">
               These homes need a pin check. Some were placed from the street address (the amber
               rings); others have no exact map spot, because their coordinate was shared with
-              other addresses. Click a pin or a row, then drag it onto the real house, or confirm
-              it if it's already right. Switch the map to <strong>Hybrid</strong> for satellite
-              imagery.
+              other addresses — several at one spot show as one &ldquo;N homes&rdquo; marker, one on
+              its own has an amber ring. Click a pin or a row, then drag it onto the real house, or
+              confirm it if it's already right. Switch the map to <strong>Hybrid</strong> for
+              satellite imagery.
             </p>
             <div className="mt-2 text-sm font-medium text-fg">
               {listQ.isLoading

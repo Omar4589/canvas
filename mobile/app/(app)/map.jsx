@@ -37,10 +37,9 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
-import { foldDeltaVoters, changesPath } from '../../lib/deltaFold';
+import { foldDeltaVoters, foldDeltaHouseholds, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
 import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
-import { distanceToCoords } from '../../lib/geo';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
@@ -55,6 +54,7 @@ import LocationBlockedBanner from '../../components/LocationBlockedBanner';
 import DataHealthBanner from '../../components/DataHealthBanner';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
+import { buildListEntries } from '../../lib/listEntries';
 import { useMapStyle } from '../../lib/mapStyles';
 import MapControlStack from '../../components/MapControlStack';
 import StatusPill from '../../components/StatusPill';
@@ -178,6 +178,8 @@ function buildBuildingFeatureCollection(buildings) {
           status: b.status || 'grey',
           total: b.total,
           done: b.done,
+          // 'unplaced' = different homes sharing one map spot (lib/buildings.js): the homes glyph and label.
+          kind: b.kind || 'building',
         },
         geometry: { type: 'Point', coordinates: b.coordinates },
       })),
@@ -441,9 +443,11 @@ export default function MapScreen() {
     let cancelled = false;
 
     async function setInitialCamera() {
-      const validHouses = scopedHouseholds.filter(
-        (h) => h.location?.coordinates?.length === 2
-      );
+      // Homes with no exact map spot sit on a shared coordinate that can be anywhere in the ZIP; framing
+      // the camera on them would pull it away from the real streets. Left out unless they are all there is.
+      const located = scopedHouseholds.filter((h) => h.location?.coordinates?.length === 2);
+      const placedOnly = located.filter((h) => !h.pinSuspect);
+      const validHouses = placedOnly.length ? placedOnly : located;
       if (!validHouses.length) return;
 
       let minLng = Infinity;
@@ -560,42 +564,13 @@ export default function MapScreen() {
     if (households.length || voters.length) {
       qc.setQueryData(['bootstrap'], (prev) => {
         if (!prev) return prev;
-        const hMap = new Map(households.map((h) => [String(h._id), h]));
         // Hold just-recorded, server-not-yet-confirmed statuses AND pin fixes over
         // the delta so a poll that predates the action can't revert a fresh
-        // optimistic recolor / move. Also apply a server-side location change
-        // (e.g. an admin pin-move) so it reflects live without a full re-bootstrap.
+        // optimistic recolor / move. The fold itself (lib/deltaFold.js foldDeltaHouseholds) applies the
+        // delta — status, provenance, the confirm stamp, the shared-spot flag and a server-side pin move
+        // (e.g. an admin pin-move) live — and drops a door suppressed mid-shift.
         const foldedHouseholds = reconcilePendingLocations(
-          reconcilePendingHouseholds(
-            prev.households
-              .map((h) => {
-                const c = hMap.get(String(h._id));
-                if (!c) return h;
-                // archived, everyone voted, all-DNC, or the address asked that nobody come
-                // back — drop. This is how a door suppressed mid-shift leaves a running app;
-                // the server bumps updatedAt on every recompute so the delta always carries it.
-                if (
-                  c.isActive === false ||
-                  c.fullyVoted === true ||
-                  c.fullyDnc === true ||
-                  c.doNotKnock === true
-                ) return null;
-                return {
-                  ...h,
-                  status: c.status,
-                  lastActionAt: c.lastActionAt,
-                  // Per-round provenance of a Restricted mark ('desk' = the office's). Copied every
-                  // fold — a stale value would let the change confirmation skip a worked door, and
-                  // it is what shows the "Marked restricted by the office" card mid-shift.
-                  restrictedFrom: c.restrictedFrom ?? null,
-                  // Unconditional, not inside the location spread: a Pin Fixes confirm/undo
-                  // changes the stamp without moving the pin, and the badge must follow.
-                  locationConfirmedAt: c.locationConfirmedAt ?? null,
-                  ...(c.location ? { location: c.location, coordSource: c.coordSource, coordConfidence: c.coordConfidence } : {}),
-                };
-              })
-              .filter(Boolean)
-          )
+          reconcilePendingHouseholds(foldDeltaHouseholds(prev.households, households))
         );
         const next = {
           ...prev,
@@ -726,49 +701,11 @@ export default function MapScreen() {
 
   // List-view entries: the SAME scoped/grouped doors as the map, filtered by the
   // active status chip, mapped to normalized entries with a distance-to-me, then
-  // sorted. Buildings show if any unit matches the filter.
+  // sorted (lib/listEntries.js — homes with no exact map spot show no distance and,
+  // under Nearest, sit in their own section). Buildings show if any unit matches the filter.
   const listEntries = useMemo(() => {
     if (viewMode !== 'list') return []; // don't compute while on the map
-    const STATUS_ORDER = { unknocked: 0, not_home: 1, wrong_address: 2, refused: 3, not_target: 4, no_soliciting: 5, restricted: 6, lit_dropped: 7, surveyed: 8 };
-    const matches = (s) => activeFilters.size === 0 || activeFilters.has(s || 'unknocked');
-    const entries = [];
-    for (const h of singles) {
-      if (!matches(h.status)) continue;
-      entries.push({
-        kind: 'single',
-        key: String(h._id),
-        household: h,
-        distanceM: distanceToCoords(userCoords, h.location?.coordinates),
-        _walk: h.walkOrder ?? Infinity,
-        _addr: h.addressLine1 || '',
-        _status: STATUS_ORDER[h.status || 'unknocked'] ?? 9,
-      });
-    }
-    for (const b of buildings) {
-      if (activeFilters.size !== 0 && !b.units.some((u) => activeFilters.has(u.status || 'unknocked'))) continue;
-      entries.push({
-        kind: 'building',
-        key: String(b.key),
-        building: b,
-        distanceM: distanceToCoords(userCoords, b.coordinates),
-        _walk: Math.min(...b.units.map((u) => u.walkOrder ?? Infinity)),
-        _addr: b.addressLine1 || '',
-        _status: 0, // buildings sort to the top of a status sort (mixed)
-      });
-    }
-    const hasUser = Array.isArray(userCoords);
-    entries.sort((a, b) => {
-      if (sortMode === 'nearest' && hasUser) {
-        return (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity);
-      }
-      if (sortMode === 'status') return a._status - b._status || a._walk - b._walk;
-      // Address A→Z (item D16) — numeric-aware so "12 Oak St" sorts before "104 Oak St".
-      if (sortMode === 'address') {
-        return a._addr.localeCompare(b._addr, undefined, { numeric: true, sensitivity: 'base' }) || a._walk - b._walk;
-      }
-      return a._walk - b._walk; // 'walk' (and 'nearest' fallback when no GPS fix)
-    });
-    return entries;
+    return buildListEntries({ singles, buildings, userCoords, activeFilters, sortMode });
   }, [viewMode, singles, buildings, activeFilters, userCoords, sortMode]);
 
   const householdsById = useMemo(() => {
@@ -1000,6 +937,9 @@ export default function MapScreen() {
             'building-grey': require('../../assets/icons/building-grey.png'),
             'building-yellow': require('../../assets/icons/building-yellow.png'),
             'building-green': require('../../assets/icons/building-green.png'),
+            'homes-grey': require('../../assets/icons/homes-grey.png'),
+            'homes-yellow': require('../../assets/icons/homes-yellow.png'),
+            'homes-green': require('../../assets/icons/homes-green.png'),
           }}
         />
         <Mapbox.ShapeSource id="households" shape={features} onPress={onPinPress}>
@@ -1060,12 +1000,13 @@ export default function MapScreen() {
           <Mapbox.SymbolLayer
             id="building-markers"
             style={{
+              // A spot of different homes (kind 'unplaced') draws two small houses and reads "N homes"; a real
+              // building keeps the tower and "N units".
               iconImage: [
-                'match',
-                ['get', 'status'],
-                'green', 'building-green',
-                'yellow', 'building-yellow',
-                'building-grey',
+                'case',
+                ['==', ['get', 'kind'], 'unplaced'],
+                ['match', ['get', 'status'], 'green', 'homes-green', 'yellow', 'homes-yellow', 'homes-grey'],
+                ['match', ['get', 'status'], 'green', 'building-green', 'yellow', 'building-yellow', 'building-grey'],
               ],
               iconSize: [
                 'interpolate',
@@ -1077,7 +1018,13 @@ export default function MapScreen() {
               ],
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
-              textField: '{total} units · {done} done',
+              textField: [
+                'concat',
+                ['to-string', ['get', 'total']],
+                ['case', ['==', ['get', 'kind'], 'unplaced'], ' homes · ', ' units · '],
+                ['to-string', ['get', 'done']],
+                ' done',
+              ],
               textSize: 11,
               textColor: colors.mapLabel,
               textHaloColor: colors.mapLabelHalo,

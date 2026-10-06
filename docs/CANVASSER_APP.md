@@ -144,8 +144,12 @@ the **distance to you**; tap a row to open the door, or use its inline quick-act
 **Lit dropped**) — which recolors instantly and syncs like everywhere else. (On a door that already
 shows a different result this round, the quick-action asks first — see
 [Changing a door's result](#changing-a-doors-result-the-app-asks-first).) Apartment buildings show
-as one row that opens the building's units. Sort the list by **Nearest to me** (uses your GPS),
-**Walk order**, or **Status**. The map stays live underneath, so switching back is instant and the
+as one row that opens the building's units. Homes that **share one map spot** with other addresses (the
+voter file gave them one coordinate, and Doorline couldn't place them) show as one row, **"N homes at one map
+spot"**, with no distance — it would be measured to the shared spot, not the house; a single such home reads
+**No exact map spot** instead of a distance. Sort the list by **Nearest to me** (uses your GPS; those homes go
+in their own **No exact map spot** section at the end), **Walk order**, **Address A–Z** (the homes row files
+under its lowest house number), or **Status**. The map stays live underneath, so switching back is instant and the
 "nearest" sort keeps updating as you move.
 
 ## The houses map
@@ -348,9 +352,16 @@ See [METRICS.md](METRICS.md) for exactly how restricted homes are (and aren't) c
 ### A pin in the wrong place
 
 Sometimes a door's pin sits in the wrong place — an **"Approximate location"** badge on the door detail
-flags the ones most likely to be off, and you'll still see that badge. (Two related badges can appear
-instead: **"Pin corrected"** when someone moved the pin to the right spot, and **"Location confirmed"**
-when an admin checked the approximate spot and vouched it's right without moving it.)
+flags the ones most likely to be off, and you'll still see that badge. (Three related badges can appear
+instead: **"No exact map spot"** when the voter file gave this home the same coordinate as other addresses —
+the door screen then says **"No exact map spot — use Directions."**; **"Pin corrected"** when someone moved
+the pin to the right spot; and **"Location confirmed"** when an admin checked the spot and vouched it's right
+without moving it.)
+
+On the map, several such homes on one spot show as **two small houses, "N homes · N done"** — not an
+apartment building. Tap it for the homes, sorted by street and house number, each with its status, its one-tap
+**Not home** / **Lit dropped** and its own **Directions**. A real building's screen lists any odd address
+sitting on its spot under **Not part of this building**.
 
 **Moving a pin is a team lead / admin job**, so there's no "Fix pin location" button on the canvasser
 screen any more. Tell your lead which door is wrong and they'll move it; everyone picks up the corrected
@@ -365,6 +376,15 @@ Fixes page sends the address to Google — see
 Leads and admins: the affordance is the same screen, reached through **Switch to canvass mode**, plus
 the web Map page's and Turf Cutting page's "Move pin" (the latter from a house or building popup). See
 [MAPS.md](MAPS.md) § "Coordinate provenance & pin correction".
+
+**Fix pin location on a home with no exact map spot** (leads and admins). The map opens on the shared spot and
+moves to your location when it's within about 500 m; **Save** stays off until you drag the pin clearly off the
+spot (more than about 5 ft) or tap **Use my current location** while standing at the house. If your location
+*is* the shared spot, Save stays off and the app says *"You're at this home's map spot. If the home really is
+here, mark it Looks right in Pin Fixes."* If the server moved nothing anyway: *"Nothing moved — the pin is still
+on its old spot."* **"Just this unit / Whole building"** is asked only when other units of the **same street
+address** share the spot, and "Whole building" moves only those units — never the separate homes on the dot.
+On every other door, Fix pin works exactly as before.
 
 ### Taking a survey
 

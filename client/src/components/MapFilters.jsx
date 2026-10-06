@@ -68,6 +68,7 @@ export default function MapFilters({
   // Doors sharing one geocode, drawn as building glyphs. 0 hides the note entirely.
   buildingCount = 0,
   stackedDoorCount = 0,
+  homesWithoutSpotCount = 0,
   showCanvasserPins = false,
   accuracyRingsWithheld = false,
   onShowCanvasserPinsChange,
@@ -423,6 +424,14 @@ export default function MapFilters({
             {buildingCount === 1 ? '' : 's'} on screen hold{' '}
             <strong className="text-fg">{stackedDoorCount.toLocaleString()}</strong> doors on shared pins. Click one to
             see every door in it.
+          </p>
+        )}
+        {/* Different homes that share one map spot (no exact pin of their own) — not a building. */}
+        {homesWithoutSpotCount > 0 && (
+          <p className="mt-2 rounded border border-warning/30 bg-warning-tint px-2 py-1.5 text-[11px] leading-snug text-warning-fg">
+            <strong>{homesWithoutSpotCount.toLocaleString()}</strong> home{homesWithoutSpotCount === 1 ? '' : 's'} on
+            screen {homesWithoutSpotCount === 1 ? 'has' : 'have'} no exact map spot — {homesWithoutSpotCount === 1 ? 'its' : 'their'}{' '}
+            coordinate is shared with other addresses. Click the &ldquo;homes&rdquo; marker to move each one to its house.
           </p>
         )}
       </div>

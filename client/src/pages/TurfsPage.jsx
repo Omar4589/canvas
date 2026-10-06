@@ -22,8 +22,9 @@ import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.js
 import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits } from '../lib/cutMapDoors.js';
 import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { crewCounts } from '../lib/turfCrewCounts.js';
-import { inBoundsWithMargin, markerSig, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
-import { buildingKeyForCoords, buildingMovePrimary } from '../lib/buildings.js';
+import { inBoundsWithMargin, markerSig, markerLabel, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
+import { buildingKeyForCoords, buildingMovePrimary, stackKind, addressGroups } from '../lib/buildings.js';
+import { pinBadge as pinBadgeOf, pinLine } from '../lib/pinBadges.js';
 import { apartmentPreviewCounts, apartmentPreviewLine } from '../lib/apartmentPreview.js';
 import { doorsInRing, snapBuildings, applySelection, planDoorSelection } from '../lib/lassoSelect.js';
 import { useLassoDraw } from '../lib/useLassoDraw.js';
@@ -182,6 +183,8 @@ function groupDoors(doors) {
     const first = units[0];
     buildings.push({
       key,
+      // 'unplaced' = different homes sharing one map spot (lib/buildings.js stackKind, from /doors' pinSuspect).
+      kind: stackKind(units),
       lng: first.lng,
       lat: first.lat,
       turfId: first.turfId,
@@ -199,7 +202,8 @@ function groupDoors(doors) {
 // DOM element for a building marker: an SVG apartment glyph (book-colored) + a
 // "{n} units" badge. A building icon — not a numbered bubble — so it never reads
 // as pin clustering.
-function buildingMarkerEl(total, color, dark, badgeText) {
+// kind 'unplaced' draws two small houses instead — different homes that share one map spot, never a building.
+function buildingMarkerEl(total, color, dark, badgeText, kind = 'building') {
   const el = document.createElement('div');
   el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;';
   // A small 2x2-window building glyph (was 28px + 12 windows) — far less clutter at 100+ markers.
@@ -209,16 +213,21 @@ function buildingMarkerEl(total, color, dark, badgeText) {
     const c = i % 2;
     windows.push(`<rect x="${8.5 + c * 4}" y="${7 + r * 4}" width="2.6" height="2.6" rx="0.5" fill="#fff" opacity="0.92"/>`);
   }
+  const glyph =
+    kind === 'unplaced'
+      ? `<path d="M2.5 12.5 L7.5 7.5 L12.5 12.5 V20 H2.5 Z" fill="${color}" stroke="#fff" stroke-width="1.3" stroke-linejoin="round" opacity="0.8"/>` +
+        `<path d="M10.5 13.5 L16 8 L21.5 13.5 V21 H10.5 Z" fill="${color}" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/>` +
+        `<rect x="14.6" y="16.2" width="2.8" height="4.8" rx="0.4" fill="#fff" opacity="0.92"/>`
+      : `<rect x="6" y="3" width="12" height="18" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` + windows.join('');
   // The "{n} units" badge inverts on dark/satellite basemaps so it stays legible. Hidden by
   // default — the marker effect shows it at zoom ≥ 16 and on hover so it doesn't crowd the map.
   const badgeBg = dark ? '#e5e7eb' : '#111827';
   const badgeFg = dark ? '#111827' : '#fff';
   el.innerHTML =
     `<svg width="18" height="18" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.35))">` +
-    `<rect x="6" y="3" width="12" height="18" rx="1.4" fill="${color}" stroke="#fff" stroke-width="1.4"/>` +
-    windows.join('') +
+    glyph +
     `</svg>` +
-    `<div class="units-badge" style="display:none;margin-top:-3px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${badgeText || `${total} units`}</div>`;
+    `<div class="units-badge" style="display:none;margin-top:-3px;background:${badgeBg};color:${badgeFg};font-size:10px;font-weight:700;line-height:1;padding:2px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.25)">${markerLabel({ kind, count: total, badgeText })}</div>`;
   return el;
 }
 
@@ -1084,20 +1093,25 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
-  // Pin provenance, same badges the Map page panel shows (coordSource / coordConfidence /
-  // locationConfirmedAt ride on the /turfs/household payload). Corrected outranks confirmed
-  // outranks approximate — the same precedence as HouseholdDetailPanel.
-  const pinBadge = hh?.coordSource === 'corrected' ? (
-    <div className="inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
-      Pin corrected{hh.correctedAt ? ` · ${formatInTz(hh.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
-    </div>
-  ) : hh?.coordConfidence === 'interpolated' && hh?.locationConfirmedAt ? (
-    <div className="inline-flex items-center rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
-      Location confirmed
-    </div>
-  ) : hh?.coordConfidence === 'interpolated' ? (
-    <div className="inline-flex items-center rounded bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
-      Approximate location
+  // Pin provenance, the same badge chain and line the Map page panel shows (lib/pinBadges.js: no exact
+  // map spot > confirmed > corrected > approximate), from the /turfs/household payload.
+  const shortDate = (d) => formatInTz(d, tz, { month: 'short', day: 'numeric' }, false);
+  const badge = pinBadgeOf(hh);
+  const line = pinLine(hh, shortDate);
+  const pinBadge = badge || line ? (
+    <div>
+      {badge && (
+        <div
+          className={
+            'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ' +
+            (badge.tone === 'warning' ? 'bg-warning-tint text-warning-fg' : 'bg-brand-tint text-brand-accent')
+          }
+        >
+          {badge.label}
+          {badge.at ? ` · ${shortDate(badge.at)}` : ''}
+        </div>
+      )}
+      {line && <div className="mt-1 text-[11px] text-fg-muted">{line}</div>}
     </div>
   ) : null;
   return (
@@ -1199,7 +1213,10 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
 // `movePlan` (buildingMovePrimary): the street address that holds most of the pin, whose units Move building
 // pin carries — or null on a spot of different homes, where the pop-up says so and points at Pin Fixes,
 // which moves them one at a time (`pinFixesHref`).
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled, movePlan, pinFixesHref }) {
+// On a spot of different homes (building.kind 'unplaced', or no address holding the pin) the pop-up lists each
+// home with its own Move pin (`onMovePinDoor(unit, { scope, count, addressLine1, unplaced })`), Mark restricted… and
+// Move to book…; units of one address are grouped with "Move these N units"; there is no Move building pin.
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, onMovePinDoor, moveDisabled, movePlan, pinFixesHref }) {
   // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
   // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
   // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
@@ -1209,7 +1226,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
   const [confirmMark, setConfirmMark] = useState(false);
   if (!building) return null;
   const { addressLine1, city, state, zipCode, units, total } = building;
-  const separateHomes = !movePlan;
+  const separateHomes = building.kind === 'unplaced' || !movePlan;
   const restrictedN = units.filter((u) => u.passStatus === 'restricted').length;
   const completedN = units.filter((u) => COMPLETED_STATUSES.has(u.passStatus)).length;
   const markableN = Math.max(0, total - restrictedN - completedN);
@@ -1226,7 +1243,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
             <span aria-hidden>🏢</span>
-            <span className="truncate">{movePlan ? movePlan.address : separateHomes ? `${total} homes at one map spot` : addressLine1 || 'Apartment building'}</span>
+            <span className="truncate">{separateHomes ? `${total} homes at one map spot` : movePlan ? movePlan.address : addressLine1 || 'Apartment building'}</span>
           </div>
           <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
           {separateHomes ? (
@@ -1257,7 +1274,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
           disabled={moving}
           className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
         >
-          <option value="">{moving ? 'Moving…' : 'Move all units to book…'}</option>
+          <option value="">{moving ? 'Moving…' : separateHomes ? 'Move all to book…' : 'Move all units to book…'}</option>
           {books.map((t) => (
             <option key={t._id} value={t._id}>{t.name}</option>
           ))}
@@ -1273,13 +1290,15 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
             onClick={() => setConfirmMark(true)}
             className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
           >
-            Mark building restricted… ({markableN} unit{markableN === 1 ? '' : 's'})
+            {separateHomes
+              ? `Mark all ${markableN} restricted…`
+              : `Mark building restricted… (${markableN} unit${markableN === 1 ? '' : 's'})`}
           </button>
         ) : (
           <>
             <p className="text-[11px] text-fg-muted">
-              Marks every unit not yet done this round ({markableN}) — including units the crew already reached;
-              completed and already-restricted units are skipped.
+              Marks every {separateHomes ? 'home' : 'unit'} not yet done this round ({markableN}) — including{' '}
+              {separateHomes ? 'homes' : 'units'} the crew already reached; completed and already-restricted ones are skipped.
             </p>
             <div className="mt-1.5 flex gap-1.5">
               <button
@@ -1347,46 +1366,161 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         </div>
       )}
 
-      <div className="mt-2 border-t border-border pt-2">
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Units</div>
-        <ul className="max-h-56 space-y-1 overflow-auto">
-          {units.map((u) => {
-            const book = u.turfId ? books.find((t) => String(t._id) === String(u.turfId)) : null;
-            const color = u.turfId ? colorByTurf.get(String(u.turfId)) : null;
-            return (
-              <li key={u.id} className="rounded border border-border p-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {/* Slate dot = Restricted this round (desk or field), so the building's
-                        count above can be seen unit by unit. */}
-                    {u.passStatus === 'restricted' && (
-                      <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS.restricted }} title="Restricted this round" />
+      {separateHomes ? (
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Homes</div>
+          <ul className="max-h-64 space-y-1.5 overflow-auto">
+            {addressGroups(units).map((g) => (
+              <li key={g.base} className="rounded border border-border p-1.5">
+                {g.units.length > 1 && (
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-semibold text-fg">
+                      {g.address} · {g.units.length} units
+                    </span>
+                    {onMovePinDoor && (
+                      <button
+                        type="button"
+                        disabled={moveDisabled}
+                        onClick={() =>
+                          onMovePinDoor(g.units[0], {
+                            scope: 'building',
+                            count: g.units.length,
+                            addressLine1: g.address,
+                            // Save stays off near the spot while any of these units has no exact spot.
+                            unplaced: g.units.some((x) => !!x.pinSuspect),
+                          })
+                        }
+                        className="shrink-0 rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                      >
+                        Move these {g.units.length} units
+                      </button>
                     )}
-                    <span className="truncate text-sm font-medium text-fg">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1">
-                    {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
-                    <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
-                  </span>
-                </div>
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
-                  disabled={moving}
-                  className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
-                >
-                  <option value="">Move to book…</option>
-                  {books
-                    .filter((t) => String(t._id) !== String(u.turfId))
-                    .map((t) => (
-                      <option key={t._id} value={t._id}>{t.name}</option>
-                    ))}
-                </select>
+                  </div>
+                )}
+                {g.units.map((u) => {
+                  const book = u.turfId ? books.find((t) => String(t._id) === String(u.turfId)) : null;
+                  const color = u.turfId ? colorByTurf.get(String(u.turfId)) : null;
+                  const label =
+                    g.units.length > 1
+                      ? u.addressLine2 || u.addressLine1 || 'Unit'
+                      : [u.addressLine1, u.addressLine2].filter(Boolean).join(' ') || 'Home';
+                  const markable = u.passStatus !== 'restricted' && !COMPLETED_STATUSES.has(u.passStatus);
+                  return (
+                    <div key={u.id} className={g.units.length > 1 ? 'mt-1 border-t border-border pt-1' : ''}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {u.passStatus === 'restricted' && (
+                            <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS.restricted }} title="Restricted this round" />
+                          )}
+                          <span className="truncate text-sm font-medium text-fg">{label}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1">
+                          {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
+                          <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {onMovePinDoor && (
+                          <button
+                            type="button"
+                            disabled={moveDisabled}
+                            onClick={() =>
+                              onMovePinDoor(u, { scope: 'unit', count: 1, addressLine1: u.addressLine1, unplaced: !!u.pinSuspect })
+                            }
+                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                          >
+                            Move pin
+                          </button>
+                        )}
+                        {markable && (
+                          <button
+                            type="button"
+                            disabled={restrictPending}
+                            onClick={() => {
+                              if (window.confirm(`Mark ${label} restricted this round?`)) onRestrict([u.id]);
+                            }}
+                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                          >
+                            Mark restricted…
+                          </button>
+                        )}
+                        {(u.deskMarks || 0) > 0 && (
+                          <button
+                            type="button"
+                            disabled={restrictPending}
+                            onClick={() => {
+                              if (window.confirm(`Remove the desk mark from ${label}? Marks canvassers recorded at the door are kept.`)) {
+                                onUnrestrict([u.id]);
+                              }
+                            }}
+                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                          >
+                            Unmark
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
+                        disabled={moving}
+                        className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+                      >
+                        <option value="">Move to book…</option>
+                        {books
+                          .filter((t) => String(t._id) !== String(u.turfId))
+                          .map((t) => (
+                            <option key={t._id} value={t._id}>{t.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                  );
+                })}
               </li>
-            );
-          })}
-        </ul>
-      </div>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Units</div>
+          <ul className="max-h-56 space-y-1 overflow-auto">
+            {units.map((u) => {
+              const book = u.turfId ? books.find((t) => String(t._id) === String(u.turfId)) : null;
+              const color = u.turfId ? colorByTurf.get(String(u.turfId)) : null;
+              return (
+                <li key={u.id} className="rounded border border-border p-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/* Slate dot = Restricted this round (desk or field), so the building's
+                          count above can be seen unit by unit. */}
+                      {u.passStatus === 'restricted' && (
+                        <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS.restricted }} title="Restricted this round" />
+                      )}
+                      <span className="truncate text-sm font-medium text-fg">{u.addressLine2 || u.addressLine1 || 'Unit'}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {color && <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />}
+                      <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
+                    </span>
+                  </div>
+                  <select
+                    value=""
+                    onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
+                    disabled={moving}
+                    className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+                  >
+                    <option value="">Move to book…</option>
+                    {books
+                      .filter((t) => String(t._id) !== String(u.turfId))
+                      .map((t) => (
+                        <option key={t._id} value={t._id}>{t.name}</option>
+                      ))}
+                  </select>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -2782,7 +2916,7 @@ export default function TurfsPage() {
         : 0;
       const badgeText = statusMode ? (offLimits ? offLimitsStackBadge(b.units, b.total) : `${hit}/${b.total} hit`) : null;
       const dimmed = !!(targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id))));
-      wanted.set(b.key, { b, color, badgeText, dimmed, sig: markerSig(color, badgeText, dimmed, darkBase) });
+      wanted.set(b.key, { b, color, badgeText, dimmed, sig: markerSig(color, badgeText, dimmed, darkBase, b.kind) });
     }
     if (wanted.size > MAX_DOM_MARKERS) {
       removeAll();
@@ -2800,7 +2934,7 @@ export default function TurfsPage() {
       const prev = current.get(key);
       if (prev) { prev.marker.remove(); current.delete(key); }
       const { b, color, badgeText, dimmed } = wanted.get(key);
-      const el = buildingMarkerEl(b.total, color, darkBase, badgeText);
+      const el = buildingMarkerEl(b.total, color, darkBase, badgeText, b.kind);
       // Live target preview: dim a building unless one of its units is targeted.
       if (dimmed) el.style.opacity = '0.2';
       const badge = el.querySelector('.units-badge');
@@ -3821,6 +3955,8 @@ export default function TurfsPage() {
                       lat: popupDoor.lat,
                       scope: 'unit',
                       count: 1,
+                      // No exact map spot: Save stays off until the pin is clearly off the shared spot.
+                      unplaced: !!(householdQ.data?.household?.pinSuspect || popupDoor.pinSuspect),
                     })
                   : undefined
               }
@@ -3848,8 +3984,22 @@ export default function TurfsPage() {
               // points at Pin Fixes instead. The toast count comes back as res.moved.
               movePlan={popupMovePlan}
               pinFixesHref={campaignId ? `/campaigns/${campaignId}/pin-fixes` : null}
+              onMovePinDoor={
+                selected?.isActive !== false
+                  ? (u, opts) =>
+                      beginMovePin({
+                        id: String(u.id),
+                        addressLine1: opts.addressLine1 || u.addressLine1,
+                        lng: popupBuilding.lng,
+                        lat: popupBuilding.lat,
+                        scope: opts.scope === 'building' ? 'building' : 'unit',
+                        count: opts.count || 1,
+                        unplaced: !!opts.unplaced,
+                      })
+                  : undefined
+              }
               onMovePin={
-                selected?.isActive !== false && popupMovePlan
+                selected?.isActive !== false && popupMovePlan && popupBuilding.kind !== 'unplaced'
                   ? () =>
                       beginMovePin({
                         id: String(popupMovePlan.primary.id),
@@ -3869,6 +4019,7 @@ export default function TurfsPage() {
               copy={movePin.copy}
               error={movePin.error}
               saving={movePin.saving}
+              canSave={movePin.canSave}
               onCancel={movePin.cancel}
               onSave={movePin.save}
               className="absolute right-3 top-3 z-10 w-72"

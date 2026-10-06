@@ -407,6 +407,11 @@ answering *"how is this round going?"* — without leaving the page.
   answered — so a book of only those doors reads **Completed**, never Restricted.
 - **Click a house** for its status, who knocked it, when, and any survey answers recorded there this
   round, alongside the usual "move to another book".
+- **A dot of different homes** — houses a voter file gave one coordinate, which Doorline couldn't place —
+  draws as **two small houses, "N homes"**, never the building tower. Its pop-up reads **"N homes at one map
+  spot"** and lists each home with its own **Move pin**, **Mark restricted…** and **Move to book…**; the units
+  of any one address are grouped with **Move these N units**; and the spot has **Move all to book…** and
+  **Mark all N restricted…** — but no Move building pin, because these aren't one building.
 - **Apartment buildings** show `5/12 hit` instead of `12 units` once the round is underway. A building
   whose units are **all** restricted or no-soliciting instead paints slate (pink when it is all
   no-soliciting) and its badge names the state — `12 restricted`, never `12/12 hit`: every unit has an

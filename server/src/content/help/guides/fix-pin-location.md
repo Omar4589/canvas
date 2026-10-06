@@ -48,8 +48,15 @@ then drag the pin onto their own house to make the flag look innocent.
   dot not in any book.
 
 If the address shares a pin with other units — an apartment building — you'll be asked whether to move
-**just this unit** or the **whole building**. "Whole building" means the units of that one address:
-separate houses that merely share the dot are never moved along with it.
+**just this unit** or the **whole building** (on the web Map page: **"Whole building (N units)"**, counting every
+unit of that address). "Whole building" means the units of that one address: separate houses that merely
+share the dot are never moved along with it.
+
+**A home with "No exact map spot"** (its coordinate was shared with other addresses). On the phone (after the
+app update), **Fix pin location** opens on the shared spot and moves to where you are if you're close by; **Save** waits until you
+drag the pin clearly off the spot or tap **Use my current location** at the house. If you're standing right on
+the shared spot it tells you so — if the home really is there, mark it **Looks right** in Pin Fixes instead.
+On the web, **Save** works the same way. Either way, if nothing moved you're told so.
 
 ## What it changes, and what it doesn't
 

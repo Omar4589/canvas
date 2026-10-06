@@ -9,6 +9,7 @@ import {
   ScrollView,
   Modal,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
@@ -32,6 +33,10 @@ import DateRangePickerModal from '../../../components/DateRangePickerModal';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
 import DirectionsButton from '../../../components/DirectionsButton';
+import { stackForTap, addressGroupsOf, stackKind } from '../../../lib/buildings';
+import { pinBadge } from '../../../lib/pinBadge';
+import { moveBarNothing } from '../../../lib/fixPin';
+import { androidAlertOrder } from '../../../lib/mapsLinks';
 import { primaryReason, reasonColor, FAR_WARN_M } from '../../../lib/flags';
 import { postBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
 import { doorMarkState, describeMarkDoorResult, describeUnmarkDoorResult, deskMarkErrorMessage } from '../../../lib/restrictBooks';
@@ -117,6 +122,8 @@ function householdsToFeatures(households) {
           // Confirm-in-place vouch (Pin Fixes): a confirmed interpolated pin stops ringing.
           // Boolean-stamped so an older server payload without the field reads plain false.
           locationConfirmed: h.locationConfirmedAt ? true : false,
+          // No exact map spot (sent only while true): rings amber too.
+          pinSuspect: h.pinSuspect || '',
         },
         geometry: {
           type: 'Point',
@@ -294,7 +301,12 @@ export default function AdminMap() {
   useEffect(() => () => clearTimeout(bulkFlashTimer.current), []);
   const [mapNotice, setMapNotice] = useState(null); // brief bottom toast (e.g. door has no location)
   const mapNoticeTimer = useRef(null);
-  const [moveTarget, setMoveTarget] = useState(null); // household being repositioned
+  const [moveTarget, setMoveTarget] = useState(null); // household being repositioned, + { scope, count, unplaced }
+  // The move bar's own line: "Nothing moved — …" (stays open) or "Moved N units" (closes a beat later).
+  const [moveNote, setMoveNote] = useState(null);
+  const moveDoneTimer = useRef(null);
+  // A tap on a pin several doors share: the chooser lists them, grouped by street address.
+  const [stackChoice, setStackChoice] = useState(null);
 
   // Deep-link scope (from a walk list / pass / import "view on map" link) — seeded once
   // from the route params, clearable in the UI.
@@ -983,11 +995,28 @@ export default function AdminMap() {
   // Move-pin: PATCH the door's location, then refetch the map. Mirrors the web endpoint
   // (scope defaults to 'unit' server-side).
   const moveMut = useMutation({
-    mutationFn: ({ id, lat, lng }) =>
-      api(`/admin/campaigns/${cId}/households/${id}/location`, { method: 'PATCH', body: { lat, lng } }),
-    onSuccess: () => {
-      setMoveTarget(null);
+    mutationFn: ({ id, lat, lng, scope = 'unit' }) =>
+      api(`/admin/campaigns/${cId}/households/${id}/location`, { method: 'PATCH', body: { lat, lng, scope } }),
+    onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ['admin', 'households', 'map'] });
+      // The server moved nothing (the crosshair was still on a shared spot): the bar stays open and says so.
+      if (res?.moved === 0) {
+        setMoveNote('Nothing moved — drag the map so the crosshair sits on the house.');
+        return;
+      }
+      if (vars?.scope === 'building') {
+        // Say how many the server moved before the bar closes.
+        const n = Number(res?.moved) || 0;
+        setMoveNote(`Moved ${n} ${n === 1 ? 'unit' : 'units'}`);
+        clearTimeout(moveDoneTimer.current);
+        moveDoneTimer.current = setTimeout(() => {
+          setMoveTarget(null);
+          setMoveNote(null);
+        }, 1500);
+        return;
+      }
+      setMoveTarget(null);
+      setMoveNote(null);
     },
   });
 
@@ -1097,12 +1126,17 @@ export default function AdminMap() {
   // Enter move mode: close the sheet and center the camera tightly on the door so the
   // fixed screen crosshair starts right on top of it. The user then drags the map to
   // reposition the crosshair, and Save reads the map center.
-  function enterMoveMode(h) {
+  // opts: { scope, count, unplaced } — the door alone, or (after "Whole building (N units)") the units of its
+  // street address on its pin, with the server's own count and whether any of them has no exact map spot.
+  function enterMoveMode(h, opts = {}) {
     setSelected(null);
     setSelectedPing(null);
     setOpenMenu(null);
+    setStackChoice(null);
     moveMut.reset();
-    setMoveTarget(h);
+    clearTimeout(moveDoneTimer.current);
+    setMoveNote(null);
+    setMoveTarget({ ...h, scope: opts.scope === 'building' ? 'building' : 'unit', count: opts.count || 1, unplaced: !!opts.unplaced });
     if (h?.location != null) {
       cameraRef.current?.setCamera({
         centerCoordinate: [h.location.lng, h.location.lat],
@@ -1121,21 +1155,55 @@ export default function AdminMap() {
       return;
     }
     if (!Array.isArray(center) || center.length < 2) return;
-    moveMut.mutate({ id: moveTarget.id, lng: center[0], lat: center[1] });
+    // A home with no exact spot (or a whole-building move over one): the crosshair still on the shared spot
+    // would move nothing — say so and post nothing (lib/fixPin.js).
+    const spot = moveTarget.location ? [moveTarget.location.lng, moveTarget.location.lat] : null;
+    if (moveBarNothing({ unplaced: moveTarget.unplaced, spot, center })) {
+      setMoveNote('Nothing moved — drag the map so the crosshair sits on the house.');
+      return;
+    }
+    setMoveNote(null);
+    moveMut.mutate({ id: moveTarget.id, lng: center[0], lat: center[1], scope: moveTarget.scope });
   }
 
+  // Move pin from a door sheet. When other units of the door's street address share its pin (the activity
+  // route's `sameAddress` — the server's count, because this map's date filter shows only some doors), ask
+  // first; Android's three slots get Cancel first and the rows reversed (lib/mapsLinks.js androidAlertOrder).
+  function startMove(h) {
+    const same = hhActivityQ.data?.sameAddress;
+    if (!same || same.count < 2) {
+      enterMoveMode(h, { scope: 'unit', count: 1, unplaced: !!h.pinSuspect });
+      return;
+    }
+    const rows = [
+      { text: 'Just this unit', onPress: () => enterMoveMode(h, { scope: 'unit', count: 1, unplaced: !!h.pinSuspect }) },
+      { text: `Whole building (${same.count} units)`, onPress: () => enterMoveMode(h, { scope: 'building', count: same.count, unplaced: !!same.unplaced }) },
+    ];
+    Alert.alert(
+      'Move which pins?',
+      `This address has ${same.count} units on this map spot.`,
+      Platform.OS === 'android' ? [{ text: 'Cancel', style: 'cancel' }, ...androidAlertOrder(rows)] : [...rows, { text: 'Cancel', style: 'cancel' }]
+    );
+  }
+
+  // Every hit counts, never just features[0]: the doors at the tapped pin's key open a chooser when there
+  // are 2+ (lib/buildings.js stackForTap — from the payload, so a door under another icon isn't lost).
   const onPinPress = useCallback(
     (e) => {
       if (moveTarget) return;
-      const f = e.features?.[0];
-      if (!f) return;
-      const h = householdsById.get(String(f.properties?.id));
-      if (h) {
-        setSelectedPing(null);
-        setSelected(h);
+      const ids = (e.features || []).map((f) => f.properties?.id).filter(Boolean);
+      const hit = stackForTap(households, ids);
+      if (!hit) return;
+      setSelectedPing(null);
+      if (hit.stack) {
+        setSelected(null);
+        setStackChoice(hit.stack);
+      } else {
+        setStackChoice(null);
+        setSelected(hit.door);
       }
     },
-    [householdsById, moveTarget]
+    [households, moveTarget]
   );
 
   const onPingPress = useCallback(
@@ -1168,6 +1236,7 @@ export default function AdminMap() {
   useEffect(() => () => {
     clearTimeout(flagFlashTimer.current);
     clearTimeout(mapNoticeTimer.current);
+    clearTimeout(moveDoneTimer.current);
   }, []);
   function onFlagReviewed(review) {
     const status = review?.status || 'updated';
@@ -1378,7 +1447,11 @@ export default function AdminMap() {
               a missing flag reading as unconfirmed. */}
           <Mapbox.CircleLayer
             id="admin-approx-ring"
-            filter={['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!', ['to-boolean', ['get', 'locationConfirmed']]]]}
+            filter={[
+              'any',
+              ['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!', ['to-boolean', ['get', 'locationConfirmed']]]],
+              ['to-boolean', ['get', 'pinSuspect']],
+            ]}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13, 17, 18],
               circleColor: 'rgba(0,0,0,0)',
@@ -1905,16 +1978,22 @@ export default function AdminMap() {
           <SafeAreaView edges={['bottom']} style={styles.moveBar}>
             <Text style={styles.moveTitle}>Move pin</Text>
             <Text style={styles.moveSub} numberOfLines={2}>
-              Drag the map so the crosshair sits on {moveTarget.addressLine1}, then save.
+              Drag the map so the crosshair sits on {moveTarget.addressLine1}
+              {moveTarget.scope === 'building' ? ` (all ${moveTarget.count} units)` : ''}, then save.
             </Text>
             {moveMut.isError && (
               <Text style={styles.moveErr}>
                 {moveMut.error?.message || 'Could not move the pin.'}
               </Text>
             )}
+            {moveNote ? <Text style={styles.moveNote}>{moveNote}</Text> : null}
             <View style={styles.moveBtnRow}>
               <Pressable
-                onPress={() => setMoveTarget(null)}
+                onPress={() => {
+                  clearTimeout(moveDoneTimer.current);
+                  setMoveNote(null);
+                  setMoveTarget(null);
+                }}
                 disabled={moveMut.isPending}
                 style={[styles.closeButton, { flex: 1, marginRight: 6, marginTop: 0 }]}
               >
@@ -1945,6 +2024,54 @@ export default function AdminMap() {
         />
       )}
 
+      {/* The doors at one tapped pin: different homes on a shared map spot, or a building's units. Grouped by
+          street address; a row opens that door's sheet. */}
+      {stackChoice && !selected && !moveTarget && (
+        <SafeAreaView edges={['bottom']} style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.chooserTitle}>
+                {stackKind(stackChoice) === 'unplaced'
+                  ? `${stackChoice.length} homes at one map spot`
+                  : `${stackChoice.length} doors at this pin`}
+              </Text>
+              {stackKind(stackChoice) === 'unplaced' ? (
+                <Text style={styles.chooserNote}>
+                  These are different homes that share one map spot. Pick one to move its pin to its house.
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <ScrollView style={{ maxHeight: 320 }}>
+            {addressGroupsOf(stackChoice).map((g) => (
+              <View key={g.base}>
+                {g.units.length > 1 ? <Text style={styles.chooserGroup}>{g.address}</Text> : null}
+                {g.units.map((u) => (
+                  <Pressable
+                    key={u.id}
+                    onPress={() => {
+                      setStackChoice(null);
+                      setSelected(u);
+                    }}
+                    style={styles.chooserRow}
+                  >
+                    <View style={[styles.statusDot, { backgroundColor: colors.status[u.status] || colors.textMuted }]} />
+                    <Text style={styles.chooserRowText} numberOfLines={1}>
+                      {g.units.length > 1 ? u.addressLine2 || u.addressLine1 : [u.addressLine1, u.addressLine2].filter(Boolean).join(' ')}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 20 }}>›</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+          </ScrollView>
+          <Pressable onPress={() => setStackChoice(null)} style={[styles.closeButton, { marginBottom: spacing.sm }]}>
+            <Text style={styles.closeButtonText}>Close</Text>
+          </Pressable>
+        </SafeAreaView>
+      )}
+
       {selected && (
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
           <View style={styles.sheetHandle} />
@@ -1957,17 +2084,19 @@ export default function AdminMap() {
               <Text style={styles.sheetSub}>
                 {selected.city}, {selected.state} {selected.zipCode}
               </Text>
-              {selected.coordSource === 'corrected' ? (
-                <Text style={styles.coordChipCorrected}>
-                  ● Pin corrected
-                  {selected.correctedAt ? ` · ${formatInTz(selected.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}` : ''}
-                </Text>
-              ) : selected.coordConfidence === 'interpolated' && selected.locationConfirmedAt ? (
-                /* Confirm-in-place (Pin Fixes): the geocoder's pin, vouched by a person. */
-                <Text style={styles.coordChipCorrected}>● Location confirmed</Text>
-              ) : selected.coordConfidence === 'interpolated' ? (
-                <Text style={styles.coordChipApprox}>● Approximate location</Text>
-              ) : null}
+              {/* lib/pinBadge.js: no exact map spot > confirmed > corrected > approximate. */}
+              {(() => {
+                const badge = pinBadge(selected);
+                if (!badge) return null;
+                return (
+                  <Text style={badge.tone === 'warning' ? styles.coordChipApprox : styles.coordChipCorrected}>
+                    ● {badge.label}
+                    {badge.kind === 'corrected' && selected.correctedAt
+                      ? ` · ${formatInTz(selected.correctedAt, tz, { month: 'short', day: 'numeric' }, false)}`
+                      : ''}
+                  </Text>
+                );
+              })()}
               {/* Below the pin badges, not above them: the badges sit 4pt apart and
                   `coordChipCorrected` is also brand-colored, so a brand link directly above
                   them would read as part of that group. A lead checking a pin gets the same
@@ -2198,8 +2327,10 @@ export default function AdminMap() {
           <View style={styles.sheetButtons}>
             {canWrite && (
               <Pressable
-                onPress={() => enterMoveMode(selected)}
-                style={[styles.primaryButton, { flex: 1, marginRight: 6, alignItems: 'center' }]}
+                onPress={() => startMove(selected)}
+                // Waits for the door's history, which carries how many units of its address share the pin.
+                disabled={hhActivityQ.isLoading}
+                style={[styles.primaryButton, { flex: 1, marginRight: 6, alignItems: 'center', opacity: hhActivityQ.isLoading ? 0.6 : 1 }]}
               >
                 <Text style={styles.primaryButtonText}>Move pin</Text>
               </Pressable>
@@ -2703,6 +2834,12 @@ function makeStyles(t) {
   moveTitle: { ...type.h3 },
   moveSub: { ...type.caption, marginTop: 4 },
   moveErr: { color: colors.danger, fontSize: 12, marginTop: spacing.sm },
+  moveNote: { color: colors.warnFg, fontSize: 12, fontWeight: '700', marginTop: spacing.sm },
+  chooserTitle: { ...type.h3 },
+  chooserNote: { ...type.caption, marginTop: 4, color: colors.warnFg },
+  chooserGroup: { ...type.caption, marginTop: spacing.md, fontWeight: '700', color: colors.textSecondary },
+  chooserRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.sm },
+  chooserRowText: { flex: 1, fontSize: 15, color: colors.textPrimary },
   moveBtnRow: {
     flexDirection: 'row',
     marginTop: spacing.md,

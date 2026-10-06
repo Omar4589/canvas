@@ -555,6 +555,8 @@ router.post('/households/:householdId/location', async (req, res, next) => {
           location: h.location,
           coordSource: h.coordSource,
           coordConfidence: h.coordConfidence,
+          // The confirm stamp too, so the phone's reconcile restores the whole pin state when nothing moved.
+          locationConfirmedAt: h.locationConfirmedAt || null,
           ...(pinSuspect ? { pinSuspect } : {}),
         },
         // 0 when the save moved nothing (services/households/updateHouseholdLocation.js no-op cases).

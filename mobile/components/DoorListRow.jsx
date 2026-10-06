@@ -6,9 +6,40 @@ import { spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 
 // One row of the canvasser door list. Either a single door (address + status +
-// distance + inline quick-action) or a building (address + "N units · M done").
+// distance + inline quick-action), a building (address + "N units · M done"), a spot of
+// different homes with no exact map spot ("N homes at one map spot", no distance — it
+// would be measured to the shared spot), or a section header (lib/listEntries.js).
 function DoorListRowBase({ item, campaignType, voters, onOpen, onQuick, onOpenBuilding }) {
   const { colors } = useTheme();
+
+  if (item.kind === 'section') {
+    return (
+      <View style={[styles.section, { backgroundColor: colors.sunken }]}>
+        <Text style={[styles.sectionText, { color: colors.textSecondary }]}>{item.title}</Text>
+      </View>
+    );
+  }
+
+  if (item.kind === 'homes') {
+    const b = item.building;
+    const dot = b.status === 'green' ? colors.success : b.status === 'yellow' ? colors.warnFg : colors.textMuted;
+    return (
+      <Pressable style={styles.row} onPress={() => onOpenBuilding(b)}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>
+            {b.total} homes at one map spot
+          </Text>
+          <View style={styles.metaRow}>
+            <View style={[styles.dot, { backgroundColor: dot }]} />
+            <Text style={[styles.meta, { color: colors.textSecondary }]}>
+              {b.total} homes · {b.done} done
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+      </Pressable>
+    );
+  }
 
   if (item.kind === 'building') {
     const b = item.building;
@@ -47,6 +78,7 @@ function DoorListRowBase({ item, campaignType, voters, onOpen, onQuick, onOpenBu
           <Text style={[styles.meta, { color: colors.textSecondary }]}>
             {campaignType === 'survey' && list.length ? ` · ${list.length} voter${list.length === 1 ? '' : 's'} · ${surveyed} surveyed` : ''}
             {item.distanceM != null ? ` · ${formatDistance(item.distanceM)}` : ''}
+            {item.noSpot ? ' · No exact map spot' : ''}
           </Text>
         </View>
       </Pressable>
@@ -79,6 +111,8 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12 },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   chevron: { fontSize: 22, fontWeight: '300' },
+  section: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  sectionText: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   quickBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   quickText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });

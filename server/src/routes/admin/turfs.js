@@ -28,6 +28,7 @@ import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
+import { effectivePinSuspect, pinWireFields } from '../../services/households/pinState.js';
 import {
   DESK_RESTRICT_MATCH,
   emptyDeskSkips,
@@ -1172,7 +1173,7 @@ router.get('/doors', async (req, res, next) => {
       filter,
       slim
         ? { location: 1, turfId: 1, status: 1 }
-        : { location: 1, turfId: 1, status: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1 }
+        : { location: 1, turfId: 1, status: 1, addressLine1: 1, addressLine2: 1, city: 1, state: 1, zipCode: 1, pinSuspect: 1, locationConfirmedAt: 1 }
     ).lean();
     // Address fields ride along (non-slim) so the client can group stacked
     // apartment units (same geocode) into one building marker and render the
@@ -1234,6 +1235,10 @@ router.get('/doors', async (req, res, next) => {
         d.city = h.city || '';
         d.state = h.state || '';
         d.zipCode = h.zipCode || '';
+        // A door with no exact map spot (its coordinate shared with other addresses): the cut map draws such
+        // a spot as "N homes", not a building. Emitted only when set.
+        const ps = effectivePinSuspect(h);
+        if (ps) d.pinSuspect = ps;
       }
       return d;
     });
@@ -1288,6 +1293,8 @@ router.get('/household/:householdId', async (req, res, next) => {
         // Confirm-in-place stamp (Pin Fixes) — the popup badge reads "Location confirmed"
         // instead of "Approximate location" when set.
         locationConfirmedAt: hh.locationConfirmedAt || null,
+        // Shared map spots: "No exact map spot" / "Placed by address" (services/households/pinState.js).
+        ...pinWireFields(hh),
       },
       voters: voters.map((v) => ({
         id: String(v._id),

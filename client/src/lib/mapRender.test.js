@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { STATUS_COLORS } from './statusColors.js';
-import { activitiesToPingsGeoJSON, flagsToGeoJSON, PING_COLOR_BY_ACTION, PING_COLOR_DEFAULT, pingColorFor, registerLayers } from './mapRender.js';
+import { activitiesToPingsGeoJSON, flagsToGeoJSON, PING_COLOR_BY_ACTION, PING_COLOR_DEFAULT, pingColorFor, registerLayers, householdsToGeoJSON, buildingsToGeoJSON } from './mapRender.js';
 
 // The admin map's accuracy circles (docs/PROPOSAL_GPS_UPGRADES.md §H.4) as the map layers see them:
 // which points carry an accuracy, where the circle layers sit in the stack, and that MapPage reads
@@ -119,4 +119,32 @@ test('MapPage reads the circles camera from its own moveend handler, never the g
   const load = src.slice(src.indexOf("map.on('load', () => {"), src.indexOf('return () => {', src.indexOf("map.on('load', () => {")));
   assert.ok(load.includes('onRingView();'), 'called once on load');
   assert.match(src, /accuracyRingsGeoJSON\(ringInputsFromPoints\(pingFC, flagFC, pingColorFor\), \{ bounds: ringView\.bounds, zoom: ringView\.zoom \}\)/);
+});
+
+test('a spot of different homes draws the homes glyph and reads N homes; a lone one rings amber', () => {
+  const images = [];
+  const map = withCanvas(() => {
+    const m = fakeMap();
+    m.addImage = (id) => images.push(id);
+    registerLayers(m, false);
+    return m;
+  });
+  for (const roll of ['none', 'partial', 'done']) assert.ok(images.includes(`homes-${roll}`), `homes-${roll} registered`);
+  const building = map.layers.find((l) => l.id === 'building-symbols');
+  assert.deepEqual(building.layout['icon-image'][1], ['to-boolean', ['get', 'unplaced']]);
+  assert.match(JSON.stringify(building.layout['text-field']), / homes/);
+  assert.match(JSON.stringify(building.layout['text-field']), / doors/);
+  const ring = map.layers.find((l) => l.id === 'household-approx-ring');
+  assert.match(JSON.stringify(ring.filter), /pinSuspect/);
+
+  const doors = householdsToGeoJSON([
+    { id: 'a', location: { lng: 1, lat: 2 }, status: 'unknocked', pinSuspect: 'placeholder' },
+    { id: 'b', location: { lng: 3, lat: 4 }, status: 'unknocked' },
+  ]);
+  assert.deepEqual(doors.features.map((f) => f.properties.pinSuspect), ['placeholder', '']);
+  const stacks = buildingsToGeoJSON([
+    { key: 'k1', lng: 1, lat: 2, total: 2, done: 0, roll: 'none', kind: 'unplaced', units: [] },
+    { key: 'k2', lng: 3, lat: 4, total: 5, done: 1, roll: 'partial', kind: 'building', units: [] },
+  ]);
+  assert.deepEqual(stacks.features.map((f) => f.properties.unplaced), [true, false]);
 });

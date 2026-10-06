@@ -174,8 +174,10 @@ tells you whose pin you're moving. Drag the marker to the right spot and click *
 **Cancel**, or press **Esc**, to back out). That moves **one door**. For an apartment building, click the
 building and choose **Move building pin →** — that moves **every unit of that address together**, and the
 card says how many (a house that merely shares the dot moves on its own). A dot that holds **different
-homes** rather than one building says so — "5 homes at one map spot" — and has no Move building pin: each of
-those homes is moved on its own, from the link to **Pin Fixes** in the pop-up. While a move is armed, clicks
+homes** rather than one building draws as two small houses, **"5 homes"**, and its pop-up says so — "5 homes at
+one map spot" — with each home's own **Move pin**, **Mark restricted…** and **Move to book…**, a **Move these N
+units** for any address with several units, and **Move all to book…** / **Mark all N restricted…** for the whole
+spot. It has no Move building pin, because these aren't one building. While a move is armed, clicks
 elsewhere on the map do nothing, so you can't select a book by accident.
 
 When it saves, the dot moves and the **book outline redraws around it** — the door's own book, and any

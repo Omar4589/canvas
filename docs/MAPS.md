@@ -121,7 +121,8 @@ On the web admin map you'll see:
   is there too — so a door inside a 84-unit building always says so.
 
 Two doors that are *near* each other but not identical still get their own pins. If they overlap on
-screen and your click hits both, the map now opens the same list instead of silently picking one.
+screen and your click hits both, the map opens a short list — **"N doors near here"** — instead of silently
+picking one; its Back bar says "Back to all N doors near here".
 
 **When the "building" is really a bad pin.** A genuine building is one street address with many
 units. If the doors inside a stack have **different addresses with no address holding a clear
@@ -131,9 +132,13 @@ majority is a real building carrying a few oddly-typed rows — an 89-door park 
 and it's treated that way: the building stands, only the odd doors are marked.) Each import now looks
 those homes up by their own address and moves the ones it can place with confidence; the rest stay on
 the dot, marked **No exact map spot**, and are listed in **Pin Fixes** (see [IMPORTS.md](IMPORTS.md) →
-*Homes that share a map spot with other addresses*). Until they're fixed, this map still draws the dot
-as one marker, and the panel says so in as many words (amber note: *"different addresses but identical
-map coordinates … the dot is what's wrong"*) instead of pretending it's a tower. **Remove apartments**
+*Homes that share a map spot with other addresses*). Until they're fixed, the dot has its own marker —
+**two small houses, "N homes"**, never the building tower — and clicking it opens **"N homes at one map
+spot"**: a note that these are different homes, then each home's full address and status with its own
+**Move pin**, the units of any one address grouped under it. A home left alone on such a spot gets the amber
+ring and a **No exact map spot** badge. (A campaign imported before the address lookup existed has no marks;
+its shared dots still draw as buildings, and the panel's amber note — *"different addresses but identical
+map coordinates … the dot is what's wrong"* — still says so.) **Remove apartments**
 goes by address too: it holds out the units of one address, or unit addresses on a crowded spot, and
 never separate houses that merely share a dot (see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)). Older
 imports can still be cleaned up by the pin repair (*Fixing pins that came in wrong* in IMPORTS.md).
@@ -169,6 +174,12 @@ A canvasser opens the app and sees the doors in the books assigned to them. They
   the phone; a "**pending**" badge shows how many are waiting. They sync automatically in the
   background once signal returns — nothing is lost.
 - **Switch the base map** between Street, Satellite, Hybrid, and more.
+- **Homes with no exact map spot.** When a voter file gave several different homes one coordinate and
+  Doorline couldn't place them, the map shows one marker of two small houses reading **"N homes · N done"**.
+  Tapping it lists the homes, sorted by street and house number, each with its status, its one-tap action and
+  its own **Directions** (always to the address — the dot isn't on any of them). A door on such a spot says
+  **"No exact map spot — use Directions."** In the list view these homes show no distance, and under
+  **Nearest** they sit in their own **No exact map spot** section at the end.
 
 **Directions to the house.** Tapping a pin opens the pull-up panel; under the address is a
 **Directions →** link (also on the house screen and the building screen). It opens your own maps app with
@@ -353,9 +364,21 @@ areas or on long roads. The web admin map flags these with a faint **amber ring*
 the door's detail panel shows **"Approximate location."** To fix one, an admin **drags the pin** to the
 right spot ("Move pin" → Save) — on this Map page, or on the **Turf Cutting** page from a house's popup
 (**Move pin →**) or a building's popup (**Move building pin →**, which moves the units of the building's
-street address together; a dot of different homes offers no building move and points to Pin Fixes); a team
-lead can also fix it from the field in the mobile app. Once it's moved the amber ring
-disappears and the door reads **"Pin corrected."**
+street address together; a dot of different homes offers no building move — its pop-up gives each home its own
+**Move pin**, and the units of one address **Move these N units**); a team lead can also fix it from the field in
+the mobile app. Once it's moved the amber ring disappears and the door reads **"Pin corrected."**
+
+**Moving one unit or the whole building.** On the Map page (web and phone), **Move pin** on a unit whose
+address has other units on the same spot asks **"Just this unit"** or **"Whole building (N units)"**. N comes
+from Doorline, not from the map, so it counts every unit of that address — including ones the date filter is
+hiding. A whole-building move ends with **"Moved N units"**. Separate houses that merely share the dot are never
+moved along with it.
+
+**The pin badge**, everywhere a door shows one (the Map panel, the Turf Cutting pop-up, the phone's door
+screen and admin map) — the first that applies: **No exact map spot** (its coordinate is shared with other
+addresses), **Location confirmed**, **Pin corrected**, **Approximate location**. Under it, a home the
+address lookup moved reads **"Placed by address (Oct 5). Its earlier spot was shared with N other homes."**,
+and one the lookup found already on its own spot reads **"The address lookup confirms this spot."**
 
 ### The Pin Fixes page — work the whole backlog in one place
 
@@ -556,6 +579,46 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   `CanvassActivity`, and the frozen `distanceFromHouseMeters` is never rewritten.
 - **Caveat:** a published `ClientReportMapPoint` snapshot is frozen at publish time and won't reflect a
   later correction until the report is republished.
+
+### Shared map spots on every map (placeholder pins, release 2)
+
+Plan and as-built notes: [PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md).
+
+- **The wire.** `pinWireFields(h)` ([services/households/pinState.js](../server/src/services/households/pinState.js))
+  adds, only when they apply, `pinSuspect` (effective — a vouched home never ships flagged) and
+  `pinPlaced: { at, inPlace, stackSize }` (while the lookup's placement stands) to `/admin/households/map`
+  rows and the Turf drill; `/turfs/doors` (non-slim) carries `pinSuspect`. The phone bootstrap and every
+  `/mobile/changes` door read one `HOUSEHOLD_PIN_PROJECTION` and ship the effective flag — its absence on a
+  delta door means the flag cleared. `GET /admin/households/:id/activity` adds `sameAddress: { count,
+  unplaced }` — the units of the door's street address on its pin (`sameAddressDoors`, the set a
+  `scope:'building'` move carries). The phone's pin POST answers `locationConfirmedAt` too. Covered by
+  `server/test/pinWire.int.test.js`.
+- **One stack rule, web and phone.** `stackKind(units)` (`client/src/lib/buildings.js`, mirrored in
+  `mobile/lib/buildings.js`): `unplaced` when any member is `'placeholder'` or every member is flagged, else
+  `building`; a building's `'stray'` members stay in its totals, are listed apart, and never head it.
+  `addressGroups` / `addressGroupsOf` group a stack's members by `stackBaseOf` (now mirrored on the phone in
+  `mobile/lib/streetName.js`, pinned by `streetNameDrift.test.js`).
+- **Web Map.** `mapRender.js` draws `unplaced` stacks with the canvas `homes-{none,partial,done}` glyph and
+  "N homes", and rings any door with `pinSuspect`. `DoorStackPanel` has three kinds — `near` (a multi-hit,
+  `MapPage` `stackNear`), `unplaced` (address groups, a Move pin per home that opens the door and starts its
+  move once `sameAddress` is known — `HouseholdDetailPanel` `autoMove`) and `building`. The header pill and the
+  filter note count buildings and homes without an exact spot apart. `HouseholdDetailPanel` renders
+  `lib/pinBadges.js` (`pinBadge`, `pinLine`) and asks "Just this unit / Whole building (N units)" from
+  `sameAddress`, gating Save with `sameAddress.unplaced`. `MovePinCard` gets the hook's `canSave` on the Map and
+  Turf pages too.
+- **Turf Cutting.** `groupDoors` carries `kind`; DOM markers draw two houses and `markerLabel` ("N homes");
+  `markerSig` includes the kind. The `BuildingPopup` for a spot of different homes lists address groups with a
+  Move pin, Mark restricted… / Unmark and Move to book… per home, "Move these N units" per multi-unit address
+  (`scope:'building'`, Save gated while any of them is unplaced), "Move all to book…" and "Mark all N
+  restricted…"; no Move building pin. `HousePopup` uses the badge chain.
+- **Phone.** `mobile/lib/listEntries.js` `buildListEntries` (no distance and a "No exact map spot" section for
+  unplaced doors and stacks; the stack row sorts by its lowest house number), `deltaFold.js`
+  `foldDeltaHouseholds` + `reconcileLocationResponse`, `fixPin.js` (the Fix pin Save gate, the GPS seed, the
+  admin move bar's no-op check), `pinBadge.js`; the `homes-*` PNGs from `scripts/genMarkerIcons.js homes`
+  (JS assets — `ota:check` matched both lanes' builds). Screens: `map.jsx` (marker, label, list, camera fit
+  without unplaced doors), `building.jsx` (the homes variant and "Not part of this building"),
+  `household/[id].jsx` (badge chain, the no-spot card, same-address siblings), `FixPinModal.jsx`, `admin/map.jsx`
+  (`stackForTap` chooser, the scope question from `sameAddress`, the move bar's no-op note and "Moved N units").
 
 ## C. How an action becomes a ping
 

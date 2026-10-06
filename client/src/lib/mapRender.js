@@ -167,6 +167,60 @@ export function drawBuildingIcon(color, size = 64) {
   return ctx.getImageData(0, 0, size * dpr, size * dpr);
 }
 
+// Render the "homes" glyph — two small houses, one behind the other — for a spot of DIFFERENT homes that
+// share one coordinate (lib/buildings.js stackKind 'unplaced'). It must never read as the apartment tower
+// above: these are separate houses whose pin isn't on any of them. Same 64px canvas + pixelRatio 2, same
+// three roll-up colours.
+export function drawHomesIcon(color, size = 64) {
+  const dpr = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const darker = darkenHex(color);
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size - 4, 21, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // One house: a roof and a body, white-outlined so the two read apart.
+  const house = (x, y, w, h, fill) => {
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y + h * 0.42);
+    ctx.lineTo(x + w / 2, y);
+    ctx.lineTo(x + w + 3, y + h * 0.42);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.roundRect(x, y + h * 0.4, w, h * 0.6, 1.5);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.stroke();
+  };
+  house(8, 12, 24, 34, darker); // the one behind
+  house(28, 18, 26, 38, color); // the one in front
+
+  // The front house's door and window
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.roundRect(37, 42, 8, 12, 1);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(31, 37, 5, 5, 1);
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, size * dpr, size * dpr);
+}
+
 // Building roll-up colors. Deliberately THREE states rather than the 8-status
 // palette: a building holds a mix of door statuses, so painting it any single
 // status would be a claim about doors it doesn't hold. Mirrors the green/yellow/
@@ -214,6 +268,8 @@ export function householdsToGeoJSON(households, stackedIds = null, dimExcluded =
           // Confirm-in-place vouch (Pin Fixes): a confirmed interpolated pin stops ringing.
           // Boolean-stamped so payloads that never ship the field read plain false.
           locationConfirmed: h.locationConfirmedAt ? true : false,
+          // No exact map spot ('placeholder' | 'stray'; '' otherwise) — rings a lone home amber.
+          pinSuspect: h.pinSuspect || '',
           stacked: stackedIds ? stackedIds.has(h.id) : false,
           excluded: dimExcluded ? h.excludedFromTurf === true : false,
         },
@@ -235,6 +291,8 @@ export function buildingsToGeoJSON(buildings, dimExcluded = false) {
         total: b.total,
         done: b.done,
         roll: b.roll,
+        // Different homes on one spot (lib/buildings.js stackKind): the "N homes" glyph.
+        unplaced: b.kind === 'unplaced',
         // A building dims only when EVERY door in it is excluded. A mixed stack still
         // holds cuttable doors, so fading it would hide live work behind an admin action.
         excluded: dimExcluded ? (b.units || []).every((u) => u.excludedFromTurf === true) : false,
@@ -435,6 +493,10 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     const id = `building-${roll}`;
     if (map.hasImage(id)) map.removeImage(id);
     map.addImage(id, drawBuildingIcon(bColors[roll]), { pixelRatio: 2 });
+    // The same roll-up for a spot of different homes (drawHomesIcon).
+    const homesId = `homes-${roll}`;
+    if (map.hasImage(homesId)) map.removeImage(homesId);
+    map.addImage(homesId, drawHomesIcon(bColors[roll]), { pixelRatio: 2 });
   }
 
   map.addSource('households', { type: 'geojson', data: EMPTY_FC });
@@ -479,18 +541,23 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     type: 'symbol',
     source: 'buildings',
     layout: {
+      // A spot of different homes (`unplaced`, lib/buildings.js stackKind) draws the two-house glyph and
+      // reads "N homes"; a real building keeps the tower and "N doors".
       'icon-image': [
-        'match', ['get', 'roll'],
-        'done', 'building-done',
-        'partial', 'building-partial',
-        'building-none',
+        'case',
+        ['to-boolean', ['get', 'unplaced']],
+        ['match', ['get', 'roll'], 'done', 'homes-done', 'partial', 'homes-partial', 'homes-none'],
+        ['match', ['get', 'roll'], 'done', 'building-done', 'partial', 'building-partial', 'building-none'],
       ],
       'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.24, 14, 0.38, 17, 0.54],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       // Door count appears once you're close enough to read it. Labels MAY collide
       // away (text-optional) — the icon never does, so no building is ever hidden.
-      'text-field': ['step', ['zoom'], '', 14, ['concat', ['to-string', ['get', 'total']], ' doors']],
+      'text-field': [
+        'step', ['zoom'], '',
+        14, ['concat', ['to-string', ['get', 'total']], ['case', ['to-boolean', ['get', 'unplaced']], ' homes', ' doors']],
+      ],
       'text-size': 11,
       'text-offset': [0, 1.15],
       'text-anchor': 'top',
@@ -511,6 +578,7 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
   // can spot the pins most likely to be off and correct them. Below the house icon.
   // A door a manager vouched for in place (Pin Fixes confirm) stops ringing; to-boolean
   // keeps payloads that never ship the flag (client report, answer mini-map) unchanged.
+  // A lone home with no exact map spot (`pinSuspect`, sent only while it is unplaced) rings too.
   map.addLayer(
     {
       id: 'household-approx-ring',
@@ -518,8 +586,11 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       source: 'households',
       filter: [
         'all',
-        ['==', ['get', 'coordConfidence'], 'interpolated'],
-        ['!', ['to-boolean', ['get', 'locationConfirmed']]],
+        [
+          'any',
+          ['all', ['==', ['get', 'coordConfidence'], 'interpolated'], ['!', ['to-boolean', ['get', 'locationConfirmed']]]],
+          ['to-boolean', ['get', 'pinSuspect']],
+        ],
         ['!=', ['get', 'stacked'], true],
       ],
       paint: {
