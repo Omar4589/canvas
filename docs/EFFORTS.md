@@ -398,4 +398,4 @@ The displayed crew is computed in [efforts.js](../server/src/routes/admin/effort
 | [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | Thin wrapper at `/campaigns/:campaignId/efforts/:effortId/passes` — renders `<PassManager variant="full">` for one walk list (no picker). |
 | [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker labels passes by walk list and defaults to an active pass. |
 | [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Walk-list filter → passes `effortId` to the reports endpoints. |
-| [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) | Resolves the survey per door from `books`/`surveys`. |
+| [mobile/lib/doorSurvey.js](../mobile/lib/doorSurvey.js) | Resolves the survey per door from `books`/`surveys` (`surveyForDoor`, read by [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx)), and the surveys **Practice the survey** offers, one per distinct survey across the user's books, named by walk list (`practiceSurveys`). |

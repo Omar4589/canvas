@@ -36,6 +36,8 @@ export default function AppLayout() {
           <Stack.Screen name="building" />
           <Stack.Screen name="household/[id]" />
           <Stack.Screen name="voter/[id]/survey" />
+          <Stack.Screen name="survey-practice/index" />
+          <Stack.Screen name="survey-practice/[surveyId]" />
           <Stack.Screen name="voters/index" />
           <Stack.Screen name="voters/[id]" />
           <Stack.Screen name="admin" />

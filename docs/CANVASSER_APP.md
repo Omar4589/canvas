@@ -84,6 +84,9 @@ Every canvasser screen has a **menu button (☰) in the top-right**. Tapping it 
 the right with the things you reach for occasionally:
 
 - **My stats** — your per-day shift history + all-time totals, connection rate, and a doors-per-day trend.
+- **Practice the survey** — on a survey campaign, rehearse the survey exactly as it looks at a door.
+  Nothing is saved. See *Practicing the survey* below.
+- **Help center** — guides, FAQ, and tips.
 - **Appearance** — Light / Dark / System.
 - **Switch organization** — only if you belong to more than one (or you're a super admin).
 - **Admin dashboard** — only if you're an admin (jumps to the admin side).
@@ -463,6 +466,32 @@ campaign — admins can see the earlier response and even restore it (see [SURVE
 Saving the survey marks that voter surveyed and turns the house green on the map right away, the same
 optimistic, never-wait-on-the-network behavior as the door buttons.
 
+### Practicing the survey
+
+Before knocking, anyone working in the field app — canvassers, and admins and team leads after
+**Switch to canvass mode** — can rehearse the survey: open the menu (☰) and tap **Practice the
+survey**. The row is there on a **survey** campaign once a campaign is open; a lit-drop campaign has no
+survey, so it has none.
+
+It opens the survey exactly as it looks at a door: the same questions and follow-ups, the same
+read-aloud lines, closings, notes and links, your own name where the script says it, and on a script
+the same one-screen-at-a-time steps with Next, Skip and Back. Two things are different, so practice
+can never be mistaken for a real door:
+
+- **The card at the top says Practice run** with a blue **Practice** tag, where a voter's name and the
+  green **At Door** tag normally sit.
+- **The last button says Finish practice** instead of **Save Response**. Required questions still have
+  to be answered first, as at a door. Then the app says *Practice finished — Nothing was saved* and
+  offers **Practice again** (start over from the top) or **Done** (back to where you were).
+
+**Nothing in practice is saved or sent.** No door changes color, nothing counts in anyone's stats,
+reports or bill, the app never asks for your location, and it works with no signal.
+
+**Which survey it opens:** the one your books use. If all your books use one survey — the usual case —
+the row opens it straight away. If your walk lists use different surveys, a short list asks which one,
+named by walk list with the survey's name under each. Before you have any books, it's the campaign's
+survey.
+
 ### Changing a door's result (the app asks first)
 
 You keep one result per door per round, so recording a different one **replaces** your earlier
@@ -593,7 +622,13 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
   caption and the next group (nesting a bordered control inside a bordered card bought a second
   outline and no separation). The **org name**, previously a brand micro-line inside the account card,
   is now the caption above it — so the row keeps one job. Rows are gated by `loadRoleContext()`
-  (admin/super) and active campaign (My stats). Canvassers have **no voter-lookup entry** — they work
+  (admin/super), active campaign (My stats) and the cached bundle (**Practice the survey**: on open, the
+  drawer reads `qc.getQueryData(['bootstrap'])` — never a fetch — and keeps
+  `practiceSurveys(bootstrap)` from [lib/doorSurvey.js](../mobile/lib/doorSurvey.js) only when the
+  bundle's `campaign.id` is the active campaign's, since on the org and campaign pickers the cache can
+  hold another campaign's bundle or none; an empty list hides the row; one entry pushes
+  `/(app)/survey-practice/<surveyId>`, two or more push the `/(app)/survey-practice` list — see *Practice
+  the survey* under *The at-door survey*). Canvassers have **no voter-lookup entry** — they work
   their assigned doors and see each household's voters at the door; the `/(app)/voters` screens +
   `/mobile/voters*` endpoints still exist (unreached) for a possible future admin use.
 - Mount: rendered in [_layout.jsx](../mobile/app/(app)/_layout.jsx) as a sibling **after** `<Stack>`
@@ -1223,13 +1258,28 @@ passing silently.
 
 ## The at-door survey
 
-[app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) — resolves the voter,
-household, and the **effort-scoped** survey (the door's book → `surveyTemplateId` override, falling back
-to `activeSurvey`) from the bootstrap cache. What it knows about the survey — which blocks show, which
-record an answer, numbering, progress, the Save gate, the POST rows, where the default closing goes,
-and the one-block-per-screen stepper — comes from the pure door runner
-[lib/surveyRunner.js](../mobile/lib/surveyRunner.js) (*Scripted surveys on the phone*, below); the
-screen holds the state and draws. Three field behaviors beyond a flat questionnaire:
+Two files since 2026-10-06 ([PROPOSAL_SURVEY_PRACTICE.md](PROPOSAL_SURVEY_PRACTICE.md)):
+
+- [app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) owns the **voter**. It
+  resolves the voter, household, and the **effort-scoped** survey from the bootstrap cache
+  (`surveyForDoor` in [lib/doorSurvey.js](../mobile/lib/doorSurvey.js): the door's book →
+  `surveyTemplateId` override, falling back to `activeSurvey`), runs the mount-time prompts, draws the
+  do-not-contact and not-found walls (`SurveyWall`), and saves (`optimisticSubmit`, below).
+- [components/SurveyForm.jsx](../mobile/components/SurveyForm.jsx) is the **form**: the answer state,
+  both presentations, scroll-to-reveal, every block, the Note field and the Save button. It writes
+  nothing. Save runs the required check (`requiredPending` and its *Missing answer* alert, plus the
+  step guard on one block per screen), then calls the host's `onSave({ answers, note })` with the POST
+  rows (`buildSubmitRows`) and the trimmed note, or null. Its props are `survey`, `canvasserFirstName`,
+  `title` and `subtitle` (the header card), `badge` (`'door'` is the green **At Door** tag, `'practice'`
+  the info-tinted **Practice** tag), `saveLabel`, `isSubmitting` and `onSave`. The door passes the
+  voter's name, the two-line address and **Save Response**; *Practice the survey* (below) is its second
+  host.
+
+The split moved the code without changing it; the door's own behavior is unchanged. What the form knows
+about the survey — which blocks show, which record an answer, numbering, progress, the Save gate, the
+POST rows, where the default closing goes, and the one-block-per-screen stepper — comes from the pure
+door runner [lib/surveyRunner.js](../mobile/lib/surveyRunner.js) (*Scripted surveys on the phone*,
+below); the form holds the state and draws. Three field behaviors beyond a flat questionnaire:
 
 - **Conditional visibility.** `visible` (`visibleBlocks(survey, answers)`) is recomputed from `answers`
   every render via the shared pure evaluator [lib/surveyVisibility.js](../mobile/lib/surveyVisibility.js)
@@ -1287,7 +1337,8 @@ client-version bump.
   refuses any other scheme at save, and one from an older template is dropped here. No QR code, by
   owner ruling — the QR lives on the printed literature. Opening only on a tap and appending nothing
   are the two conditions that keep a link out of the privacy policy (PROPOSAL §K).
-- **`{{canvasser}}`.** `fill` = `fillScript(text, { canvasserFirstName: bootstrap.user.firstName })`
+- **`{{canvasser}}`.** `fill` = `fillScript(text, { canvasserFirstName })`, where both hosts pass the
+  form `bootstrap.user.firstName`,
   from [lib/surveyScriptText.js](../mobile/lib/surveyScriptText.js) (a byte-identical mirror of
   `server/src/services/surveys/scriptText.js`, drift-guarded by `scriptText.test.js`) fills the
   greeting, the default closing, statement text, option scripts and notes — never a question's label or
@@ -1297,9 +1348,9 @@ client-version bump.
 - **Which presentation.** `survey.presentation === 'steps'` is one block per screen; anything else
   (absent on older templates) is the single page. The builder ticks it when a survey that wasn't a
   script when opened gains a statement, a closing or a route (worked out from the survey as it will be
-  saved, never latched on a keystroke), and every existing survey keeps the single page. It never
-  applies while the do-not-contact wall or the not-found screen shows (`formShown`), so Back stays
-  plain there.
+  saved, never latched on a keystroke), and every existing survey keeps the single page. The door's
+  do-not-contact wall and not-found screen never mount the form, so Back stays plain there. (Before
+  the split, one component held both, and a `formShown` flag kept the stepper off behind the walls.)
 
 **One block per screen (`'steps'`).** A cursor over the visible list, held in component state as a
 screen id rather than a route per block, so the stack depth `dismiss(2)` relies on never changes:
@@ -1391,6 +1442,38 @@ full `label` with no control, counts it as an unanswered question, shows the def
 path and posts an empty row for it, which the server drops. It routes correctly, because the compiled
 rules use only `any_of`, an op it already evaluates.
 
+### Practice the survey
+
+The canvasser menu's **Practice the survey** row walks `SurveyForm` with no voter and no save
+([PROPOSAL_SURVEY_PRACTICE.md](PROPOSAL_SURVEY_PRACTICE.md)). JavaScript only, no server change.
+
+- **Which surveys.** `practiceSurveys(bootstrap)` in [lib/doorSurvey.js](../mobile/lib/doorSurvey.js)
+  returns one entry per distinct survey (by `_id`) across `surveyForBook` of each of the user's
+  `books`, as `{ id, survey, walkLists, label }`. `walkLists` holds the names (from `bootstrap.efforts`)
+  of the walk lists whose books use it; `label` is those names joined, or *Campaign survey* when none
+  names it (books outside any walk list, or no books yet). With no books it is the campaign default
+  (`activeSurvey`) alone. It is empty on a campaign whose `type` is not `'survey'`, and when no survey
+  resolves. `surveyForBook` is the rule the door uses (`surveyForDoor` = the door's book through
+  `surveyForBook`), so practice can never offer a survey other than the ones at the user's doors;
+  `doorSurvey.test.js` pins the door's old inline rule as its oracle. The bundle is the user's own:
+  canvass mode scopes an admin or lead to their own books too.
+- **The run.** [app/(app)/survey-practice/[surveyId].jsx](../mobile/app/(app)/survey-practice/[surveyId].jsx)
+  reads the bundle as a pure reader (like the door screen) and looks its survey up in
+  `practiceSurveys` — never by a bare id — then renders `SurveyForm` with `title` *Practice run*,
+  `subtitle` *Nothing here is saved*, `badge="practice"` and `saveLabel` *Finish practice*. Its `onSave`
+  only opens the *Practice finished* alert (*Nothing was saved. At a real door, Save Response records
+  the answers.*): **Practice again** bumps a `run` counter used as the form's `key`, which mounts a
+  fresh form on its first screen; **Done** is `router.back()`. When the survey is no longer in the list
+  (swapped or detached mid-run, or the campaign changed) it shows a `SurveyWall` instead.
+- **The list.** [app/(app)/survey-practice/index.jsx](../mobile/app/(app)/survey-practice/index.jsx),
+  reached when there are two or more entries: one `InsetNavRow` per entry (label = walk lists, sub = the
+  survey's `name`), each pushing `/(app)/survey-practice/<id>`.
+- **Nothing writes.** Neither screen imports `recordAction`, an API client or a cache writer: answers
+  live in the form's state and are gone when the screen closes, so practice never reaches the server,
+  the offline queue, a door's color or anyone's counts, and never asks for location (only a real save
+  takes the GPS stamp). Not privacy-affecting: nothing is collected, kept, shared or newly shown, and
+  links render through the same tap-only `SurveyNoteAndLinks`.
+
 ## Effort selection + data
 
 Two entry points, both scoping the book picker to one effort:
@@ -1426,7 +1509,11 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `surveyRunner.test.js`, run with `npm run test:mobile` — the door runner and the one-block-per-screen
   stepper, mirrored to `client/src/lib/surveyRunner.js`), `lib/surveyScriptText.js` (`fillScript` for
   `{{canvasser}}`, mirrored from `server/src/services/surveys/scriptText.js`),
-  `components/SurveyNoteAndLinks.jsx` (a block's "For you — not read aloud" note and its link rows).
+  `components/SurveyNoteAndLinks.jsx` (a block's "For you — not read aloud" note and its link rows),
+  `components/SurveyForm.jsx` (the survey form, moved out of `voter/[id]/survey.jsx`, plus
+  `SurveyWall`), `lib/doorSurvey.js` (+ `doorSurvey.test.js` — which survey a door uses and which
+  surveys practice offers), `app/(app)/survey-practice/index.jsx` and
+  `app/(app)/survey-practice/[surveyId].jsx` (Practice the survey).
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
   `app/(app)/books.jsx`, `app/(app)/map.jsx` (+ the Not target chip, legend entry and pin; the
   `/changes` URL through `changesPath`, the `doorConfig` fold, and `restrictedFrom` in the delta fold),

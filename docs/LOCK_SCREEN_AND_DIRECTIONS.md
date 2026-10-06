@@ -346,7 +346,7 @@ canvasser surfaces need no server change.
 | Map pull-up sheet | [map.jsx](../mobile/app/(app)/map.jsx) selected-house sheet | full | yes | **Built** — a link under the city line, *not* a third button beside Open/Close: three buttons crowd the sheet, and this matches the door screen's grammar. **`HOUSE_PEEK_HEIGHT` went 220 → 248** with it; see below |
 | Building screen | [building.jsx](../mobile/app/(app)/building.jsx) | full (building address, no unit) | yes | **Built** — under the units summary |
 | House list rows | [DoorListRow.jsx](../mobile/components/DoorListRow.jsx) | full | yes | No: the row carries the quick-action; the door screen is one tap away |
-| Survey screen header | [voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) ~L419-425 | full | yes | No: the canvasser is at the door |
+| Survey screen header | [voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx) passes the address; [SurveyForm.jsx](../mobile/components/SurveyForm.jsx) draws the card (since 2026-10-06) | full | yes | No: the canvasser is at the door |
 | Admin map house sheet | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | full | yes | **Built** (lead/admin) — above the pin badges |
 | Overlap detail | [admin/overlap/[householdId].jsx](../mobile/app/(app)/admin/overlap/[householdId].jsx) | full | yes | **Built** (lead/admin) |
 | Voter profile, Household card | [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) | full (`buildVoterProfile` sends line1/city/state/zip) | yes | **Built** (management-only screen) |

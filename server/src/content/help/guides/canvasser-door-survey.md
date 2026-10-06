@@ -5,11 +5,17 @@ audience: canvasser
 kind: guide
 order: 31
 sourceDoc: SURVEYS.md
-summary: Open the survey for a voter, answer the questions — one screen at a time on a scripted survey — and submit.
-tags: canvasser, survey, voter, door, script, read aloud, closing, next, skip, back, link, note
+summary: Practice the survey from the menu first if you like, then open it for a voter, answer the questions — one screen at a time on a scripted survey — and submit.
+tags: canvasser, survey, voter, door, script, read aloud, closing, next, skip, back, link, note, practice, rehearse, preview
 ---
 
 On a survey campaign, tap a voter at the house to open their survey.
+
+## Practice before you knock
+
+Want to know the survey before your first door? Open the menu (☰) and tap **Practice the survey**. It opens the survey exactly as it looks at a door, with **Practice run** at the top instead of a voter's name. Tap through it as you would at a door; at the end, **Finish practice** tells you nothing was saved and lets you go again. Nothing in practice is saved or sent, so try every answer you like. More in [Can I practice the survey before I knock?](practice-the-survey).
+
+## At the door
 
 Each voter shows their **party, age, and gender** — whatever the voter file has on them — plus a **✓ Voted** tag if they've already voted early, and whether they've been surveyed. It's the same line you saw on the map panel before you walked up. Records are often incomplete, so anything missing is just left out; that's normal.
 

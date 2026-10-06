@@ -28,6 +28,7 @@ import ThemeToggle from './ThemeToggle';
 import InsetGroup, { InsetNavRow, InsetActionRow, RowEmoji } from './InsetGroup';
 import SectionHeader from './SectionHeader';
 import { useDrawer } from '../lib/DrawerContext';
+import { practiceSurveys } from '../lib/doorSurvey';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { radius, spacing } from '../lib/theme';
@@ -57,6 +58,8 @@ export default function CanvasserDrawer() {
   });
   const [activeCampaign, setActiveCampaign] = useState(null);
   const [orgName, setOrgName] = useState(null);
+  // The surveys Practice the survey can open (lib/doorSurvey.js); empty hides the row.
+  const [practice, setPractice] = useState([]);
 
   // Refresh the drawer's data every time it opens, so role / campaign / account
   // are always current (they can change between opens).
@@ -71,11 +74,17 @@ export default function CanvasserDrawer() {
       // Prefer the org name cached at selection (covers super admins, who enter
       // orgs they aren't members of); fall back to the membership's name.
       setOrgName(on || rc.activeMembership?.organizationName || null);
+      // Practice reads the bundle already in the cache, never a fetch, and only when it is the
+      // active campaign's: on the org and campaign pickers it can belong to another campaign, or
+      // not be loaded yet, and then there is no row.
+      const bootstrap = qc.getQueryData(['bootstrap']);
+      const current = !!c && !!bootstrap && String(bootstrap.campaign?.id) === String(c.id);
+      setPractice(current ? practiceSurveys(bootstrap) : []);
     });
     return () => {
       mounted = false;
     };
-  }, [isOpen]);
+  }, [isOpen, qc]);
 
   const panelStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: panelWidth * (1 - progress.value) }],
@@ -180,6 +189,19 @@ export default function CanvasserDrawer() {
                     the door. Voter search remains an admin-only tool. */}
                 {activeCampaign && (
                   <InsetNavRow emphasis="menu" leading={<RowEmoji>📊</RowEmoji>} label="My stats" onPress={() => go('/(app)/stats')} />
+                )}
+                {/* Rehearse the survey before knocking: the door's own form, nothing saved. One
+                    survey opens straight away; walk lists with different surveys get a list. */}
+                {practice.length > 0 && (
+                  <InsetNavRow
+                    emphasis="menu"
+                    leading={<RowEmoji>📝</RowEmoji>}
+                    label="Practice the survey"
+                    sub="Rehearse it first · nothing is saved"
+                    onPress={() =>
+                      go(practice.length === 1 ? `/(app)/survey-practice/${practice[0].id}` : '/(app)/survey-practice')
+                    }
+                  />
                 )}
                 <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} />
               </InsetGroup>
