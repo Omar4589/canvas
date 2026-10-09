@@ -3,7 +3,7 @@ import assert from 'node:assert';
 
 // The FbTime client's test seam and error surface — no network, no DB.
 //   node --test test/fbtimeClient.test.js
-const { ping, getShifts, listAllPeople, setFbtimeFake, FbtimeApiError, FATAL_CODES } = await import(
+const { ping, putDoors, getShifts, listAllPeople, setFbtimeFake, FbtimeApiError, FATAL_CODES } = await import(
   '../src/services/fbtime/client.js'
 );
 const { installFbtimeFake, uninstallFbtimeFake, fbtimeCalls } = await import(
@@ -110,4 +110,123 @@ test('the raw key never appears in an error message', async () => {
   } catch (err) {
     assert.ok(!String(err.message).includes('supersecret123'));
   }
+});
+
+// ── PUT /doors — the one write ─────────────────────────────────────────────────
+const P = 'aaaaaaaaaaaaaaaaaaaaaaa1';
+const doorsBody = { startDate: '2026-10-03', endDate: '2026-10-09', userIds: [P], counts: [{ userId: P, date: '2026-10-09', doors: 4 }] };
+const LIVE_KEY = 'fbt_live_abcdefgh12345678secret';
+
+// A stubbed global fetch for the network path: records the call and answers `respond`.
+const withFetch = async (respond, fn) => {
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return respond(url, init);
+  };
+  try {
+    await fn(calls);
+  } finally {
+    globalThis.fetch = real;
+  }
+};
+const withEnv = async (vars, fn) => {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+};
+const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+test('putDoors is a PUT with the body, through the test seam', async () => {
+  installFbtimeFake({ now: '2026-10-09T12:00:00Z' });
+  const res = await putDoors({ apiKey: 'fbt_test_put', body: doorsBody });
+  assert.strictEqual(res.applied, 1);
+  const [call] = fbtimeCalls();
+  assert.deepStrictEqual([call.method, call.path], ['PUT', '/doors']);
+  assert.deepStrictEqual(call.body, doorsBody);
+});
+
+test('on the network, the key rides only the header, the body is JSON, and a 400 keeps FbTime’s detail', async () => {
+  await withEnv({ FBTIME_API_BASE: 'http://127.0.0.1:9/api/partner/v1', NODE_ENV: undefined }, () =>
+    withFetch(
+      () => json(400, { message: 'counts[0].date is outside the window', code: 'VALIDATION', index: 0, userId: P }),
+      async (calls) => {
+        await assert.rejects(
+          () => putDoors({ apiKey: LIVE_KEY, body: doorsBody }),
+          (err) =>
+            err instanceof FbtimeApiError &&
+            err.code === 'VALIDATION' &&
+            err.status === 400 &&
+            err.detail.index === 0 &&
+            err.detail.userId === P &&
+            !('message' in err.detail)
+        );
+        const { url, init } = calls[0];
+        assert.strictEqual(init.method, 'PUT');
+        assert.strictEqual(init.headers.Authorization, `Bearer ${LIVE_KEY}`);
+        assert.strictEqual(init.headers['Content-Type'], 'application/json');
+        assert.deepStrictEqual(JSON.parse(init.body), doorsBody);
+        assert.ok(!String(url).includes('secret'), 'never in the URL');
+      }
+    )
+  );
+});
+
+test('the laptop guard: outside production a write reaches only loopback; reads are untouched', async () => {
+  const ok = () => json(200, { ok: true, applied: 0 });
+  await withEnv({ FBTIME_API_BASE: 'https://fbtime.example.com/api/partner/v1', NODE_ENV: undefined }, () =>
+    withFetch(ok, async (calls) => {
+      await assert.rejects(() => putDoors({ apiKey: LIVE_KEY, body: doorsBody }), (err) => err.code === 'LAPTOP_GUARD');
+      assert.strictEqual(calls.length, 0, 'refused before any request');
+      await ping({ apiKey: LIVE_KEY });
+      assert.strictEqual(calls.length, 1, 'a read is not a write');
+    })
+  );
+  for (const base of ['http://[::1]:4000/api/partner/v1', 'http://localhost:4000/api/partner/v1', 'http://127.0.0.1:4000/x']) {
+    await withEnv({ FBTIME_API_BASE: base, NODE_ENV: undefined }, () =>
+      withFetch(ok, async (calls) => {
+        await putDoors({ apiKey: LIVE_KEY, body: doorsBody });
+        assert.strictEqual(calls.length, 1, base);
+      })
+    );
+  }
+  await withEnv({ FBTIME_API_BASE: 'http://localhost@evil.example.com/api', NODE_ENV: undefined }, () =>
+    withFetch(ok, async () => {
+      await assert.rejects(() => putDoors({ apiKey: LIVE_KEY, body: doorsBody }), (err) => err.code === 'LAPTOP_GUARD');
+    })
+  );
+  await withEnv({ FBTIME_API_BASE: 'https://fbtime.example.com/api/partner/v1', NODE_ENV: 'production' }, () =>
+    withFetch(ok, async (calls) => {
+      await putDoors({ apiKey: LIVE_KEY, body: doorsBody });
+      assert.strictEqual(calls.length, 1, 'production writes to the real FbTime');
+    })
+  );
+});
+
+test('a timeout covers the request AND reading the body', async () => {
+  const hangUntilAbort = (signal) =>
+    new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  await withEnv({ FBTIME_API_BASE: 'http://127.0.0.1:9/api/partner/v1', NODE_ENV: undefined }, async () => {
+    await withFetch((url, init) => hangUntilAbort(init.signal), async () => {
+      const t = Date.now();
+      await assert.rejects(() => ping({ apiKey: LIVE_KEY, timeoutMs: 30 }), (err) => err instanceof FbtimeApiError && err.code === null);
+      assert.ok(Date.now() - t < 2000, 'ping takes its own timeout');
+    });
+    await withFetch((url, init) => ({ ok: true, status: 200, json: () => hangUntilAbort(init.signal) }), async () => {
+      const t = Date.now();
+      await assert.rejects(() => putDoors({ apiKey: LIVE_KEY, body: doorsBody, timeoutMs: 30 }));
+      assert.ok(Date.now() - t < 2000, 'a body that stalls after the headers is cut off too');
+    });
+  });
 });

@@ -109,12 +109,14 @@ test('health is GREEN after a fresh successful run', { skip }, async () => {
 });
 
 test('a failing purge is RECORDED, not swallowed', { skip }, async () => {
-  const orig = DeletedUserRecord.countDocuments;
-  DeletedUserRecord.countDocuments = () => Promise.reject(new Error('mongo exploded'));
+  // The purge reads the due records with find() (record by record — the FbTime step can fail
+  // per record); the query itself failing is the whole run failing.
+  const orig = DeletedUserRecord.find;
+  DeletedUserRecord.find = () => ({ select: () => ({ lean: () => Promise.reject(new Error('mongo exploded')) }) });
   try {
     await assert.rejects(() => purgeDeletedIdentities({ apply: true }), /mongo exploded/);
   } finally {
-    DeletedUserRecord.countDocuments = orig;
+    DeletedUserRecord.find = orig;
   }
   const run = await RetentionRun.findOne({ job: JOB_NAME, ok: false }).lean();
   assert.ok(run, 'the failed run left a record');

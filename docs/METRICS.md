@@ -20,7 +20,9 @@ with nothing on this page: **Results by voter**'s per-person *Surveys taken*, it
 *Rounds worked*, and the activity log's survey-source rows), [TIMEZONES.md](TIMEZONES.md) (these counts are windowed and bucketed in
 the campaign's timezone — what "a day" means here),
 [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (why **Not a target voter** exists,
-the owner's rulings behind how it counts, and the Contact % double count fixed with it).
+the owner's rulings behind how it counts, and the Contact % double count fixed with it),
+[FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) (measured hours in doors-per-hour, and the
+per-canvasser daily door counts sent to FbTime).
 
 ---
 
@@ -571,6 +573,13 @@ map/panel; if you want to reconcile a specific day's or week's numbers, use the 
   re-credited to a team. It's an **audit surface** — it answers "who pressed the button", not
   "whose team gets credit" — so it deliberately skips the team fold that the team-attribution
   reports apply. See [SURVEYS.md](SURVEYS.md) (Part 1 → *Auditing answers*; contract in §J).
+- **A canvasser's doors per day can leave Doorline.** Where an org admin has turned on **Door
+  counts to FbTime**, each linked canvasser's doors for each day — the **Doors** column of the
+  Timeline's canvasser table, added up across the organization's campaigns, Restricted access never
+  counted — is sent to the organization's own FbTime, so its doors-per-hour page fills itself. It is
+  this same per-canvasser count: one result per door per round, the latest, so a door recorded again
+  in the same round moves to the later day there too. See [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md)
+  → *Door counts to FbTime*.
 
 ---
 
@@ -611,6 +620,17 @@ in all three cases the canvasser reached the door). Two actions are deliberately
 *marker* — no door interaction happened, so it is never a knock and never enters any rate). A few
 files cannot import the constant and keep hand copies, named in the comment above it; a new knock
 outcome must be added to every one, or that surface silently stops counting the door.
+
+**A change to `KNOCK_ACTIONS` also changes what leaves the system.** Door counts to FbTime
+([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md),
+[`services/fbtime/doorCounts.js`](../server/src/services/fbtime/doorCounts.js)) send each linked
+canvasser's count of `KNOCK_ACTIONS` rows per local day — `restricted` is matched only so a
+Restricted-only day is sent as 0 — and import the constant rather than copy it. So adding, removing
+or re-scoping an outcome changes the numbers every organization with door counts on sends its
+FbTime: within 15 minutes for the last 7 days, at the next nightly run for the rest of the 120-day
+window. Treat it as a change to what Doorline tells a third party, not only to a dashboard. (The
+hand-copy list in the comment above the constant doesn't name door counts, because they import
+it.)
 
 `CONTACT_ACTIONS = ['survey_submitted', 'refused', 'not_target']` (same file) — *someone answered the
 door*. Membership **is** the definition of a contact: `contactRate`'s numerator is the doors, per
@@ -1405,6 +1425,15 @@ resolver-not-direct-read pattern). The rules, in full in
   into the KPI tile); the merged figure rides additively as `measuredHoursOnDoors`, and the
   "clients must not re-derive" rule extends to `hoursSource` — clients compose these fields,
   never recompute them.
+- **A returning canvasser's hours stay with the old account.** When an admin unlinks a deleted
+  canvasser's account choosing *Yes — keep* and links their new account to the same FbTime person,
+  the old account is **kept**: shifts clocked before its cut stay its own, so the campaigns it worked
+  keep measured rates, and the new account's start with its own door results. One owner decides whose
+  hours a shift is — `shiftOwner` ([`services/fbtime/shiftOwner.js`](../server/src/services/fbtime/shiftOwner.js),
+  used by every writer of `FbTimeShift.userId`) — and `loadMeasuredHours`' `linkedUserIds` includes
+  kept accounts, so one never reads `not-linked`. After the 180-day identity purge those shifts keep
+  their `userId` and lose the FbTime person (`'purged'`), so the rates stay measured then too.
+  Rules: [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) → *Kept accounts*.
 
 - **A knock is a historical fact. Losing a person never moves a number.** Deactivating a canvasser,
   removing them from a campaign, removing them from the org, or deleting their account **does not

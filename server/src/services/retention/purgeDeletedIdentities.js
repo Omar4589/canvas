@@ -1,5 +1,6 @@
 import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
+import { depairFbtimeAccount } from '../fbtime/purgePairing.js';
 
 // The 180-day identity purge, as a function the app can call — not a script a human must remember.
 //
@@ -13,6 +14,12 @@ import { RetentionRun } from '../../models/RetentionRun.js';
 // legacy email/phone, stamp purgedAt. The ROW stays — it is the evidence that a deletion happened and that we
 // honoured the window.
 //
+// RECORD BY RECORD, because the purge also de-pairs the account from FbTime
+// (services/fbtime/purgePairing.js) — before the stamp, so a record whose FbTime step throws stays
+// due for the next night while the rest are purged; a run with any failure is recorded ok:false
+// (with `failed`) — the health surface shows the error at once and goes red once 48 hours pass
+// without a clean run, rather than one record silently stalling everyone's purge.
+//
 // Called by the repeatable worker job (services/retention/scheduler.js) and by the CLI
 // (migrations/purgeDeletedIdentities.js), which is now just a manual escape hatch.
 
@@ -24,30 +31,55 @@ export const STALE_AFTER_HOURS = 48;
 
 export async function purgeDeletedIdentities({ apply = true } = {}) {
   const startedAt = new Date();
-  const run = await RetentionRun.create({ job: JOB_NAME, startedAt });
+  // A dry run records nothing: a RetentionRun is the health check's evidence that the purge
+  // RAN, and a counting pass from a console must never make a dead job read green.
+  const run = apply ? await RetentionRun.create({ job: JOB_NAME, startedAt }) : null;
 
   try {
     const filter = { retentionUntil: { $lte: startedAt }, purgedAt: null };
-    const scanned = await DeletedUserRecord.countDocuments(filter);
+    const due = await DeletedUserRecord.find(filter).select('_id userId deletedAt').lean();
+    const scanned = due.length;
 
     let purged = 0;
-    if (apply && scanned > 0) {
-      // New snapshots are name-only; the $unset still sweeps email/phone off any legacy row
-      // that predates migrate:deletion-snapshots, so the purge is complete either way.
-      const res = await DeletedUserRecord.updateMany(filter, {
-        $set: { firstName: '', lastName: '', purgedAt: startedAt },
-        $unset: { email: 1, phone: 1 },
-      });
-      purged = res.modifiedCount || 0;
+    let failed = 0;
+    const fbtime = { links: 0, shiftsKept: 0, shiftsReassigned: 0, events: 0 };
+    for (const rec of due) {
+      try {
+        const c = await depairFbtimeAccount({ userId: rec.userId, deletedAt: rec.deletedAt, apply });
+        for (const k of Object.keys(fbtime)) fbtime[k] += c[k] || 0;
+        if (!apply) continue;
+        // New snapshots are name-only; the $unset still sweeps email/phone off any legacy row
+        // that predates migrate:deletion-snapshots, so the purge is complete either way.
+        const res = await DeletedUserRecord.updateOne(
+          { _id: rec._id, purgedAt: null },
+          { $set: { firstName: '', lastName: '', purgedAt: startedAt }, $unset: { email: 1, phone: 1 } }
+        );
+        purged += res.modifiedCount || 0;
+      } catch (err) {
+        failed += 1;
+        console.error(`[retention] identity purge failed for record ${rec._id}: ${err?.message || err}`);
+      }
     }
 
+    const ok = failed === 0;
+    if (!run) return { ok, scanned, purged, failed, fbtime };
     await RetentionRun.updateOne(
       { _id: run._id },
-      { $set: { finishedAt: new Date(), ok: true, purged, scanned } }
+      {
+        $set: {
+          finishedAt: new Date(),
+          ok,
+          purged,
+          scanned,
+          failed,
+          ...(ok ? {} : { error: `${failed} record(s) failed and stay due for the next run` }),
+        },
+      }
     );
-    return { ok: true, scanned, purged };
+    return { ok, scanned, purged, failed, fbtime };
   } catch (err) {
     // Record the failure. A job that throws and leaves no trace is the thing we are fixing.
+    if (!run) throw err;
     await RetentionRun.updateOne(
       { _id: run._id },
       { $set: { finishedAt: new Date(), ok: false, error: String(err?.message || err) } }

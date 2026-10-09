@@ -14,7 +14,16 @@ import mongoose from 'mongoose';
 // byUserId null = the worker (sync transitions have no human behind them).
 // `sync-failed` is written ONCE per transition into the errored state, not per
 // failing run — a 15-minute cron must not turn one revoked key into a wall of
-// identical rows (the provider's own hourly-bucket logic, adapted).
+// identical rows (the provider's own hourly-bucket logic, adapted). The door-count
+// failure/recovery pair follows the same once-per-transition rule.
+//
+// Append-only IN OPERATION, with two privacy exceptions and the org-deletion
+// cascade: the one-off migrate:fbtime-deletion-gaps strips `detail.userEmail`
+// (link-created no longer stores it), and the 180-day identity purge strips
+// `detail.fbtimePersonId` from a purged account's link-type events
+// (link-created, link-removed, account-kept, account-kept-removed) so nothing
+// pairs that account with an FbTime person. Door-count events never hold a user
+// id beside a person id.
 const integrationEventSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -41,6 +50,20 @@ const integrationEventSchema = new mongoose.Schema(
         'auto-matched',
         'sync-failed',
         'sync-recovered',
+        // Door counts to FbTime (services/fbtime/doorPush.js).
+        'doors-enabled',
+        'doors-disabled',
+        'doors-failed',
+        'doors-recovered',
+        'doors-cleared',
+        'doors-clears-abandoned',
+        // An admin asked for a clear outside an unlink (the Off card's clear, or one
+        // unlinked person's): {all:true} or {fbtimePersonId} — the request is attributable.
+        'doors-clear-requested',
+        // Kept accounts (services/fbtime/shiftOwner.js): one FbTime person, more than one
+        // Doorline account. detail { userId, fbtimePersonId } — de-paired by the purge.
+        'account-kept',
+        'account-kept-removed',
       ],
       required: true,
     },

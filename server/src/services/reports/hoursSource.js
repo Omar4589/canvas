@@ -128,7 +128,7 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
   if (!organizationId || !tz) return none;
 
   const connection = await FbTimeConnection.findOne({ organizationId, status: 'connected' })
-    .select('hourFigure')
+    .select('hourFigure keptAccounts')
     .lean();
   if (!connection) return none;
 
@@ -257,7 +257,12 @@ export async function loadMeasuredHours({ organizationId, from = null, to = null
     hourFigure: connection.hourFigure,
     byUserDay,
     daysByUser,
-    linkedUserIds: new Set(links.map((l) => String(l.userId))),
+    // A kept earlier account (services/fbtime/shiftOwner.js) still owns its pre-`until`
+    // shifts, so it is "linked" for the reason below — never "link them".
+    linkedUserIds: new Set([
+      ...links.map((l) => String(l.userId)),
+      ...(connection.keptAccounts || []).map((k) => String(k.userId)),
+    ]),
     today,
     campaignScoped,
     stintByUser,

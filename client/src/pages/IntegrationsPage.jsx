@@ -1,26 +1,34 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
-import { Button, EmptyState, IconCheck } from '../components/ui/index.js';
+import { IconCheck } from '../components/ui/index.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 import {
+  asksLinkQuestion,
   buildRosterRows,
+  cantRelink,
   filterRosterRows,
   linkCandidates,
   resolveSelection,
   rosterCounts,
   sortRosterRows,
   suggestedPairs,
+  unlinkQuestion,
 } from '../lib/fbtimeRoster.js';
 import { invalidateLinkCaches, runLinkBatch, runUnlinkBatch } from '../lib/fbtimeBulk.js';
+import { doorsPollInterval, showDoorsCard } from '../lib/fbtimeDoors.js';
 import ConnectCard from '../components/integrations/ConnectCard.jsx';
 import StatusStrip from '../components/integrations/StatusStrip.jsx';
+import DoorCountsCard from '../components/integrations/DoorCountsCard.jsx';
 import IntegrationSettingsModal from '../components/integrations/IntegrationSettingsModal.jsx';
 import RosterToolbar from '../components/integrations/RosterToolbar.jsx';
 import RosterTable from '../components/integrations/RosterTable.jsx';
 import LinkPickerModal from '../components/integrations/LinkPickerModal.jsx';
 import SuggestionsModal from '../components/integrations/SuggestionsModal.jsx';
 import BulkLinkBar from '../components/integrations/BulkLinkBar.jsx';
+import BatchBanner from '../components/integrations/BatchBanner.jsx';
+import UnlinkModal from '../components/integrations/UnlinkModal.jsx';
+import { ClearSentModal, StopCountingModal } from '../components/integrations/DoorCountModals.jsx';
 import RecentActivity from '../components/integrations/RecentActivity.jsx';
 
 // The FbTime integration: connect the org's time-tracking so doors-per-hour
@@ -34,6 +42,10 @@ import RecentActivity from '../components/integrations/RecentActivity.jsx';
 // match — the person whose hours never arrive — appeared nowhere on the screen
 // that exists to fix exactly that. All folding, filtering and ordering lives in
 // lib/fbtimeRoster.js so it can be tested without a browser.
+//
+// Door counts to FbTime (the one thing the connection sends) get their own card
+// under the status bar; the server's `doors` block is the one owner of what it
+// shows (lib/fbtimeDoors.js says what the screen still decides).
 
 const EMPTY_FILTERS = { term: '', campaignId: '', status: 'all', includeInactive: false };
 
@@ -49,14 +61,21 @@ export default function IntegrationsPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
-  const [batch, setBatch] = useState(null); // { busy, progress, results, undo }
+  const [batch, setBatch] = useState(null); // { busy, progress, results, undo, cleared, undoSkipped }
+  const [unlinkAsk, setUnlinkAsk] = useState(null); // { rows, fromRow } awaiting "Was the link right?"
+  const [stopTarget, setStopTarget] = useState(null); // { row, kept } — Stop counting
+  const [clearTarget, setClearTarget] = useState(null); // a row — clear what Doorline sent for it
 
   const statusQ = useQuery({
     queryKey: ['admin', 'integrations', 'fbtime', orgId],
     queryFn: () => api('/admin/integrations/fbtime'),
     enabled: Boolean(orgId),
+    // While the first send or a clear runs, so the door-count card sees it finish.
+    // React Query stops the interval itself once the state settles or the page unmounts.
+    refetchInterval: (query) => doorsPollInterval(query.state.data),
   });
   const connected = Boolean(statusQ.data?.connected);
+  const doors = statusQ.data?.doors || null;
 
   const peopleQ = useQuery({
     queryKey: ['admin', 'integrations', 'fbtime', 'people', orgId],
@@ -107,10 +126,25 @@ export default function IntegrationsPage() {
       invalidateLinks();
     },
   });
-  const unlinkMut = useMutation({
-    mutationFn: (userId) =>
-      api(`/admin/integrations/fbtime/links/${userId}`, { method: 'DELETE' }),
-    onSuccess: invalidateLinks,
+
+  // Stop counting a kept earlier account — its shifts re-resolve, so hours move.
+  const stopMut = useMutation({
+    mutationFn: ({ fbtimePersonId, userId }) =>
+      api(`/admin/integrations/fbtime/kept/${fbtimePersonId}/${userId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      setStopTarget(null);
+      invalidateLinks();
+    },
+  });
+
+  // "Clear the numbers Doorline sent for <person>" — recorded here, run by the worker.
+  const clearPersonMut = useMutation({
+    mutationFn: (fbtimePersonId) =>
+      api('/admin/integrations/fbtime/doors', { method: 'PATCH', body: { clearPerson: fbtimePersonId } }),
+    onSuccess: () => {
+      setClearTarget(null);
+      invalidateLinks();
+    },
   });
 
   const debouncedTerm = useDebouncedValue(filters.term, 150);
@@ -140,6 +174,11 @@ export default function IntegrationsPage() {
 
   const counts = useMemo(() => rosterCounts(allRows, visibleRows), [allRows, visibleRows]);
   const { pairs, skippedConflicts } = useMemo(() => suggestedPairs(allRows), [allRows]);
+  // Recent activity names an FbTime person off the same rows the table renders.
+  const fbtimeNames = useMemo(
+    () => new Map(allRows.filter((r) => r.fbtimePersonId).map((r) => [r.fbtimePersonId, r.fbtimeName])),
+    [allRows]
+  );
   const candidates = useMemo(
     () => linkCandidates(allRows, pickerTarget, { includeInactive: filters.includeInactive }),
     [allRows, pickerTarget, filters.includeInactive]
@@ -175,8 +214,10 @@ export default function IntegrationsPage() {
     });
 
   // One invalidation at the end, never per item: each refetch re-pulls the
-  // provider's whole roster.
-  const runBatch = async (items, runner, undoItems) => {
+  // provider's whole roster. A bulk action clears the whole selection; a ROW's
+  // action (a one-item batch, so it gets the banner and Undo too) drops only its
+  // own key, leaving whatever else was ticked alone.
+  const runBatch = async (items, runner, undoItems, { onlyItemsSelection = false, rows = [] } = {}) => {
     setBatch({ busy: true, progress: { done: 0, total: items.length }, results: null });
     markBusy(items.map((i) => i.key), true);
     let done = 0;
@@ -188,8 +229,26 @@ export default function IntegrationsPage() {
       },
     });
     invalidateLinks();
-    setSelected(new Set());
-    setBatch({ busy: false, progress: { done, total: items.length }, results, undo: undoItems });
+    if (onlyItemsSelection) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        items.forEach((i) => next.delete(i.key));
+        return next;
+      });
+    } else {
+      setSelected(new Set());
+    }
+    const unlinked = rows.filter((r) => results.ok.includes(r.key));
+    setBatch({
+      busy: false,
+      progress: { done, total: items.length },
+      results,
+      undo: undoItems,
+      // Undoable unlinks that started a clear ("clear" is the server's answer — false
+      // when Doorline never sent for that person), and unlinks Undo can't reverse.
+      cleared: unlinked.filter((r) => !cantRelink(r) && results.responses?.[r.key]?.clear).length,
+      undoSkipped: unlinked.filter(cantRelink).length,
+    });
     return results;
   };
 
@@ -206,20 +265,37 @@ export default function IntegrationsPage() {
       null
     );
 
-  const bulkUnlink = (rows) =>
+  // `choice` is the answer to "Was the link right?" ('keep' | 'clear'). It goes ONLY
+  // on the rows the question was about; every other row is a plain unlink.
+  const unlinkRows = (rows, choice = null, { fromRow = false } = {}) =>
     runBatch(
-      rows.map((r) => ({ key: r.key, userId: r.userId })),
-      runUnlinkBatch,
-      // Captured BEFORE the writes — after the refetch there is no way to tell
-      // which links we removed.
       rows.map((r) => ({
         key: r.key,
         userId: r.userId,
-        fbtimePersonId: r.fbtimePersonId,
-        fbtimeName: r.fbtimeName,
-        fbtimeEmail: r.fbtimeEmail,
-      }))
+        doors: choice && asksLinkQuestion(r) ? choice : undefined,
+      })),
+      runUnlinkBatch,
+      // Captured BEFORE the writes — after the refetch there is no way to tell
+      // which links we removed. A deleted account or a member who left can never
+      // be linked again, so Undo leaves them out rather than fail on each.
+      rows
+        .filter((r) => !cantRelink(r))
+        .map((r) => ({
+          key: r.key,
+          userId: r.userId,
+          fbtimePersonId: r.fbtimePersonId,
+          fbtimeName: r.fbtimeName,
+          fbtimeEmail: r.fbtimeEmail,
+        })),
+      { onlyItemsSelection: fromRow, rows }
     );
+
+  // A row's Unlink: the question when it changes something, otherwise straight away
+  // (as it always was — and now with Undo, since it runs as a one-item batch).
+  const unlinkRow = (row) => {
+    if (asksLinkQuestion(row)) setUnlinkAsk({ rows: [row], fromRow: true });
+    else unlinkRows([row], null, { fromRow: true });
+  };
 
   const applySuggestions = async (subset, { all }) => {
     // When nothing was unticked this is exactly what the blind auto-match does —
@@ -266,7 +342,11 @@ export default function IntegrationsPage() {
       )}
 
       {data && !data.connected && (
-        <ConnectCard configured={data.configured} onDone={invalidateAll} />
+        <ConnectCard
+          configured={data.configured}
+          doorsAvailable={Boolean(data.doorsAvailable)}
+          onDone={invalidateAll}
+        />
       )}
 
       {data && data.connected && (
@@ -276,6 +356,10 @@ export default function IntegrationsPage() {
             onChanged={invalidateAll}
             onOpenSettings={() => setSettingsOpen(true)}
           />
+
+          {showDoorsCard(doors) && (
+            <DoorCountsCard data={data} onOpenSettings={() => setSettingsOpen(true)} />
+          )}
 
           <RosterToolbar
             filters={filters}
@@ -295,42 +379,14 @@ export default function IntegrationsPage() {
           />
 
           {batch && !batch.busy && batch.results && !suggestOpen && (
-            <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-card px-4 py-2.5 text-sm shadow-card">
-              <IconCheck size={16} className="text-success-fg" />
-              <span className="text-fg">
-                {batch.results.ok.length} updated
-                {batch.results.failed.length ? ` · ${batch.results.failed.length} failed` : ''}
-              </span>
-              {batch.results.failed.length > 0 && (
-                <span className="text-xs text-danger">{batch.results.failed[0].message}</span>
-              )}
-              {batch.undo && batch.results.ok.length > 0 && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    const items = batch.undo.filter((u) => batch.results.ok.includes(u.key));
-                    runBatch(items, runLinkBatch, null);
-                  }}
-                >
-                  Undo
-                </Button>
-              )}
-              <button
-                type="button"
-                onClick={() => setBatch(null)}
-                className="ml-auto text-xs text-fg-muted underline underline-offset-2 hover:text-fg"
-              >
-                Dismiss
-              </button>
-            </div>
+            <BatchBanner
+              batch={batch}
+              onUndo={(items) => runBatch(items, runLinkBatch, null)}
+              onDismiss={() => setBatch(null)}
+            />
           )}
 
-          {(linkMut.error || unlinkMut.error) && (
-            <p className="text-xs text-danger">
-              {(linkMut.error || unlinkMut.error).message}
-            </p>
-          )}
+          {linkMut.error && <p className="text-xs text-danger">{linkMut.error.message}</p>}
 
           <RosterTable
             rows={visibleRows}
@@ -344,14 +400,19 @@ export default function IntegrationsPage() {
             busyKeys={busyKeys}
             projectsLoading={projectsQ.isLoading}
             emptyHint={emptyHint}
+            syncLabel={doors?.enabled ? 'Sync now' : 'Refresh hours'}
+            doorsAvailable={Boolean(doors?.available)}
             onLink={(row) =>
               setPickerTarget({ side: row.fbtimePersonId ? 'doorline' : 'fbtime', row })
             }
-            onUnlink={(row) => {
-              markBusy([row.key], true);
-              unlinkMut.mutate(row.userId, {
-                onSettled: () => markBusy([row.key], false),
-              });
+            onUnlink={unlinkRow}
+            onStopCounting={(row, kept) => {
+              stopMut.reset();
+              setStopTarget({ row, kept });
+            }}
+            onClearSent={(row) => {
+              clearPersonMut.reset();
+              setClearTarget(row);
             }}
           />
 
@@ -366,7 +427,7 @@ export default function IntegrationsPage() {
             </p>
           )}
 
-          <RecentActivity />
+          <RecentActivity personName={(id) => fbtimeNames.get(id) || null} />
         </>
       )}
 
@@ -377,7 +438,10 @@ export default function IntegrationsPage() {
         busy={Boolean(batch?.busy)}
         progress={batch?.progress}
         onLink={bulkLink}
-        onUnlink={bulkUnlink}
+        // The inline confirm stays only for selections the question isn't about.
+        askBeforeUnlink={unlinkQuestion(unlinkable).ask}
+        onAskUnlink={(rows) => setUnlinkAsk({ rows, fromRow: false })}
+        onUnlink={(rows) => unlinkRows(rows)}
         onClear={() => setSelected(new Set())}
       />
 
@@ -386,6 +450,43 @@ export default function IntegrationsPage() {
           data={data}
           onChanged={invalidateAll}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {unlinkAsk && (
+        <UnlinkModal
+          rows={unlinkAsk.rows}
+          doorsAvailable={Boolean(doors?.available)}
+          onConfirm={(choice) => {
+            const { rows, fromRow } = unlinkAsk;
+            setUnlinkAsk(null);
+            unlinkRows(rows, choice, { fromRow });
+          }}
+          onClose={() => setUnlinkAsk(null)}
+        />
+      )}
+
+      {stopTarget && (
+        <StopCountingModal
+          row={stopTarget.row}
+          kept={stopTarget.kept}
+          doorsOn={Boolean(doors?.enabled)}
+          pending={stopMut.isPending}
+          error={stopMut.error}
+          onConfirm={() =>
+            stopMut.mutate({ fbtimePersonId: stopTarget.row.fbtimePersonId, userId: stopTarget.kept.userId })
+          }
+          onClose={() => setStopTarget(null)}
+        />
+      )}
+
+      {clearTarget && (
+        <ClearSentModal
+          name={clearTarget.fbtimeName || 'this FbTime person'}
+          pending={clearPersonMut.isPending}
+          error={clearPersonMut.error}
+          onConfirm={() => clearPersonMut.mutate(clearTarget.fbtimePersonId)}
+          onClose={() => setClearTarget(null)}
         />
       )}
 

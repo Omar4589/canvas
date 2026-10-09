@@ -42,6 +42,13 @@ async function main() {
   }
 
   if (!APPLY) {
+    // Counts only — the FbTime step reports what it would de-pair; nothing is written, not even
+    // a RetentionRun row.
+    const dry = await purgeDeletedIdentities({ apply: false });
+    console.log(
+      `  FbTime: ${dry.fbtime.links} link(s), ${dry.fbtime.shiftsKept} shift(s) to de-pair, ` +
+        `${dry.fbtime.shiftsReassigned} to re-resolve, ${dry.fbtime.events} event(s)`
+    );
     console.log('');
     console.log('Dry run — re-run with --apply. (The worker dyno does this on a schedule regardless.)');
     await mongoose.disconnect();
@@ -51,6 +58,9 @@ async function main() {
   const res = await purgeDeletedIdentities({ apply: true });
   console.log('');
   console.log(`Purged ${res.purged} identit${res.purged === 1 ? 'y' : 'ies'}. Their past field work no longer directly identifies them.`);
+  if (res.failed) {
+    console.log(`*** ${res.failed} record(s) failed and stay due — see the errors above. The health check shows the failure, and goes red if no clean run follows within 48 hours. ***`);
+  }
 
   await mongoose.disconnect();
 }

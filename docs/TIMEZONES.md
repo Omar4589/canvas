@@ -10,7 +10,8 @@ every **displayed timestamp** across web and mobile.
 
 Related: [METRICS.md](METRICS.md) (the numbers anchored by this), [DATE_FILTERS.md](DATE_FILTERS.md)
 (the date-range control that sends days into the anchor tz), [USERS.md](USERS.md) (multi-org / who an
-admin is).
+admin is), [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) (door counts to FbTime are dated in each
+campaign's zone, and need every zone to be on the curated list — §E).
 
 ---
 
@@ -64,6 +65,11 @@ New campaigns **default their timezone from their state** (Texas → Central, Fl
 a dozen states straddle two zones (e.g. El Paso is Mountain, the Florida panhandle is Central), so the
 campaign form has a **Timezone** dropdown to override the guess. The org has its own timezone for the
 rollups above.
+
+The zones in that dropdown are the only ones Doorline accepts for a campaign — a campaign can't be
+created with, or changed to, any other (one saved before this rule keeps its zone until someone
+changes it). Nothing on screen offers anything else, so this only matters to something talking to the
+server directly; the reason is in Part 2 §E.
 
 ## The one exception: personal stats
 
@@ -180,6 +186,21 @@ shifts a day in negative-offset zones).
   (dominant IANA zone per US state) + `US_TIMEZONES` (the override dropdown list). Campaign create
   ([routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js)) defaults `timeZone` from
   `state`; the SPA campaign form has the dropdown.
+- **The curated list is enforced** (2026-10, with door counts to FbTime). Campaign create answers
+  `400 { error: 'Choose one of the listed US time zones.', code: 'INVALID_TIMEZONE' }` for a sent
+  `timeZone` outside `US_TIMEZONES`; update answers the same only when the zone **changes** —
+  checked after the campaign loads, because the Edit drawer re-sends the stored zone on every save,
+  so a campaign stored with an older spelling keeps saving. `defaultZoneForState` only ever returns
+  listed zones. Why: `Intl` accepts spellings MongoDB's `$dateToString` rejects (`america/chicago`,
+  `us/eastern`, `utc` — error 40485), and the org-wide door count to FbTime buckets every campaign's
+  knocks by its own zone in **one** aggregation, so one such campaign would stop door counts for the
+  whole organization. The door count also checks every zone it resolves (campaign → org →
+  `America/New_York`, the §A fallback) against the list, so an older campaign with an unlisted zone —
+  or an organization, whose `timeZone` has no customer-facing editor and isn't validated on write —
+  shows, while door counts are on, as the door-count card's *Needs attention* (`timezone`) with the
+  campaign or the organization named in `failDetail`, instead of failing unnamed
+  ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md)). Re-picking the campaign's zone from the dropdown
+  clears it at the next run whose count succeeds. Clears never need a zone, so they run regardless.
 - [migrations/migrateTimeZones.js](../server/src/migrations/migrateTimeZones.js)
   (`npm run migrate:timezones [-- --apply]`) — backfills each campaign's `timeZone` from its state
   (replacing the old blanket Eastern default) and sets each org's `timeZone` to its campaigns' most

@@ -248,10 +248,23 @@ router.get('/', async (req, res, next) => {
         .select('_id')
         .lean();
       if (connected) {
-        const fbLinks = await FbTimePersonLink.find({ organizationId: activeOrgId(req) })
-          .select('userId fbtimeName source')
-          .lean();
+        const [fbLinks, conn] = await Promise.all([
+          FbTimePersonLink.find({ organizationId: activeOrgId(req) }).select('userId fbtimeName source fbtimePersonId').lean(),
+          FbTimeConnection.findOne({ organizationId: activeOrgId(req) }).select('keptAccounts').lean(),
+        ]);
         fbtimeByUser = new Map(fbLinks.map((l) => [String(l.userId), l]));
+        // A kept earlier account (Unlink → "Yes — keep") still owns the hours it clocked
+        // before it was kept, so it reads as measured, never "Not linked".
+        const nameByPerson = new Map(fbLinks.map((l) => [String(l.fbtimePersonId).toLowerCase(), l.fbtimeName]));
+        for (const k of conn?.keptAccounts || []) {
+          const uid = String(k.userId);
+          if (fbtimeByUser.has(uid)) continue;
+          fbtimeByUser.set(uid, {
+            fbtimeName: nameByPerson.get(String(k.fbtimePersonId).toLowerCase()) || null,
+            source: null,
+            kept: true,
+          });
+        }
       }
     }
 
@@ -271,6 +284,7 @@ router.get('/', async (req, res, next) => {
               linked: fbtimeByUser.has(String(m.userId._id)),
               personName: fbtimeByUser.get(String(m.userId._id))?.fbtimeName || null,
               source: fbtimeByUser.get(String(m.userId._id))?.source || null,
+              kept: fbtimeByUser.get(String(m.userId._id))?.kept === true,
             }
           : null,
         user: {
@@ -860,12 +874,25 @@ router.get('/:userId/stats', async (req, res, next) => {
       // Whether THIS person's hours are measured — answerable only here, because the
       // Integrations page is admin-only and a lead had no way to find out at all.
       FbTimeConnection.findOne({ organizationId: orgId, status: 'connected' })
-        .select('_id')
+        .select('_id keptAccounts')
         .lean(),
       FbTimePersonLink.findOne({ organizationId: orgId, userId })
         .select('fbtimeName fbtimeEmail source linkedAt')
         .lean(),
     ]);
+    // Not linked, but kept for an FbTime person (Unlink → "Yes — keep"): the hours it clocked
+    // before it was kept are still its own, so it must not read "count nowhere until linked".
+    const keptEntry = !fbtimeLink
+      ? (fbtimeConn?.keptAccounts || []).find((k) => String(k.userId) === String(userId))
+      : null;
+    const keptPersonLink = keptEntry
+      ? await FbTimePersonLink.findOne({
+          organizationId: orgId,
+          fbtimePersonId: new RegExp(`^${String(keptEntry.fbtimePersonId).toLowerCase()}$`, 'i'),
+        })
+          .select('fbtimeName')
+          .lean()
+      : null;
 
     let doorsKnocked = 0;
     let restricted = 0;
@@ -917,9 +944,12 @@ router.get('/:userId/stats', async (req, res, next) => {
       // that never connected FbTime sees no new row.
       fbtime: {
         connected: Boolean(fbtimeConn),
-        linked: Boolean(fbtimeLink),
-        personName: fbtimeLink?.fbtimeName || fbtimeLink?.fbtimeEmail || null,
+        linked: Boolean(fbtimeLink || keptEntry),
+        personName: fbtimeLink?.fbtimeName || fbtimeLink?.fbtimeEmail || keptPersonLink?.fbtimeName || null,
         source: fbtimeLink?.source || null,
+        // An earlier account kept for that FbTime person — its hours before it was kept count.
+        // (Lead-visible like the rest of this block, so no dates: just the fact.)
+        kept: Boolean(keptEntry),
       },
     });
   } catch (err) {

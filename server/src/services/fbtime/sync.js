@@ -1,11 +1,13 @@
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimeShift } from '../../models/FbTimeShift.js';
-import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { Organization } from '../../models/Organization.js';
 import { openSecret, sealedSecretConfigured } from '../../utils/sealedSecret.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { getShifts, ping, FbtimeApiError, FATAL_CODES } from './client.js';
+import { loadShiftOwners } from './shiftOwner.js';
+import { markErroredIfCurrent } from './connectionState.js';
+import { runDoorStep } from './doorPush.js';
 
 // The FbTime hours sync: re-pull date ranges of SHIFTS, replace what we hold.
 //
@@ -23,10 +25,15 @@ import { getShifts, ping, FbtimeApiError, FATAL_CODES } from './client.js';
 //     edits and deletions beyond the recent window, and re-pings 'errored'
 //     connections so a re-enabled key self-heals with no admin action.
 //
-// This is deliberately ALL the machinery. No reconciliation pass, no drift
-// detection, no per-row bookkeeping — the polling model is self-healing by
+// This is deliberately ALL the machinery for HOURS. No reconciliation pass, no
+// drift detection, no per-row bookkeeping — the polling model is self-healing by
 // construction, and any machinery on top would be solving a problem the model
-// does not have (the provider's own words in its contract).
+// does not have (the provider's own words in its contract). The door step that
+// runs after it (doorPush.js) keeps one bounded ledger of its own — which FbTime
+// people it ever reported — because a clear must know whom to reach.
+//
+// Each run ends with the DOOR STEP (services/fbtime/doorPush.js), whatever the
+// hours result: it re-reads the connection and gates on its own state.
 //
 // THE ZONE HERE ONLY SHAPES THE PULL WINDOW. Shifts are cached as instants and
 // bucketed into local days at READ time, in each report's own anchor zone
@@ -70,27 +77,13 @@ export const windowFor = (timeZone, windowDays) => {
 };
 
 /**
- * Record a sync failure ON THE TRANSITION, not per run. A revoked key hit by a
- * 15-minute cron must produce one audit row, not a wall of identical ones.
+ * Record a sync failure ON THE TRANSITION, not per run — one audit row for a revoked
+ * key, not a wall of them. Conditional on the key this run used (services/fbtime/
+ * connectionState.js): a sweep that loaded an old key before a Replace key must not
+ * break the connection now holding the new one.
  */
-const markConnectionError = async (connection, err) => {
-  const summary = `${err.code || 'ERROR'}: ${String(err.message || '').slice(0, 200)}`;
-  const wasConnected = connection.status === 'connected';
-
-  connection.status = 'errored';
-  connection.lastSyncError = summary;
-  connection.lastErrorAt = new Date();
-  await connection.save();
-
-  if (wasConnected) {
-    await IntegrationEvent.create({
-      organizationId: connection.organizationId,
-      byUserId: null, // the worker
-      type: 'sync-failed',
-      detail: { code: err.code || null },
-    });
-  }
-};
+const markConnectionError = (connection, err) =>
+  markErroredIfCurrent(connection._id, connection.keyCiphertext, err);
 
 /**
  * Pull one organization's shifts for the trailing window and make the cache
@@ -113,13 +106,12 @@ export async function syncOrgHours(connection, { windowDays = RECENT_WINDOW_DAYS
   const apiKey = openSecret(connection.keyCiphertext);
   const shifts = await getShifts({ apiKey, startDate, endDate, timeZone });
 
-  // Resolve the link map once; shifts for unmapped people are kept with
-  // userId null — that is the mapping screen's "unmatched hours exist" signal,
-  // and absence of a link must never make hours silently vanish.
-  const links = await FbTimePersonLink.find({ organizationId: connection.organizationId })
-    .select('userId fbtimePersonId')
-    .lean();
-  const userOf = new Map(links.map((l) => [l.fbtimePersonId, l.userId]));
+  // Resolve the owners once (services/fbtime/shiftOwner.js — the person's current
+  // link, or a kept earlier account for shifts clocked before its cut). Shifts for
+  // unmapped people are kept with userId null — that is the mapping screen's
+  // "unmatched hours exist" signal, and absence of a link must never make hours
+  // silently vanish.
+  const ownerOf = await loadShiftOwners(connection.organizationId);
 
   const now = new Date();
   const seen = new Set(); // shift ids present in the response
@@ -139,7 +131,7 @@ export async function syncOrgHours(connection, { windowDays = RECENT_WINDOW_DAYS
         update: {
           $set: {
             fbtimePersonId: String(s.userId),
-            userId: userOf.get(String(s.userId)) ?? null,
+            userId: ownerOf(s.userId, new Date(s.clockIn)),
             clockIn: new Date(s.clockIn),
             // Stored as sent — each figure already rounded to 2dp per the
             // contract, so read-time sums reproduce the provider's own totals.
@@ -202,13 +194,38 @@ export async function syncOrgHours(connection, { windowDays = RECENT_WINDOW_DAYS
  * Returns { ok, recovered, ...counts } — `recovered` stays true even when the
  * pull after a successful probe fails, matching the loop's historic counting.
  */
-export async function syncOneConnection(connection, { windowDays } = {}) {
+export async function syncOneConnection(connection, { windowDays, deep = false } = {}) {
+  const hours = await syncHoursStep(connection, { windowDays });
+  // The door step, whatever the hours result — it re-reads the connection and gates
+  // on its own state (an errored connection reads as "paused"). `deep` comes from the
+  // JOB, never from the hours window: the deep job and the one-off org job (connect,
+  // turn-on, a clear, Sync now) are deep.
+  try {
+    hours.doors = await runDoorStep(connection._id, { deep });
+  } catch (err) {
+    console.error(`[fbtime] door step failed for org ${connection.organizationId}: ${err?.message || err}`);
+  }
+  return hours;
+}
+
+async function syncHoursStep(connection, { windowDays } = {}) {
   let recovered = false;
   try {
     if (connection.status === 'errored') {
-      await ping({ apiKey: openSecret(connection.keyCiphertext) });
+      const pinged = await ping({ apiKey: openSecret(connection.keyCiphertext) });
       connection.status = 'connected';
       await connection.save();
+      // The recovery ping also says what the key may do and what FbTime supports —
+      // written against the key this run used, so a Replace key in between keeps its own.
+      await FbTimeConnection.updateOne(
+        { _id: connection._id, keyCiphertext: connection.keyCiphertext },
+        {
+          $set: {
+            keyScopes: Array.isArray(pinged?.key?.scopes) ? pinged.key.scopes : [],
+            fbtimeFeatures: Array.isArray(pinged?.features) ? pinged.features : [],
+          },
+        }
+      );
       await IntegrationEvent.create({
         organizationId: connection.organizationId,
         byUserId: null,
@@ -246,7 +263,7 @@ export async function syncOneConnection(connection, { windowDays } = {}) {
  * recoverErrored (the deep job): include 'errored' connections so
  * syncOneConnection's probe can self-heal them.
  */
-export async function runFbtimeSync({ windowDays, recoverErrored = false } = {}) {
+export async function runFbtimeSync({ windowDays, recoverErrored = false, deep = false } = {}) {
   if (!sealedSecretConfigured()) {
     // Dormant, not broken — same posture as the mailer without RESEND_API_KEY.
     return { orgs: 0, ok: 0, errored: 0, recovered: 0, dormant: true };
@@ -258,7 +275,7 @@ export async function runFbtimeSync({ windowDays, recoverErrored = false } = {})
   const out = { orgs: connections.length, ok: 0, errored: 0, recovered: 0 };
 
   for (const connection of connections) {
-    const res = await syncOneConnection(connection, { windowDays });
+    const res = await syncOneConnection(connection, { windowDays, deep });
     if (res.recovered) out.recovered += 1;
     if (res.ok) out.ok += 1;
     else out.errored += 1;

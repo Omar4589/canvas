@@ -35,11 +35,13 @@ export function invalidateLinkCaches(qc, orgId) {
  * Concurrency is bounded because each POST does an updateMany; firing fifty in
  * parallel is a self-inflicted outage on our own database. Partial failure is the
  * NORMAL case here (a LINK_TAKEN race), so results are reported per item and the
- * caller invalidates ONCE at the end, never per item.
+ * caller invalidates ONCE at the end, never per item. Each success's response body
+ * comes back too, keyed like `ok` — an unlink answers whether it started a clear.
  */
 const runBatch = async (items, worker, { concurrency = 3, onSettled } = {}) => {
   const ok = [];
   const failed = [];
+  const responses = {};
   let cursor = 0;
 
   const drain = async () => {
@@ -47,7 +49,7 @@ const runBatch = async (items, worker, { concurrency = 3, onSettled } = {}) => {
       const item = items[cursor];
       cursor += 1;
       try {
-        await worker(item);
+        responses[item.key] = await worker(item);
         ok.push(item.key);
         onSettled?.(item.key, { ok: true });
       } catch (err) {
@@ -65,7 +67,7 @@ const runBatch = async (items, worker, { concurrency = 3, onSettled } = {}) => {
   await Promise.all(
     Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, drain)
   );
-  return { ok, failed };
+  return { ok, failed, responses };
 };
 
 /** items: [{ key, userId, fbtimePersonId, fbtimeName, fbtimeEmail }] */
@@ -87,10 +89,19 @@ export const runLinkBatch = (items, opts) =>
     opts
   );
 
-/** items: [{ key, userId }] */
+/**
+ * items: [{ key, userId, doors? }] — `doors` is the row's answer to "Was the link
+ * right?" ('keep' | 'clear'), present only on rows the question was about; without it
+ * the DELETE carries no body and is a plain unlink. Each response is
+ * { removed, kept, clear } — `clear` is false when Doorline never sent for that person.
+ */
 export const runUnlinkBatch = (items, opts) =>
   runBatch(
     items,
-    (i) => api(`/admin/integrations/fbtime/links/${i.userId}`, { method: 'DELETE' }),
+    (i) =>
+      api(`/admin/integrations/fbtime/links/${i.userId}`, {
+        method: 'DELETE',
+        body: i.doors ? { doors: i.doors } : undefined,
+      }),
     opts
   );

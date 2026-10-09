@@ -16,6 +16,10 @@ import mongoose from 'mongoose';
 // Hand copies that cannot import this (their own files say why) must carry every key too:
 // routes/mobile/me.js and routes/admin/memberships.js DOOR_ACTIONS, routes/superAdmin/platform.js
 // ACTION_DOOR, services/voters/voterProfile.js, and both clients' OVERLAP_KNOCK_ACTIONS.
+//
+// This list also leaves the system: it is what Doorline sends FbTime as each linked canvasser's
+// doors per day (services/fbtime/doorCounts.js). Changing it changes the number on customers'
+// FbTime doors-per-hour pages for up to the last 120 days at the next send.
 export const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 
 // Someone answered the door. Membership IS the definition of a contact: contactRate's numerator is

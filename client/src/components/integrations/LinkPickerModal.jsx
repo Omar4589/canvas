@@ -140,8 +140,10 @@ export default function LinkPickerModal({ target, candidates, pending, error, on
         </p>
       )}
 
-      {/* A LINK_TAKEN 409 keeps the dialog open on purpose: the fix is picking
-          somebody else, and that list is right here. */}
+      {/* A 409 keeps the dialog open on purpose. LINK_TAKEN's fix is picking
+          somebody else, and that list is right here; LINK_CHANGE (the canvasser is
+          linked to a different FbTime person — unlink first) and ACCOUNT_DELETED
+          (a deleted account can't be linked) say what to do in their own words. */}
       {error && <p className="mt-3 text-xs text-danger">{error.message}</p>}
     </Modal>
   );

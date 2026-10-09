@@ -596,14 +596,27 @@ export default function UserProfileModal({ membership, onClose }) {
                   is reassuring but inert, while "not linked" is the two-click fix that stops
                   their hours landing nowhere. Leads see the same sentence but no link: the
                   Integrations page is admin-only, and pointing them at a 403 is worse than
-                  telling them to ask an admin. */}
+                  telling them to ask an admin. A KEPT account (unlinked with "Yes — keep")
+                  is an earlier account of an FbTime person: no link of its own, but the
+                  hours it clocked before still count, so it gets neither "linked as" nor
+                  the "Link them" nag. */}
               {stats.fbtime?.connected && (
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   <Badge variant={stats.fbtime.linked ? 'success' : 'warning'}>
-                    {stats.fbtime.linked ? 'FbTime linked' : 'FbTime not linked'}
+                    {stats.fbtime.kept
+                      ? 'FbTime earlier account'
+                      : stats.fbtime.linked
+                        ? 'FbTime linked'
+                        : 'FbTime not linked'}
                   </Badge>
                   <span className="text-fg-muted">
-                    {stats.fbtime.linked ? (
+                    {stats.fbtime.kept ? (
+                      <>
+                        An earlier account
+                        {stats.fbtime.personName ? ` of ${stats.fbtime.personName}` : ''} in FbTime —
+                        the hours it clocked before it was replaced still count as measured.
+                      </>
+                    ) : stats.fbtime.linked ? (
                       <>
                         Hours measured from their clock time
                         {stats.fbtime.personName ? ` as ${stats.fbtime.personName}` : ''}

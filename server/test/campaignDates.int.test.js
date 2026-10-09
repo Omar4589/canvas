@@ -187,3 +187,31 @@ test('GET /mobile/bootstrap carries the four key-date fields on the campaign (in
   assert.strictEqual(r.json.campaign.earlyVotingEnd, '2026-10-25');
   assert.strictEqual(r.json.campaign.datesNote, 'Runoff moved.');
 });
+
+test('time zones come from the curated US list: create refuses others; update refuses a CHANGE to one', { skip }, async () => {
+  // An Intl-valid spelling MongoDB rejects ("us/eastern") would stop the org-wide door count
+  // to FbTime for every campaign (services/fbtime/doorCounts.js resolveZones).
+  const bad = await call('POST', '/admin/campaigns', {
+    ...auth(),
+    body: { name: 'Zone C', type: 'survey', state: 'NY', timeZone: 'us/eastern' },
+  });
+  assert.deepStrictEqual([bad.status, bad.json.code], [400, 'INVALID_TIMEZONE']);
+
+  const ok = await call('POST', '/admin/campaigns', {
+    ...auth(),
+    body: { name: 'Zone C', type: 'survey', state: 'NY', timeZone: 'America/Chicago' },
+  });
+  assert.strictEqual(ok.status, 201);
+  const id = ok.json.campaign._id;
+
+  const change = await call('PATCH', `/admin/campaigns/${id}`, { ...auth(), body: { timeZone: 'UTC' } });
+  assert.deepStrictEqual([change.status, change.json.code], [400, 'INVALID_TIMEZONE']);
+
+  // A campaign saved before the list was enforced keeps saving: the drawer re-sends the
+  // stored zone on every save, and an unchanged zone is never refused.
+  await Campaign.updateOne({ _id: id }, { $set: { timeZone: 'america/chicago' } });
+  const resend = await call('PATCH', `/admin/campaigns/${id}`, { ...auth(), body: { timeZone: 'america/chicago', name: 'Zone C2' } });
+  assert.strictEqual(resend.status, 200);
+  const fixed = await call('PATCH', `/admin/campaigns/${id}`, { ...auth(), body: { timeZone: 'America/Chicago' } });
+  assert.strictEqual(fixed.status, 200);
+});

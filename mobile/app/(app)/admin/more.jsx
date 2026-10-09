@@ -41,6 +41,52 @@ const WEB_NOTES = {
   },
 };
 
+// Door counts to FbTime — COPY ONLY on the phone. The state comes from the server's one status
+// model (GET /admin/integrations/fbtime → doors.state / doors.reason, never re-derived here);
+// turning it on, clearing and every fix live on the web dashboard. An older server sends no
+// `doors` block, which reads exactly like "off".
+const DOORS_SUB = {
+  starting: ' · door counts starting',
+  sending: ' · door counts on',
+  clearing: ' · clearing door counts',
+};
+const doorsNeedAttention = (doors) =>
+  doors?.state === 'attention' || (doors?.state === 'paused' && doors.reason === 'connection');
+
+const sentAt = (iso) => {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleString();
+};
+
+const ATTENTION_SENTENCE = {
+  conflict: 'Another Doorline organization already sends door counts to this FbTime organization.',
+  'needs-permission': 'The FbTime key can no longer fill in door counts — it needs a key that can.',
+  timezone: "A campaign's time zone can't be used for door counts.",
+  refused: 'FbTime refused the last door counts Doorline sent.',
+  stuck: 'Sending door counts has kept failing for about two hours.',
+};
+
+const doorsNote = (doors) => {
+  if (!doors) return '';
+  if (doors.state === 'starting') return ' Door counts to FbTime are on — the first send is under way.';
+  if (doors.state === 'sending') {
+    return doors.lastSentAt
+      ? ` Door counts go to FbTime every 15 minutes; last sent ${sentAt(doors.lastSentAt)}.`
+      : ' Door counts go to FbTime every 15 minutes.';
+  }
+  if (doors.state === 'clearing') return ' Removing the numbers you asked Doorline to clear.';
+  if (doors.state === 'paused' && doors.reason === 'doorline') return ' Door counts are paused by Doorline.';
+  if (doors.state === 'paused' && doors.reason === 'fbtime-outdated') return ' Door counts are paused until FbTime is updated.';
+  if (doors.state === 'attention') {
+    const campaign = doors.reason === 'timezone' && doors.failDetail?.campaignName ? ` (${doors.failDetail.campaignName})` : '';
+    const sentence = ATTENTION_SENTENCE[doors.reason] || 'Door counts need attention.';
+    return ` ${sentence.replace(/\.$/, `${campaign}.`)} Manage on the web dashboard (Integrations).`;
+  }
+  return '';
+};
+
 // This screen is a MENU, not a data list — every row is a destination you tap, so the rows carry
 // `emphasis="menu"` (15/600 labels) under small ALL-CAPS `caption` headers, and the shared
 // `RowEmoji` slot keeps every label starting at the same x. The card, the interleaved hairlines and
@@ -73,13 +119,16 @@ export default function AdminMore() {
     staleTime: 60 * 1000,
   });
   const fbtime = fbtimeQ.data;
+  const doors = fbtime?.connected ? fbtime.doors || null : null;
   const fbtimeSub = !fbtime
     ? 'Manage on the web'
     : !fbtime.connected
       ? 'Not connected'
       : fbtime.status === 'errored'
         ? 'Needs attention'
-        : 'Connected — measured hours on';
+        : `Connected — measured hours on${
+            doorsNeedAttention(doors) ? ' · door counts need attention' : DOORS_SUB[doors?.state] || ''
+          }`;
 
   useEffect(() => {
     loadCurrentUser().then(setUser);
@@ -183,7 +232,7 @@ export default function AdminMore() {
             leading={<RowEmoji>⏱️</RowEmoji>}
             label="FbTime hours"
             sub={fbtimeSub}
-            badge={fbtime?.status === 'errored' ? { text: '!' } : null}
+            badge={fbtime?.status === 'errored' || doorsNeedAttention(doors) ? { text: '!' } : null}
             hint="Explains where to manage this"
             onPress={() =>
               setWebNote({
@@ -191,8 +240,8 @@ export default function AdminMore() {
                 body: !fbtime?.connected
                   ? 'If your canvassers clock in with FbTime, an org admin can connect it on the web dashboard (Integrations) so doors-per-hour uses measured clock time. Reports label every figure measured or estimated.'
                   : fbtime.status === 'errored'
-                    ? `Hours have stopped syncing${fbtime.lastSyncError ? ` (${fbtime.lastSyncError})` : ''}. Replace the API key on the web dashboard (Integrations).`
-                    : `Connected to ${fbtime.fbtimeOrgName || 'FbTime'} — ${fbtime.linkCount || 0} canvasser${fbtime.linkCount === 1 ? '' : 's'} linked${fbtime.lastSyncAt ? `, last synced ${new Date(fbtime.lastSyncAt).toLocaleString()}` : ''}. Key, hours figure and canvasser mapping are managed on the web dashboard (Integrations). Doorline shows daily totals only — exact clock-ins, clock-outs and breaks live on the person's timesheet in FbTime.`,
+                    ? `${doors?.enabled ? 'Hours and door counts have' : 'Hours have'} stopped syncing${fbtime.lastSyncError ? ` (${fbtime.lastSyncError})` : ''}. Replace the API key on the web dashboard (Integrations).`
+                    : `Connected to ${fbtime.fbtimeOrgName || 'FbTime'} — ${fbtime.linkCount || 0} canvasser${fbtime.linkCount === 1 ? '' : 's'} linked${fbtime.lastSyncAt ? `, last synced ${new Date(fbtime.lastSyncAt).toLocaleString()}` : ''}. Key, hours figure and canvasser mapping are managed on the web dashboard (Integrations). Doorline holds each work shift's start time and its hours figures; clock-out times and break detail stay on the person's timesheet in FbTime.${doorsNote(doors)}`,
               })
             }
           />

@@ -2,76 +2,81 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../../api/client.js';
 import { Badge, Button, Card, IconAlert, IconKey, IconSpinner } from '../ui/index.js';
+import { syncDoneNote, syncFailedNote, syncOutcome } from '../../lib/fbtimeDoors.js';
 
 // One slim line answering exactly one question: is this working right now.
 //
 // The key prefix, the hours figure and the linked count deliberately do NOT live
 // here — they moved to Settings and to the table's own count line. A strip with a
-// fifth fact on it stops answering its one question.
+// fifth fact on it stops answering its one question. Door counts have their own
+// card underneath; the only door-count thing here is that the ONE button also
+// re-sends them, so it reads "Sync now" while they're on and "Refresh hours" while
+// they're off.
 export default function StatusStrip({ data, onChanged, onOpenSettings }) {
   const orgId = getActiveOrgId();
   const qc = useQueryClient();
+  const doorsOn = Boolean(data.doors?.enabled);
 
-  // "Refresh hours now": the server enqueues a deep re-pull and answers with
-  // its requestedAt; completion is read off the connection's own sync stamps
-  // moving past that instant, so both sides of the comparison are the server's
-  // clock. (A 15-minute cron tick landing in the same window can trip the
-  // "refreshed" note a moment before the deep rows land — cosmetic; the rows
-  // arrive on the very next refetch.)
-  const [refreshingSince, setRefreshingSince] = useState(null); // ms epoch, server time
+  // Sync now / Refresh hours: the server enqueues a deep run (hours, then door
+  // counts) and answers with its requestedAt; completion is read off the
+  // connection's own stamps moving past that instant, so both sides of the
+  // comparison are the server's clock. The verdict — failed checked FIRST — is
+  // syncOutcome() in lib/fbtimeDoors.js. (A 15-minute cron tick landing in the
+  // same window can trip "done" a moment before the deep rows land — cosmetic;
+  // they arrive on the very next refetch.)
+  const [refreshing, setRefreshing] = useState(null); // { at: ms epoch (server), erroredBefore }
   const [refreshNote, setRefreshNote] = useState(null);
 
   const refreshMut = useMutation({
     mutationFn: () => api('/admin/integrations/fbtime/sync', { method: 'POST' }),
-    onSuccess: (res) => {
+    // `erroredBefore` is the status at the click: a retry of an errored connection
+    // must not read its old errored status as this run's failure.
+    onSuccess: (res, erroredBefore) => {
       setRefreshNote(null);
-      setRefreshingSince(new Date(res.requestedAt).getTime());
+      setRefreshing({ at: new Date(res.requestedAt).getTime(), erroredBefore });
     },
   });
 
   // Poll the status query while a refresh is in flight; give up politely after
   // 90s (the job still runs — the next natural refetch shows its result).
   useEffect(() => {
-    if (!refreshingSince) return undefined;
+    if (!refreshing) return undefined;
     const tick = setInterval(() => {
       qc.invalidateQueries({ queryKey: ['admin', 'integrations', 'fbtime', orgId] });
     }, 2000);
     const bail = setTimeout(() => {
-      setRefreshingSince(null);
-      setRefreshNote('Still working — the refresh runs in the background. Check back in a minute.');
+      setRefreshing(null);
+      setRefreshNote('Still working — it runs in the background. Check back in a minute.');
     }, 90_000);
     return () => {
       clearInterval(tick);
       clearTimeout(bail);
     };
-  }, [refreshingSince, qc, orgId]);
+  }, [refreshing, qc, orgId]);
 
-  // lastSyncAt past our request = done; lastErrorAt past it = the sync ran and
-  // failed, and the error banner already says why.
   useEffect(() => {
-    if (!refreshingSince) return;
-    const syncedAt = data.lastSyncAt ? new Date(data.lastSyncAt).getTime() : 0;
-    const failedAt = data.lastErrorAt ? new Date(data.lastErrorAt).getTime() : 0;
-    if (syncedAt >= refreshingSince) {
-      setRefreshingSince(null);
-      setRefreshNote('Hours refreshed.');
+    if (!refreshing) return;
+    const outcome = syncOutcome(data, refreshing);
+    if (outcome === 'failed') {
+      setRefreshing(null);
+      setRefreshNote(syncFailedNote(data, refreshing.at));
+    } else if (outcome === 'done') {
+      setRefreshing(null);
+      setRefreshNote(syncDoneNote(data));
       onChanged(); // every report recomputes against the fresh cache
-    } else if (failedAt >= refreshingSince) {
-      setRefreshingSince(null);
-      setRefreshNote(null);
     }
-  }, [data.lastSyncAt, data.lastErrorAt, refreshingSince, onChanged]);
+  }, [data, refreshing, onChanged]);
 
   const errored = data.status === 'errored';
-  const refreshing = refreshMut.isPending || Boolean(refreshingSince);
+  const busy = refreshMut.isPending || Boolean(refreshing);
 
   const badge = errored ? (
     <Badge variant="danger" dot>
       Needs attention
     </Badge>
-  ) : refreshing ? (
+  ) : busy ? (
     <Badge variant="info">
-      <IconSpinner size={12} /> Refreshing
+      <IconSpinner size={12} /> {doorsOn ? 'Syncing' : 'Refreshing'}
     </Badge>
   ) : data.lastSyncAt ? (
     <Badge variant="success" dot>
@@ -84,9 +89,11 @@ export default function StatusStrip({ data, onChanged, onOpenSettings }) {
   );
 
   const middle = errored
-    ? data.lastSyncError || 'Hours have stopped syncing.'
-    : refreshing
-      ? 'Re-pulling the last few months…'
+    ? data.lastSyncError || (doorsOn ? 'Hours and door counts have stopped syncing.' : 'Hours have stopped syncing.')
+    : busy
+      ? doorsOn
+        ? 'Re-pulling hours and re-sending door counts…'
+        : 'Re-pulling the last few months…'
       : data.lastSyncAt
         ? `Synced ${new Date(data.lastSyncAt).toLocaleString()}`
         : 'First sync in progress — hours appear within a few minutes.';
@@ -116,11 +123,15 @@ export default function StatusStrip({ data, onChanged, onOpenSettings }) {
         <Button
           variant="secondary"
           size="sm"
-          disabled={refreshing}
-          onClick={() => refreshMut.mutate()}
-          title="Re-pulls the last few months from FbTime — use it after fixing a timesheet there."
+          disabled={busy}
+          onClick={() => refreshMut.mutate(errored)}
+          title={
+            doorsOn
+              ? 'Re-pulls hours from FbTime and re-sends door counts — use it after fixing a timesheet there or a door result here.'
+              : 'Re-pulls the last few months from FbTime — use it after fixing a timesheet there.'
+          }
         >
-          {refreshing ? 'Refreshing…' : 'Refresh hours'}
+          {busy ? (doorsOn ? 'Syncing…' : 'Refreshing…') : doorsOn ? 'Sync now' : 'Refresh hours'}
         </Button>
         <Button variant="secondary" size="sm" onClick={onOpenSettings}>
           <IconKey size={14} /> Settings

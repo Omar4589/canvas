@@ -13,8 +13,23 @@ const CONFIRM_OVER = 25;
  * Every row gets a checkbox, including ones nothing can be done to — disabled
  * checkboxes force the reader to reverse-engineer an eligibility rule. The bar
  * does that arithmetic instead and says so.
+ *
+ * When any row being unlinked has door counts on FbTime or is a deleted account,
+ * Unlink hands the page the rows for its "Was the link right?" dialog
+ * (`onAskUnlink`); the inline confirm below is only for selections with neither.
  */
-export default function BulkLinkBar({ selected, linkable, unlinkable, busy, progress, onLink, onUnlink, onClear }) {
+export default function BulkLinkBar({
+  selected,
+  linkable,
+  unlinkable,
+  busy,
+  progress,
+  onLink,
+  onUnlink,
+  askBeforeUnlink = false,
+  onAskUnlink,
+  onClear,
+}) {
   const [confirming, setConfirming] = useState(false);
   if (!selected.length) return null;
 
@@ -27,7 +42,10 @@ export default function BulkLinkBar({ selected, linkable, unlinkable, busy, prog
 
   const doUnlink = () => {
     setConfirming(false);
-    onUnlink(unlinkable);
+    // The selection can change under an open confirm; a row the question is about
+    // must never slip through as a plain unlink.
+    if (askBeforeUnlink) onAskUnlink(unlinkable);
+    else onUnlink(unlinkable);
   };
 
   return (
@@ -69,7 +87,7 @@ export default function BulkLinkBar({ selected, linkable, unlinkable, busy, prog
                     variant="danger"
                     size="sm"
                     disabled={busy}
-                    onClick={() => setConfirming(true)}
+                    onClick={() => (askBeforeUnlink ? onAskUnlink(unlinkable) : setConfirming(true))}
                   >
                     Unlink {unlinkable.length}
                   </Button>

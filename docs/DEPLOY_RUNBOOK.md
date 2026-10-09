@@ -366,6 +366,19 @@ npm run migrate:deletion-snapshots        # then: npm run migrate:deletion-snaps
 - **`deletion-snapshots`** strips email/phone off pre-name-only `DeletedUserRecord` rows, making the
   deletion promise ("contact details are removed immediately") true for the whole corpus.
 
+**One more of the same kind, from a later release** — *Door counts to FbTime*, October 2026; not part of
+this release's window. Run it from the Run console straight after **that** release's deploy, the same
+way (dry run, read it, apply, then the bare command again to see zeros):
+
+```
+npm run migrate:fbtime-deletion-gaps      # then: npm run migrate:fbtime-deletion-gaps -- --apply
+```
+
+- **`fbtime-deletion-gaps`** nulls the email on FbTime links of deleted accounts, strips the email from
+  every `link-created` integration event, and unpairs from FbTime any account already past its 180-day
+  purge (expected 0) — the same "email removed immediately" promise, for the FbTime copies. Details:
+  [OPERATIONS.md](OPERATIONS.md) → *Release "Door counts to FbTime"*.
+
 ---
 
 # STEP 5b — ✅ Turn the `worker` dyno back ON
@@ -502,6 +515,7 @@ at a maintenance page.*
 | `migrate:geocode-lastused` | **Yes.** Stamps a date field. Safe to re-run. |
 | `migrate:scrub-map-points` | **One-way for the scrubbed text** (that's the point — it removes typed write-ins from public points), but idempotent and rebuildable: republishing a report regenerates its points from the ledger. |
 | `migrate:deletion-snapshots` | **One-way** ($unsets email/phone off deletion snapshots) — deliberately: retaining them is what the policy forbids. |
+| `migrate:fbtime-deletion-gaps` *(later release)* | **One-way** for what it removes (emails on deleted accounts' FbTime links and in `link-created` history; an already-purged account's FbTime pairing) — deliberately: retaining them is what the policy forbids. Idempotent. The cleared fields were already optional (a link's email defaults to empty; nothing reads the event's), so a code rollback needs nothing undone. |
 
 **If step 4 succeeds and step 5 fails** — the realistic bad case:
 - Persons are stamped; the legacy indexes are **gone**; the new uniques are **not built**.

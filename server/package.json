@@ -39,6 +39,7 @@
     "migrate:geocode-lastused": "node src/migrations/backfillGeocodeLastUsed.js",
     "migrate:scrub-map-points": "node src/migrations/scrubMapPointAnswers.js",
     "migrate:deletion-snapshots": "node src/migrations/migrateDeletionSnapshots.js",
+    "migrate:fbtime-deletion-gaps": "node src/migrations/backfillFbtimeDeletionGaps.js",
     "migrate:platform-stats": "node src/migrations/backfillPlatformStats.js",
     "migrate:candidate-orgs": "node src/migrations/backfillCandidateOrgs.js",
     "migrate:campaign-stats": "node src/migrations/reconcileCampaignStats.js",

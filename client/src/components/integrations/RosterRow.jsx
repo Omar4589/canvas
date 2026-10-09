@@ -35,11 +35,22 @@ const Projects = ({ row, loading }) => {
   );
 };
 
+// The two halves of a Broken link want opposite advice: an FbTime person who is no
+// longer in FbTime can be unlinked, while a member who left is usually left linked —
+// the link is what keeps their hours theirs, and once unlinked they can't come back.
+const brokenLinkHint = (row) => {
+  if (row.fbtimeGone && row.memberGone) {
+    return 'Both sides are gone: the FbTime person is no longer in FbTime, and the member left this organization.';
+  }
+  if (row.fbtimeGone) return 'This FbTime person is no longer in FbTime — this link can be unlinked.';
+  return 'This link points at someone no longer in the organization. Usually leave it — it keeps their hours theirs, and once unlinked they can’t be linked again.';
+};
+
 const Bridge = ({ row, busy }) => {
   if (busy) return <IconSpinner size={14} className="text-fg-subtle" />;
   if (row.kind === 'orphan') {
     return (
-      <Tooltip label="This link points at someone no longer in the organization">
+      <Tooltip label={brokenLinkHint(row)}>
         <span>
           <IconAlert size={16} className="text-danger-fg" />
           <span className="sr-only">Broken link</span>
@@ -60,7 +71,30 @@ const Bridge = ({ row, busy }) => {
   return <span className="mx-auto block h-px w-4 border-t border-dashed border-border" />;
 };
 
-export default function RosterRow({ row, selected, onToggle, busy, onLink, onUnlink, projectsLoading }) {
+// A text-sized action inside a cell — the row's one real button stays in the status
+// column, so these never compete with it.
+const CellAction = ({ children, ...rest }) => (
+  <button
+    type="button"
+    className="text-xs font-medium text-fg-muted underline underline-offset-2 hover:text-fg disabled:opacity-60"
+    {...rest}
+  >
+    {children}
+  </button>
+);
+
+export default function RosterRow({
+  row,
+  selected,
+  onToggle,
+  busy,
+  onLink,
+  onUnlink,
+  onStopCounting,
+  onClearSent,
+  projectsLoading,
+  doorsAvailable = false,
+}) {
   const status = ROW_STATUS[row.status] || ROW_STATUS.linked;
   // ONE rail per row, danger outranking warning: a row with both a broken link and
   // no recent hours is a broken-link row, and the rest is noise until that's fixed.
@@ -108,12 +142,16 @@ export default function RosterRow({ row, selected, onToggle, busy, onLink, onUnl
         )}
         <div className="mt-1 flex flex-wrap gap-1">
           {row.flags
-            .filter((f) => ['member-gone', 'member-deleted', 'member-inactive'].includes(f))
+            .filter((f) => ['member-gone', 'member-deleted', 'member-inactive', 'kept-account'].includes(f))
             .map((f) => (
               <Badge
                 key={f}
                 variant={
-                  f === 'member-gone' ? 'danger' : f === 'member-deleted' ? 'neutral' : 'warning'
+                  f === 'member-gone'
+                    ? 'danger'
+                    : f === 'member-inactive'
+                      ? 'warning'
+                      : 'neutral'
                 }
               >
                 {ROW_FLAG[f]}
@@ -147,13 +185,47 @@ export default function RosterRow({ row, selected, onToggle, busy, onLink, onUnl
           <Ghost>Not in FbTime</Ghost>
         )}
         <div className="mt-1 flex flex-wrap gap-1">
+          {row.flags.includes('fbtime-gone') && (
+            <Badge variant="danger">{ROW_FLAG['fbtime-gone']}</Badge>
+          )}
           {row.flags.includes('fbtime-inactive') && (
             <Badge variant="neutral">{ROW_FLAG['fbtime-inactive']}</Badge>
           )}
           {row.hasUnmatchedHours && (
             <Badge variant="warning">{ROW_FLAG['unmatched-hours']}</Badge>
           )}
+          {row.flags.includes('clear-waiting') && (
+            <Badge variant="info">{ROW_FLAG['clear-waiting']}</Badge>
+          )}
         </div>
+        {/* Kept earlier accounts (Unlink → "Yes — keep"): one FbTime person across
+            Doorline accounts, whose hours and doors still count for this person. */}
+        {row.alsoCounts.map((k) => (
+          <div key={k.userId} className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-fg-muted">
+            <span>
+              also counts{' '}
+              <span className="italic text-fg">
+                {k.name || 'an account'} (earlier account)
+              </span>
+            </span>
+            <CellAction
+              disabled={busy}
+              aria-label={`Stop counting ${k.name || 'the earlier account'} for ${row.fbtimeName || 'this person'}`}
+              onClick={() => onStopCounting(row, k)}
+            >
+              Stop counting
+            </CellAction>
+          </div>
+        ))}
+        {/* Sent, not linked now, no clear waiting — the server's canClearSent. A linked
+            person's clear is Unlink → "No — the link was wrong" instead. */}
+        {row.canClearSent && doorsAvailable && (
+          <div className="mt-1">
+            <CellAction disabled={busy} onClick={() => onClearSent(row)}>
+              Clear the numbers Doorline sent for {row.fbtimeName || 'this person'}
+            </CellAction>
+          </div>
+        )}
       </td>
 
       <td className="hidden w-[220px] px-4 py-2.5 xl:table-cell">
@@ -179,13 +251,18 @@ export default function RosterRow({ row, selected, onToggle, busy, onLink, onUnl
         <div>
           {canUnlink ? (
             <Button
-              variant={row.kind === 'orphan' ? 'danger' : 'ghost'}
+              // Danger only where unlinking IS the fix (the FbTime person is gone); a
+              // member who left is usually best left linked.
+              variant={row.kind === 'orphan' && row.fbtimeGone ? 'danger' : 'ghost'}
               size="sm"
               disabled={busy}
               onClick={() => onUnlink(row)}
             >
               Unlink
             </Button>
+          ) : hasDoorline && row.memberDeleted ? (
+            // POST /links refuses a deleted account (409 ACCOUNT_DELETED).
+            <span className="text-xs text-fg-subtle">Can’t be linked</span>
           ) : (
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => onLink(row)}>
               {hasFbtime ? 'Link…' : 'Find in FbTime…'}

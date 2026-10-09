@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { Button, Modal } from '../ui/index.js';
+import { clearWho, withPeriod } from '../../lib/fbtimeDoors.js';
+import ReplaceKey from './ReplaceKey.jsx';
 
 const FIGURES = [
   {
@@ -21,12 +23,63 @@ const FIGURES = [
   },
 ];
 
+/**
+ * The Disconnect confirmation. Presentational so each case renders in a test.
+ * `clearPending` is a 409 DOORS_CLEAR_PENDING's body: a clear's first pass is still
+ * waiting, and the override (DELETE with { leaveDoorCounts: true }) abandons it.
+ */
+export const DisconnectConfirm = ({ doors, pending, error, clearPending, onConfirm, onCancel }) => (
+  <Modal
+    size="md"
+    title="Disconnect FbTime?"
+    onClose={onCancel}
+    footer={
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="danger" disabled={pending} onClick={onConfirm}>
+          {pending ? 'Disconnecting…' : clearPending ? 'Abandon the clear and disconnect' : 'Disconnect'}
+        </Button>
+      </div>
+    }
+  >
+    <p className="text-sm text-fg">
+      Reports go back to <span className="font-medium">estimated</span> hours immediately — the
+      cached hours are deleted.
+    </p>
+    <p className="mt-2 text-sm text-fg-muted">
+      Your canvasser links are <span className="font-medium text-fg">kept</span>, so reconnecting
+      later does not mean mapping everybody again.
+    </p>
+    {(doors?.enabled || doors?.everSent) && (
+      <p className="mt-2 text-sm text-fg-muted">
+        {doors.enabled ? 'Door counts turn off too. ' : ''}
+        {doors.everSent
+          ? 'The numbers Doorline sent stay on FbTime — locked while your door-count key is live — so clear first if you want, then revoke the key in FbTime.'
+          : 'Revoke the key in FbTime afterwards.'}{' '}
+        Reconnecting starts with door counts off.
+      </p>
+    )}
+    {clearPending && (
+      <p className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+        {withPeriod(`Doorline is still clearing the numbers it sent for ${clearWho(clearPending)}`)}{' '}
+        Disconnecting now abandons that clear.
+      </p>
+    )}
+    {error && <p className="mt-2 text-xs text-danger">{error.message}</p>}
+  </Modal>
+);
+
 // The rarely-touched half of the connection. Disconnect confirms in a Modal
 // rather than window.confirm: the consequence has two halves that matter
 // separately (the hours cache goes, the links stay) and a system dialog cannot
 // render that difference — nor be styled, focus-trapped, or tested.
 export default function IntegrationSettingsModal({ data, onChanged, onClose }) {
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  // A DOORS_CLEAR_PENDING answer to Disconnect: the next confirm abandons the clear.
+  const [clearPending, setClearPending] = useState(null);
+  const doors = data.doors || null;
 
   const figureMut = useMutation({
     mutationFn: (hourFigure) =>
@@ -40,46 +93,38 @@ export default function IntegrationSettingsModal({ data, onChanged, onClose }) {
   });
 
   const disconnectMut = useMutation({
-    mutationFn: () => api('/admin/integrations/fbtime', { method: 'DELETE' }),
+    mutationFn: (leaveDoorCounts) =>
+      api('/admin/integrations/fbtime', {
+        method: 'DELETE',
+        body: leaveDoorCounts ? { leaveDoorCounts: true } : undefined,
+      }),
     onSuccess: () => {
       onChanged();
       onClose();
     },
+    onError: (err) => {
+      if (err.code === 'DOORS_CLEAR_PENDING') {
+        setClearPending({ all: Boolean(err.data?.all), persons: err.data?.persons || [] });
+      }
+    },
   });
 
   if (confirmingDisconnect) {
+    const cancel = () => {
+      disconnectMut.reset();
+      setClearPending(null);
+      setConfirmingDisconnect(false);
+    };
     return (
-      <Modal
-        size="md"
-        title="Disconnect FbTime?"
-        onClose={() => setConfirmingDisconnect(false)}
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setConfirmingDisconnect(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              disabled={disconnectMut.isPending}
-              onClick={() => disconnectMut.mutate()}
-            >
-              {disconnectMut.isPending ? 'Disconnecting…' : 'Disconnect'}
-            </Button>
-          </div>
-        }
-      >
-        <p className="text-sm text-fg">
-          Reports go back to <span className="font-medium">estimated</span> hours immediately — the
-          cached hours are deleted.
-        </p>
-        <p className="mt-2 text-sm text-fg-muted">
-          Your canvasser links are <span className="font-medium text-fg">kept</span>, so reconnecting
-          later does not mean mapping everybody again.
-        </p>
-        {disconnectMut.error && (
-          <p className="mt-2 text-xs text-danger">{disconnectMut.error.message}</p>
-        )}
-      </Modal>
+      <DisconnectConfirm
+        doors={doors}
+        pending={disconnectMut.isPending}
+        // The override's question replaces the 409's own text.
+        error={disconnectMut.error?.code === 'DOORS_CLEAR_PENDING' ? null : disconnectMut.error}
+        clearPending={clearPending}
+        onConfirm={() => disconnectMut.mutate(Boolean(clearPending))}
+        onCancel={cancel}
+      />
     );
   }
 
@@ -117,6 +162,8 @@ export default function IntegrationSettingsModal({ data, onChanged, onClose }) {
       <p className="mt-3 text-xs text-fg-muted">
         Doorline holds each work shift's start time and its hours figures. Clock-out times and
         break detail are never stored here — they stay on the person's timesheet in FbTime.
+        {doors?.available &&
+          ' When door counts are on, Doorline also sends FbTime each linked canvasser’s doors per day.'}
       </p>
 
       <fieldset className="mt-5 border-t border-border pt-4">
@@ -164,6 +211,8 @@ export default function IntegrationSettingsModal({ data, onChanged, onClose }) {
         </div>
         {autoMut.error && <p className="mt-2 text-xs text-danger">{autoMut.error.message}</p>}
       </div>
+
+      <ReplaceKey doors={doors} currentOrgName={data.fbtimeOrgName} onChanged={onChanged} />
 
       <div className="mt-5 border-t border-border pt-4">
         <Button variant="danger" size="sm" onClick={() => setConfirmingDisconnect(true)}>

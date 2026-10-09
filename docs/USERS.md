@@ -509,6 +509,13 @@ unassigned, so no doors are stranded with someone who's gone. They come off ever
 **brand-new account** — their old knocks stay attached to the deleted one. That's deliberate: re-hiring
 someone must not quietly re-attach them to a flag history they deleted.
 
+**If your organization uses FbTime.** The email on their FbTime link goes when the account is deleted,
+with the rest of their contact details. The link itself stays until the 180-day removal, because it is
+what keeps the hours they clocked their own — an admin who links their new account can keep the old one
+counting as the same FbTime person (**Unlink → Yes — keep**). When the 180 days are up, nothing on
+Doorline's side ties the old account to an FbTime person any more, and its past hours stay measured.
+See [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md).
+
 Someone who's already uninstalled the app can request deletion at **doorline.app/delete-account**.
 
 ---

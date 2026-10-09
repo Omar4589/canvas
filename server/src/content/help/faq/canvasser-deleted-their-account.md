@@ -6,13 +6,14 @@ kind: faq
 order: 39
 sourceDoc: USERS.md
 summary: Nothing is lost. Their knocks, surveys and GPS trail stay with the campaign and your counts don't move. Their books are handed back, and you can still audit them for 180 days.
-tags: delete, account, canvasser, left, quit, audit, counts, books, gps
+tags: delete, account, canvasser, left, quit, audit, counts, books, gps, fbtime, hours, came back, new account
 ---
 
 **Your numbers don't move.** Every door they knocked and every survey they recorded stays with the
 campaign. Those are your organization's records of work performed, not the person's personal content, so
 deleting an account never changes a campaign's totals, its coverage, or your bill. Nothing needs
-recalculating.
+recalculating. If your organization connected **FbTime**, the hours they clocked stay with their account
+too, so their doors-per-hour stays measured.
 
 **They show up as "Deleted user."** On reports, the leaderboard, the timeline and the map, their rows are
 all still there with the right numbers — just without a name attached.
@@ -31,6 +32,12 @@ They're also removed from every campaign roster.
 them back, and you can't put them back on a roster. If they return, add them as a new person: their email
 address is released when they delete. They'll get a **brand-new account**, and their old knocks stay
 attached to the deleted one.
+
+**If your organization uses FbTime**, keep them as one person there: on the Integrations page, unlink the
+old account and choose **Yes — keep**, then link the new account to the same FbTime person. Their old hours
+stay with the old account, so last season's doors-per-hour stays measured, and if you send door counts to
+FbTime, both accounts' doors are added together for that person. See
+[FbTime: measured hours and door counts](fbtime-hours).
 
 **Admins have guardrails.** An admin can't delete themselves if they're the **only admin**, or the **only
 admin with billing access** — that would leave the organization with nobody who can run it or pay for it.

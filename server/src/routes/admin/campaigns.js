@@ -13,7 +13,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
-import { defaultZoneForState } from '../../utils/usStateTimeZone.js';
+import { defaultZoneForState, US_TIMEZONES } from '../../utils/usStateTimeZone.js';
 import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
@@ -84,6 +84,13 @@ const router = Router();
 // they manage, PATCH is limited to editable config, and create/archive/delete are
 // gated to org admins inside the handlers below.
 router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
+
+// Campaign zones come from the curated US list only. A zone outside it (an Intl-valid
+// spelling like "us/eastern" or "utc") is one MongoDB's $dateToString rejects, and the
+// org-wide door count to FbTime groups every campaign's knocks by its zone in ONE
+// aggregation — one such campaign would stop door counts for the whole organization.
+const CURATED_ZONES = new Set(US_TIMEZONES.map((z) => z.value));
+const INVALID_TIMEZONE = { error: 'Choose one of the listed US time zones.', code: 'INVALID_TIMEZONE' };
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -437,6 +444,7 @@ router.post('/', async (req, res, next) => {
     if (goalDateNeedsGoal(data.doorGoal, data.goalDate)) {
       return res.status(400).json({ error: 'Set a door goal before a goal date.', code: 'goal-date-without-goal' });
     }
+    if (data.timeZone && !CURATED_ZONES.has(data.timeZone)) return res.status(400).json(INVALID_TIMEZONE);
     const campaign = await Campaign.create({
       organizationId: orgId,
       name: data.name,
@@ -547,6 +555,12 @@ router.patch('/:campaignId', async (req, res, next) => {
     const evEnd = data.earlyVotingEnd !== undefined ? data.earlyVotingEnd : campaign.earlyVotingEnd;
     if (evStart && evEnd && evEnd < evStart) {
       return res.status(400).json({ error: 'Early voting end date cannot be before the start date.' });
+    }
+
+    // The drawer re-sends the stored zone on every save, so only a CHANGE must be on the list
+    // (a campaign saved before the list was enforced keeps saving).
+    if (data.timeZone !== undefined && data.timeZone !== campaign.timeZone && !CURATED_ZONES.has(data.timeZone)) {
+      return res.status(400).json(INVALID_TIMEZONE);
     }
 
     // Snapshot the audited fields BEFORE any mutation below — this is the only moment the old

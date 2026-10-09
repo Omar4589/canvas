@@ -43,8 +43,12 @@ export default function RosterTable({
   busyKeys,
   onLink,
   onUnlink,
+  onStopCounting,
+  onClearSent,
   projectsLoading,
   emptyHint,
+  syncLabel = 'Refresh hours',
+  doorsAvailable = false,
 }) {
   const allRef = useRef(null);
   const shown = rows.slice(0, RENDER_CAP);
@@ -126,7 +130,10 @@ export default function RosterTable({
             onToggle={onToggle}
             onLink={onLink}
             onUnlink={onUnlink}
+            onStopCounting={onStopCounting}
+            onClearSent={onClearSent}
             projectsLoading={projectsLoading}
+            doorsAvailable={doorsAvailable}
           />
         ))}
 
@@ -137,7 +144,9 @@ export default function RosterTable({
                 <EmptyState
                   icon={<IconUsers size={22} />}
                   title="No people in FbTime yet"
-                  hint="Add your staff in FbTime, then refresh hours."
+                  // The status bar's one button: "Sync now" while door counts are on,
+                  // "Refresh hours" while they're off — either re-reads the roster.
+                  hint={`Add your staff in FbTime, then press ${syncLabel} on the status bar.`}
                 />
               ) : (
                 <p className="px-4 py-14 text-center text-sm text-fg-muted">{emptyHint}</p>

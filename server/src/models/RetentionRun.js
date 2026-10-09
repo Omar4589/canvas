@@ -31,6 +31,11 @@ const retentionRunSchema = new mongoose.Schema(
     // by the org row being gone — never by a number written here.
     enqueued: { type: Number, default: 0 },
     scanned: { type: Number, default: 0 },
+    // Records the identity purge could not finish this run (each stays due for the next run).
+    // Any failure makes the run ok:false: the health surface shows the error at once and goes red
+    // once 48 hours pass without a clean run — one bad record can no longer quietly hold back
+    // everyone's purge.
+    failed: { type: Number, default: 0 },
     // Deletion warnings delivered this run (wind-down + dormancy) — the "we warned before we
     // deleted" half of the promise, countable next to the deletions themselves.
     warned: { type: Number, default: 0 },

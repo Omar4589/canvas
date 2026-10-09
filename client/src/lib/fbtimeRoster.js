@@ -24,14 +24,22 @@ export const ROW_STATUS = {
 
 // Secondary chips. Deliberately separate from status: a row can carry several,
 // and folding them into one enum produces a combinatorial mess nobody can test.
+//
+// The two halves of a Broken link are separate chips because they are separate
+// problems: 'fbtime-gone' (the FbTime person is no longer in FbTime — unlinking is
+// the fix) and 'member-gone' (the Doorline member left — usually left alone, since
+// the link is what keeps their hours theirs).
 export const ROW_FLAG = {
   'fbtime-inactive': 'Inactive in FbTime',
+  'fbtime-gone': 'No longer in FbTime',
   'member-inactive': 'Deactivated in Doorline',
   'member-deleted': 'Account deleted',
   'unmatched-hours': 'Has unassigned hours',
   auto: 'Auto-matched by email',
   'no-campaign': 'On no active campaign',
   'member-gone': 'No longer in this organization',
+  'kept-account': 'Earlier account, still counted',
+  'clear-waiting': 'Clear waiting',
 };
 
 export const SORT_DEFAULT_DIR = {
@@ -53,6 +61,36 @@ const rowKey = (r) => (r.fbtimePersonId ? `f:${r.fbtimePersonId}` : `d:${r.userI
 
 const memberName = (m) =>
   fullName(m?.user?.firstName, m?.user?.lastName) || m?.user?.email || 'Unknown user';
+
+// Door counts and kept accounts for one FbTime person, as GET /fbtime/people sends
+// them on every person and every orphan link (the server decides each one — e.g.
+// canClearSent is "sent, not linked now, no clear waiting"). An older server sends
+// none of them, which reads as "nothing sent, nothing kept".
+const doorSide = (p = {}) => ({
+  doorsSent: p.doorsSent === true,
+  clearWaiting: p.clearWaiting === true,
+  canClearSent: p.canClearSent === true,
+  alsoCounts: Array.isArray(p.alsoCounts) ? p.alsoCounts : [],
+});
+const NO_DOORS = doorSide();
+
+// A link whose Doorline account is no longer a member — removed from the
+// organization. Deliberately NOT the FbTime name: echoing it on the Doorline side
+// makes a broken link render as a healthy pair, which is the exact confusion this
+// row kind exists to end.
+const formerMember = (userId, deleted) => ({
+  userId: String(userId),
+  name: 'Former member',
+  email: null,
+  role: null,
+  memberActive: false,
+  memberDeleted: deleted === true,
+  memberGone: true,
+  kept: false,
+  campaigns: [],
+  campaignIds: [],
+  managedCampaignIds: [],
+});
 
 /**
  * Fold both rosters into one row list.
@@ -88,7 +126,9 @@ export function buildRosterRows({
   const rows = [];
   const consumedUserIds = new Set();
 
-  const doorlineSide = (member) => {
+  // `deleted` is the people route's own reading of the linked account; either source
+  // saying "deleted" is enough, because a deleted account can never be linked again.
+  const doorlineSide = (member, { deleted = false } = {}) => {
     const all = (member.campaignIds || []).map(resolveCampaign);
     return {
       userId: String(member.user.id),
@@ -96,20 +136,25 @@ export function buildRosterRows({
       email: member.user.email || null,
       role: member.role,
       memberActive: member.isActive !== false && member.user.isActive !== false,
-      memberDeleted: Boolean(member.user.isDeleted),
+      memberDeleted: Boolean(member.user.isDeleted) || deleted === true,
+      memberGone: false,
+      // Unlinked with "Yes — keep": an earlier account of an FbTime person, whose
+      // hours from before still count as measured (GET /admin/memberships).
+      kept: member.fbtime?.kept === true,
       campaigns: all.filter((c) => c.isActive).sort((a, b) => a.name.localeCompare(b.name)),
       campaignIds: all.map((c) => c.id),
       managedCampaignIds: (member.managedCampaignIds || []).map(String),
     };
   };
 
-  const fbtimeSide = (personId, { name, email, isActive }) => {
+  const fbtimeSide = (personId, { name, email, isActive, gone = false }) => {
     const found = projectsByPerson.get(String(personId));
     return {
       fbtimePersonId: String(personId),
       fbtimeName: name || null,
       fbtimeEmail: email || null,
       fbtimeActive: isActive !== false, // absent means unknown, and unknown is not inactive
+      fbtimeGone: gone, // linked, but no longer on FbTime's roster at all
       fbtimeProjects: found?.projects || [],
       fbtimeLastShiftAt: found?.lastShiftAt || null,
     };
@@ -128,8 +173,9 @@ export function buildRosterRows({
       consumedUserIds.add(String(p.linkedUserId));
       rows.push({
         kind: 'linked',
-        ...doorlineSide(member),
+        ...doorlineSide(member, { deleted: p.deleted }),
         ...side,
+        ...doorSide(p),
         linkSource: p.linkSource || null,
         hasUnmatchedHours: false, // the server only ever sets this on an UNLINKED person
         suggestedUserId: null,
@@ -140,19 +186,9 @@ export function buildRosterRows({
       // page — and today it renders as the bare word "Linked".
       rows.push({
         kind: 'orphan',
-        userId: String(p.linkedUserId),
-        // Deliberately NOT the FbTime name: echoing it on the Doorline side makes
-        // a broken link render as a healthy pair, which is the exact confusion
-        // this row kind exists to end.
-        name: 'Former member',
-        email: null,
-        role: null,
-        memberActive: false,
-        memberDeleted: false,
-        campaigns: [],
-        campaignIds: [],
-        managedCampaignIds: [],
+        ...formerMember(p.linkedUserId, p.deleted),
         ...side,
+        ...doorSide(p),
         linkSource: p.linkSource || null,
         hasUnmatchedHours: false,
         suggestedUserId: null,
@@ -166,10 +202,13 @@ export function buildRosterRows({
         role: null,
         memberActive: false,
         memberDeleted: false,
+        memberGone: false,
+        kept: false,
         campaigns: [],
         campaignIds: [],
         managedCampaignIds: [],
         ...side,
+        ...doorSide(p),
         linkSource: null,
         hasUnmatchedHours: Boolean(p.hasUnmatchedHours),
         suggestedUserId: suggestByPerson.get(pid) || null,
@@ -186,23 +225,13 @@ export function buildRosterRows({
       name: l.fbtimeName,
       email: l.fbtimeEmail,
       isActive: false,
+      gone: true,
     });
     rows.push({
       kind: 'orphan',
-      ...(member
-        ? doorlineSide(member)
-        : {
-            userId: String(l.userId),
-            name: 'Former member',
-            email: null,
-            role: null,
-            memberActive: false,
-            memberDeleted: false,
-            campaigns: [],
-            campaignIds: [],
-            managedCampaignIds: [],
-          }),
+      ...(member ? doorlineSide(member, { deleted: l.deleted }) : formerMember(l.userId, l.deleted)),
       ...side,
+      ...doorSide(l),
       linkSource: l.source || null,
       hasUnmatchedHours: false,
       suggestedUserId: null,
@@ -221,10 +250,13 @@ export function buildRosterRows({
       role: null,
       memberActive: false,
       memberDeleted: false,
+      memberGone: false,
+      kept: false,
       campaigns: [],
       campaignIds: [],
       managedCampaignIds: [],
       ...fbtimeSide(id, { name: null, email: null, isActive: false }),
+      ...NO_DOORS,
       linkSource: null,
       hasUnmatchedHours: true,
       suggestedUserId: null,
@@ -241,8 +273,10 @@ export function buildRosterRows({
       fbtimeName: null,
       fbtimeEmail: null,
       fbtimeActive: false,
+      fbtimeGone: false,
       fbtimeProjects: [],
       fbtimeLastShiftAt: null,
+      ...NO_DOORS,
       linkSource: null,
       hasUnmatchedHours: false,
       suggestedUserId: suggestByUser.get(uid) || null,
@@ -255,10 +289,14 @@ export function buildRosterRows({
 
 function decorate(r) {
   const flags = [];
-  if (r.fbtimePersonId && !r.fbtimeActive && r.kind !== 'ghost') flags.push('fbtime-inactive');
-  if (r.kind === 'orphan') flags.push('member-gone');
+  // Gone outranks inactive: a person FbTime no longer lists at all is not "inactive".
+  if (r.fbtimeGone) flags.push('fbtime-gone');
+  else if (r.fbtimePersonId && !r.fbtimeActive && r.kind !== 'ghost') flags.push('fbtime-inactive');
+  if (r.memberGone) flags.push('member-gone');
   else if (r.userId && r.memberDeleted) flags.push('member-deleted');
-  else if (r.userId && !r.memberActive && r.kind !== 'orphan') flags.push('member-inactive');
+  else if (r.userId && !r.memberActive) flags.push('member-inactive');
+  if (r.kept && r.kind === 'no-fbtime') flags.push('kept-account');
+  if (r.clearWaiting) flags.push('clear-waiting');
   if (r.hasUnmatchedHours) flags.push('unmatched-hours');
   if (r.linkSource === 'auto-email') flags.push('auto');
   if (r.kind === 'linked' && r.campaigns.length === 0) flags.push('no-campaign');
@@ -459,3 +497,27 @@ export function suggestedPairs(allRows) {
   }
   return { pairs, skippedConflicts };
 }
+
+/**
+ * Unlinking asks ONE question — "Was the link right?" — when the answer changes
+ * something: Doorline has sent door counts for the FbTime person (keep them, or clear
+ * them), or the account was deleted (keeping it is what keeps its hours its own). Any
+ * other row simply unlinks, and must be sent with no answer at all: `keep` on such a
+ * row would record a kept account nobody asked for.
+ */
+export const asksLinkQuestion = (row) => Boolean(row?.doorsSent || row?.memberDeleted);
+
+/** A deleted account, or a member who left: once unlinked, never linkable again. */
+export const cantRelink = (row) => Boolean(row?.memberDeleted || row?.memberGone);
+
+/** What a set of rows about to be unlinked adds up to, for the dialog and the bulk bar. */
+export const unlinkQuestion = (rows = []) => {
+  const asked = rows.filter(asksLinkQuestion);
+  return {
+    ask: asked.length > 0,
+    withDoors: rows.filter((r) => r.doorsSent).length,
+    deleted: rows.filter((r) => r.memberDeleted).length,
+    cantRelink: rows.filter(cantRelink).length,
+    plain: rows.length - asked.length,
+  };
+};

@@ -8,6 +8,9 @@ import {
   resolveSelection,
   linkCandidates,
   suggestedPairs,
+  asksLinkQuestion,
+  cantRelink,
+  unlinkQuestion,
   ROW_STATUS,
 } from './fbtimeRoster.js';
 
@@ -283,4 +286,135 @@ test('recent projects attach per person and never block a row from rendering', (
   assert.equal(pair.fbtimeProjects[0].name, 'Ward 5 Field');
   assert.deepEqual(bare.fbtimeProjects, [], 'a person with no projects payload is empty, not broken');
   assert.ok(pair.searchText.includes('ward 5 field'), 'project names are searchable');
+});
+
+// ── Door counts: the two halves of a Broken link, kept accounts, and clears ─────
+
+test('fbtime-gone and member-gone are separate chips — the two halves of a Broken link', () => {
+  // The FbTime person left FbTime, the member is still here: unlinking is the fix.
+  // Before this, every orphan row was chipped "No longer in this organization",
+  // which was false for exactly this row.
+  const { rows } = buildRosterRows({
+    people: [person('p2', { linkedUserId: 'gone' })],
+    members: [member('u1')],
+    orphanLinks: [{ fbtimePersonId: 'p9', userId: 'u1', fbtimeName: 'Gone Person', source: 'manual' }],
+    campaigns: CAMPAIGNS,
+  });
+  const fbGone = rows.find((r) => r.fbtimePersonId === 'p9');
+  assert.equal(fbGone.kind, 'orphan');
+  assert.ok(fbGone.flags.includes('fbtime-gone'));
+  assert.ok(!fbGone.flags.includes('member-gone'), 'the member is still here');
+  assert.ok(!fbGone.flags.includes('fbtime-inactive'), 'gone outranks inactive');
+  assert.equal(fbGone.status, 'orphan', 'still a Broken link');
+
+  // The member left, the FbTime person is still in FbTime: usually leave it linked.
+  const memberGone = rows.find((r) => r.fbtimePersonId === 'p2');
+  assert.ok(memberGone.flags.includes('member-gone'));
+  assert.ok(!memberGone.flags.includes('fbtime-gone'));
+  assert.equal(memberGone.name, 'Former member');
+
+  // Both at once.
+  const both = buildRosterRows({
+    members: [],
+    orphanLinks: [{ fbtimePersonId: 'p9', userId: 'gone', fbtimeName: 'Gone Person' }],
+    campaigns: CAMPAIGNS,
+  }).rows[0];
+  assert.deepEqual(
+    both.flags.filter((f) => f.endsWith('-gone')).sort(),
+    ['fbtime-gone', 'member-gone']
+  );
+});
+
+test('door-count fields ride every person and orphan link, and default to nothing', () => {
+  const kept = { userId: 'u9', name: 'Maria Old', deleted: true, until: '2026-09-01T00:00:00Z' };
+  const { rows } = buildRosterRows({
+    people: [
+      person('p1', { linkedUserId: 'u1', doorsSent: true, alsoCounts: [kept] }),
+      person('p2', { doorsSent: true, canClearSent: true }),
+      person('p3', { doorsSent: true, clearWaiting: true }),
+      person('p4'),
+    ],
+    members: [member('u1'), member('u2'), member('u3')],
+    orphanLinks: [{ fbtimePersonId: 'p8', userId: 'u2', fbtimeName: 'Off Roster', doorsSent: true }],
+    campaigns: CAMPAIGNS,
+  });
+  const by = (pid) => rows.find((r) => r.fbtimePersonId === pid);
+
+  assert.deepEqual(by('p1').alsoCounts, [kept], 'also counts: the kept earlier account, as the server sent it');
+  assert.equal(by('p1').doorsSent, true);
+  assert.equal(by('p1').canClearSent, false, 'linked now — its clear is Unlink → No');
+
+  assert.equal(by('p2').canClearSent, true, 'sent, not linked now, no clear waiting');
+  assert.equal(by('p2').kind, 'needs-link');
+
+  assert.equal(by('p3').clearWaiting, true);
+  assert.ok(by('p3').flags.includes('clear-waiting'), 'shown as "Clear waiting"');
+  assert.equal(by('p3').canClearSent, false, 'never offered twice');
+
+  assert.equal(by('p8').doorsSent, true, 'an orphan link carries them too');
+
+  // An older server sends none of these: nothing sent, nothing kept, nothing to clear.
+  const doorlineOnly = rows.find((x) => x.kind === 'no-fbtime');
+  assert.ok(doorlineOnly, 'u3 has no FbTime side');
+  for (const r of [by('p4'), doorlineOnly]) {
+    assert.equal(r.doorsSent, false);
+    assert.equal(r.canClearSent, false);
+    assert.equal(r.clearWaiting, false);
+    assert.deepEqual(r.alsoCounts, []);
+  }
+});
+
+test('a kept earlier account is chipped on its own Doorline row, not left reading "No FbTime person"', () => {
+  const { rows } = buildRosterRows({
+    people: [],
+    members: [member('u1', { fbtime: { linked: true, kept: true, personName: 'Maria D.' } }), member('u2')],
+    campaigns: CAMPAIGNS,
+  });
+  const keptRow = rows.find((r) => r.userId === 'u1');
+  assert.equal(keptRow.kind, 'no-fbtime');
+  assert.ok(keptRow.flags.includes('kept-account'));
+  assert.ok(!rows.find((r) => r.userId === 'u2').flags.includes('kept-account'));
+});
+
+test('the people route’s own "deleted" marks the row deleted even before the member list catches up', () => {
+  const { rows } = buildRosterRows({
+    people: [person('p1', { linkedUserId: 'u1', deleted: true }), person('p2', { linkedUserId: 'gone', deleted: true })],
+    members: [member('u1')],
+    campaigns: CAMPAIGNS,
+  });
+  assert.equal(rows.find((r) => r.fbtimePersonId === 'p1').memberDeleted, true);
+  const gone = rows.find((r) => r.fbtimePersonId === 'p2');
+  assert.equal(gone.memberDeleted, true);
+  assert.equal(gone.memberGone, true);
+});
+
+test('Unlink asks "Was the link right?" only when the answer changes something', () => {
+  const { rows } = buildRosterRows({
+    people: [
+      person('p1', { linkedUserId: 'u1', doorsSent: true }),
+      person('p2', { linkedUserId: 'u2' }),
+      person('p3', { linkedUserId: 'u3' }),
+      person('p4', { linkedUserId: 'gone' }),
+    ],
+    members: [
+      member('u1'),
+      member('u2'),
+      member('u3', { isActive: false, user: { isDeleted: true, firstName: 'Deleted', lastName: 'user' } }),
+    ],
+    campaigns: CAMPAIGNS,
+  });
+  const by = (pid) => rows.find((r) => r.fbtimePersonId === pid);
+
+  assert.equal(asksLinkQuestion(by('p1')), true, 'door counts sent for the person');
+  assert.equal(asksLinkQuestion(by('p2')), false, 'neither: a plain unlink, and must be SENT plain');
+  assert.equal(asksLinkQuestion(by('p3')), true, 'a deleted account — keeping it keeps its hours its own');
+  assert.equal(asksLinkQuestion(by('p4')), false, 'a member who left, nothing sent: plain');
+
+  assert.equal(cantRelink(by('p3')), true, 'deleted');
+  assert.equal(cantRelink(by('p4')), true, 'left the organization');
+  assert.equal(cantRelink(by('p2')), false);
+
+  const all = unlinkQuestion([by('p1'), by('p2'), by('p3'), by('p4')]);
+  assert.deepEqual(all, { ask: true, withDoors: 1, deleted: 1, cantRelink: 2, plain: 2 });
+  assert.equal(unlinkQuestion([by('p2'), by('p4')]).ask, false, 'the inline confirm keeps selections with neither');
 });

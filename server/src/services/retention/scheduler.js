@@ -129,7 +129,7 @@ export async function registerMaintenanceJobs() {
 export async function processMaintenanceJob(job) {
   if (job.name === JOB_NAME) {
     const res = await purgeDeletedIdentities({ apply: true });
-    console.log(`[maintenance] ${JOB_NAME}: scanned ${res.scanned}, purged ${res.purged}`);
+    console.log(`[maintenance] ${JOB_NAME}: scanned ${res.scanned}, purged ${res.purged}, failed ${res.failed}`);
     return res;
   }
   if (job.name === TRIGGER_JOB) {
@@ -200,7 +200,7 @@ export async function processMaintenanceJob(job) {
     return res;
   }
   if (job.name === FBTIME_DEEP_JOB) {
-    const res = await runFbtimeSync({ windowDays: DEEP_WINDOW_DAYS, recoverErrored: true });
+    const res = await runFbtimeSync({ windowDays: DEEP_WINDOW_DAYS, recoverErrored: true, deep: true });
     if (!res.dormant && res.orgs > 0) {
       console.log(
         `[maintenance] ${FBTIME_DEEP_JOB}: ${res.ok}/${res.orgs} org(s) synced` +
@@ -222,7 +222,8 @@ export async function processMaintenanceJob(job) {
       status: { $in: ['connected', 'errored'] },
     });
     if (!connection) return { skipped: true }; // disconnected before we ran — not an error
-    const res = await syncOneConnection(connection, { windowDays: DEEP_WINDOW_DAYS });
+    // Deep for door counts too: connect, turn-on, a clear and Sync now all enqueue this.
+    const res = await syncOneConnection(connection, { windowDays: DEEP_WINDOW_DAYS, deep: true });
     console.log(
       `[maintenance] ${FBTIME_ORG_JOB}: org ${job.data.organizationId} — ` +
       (res.ok ? `${res.pulled} shift(s), ${res.deleted} removed` : `failed (${res.code || 'transient'})`)

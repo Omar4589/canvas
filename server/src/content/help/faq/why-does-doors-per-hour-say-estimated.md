@@ -53,7 +53,8 @@ of the hours were typed into FbTime by hand rather than clocked.
 
 **I fixed a timesheet in FbTime but the number hasn't changed.** Doorline re-checks recent days
 every few minutes and older days overnight, so it will catch up on its own — or press **Refresh
-hours** in the connection bar at the top of the Integrations page to pull it immediately. See
+hours** in the connection bar at the top of the Integrations page (it reads **Sync now** if your
+organization sends door counts to FbTime) to pull it immediately. See
 [I fixed a shift in FbTime — when does Doorline update?](fixed-fbtime-shift-not-updating)
 
 **What if someone works two shifts in one day?** That's handled and needs nothing from you. A

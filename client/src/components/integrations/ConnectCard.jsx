@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { Button, Card } from '../ui/index.js';
+import { keyCanFillDoors } from '../../lib/fbtimeDoors.js';
 
 // The not-connected state. Moved out of the page unchanged in behaviour — the
 // test-then-confirm flow is the wrong-customer-key guard and its copy is already
 // right. Note it stays NARROW while the rest of the page went full width: the
 // mapping TABLE wanted the screen, a key-entry form does not.
-export default function ConnectCard({ configured, onDone }) {
+export default function ConnectCard({ configured, doorsAvailable = false, onDone }) {
   const [apiKey, setApiKey] = useState('');
   // The Test result the admin must confirm — pasting another customer's key is
   // caught HERE as a name that reads wrong, not weeks later as a report full of
@@ -89,6 +90,11 @@ export default function ConnectCard({ configured, onDone }) {
               ) : null}
               . Is that your organization?
             </p>
+            {/* Only once door counts are released (GET /fbtime's doorsAvailable): the key's
+                scope and FbTime's build together, as the Replace-key form says it. */}
+            {doorsAvailable && keyCanFillDoors(tested) && (
+              <p className="mt-1 text-sm text-fg">It can also fill in door counts.</p>
+            )}
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"

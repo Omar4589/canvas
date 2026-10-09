@@ -967,6 +967,93 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `user.isDeleted` (already disclosed, previously only inferable from the tombstone email), and
   `fbtime {linked, personName, source}` which is **admin-only**: the per-user lead disclosure
   stamped 2026-08-14 stays exactly as scoped, and this org-wide roll-up is not extended to leads.]*
+  *[v6 2026-10-09: **door counts to FbTime — the integration SENDS something about people for the
+  first time; built, NOT yet released** ([PROPOSAL_FBTIME_DOOR_COUNTS.md](PROPOSAL_FBTIME_DOOR_COUNTS.md),
+  owner rulings 1-16). **What leaves**, only by `PUT /api/partner/v1/doors` (`services/fbtime/client.js`
+  `putDoors`, the key in the `Authorization` header only): `{ startDate, endDate, userIds, counts:
+  [{ userId, date, doors }] }`, where `userIds` are **FbTime's own person ids** (from
+  `FbTimePersonLink`), `date` a local day in the campaign's zone, and `doors` that day's knocks for that
+  linked canvasser — the Timeline's Doors column summed across the org's campaigns (`KNOCK_ACTIONS`,
+  `NOT_BULK`; a Restricted-only day is sent as 0; notes and desk marks never count; a day with no door
+  result sends nothing). An explicit clear sends the same keys with `counts: []` plus
+  `restoreTyped: true` (FbTime then brings back numbers people had typed). Nothing else — no names,
+  emails, voter data, addresses, survey answers, notes or locations — pinned by the body-key assertions
+  in `test/fbtimeDoorCounts.test.js` and `test/fbtimeDoorPush.int.test.js`. Each send restates up to
+  the last **120 days** (so the first send after a turn-on covers the 120 days before it); a clear
+  reaches back to the first day ever sent (never past FbTime's 2-year limit). **Only when all hold**
+  (`services/fbtime/doorPush.js` gates, re-checked before every request): the release var
+  `FBTIME_DOOR_COUNTS` is on; the org's own switch is on (off by default); the stored key carries
+  `doors:write`; FbTime's `/ping` advertises `doors:reported-wins`; the connection is `connected`; the org
+  is not being deleted; no other Doorline organization reports to the same FbTime organization. Outside
+  production a write reaches only a loopback host (`LAPTOP_GUARD`). **Who can turn it on:** the
+  customer's own org admin; Doorline staff under a support grant are refused (`403
+  DOORS_STAFF_FORBIDDEN`) and may only turn it off. Note for the v5 sentence "nobody at Doorline can
+  wire it up": staff under a grant CAN connect FbTime itself (`requireOrgRole` admits them) — that half
+  is a process rule; the door-count switch is enforced in code. **What Doorline newly holds** (all on
+  `FbTimeConnection` / `IntegrationEvent`, both in the org-delete `ORG_SCOPED` sweep,
+  `services/platform/deleteOrganization.js`): the key's scopes and FbTime's feature list; a ledger of the
+  FbTime person ids ever listed and the earliest date sent; waiting clears (person id, and the account it
+  was unlinked from); "the link was wrong" pairs (person id + account id, kept out of suggestions and
+  the email auto-match); run summaries (counts only), over-limit days (person id, date, number) and
+  unrecognised person ids; **kept accounts** (person id + account id + `until` + who kept it — an admin's
+  ruling that one FbTime person is one human across two Doorline accounts: no new data, a mapping between
+  records already held; it keeps the earlier account's pre-`until` hours its own and adds its pre-`until`
+  knocks to that person's counts). **No door count is stored** — every send recomputes from
+  `CanvassActivity`. New events: doors-enabled / -disabled / -failed / -recovered / -cleared /
+  -clears-abandoned / -clear-requested, account-kept / -kept-removed; door-count events never hold an
+  account id beside a person id (the link-type ones do, and the purge de-pairs them — below). Numbers
+  already sent live in the customer's FbTime, outside Doorline's deletion (`privacy.html:122` describes
+  Doorline's systems and stays true). **Lead-visible:** only `fbtime.kept` (a boolean, no dates) on the
+  per-user stats route already narrowed 2026-08-14. **Names on the Integrations page** (admin-only router):
+  Recent activity now names who made each change (`by`) and whom a link event is about (`subject`), and
+  the roster names kept earlier accounts — all resolved at read time through `hydrateCanvassers`, never
+  stored in an event, so a deleted account shows its retained snapshot name until the 180-day purge,
+  exactly as the leaderboard and Timeline already do (USERS.md); never an email (the events' stored
+  emails are what this build removes).
+  **Account deletion — two older gaps closed in the same build** (decision 10; `privacy.html:127`
+  promises the email is removed immediately): (1) deletion now nulls the FbTime link's `fbtimeEmail`
+  in every org (`services/users/deleteAccount.js`) and `link-created` no longer stores `userEmail`;
+  (2) the 180-day identity purge now **de-pairs** the account from FbTime in every org and connection
+  status (`services/fbtime/purgePairing.js`, record by record before the `purgedAt` stamp; a failure
+  leaves that record due and the run `ok:false` with `failed` — the health surface shows it, and goes red
+  once 48 hours pass without a clean run): links
+  deleted; kept and rejected entries removed; a waiting clear keeps the person but loses the account;
+  shifts clocked before the deletion keep their `userId` (hours stay measured) with `fbtimePersonId`
+  set to `'purged'`; later shifts re-resolve without the account; link-type events lose
+  `detail.fbtimePersonId` (and any `userEmail`); one id-less `link-removed {reason:'identity-purge'}`
+  row per org. Until the purge the link survives, so a deleted canvasser's existing counts can be
+  restated for at most 119 days after their last knock. Holds while `DELETED_IDENTITY_RETENTION_DAYS` ≥
+  121 (default 180). **Rows from before this deploy keep those emails and pairings until
+  `npm run migrate:fbtime-deletion-gaps -- --apply` runs in production** *(operator-attested run: NOT YET
+  RUN — fill in the date and the three counts from its output)*. IntegrationEvent stays append-only in
+  operation with two named exceptions (that migration's email scrub; the purge's de-pairing) beside the
+  existing org-deletion cascade.
+  **Sentences that become false the moment a send happens** — and so gate the release var:
+  `docs/DPA.md` §6 ("Doorline sends FbTime only date ranges and a timezone"), `privacy.html:106` ("we
+  send date ranges, and receive …"), this entry's v5 "What LEAVES … read-only inbound", and the
+  2026-09-03 stamp's "still only date ranges and a timezone" (all superseded by this stamp for any org
+  with door counts on). 🛑 **DPA.md and privacy.html are OWNER DECISIONS — flagged, not edited.**
+  Proposed wording: DPA §6 "… Doorline sends FbTime date ranges and a timezone and, if Customer also
+  turns on door-count reporting, the number of doors each linked staff member recorded each day
+  (including up to the 120 days before reporting is turned on), identified only by FbTime's own person
+  identifier; and receives Customer's staff names, …"; Privacy Policy "… we send date ranges — and, if
+  your administrator also turns on door-count reporting, the number of doors each linked staff member
+  recorded each day, so FbTime can show doors per hour — and receive staff names, …". In the same edit:
+  `privacy.html:81` "Last updated" still reads July 17, 2026 after four content edits (so `:143` is
+  already untrue), and the 2026-09-03 project-label wording is still open. **Assessment:
+  privacy-affecting (a new category of personal data leaving Doorline — per-canvasser daily door
+  counts); NOT a new subprocessor and no DPA §6 notice event** — FbTime is already disclosed and, per
+  DPA §6 as landed, engaged by the Customer; the customer's admin turning door counts on is the
+  customer's instruction under **DPA §2** (owner ruling 7: no customer notice beyond the updated
+  wording). This record contradicts itself on that point — v5 above calls FbTime "a NEW subprocessor";
+  **DPA §6 governs.** ToS unaffected (§3, §4, `terms.html:106`).]*
+
+- *(v6 2026-10-09)* **Door counts to FbTime — "never names, emails, voter data, addresses, survey
+  answers, notes or locations"** (the Help Center's door-count articles say it). True while `PUT /doors`
+  carries only `startDate`, `endDate`, `userIds` (FbTime's person ids), `counts [{ userId, date, doors }]`
+  and, on explicit clears, `restoreTyped` — built in one place (`planDoorRequests` /
+  `doorPush.js` `clearPhase`) and pinned by the body-key tests named in the stamp above. Any change to
+  what that request carries must re-verify this line, the stamp, DPA §6 and `privacy.html:106`.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -2951,6 +3038,8 @@ Two of your own findings conflict here and I am telling you which is right.
 *[v6 2026-10-05 (GPS upgrades step W1; item 27 of "Remaining honest gaps"): two clauses above are no longer true for `accuracy`. The zod schema no longer "accepts any `z.number()`" for it: `locationSchema.accuracy` and the pin route's `locationCorrectionSchema.accuracy` pass through `usableAccuracy` (`routes/mobile/canvass.js`), which keeps a finite number above zero and turns zero, negative and non-finite values into `null`. And the write no longer "assigns `location` verbatim": the parsed location carries that sanitised accuracy, and `buildReplacedSnapshot` copies prior accuracies through the same function. The coordinate itself is still stored raw and unrounded, but a coordinate that is not a finite number is now refused (`400 LOCATION_REQUIRED`, before any write). Finite coordinates off the Earth are still accepted until `npm run audit:gps-stamps` has counted the stored ones. Stores less, never more; stored rows are not rewritten. The before numbers from that count's first production run, and the `--since` numbers after the deploy, are added here in a later docs change. The web admin map now also draws each recorded stamp's accuracy as a circle: display only, from the field the map payload already carried to the same roles.]*
 
 *[v6 2026-10-05, evening (W1-offEarth; item 27): the before numbers the stamp above promised. The count's first production run, right after the W1 deploy, found no zero, negative or non-finite accuracy and no non-finite, off-Earth or (0, 0) coordinate on any ledger: 0 of 86,672 door results (replaced snapshots included), 0 of 16,251 survey responses, 0 of 51 replaced survey answers, 0 of 396 frozen unknocked rows, 0 of 5 GPS pin fixes. A coordinate off the Earth is now refused like a non-finite one (`400 LOCATION_REQUIRED`, before any write). The `--since` run a few days after the deploy remains the after check.]*
+
+*[v6 2026-10-08 — the after check: `npm run audit:gps-stamps -- --since=2026-10-05` in production found no odd stamp among the 4,000 door results, 1,280 survey responses and 2 replaced survey answers created since 2026-10-05 00:00 UTC; no unknocked entries were frozen and no GPS pin fixes were recorded in that window. The off-Earth refusal shipped in commit d2903dc.]*
 
 `distanceFromHouseMeters` is stored **in addition** to the raw coordinate, as `Math.round(haversineMeters(...))` (`canvass.js:83-86`). It does not replace or coarsen the raw lat/lng. It is null when the household has no pin.
 

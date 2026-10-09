@@ -97,7 +97,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 
 | Job | When | What it does |
 | --- | --- | --- |
-| `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago |
+| `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago, and unpairs that account from FbTime (its FbTime links go, and nothing is left tying it to an FbTime person). One record at a time: a record that fails stays due for the next night while the rest are purged, and a run with a failure doesn't count as a success — so a record that keeps failing turns the health check below red. |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
 | `reconcile-campaign-stats` | Daily 04:07 UTC | **Re-checks every campaign's stored all-time counts** (`Campaign.stats` — what the campaigns list and the All-time dashboards read) against the knock and survey records, and writes back the true numbers. Same code as `npm run migrate:campaign-stats -- --apply`. When it had to repair something, the worker log carries a warning naming each campaign and count; a campaign that needs repairing every night is a bug in the counters. Cron override: `CAMPAIGN_STATS_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `retention-triggers` | Daily 04:41 UTC | **Warns, then condemns organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then hands each due org (wind-down, dormancy, due deletion requests) to **`org-delete-queue`** — one job per org, so a failure is isolated to that org instead of aborting the sweep, and the worker does the destroying minutes later. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. The run receipt reports `enqueued`; `purged` is 0 because this job no longer destroys anything itself. |
@@ -114,7 +114,7 @@ had nothing to do, unless something is counting.
 | `RETENTION_WIND_DOWN_DAYS` | **60** | After a subscription is canceled, the customer has this long to export. Then their data is deleted. |
 | `RETENTION_DORMANCY_MONTHS` | **30** | No canvassing activity for this long → a non-paying (canceled/suspended) org is purged. A single knock resets the clock (the clock *is* the last knock). |
 | `RETENTION_DELETE_SLA_DAYS` | **30** | A deletion request is scheduled this far out — the window in which a mistaken or coerced request can be cancelled. |
-| `DELETED_IDENTITY_RETENTION_DAYS` | **180** | How long a deleted user's name is kept for fraud attribution. |
+| `DELETED_IDENTITY_RETENTION_DAYS` | **180** | How long a deleted user's name is kept for fraud attribution. **Never set it below 121:** the purge's FbTime step relies on a deleted account's shifts being older than FbTime's 120-day re-pull by the time it runs ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) → *Account deletion and the 180-day purge*). |
 | `SUPPORT_GRANT_HOURS` | **4** | How long a support access session lasts. |
 | `RETENTION_WARN_LEAD_DAYS` | **30** | How far ahead of a wind-down/dormancy deletion the warning email goes out. |
 | `RETENTION_WARN_GRACE_DAYS` | **14** | Minimum time between the warning actually being delivered and the deletion — even for an org already past its deadline when first warned. |
@@ -511,6 +511,75 @@ Nothing already placed is undone, and an address already looked up is answered f
 `PIN_PLACEMENT_MAX_HOMES` (config var, default 25,000) is the most homes one import will look up; any more
 stay marked in Pin Fixes, and importing the file again looks up the rest.
 
+### Release "Door counts to FbTime" — and the switch that stops it (October 2026)
+
+**Door counts to FbTime** sends each linked canvasser's doors per day to the customer's own FbTime, so
+FbTime's doors-per-hour page fills itself. It is off in every organization until an org admin turns it
+on, and no org admin can until Doorline **releases** it — which you do here, last. What it is and how it
+behaves: [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md); the design and the owner's rulings:
+[PROPOSAL_FBTIME_DOOR_COUNTS.md](PROPOSAL_FBTIME_DOOR_COUNTS.md).
+
+**The release is one config var, `FBTIME_DOOR_COUNTS`** (**Settings ▸ Reveal Config Vars**). The server
+reads it every time it needs it, and saving it restarts the dynos — no deploy. **Never name it to
+customers.**
+
+| `FBTIME_DOOR_COUNTS` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships | Not released. No **Door counts to FbTime** card anywhere, nobody can turn it on, nothing is sent and nothing is cleared. The rest of the release — the account-deletion fixes, and keeping a returning canvasser's old hours measured — is live regardless. |
+| **`on`** (`true` or `1` work too, in any case) | Released. Every connected organization's Integrations page shows the card, Off; only that organization's own admin can turn it on — Doorline staff under a support session are refused, by design. |
+| **Unset again**, after a release | **The Doorline-wide off switch.** Every organization's sends and clears stop at once; a card that was on reads **Paused** ("Doorline has paused door counts for everyone"), and its admin can still turn it off. What was already sent stays on FbTime. Setting it again resumes every organization still switched on — tell their admins first. |
+
+**To release it, in this order:**
+
+1. **Deploy server and web from `main`** (**Deploy** tab ▸ **Manual deploy**) with the var unset. Before
+   that, on your computer, `npm run audit:mobile-api` from the repo root: it flags the campaigns,
+   integrations and memberships route files — all additive for the phone (the door-count block on
+   `GET /admin/integrations/fbtime`, a `kept` flag on the member list and the profile stats), except that a
+   campaign time zone outside the listed US zones is now refused, which no screen offers. No index build,
+   no client-version bump.
+2. **Required, straight after the deploy**, in the Run console:
+
+   ```
+   npm run migrate:fbtime-deletion-gaps              # dry run — counts per step, writes nothing
+   npm run migrate:fbtime-deletion-gaps -- --apply   # writes
+   npm run migrate:fbtime-deletion-gaps              # again: every count should now read 0
+   ```
+
+   It removes emails that outlived deleted accounts — the copy on their FbTime links and the copy in the
+   link history — and unpairs from FbTime any account already past its 180-day purge (expected 0). Keep
+   the first run's counts: the privacy record's entry for this release is completed from them. Safe to
+   re-run any time; a record it couldn't process is printed and a re-run retries it. (All three were run
+   from the repo root against a throwaway database seeded with pre-fix rows: the dry run counted them,
+   `--apply` cleared them, the re-run read 0.)
+3. **The owner approves the privacy wording** — the door-count sentence for the Privacy Policy and DPA §6
+   ([PROPOSAL_FBTIME_DOOR_COUNTS.md](PROPOSAL_FBTIME_DOOR_COUNTS.md) §M) — and the live Privacy Policy is
+   updated. Until then they say Doorline sends FbTime only date ranges. (Approving it before step 1 lets it
+   ship in the same deploy.)
+4. **FbTime's side is deployed** ("Doorline decides" and the four rules that followed it — FbTimeApp
+   commit 561327a, deployed 2026-10-09). Doorline checks for it by itself — FbTime's `/ping` must list
+   `doors:reported-wins`, or nothing is sent — but confirm that FbTime's key-creation text and its
+   doors-per-hour help describe the new rules; no check can see stale wording.
+5. **Check, then set the var.** Open the live Privacy Policy and confirm the door-count sentence, and
+   confirm `docs/DPA.md` §6 on `main`. Then **Settings ▸ Reveal Config Vars** → `FBTIME_DOOR_COUNTS` = `on`
+   (the dynos restart). Confirm the card appears on an organization's Integrations page.
+6. **Ship the phone copy** — the FbTime row under **More** names the door-count state. Check what else is
+   unreleased under `mobile/` on `main` (`ota:production` publishes the whole tree), then `npm run
+   ota:staging` from `mobile/`, check it, then `npm run ota:production` from `main`. Older apps simply
+   ignore the new fields.
+
+Each organization then turns it on itself — an org admin who is a member of the organization: a key from
+FbTime with **Also let it fill in door counts** ticked → **Integrations → Settings → Replace key** → **Turn
+on** on the card → revoke the old key in FbTime ([FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) → *Turning
+door counts on*). The card says **Sending** within a few minutes.
+
+**Run exactly one `worker` dyno** (**Resources** tab). The maintenance queue — the FbTime hours sync, with
+the door counts that ride on it — runs one job at a time on one worker. A second worker dyno could run two
+door-count passes for the same organization at once; the checks before each request narrow what that
+could do, but don't remove it.
+
+**Two kill switches:** unset `FBTIME_DOOR_COUNTS` (every organization at once, no deploy), or **Turn off**
+on one organization's card.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -709,6 +778,23 @@ Idempotent, and dry-run by default — `--apply` is what makes it write. The win
 `DELETED_IDENTITY_RETENTION_DAYS` (default **180**), read at deletion time and frozen onto the record, so
 changing the env var later only affects future deletions.
 
+**Record by record, with an FbTime step** (since the door-counts release). The job and the CLI share
+[`services/retention/purgeDeletedIdentities.js`](../server/src/services/retention/purgeDeletedIdentities.js):
+each due record first runs `depairFbtimeAccount`
+([`services/fbtime/purgePairing.js`](../server/src/services/fbtime/purgePairing.js) — the account's FbTime
+links deleted, its kept and rejected entries removed, its pre-deletion shifts kept but stripped of the
+FbTime person, its link history de-paired; [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md) → *Account
+deletion and the 180-day purge*), then gets its scrub and `purgedAt` stamp, all inside its own try/catch.
+A record that throws is counted (`failed`), logged and left unstamped for the next run while the rest
+proceed, and the run is recorded `RetentionRun { ok: false, failed, error }` — not a success, so
+`retentionHealth()` reads red once 48 hours pass without a clean run, with the failure count in its
+`lastError`. A dry run (the CLI without `--apply`) prints what the FbTime step would do and writes
+**nothing** — not even a `RetentionRun` row, so a counting pass from the console can never make a dead job
+read green (checked from the repo root against a throwaway database: zero rows after the dry run).
+**`DELETED_IDENTITY_RETENTION_DAYS` must stay ≥ 121:** the FbTime step leaves a deleted account's
+pre-deletion shifts with no FbTime person, and that holds only while they are older than the hours sync's
+120-day re-pull when the purge reaches them — a younger shift would be re-pulled and re-paired.
+
 Without this on a schedule, the retention promise made in
 [`DeleteAccountSheet`](../mobile/components/DeleteAccountSheet.jsx), on
 [`/delete-account`](../client/public/delete-account.html) and in the privacy policy is not kept. See
@@ -742,6 +828,8 @@ fraud audit).
 | `npm run audit:gps-stamps` | **Read-only.** Stored GPS stamps the stamp rules in [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I refuse, store as unknown or judge differently for new stamps (its first production run, 2026-10-05, found none on any ledger): per ledger, negative, zero (by month and mock-location flag) and non-finite accuracies, non-finite, off-Earth and (0, 0) coordinates, each against the rows scanned; and what the read-side clamp changes (audit far reasons removed, severities that drop, the per-canvasser Far count and forgiven), measured by running the far rule with the old arithmetic and with the current one. Counts only, never a coordinate, name or id. One collection scan per ledger, so run it late in the evening. `-- --since=<time>` limits it to rows created at or after a full time with its UTC offset (`2026-10-13T23:45-05:00`) or a date read as 00:00 UTC; a time without an offset, an impossible date and a future time are refused. Test `auditGpsStamps.int.test.js` runs it as a child process over the real script |
 | `npm run migrate:campaign-stats` | **Read-only.** Recomputes every campaign's `Campaign.stats` from the ledgers and lists the ones that differ (`DRIFTED`) or were never seeded (`UNSEEDED`) — [see below](#contactknockcount-and-the-required-recompute-migratecampaign-stats) |
 | `npm run migrate:campaign-stats -- --apply` | **Once, straight after the Not-a-target release deploy** (seeds `contactKnockCount`); otherwise any time counter drift is suspected. Recomputes and stamps **every** campaign — the same code as the nightly `reconcile-campaign-stats` job |
+| `npm run migrate:fbtime-deletion-gaps` | **Read-only.** Counts, per step, what the FbTime deletion-gaps backfill would change ([`backfillFbtimeDeletionGaps.js`](../server/src/migrations/backfillFbtimeDeletionGaps.js)) |
+| `npm run migrate:fbtime-deletion-gaps -- --apply` | **Once, straight after the door-counts release deploy.** (1) nulls `fbtimeEmail` on FbTime links of deleted accounts; (2) strips `detail.userEmail` from **every** `link-created` integration event (nothing reads it, and a per-user match would miss rows whose `detail.userId` is stored upper-case); (3) runs the purge's FbTime step for records purged before it existed (expected 0 — the first default purge is around 2027-01-08). Idempotent; a record that fails is printed, the exit code is 1, and a re-run retries it |
 
 Five notes on `repair:import-pins` specifically, because they surprise people:
 
@@ -984,6 +1072,31 @@ anything older a write that never touches `status` — `updateHouseholdLocation`
 `save()` — fails with `` `not_target` is not a valid enum value for path `status` `` (checked on mongoose
 8.23.1). That 500 is not dropped: a 5xx stays at the head of the queue for retry and holds up the lead's
 queue behind it.
+
+### The door-count release gate (`FBTIME_DOOR_COUNTS`)
+
+[`doorCountsAvailable()`](../server/src/services/fbtime/doorCounts.js) reads
+`process.env.FBTIME_DOOR_COUNTS` on every call — `on`, `true` or `1` after trimming, in any case; anything
+else is off. Nothing caches it, and every reader calls it:
+
+- **`GET /api/admin/integrations/fbtime`** returns it as `doors.available` (and `doorsAvailable` when not
+  connected) — what the web card and the Replace-key form's door-count line are drawn from.
+- **`PATCH /fbtime/doors`** refuses a turn-on and any clear with `409 DOORS_NOT_AVAILABLE`; Turn off and
+  Cancel always work, so a withdrawal never strands an admin.
+- **The door step** ([`doorPush.js`](../server/src/services/fbtime/doorPush.js)) checks it first among its
+  gates: off → no request at all, and no write for an organization with nothing to do (an enabled one
+  records `lastSkip: 'unavailable'`, and its card reads **Paused**). The deep job's scope refresh runs only
+  while it is on.
+
+Unsetting it loses nothing: the switch, the ledger of who was sent, waiting clears and kept accounts all
+stay, and resume when it is set again.
+
+**The one-worker rule.** The maintenance worker is `new Worker(QUEUE_NAMES.MAINTENANCE, …, { concurrency: 1
+})` in [`worker.js`](../server/src/worker.js) — one job at a time **per process**. A second worker dyno is
+a second process, so the 15-minute and nightly FbTime jobs (and the one-off org job) could run the door step
+for the same organization twice at once. Every send and clear re-checks before each request (the key-filtered
+ledger write, the reporter predicate, each person's set of accounts), which narrows what an interleaving
+could do but doesn't make it safe — so the formation stays at one worker dyno.
 
 ### `contactKnockCount` and the required recompute (`migrate:campaign-stats`)
 

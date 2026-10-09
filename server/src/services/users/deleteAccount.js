@@ -10,6 +10,7 @@ import { CampaignManager } from '../../models/CampaignManager.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { EffortMember } from '../../models/EffortMember.js';
 import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
+import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 
 // Self-serve account deletion — App Store guideline 5.1.1(v) and Google Play's
 // account-deletion policy both require it, and both are triggered by the fact that our
@@ -226,6 +227,12 @@ export async function deleteAccount(userId, { reason = 'self', deletedBy = null 
   // Membership with no join to User, so leaving them active would keep counting a deleted
   // person forever, and the campaign setup-progress step would still read as "staffed".
   await Membership.updateMany({ userId: user._id }, { $set: { isActive: false } });
+
+  // The FbTime link (one per org that connected FbTime) holds the FbTime person's email,
+  // which for the same human is this person's email: it goes now, with the account's own
+  // ("removed immediately"). The link itself stays until the purge — it is what keeps the
+  // person's measured hours theirs, and an admin's "was the link right?" needs it.
+  await FbTimePersonLink.updateMany({ userId: user._id }, { $set: { fbtimeEmail: null } });
 
   await User.updateOne(
     { _id: user._id },

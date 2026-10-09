@@ -1,22 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../../api/client.js';
 import { IconChevronRight } from '../ui/index.js';
-
-const EVENT_COPY = {
-  connected: 'Connected',
-  disconnected: 'Disconnected',
-  'key-rotated': 'API key replaced',
-  'figure-changed': 'Hours figure changed',
-  'link-created': 'Canvasser linked',
-  'link-removed': 'Canvasser unlinked',
-  'auto-matched': 'Auto-matched by email',
-  'sync-failed': 'Sync started failing',
-  'sync-recovered': 'Sync recovered',
-};
+import { eventText } from '../../lib/fbtimeEvents.js';
 
 // A native <details>: keyboard-accessible for free, and there is no Accordion
 // primitive in the kit to reach for instead.
-export default function RecentActivity() {
+//
+// Each line says who and why — "Door counts turned on — by Ada Admin" — from the
+// names the server resolves at read time (lib/fbtimeEvents.js has every sentence).
+// `personName` names an FbTime person off the page's roster, for the one event that
+// carries only a person id.
+export default function RecentActivity({ personName }) {
   const orgId = getActiveOrgId();
   const eventsQ = useQuery({
     queryKey: ['admin', 'integrations', 'fbtime', 'events', orgId],
@@ -40,12 +34,7 @@ export default function RecentActivity() {
       <ul className="space-y-1.5 border-t border-border px-4 py-3">
         {events.map((e) => (
           <li key={e.id} className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="text-fg">
-              {EVENT_COPY[e.type] || e.type}
-              {e.detail?.count != null && ` — ${e.detail.count}`}
-              {e.detail?.code && ` (${e.detail.code})`}
-              {e.detail?.to && ` → ${e.detail.to}`}
-            </span>
+            <span className="text-fg">{eventText(e, { personName })}</span>
             <span className="shrink-0 text-xs text-fg-subtle">
               {new Date(e.at).toLocaleString()}
             </span>

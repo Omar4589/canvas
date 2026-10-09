@@ -51,6 +51,7 @@
     "migrate:geocode-lastused": "npm --prefix server run migrate:geocode-lastused --",
     "migrate:scrub-map-points": "npm --prefix server run migrate:scrub-map-points --",
     "migrate:deletion-snapshots": "npm --prefix server run migrate:deletion-snapshots --",
+    "migrate:fbtime-deletion-gaps": "npm --prefix server run migrate:fbtime-deletion-gaps --",
     "migrate:platform-stats": "npm --prefix server run migrate:platform-stats --",
     "migrate:candidate-orgs": "npm --prefix server run migrate:candidate-orgs --",
     "request:org-deletion": "npm --prefix server run request:org-deletion --",

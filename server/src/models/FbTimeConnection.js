@@ -2,10 +2,12 @@ import mongoose from 'mongoose';
 
 // An organization's opt-in link to FbTime's Partner API — the add-on that
 // replaces the derived first-to-last-knock span with measured hours in
-// doors-per-hour. One per organization, created by the org's OWN admin pasting
-// an API key they minted inside FbTime; that act is the consent that makes this
-// a customer integration rather than a disclosure (see docs/FBTIME_INTEGRATION.md
-// and the provider contract, FbTimeApp/docs/PARTNER_API.md).
+// doors-per-hour, and (when an admin also turns door counts on) sends each linked
+// canvasser's doors per day back to FbTime's own doors-per-hour page. One per
+// organization, created by the org's OWN admin pasting an API key they minted
+// inside FbTime; that act is the consent that makes this a customer integration
+// rather than a disclosure (see docs/FBTIME_INTEGRATION.md and the provider
+// contract, FbTimeApp/docs/PARTNER_API.md).
 //
 // Orgs that never create one see zero change anywhere — every reader goes
 // through services/reports/hoursSource.js, which treats "no connection" as
@@ -67,6 +69,121 @@ const fbTimeConnectionSchema = new mongoose.Schema(
     // When an admin last pressed "Refresh hours now" — the cooldown stamp for
     // the manual deep pull, not a sync-progress fact (lastSyncAt is that).
     manualSyncRequestedAt: { type: Date, default: null },
+
+    // ── Door counts (docs/PROPOSAL_FBTIME_DOOR_COUNTS.md) ─────────────────────
+    //
+    // NOTHING BELOW HAS A DEFAULT, and every array is `default: undefined`. Mongoose
+    // writes non-null schema defaults for paths missing when a document was LOADED, so
+    // the hours sync's own connection.save() on a connection made before this feature
+    // would otherwise write doors.enabled:false over an admin's turn-on that landed
+    // mid-run (reproduced). Readers take lean documents and are null-safe
+    // (`connection.doors?.enabled === true`); a reset is `$unset: { doors: '' }`.
+    // Array writes are $push / $pull / positional $set — never a whole-array $set.
+
+    // What the key may do, and what the FbTime server supports — both from GET /ping
+    // (key.scopes; the top-level, server-wide features). Door counts need doors:write
+    // in the first and doors:reported-wins in the second.
+    keyScopes: { type: [String], default: undefined },
+    fbtimeFeatures: { type: [String], default: undefined },
+
+    // Kept accounts: an admin's "the link was right" on unlink — one FbTime person is
+    // one human across Doorline accounts. Deliberately OUTSIDE `doors`: they also
+    // decide whose hours a shift is (services/fbtime/shiftOwner.js), so turning door
+    // counts off, a clear or an org change must never drop them.
+    keptAccounts: {
+      type: [
+        {
+          fbtimePersonId: String,
+          userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+          until: Date, // shifts and knocks before this belong to the kept account
+          keptByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+          keptAt: Date,
+          _id: false,
+        },
+      ],
+      default: undefined,
+    },
+
+    doors: {
+      enabled: Boolean,
+      enabledAt: Date, // set only on the off→on transition
+      enabledByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+      // Write-ahead ledger: every FbTime person id ever listed in a send, written
+      // BEFORE the request, and the earliest startDate ever sent (where a clear starts).
+      reported: { type: [String], default: undefined },
+      earliestDate: String,
+
+      // Explicit clears — the only way Doorline removes a person's numbers.
+      clearPersons: {
+        type: [
+          {
+            fbtimePersonId: String,
+            fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // null: unlinked / purged
+            confirmAfter: Date, // set once the first pass finished; the confirm pass runs after it
+            _id: false,
+          },
+        ],
+        default: undefined,
+      },
+      clearAll: Boolean,
+      clearAllDone: { type: [String], default: undefined }, // progress of the current clear-all pass
+      clearAllConfirmAfter: Date,
+      rejected: {
+        type: [
+          {
+            fbtimePersonId: String,
+            userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+            _id: false,
+          },
+        ],
+        default: undefined,
+      },
+
+      deepDueAt: Date, // a full 120-day run is owed (turn-on, key change, link change)
+      deepRetry: { type: [String], default: undefined }, // people still owed a 120-day send
+
+      lastFinishedAt: Date,
+      lastSkip: String,
+      lastSentAt: Date,
+      lastResult: {
+        type: [
+          {
+            windowDays: Number,
+            startDate: String,
+            endDate: String,
+            people: Number,
+            applied: Number,
+            unchanged: Number,
+            cleared: Number,
+            _id: false,
+          },
+        ],
+        default: undefined,
+      },
+      lastDeepSentAt: Date,
+      lastDeepResult: {
+        windowDays: Number,
+        startDate: String,
+        endDate: String,
+        people: Number,
+        applied: Number,
+        unchanged: Number,
+        cleared: Number,
+      },
+      replacedTyped: Number, // cumulative since enabledAt; reset by Turn on
+      overCap: {
+        type: [{ fbtimePersonId: String, date: String, knocks: Number, _id: false }],
+        default: undefined,
+      },
+      unknownPersonIds: { type: [String], default: undefined },
+      failCode: String,
+      failPhase: String,
+      failDetail: mongoose.Schema.Types.Mixed,
+      transientStreak: Number,
+      lastError: String,
+      lastErrorAt: Date,
+    },
   },
   { timestamps: true }
 );
