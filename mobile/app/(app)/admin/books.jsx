@@ -35,6 +35,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../../../lib/config';
 import { getToken } from '../../../lib/auth';
 import { loadActiveOrgId } from '../../../lib/cache';
+import { refreshSession } from '../../../lib/session';
 import { doorDotsRequest, doorDotFilterExpr } from '../../../lib/doorDots';
 import { restrictCountsFromStatusCounts } from '../../../lib/restrictBooks';
 import { bookStatusSet as sharedBookStatusSet, matchesBookStatus } from '../../../lib/bookStatusFilter';
@@ -233,6 +234,8 @@ export default function AdminBooks() {
       const res = await FileSystem.downloadAsync(`${API_BASE_URL}/api${path}`, uri, { headers });
       if (res.status !== 200) {
         await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        // Bypasses api(); let /auth/me (through api()) report an ended sign-in.
+        if (res.status === 401) refreshSession({ force: true });
         throw new Error(`Door dots download failed: ${res.status}`);
       }
       return uri;

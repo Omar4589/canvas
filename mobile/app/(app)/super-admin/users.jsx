@@ -160,7 +160,7 @@ export default function SuperAdminUsersScreen() {
                     <Text style={styles.userMeta}>
                       {/* Three clocks, each omitted when absent rather than padded with an
                           em-dash — this line wraps, and two dashes per account is phone noise. */}
-                      Last login {formatRelative(u.lastLoginAt)}
+                      Last password login {formatRelative(u.lastLoginAt)}
                       {u.lastSeenAt ? ` · active ${formatRelative(u.lastSeenAt)}` : ''}
                       {u.lastActivityAt ? ` · canvassed ${formatRelative(u.lastActivityAt)}` : ''}
                       {!u.isActive && ' · inactive'}

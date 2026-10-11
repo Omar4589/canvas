@@ -49,7 +49,9 @@ export const farKpiForRows = async (rows, { organizationId, thresholds = FLAG_TH
     if (!fa) continue;
     assessmentsByActionId.set(String(r._id), fa);
     if (fa.severity === 'med' || fa.severity === 'high') farCount += 1;
-    if (fa.detail.pinDowngraded) farForgivenByPinCount += 1;
+    // "Forgiven by pin": a pin corrected after the knock, or a knock frozen at an unconfirmed estimate or at
+    // a condo complex (the pin-fixes build) — every downgrade that blames the pin, not the canvasser.
+    if (fa.detail.pinDowngraded || fa.detail.estimatedPin || fa.detail.complexPin) farForgivenByPinCount += 1;
   }
   return { farCount, farForgivenByPinCount, assessmentsByActionId };
 };
@@ -70,6 +72,8 @@ export const farVerdictForWire = (fa) => {
       ...(d.pinCorrectedMeters != null ? { pinCorrectedMeters: d.pinCorrectedMeters, pinCorrectedAt: d.pinCorrectedAt } : {}),
       ...(d.pinDowngraded ? { pinDowngraded: true } : {}),
       ...(d.pinMovedBySelf ? { pinMovedBySelf: true } : {}),
+      ...(d.estimatedPin ? { estimatedPin: true } : {}),
+      ...(d.complexPin ? { complexPin: true } : {}),
     },
   };
 };
@@ -85,7 +89,7 @@ export const farVerdictForWire = (fa) => {
 export const computeFarKpi = async (activityMatch, { organizationId, thresholds = FLAG_THRESHOLDS } = {}) => {
   const rows = await CanvassActivity.find(
     { ...activityMatch, via: { $ne: 'bulk' } },
-    '_id userId householdId timestamp location distanceFromHouseMeters replaced'
+    '_id userId householdId timestamp location distanceFromHouseMeters knockPin replaced'
   ).lean();
   return farKpiForRows(rows, { organizationId, thresholds });
 };

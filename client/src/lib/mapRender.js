@@ -291,8 +291,11 @@ export function buildingsToGeoJSON(buildings, dimExcluded = false) {
         total: b.total,
         done: b.done,
         roll: b.roll,
-        // Different homes on one spot (lib/buildings.js stackKind): the "N homes" glyph.
+        // Different homes on one spot (lib/buildings.js stackKind): the "N homes" glyph. A condo complex draws
+        // the same glyph (`homes`), but is a place, not a problem: `unplaced` stays false for it.
         unplaced: b.kind === 'unplaced',
+        homes: b.kind === 'unplaced' || b.kind === 'complex',
+        complex: b.kind === 'complex',
         // A building dims only when EVERY door in it is excluded. A mixed stack still
         // holds cuttable doors, so fading it would hide live work behind an admin action.
         excluded: dimExcluded ? (b.units || []).every((u) => u.excludedFromTurf === true) : false,
@@ -545,7 +548,7 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       // reads "N homes"; a real building keeps the tower and "N doors".
       'icon-image': [
         'case',
-        ['to-boolean', ['get', 'unplaced']],
+        ['to-boolean', ['get', 'homes']],
         ['match', ['get', 'roll'], 'done', 'homes-done', 'partial', 'homes-partial', 'homes-none'],
         ['match', ['get', 'roll'], 'done', 'building-done', 'partial', 'building-partial', 'building-none'],
       ],
@@ -556,7 +559,7 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
       // away (text-optional) — the icon never does, so no building is ever hidden.
       'text-field': [
         'step', ['zoom'], '',
-        14, ['concat', ['to-string', ['get', 'total']], ['case', ['to-boolean', ['get', 'unplaced']], ' homes', ' doors']],
+        14, ['concat', ['to-string', ['get', 'total']], ['case', ['to-boolean', ['get', 'homes']], ' homes', ' doors']],
       ],
       'text-size': 11,
       'text-offset': [0, 1.15],
@@ -846,3 +849,50 @@ export function registerLayers(map, dark, { withCanvassers = true } = {}) {
     },
   });
 }
+
+// ── Pin Fixes' Place along the street: house numbers (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.3) ──
+// The leading house number of every door in view that is NOT in the queue (pinFixes.js
+// neighbourNumbersGeoJSON), so the numbering direction and the odd/even side read at a glance while
+// clicking roofs. Not part of registerLayers: the page adds it only while placing, again after every
+// basemap swap (setStyle drops custom sources and layers), and removes it on exit. Labels may collide
+// away; they are a hint, never the record.
+export const NEIGHBOUR_NUMBERS = 'neighbour-numbers';
+export const neighbourNumbersLayer = (dark) => ({
+  id: NEIGHBOUR_NUMBERS,
+  type: 'symbol',
+  source: NEIGHBOUR_NUMBERS,
+  minzoom: 15,
+  layout: {
+    'text-field': ['get', 'num'],
+    'text-size': 11,
+    'text-offset': [0, -1.1],
+    'text-anchor': 'bottom',
+    'text-optional': true,
+  },
+  paint: {
+    'text-color': dark ? '#f3f4f6' : '#111827',
+    'text-halo-color': dark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
+    'text-halo-width': 1.4,
+  },
+});
+// Add or refresh the labels. False when the style isn't ready to take a source yet (the caller retries on
+// the map's next idle).
+export const setNeighbourNumbers = (map, data, dark) => {
+  try {
+    const src = map.getSource(NEIGHBOUR_NUMBERS);
+    if (src) src.setData(data);
+    else map.addSource(NEIGHBOUR_NUMBERS, { type: 'geojson', data });
+    if (!map.getLayer(NEIGHBOUR_NUMBERS)) map.addLayer(neighbourNumbersLayer(dark));
+    return true;
+  } catch {
+    return false;
+  }
+};
+export const removeNeighbourNumbers = (map) => {
+  try {
+    if (map.getLayer(NEIGHBOUR_NUMBERS)) map.removeLayer(NEIGHBOUR_NUMBERS);
+    if (map.getSource(NEIGHBOUR_NUMBERS)) map.removeSource(NEIGHBOUR_NUMBERS);
+  } catch {
+    // The style is mid-swap: setStyle already dropped them.
+  }
+};

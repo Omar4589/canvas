@@ -131,7 +131,8 @@ test('a spot of different homes draws the homes glyph and reads N homes; a lone 
   });
   for (const roll of ['none', 'partial', 'done']) assert.ok(images.includes(`homes-${roll}`), `homes-${roll} registered`);
   const building = map.layers.find((l) => l.id === 'building-symbols');
-  assert.deepEqual(building.layout['icon-image'][1], ['to-boolean', ['get', 'unplaced']]);
+  // Since the pin-fixes build the glyph switches on `homes` (a spot of different homes, or a condo complex).
+  assert.deepEqual(building.layout['icon-image'][1], ['to-boolean', ['get', 'homes']]);
   assert.match(JSON.stringify(building.layout['text-field']), / homes/);
   assert.match(JSON.stringify(building.layout['text-field']), / doors/);
   const ring = map.layers.find((l) => l.id === 'household-approx-ring');
@@ -145,6 +146,39 @@ test('a spot of different homes draws the homes glyph and reads N homes; a lone 
   const stacks = buildingsToGeoJSON([
     { key: 'k1', lng: 1, lat: 2, total: 2, done: 0, roll: 'none', kind: 'unplaced', units: [] },
     { key: 'k2', lng: 3, lat: 4, total: 5, done: 1, roll: 'partial', kind: 'building', units: [] },
+    { key: 'k3', lng: 5, lat: 6, total: 46, done: 0, roll: 'none', kind: 'complex', units: [] },
   ]);
-  assert.deepEqual(stacks.features.map((f) => f.properties.unplaced), [true, false]);
+  assert.deepEqual(stacks.features.map((f) => f.properties.unplaced), [true, false, false]);
+  assert.deepEqual(stacks.features.map((f) => f.properties.homes), [true, false, true], 'a complex draws the homes glyph');
+  assert.deepEqual(stacks.features.map((f) => f.properties.complex), [false, false, true]);
+});
+
+// ── Pin Fixes' house-number labels (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.3) ──
+import { neighbourNumbersLayer, setNeighbourNumbers, removeNeighbourNumbers, NEIGHBOUR_NUMBERS } from './mapRender.js';
+
+test('neighbour numbers: one symbol layer on its own source, added once, refreshed after, removed on exit', () => {
+  const layer = neighbourNumbersLayer(true);
+  assert.equal(layer.id, NEIGHBOUR_NUMBERS);
+  assert.equal(layer.source, NEIGHBOUR_NUMBERS);
+  assert.deepEqual(layer.layout['text-field'], ['get', 'num']);
+  const sources = new Map();
+  const layers = new Set();
+  let setDataCalls = 0;
+  const map = {
+    getSource: (id) => (sources.has(id) ? { setData: () => { setDataCalls += 1; } } : undefined),
+    addSource: (id, spec) => sources.set(id, spec),
+    getLayer: (id) => (layers.has(id) ? {} : undefined),
+    addLayer: (spec) => layers.add(spec.id),
+    removeLayer: (id) => layers.delete(id),
+    removeSource: (id) => sources.delete(id),
+  };
+  const fc = { type: 'FeatureCollection', features: [] };
+  assert.equal(setNeighbourNumbers(map, fc, true), true);
+  assert.equal(setNeighbourNumbers(map, fc, true), true);
+  assert.equal(setDataCalls, 1, 'the second call refreshes the data, never re-adds');
+  assert.equal(layers.size, 1);
+  removeNeighbourNumbers(map);
+  assert.equal(layers.size + sources.size, 0);
+  const busy = { getSource: () => undefined, addSource: () => { throw new Error('Style is not done loading'); } };
+  assert.equal(setNeighbourNumbers(busy, fc, true), false, 'a style mid-swap reports false for a retry');
 });

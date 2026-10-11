@@ -1,4 +1,4 @@
-import { getToken, getActiveOrgId } from '../api/client.js';
+import { api, getToken, getActiveOrgId } from '../api/client.js';
 
 // THE file-saving module for the web client. Every "put a file on the user's disk" path goes
 // through `saveBlob` at the bottom of it — the anchor dance was hand-rolled in ten places, and
@@ -86,6 +86,10 @@ export const downloadFile = async (path, { fallbackName = 'download.csv' } = {})
   if (orgId) headers['X-Org-Id'] = orgId;
   const res = await fetch(`/api${path}`, { headers });
   if (!res.ok) {
+    // This bypasses api(), so it can't see an ended sign-in itself: ask /auth/me through api(),
+    // which reports it if the sign-in really ended (the password prompt, or the sign-in page).
+    // Not awaited: that request waits for the password while the prompt is up.
+    if (res.status === 401) api('/auth/me').catch(() => {});
     let message = `Download failed: ${res.status}`;
     try {
       const body = await res.json();

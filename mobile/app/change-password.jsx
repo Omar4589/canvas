@@ -9,8 +9,9 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { useAuthToken, signIn, signOut } from '../lib/authState';
+import { useAuthToken, rotateToken } from '../lib/authState';
 import { saveCurrentUser, saveMemberships } from '../lib/cache';
 import Logo from '../components/Logo';
 import PasswordInput from '../components/PasswordInput';
@@ -26,6 +27,7 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 export default function ChangePassword() {
   const token = useAuthToken();
   const router = useRouter();
+  const qc = useQueryClient();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -48,28 +50,28 @@ export default function ChangePassword() {
     }
     setLoading(true);
     try {
-      const res = await api('/auth/change-password', {
-        method: 'POST',
-        body: { currentPassword, newPassword },
-      });
       // The change revokes every session issued before it — INCLUDING the token this request
-      // rode in on. Adopt the fresh one from the response first, or the very next request
-      // (and a mid-shift canvasser's queued-knock flush) would 401 into a sign-out.
-      if (res.token) await signIn(res.token);
+      // rode in on. rotateToken adopts the fresh one from the response under the session lock,
+      // so an old-token 401 from another request landing meanwhile waits and then does nothing
+      // (lib/sessionStore.js). Only the bare api() call goes inside: anything that touched the
+      // session store from in there would wait on the lock rotateToken holds.
+      const res = await rotateToken(() =>
+        api('/auth/change-password', {
+          method: 'POST',
+          body: { currentPassword, newPassword },
+        })
+      );
       if (res.user) await saveCurrentUser(res.user);
       await saveMemberships(res.memberships || []);
+      // Anything that left with the old token while the change was in flight failed with a 401
+      // that is not retried: run it again with the new one.
+      qc.invalidateQueries({ predicate: (q) => q.state.status === 'error' });
       router.replace('/');
     } catch (err) {
-      // The session died UNDER this screen — the user completed a reset elsewhere (the
-      // emailed rescue link) while this device sat on the forced-change form. Without this,
-      // the form is an inescapable dead end: submits 401 forever, relaunch re-routes here
-      // off the cached mustChangePassword, and the only exit (reinstall) would destroy any
-      // queued knocks. signOut drops to /login via the !token redirect — the offline queue
-      // survives it by design.
-      if (err.code === 'SESSION_REVOKED') {
-        await signOut();
-        return;
-      }
+      // If the session died UNDER this screen (a reset completed elsewhere, or the sign-in ran
+      // out), lib/api.js has already reported it: app/_layout.jsx signs out (the offline queue
+      // survives it) or shows the password screen over this one. Either way the form is never an
+      // inescapable dead end.
       setError(err.message);
     } finally {
       setLoading(false);

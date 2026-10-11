@@ -11,10 +11,11 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import { api } from '../../lib/api';
-import { signIn } from '../../lib/authState';
+import { rotateToken } from '../../lib/authState';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
 import PasswordRequirements from '../../components/PasswordRequirements';
@@ -30,6 +31,7 @@ import { useThemedStyles } from '../../lib/useThemedStyles';
 // works regardless of active org.
 export default function ProfileScreen() {
   const router = useRouter();
+  const qc = useQueryClient();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
@@ -108,16 +110,21 @@ export default function ProfileScreen() {
     }
     setSavingPw(true);
     try {
-      const res = await api('/auth/change-password', {
-        method: 'POST',
-        body: { currentPassword, newPassword },
-      });
       // The change revokes every session issued before it — including this device's token.
-      // Adopt the fresh one FIRST, or the map's next poll would 401 into a sign-out seconds
-      // after the user successfully changed their own password.
-      if (res.token) await signIn(res.token);
+      // rotateToken adopts the fresh one under the session lock, so the map's next poll can't
+      // 401 into a sign-out seconds after the user successfully changed their own password
+      // (lib/sessionStore.js). Only the bare api() call goes inside.
+      const res = await rotateToken(() =>
+        api('/auth/change-password', {
+          method: 'POST',
+          body: { currentPassword, newPassword },
+        })
+      );
       if (res.user) await saveCurrentUser(res.user);
       if (res.memberships) await saveMemberships(res.memberships);
+      // Anything that left with the old token while the change was in flight failed with a 401
+      // that is not retried: run it again with the new one.
+      qc.invalidateQueries({ predicate: (q) => q.state.status === 'error' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirm('');

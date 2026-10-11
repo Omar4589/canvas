@@ -15,12 +15,15 @@ import {
   loadCurrentEffort,
   clearCurrentEffort,
 } from '../../lib/cache';
-import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
+import { bootstrapQueryFn, rosterErrorIsFinal, useSeatedRoster } from '../../lib/bootstrapQuery';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
+import ReauthNotice from '../../components/ReauthNotice';
+import { RefreshFailedRow } from '../../components/DataHealthBanner';
+import { getSessionState, expandReauth, useSessionState } from '../../lib/authState';
 import MapControlStack from '../../components/MapControlStack';
 import EffortPicker from '../../components/EffortPicker';
 import ElectionCountdownChip from '../../components/ElectionCountdownChip';
@@ -82,7 +85,8 @@ export default function BooksScreen() {
     };
   }, [router]);
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
+  const { reauth: reauthPending } = useSessionState();
+  const rosterQuery = useQuery({
     queryKey: ['bootstrap'],
     // Shared with map.jsx (lib/bootstrapQuery.js). Two fixes over the old local
     // fetcher: pending overlays now apply here too (this screen's refetch-on-mount
@@ -93,7 +97,14 @@ export default function BooksScreen() {
     // Short window so a freshly-activated round refetches per-round status on mount
     // rather than showing the prior round's cached colors.
     staleTime: 30 * 1000,
+    // bootstrapQueryFn retries once itself, so both attempts fetch this campaign.
+    retry: false,
   });
+  const { isLoading, refetch, isFetching } = rosterQuery;
+  // Never another campaign's books or failure, never a cancelled refresh shown as a failure; and
+  // when something else sits in the shared cache, `waiting` holds the loader while this campaign's
+  // roster is fetched (lib/bootstrapQuery.js useSeatedRoster, rules in lib/seatedRoster.js).
+  const { data, error, waiting: rosterWaiting } = useSeatedRoster(rosterQuery, activeCampaign?.id);
 
   const books = data?.books || [];
   const households = data?.households || [];
@@ -150,6 +161,12 @@ export default function BooksScreen() {
   // books, then update the pending badge — so the shared cluster's refresh button
   // behaves identically on both maps.
   const onRefresh = useCallback(async () => {
+    // While the password is pending a refetch can only 401 again: bring the password screen back
+    // (the map's Refresh does the same).
+    if (getSessionState().reauth) {
+      expandReauth();
+      return;
+    }
     try {
       await flushQueue();
     } catch {}
@@ -290,7 +307,7 @@ export default function BooksScreen() {
       </SafeAreaView>
     );
   }
-  if (activeCampaign === undefined || (activeCampaign && isLoading)) {
+  if (activeCampaign === undefined || (activeCampaign && (isLoading || rosterWaiting))) {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator color={colors.brand} />
@@ -301,8 +318,13 @@ export default function BooksScreen() {
   // An archived (or deleted) campaign answers 404 "Campaign inactive" from /mobile/bootstrap, and
   // Retry against that can never succeed — the screen was a trap you could only leave by
   // force-quitting. Name it, and make the escape the primary action.
-  if (error) {
-    const gone = error?.status === 404;
+  //
+  // Any other answer from the server about this campaign replaces the screen too — "Not assigned to
+  // this campaign" keeps its way out. A passing failure (no signal, a server blip, a sign-in that
+  // ran out) replaces it only when there is nothing to show: a refetch that failed keeps the books
+  // already loaded, like the map, and the row under the header says so.
+  if (error && (!data || rosterErrorIsFinal(error))) {
+    const gone = error?.status === 404 && rosterErrorIsFinal(error);
     return (
       <SafeAreaView style={styles.center}>
         <Text style={styles.errorText}>
@@ -316,7 +338,12 @@ export default function BooksScreen() {
           </Pressable>
         ) : (
           <>
-            <Pressable onPress={() => refetch()} style={styles.primaryButton}>
+            {/* While the password is pending, a retry can only 401 again: bring the password screen
+                back instead. */}
+            <Pressable
+              onPress={() => (getSessionState().reauth ? expandReauth() : refetch())}
+              style={styles.primaryButton}
+            >
               <Text style={styles.primaryButtonText}>Retry</Text>
             </Pressable>
             <Pressable onPress={switchCampaign} style={[styles.secondaryButton, { marginTop: 10 }]}>
@@ -407,6 +434,13 @@ export default function BooksScreen() {
 
       <SafeAreaView edges={['top']} style={styles.headerWrap} pointerEvents="box-none">
         <CanvasserHeader variant="floating" onSwitchCampaign={switchCampaign} />
+        {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
+        <ReauthNotice />
+        <RefreshFailedRow
+          what="your books"
+          message={error && data && !rosterErrorIsFinal(error) && !reauthPending ? error.message : null}
+          onRetry={onRefresh}
+        />
         {efforts.length > 1 && (
           <View style={styles.effortRow}>
             <EffortPicker efforts={efforts} value={currentEffort} onChange={onEffortChange} />

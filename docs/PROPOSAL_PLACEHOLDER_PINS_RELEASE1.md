@@ -1,5 +1,9 @@
 # Release 1: homes that share a map spot — placed by address when a file is imported
 
+> **Superseded in part (2026-10-10) by [Pin Fixes at scale](PROPOSAL_PIN_FIXES_AT_SCALE.md):** the answer rule
+> (street-level answers now used and flagged Approximate), the recovery for a busy or failed pass (Look up by
+> address in Pin Fixes), and the repair script's street rule (shared with the import) changed there.
+>
 > **Status: BUILT 2026-10-05 (uncommitted at time of writing), to the plan and design the owner approved the
 > same day. A server deploy plus the web build — nothing ships to phones. Where the build differs from the plan
 > is listed in "F. As built", at the end.** This is the release the owner chose: get the Nye campaign right,
@@ -199,7 +203,7 @@ reference's text is the spec, including the fixes its six review rounds made.
 | `Campaign.pinPass` lease | §C | Taken only by an import whose lookups are allowed. |
 | ImportJob fields and `ORG_HIDDEN_IMPORT_FIELDS` | §C, §F | Kept: `strayPinDoors`, `pinsPlacedExact`, `pinsConfirmedInPlace`, `pinsStillUnplaced`, `pinLookupsNew/Cached/OverCap`, `pinProbedIds`, `keptPlacements`, `pinPassError`, `pinPassCause`. Not built: `pinStackHomes`, `pinsPlacedApprox`, `pinPendingIds`, `pinFollowUp`. |
 | The pass, `services/households/placeStackedPins.js`, import mode only | §E steps 1–7, 9, 10 | See B. No `check` mode, `dryRun`, `overrides` or `repairCollapseReverts`; no step 8 (freeze) or 11 (run modes). |
-| `pinTrust.js` with `stackPolicy` and `isPointClaim` | §E step 6 | `range_interpolation` is always refused (no calibration, so `PIN_PLACEMENT_MAX_INTERP_M` and the street-outlier test are not built). `repairPolicy` is not built: the repair script is unchanged. |
+| `pinTrust.js` with `stackPolicy` and `isPointClaim` | §E step 6 | `range_interpolation` is always refused (no calibration, so `PIN_PLACEMENT_MAX_INTERP_M` and the street-outlier test are not built). `repairPolicy` is not built: the repair script is unchanged. *Superseded 2026-10-10: Pin Fixes at scale's answer ladder accepts estimates and street answers by pin class, with two measured floors and the cohort test.* |
 | `applyImport` placement rules (prefetch, first test, the rows table) | §F | As specified, so a later refresh of Nye keeps placed pins and lets a real vendor change win. |
 | Import wiring: phase `pins`, `STATUS_LABEL.pins`, the heartbeat helper, non-fatal failure | §F `importProcessor.js` | No follow-up job. The recovery for a busy or failed pass is importing the file again. |
 | Preview: `finish()` per home, `strayPinDoors` at every hop, the copy | §F | Copy as in Part 1, Design 1. |

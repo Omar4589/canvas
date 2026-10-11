@@ -3,12 +3,15 @@
 // `node --test src/` pins the order and the wording.
 //
 // The badge: the first that applies wins.
+//   0. Complex            — a condo complex: several homes share this spot, and it IS their spot (the payloads
+//                           send pinSuspect 'complex' whether or not a lead has vouched);
 //   1. No exact map spot  — the door is unplaced now (the payloads send `pinSuspect` only then);
 //   2. Location confirmed — a person vouched the spot (any door with the stamp, a shared-spot home included);
 //   3. Pin corrected      — a person moved it;
 //   4. Approximate location — a street-level geocode nobody has checked.
 export const pinBadge = (h) => {
   if (!h) return null;
+  if (h.pinSuspect === 'complex') return { kind: 'complex', label: 'Complex', tone: 'brand', at: null };
   if (h.pinSuspect) return { kind: 'unplaced', label: 'No exact map spot', tone: 'warning', at: null };
   if (h.locationConfirmedAt) return { kind: 'confirmed', label: 'Location confirmed', tone: 'brand', at: h.locationConfirmedAt };
   if (h.coordSource === 'corrected') return { kind: 'corrected', label: 'Pin corrected', tone: 'brand', at: h.correctedAt || null };
@@ -19,13 +22,24 @@ export const pinBadge = (h) => {
 // The sentence under the badge, when one applies: why a home has no exact spot, or what the address lookup
 // did with it (`pinPlaced`, sent only while the lookup's placement stands). `fmtDate` formats a date in the
 // page's time zone.
+// The sentence for each kind of flag (the pin-fixes build adds far, unlocated and complex —
+// docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.4).
+const FLAG_LINES = {
+  placeholder: 'This home has no exact map spot; its coordinate was shared with other addresses.',
+  stray: 'This home has no exact map spot; its coordinate was shared with other addresses.',
+  far: "This home's pin sits far from the rest of its street, and the address lookup couldn't settle it.",
+  unlocated: "Doorline couldn't find this address. The pin is a holding spot in its ZIP, not the home.",
+  complex: "A complex: several homes share this spot. Directions go to each home's address.",
+};
 export const pinLine = (h, fmtDate = (d) => String(d)) => {
   if (!h) return null;
-  if (h.pinSuspect) return 'This home has no exact map spot; its coordinate was shared with other addresses.';
+  if (h.pinSuspect) return FLAG_LINES[h.pinSuspect] || FLAG_LINES.placeholder;
   const pp = h.pinPlaced;
   if (!pp) return null;
   const when = pp.at ? ` (${fmtDate(pp.at)})` : '';
   if (pp.inPlace) return `The address lookup confirms this spot${when}.`;
+  if (pp.kind === 'unlocated') return `Placed by address${when}. It had no location in the file.`;
+  if (pp.kind === 'far') return `Placed by address${when}. Its earlier pin was far from its street.`;
   const n = Number(pp.stackSize) || 0;
   return `Placed by address${when}. Its earlier spot was shared with ${n > 0 ? `${n.toLocaleString()} other ${n === 1 ? 'home' : 'homes'}` : 'other addresses'}.`;
 };

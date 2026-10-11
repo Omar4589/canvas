@@ -184,3 +184,13 @@ test('addressGroups: one group per street address, streets then house numbers, u
   assert.deepEqual(groups[2].units.map((x) => x.id), ['c', 'b1', 'b2'], 'the St/Street spellings are one address; Apt 2 before Apt 10');
   assert.deepEqual(addressGroups(undefined), []);
 });
+
+// ── The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.5) ──
+test('stackKind: a condo complex, and a real building whose pin sits far from its street', () => {
+  const at = (addressLine1, pinSuspect) => ({ addressLine1, pinSuspect, location: { lng: 1, lat: 2 } });
+  assert.equal(stackKind([at('10 Woods Dr', 'complex'), at('11 Woods Dr', 'complex')]), 'complex');
+  assert.equal(stackKind([at('100 Main St Apt 1', 'far'), at('100 Main St Apt 2', 'far')]), 'building');
+  assert.equal(stackKind([at('100 Main St', 'far'), at('200 Oak St', 'far')]), 'unplaced', 'two different far homes on one spot');
+  assert.equal(stackKind([at('10 Woods Dr', 'complex'), at('5 Elm St', 'placeholder')]), 'unplaced', 'a mixed stack keeps today\'s rule');
+  assert.equal(buildingLabel({ kind: 'complex', total: 46, units: [] }), '46 homes at a complex');
+});

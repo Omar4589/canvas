@@ -342,7 +342,7 @@ export default function UserProfileModal({ membership, onClose }) {
                 </span>
                 <span className="text-xs text-fg-subtle">·</span>
                 <span className="text-xs text-fg-muted">
-                  Last login {formatRelative(user.lastLoginAt)}
+                  Last password login {formatRelative(user.lastLoginAt)}
                 </span>
               </div>
             </div>

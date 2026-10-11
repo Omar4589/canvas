@@ -49,7 +49,8 @@ land depends on which surface you sign in to, because the two surfaces are for d
   Org B. Same email, same password.
 
 Switching orgs in the console always drops you on the new org's home page, never on a page that belonged
-to the org you just left.
+to the org you just left. Each browser tab keeps its own organization: switching in one tab doesn't move
+your other open tabs.
 
 ## Adding someone to your org
 
@@ -211,7 +212,7 @@ Manage it on the campaign's **Team** page (stacked and full-width since 2026-08-
 page, **+ Add someone** is the header action, and an admin-only **Add from your organization** card
 collapses underneath — the old side-by-side directory pane had shrunk, for a lead, to a button beside
 a mostly empty column). On `md+` the roster rows carry **activity columns** — doors, surveys (survey
-campaigns), last door knocked, last sign-in — joined client-side from the all-time campaign
+campaigns), last door knocked, last password login — joined client-side from the all-time campaign
 leaderboard (`GET /admin/reports/canvassers?campaignId=`, the same ledger-sourced rows the reports
 pages read) plus the roster's own `lastLoginAt`. `lastSeenAt` stays super-admin-only by design and
 must never be added here.
@@ -284,6 +285,57 @@ ever sees, and the emailed link is the account's only way in. The same typed-pas
   — better, if the person has a reachable inbox — click **"Resend invite"**, which emails them a fresh
   set-password link so no password ever has to be read aloud. This applies to a freshly created account
   too, so have new people sign in promptly.
+
+### Staying signed in
+
+**Using Doorline keeps you signed in.** A sign-in starts when you type your password. While you keep
+using Doorline — opening the phone app, or using the web console — it is quietly extended about once a
+day, so someone who works every day almost never sees a sign-in screen. Two limits still apply, for
+security:
+
+- **30 days without using Doorline** ends the sign-in.
+- **90 days after you last typed your password**, Doorline asks for it again, however often you use it.
+  Doorline staff accounts keep a plain 30 days from sign-in.
+
+**When a sign-in runs out, Doorline asks for the password right where you are.** A screen covers the
+app or the console page — *"Enter your password to keep going"* — with your email filled in. Type the
+password and you're back exactly where you were: the same map or list on the phone, the same page and
+unsaved edits on the web. Nothing is signed out and nothing is deleted while it waits. On the phone it
+never interrupts a door or a survey: anything you save there is kept on the phone, and the screen
+appears once you're back on the map or a list. If the signal is too weak to sign in, **Later** lets a
+canvasser keep knocking; the map then shows how many items are waiting and that the team sees them once
+the password is entered.
+
+**Some sign-outs are deliberate, and those really sign you out:** a password change on another device,
+a deleted account, or signing out in another browser tab (a tab already showing the password screen
+waits for you instead). You land on the sign-in screen with a short note, saying why for a password
+change or a deleted account. On the phone it waits until you're off a door, and the phone deletes its
+saved houses, as every sign-out does.
+
+**Signing out ends the sign-in on Doorline's servers too** (when you have signal), so a copy of it
+can't be used afterwards.
+
+**Lost a signed-in phone, or left a shared computer signed in? Change your password yourself** — Forgot
+password? on the sign-in page, or your profile. Every other device then needs the new password: the next
+time it reaches Doorline it signs out (a phone deletes its saved houses as it does). The one exception
+is a device whose password screen came up or was used in the half hour before it hears about the change,
+which is what tapping **Forgot password?** there and coming straight back looks like: that one asks for
+the new password in place instead, until it has been left untouched for half an hour. A phone with no
+signal keeps working on its saved houses until it connects. A temporary password set by an admin or lead
+does **not** sign other devices out.
+
+**Saved work stays on the phone through a password prompt or a sign-out.** It is sent when you sign
+back in **as yourself** — anything saved on a phone goes up under whoever signs in next. Doorline can
+still turn an item down (for example, if you were taken off the campaign meanwhile), and those items
+aren't kept.
+
+**Apps that haven't updated** go straight to a plain sign-in screen when their sign-in runs out (no more
+"Invalid token" with a Retry that never works) and, like any sign-out, that clears the houses saved on
+the phone; they download again at the next sign-in. Those apps sign in again every 30 days.
+
+**"Last password login"** on the Team and Users pages is the last time the person typed their password,
+not the last time they used Doorline. For who's been out lately, look at the Team page's **Last door**
+column.
 
 ### Resend invite
 
@@ -532,10 +584,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
     alongside `mustChangePassword` on created accounts too, so a brand-new hire's temp password also
     expires after 72h.
   - `isSuperAdmin: Boolean` — platform-wide; bypasses org-role checks.
-  - `lastLoginAt: Date` — written in **exactly one place**, `POST /auth/login`. It is "when they last
-    typed a password", **not** a last-activity clock: tokens live 30 days and the mobile app skips
-    the login screen whenever it holds one, so a canvasser who works daily legitimately reads
-    `27d ago`. Exposed in `toSafeJSON()`.
+  - `lastLoginAt: Date` — written in **exactly one place**, `POST /auth/login` (which the sign-in
+    screens AND both apps' in-place password prompts call). It is "when they last typed a password",
+    **not** a last-activity clock: a used sign-in is extended up to 90 days without one (see *Sessions*
+    below), so a canvasser who works daily can legitimately read `2 months ago`. Both consoles label it
+    **Last password login**. Exposed in `toSafeJSON()`.
   - `lastSeenAt: Date` — the true last-activity clock, stamped by `requireAuth` on any authenticated
     request and throttled to ~15 min per user per process (`middleware/lastSeen.js`), so it is
     approximate by design. **Super-admin-only**: emitted by `GET /super-admin/users` and
@@ -545,6 +598,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
     never a predicate or sort key, so an index would buy write amplification on the hottest write
     path for no read at all. Both clocks are **scrubbed on account deletion**
     ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) v4).
+  - `endedSessionIds: [String]` — session ids this account signed out of (`POST /auth/logout`);
+    `requireAuth` refuses any token carrying one. Keeps the last 200; `default: undefined`, so it isn't
+    written as `[]` on every create and save; `select: false`, so only `requireAuth`
+    (`.select('+endedSessionIds')`) ever loads it. Never leaves the server (absent from `toSafeJSON()`
+    and every projection); cleared by account deletion. See *Sessions* below.
 - **`Membership`** ([server/src/models/Membership.js](../server/src/models/Membership.js)) — join table
   `{ userId, organizationId, role: 'admin'|'lead'|'canvasser', isActive, addedBy }`, unique on
   `(userId, organizationId)`. The `'lead'` (team lead) role is a **campaign-scoped admin** — its
@@ -566,7 +624,8 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
 ## Auth & the forced-password-change flow
 
 - **Login** (`POST /auth/login`) returns `{ token, user: toSafeJSON(), memberships }`. The JWT payload
-  is `{ sub, email, isSuperAdmin }` — no org. Memberships carry `isNew: !acknowledgedAt`.
+  is `{ sub, email, isSuperAdmin, auth_ms, sid }` — no org; `auth_ms` and `sid` are explained under
+  *Sessions* below. Memberships carry `isNew: !acknowledgedAt`.
   - On login, if `mustChangePassword && tempPasswordSetAt` is older than `TEMP_PASSWORD_TTL_HOURS`
     (72), login is rejected with `code: 'TEMP_PASSWORD_EXPIRED'`.
 - **`mustChangePassword` enforcement** — [server/src/middleware/passwordGate.js](../server/src/middleware/passwordGate.js)
@@ -579,11 +638,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   ([middleware/lastSeen.js](../server/src/middleware/lastSeen.js)). Three details are load-bearing:
   - **It sits after every 401 guard**, immediately before `req.user = user`. A deleted or
     session-revoked account has already been refused above, so a tombstone can never be re-stamped by
-    the deleted holder's still-valid 30-day token — which is what keeps the deletion scrub true.
-  - **It is fire-and-forget** (`.catch(() => {})`, unawaited) and passes `{ timestamps: false }`.
-    `requireAuth` wraps its whole body in a catch returning a blanket `401`, so an awaited write that
-    rejected on a transient DB blip would eject a live session; and without `timestamps: false` the
-    stamp would drag `User.updatedAt` forward every 15 minutes for every active account.
+    the deleted holder's still-valid token — which is what keeps the deletion scrub true.
+  - **It is fire-and-forget** (`.catch(() => {})`, unawaited) and passes `{ timestamps: false }`. An
+    awaited write that rejected on a transient DB blip would fail a live request; and without
+    `timestamps: false` the stamp would drag `User.updatedAt` forward every 15 minutes for every active
+    account.
   - **The throttle is an in-process LRU Map, not a "is the stored value stale?" check.** `requireAuth`
     runs **twice** on every `/admin`, `/mobile` and `/super-admin` request (the `routes/index.js`
     gate plus each sub-router's own mount) and **three times** on nested campaign routes, since
@@ -610,14 +669,17 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   a weak password never burns the token. Throttled by its own limiters (per-IP 20 + per-email
   5 / 15 min, counting every request on a store **separate** from the login lockout — see
   `middleware/loginRateLimit.js`). **Completing a reset revokes every existing session**: it stamps
-  `User.passwordChangedAt`, and `requireAuth` refuses any JWT issued before that instant
-  (`401 { code: 'SESSION_REVOKED' }`) — "I changed my password" ends every other device's session.
+  `User.passwordChangedAt`, and `requireAuth` refuses any session whose sign-in time (`auth_ms`) is
+  before that instant (`401 { code: 'SESSION_REVOKED', reason: 'password_changed' }`) — "I changed my
+  password" ends every other device's session.
   A null stamp grandfathers sessions issued before this feature. Mail itself is dormant until
   `RESEND_API_KEY`/`MAIL_FROM` are configured (`services/mail/mailer.js`).
 - **Self-service change** — `POST /auth/change-password` (`requireAuth` only, no org context). Verifies
   `currentPassword`, **enforces strength on `newPassword` via `strongPasswordSchema`** (8+ with an
   uppercase, a lowercase, a number, and a special character), rejects reuse, sets
-  `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null, passwordChangedAt: now }`
+  `{ passwordHash, mustChangePassword: false, tempPasswordSetAt: null, passwordChangedAt: changedAt }`
+  — ONE `changedAt`, which is also the fresh token's `auth_ms`, so that token passes the strict `<`
+  check while every older session fails it
   (plus clearing any outstanding emailed reset/invite token — a link issued for the old
   credentials must not fire later), returns fresh `{ token, user, memberships }`. The stamp revokes every session issued before the
   change; the **fresh token in the response** is how the device that made the change continues
@@ -630,9 +692,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   stamp `passwordChangedAt`: live sessions are already suspended recoverably by the password gate
   (`403 PASSWORD_CHANGE_REQUIRED` — the phone shows the forced-change screen instead of dumping to
   login), and the hard revocation lands the moment the user completes that change. The mobile
-  offline queue **holds** (never drops) queued knocks on both `401 SESSION_REVOKED` and the gate's
-  403, and the queue survives sign-out — so a mid-shift reset can no longer lose billable work
-  (`mobile/lib/offlineQueue.js` isAuthFailure).
+  offline queue **holds** (never drops) queued knocks on any 401 (every session end is
+  `SESSION_REVOKED`) and on the gate's 403, and the queue survives sign-out — so a mid-shift reset can
+  no longer lose billable work (`mobile/lib/offlineQueue.js` isAuthFailure). On the phone the
+  forced-change screen itself is queued off the door flow (`components/SessionGate.jsx`), so it never
+  unmounts a half-filled survey.
 - **Set on create** — every account-creation path hashes SOME password + forces a first-login
   change, but the typed temp password is OPTIONAL on all three: super-admin provisioning
   (`POST /super-admin/organizations`, first admin — a typed password is echoed once in the 201,
@@ -660,6 +724,169 @@ deliberately no parallel `/super-admin/.../password` route to build or secure. (
 org's admin surfaces works the same way, except `orgContext` first requires a live, logged support
 grant — the reset endpoint itself is identical.) The authz side of this is in [ROLES.md](ROLES.md) →
 *Super admins inside an org — including internal orgs*.
+
+## Sessions: lifetime, extension, and how they end
+
+Built 2026-10-10 from [PROPOSAL_SESSION_EXPIRY.md](PROPOSAL_SESSION_EXPIRY.md) (the plan and its three
+review rounds). The short version: every ended session answers ONE coded 401; a sign-in that ran out
+is answered with a password prompt **in place** on both clients; deliberate ends sign out fully.
+
+**The token.** [services/auth/tokens.js](../server/src/services/auth/tokens.js) signs
+`{ sub, email, isSuperAdmin, auth_ms, sid }` with `expiresIn: JWT_EXPIRES_IN || '30d'` (the idle
+window; a value without a unit is read as **milliseconds**).
+
+- `auth_ms` — the moment the person typed their password. Login captures it **before** the user lookup;
+  change-password passes the exact instant it writes as `passwordChangedAt`. Revocation compares it in
+  milliseconds (`authMs < passwordChangedAt`), so a login in the same second as a password change no
+  longer survives it. A token minted before this field existed counts as `iat * 1000 + 999` — exactly
+  the old whole-second rule. Residual: one database write round trip plus dyno clock skew.
+- `sid` — the session id. Extension carries it; `POST /auth/logout` ends it. A token without one uses
+  `'legacy:'` + the first 32 hex characters of sha256(signature) (`legacySessionId`), so every copy of
+  one old token shares one id.
+- `renewUserToken(user, { authMs, sid })` is the extension path and **throws** without both — it can
+  never fall back to "now", which would reset the cap and outlive a password change.
+
+**Every ended session is the same 401** — `{ error, code: 'SESSION_REVOKED', reason }` — because that
+code is what every phone bundle since 2026-07-18 and the web already turn into "go to sign-in":
+
+| `reason` | When | phone | web |
+|---|---|---|---|
+| `missing` | no `Bearer` header | password in place (storage lost the token) | sign-in page (signed out in another tab) |
+| `expired` | past `exp`, or past the 90-day cap | password in place | password in place |
+| `invalid` | any verify throw (bad signature, malformed, non-JSON, future `nbf`), a failed shape check, no such user, a `sid` ended by sign-out | password in place | password in place |
+| `deleted` | `deletedAt` set | sign-out | sign-in page |
+| `inactive` | `isActive: false` without `deletedAt` (legacy rows only; login refuses them) | sign-out | sign-in page |
+| `password_changed` | `auth_ms` before `passwordChangedAt` | sign-out — **or** in place within 30 minutes of the latest of the prompt coming up, its last use, and its switch to asking for the new password (`keepReauthInPlace`: a reset from the prompt) | same |
+
+The `error` text is what an OLD app shows where it catches the 401 without signing out, so it never
+claims a sign-out happened ("Your sign-in has ended. Sign in again to keep going."). Wrong typed
+passwords, the share-link password and FbTime's `KEY_*` passthroughs stay non-`SESSION_REVOKED` 401s.
+
+**`requireAuth`'s order** ([middleware/auth.js](../server/src/middleware/auth.js)): no Bearer →
+`missing`; `verifySessionToken` (`ignoreExpiration`; ANY throw → `invalid`; a missing `JWT_SECRET` →
+503); `sessionClaims` shape check BEFORE any DB read (object; no `purpose`/`kind`; string ObjectId
+`sub`; integer `iat`/`exp`; `auth_ms` absent or finite; `sid` absent or a non-empty string);
+`User.findById` (a throw → 503); `deletedAt` → `deleted`; `!isActive` → `inactive`; revocation →
+`password_changed`; ended `sid` → `invalid`; `floor(now/1000) >= exp` → `expired` (jsonwebtoken's own
+rule, applied after the lookup so a deleted account never reads "expired"); the cap → `expired`; then
+the `lastSeenAt` stamp and `req.auth = { iat, exp, authMs, hasAuthMs, sid }`. **Server faults are 503
+with generic text** (`Sign-in check unavailable. Try again.`), logged server-side — a database blip
+answered as a coded 401 would end every session at once. `verifyToken` behaves as before and is still
+used by the share-unlock route, whose 24-hour expiry must not widen.
+
+**Extension — `GET /auth/me`.** Adds `token` when `renewalDue` (a day old, or half a short life) AND
+not `mustChangePassword` AND at least one active membership in an active organization that isn't being
+deleted (`loadMembershipsForUser`) AND not a super admin AND before `authMs + cap`.
+The new token keeps `auth_ms` and `sid`. A throw while extending is logged and the response simply has
+no `token`. `/auth/me` always sends `Cache-Control: no-store`. Extension writes nothing — never
+`lastLoginAt`.
+
+**The cap.** `SESSION_MAX_DAYS = 90`, enforced in `requireAuth` for tokens that carry `auth_ms`. Old
+tokens expire on their own `exp`, so a long idle window can't become a mass sign-out at deploy.
+
+**Sign-out.** `POST /auth/logout` pushes `req.auth.sid` onto `User.endedSessionIds`
+(`$slice: -200`, `timestamps: false`). The field is `select: false`: `requireAuth` is its one reader
+(`.select('+endedSessionIds')`), so up to 200 ids never ride along on member lists or populates. Both
+clients call logout fire-and-forget, quiet, before forgetting the token; with no signal it never
+arrives, and a write failure answers 503. Either way that session simply runs out.
+
+**Bull board** ([queues/bullBoard.js](../server/src/queues/bullBoard.js)) accepts only its own ticket
+(`purpose: 'bullboard'`) from its `bb_token` cookie — never a session token, never `Bearer` or `?t=`.
+`requireAuth` refuses the ticket (and share tokens) as sessions.
+
+**The phone** ([mobile/lib/sessionStore.js](../mobile/lib/sessionStore.js),
+[sessionEnd.js](../mobile/lib/sessionEnd.js)):
+
+- One promise-chain lock around every token change (sign-in, sign-out, extension adoption, password
+  rotation, ended-session handling); `authState.js` wires it to SecureStore and the caches. A renewal
+  landing during a sign-out can no longer write the last person's token back.
+- `api.js` reports ended sessions itself (several callers swallow the 401), for the session the answer
+  was about (`tokenToEnd`: a bare request from a previous session never ends the next one).
+- `components/SessionGate.jsx` owns WHEN: the password screen (`ReauthSheet.jsx`) never covers the door
+  flow (`CANVASS_FLOW`, now including `/survey-practice/*`); deliberate sign-outs and the forced
+  password change are queued until the person is off a door, after in-flight saves settle; "Signing
+  out…" covers the cache clears. **Later** appears only after a sign-in attempt failed for lack of
+  signal, and collapses the screen into `ReauthNotice.jsx` on the map, books and building screens;
+  elsewhere the same failure offers **Go back** when there is a screen to go back to.
+- A password change heard while the screen is up keeps it in place only within 30 minutes of the
+  latest of: the screen coming up (`raisedAt`), someone last using it (Sign in, Forgot password?,
+  Later, Go back, the notice: `touchReauth` stamps `activeAt`), and the screen first switching to ask
+  for the new password (`changeHeardAt`, stamped once — a repeat answer about the same change doesn't
+  move it). `keepReauthInPlace` → `resetWindowOpen`. A screen left untouched for longer, likely on a
+  lost phone, signs out, a screen already asking for the new password included.
+- The roster write guard (`cache.js` `setRosterWriteGuard`, checked at write time inside the
+  coalescer) keeps a late save from writing the walk list back after a sign-out; a session
+  **generation** (bumped on every sign-in and sign-out, never on an extension or a password typed into
+  the in-place screen) makes `bootstrapQueryFn` discard a roster that lands after a sign-out or a new
+  sign-in.
+- `refreshSession` adopts the extended token after saving identity, and saves nothing for a session
+  that changed meanwhile. Polls pause while the password is pending.
+- A failed roster refresh keeps the houses on screen (the full-screen error is for nothing to show, or
+  a final 4xx answer such as an archived campaign). The map and books read the shared `['bootstrap']`
+  cache through `useSeatedRoster` (rules in the plain `lib/seatedRoster.js`): `bootstrapQueryFn` tags
+  each failure with its campaign, another campaign's roster or failure never shows, and this
+  campaign's roster is fetched until it arrives or its own fetch fails. A cancelled refresh is not a
+  failure. A sign-in clears every cached query except the store-update check, and a password change
+  reruns whatever failed with the old token.
+
+**The web** ([client/src/auth/AuthContext.jsx](../client/src/auth/AuthContext.jsx),
+[lib/sessionEnd.js](../client/src/lib/sessionEnd.js)):
+
+- `api/client.js` dispatches `doorline:session-ended` for a live session end; it never clears the token
+  itself (that would push every other tab into a sign-out). A request answered with a run-out (or, while
+  the prompt is up, a password change or another tab's sign-out) is **held** until the session is back,
+  then retried once — the 401 came from the sign-in check, so it never ran: nothing fails under the
+  prompt, and a Save clicked at the wrong moment completes after the password. "While the prompt is up"
+  is a flag AuthContext sets on every change to it (`setSessionPromptUp`). Polls pause while the prompt
+  is up (react-query's `focusManager`); the one poll that runs in the background anyway
+  (`refetchIntervalInBackground`) is held with the rest and doesn't stack.
+- **The active org is per tab** (`getActiveOrgId()` reads localStorage once, then the tab owns it), so a
+  sign-in, sign-out or org switch in another tab no longer re-points this tab's requests — which also
+  kept a password reset in another tab from stripping the org from a tab holding edits behind its
+  prompt. A reload starts from the org last stored by any tab: an org switch or sign-in there, or a
+  tab continuing at its password prompt (`reauthenticate()` writes its org back, below).
+- A password changed elsewhere while a tab's prompt is up keeps it in place only within 30 minutes of
+  the latest of: the prompt coming up, someone last using it (a sign-in attempt, Forgot password?), and
+  its switch to asking for the new password (`keepReauthInPlace` → `resetWindowOpen`, from
+  `max(raisedAt, activeAt, changeHeardAt)`, the same rule as the phone); another tab signing out never
+  closes a prompt that is up. Tabs that load together accept an answer for the same person even when another
+  tab stored its extended token first. The provider decides: the password prompt
+  in place (`components/ReauthModal.jsx`, portaled at `z-[60]`, other body children `inert`, Escape and
+  Tab caught on window in the capture phase so a drawer underneath never sees them), or the sign-in page
+  with `?signedOut=<reason>` (first redirect wins, never off a public page).
+- The page-load check is quiet and keeps the token for a run-out (prompt in place, deep link and org
+  kept) and for a 5xx/offline ("Couldn't reach Doorline." with Try again / Sign in again); only a
+  deliberate end, or an older server's uncoded 401, clears it.
+- An open tab extends its sign-in when it comes into view or on a 6-hour look, only if someone used it
+  since the token was issued (`renewCheckDue`). A `storage` listener keeps tabs in step: the same
+  person's new token closes this tab's prompt, on any page; another person's sends the tab to
+  `/login`, which — with that person's token stored — lands it on their home, so it never keeps showing
+  the last person's page. On a public page (a reset in progress, a shared report), which must not be
+  navigated away from, the tab instead forgets the last person at once (`forgetPerson`: no user, no
+  prompt, held requests failed) and loads fresh as soon as it leaves the page. The same check
+  (`reconcileStoredToken`) runs on every prompt, user or page change, and right after this tab stores a
+  token itself (its own password change or extension), so a prompt never outlives its token; and every
+  change to the prompt updates the ref the listeners read at once, not at the next render.
+- A run-out never reaches `login()`: `reauthenticate()` continues the session and leaves the active org
+  alone (like a reload), so the recorded sign-in rule — typing your password starts you at your home
+  ([lib/roles.js](../client/src/lib/roles.js)) — still holds for the sign-in page. `reauthenticate()`
+  writes the tab's org back to storage when the tab has one (a tab with none never erases another
+  tab's choice), so the tab's next full load starts there too, and continues when another tab signed
+  out meanwhile. `login()` fails anything still held for an old prompt and clears react-query's cache
+  before the new person loads, so nothing a previous person loaded in that tab (after a sign-out, or
+  in a tab that forgot its person) can paint under them: most console query keys name neither the
+  person nor the org. `logout()` in a tab that holds no person (it forgot its person, or never had
+  one, like a reset link opened in a fresh tab) leaves the stored token and org alone, since they
+  belong to whoever signed in elsewhere (the reset page signs out this way).
+  `changePassword()` ignores every `password_changed` while the change is on its way (a request the
+  prompt held and re-sent carries a token it can't know) — but not while the prompt still holds the
+  change back, when such an answer can only be a change made elsewhere — then reruns whatever failed.
+
+**Tests:** server `test/sessionLifetime.test.js` (unit) and `test/sessionLifetime.int.test.js` (the
+HTTP contract, old tokens, the race, the cap, sign-out, bull board); phone
+`mobile/lib/sessionEnd.test.js` and `sessionStore.test.js` (every race case); web
+`client/src/lib/sessionEnd.test.js` plus `sessionEnd.parity.test.js` (the copy is identical on both
+clients).
 
 ## Cross-org guards
 
@@ -874,9 +1101,11 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
 
 The JWT carries **no org claim** — it's org-agnostic. The active org is a client-held value sent as the
 `X-Org-Id` header on every request (web: `localStorage` key `canvass.activeOrgId`, set in
-[api/client.js](../client/src/api/client.js); mobile: the same key in `AsyncStorage`). The server resolves
-and re-authorizes it per request in [middleware/orgContext.js](../server/src/middleware/orgContext.js),
-so the client's copy is a *preference*, never a grant.
+[api/client.js](../client/src/api/client.js); mobile: the same key in `AsyncStorage`). On the web it is
+read from localStorage once per tab, then held by that tab (see *Sessions*): another tab's org switch,
+sign-in or sign-out no longer re-points it. The server resolves and re-authorizes it per request in
+[middleware/orgContext.js](../server/src/middleware/orgContext.js), so the client's copy is a
+*preference*, never a grant.
 
 Because it **persists**, a bad value used to be sticky: pick an org you have no console role in, and every
 reload landed back on the same Forbidden screen until you cleared site data. Two guarantees now prevent
@@ -950,14 +1179,14 @@ never missing.
 
 | Field | Meaning |
 | --- | --- |
-| `User.deletedAt` | Terminal. Checked in `requireAuth` **and** at login. Distinct from `isActive` on purpose — `isActive:false` is the reversible admin deactivate, and `PATCH /admin/memberships/:userId/password` can revive it. Apple: *"only offering to temporarily deactivate or disable an account is insufficient."* |
+| `User.deletedAt` | Terminal. Checked in `requireAuth` (`401 SESSION_REVOKED`, reason `deleted`) **and** at login. Deletion also sets `isActive:false`, and nothing else does today: the admin Deactivate and Remove actions are **per organization** and change the `Membership`, never the account, so a removed person keeps their sign-in and their other orgs (they simply stop being extended once no organization is left). Older rows may still carry `isActive:false` from pre-multitenancy code; `requireAuth` answers those `inactive`. Apple: *"only offering to temporarily deactivate or disable an account is insufficient."* |
 | `User.deletionLocked` | The App Review / Play reviewer demo login. A reviewer **will** press the button — that's what 5.1.1(v) asks them to test — and an unguarded delete would destroy the demo tenant and leave the *next* submission unreviewable. |
 | `DeletedUserRecord` | The identity snapshot. See below. |
 
-**`requireAuth` is the revocation.** The JWT is stateless with a 30-day life
-([tokens.js](../server/src/services/auth/tokens.js)) and carries no `jti`/`tokenVersion` — but
-`requireAuth` loads the user from the DB on **every** request, so refusing a `deletedAt` user there kills
-the session immediately rather than in a month.
+**`requireAuth` is the revocation.** The JWT is stateless — 30 days idle, extended while used up to 90
+days from the typed password ([tokens.js](../server/src/services/auth/tokens.js); see *Sessions* above)
+— but `requireAuth` loads the user from the DB on **every** request, so refusing a `deletedAt` user there
+kills the session immediately rather than whenever the token would have run out.
 
 **The fraud-audit problem, and `DeletedUserRecord`.** Scrubbing the `User` row satisfies the stores but
 destroys the only join key the GPS audit has: `flagDetection` resolves a flagged canvasser through
@@ -975,10 +1204,13 @@ The billing one matters most: losing the last `billingAccess` admin means nobody
 and the entitlement gate drives the whole org read-only when it lapses — **self-deletion must not be able to
 financially suspend a customer.**
 
-**The offline queue is a live hazard.** [offlineQueue.js](../mobile/lib/offlineQueue.js) *drops* any 4xx so
-one bad submission can't wedge the queue forever. The moment the account dies, every unsynced knock 401s and
-is silently discarded — real, billable field work. `DeleteAccountSheet` therefore **flushes first and refuses
-to delete while anything is still pending**. Do not weaken that.
+**The offline queue is a live hazard.** [offlineQueue.js](../mobile/lib/offlineQueue.js) *holds* every 401
+(a session problem, never a verdict on the knock) but *drops* any other 4xx so one bad submission can't wedge
+the queue forever. The moment the account dies, every unsynced knock 401s with reason `deleted` and is
+held on a phone whose account can never sign in again: it can only go up under whoever signs in next on
+that phone, and it is real, billable field work.
+`DeleteAccountSheet` therefore **flushes first and refuses to delete while anything is still pending**. Do
+not weaken that.
 
 **Two `required` traps** worth stating, since both fail *silently* the wrong way:
 `passwordHash` cannot be cleared (a `.save()` throws; a `$set: null` slips past the validator and then makes

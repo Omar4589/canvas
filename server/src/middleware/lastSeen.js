@@ -1,9 +1,10 @@
 // Throttle for the User.lastSeenAt stamp.
 //
-// Why it exists: lastLoginAt only moves when someone types a password, and with 30-day tokens and a
-// mobile app that skips the login screen, that is a lie about whether an account is alive — a daily
-// canvasser reads "27d ago". lastSeenAt answers "when was this person last here" honestly, which
-// means stamping on ordinary authenticated requests rather than on login.
+// Why it exists: lastLoginAt only moves when someone types a password, and with sign-ins that are
+// extended while used (up to 90 days) and a mobile app that skips the login screen, that is a lie
+// about whether an account is alive — a daily canvasser can read "2 months ago". lastSeenAt answers
+// "when was this person last here" honestly, which means stamping on ordinary authenticated
+// requests rather than on login.
 //
 // Why throttled: requireAuth runs on EVERY authenticated request. Stamping each one would put a
 // write on the hottest read path in the app. One write per user per window is all the column needs —

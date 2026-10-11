@@ -6,6 +6,13 @@
 // browser can't import server ESM); server/test/flagsMirror.test.js pins the two together.
 //
 // These are deliberately tunable in ONE place; calibrate against real field data.
+// A knock at a condo-complex home (CanvassActivity.knockPin 'complex') is measured against the complex's ONE
+// pin, not its own door, so a canvasser at unit 46 can honestly stand a few hundred feet from it. Within this
+// distance (after accuracy) it is not "far"; beyond it, it reads low with the reason shown
+// (flagDetection.js farAssessment; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.7). Server-only, deliberately
+// OUTSIDE FLAG_THRESHOLDS: that object is mirrored to the web and the phone and pinned by flagsMirror.test.js.
+export const COMPLEX_FAR_M = 300;
+
 export const FLAG_THRESHOLDS = {
   // FAR — canvasser GPS was this far from the house pin when they recorded. Tiered on
   // distance MINUS accuracy (a big distance from a poor fix is weak GPS, not "far").

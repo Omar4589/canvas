@@ -10,19 +10,40 @@
 const n = (v) => Number(v) || 0;
 const fmt = (v) => n(v).toLocaleString();
 
+//
+// The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.7) adds four parts: placed on the street (an
+// estimate, listed as approximate — "check them"), in complexes, kept at a holding spot (a subset of "without an
+// exact spot", said inside it), and far marks this run set anywhere in the campaign ("look them up": the first
+// lookup on a campaign imported before this shipped can mark hundreds, and this is what points at the far card).
 export const importPinLine = (job) => {
   if (!job) return null;
   if (job.pinPassError) return { text: job.pinPassError, pinFixes: false, failed: true };
   const placed = n(job.pinsPlacedExact);
+  const approx = n(job.pinsPlacedApprox);
   const confirmed = n(job.pinsConfirmedInPlace);
+  const complex = n(job.pinsComplex);
   const unplaced = n(job.pinsStillUnplaced);
+  const parked = n(job.pinsUnlocated);
+  const farMarked = n(job.pinsFarMarked);
   const parts = [];
   if (placed > 0) parts.push(`${fmt(placed)} placed by address`);
+  if (approx > 0) parts.push(`${fmt(approx)} placed on the street (check ${approx === 1 ? 'it' : 'them'})`);
   if (confirmed > 0) parts.push(`${fmt(confirmed)} confirmed at ${confirmed === 1 ? 'its' : 'their'} spot`);
-  if (unplaced > 0) parts.push(`${fmt(unplaced)} without an exact spot`);
+  if (complex > 0) parts.push(`${fmt(complex)} in ${complex === 1 ? 'a complex' : 'complexes'}`);
+  if (unplaced > 0) {
+    parts.push(
+      `${fmt(unplaced)} without an exact spot${parked > 0 ? `, ${fmt(parked)} of them kept at a holding spot` : ''}`
+    );
+  }
+  if (farMarked > 0) parts.push(`${fmt(farMarked)} flagged far from ${farMarked === 1 ? 'its' : 'their'} street — look ${farMarked === 1 ? 'it' : 'them'} up`);
   if (!parts.length) return null;
-  return { text: `Map pins: ${parts.join(' · ')}`, pinFixes: unplaced > 0, failed: false };
+  return { text: `Map pins: ${parts.join(' · ')}`, pinFixes: unplaced > 0 || approx > 0 || farMarked > 0, failed: false };
 };
+
+// A Pin Fixes "Look up by address" job (kind 'pin_lookup') has no file: its row reads this instead, and it
+// offers no Undo (the server refuses one — there is nothing to undo).
+export const isPinLookupJob = (job) => job?.kind === 'pin_lookup';
+export const pinLookupLabel = (job) => `Pin lookup · ${fmt(job?.totalRows)} ${n(job?.totalRows) === 1 ? 'home' : 'homes'}`;
 
 // The Status column while the job is checking pins: its own stage, no percent (the write's 100%
 // would read as done while lookups are still running). The job's status stays 'importing' through

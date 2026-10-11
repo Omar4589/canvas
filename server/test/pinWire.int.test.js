@@ -135,13 +135,15 @@ const expectFacts = (row, line, where) => {
   if (!flagged[line]) assert.equal('pinSuspect' in row, false, `${where}: ${line} ships no flag`);
 };
 
+// pinPlaced carries the flag the door left (`kind`) since the pin-fixes build (S3.2), so the web's placement line can
+// say "it had no location in the file" for a home placed off a holding spot.
 test('admin map rows: the flag only while unplaced, the placement only while it stands', { skip }, async () => {
   const res = await call(`/admin/households/map?campaignId=${ctx.camp._id}`, ctx.adminTok);
   assert.equal(res.status, 200);
   const rows = new Map(res.body.households.map((h) => [h.addressLine1, h]));
   for (const line of ctx.byLine.keys()) expectFacts(rows.get(line), line, 'map');
-  assert.deepStrictEqual(rows.get('20 Oak St').pinPlaced, { at: PLACED_AT.toISOString(), inPlace: false, stackSize: 2 });
-  assert.deepStrictEqual(rows.get('30 Elm St').pinPlaced, { at: PLACED_AT.toISOString(), inPlace: true, stackSize: 1 });
+  assert.deepStrictEqual(rows.get('20 Oak St').pinPlaced, { at: PLACED_AT.toISOString(), inPlace: false, stackSize: 2, kind: 'placeholder' });
+  assert.deepStrictEqual(rows.get('30 Elm St').pinPlaced, { at: PLACED_AT.toISOString(), inPlace: true, stackSize: 1, kind: 'placeholder' });
   assert.equal('pinPlaced' in rows.get('40 Ash St'), false, 'a person moved it since');
   assert.equal('pinPlaced' in rows.get('50 Lone Way'), false);
   assert.equal('pinPlacement' in rows.get('20 Oak St'), false, 'the raw record never ships');
@@ -164,7 +166,7 @@ test('Turf doors and the drill carry the same facts', { skip }, async () => {
   for (const line of ctx.byLine.keys()) expectFacts(rows.get(line), line, 'turf doors');
   const drill = await call(`/admin/campaigns/${ctx.camp._id}/turfs/household/${idOf('20 Oak St')}`, ctx.adminTok);
   assert.equal(drill.status, 200);
-  assert.deepStrictEqual(drill.body.household.pinPlaced, { at: PLACED_AT.toISOString(), inPlace: false, stackSize: 2 });
+  assert.deepStrictEqual(drill.body.household.pinPlaced, { at: PLACED_AT.toISOString(), inPlace: false, stackSize: 2, kind: 'placeholder' });
   const flagged = await call(`/admin/campaigns/${ctx.camp._id}/turfs/household/${idOf('12 Pine St')}`, ctx.adminTok);
   assert.equal(flagged.body.household.pinSuspect, 'stray');
 });

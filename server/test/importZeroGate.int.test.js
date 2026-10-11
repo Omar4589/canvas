@@ -29,11 +29,18 @@ const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
 const ctx = {};
 
-// Rows in the built-in vendor profile's columns; coordinates included so no geocoding runs.
+// Rows in the built-in vendor profile's columns; coordinates included so no geocoding runs. Each row's
+// coordinates sit inside the state it names: since the pin-fixes build the import refuses a coordinate outside
+// its row's own state (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.1), and these Nebraska and Ohio rows used to
+// carry Atlanta's.
 const HEADER = ['State Voter ID', 'First Name', 'Last Name', 'Address', 'City', 'Registered State', 'Zip Code', 'p_Latitude', 'p_Longitude'];
+const ORIGIN = { GA: [33.8, -84.4], NE: [41.25, -96.0], OH: [39.96, -83.0] };
 const csvOf = (rows) =>
   Buffer.from(
-    [HEADER.join(',')].concat(rows.map((r, i) => [r.id, r.first || `F${i}`, r.last || 'Gate', r.address || `${100 + i} Gate St`, 'Atlanta', r.state || 'GA', '30342', (33.8 + i * 0.0001).toFixed(6), (-84.4).toFixed(6)].join(','))).join('\n') + '\n'
+    [HEADER.join(',')].concat(rows.map((r, i) => {
+      const [lat, lng] = ORIGIN[r.state || 'GA'];
+      return [r.id, r.first || `F${i}`, r.last || 'Gate', r.address || `${100 + i} Gate St`, 'Atlanta', r.state || 'GA', '30342', (lat + i * 0.0001).toFixed(6), lng.toFixed(6)].join(',');
+    })).join('\n') + '\n'
   );
 
 // Drive the REAL worker exactly like an enqueued job: create the ImportJob (kind 'apply' or

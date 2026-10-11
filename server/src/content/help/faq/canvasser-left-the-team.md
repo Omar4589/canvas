@@ -28,6 +28,6 @@ Switch the date range to **All time** and you'll see them — that view is campa
 Only what they were **holding**:
 
 - **Remove from a campaign** hands back the books they had on that campaign, so you can give them to someone else. Books they hold on other campaigns are untouched. If other canvassers share those books, they keep them.
-- **Deactivate the account** stops them signing in, org-wide. It's reversible, and it deliberately leaves their books alone — you may well switch them back on tomorrow.
+- **Deactivate the account** shuts them out of your organization, org-wide: the app stops working for them here on its next request. It's reversible, and it deliberately leaves their books alone — you may well switch them back on tomorrow.
 
 See [The Team page](page-team) for the walkthrough.

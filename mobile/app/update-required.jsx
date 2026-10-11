@@ -1,6 +1,7 @@
 import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { signOut } from '../lib/authState';
+import { Redirect } from 'expo-router';
+import { signOut, useAuthToken } from '../lib/authState';
 import { STORE_URL } from '../lib/config';
 import Logo from '../components/Logo';
 import { radius, spacing } from '../lib/theme';
@@ -12,6 +13,7 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // cryptic 4xx errors deeper in the app.
 
 export default function UpdateRequired() {
+  const token = useAuthToken();
   const styles = useThemedStyles(makeStyles);
 
   async function openStore() {
@@ -21,6 +23,9 @@ export default function UpdateRequired() {
       // No store app / not yet published — nothing more we can do here.
     }
   }
+
+  // Its own Sign out (below) used to do nothing visible: this screen never watched the token.
+  if (token === null) return <Redirect href="/login" />;
 
   return (
     <SafeAreaView style={styles.screen}>

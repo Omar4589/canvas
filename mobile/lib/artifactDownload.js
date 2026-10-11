@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 import { API_BASE_URL } from './config';
 import { getToken } from './auth';
 import { loadActiveOrgId } from './cache';
+import { refreshSession } from './session';
 
 // Download a finished Export Center artifact (CSV or ZIP) straight to a FILE and hand it
 // to the OS share sheet. Deliberately NOT lib/csv.js's fetch→text→write flow: an artifact
@@ -27,6 +28,8 @@ export async function downloadArtifact(path, filename, mimeType = 'text/csv') {
     const res = await FileSystem.downloadAsync(`${API_BASE_URL}/api${path}`, uri, { headers });
     if (res.status !== 200) {
       await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+      // Bypasses api(); let /auth/me (through api()) report an ended sign-in.
+      if (res.status === 401) refreshSession({ force: true });
       throw new Error(
         res.status === 410
           ? 'This export has expired — queue a fresh one.'

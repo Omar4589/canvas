@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import {
   QueryClient,
@@ -12,7 +12,16 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
-import { signOut } from '../lib/authState';
+import {
+  getSessionState,
+  subscribeSession,
+  requireReauthIfCurrent,
+  expandReauth,
+  expandReauthIfStale,
+  setServerSignOutNotifier,
+} from '../lib/authState';
+import { api, setSessionEndedHandler } from '../lib/api';
+import { phoneAction, inCanvassFlow, retryUnless401, keepReauthInPlace } from '../lib/sessionEnd';
 import { promptSupportAccess } from '../lib/supportAccessState';
 import { refreshSession } from '../lib/session';
 import { loadRoleContext } from '../lib/role';
@@ -20,6 +29,7 @@ import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import RootErrorBoundary from '../components/RootErrorBoundary';
 import UpdateGate from '../components/UpdateGate';
 import OtaUpdatePrompt from '../components/OtaUpdatePrompt';
+import SessionGate, { queueSessionAction, sessionPath, useSessionCoverUp } from '../components/SessionGate';
 
 // Bar icons must contrast the bar background: light icons on dark, dark on light.
 function ThemedStatusBar() {
@@ -79,32 +89,49 @@ async function recoverRole() {
   }
 }
 
-// Route to the forced-change screen the moment ANY request reports the temp-password gate —
-// an admin reset this user mid-session, and without this the phone just shows errors on every
-// screen until a full relaunch re-runs index.jsx's boot redirect. Debounced like recoverRole:
-// a burst of failing queries triggers one navigation.
-let routingToChangePassword = false;
-function routeToForcedChange() {
-  if (routingToChangePassword) return;
-  routingToChangePassword = true;
-  try {
-    router.replace('/change-password');
-  } finally {
-    setTimeout(() => {
-      routingToChangePassword = false;
-    }, 1500);
+// Route to the forced-change screen when ANY request reports the temp-password gate — an admin
+// reset this user mid-session, and without this the phone just shows errors on every screen until
+// a full relaunch re-runs index.jsx's boot redirect. Queued through SessionGate rather than routed
+// at once: a replace() mid-survey would unmount the door screen and lose the answers. The gate
+// runs it as soon as the person is off the door flow; a burst of failing queries queues it once.
+const routeToForcedChange = () => queueSessionAction({ type: 'forcedChange' });
+
+// The server said a session ended (lib/api.js reports it, for the session the answer is about).
+// A sign-in that ran out → the password screen, in place: nothing on screen is lost and the phone
+// keeps its saved houses. A deliberate end (password changed elsewhere, account deleted) → a full
+// sign-out, queued so it never lands mid-door. See docs/PROPOSAL_SESSION_EXPIRY.md section D.
+const LATER_REEXPAND_MS = 30 * 60 * 1000;
+const onSessionEnded = ({ reason, token }) => {
+  const { reauth } = getSessionState();
+  // A password changed while the password screen is up, within half an hour of it coming up, being
+  // used, or switching to ask for the new password, is the person's own "Forgot password?": ask for
+  // the new one in place. A screen left untouched for longer may be on a lost phone — sign it out
+  // and delete its houses (lib/sessionEnd.js keepReauthInPlace).
+  if (phoneAction(reason, { reauthUp: keepReauthInPlace(reauth, Date.now()) }) === 'reauth') {
+    requireReauthIfCurrent({ reason, token })
+      .then(() => {
+        // An answer from the server proves there is signal again: if the person tapped "Later" a
+        // while ago and isn't on a door, bring the password screen back.
+        if (!inCanvassFlow(sessionPath.current)) expandReauthIfStale(Date.now(), LATER_REEXPAND_MS);
+      })
+      .catch(() => {});
+    return;
   }
-}
+  queueSessionAction({ type: 'signout', reason, token });
+};
+setSessionEndedHandler(onSessionEnded);
+
+// A manual sign-out also ends the session on the server (POST /auth/logout), so copies of the
+// token stop working. Fire-and-forget and quiet: with no signal it simply never arrives.
+setServerSignOutNotifier((token) => api('/auth/logout', { method: 'POST', token, quiet: true }));
 
 // Shared by the query AND mutation caches — a revoked session can surface through either
 // (a dashboard poll or a notes/assignment mutation), and both must land on the same recovery.
+// Ended sessions are not handled here: lib/api.js reports them itself (onSessionEnded above), because
+// several callers swallow that 401 before react-query would ever see it.
 function onGlobalError(err) {
   if (err?.code === 'ORG_CONTEXT') recoverOrgContext();
   else if (err?.code === 'FORBIDDEN_ROLE') recoverRole();
-  // The password was changed elsewhere and this session is revoked — sign out to the login
-  // screen (signOut is idempotent, so several failing queries landing at once is fine).
-  // Queued knocks survive: signOut clears identity caches, never the offline queue.
-  else if (err?.code === 'SESSION_REVOKED') signOut();
   else if (err?.status === 403 && err?.data?.code === 'PASSWORD_CHANGE_REQUIRED') routeToForcedChange();
   // A customer org needs a support session. Unlike the recoveries above this does NOT eject —
   // it offers the grant sheet (components/SupportAccessGate) so the operator can state a reason
@@ -115,7 +142,8 @@ function onGlobalError(err) {
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    // One retry, as before — except a 401, which can't succeed a second later.
+    queries: { retry: retryUnless401, refetchOnWindowFocus: false },
   },
   queryCache: new QueryCache({ onError: onGlobalError }),
   mutationCache: new MutationCache({ onError: onGlobalError }),
@@ -125,14 +153,33 @@ const queryClient = new QueryClient({
 // refetchIntervalInBackground defaults to false, so once focusManager knows the
 // app is inactive, every interval timer (map, dashboards, activity feed) stops
 // and resumes when the user returns to the app.
-function onAppStateChange(status) {
+//
+// Polls also pause while the password screen is pending: every one of them would just get the same
+// 401 again. They resume the moment the password is entered.
+const syncFocus = (status = AppState.currentState) => {
   if (Platform.OS !== 'web') {
-    focusManager.setFocused(status === 'active');
+    focusManager.setFocused(status === 'active' && !getSessionState().reauth);
   }
+};
+subscribeSession(() => syncFocus());
+
+// iOS reports inactive→active for a Notification Center or Control Center pull; only a real return
+// from the background brings a collapsed password screen back.
+let lastAppState = AppState.currentState;
+
+function onAppStateChange(status) {
+  const fromBackground = lastAppState === 'background';
+  lastAppState = status;
+  syncFocus(status);
   // Coming back to the app is the natural moment to notice a role change made while we were
   // away. refreshSession throttles itself to ≤1/min, so a user flipping between apps doesn't
-  // spam /auth/me, and a failure (offline) is a no-op that keeps the cached identity.
-  if (status === 'active') refreshSession();
+  // spam /auth/me, and a failure (offline) is a no-op that keeps the cached identity. It is also
+  // how a used sign-in gets extended (lib/session.js).
+  if (status === 'active') {
+    // A password screen collapsed with "Later" comes back on the next return to the app.
+    if (fromBackground) expandReauth();
+    refreshSession();
+  }
 }
 
 export default function RootLayout() {
@@ -140,6 +187,8 @@ export default function RootLayout() {
     const sub = AppState.addEventListener('change', onAppStateChange);
     return () => sub.remove();
   }, []);
+  // While a full-screen session cover is up, screen readers must not walk the screen underneath.
+  const coverUp = useSessionCoverUp();
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -148,17 +197,30 @@ export default function RootLayout() {
           <ThemeProvider>
             <ThemedStatusBar />
             <RootErrorBoundary>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="index" />
-                <Stack.Screen name="login" />
-                <Stack.Screen name="change-password" />
-                <Stack.Screen name="update-required" />
-                <Stack.Screen name="(app)" />
-              </Stack>
+              {/* collapsable={false}: one stable native view. Without it the renderer flattens this
+                  wrapper away while the prop is 'auto' and re-creates it when a cover appears,
+                  re-mounting the whole navigator (and the map) underneath. */}
+              <View
+                style={{ flex: 1 }}
+                collapsable={false}
+                importantForAccessibility={coverUp ? 'no-hide-descendants' : 'auto'}
+              >
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="login" />
+                  <Stack.Screen name="change-password" />
+                  <Stack.Screen name="update-required" />
+                  <Stack.Screen name="(app)" />
+                </Stack>
+              </View>
               {/* Above the whole Stack (login included): a downloaded OTA update, offered
                   politely (never auto-applied). Renders BEFORE UpdateGate so the store
                   nag's hard wall paints above this banner if both ever fire. */}
               <OtaUpdatePrompt />
+              {/* Session changes, above the whole Stack: the in-place password screen, "Signing
+                  out…", and the queue that keeps a sign-out or a forced password change off the
+                  door flow. Before UpdateGate, so the store's hard wall still paints on top. */}
+              <SessionGate />
               {/* Above the whole Stack (login included): the store-update nag/wall for
                   superseded native builds. Server-driven; fails open. */}
               <UpdateGate />

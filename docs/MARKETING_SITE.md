@@ -53,11 +53,13 @@ rather write their own email.
 
 ## The `/app` page
 
-`doorline.app/app` is a small page for **canvassers**: the two store badges, and the thing the
-store listings can't tell them — that they need an account from their campaign first, that they
-sign in with the same email and password they set on the web, and that they must not create a new
-account. Most canvassers arrive by invitation email instead, but some search the store or type the
-domain, and this is where those people land.
+`doorline.app/app` is a small page for **canvassers**: the two store badges, and the thing the store
+listings can't tell them — that they need an account from their campaign first, that they sign in
+with the same email and password they set on the web, and that they must not create a new account.
+An **Asked to sign in again?** section says that the password prompt is routine, that **Later**
+keeps a canvasser knocking when the signal is weak, to always sign back in as yourself, and what to
+do about a lost phone ([USERS.md](USERS.md) → *Sessions*). Most canvassers arrive by invitation
+email instead, but some search the store or type the domain, and this is where those people land.
 
 It is linked from the field-app section of the homepage, from the line under the hero buttons, and
 from the footer.

@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupBuildings, homesInOrder } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
 import DirectionsButton from '../../components/DirectionsButton';
+import ReauthNotice from '../../components/ReauthNotice';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -94,6 +95,8 @@ export default function BuildingScreen() {
           <Text style={styles.back}>‹ Map</Text>
         </Pressable>
       </View>
+      {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
+      <ReauthNotice />
 
       <View style={styles.addressCard}>
         {homes ? (

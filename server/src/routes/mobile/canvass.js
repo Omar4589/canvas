@@ -26,7 +26,7 @@ import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswe
 import { effectiveSurveyTemplateId } from '../../services/surveys/effectiveTemplate.js';
 import { archiveOverwrittenResponse } from '../../services/surveys/archiveOverwrite.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
-import { effectivePinSuspect } from '../../services/households/pinState.js';
+import { effectivePinSuspect, knockPinOf } from '../../services/households/pinState.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { struckByUnknock } from '../../services/canvass/unknock.js';
@@ -369,6 +369,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
   const distance = distanceFromHouse(household, data.location);
+  // The pin this distance is measured against, frozen on the row (the GPS audit forgives a Far at an
+  // unconfirmed estimate or a condo complex). An offline replay stamps at flush time, like the distance.
+  const knockPin = knockPinOf(household);
   const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
   // Campaign.stats deltas: one indexed read of the pair's replaceable rows gives the pair's
@@ -446,6 +449,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     note: data.note ?? null,
     location: data.location,
     distanceFromHouseMeters: distance,
+    ...(knockPin ? { knockPin } : {}),
     replaced,
     timestamp: ts,
     wasOfflineSubmission: !!data.wasOfflineSubmission,
@@ -799,6 +803,9 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
     const distance = distanceFromHouse(household, data.location);
+    // The pin this distance is measured against, frozen on the row (the GPS audit forgives a Far at an
+    // unconfirmed estimate or a condo complex). An offline replay stamps at flush time, like the distance.
+    const knockPin = knockPinOf(household);
     const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
 
     // Campaign.stats deltas — same pre-read pattern as recordHouseholdAction (see the comment
@@ -944,6 +951,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       note: data.note ?? null,
       location: data.location,
       distanceFromHouseMeters: distance,
+      ...(knockPin ? { knockPin } : {}),
       replaced,
       timestamp: ts,
       wasOfflineSubmission: !!data.wasOfflineSubmission,

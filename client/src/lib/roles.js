@@ -55,7 +55,9 @@ export function autoSelectOrgId(memberships = []) {
 //
 // Scope: sign-in only. Session RESTORE (AuthContext's /auth/me effect) deliberately leaves the
 // stored org alone, so reloading a tab keeps you where you were. Typing your password starts you
-// at your home; reloading does not.
+// at your home; reloading does not. A sign-in that merely ran out never reaches sign-in either: the
+// console asks for the password in place (AuthContext.reauthenticate) and, like a reload, keeps
+// the org.
 export function activeOrgIdForLogin(user, memberships = []) {
   if (user?.isSuperAdmin) return null;
   return autoSelectOrgId(memberships);

@@ -5,7 +5,7 @@ import StatCard from '../components/StatCard.jsx';
 import Pager from '../components/Pager.jsx';
 import { fmtUsd } from '../lib/billingStatus.jsx';
 import { saveCsvRows } from '../lib/downloadFile.js';
-import { pinCheckBadge } from '../lib/importPins.js';
+import { pinCheckBadge, isPinLookupJob, pinLookupLabel } from '../lib/importPins.js';
 
 const LIMIT = 50;
 
@@ -99,7 +99,7 @@ export default function SuperAdminImportsPage() {
           ...rows.map((r) => [
             r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : '',
             r.organizationName,
-            r.filename || '',
+            isPinLookupJob(r) ? pinLookupLabel(r) : r.filename || '',
             r.campaignName || '',
             r.uploadedByName || '',
             r.status,
@@ -335,7 +335,9 @@ export default function SuperAdminImportsPage() {
                   <tr key={r.id} className={r.undone ? 'opacity-60' : ''}>
                     <td className="whitespace-nowrap px-4 py-3 text-fg-muted">{formatDate(r.createdAt)}</td>
                     <td className="px-4 py-3 font-medium text-fg">{r.organizationName}</td>
-                    <td className="max-w-[220px] truncate px-4 py-3 text-fg-muted" title={r.filename || ''}>{r.filename || '—'}</td>
+                    <td className="max-w-[220px] truncate px-4 py-3 text-fg-muted" title={r.filename || ''}>
+                      {isPinLookupJob(r) ? pinLookupLabel(r) : r.filename || '—'}
+                    </td>
                     <td className="px-4 py-3 text-fg-muted">{r.campaignName || '—'}</td>
                     <td className="px-4 py-3 text-fg-muted">{r.uploadedByName || '—'}</td>
                     <td className="px-4 py-3">

@@ -148,7 +148,7 @@ export default function SuperAdminUsersPage() {
                 { key: 'email', label: 'Email', sortable: true },
                 { key: 'status', label: 'Status' },
                 { key: 'memberships', label: 'Memberships' },
-                { key: 'lastLogin', label: 'Last login', sortable: true },
+                { key: 'lastLogin', label: 'Last password login', sortable: true },
                 { key: 'lastSeen', label: 'Last active', sortable: true },
                 { key: 'created', label: 'Created', sortable: true },
               ].map((c) => (

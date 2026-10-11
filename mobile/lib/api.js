@@ -2,6 +2,7 @@ import { API_BASE_URL, CLIENT_API_VERSION } from './config';
 import { getToken } from './auth';
 import { getCurrentToken } from './authState';
 import { loadActiveOrgId } from './cache';
+import { sessionEndReason, tokenToEnd } from './sessionEnd';
 
 // Server messages that mean "this request had no valid active-organization
 // context" — a stale activeOrgId or a client/server version skew. We tag these
@@ -23,11 +24,37 @@ const ORG_CONTEXT_ERRORS = new Set([
 // callers fail fast and queue (or fall back to cache) instead of waiting that out.
 const DEFAULT_TIMEOUT_MS = 20000;
 
+// Who is told when the server says a session ended — app/_layout.jsx, which asks for the password
+// in place or signs out (lib/sessionEnd.js phoneAction). Reported from HERE, not from react-query's
+// onError, because at least five callers swallow this 401 before react-query could see it (the
+// cold-start disk fallback, refreshSession, the offline queue's flush, select-org, the added-to-org
+// banner). Called fire-and-forget, so api() never waits on the session lock.
+let sessionEndedHandler = null;
+export const setSessionEndedHandler = (fn) => {
+  sessionEndedHandler = fn;
+};
+
 export async function api(
   path,
-  { method = 'GET', body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal, orgId: orgIdOverride } = {}
+  {
+    method = 'GET',
+    body,
+    headers = {},
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    signal,
+    orgId: orgIdOverride,
+    // An explicit bearer token, e.g. signing a specific session out on the server.
+    token: tokenOverride,
+    // Never report a session end from this call (the sign-out call itself, the in-place password
+    // screen's login).
+    quiet = false,
+  } = {}
 ) {
-  const token = await getToken();
+  // Which session memory held when this request left — read BEFORE the storage read below. A
+  // request that goes out with no token (storage lost it) can only end THIS session, never a
+  // later one (lib/sessionEnd.js tokenToEnd).
+  const heldAtSend = getCurrentToken();
+  const token = tokenOverride !== undefined ? tokenOverride : await getToken();
   // orgId is normally the active org, but the offline queue pins each item to the org it was
   // recorded under — a multi-org user who re-logs into a different org must not flush org-A
   // knocks under an org-B header (they'd 4xx and be dropped as "bad submissions").
@@ -95,17 +122,30 @@ export async function api(
       if (res.status === 403 && data?.code === 'FORBIDDEN_ROLE' && !err.code) {
         err.code = 'FORBIDDEN_ROLE';
       }
-      // The server explicitly revoked this session (password changed elsewhere). Tagged so the
-      // global handler can sign out to the login screen instead of every query dead-ending.
-      // The offline queue is untouched by sign-out, so queued knocks survive to flush after
-      // the user signs back in. Tagged ONLY when the token this request carried is still the
-      // one in use: an in-flight request from BEFORE a token rotation (change-password adopts
-      // a fresh token) can land 401 AFTER the rotation, and signing out then would wipe the
-      // brand-new session. A stale request's 401 keeps err.status for the queue's hold logic
-      // but never triggers the global sign-out.
+      // The server says this session ended — expired, signed out elsewhere, password changed,
+      // account deleted: every such 401 carries code SESSION_REVOKED plus a reason. err.code is
+      // tagged ONLY when the token this request carried is still the one in use: an in-flight
+      // request from BEFORE a token rotation (change-password adopts a fresh token) can land 401
+      // AFTER the rotation, and must not act on the brand-new session. A stale request's 401
+      // keeps err.status for the offline queue's hold logic (queued knocks are never dropped on a
+      // 401, and survive any sign-out).
       if (res.status === 401 && data?.code === 'SESSION_REVOKED') {
         const current = getCurrentToken();
         if (!current || current === token) err.code = 'SESSION_REVOKED';
+        // Why it ended (lib/sessionEnd.js): the handler asks for the password in place for a
+        // sign-in that ran out, and signs out for a deliberate end (password changed elsewhere,
+        // account deleted). Reported only for the session the answer is about.
+        err.reason = sessionEndReason(res.status, data);
+        if (!quiet && sessionEndedHandler) {
+          const ended = tokenToEnd({ sentToken: token, heldAtSend, current });
+          if (ended) {
+            try {
+              sessionEndedHandler({ reason: err.reason, token: ended });
+            } catch {
+              // a handler fault must never turn into a different error for the caller
+            }
+          }
+        }
       }
       // Entering a CUSTOMER org the super admin isn't a member of needs a time-boxed support
       // grant (middleware/orgContext.js). Deliberately NOT in ORG_CONTEXT_ERRORS: that set

@@ -179,7 +179,7 @@ const clampReport = async () => {
       via: { $ne: 'bulk' },
       $or: [{ 'location.accuracy': { $lt: 0 } }, { 'replaced.nearest.accuracy': { $lt: 0 } }],
     },
-    '_id userId householdId timestamp location distanceFromHouseMeters replaced'
+    '_id userId householdId timestamp location distanceFromHouseMeters knockPin replaced'
   )
     .lean()
     .cursor();

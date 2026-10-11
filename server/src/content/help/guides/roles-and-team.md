@@ -27,7 +27,7 @@ One account, one email — but a **separate role in each organization**. Someone
 - **If there's only one org they can run from the console, sign-in takes them straight into it** — no picker.
 - **The mobile app** shows *all* their organizations, because every role has a home there.
 
-Switching organizations in the console always lands on the new org's home page — Overview for an admin, Campaigns for a team lead.
+Switching organizations in the console always lands on the new org's home page — Overview for an admin, Campaigns for a team lead. Each browser tab keeps its own organization: switching in one tab doesn't move your other open tabs.
 
 ## What a team lead can do
 

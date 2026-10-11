@@ -42,7 +42,10 @@ const ctx = {};
 // ── Geocodio, faked: answers by the exact address string resolve() sends. ──
 const realFetch = globalThis.fetch;
 const geo = { answers: new Map(), mode: 'ok', calls: 0, sent: [] };
-const answer = (address, lat, lng, type = 'rooftop') => geo.answers.set(address, { lat, lng, type });
+// `accuracy` and `matched` (the formatted address Geocodio returns) are options since the pin-fixes build: the
+// answer ladder reads the score, and the ZIP rule reads the matched ZIP and city.
+const answer = (address, lat, lng, type = 'rooftop', { accuracy = 1, matched = address } = {}) =>
+  geo.answers.set(address, { lat, lng, type, accuracy, matched });
 globalThis.fetch = async (url, init) => {
   if (!String(url).startsWith('https://api.geocod.io/')) return realFetch(url, init);
   geo.calls += 1;
@@ -54,7 +57,7 @@ globalThis.fetch = async (url, init) => {
     const a = geo.answers.get(address);
     results[k] = {
       response: {
-        results: a ? [{ location: { lat: a.lat, lng: a.lng }, accuracy: 1, accuracy_type: a.type, formatted_address: address }] : [],
+        results: a ? [{ location: { lat: a.lat, lng: a.lng }, accuracy: a.accuracy, accuracy_type: a.type, formatted_address: a.matched }] : [],
       },
     };
   }
@@ -69,7 +72,7 @@ const CSV_HEADER = 'State Voter ID,First Name,Last Name,Phone,Party,Address,City
 const row = (svid, address, [lat, lng] = S) => ({ svid, address, lat, lng });
 const csvOf = (rows) =>
   Buffer.from(
-    [CSV_HEADER, ...rows.map((r) => [r.svid, 'Pat', r.svid, '', '', r.address, 'Pahrump', 'NV', '89061', r.lat.toFixed(6), r.lng.toFixed(6)].join(','))].join('\n'),
+    [CSV_HEADER, ...rows.map((r) => [r.svid, 'Pat', r.svid, '', '', r.address, 'Pahrump', 'NV', '89061', r.lat == null ? '' : r.lat.toFixed(6), r.lng == null ? '' : r.lng.toFixed(6)].join(','))].join('\n'),
     'utf8'
   );
 const sentAs = (address) => `${address}, Pahrump, NV 89061`;
@@ -122,7 +125,10 @@ test('1. houses sharing one spot are each looked up and placed at their own roof
     row('MP1', '5001 E Monte Penne Way'),
     row('MP2', '5011 E Monte Penne Way'),
     row('MP3', '5016 E Monte Penne Way'),
-    row('MP4', '4896 E Monte Penne Way', [36.205, -115.945]), // its own coordinate: never looked up
+    // Its own coordinate, near where its street-mates' rooftops are: never looked up. (Since the pin-fixes build a
+    // home far from its street's placed homes is looked up — test 4 would then see a lookup; that rule has its own
+    // cases in pinFixesAtScale.int.test.js.)
+    row('MP4', '4896 E Monte Penne Way', [36.214, -115.941]),
   ];
   const job = await runFile(c, rows);
   assert.strictEqual(job.status, 'completed');
@@ -173,7 +179,11 @@ test('2. a building is never looked up; a stray is placed, unless its rooftop is
   assert.strictEqual(job.pinsStillUnplaced, 1);
 });
 
-test('3. no match, a nearest-rooftop guess, and two addresses on one answer all stay flagged', { skip }, async () => {
+// Rewritten by the pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S11): 22 and 24 Ash St — two
+// addresses the vendor put on one spot whose exact answers are one point — are the Fairfield pattern, a condo
+// complex, not a geocoder placeholder. 18 (no match) and 20 (a neighbour's roof, which never replaces a shared
+// spot) stay flagged.
+test('3. no match and a nearest-rooftop guess stay flagged; two addresses on one exact answer form a complex', { skip }, async () => {
   resetGeo();
   const c = await newCampaign('Refusals');
   const P = [36.231, -115.931];
@@ -182,17 +192,25 @@ test('3. no match, a nearest-rooftop guess, and two addresses on one answer all 
   answer(sentAs('24 Ash St'), P[0], P[1]);
   const job = await runFile(c, [row('RA1', '18 Ash St'), row('RA2', '20 Ash St'), row('RA3', '22 Ash St'), row('RA4', '24 Ash St')]);
   assert.strictEqual(job.pinsPlacedExact, 0);
-  assert.strictEqual(job.pinsStillUnplaced, 4);
+  assert.strictEqual(job.pinsStillUnplaced, 2);
+  assert.strictEqual(job.pinsComplex, 2);
   // The provider bills every address it answers, matched or not: 18 Ash St had no match and still counts.
   assert.strictEqual(geo.sent.length, 4);
   assert.strictEqual(job.pinLookupsNew, 4);
-  for (const a of ['18', '20', '22', '24']) {
+  for (const a of ['18', '20']) {
     const d = await door(c, `${a} Ash St`);
     assert.strictEqual(d.pinSuspect, 'placeholder', `${a} flagged`);
     assert.strictEqual(d.coordSource, 'file', `${a} not moved`);
   }
-  assert.deepStrictEqual((await door(c, '22 Ash St')).pinDistrustedKeys, [keyOf(P)]);
-  assert.deepStrictEqual((await door(c, '24 Ash St')).pinDistrustedKeys, [keyOf(P)]);
+  for (const a of ['22', '24']) {
+    const d = await door(c, `${a} Ash St`);
+    assert.strictEqual(d.pinSuspect, 'complex', `${a} is a complex member`);
+    assert.strictEqual(d.pinComplexKey, keyOf(P));
+    assert.strictEqual(d.coordSource, 'geocodio', `${a} moved onto the complex's point`);
+    assert.deepStrictEqual(d.location.coordinates, [P[1], P[0]]);
+    assert.strictEqual(d.pinDistrustedKeys, undefined, `${a} remembers no distrusted key`);
+    assert.strictEqual(d.pinPlacement.answer, 'exact');
+  }
   assert.strictEqual((await door(c, '20 Ash St')).pinDistrustedKeys, undefined, 'a guess claims nothing');
 });
 
@@ -212,7 +230,10 @@ test('4. importing the same file again keeps the placed pins and looks nothing u
 test('5. a vendor change wins, and the placement is released', { skip }, async () => {
   resetGeo();
   const { c, rows } = ctx.mp;
-  const V = [36.241, -115.921];
+  // A plausible vendor move — about 40 m, a corrected rooftop. (Since the pin-fixes build a "move" kilometres off
+  // the home's street is suspected as far and checked against the address; that has its own cases in
+  // pinFixesAtScale.int.test.js. This test is about the release mechanics of a vendor change.)
+  const V = [36.2153, -115.9396];
   const job = await runFile(c, rows.map((r) => (r.svid === 'MP1' ? row('MP1', r.address, V) : r)));
   assert.strictEqual(job.keptPlacements, 2);
   const d = await door(c, '5001 E Monte Penne Way');

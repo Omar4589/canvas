@@ -26,13 +26,14 @@ export function inBoundsWithMargin(bounds, lng, lat, marginFrac = 0.2) {
 // Render signature: a marker is rebuilt only when something it DRAWS changed. The glyph differs for a spot of
 // different homes (kind 'unplaced'), so that kind joins the signature; a building's signature is unchanged.
 export function markerSig(color, badgeText, dimmed, dark, kind = 'building') {
-  return `${color}|${badgeText ?? ''}|${dimmed ? 1 : 0}|${dark ? 1 : 0}${kind === 'unplaced' ? '|homes' : ''}`;
+  return `${color}|${badgeText ?? ''}|${dimmed ? 1 : 0}|${dark ? 1 : 0}${kind === 'unplaced' || kind === 'complex' ? '|homes' : ''}`;
 }
 
 // The marker's badge: the round's status text when the map shows status ("3/5 hit", "12 restricted"),
 // otherwise how many doors it stands for — "N homes" on a spot of different homes, "N units" on a building.
+// A condo complex reads "N homes" too (the two-house glyph), never "N units".
 export const markerLabel = ({ kind = 'building', count = 0, badgeText = null } = {}) =>
-  badgeText || `${count} ${kind === 'unplaced' ? (count === 1 ? 'home' : 'homes') : count === 1 ? 'unit' : 'units'}`;
+  badgeText || `${count} ${kind === 'unplaced' || kind === 'complex' ? (count === 1 ? 'home' : 'homes') : count === 1 ? 'unit' : 'units'}`;
 
 /**
  * Diff the currently-rendered marker map against the wanted set.

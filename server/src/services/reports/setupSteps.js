@@ -64,6 +64,24 @@ const STEP_DEFS = [
       return n > 0 ? `${n} pass${n === 1 ? '' : 'es'}` : 'No passes yet';
     },
   },
+  // Map pins (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.5, change #3): homes without a reliable spot land
+  // in the wrong book, so the guide asks before the cut. It never blocks "setup complete": approximate pins
+  // exist in most campaigns, so once books are cut with pins still waiting the step is skipped, not owed.
+  {
+    key: 'pinsChecked',
+    label: 'Check map pins',
+    route: '/pin-fixes',
+    satisfied: (counts) => (counts.pinsToFix || 0) === 0,
+    skipped: (_campaign, counts = {}) => (counts.pinsToFix || 0) > 0 && (counts.publishedTurfs || 0) > 0,
+    value: (counts) => {
+      const n = counts.pinsToFix || 0;
+      if (n === 0) return 'All pins checked';
+      return (counts.publishedTurfs || 0) > 0 ? `${n} still to look at — books were cut` : `${n} to look at`;
+    },
+    warn: (counts) =>
+      (counts.pinsToFix || 0) > 0 && (counts.publishedTurfs || 0) === 0 ? 'Homes without a reliable spot land in the wrong book' : null,
+    warnRoute: '/pin-fixes',
+  },
   {
     key: 'booksCut',
     label: 'Books cut & accepted',
@@ -96,13 +114,14 @@ const STEP_DEFS = [
 ];
 
 // counts: { households, ownedDoors, intakeDoors, passes, publishedTurfs,
-//           assignments, orgCanvassers, activePasses }
+//           assignments, orgCanvassers, activePasses, pinsToFix }
+// A def's `skipped` receives (campaign, counts); `satisfied`, `value` and `warn` receive counts first.
 // campaign: { name, type, surveyTemplateId }
 export function deriveSetupSteps({ campaign, counts = {} }) {
   // First unsatisfied, non-skipped step is the suggested next action.
   let currentKey = null;
   for (const def of STEP_DEFS) {
-    if (def.skipped?.(campaign)) continue;
+    if (def.skipped?.(campaign, counts)) continue;
     if (!def.satisfied(counts, campaign)) {
       currentKey = def.key;
       break;
@@ -110,7 +129,7 @@ export function deriveSetupSteps({ campaign, counts = {} }) {
   }
 
   const steps = STEP_DEFS.map((def) => {
-    const skipped = Boolean(def.skipped?.(campaign));
+    const skipped = Boolean(def.skipped?.(campaign, counts));
     let status;
     if (skipped) status = 'skipped';
     else if (def.satisfied(counts, campaign)) status = 'done';

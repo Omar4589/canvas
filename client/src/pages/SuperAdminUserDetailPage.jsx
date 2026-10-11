@@ -145,7 +145,7 @@ export default function SuperAdminUserDetailPage() {
           <div>
             {/* Three clocks on purpose: typing a password, using the app at all, and canvassing
                 (the last one below, per org). */}
-            <dt className="text-xs uppercase tracking-wide text-fg-subtle">Last login</dt>
+            <dt className="text-xs uppercase tracking-wide text-fg-subtle">Last password login</dt>
             <dd className="text-fg">{formatRelative(u.lastLoginAt)}</dd>
           </div>
           <div>

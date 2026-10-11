@@ -16,10 +16,16 @@ reads **"Pin corrected."** If someone checks the spot and it's already right, th
 instead — the ring goes out the same way and the door reads **"Location confirmed."**
 
 **Working through a whole backlog of them?** Use the [Pin Fixes page](page-pin-fixes) (sidebar →
-Quality): every approximate pin in the campaign — plus every home marked **"No exact map spot"**
-because its voter file gave it the same spot as other addresses — grouped by street, with satellite
-imagery, a Google Maps shortcut, and the move / confirm actions side by side. This guide covers moving
-a single pin wherever you run into one.
+Quality): every approximate pin in the campaign, every home marked **"No exact map spot"**, and every
+condo complex, grouped by cause with buttons that fix a whole group at once — **Look up by address**,
+**Place along the street** (click each roof in satellite view; the next home lights up), and **Set aside**
+for homes nobody can place. This guide covers moving a single pin wherever you run into one.
+
+**A complex is not a mistake.** When a voter file put several addresses on one spot and the address lookup
+agrees they are all there, Doorline calls it **a complex**: every map shows *"N homes · a complex"*, each
+home keeps its own Directions, and it is cut into books like an apartment building. You can still move any
+one of its homes onto its own building — the complex's **Spread on the map** in Pin Fixes does it home by
+home.
 
 ## Who can move a pin
 
@@ -43,7 +49,8 @@ then drag the pin onto their own house to make the flag look innocent.
   Click the house and choose **Move pin →** in its popup, drag the blue marker, then **Save location**;
   that moves **one door**. Click an apartment building instead and its popup has **Move building
   pin →**, which moves **every unit of that address together**. A dot of *different* homes has no
-  building move — its pop-up says so and links to Pin Fixes, where each home is moved on its own. Same
+  building move — its pop-up says so and links to Pin Fixes, where each home is moved on its own — and
+  neither does a complex, whose spot is right; each of its homes keeps its own **Move pin**. Same
   fix, same audit trail, no trip to the Map page. It works on a draft cut, an accepted book, or a loose
   dot not in any book.
 
@@ -52,7 +59,8 @@ If the address shares a pin with other units — an apartment building — you'l
 unit of that address). "Whole building" means the units of that one address: separate houses that merely
 share the dot are never moved along with it.
 
-**A home with "No exact map spot"** (its coordinate was shared with other addresses). On the phone (after the
+**A home with "No exact map spot"** (its coordinate was shared with other addresses, its pin sits far from its
+street, or the address lookup couldn't find it and it waits at a holding spot in its ZIP). On the phone (after the
 app update), **Fix pin location** opens on the shared spot and moves to where you are if you're close by; **Save** waits until you
 drag the pin clearly off the spot or tap **Use my current location** at the house. If you're standing right on
 the shared spot it tells you so — if the home really is there, mark it **Looks right** in Pin Fixes instead.

@@ -7,8 +7,9 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { normalizeAddress, haversineMeters } from '../../utils/normalizeAddress.js';
-import { inStateBounds } from '../../utils/stateBounds.js';
-import { stackBaseOf, homeKeyOf } from '../../utils/streetName.js';
+import { inStateBounds, isValidLatLng, fileCoordRefusal } from '../../utils/stateBounds.js';
+import { stackBaseOf, homeKeyOf, baseFamily, streetOfBase } from '../../utils/streetName.js';
+import { cohortOutliers } from '../../utils/pinCohorts.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
 import { isPlacedByLookup } from '../households/pinState.js';
 import { classifyStackedPins } from '../../utils/stackedPins.js';
@@ -96,8 +97,12 @@ function mapRow(raw, resolved) {
   const rawLng = get('longitude');
   const lat = parseCoord(rawLat);
   const lng = parseCoord(rawLng);
-  const hasValidCoords =
-    lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  const inRange = lat != null && lng != null && isValidLatLng(lat, lng);
+  // A coordinate that can't be real — 0,0 (the vendor's "no location"), or outside the row's own state —
+  // counts as NO coordinate: the home is looked up by address, or parked at a holding spot
+  // (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.1). State is a required column, so no fallback is needed.
+  const coordRefused = inRange ? fileCoordRefusal({ lat, lng, state: get('state') }) : null;
+  const hasValidCoords = inRange && !coordRefused;
 
   const household = {
     addressLine1: get('addressLine1'),
@@ -111,6 +116,8 @@ function mapRow(raw, resolved) {
     // Did the source row carry BOTH coord columns (valid or not)? Distinguishes a
     // malformed-coords row (→ bad_coords) from a no-coords-column row (→ geocode).
     coordsProvided: rawLat != null && rawLng != null,
+    // 'offworld' | 'outside_state' | null: the row asserted a coordinate that can't be the home.
+    coordRefused,
   };
 
   return { voter, household };
@@ -307,7 +314,10 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       // error. Missing coords (no coord columns) survive to grouping ONLY when
       // geocoding is enabled — the geocode step then fills or drops them. With
       // geocoding off, behavior is byte-for-byte unchanged.
-      if (mapped.household.coordsProvided || !geocodeEnabled) {
+      // A REFUSED coordinate (0,0, outside its state) is no coordinate: the row survives to grouping in
+      // both modes — looked up by address, or parked at a holding spot (importProcessor.js) — so the house
+      // and its voters are never lost to it.
+      if (!mapped.household.coordRefused && (mapped.household.coordsProvided || !geocodeEnabled)) {
         errors.push({
           rowIndex: i + 2,
           code: 'bad_coords',
@@ -342,6 +352,7 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       existing.latitude = mapped.household.latitude;
       existing.longitude = mapped.household.longitude;
       existing.coordVotes = 1;
+      existing.coordRefused = null; // one real pin outranks a sibling row's zero
     } else if (existing.latitude != null && mapped.household.latitude != null) {
       noteCoordCandidate(coordConflicts, normAddr, existing, mapped.household);
     }
@@ -361,14 +372,38 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
     // One member per HOME (homeKeyOf), keyed by street address (stackBaseOf) — the rule the
     // placement pass judges spots by, so the preview counts what the pass will find: units of one
     // street address are a building, two records of one home count once. Counts stay per door.
+    //
+    // Street addresses are compared as base families (baseFamily), as the pass compares them, so
+    // "533 Black Rock Tpke 3" and "533 Black Rock Tpke" are one address here too.
+    //
+    // The pin-fixes build adds four file-scoped counts (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.4), all
+    // door-weighted: rows whose coordinate was refused as 0,0 or outside their state (now looked up or
+    // parked, never placed there); homes pinned far from their street — the cohort rule over this file's
+    // placed homes, shared spots excluded (a spot verdict wins), the same rule the pass applies campaign-wide;
+    // and homes with no street address to look up (no house number, or ZIP 00000).
     const homes = new Map();
+    let offWorldDoors = 0;
+    let outsideStateDoors = 0;
+    let unlocatableDoors = 0;
     for (const [, h] of householdMap) {
-      if (h.latitude == null || h.longitude == null) continue;
+      const line1 = String(h.addressLine1 || '').trim();
+      if (!/^\d/.test(line1) || String(h.zipCode ?? '').trim().slice(0, 5) === '00000') unlocatableDoors += 1;
+      if (h.latitude == null || h.longitude == null) {
+        if (h.coordRefused === 'offworld') offWorldDoors += 1;
+        else if (h.coordRefused === 'outside_state') outsideStateDoors += 1;
+        continue;
+      }
       const pinKey = buildingKeyForCoords([h.longitude, h.latitude]);
       const id = `${pinKey}#${homeKeyOf(h)}`;
       const home = homes.get(id);
       if (home) home.doors += 1;
-      else homes.set(id, { id, street: stackBaseOf(h.addressLine1), pinKey, doors: 1 });
+      else {
+        const street = baseFamily(stackBaseOf(h.addressLine1));
+        homes.set(id, {
+          id, street, pinKey, doors: 1, lat: h.latitude, lng: h.longitude,
+          zip5: String(h.zipCode ?? '').trim().slice(0, 5),
+        });
+      }
     }
     const stacked = classifyStackedPins([...homes.values()]);
     let placeholderPinDoors = 0;
@@ -378,6 +413,13 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       if (kind === 'placeholder') placeholderPinDoors += home.doors;
       else if (kind === 'stray') strayPinDoors += home.doors;
     }
+    const cohortPoints = [];
+    for (const home of homes.values()) {
+      if (stacked.suspects.has(home.id)) continue;
+      cohortPoints.push({ id: home.id, lat: home.lat, lng: home.lng, street: streetOfBase(home.street), zip5: home.zip5, spotKey: home.pinKey });
+    }
+    let farPinDoors = 0;
+    for (const id of cohortOutliers(cohortPoints, { zipFallback: true }).keys()) farPinDoors += homes.get(id)?.doors || 0;
     return {
       totalRows,
       errors,
@@ -397,6 +439,10 @@ export function makeRowValidator(mapping, headers, { sink } = {}) {
       placeholderPins: stacked.placeholderPins,
       placeholderPinDoors,
       strayPinDoors,
+      offWorldDoors,
+      outsideStateDoors,
+      farPinDoors,
+      unlocatableDoors,
     };
   };
   return { push, finish, resolved };
@@ -802,9 +848,28 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
           normalizedAddress: { $in: addrs.slice(i, i + batchSize) },
           $or: [{ 'pinPlacement.at': { $exists: true } }, { pinSuspect: { $type: 'string' } }],
         },
-        { normalizedAddress: 1, location: 1, coordSource: 1, locationConfirmedAt: 1, pinPlacement: 1, pinSuspect: 1 }
+        { normalizedAddress: 1, location: 1, coordSource: 1, locationConfirmedAt: 1, pinPlacement: 1, pinSuspect: 1, state: 1 }
       ).lean();
       for (const d of docs) pinState.set(d.normalizedAddress, d);
+    }
+  }
+
+  // 0.7. Holding spots never replace a real pin (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.6). A home this
+  // file couldn't place (importProcessor parked it: coordSource 'holding') that already exists in the
+  // campaign with a REAL location keeps that location and gains no flag. A prior at 0,0 or outside its state
+  // is not a real location (the legacy Fairfield doors), so it is not protected from the holding spot.
+  const holdingAddresses = new Set();
+  {
+    const addrs = householdValues.filter((h) => h.coordSource === 'holding').map((h) => h.normalizedAddress);
+    for (let i = 0; i < addrs.length; i += batchSize) {
+      const docs = await Household.find(
+        { campaignId, normalizedAddress: { $in: addrs.slice(i, i + batchSize) }, location: { $ne: null } },
+        { normalizedAddress: 1, location: 1, state: 1 }
+      ).lean();
+      for (const d of docs) {
+        const c = d.location?.coordinates;
+        if (c?.length === 2 && !fileCoordRefusal({ lat: c[1], lng: c[0], state: d.state })) holdingAddresses.add(d.normalizedAddress);
+      }
     }
   }
   const pinNow = new Date();
@@ -859,6 +924,9 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
       keepLocation = true;
       if (correctedAddresses.has(h.normalizedAddress)) keptPins += 1;
       else keptConfirmed += 1;
+    } else if (h.coordSource === 'holding' && holdingAddresses.has(h.normalizedAddress)) {
+      // This file couldn't place the home, but the campaign already has a real spot for it: keep that.
+      keepLocation = true;
     } else if (set.location && pinState.has(h.normalizedAddress)) {
       // A door the address lookup placed, or one flagged on a shared spot (docs/PROPOSAL_PLACEHOLDER_PINS.md §F).
       const prior = pinState.get(h.normalizedAddress);
@@ -866,9 +934,20 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
       const curKey = buildingKeyForCoords(prior.location?.coordinates);
       const newKey = buildingKeyForCoords(set.location.coordinates);
       const placed = isPlacedByLookup(prior);
-      if (!human && (newKey === curKey || h.coordSource === 'geocodio')) {
+      const pc = prior.location?.coordinates;
+      // A prior at 0,0 or outside its state is no spot at all: never kept, whatever the file says now.
+      const priorRefused = !(pc?.length === 2) || !!fileCoordRefusal({ lat: pc[1], lng: pc[0], state: prior.state });
+      if (
+        !human &&
+        !priorRefused &&
+        (newKey === curKey ||
+          (h.coordSource === 'holding' && prior.coordSource === 'holding') ||
+          (h.coordSource === 'geocodio' && prior.coordSource !== 'holding'))
+      ) {
         // The file repeats the spot the door already has, or gave no coordinate at all (the
-        // geocoder filled it): nothing new to say. Its flag and its placement record stand.
+        // geocoder filled it, or it is parked again): nothing new to say. Its flag and its placement
+        // record stand. A PARKED prior whose geocode now succeeds is not "nothing new": it falls
+        // through to the flagged-door branch below, where the answer wins.
         keepLocation = true;
       } else if (placed && newKey === buildingKeyForCoords(prior.pinPlacement.from)) {
         // An echo of the vendor's old shared spot (a re-import of the same file, an export
@@ -880,6 +959,7 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
         // The vendor changed the coordinate: the file wins, and the placement is released.
         set['pinPlacement.releasedAt'] = pinNow;
         unset.pinSuspect = 1;
+        unset.pinComplexKey = 1;
       } else if (prior.pinSuspect) {
         // A flagged door the file moves somewhere new: the file wins, and the spot it left is recorded
         // (the pass reads that `from` as a home that left the shared spot).
@@ -892,9 +972,18 @@ export async function applyImport({ campaign, orgId, validRows, validRowsFile = 
           releasedAt: pinNow,
         };
         unset.pinSuspect = 1;
+        unset.pinComplexKey = 1;
       } else if (prior.pinPlacement?.at && newKey !== curKey) {
         set['pinPlacement.releasedAt'] = pinNow;
       }
+    }
+    // A home landing on a holding spot is flagged 'unlocated' — the only place this file's write sets a flag.
+    // It moves from one flagged state to another, so a branch above that unset the old flag is overruled here
+    // (never a $set and an $unset of one field in one op: MongoDB refuses the path conflict).
+    if (h.coordSource === 'holding' && !keepLocation) {
+      delete unset.pinSuspect;
+      set.pinSuspect = 'unlocated';
+      unset.pinComplexKey = 1;
     }
     // Keeping the location: move the trio to $setOnInsert, so a row deleted between the prefetch and
     // this write still inserts complete coords. A field must never appear in both operators — Mongo

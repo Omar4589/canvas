@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { retryUnless401 } from './lib/sessionEnd.js';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
@@ -20,7 +21,8 @@ window.addEventListener('vite:preloadError', (e) => {
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    // One retry, as before — except a 401, which can't succeed a second later.
+    queries: { retry: retryUnless401, refetchOnWindowFocus: false },
   },
 });
 

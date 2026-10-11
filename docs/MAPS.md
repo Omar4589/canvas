@@ -375,21 +375,70 @@ hiding. A whole-building move ends with **"Moved N units"**. Separate houses tha
 moved along with it.
 
 **The pin badge**, everywhere a door shows one (the Map panel, the Turf Cutting pop-up, the phone's door
-screen and admin map) — the first that applies: **No exact map spot** (its coordinate is shared with other
-addresses), **Location confirmed**, **Pin corrected**, **Approximate location**. Under it, a home the
-address lookup moved reads **"Placed by address (Oct 5). Its earlier spot was shared with N other homes."**,
-and one the lookup found already on its own spot reads **"The address lookup confirms this spot."**
+screen and admin map) — the first that applies: **Complex** (a condo complex: several homes share this spot,
+and it is their spot), **No exact map spot** (the pin isn't the home), **Location confirmed**, **Pin
+corrected**, **Approximate location**. The sentence under **No exact map spot** names the cause: the
+coordinate was shared with other addresses; *"This home's pin sits far from the rest of its street, and the
+address lookup couldn't settle it"*; or *"Doorline couldn't find this address. The pin is a holding spot in
+its ZIP, not the home."* A complex reads *"Several homes share this spot. Directions go to each home's
+address."* A home the address lookup moved reads **"Placed by address (Oct 5). Its earlier spot was shared
+with N other homes."** (or *"It had no location in the file"*, or *"Its earlier pin was far from its
+street"*), and one the lookup found already on its own spot reads **"The address lookup confirms this
+spot."**
+
+**No map opens on the ocean.** A home still at 0,0 (a vendor's "no location" from an import before the import
+refused it) stays on the map until it is fixed, but the first view of the Map page, Turf Cutting and Pin
+Fixes leaves it out, and Pin Fixes never flies there.
 
 ### The Pin Fixes page — work the whole backlog in one place
 
 Hunting rings on a busy map doesn't scale, so the campaign has a dedicated **Pin Fixes** page
 (sidebar → Quality). It lists **every** pin that needs a check — every approximate pin in the campaign,
 including ones the map literally can't ring, like doors stacked inside an apartment-building marker, and
-every home with **No exact map spot** (its coordinate was shared with other addresses and the import's
-lookup couldn't place it) — **grouped by street**, with a map beside the list and a live **"N doors to
-review"** count (the same number as the amber badge on the sidebar item, *"N pins to fix"*). Units of
-one address on one spot share a row; separate homes never do, even when they sit on one dot. There are
-two ways to work a pin, sharing one selection:
+every home with **No exact map spot** (its coordinate was shared with other addresses, it sits far from
+its street, or the address lookup couldn't find it) — **grouped by street**, with a map beside the list
+and a live **"N doors to review · M complexes"** count (the sidebar item's badge counts the same doors plus
+one per complex). Units of one address on one spot share a row; separate homes never do, even when they
+sit on one dot.
+
+**Fix together — the cards at the top.** Above the list, one card per cause, each with its homes' count,
+its busiest streets, and the actions that fix the whole group at once:
+
+- **Share one spot with other addresses**, **Pinned far from their street**, **Couldn't be found by
+  address** — **Look up by address** runs the import's lookup on just that group (for a campaign imported
+  before the import learned these rules, an import whose pin check was busy, or anything over its
+  ceiling). The button reads *Looking up…* while it runs, and the toast says what it did, in the import's
+  words: *"Map pins: 231 placed by address · 19 placed on the street (check them) · 3 without an exact
+  spot."* Each address looked up is one lookup at the usual rate, Doorline's cost, and one already looked
+  up is free. **Place along the street** (shared and couldn't-be-found cards) and **Set aside…** (all three)
+  are below.
+- **Complexes** — one row per complex (*"Rowayton Woods Dr — 46 homes"*). Select it for **Looks right —
+  it's a complex** (vouches every home at once; Undo on the toast), **Spread on the map** (Place along the
+  street over its addresses, to put each unit on its own building), and **Google Maps ↗**.
+- **Placed on the street, not the house** — the approximate pins. **Start checking** narrows the list to
+  them (*"Checking approximate pins · N left · Show all"*) and opens the first in the popup, so Enter, the
+  arrows and auto-advance work through just that group and end with *"All checked."*
+- **Show homes ▾** on any card narrows the list to that card's homes; **Show all** puts the full list back.
+- **Set aside (N) ▸**, at the bottom, lists the homes set aside, each with **Bring back**.
+
+**Place along the street — click, not drag.** The map switches to **Hybrid**, flies to the first home,
+and labels the house numbers of the street's placed homes so the numbering direction and the odd/even side
+show. A rail replaces the list: *"Placing · Foxboro Dr · 3 of 42"* and *"Click the roof of 1002 Foxboro
+Dr."* **Click the roof: the pin is saved and the next home lights up.** A click on the home's old spot
+moves nothing (*"Nothing moved — click the house itself"*). **Skip** leaves a home for later; **Back**
+re-arms the previous one, so a mis-click is fixed by clicking its right roof; **Exit** (or Esc) leaves
+and puts the basemap back. A row with several units of one address places them all with one click. Every
+click is the same pin move as a drag — the same audit row and outline redraw. A home at 0,0 is shown from
+the middle of its street (or of the campaign), never from the ocean.
+
+**Set aside — for homes nobody can place.** *"Fairfield University No Know, 00000"* is not getting a pin.
+**Set aside** (a card's button, or a home's own) asks once — *"Set aside 13 homes? They leave the queue and
+every book cut until brought back."* — and takes them out of the queue and out of every book cut, the same
+hold **Remove apartments** uses, noted with who and when; **Re-include apartments** never brings one back.
+**Bring back**, a move, or a **Looks right** returns it. Set-aside homes stay on the admin map, under the
+same Dim / Hide treatment as other doors held out of books.
+
+There are two ways to work a single pin, sharing one selection:
 
 - **Click a pin on the map** and an **action popup opens at the top-right of the map** — the same
   corner the Move-pin card uses — with the address (and, for a building, the scrollable list of its
@@ -405,14 +454,17 @@ The three actions, either way:
   unit of its address at the pin together. On a home with **No exact map spot**, **Save** stays off
   until the pin is dragged clearly off the shared spot (more than about 5 ft); if the server still
   finds nothing moved, the card says *"Nothing moved — drag the pin onto the house"* and stays open.
-- **Looks right — confirm** — for pins that check out: the door leaves the queue and the ring goes
+- **Looks right — confirm** — for pins that check out (not offered on a home parked at a holding spot,
+  which is by definition not the home): the door leaves the queue and the ring goes
   out **without** pretending anyone moved anything. The door then reads **"Location confirmed"**
   instead of "Approximate location", the fix is attributed and timestamped, and a re-imported file
   can't silently yank the pin you vouched for (same protection corrected pins get). There's an
   **Undo** on the toast if you mis-click. Confirming a building confirms every *approximate* unit
   of its address at the pin — a unit someone already hand-corrected is left alone. On a home with **No
   exact map spot** the button reads **Looks right — the home is here** and asks once first (*"This
-  home's map spot was shared with other addresses. Confirm the home is really here?"*). If the pin
+  home's map spot was shared with other addresses. Confirm the home is really here?"*, or for a far pin
+  *"This home's pin sits far from the rest of its street. Confirm the home is really here?"*). A home
+  without an exact spot also offers **Set aside**. If the pin
   changed since the page loaded (another lead moved it, or an import placed it), the confirm is refused
   — *"This pin changed since the page loaded — reloading."* — and the list reloads.
 - **Google Maps ↗** — opens the door's *address* in a Google Maps search in a new tab, for the cases
@@ -552,10 +604,14 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   for a door that is neither interpolated nor unplaced, `409 PIN_CHANGED`, the usual
   `403 FORBIDDEN_ROLE` / `409 campaign-archived`. Covered end-to-end by `server/test/pinFixes.int.test.js`
   and `server/test/placeholderPinWriters.int.test.js`.
-- **The needs-fixing predicates** are `NEEDS_PIN_FIX` and `UNPLACED_PIN` (both exported beside the
-  confirm writer). `NEEDS_PIN_FIX`: `isActive + coordConfidence:'interpolated' + locationConfirmedAt:null`.
-  `UNPLACED_PIN`: `isActive + pinSuspect is a string + locationConfirmedAt:null + coordConfidence ≠
-  'interpolated'` — disjoint from the first by construction, so the Pin Fixes list
+- **The needs-fixing predicates** are `NEEDS_PIN_FIX`, `UNPLACED_PIN` and (Pin Fixes at scale)
+  `COMPLEX_TO_REVIEW`, all exported beside the confirm writer. `NEEDS_PIN_FIX`: `isActive +
+  coordConfidence:'interpolated' + locationConfirmedAt:null + pinSetAside.at:null`. `UNPLACED_PIN`:
+  `isActive + pinSuspect is a string other than 'complex' + locationConfirmedAt:null + coordConfidence ≠
+  'interpolated' + pinSetAside.at:null`. `COMPLEX_TO_REVIEW`: `isActive + pinSuspect 'complex' +
+  locationConfirmedAt:null + pinSetAside.at:null` (each keeps `$type: 'string'` beside its `$ne`/`$eq` so the
+  planner can still use the `{ campaignId, pinSuspect }` partial index). The badge is `total + complexCount`
+  (one per complex). `NEEDS_PIN_FIX` and `UNPLACED_PIN` are disjoint by construction, so the Pin Fixes list
   (`GET /admin/campaigns/:id/households/pin-fixes` — cap `PIN_FIX_LIST_CAP`, default 10 000, applied
   to the merged rows, with `{ total, truncated, cap }` on the /map convention) and the campaigns-rollup
   badge count (`campaignSummaries.pinsToFix`, a live derived aggregate — deliberately NOT a
@@ -579,6 +635,78 @@ A geocode can land off-spot (usually `interpolated` matches). The maps surface t
   `CanvassActivity`, and the frozen `distanceFromHouseMeters` is never rewritten.
 - **Caveat:** a published `ClientReportMapPoint` snapshot is frozen at publish time and won't reflect a
   later correction until the report is republished.
+
+### Pin Fixes at scale (2026-10-10)
+
+Plan and as-built notes: [PROPOSAL_PIN_FIXES_AT_SCALE.md](PROPOSAL_PIN_FIXES_AT_SCALE.md) and its
+[build plan](PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md). The import side (refused coordinates, the holding spot,
+the answer ladder, far marks, the complex verdict, the `pin_lookup` job) is in [IMPORTS.md](IMPORTS.md) §H.
+
+- **Provenance fields.** `Household.pinSuspect` gains `far` (recomputed each pass from the street/ZIP
+  cohort, never sticky), `unlocated` (parked at a holding spot; sticky until placed) and `complex` (a condo
+  complex — not unplaced, always on the wire, vouched or not). `pinComplexKey` (the complex's exact point,
+  ~1.1 m key) groups its members. `pinSetAside { at, by }` (a staff user id, like `correctedBy`) rides
+  `excludedFromTurf: true`. `coordSource: 'holding'` marks a Doorline-derived point that is deliberately not
+  the home. `pinPlacement.kind` is one of the five kinds and `pinPlacement.answer` the answer class.
+- **Pin state** ([`pinState.js`](../server/src/services/households/pinState.js)): `isPinUnplaced`
+  excludes complex members; `isPinFlaggedUnvouched` (any flag, no stamp) is the move gate and the activity
+  route's `sameAddress.unplaced`; `effectivePinSuspect` always sends `'complex'`; `pinWireFields`'
+  `pinPlaced` gains `kind`; `knockPinOf` is the frozen knock stamp (`AUDIT.md`).
+- **Writers.** `setAsidePins` / `bringBackPins`
+  ([`setAsidePin.js`](../server/src/services/households/setAsidePin.js), the one set-aside writer): only a
+  door with a `pinSuspect` string or an interpolated pin, not already set aside; bring back clears the hold
+  and `excludedFromTurf`. `updateHouseholdLocation` (a person's move) unsets `pinSuspect`, `pinComplexKey`
+  and `pinSetAside` and lifts a set-aside door's `excludedFromTurf` in the same pipeline update.
+  `confirmHouseholdLocation` gains `scope: 'spot'` (every active member of the primary's `pinComplexKey`
+  that needs a vouch; `'unit'` without a key), refuses a home parked at a holding spot (`isConfirmable`),
+  and brings a set-aside door back after its stamp. The audit row's `scope` enum gains `'spot'`.
+- **Routes** ([`campaignHouseholds.js`](../server/src/routes/admin/campaignHouseholds.js), lead-allowed,
+  campaign-scoped, AccessLog subjects): `GET …/pin-fixes` adds `complexes: [{ key, lng, lat, count,
+  streets, rows }]`, `complexCount`, `setAside` (rows), `truncatedExtra`, and per row `spotKey`,
+  `complexKey`, `setAside`; `POST …/pin-lookup { group: shared|far|unlocated|complexes } | { householdIds }`
+  → `202 { jobId }` (polled through `GET /admin/imports/:id`), `409 LOOKUPS_OFF`, `400 NOTHING_TO_LOOK_UP`,
+  `503` when the queue can't take it; `POST …/set-aside` and `…/bring-back { householdIds }` →
+  `{ updated }`; `POST …/:id/confirm-location { scope: 'spot' }`.
+- **Stacks and markers.** `stackKind` (`client/src/lib/buildings.js`): every member `complex` →
+  `'complex'`; every member `far` on one street address → `'building'` (a mis-pinned real building);
+  otherwise as before. `buildingsToGeoJSON` adds `homes` (`kind !== 'building'`) and `complex`; the
+  homes glyph and " homes" caption read `homes`. `buildingMarkers.js` renders `'complex'` like `'unplaced'`.
+  `DoorStackPanel` heads a complex *"N homes at a complex"* with its own note; Turf Cutting's pop-up reads
+  *"N homes · a complex"* with no Pin Fixes link, and **Move building pin** is offered only for
+  `kind === 'building'`. `MapPage`'s stack counts file a complex with the buildings.
+- **The Pin Fixes page.** `buildGroups` ([`lib/pinFixes.js`](../client/src/lib/pinFixes.js)) builds the
+  cards by `rowCause` (`shared`/`far`/`unlocated`/`approx`, plus `complexes` from the payload's list), a
+  `'c:<key>'` pseudo-row per complex (merged into `rowsByKey`, `idToRowKey` and `spotRowKeys`, so a marker
+  click and the stale-selection effect resolve it like any row) and each complex's member rows (built like
+  street rows, so one address's units stay one `scope: 'building'` row — what Spread on the map places).
+  `PinFixCards` and `PlaceAlongRail` (`client/src/components/`) are presentational. `confirmLabel` is null
+  for a holding spot; `enterAction` is null for unplaced and complex rows. Start checking is a `scope`
+  (a row-key set) over the list: `rowKeys` (the arrows' order) is scoped, and `advanceAfterAction`'s
+  fallback stays inside it. The stale-selection effect clears only a selection that is still the stale
+  one (a functional update): the refetch can commit before a settling action advances.
+- **Place along the street.** `useMovePin`'s click mode: `startClick(target)` arms a target with no
+  marker, mirrored into `clickTargetRef` (assigned during render and on arming) and carrying the campaign
+  it was armed under; `placeAt({ lng, lat })` — the page's one once-bound map click — PATCHes the same
+  location route with the target's scope (`placeAtBody`), keeps the row armed on `moved: 0`
+  (`NOTHING_PLACED`), and calls `onSaved` with `target.mode === 'click'`; `armedRef` covers both modes;
+  `clickCopy` is the rail's sentence (`placeAtCopy`), and `copy` stays drag-only. The page switches the
+  basemap to Hybrid (restored on exit if unchanged), sets a crosshair, flies to `placeFlyTarget` (a row at
+  0,0 borrows the middle of its street's other rows, else the queue's middle, else stays put) at zoom ≥ 17,
+  and draws the `neighbour-numbers` symbol layer (`mapRender.js` `setNeighbourNumbers` /
+  `removeNeighbourNumbers`) from `GET /admin/households/map?campaignId&bbox` at zoom ≥ 15 — the doors in
+  view that are not in the queue, labelled with `addressLine1`'s leading number — re-added after each
+  style swap (`styleEpoch`). Esc is bound once per placing session through a ref (the hook's own Esc
+  re-renders mid-event, and a listener re-bound by that render would be skipped). A campaign switch exits
+  the mode, the scope and any lookup.
+- **No first view on the ocean.** The Pin Fixes fit (singles and stacks), `MapPage`'s first fit,
+  Turf Cutting's raw-doors frame (`bboxOfDoors`) and `/admin/households/map`'s `includeBounds` extent all
+  skip a point within 1e-5° of 0,0 (`isOffWorld`; the server's `$nor` mirrors it). The door stays on the
+  map; only the camera ignores it.
+- **Tests.** `pinFixes.test.js`, `movePin.test.js`, `pinBadges.test.js`, `buildings.test.js`,
+  `mapRender.test.js`, `buildingMarkers.test.js`, `importPins.test.js`, `turfUnplacedToggle.test.js`,
+  `pinFixesRender.smoke.test.js` (the cards from a loaded queue, the rail); server
+  `pinFixesAtScale.int.test.js` (incl. the extent), `pinFixes.int.test.js`, `pinWire.int.test.js`,
+  `placeholderPinWriters.int.test.js`.
 
 ### Shared map spots on every map (placeholder pins, release 2)
 

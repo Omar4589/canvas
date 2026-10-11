@@ -8,10 +8,13 @@ import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { classifyStackedPins } from '../../utils/stackedPins.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
-import { homeKeyOf } from '../../utils/streetName.js';
+import { homeKeyOf, baseFamily, streetOfBase } from '../../utils/streetName.js';
+import { fileCoordRefusal } from '../../utils/stateBounds.js';
+import { buildCohorts, isCohortOutlier } from '../../utils/pinCohorts.js';
 import { resolve as geocodeResolve, geocodeCacheKey } from '../import/geocode/geocodeService.js';
 import { geocodeBatch as geocodioBatch } from '../import/geocode/geocodioProvider.js';
-import { stackPolicy, zipOfMatched } from './pinTrust.js';
+import { lookupPolicy, pinClass, answerClass, zipOfMatched, cityOfMatched } from './pinTrust.js';
+import { isPinUnplaced } from './pinState.js';
 import { recomputePassTerritories } from '../turf/generateTurf.js';
 
 // Homes a voter-file vendor stamped with one shared coordinate (it couldn't place them, so it gave
@@ -20,13 +23,25 @@ import { recomputePassTerritories } from '../turf/generateTurf.js';
 // (importProcessor.js), after recomputeHouseholdActive. Release 1 of docs/PROPOSAL_PLACEHOLDER_PINS.md
 // — see docs/PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md for what is built and what waits.
 //
-// The order: lease → load → classify → sort → marks → look up → gate → write → outlines → tally.
+// The order: lease → load → classify → 2b far → marks → look up → gate → write → outlines → tally.
+//
+// The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S6) adds, in this file:
+//   · a holding spot ('holding', pinSuspect 'unlocated') and a refused file coordinate (0,0) are class 0 —
+//     any trusted answer beats them; neither is ever evidence of where a street is;
+//   · step 2b marks 'far' — a door far from its street's (or its ZIP's) other homes — RECOMPUTED every pass
+//     from the cohort, never sticky; a spot verdict outranks it;
+//   · the precedence ladder: a stored 'unlocated' or 'complex', or a set-aside door, keeps its kind whatever
+//     its spot's verdict; a person's move or vouch beats everything;
+//   · the gate is pinTrust.js's lookupPolicy: one answer ladder, and condo COMPLEXES (several addresses whose
+//     exact answers are one point) recognised instead of refused;
+//   · same-street-address comparisons use baseFamily, so "533 Black Rock Tpke 3" is the same address as
+//     "533 Black Rock Tpke".
 //   · The whole campaign is classified and marked; only THIS file's homes are looked up (and paid for).
 //   · A spot is judged by its HOMES, not its door records (homeKeyOf): two records of one home — a
 //     re-spelled address, a unit moved between line 1 and line 2 — count once, an emptied door votes as
 //     if it were still occupied, and a home that was moved off the spot leaves a departure there that
 //     never votes and proves its street address wrong on that spot. See the reference §E step 1.
-//   · Nothing is placed on suspicion: pinTrust.js's stackPolicy is the gate, and a home it can't place
+//   · Nothing is placed on suspicion: pinTrust.js's lookupPolicy is the gate, and a home it can't place
 //     stays where it is, flagged, for a person in Pin Fixes.
 //   · Idempotent: a retry re-runs from the start, the probed-id ledger stops it paying twice, and a
 //     placed door is never a candidate again.
@@ -58,7 +73,23 @@ const keyOfCoords = (c) => buildingKeyForCoords(c);
 const baseOf = (hk) => hk.slice(0, hk.indexOf('|'));
 const humanOwned = (d) => d.cs === 'corrected' || !!d.conf;
 const placedByLookup = (d) => d.pp?.by === 'lookup' && !d.pp.rel && d.cs === 'geocodio';
-const fileish = (d) => d.cs === 'file' || d.cs == null;
+// 'holding' is a Doorline-derived spot for a home the lookup couldn't find: like a file pin, it may be
+// looked up again; unlike one, it is never evidence of where its street is (see step 2b).
+const fileish = (d) => d.cs === 'file' || d.cs == null || d.cs === 'holding';
+// Same-street-address family (memoised: the pass compares the same few thousand addresses many times).
+const famMemo = new Map();
+const famOf = (hk) => {
+  const base = baseOf(hk);
+  let f = famMemo.get(base);
+  if (f === undefined) {
+    f = baseFamily(base);
+    if (famMemo.size > 200000) famMemo.clear();
+    famMemo.set(base, f);
+  }
+  return f;
+};
+// A pin flag that came from the spot's verdict. 'far' never does: it is the cohort's, recomputed in step 2b.
+const spotFlag = (v) => (v && v !== 'far' ? v : null);
 
 // The compact record each loaded door is kept as (a 250k-door campaign must fit beside the import).
 const compact = (h, inScope) => {
@@ -84,6 +115,12 @@ const compact = (h, inScope) => {
     pp,
     dk: h.pinDistrustedKeys?.length ? h.pinDistrustedKeys : null,
     inScope,
+    z5: String(h.zipCode ?? '').trim().slice(0, 5),
+    cc: h.coordConfidence || null,
+    sa: !!h.pinSetAside?.at,
+    ck: h.pinComplexKey || null,
+    // A refused coordinate (0,0, or outside the home's state): class 0, and never cohort evidence.
+    off: Array.isArray(loc) && loc.length === 2 ? !!fileCoordRefusal({ lat: loc[1], lng: loc[0], state: h.state }) : false,
   };
 };
 
@@ -96,7 +133,7 @@ const judge = (key, g) => {
   const homes = new Map();
   const homeFor = (hk) => {
     let h = homes.get(hk);
-    if (!h) homes.set(hk, (h = { hk, base: baseOf(hk), active: [], inactive: [], departures: 0 }));
+    if (!h) homes.set(hk, (h = { hk, base: famOf(hk), active: [], inactive: [], departures: 0 }));
     return h;
   };
   for (const d of g.active) homeFor(d.hk).active.push(d);
@@ -154,12 +191,17 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
     pinsPlacedExact: 0,
     pinsConfirmedInPlace: 0,
     pinsStillUnplaced: 0,
+    pinsPlacedApprox: 0,
+    pinsComplex: 0,
+    pinsUnlocated: 0,
+    pinsFarMarked: 0,
     pinLookupsCached: 0,
     pinLookupsOverCap: 0,
     pinPassError: null,
     pinPassCause: null,
     marked: 0,
     placed: 0,
+    complexMarked: 0,
     reverted: 0,
   };
 
@@ -198,6 +240,7 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
     const projection = {
       location: 1, addressLine1: 1, addressLine2: 1, normalizedAddress: 1, coordSource: 1,
       locationConfirmedAt: 1, pinSuspect: 1, pinPlacement: 1, pinDistrustedKeys: 1,
+      zipCode: 1, state: 1, coordConfidence: 1, pinSetAside: 1, pinComplexKey: 1,
     };
     const addDeparture = (d) => {
       // An in-place placement's `from` is the verified house, never a departure; nor is a `from` the
@@ -227,12 +270,32 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
       const f = judge(k, g);
       facts.set(k, { size: f.size });
       const propagate = [];
+      // A spot that already holds a condo complex (its members carry pinComplexKey === this key).
+      const complexHere = g.active.some((m) => m.ps === 'complex' && m.ck === k);
       for (const d of g.active) {
         const h = f.homes.get(d.hk);
+        // The precedence ladder's first rules: a set-aside door keeps whatever kind it had and is never
+        // looked up; a stored 'unlocated' (a holding spot is a 'placeholder' by shape) or 'complex' keeps
+        // its kind whatever the spot's verdict.
+        if (d.sa) {
+          next.set(d.id, { ps: d.ps, candidate: false });
+          continue;
+        }
+        if (d.ps === 'unlocated' || d.ps === 'complex') {
+          next.set(d.id, { ps: d.ps, candidate: !humanOwned(d) && d.inScope });
+          continue;
+        }
+        // A home the IMPORT geocoded (no file coordinate, or a refused one) whose exact answer for its own
+        // address is this complex's point joins the complex: import-time geocoding never reaches the gate's
+        // join rule, so without this it would read as a different address collapsed onto the spot.
+        if (complexHere && !humanOwned(d) && !placedByLookup(d) && d.cs === 'geocodio' && d.cc === 'exact') {
+          next.set(d.id, { ps: 'complex', ck: k, candidate: false });
+          continue;
+        }
         // A re-keyed door inherits its old door's mark: an inactive record of the same home on this spot
-        // that carries an effective flag.
-        const twin = !d.ps && !humanOwned(d) && !placedByLookup(d) ? h.inactive.find((t) => t.ps && !humanOwned(t)) : null;
-        const stored = d.ps || twin?.ps || null;
+        // that carries an effective flag. 'far' is never a stored spot flag (step 2b owns it).
+        const twin = !d.ps && !humanOwned(d) && !placedByLookup(d) ? h.inactive.find((t) => spotFlag(t.ps) && !humanOwned(t)) : null;
+        const stored = spotFlag(d.ps) || spotFlag(twin?.ps) || null;
         let ps = d.ps;
         let candidate = false;
         if (placedByLookup(d)) ps = null; // never flagged; only the gate can revert it
@@ -257,10 +320,38 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
       // building is flagged with it — but never a unit the lookup placed, or one a person owns.
       for (const [base, kind] of propagate) {
         for (const d of g.active) {
-          if (baseOf(d.hk) !== base || humanOwned(d) || placedByLookup(d)) continue;
+          if (famOf(d.hk) !== base || humanOwned(d) || placedByLookup(d) || d.sa) continue;
           const n = next.get(d.id);
           if (!n.ps) next.set(d.id, { ps: kind, candidate: fileish(d) });
         }
+      }
+    }
+
+    // 2b. Far: a door far from the other homes on its street (or, on a street too short to judge, in its
+    // ZIP) — the repair script's old street-outlier signal, on every pass. Cohorts are built ONCE, from every
+    // door whose pin is evidence of where its street is (not a shared spot, not a holding spot, not a refused
+    // coordinate), and also serve the gate's estimate test (cohortFor). Only a file pin nobody owns, with no
+    // spot verdict this pass, may be marked; a door marked 'far' before that is no longer an outlier is
+    // cleared — 'far' is the cohort's opinion now, never a sticky flag.
+    const effectivePs = (d) => (next.has(d.id) ? next.get(d.id).ps : d.ps);
+    const NOT_EVIDENCE = new Set(['placeholder', 'stray', 'unlocated']);
+    const pointOf = (d) => ({ id: d.id, lat: d.loc[1], lng: d.loc[0], street: streetOfBase(famOf(d.hk)), zip5: d.z5, spotKey: d.k });
+    const evidence = [];
+    for (const d of activeById.values()) {
+      if (d.off || d.cs === 'holding' || NOT_EVIDENCE.has(effectivePs(d))) continue;
+      evidence.push(pointOf(d));
+    }
+    const cohorts = buildCohorts(evidence, { zipFallback: true });
+    for (const d of activeById.values()) {
+      if (!fileish(d) || d.cs === 'holding' || humanOwned(d) || placedByLookup(d) || d.sa || d.off) continue;
+      const ps = effectivePs(d);
+      if (ps && ps !== 'far') continue; // a spot verdict wins over the cohort
+      const pt = pointOf(d);
+      if (isCohortOutlier(pt, cohorts.summaryFor(pt))) {
+        next.set(d.id, { ps: 'far', candidate: d.inScope });
+        if (d.ps !== 'far') out.pinsFarMarked += 1;
+      } else if (d.ps === 'far') {
+        next.set(d.id, { ps: null, candidate: false });
       }
     }
 
@@ -273,7 +364,9 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
       markOps.push({
         updateOne: {
           filter: { _id: id, 'location.coordinates': d.loc, coordSource: d.cs, locationConfirmedAt: d.conf },
-          update: n.ps ? { $set: { pinSuspect: n.ps } } : { $unset: { pinSuspect: 1 } },
+          update: n.ps
+            ? { $set: { pinSuspect: n.ps, ...(n.ps === 'complex' && n.ck ? { pinComplexKey: n.ck } : {}) } }
+            : { $unset: { pinSuspect: 1 } },
         },
       });
     }
@@ -357,9 +450,12 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
             lng: p.longitude,
             accuracyType: p.geocodeAccuracyType ?? null,
             matchedZip: zipOfMatched(p.geocodeMatchedAddress),
+            matchedCity: cityOfMatched(p.geocodeMatchedAddress),
+            accuracy: p.geocodeAccuracy ?? null,
             cacheKey: geocodeCacheKey(p),
             zipCode: p.zipCode,
             state: p.state,
+            city: p.city,
           });
         }
       }
@@ -378,45 +474,107 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
         .filter((d) => answers.has(d.id))
         .map((d) => {
           const a = answers.get(d.id);
-          return { id: d.id, key: d.k, base: baseOf(d.hk), zipCode: a.zipCode, state: a.state, distrusted: d.dk || [] };
+          return {
+            id: d.id,
+            key: d.k,
+            base: baseOf(d.hk),
+            fam: famOf(d.hk),
+            zipCode: a.zipCode,
+            state: a.state,
+            city: a.city,
+            distrusted: d.dk || [],
+            pinClass: pinClass({ pinSuspect: effectivePs(d), coordSource: d.cs, off: d.off }),
+            loc: d.loc,
+            street: streetOfBase(famOf(d.hk)),
+            zip5: d.z5,
+          };
         });
       const doorsOnKey = (k) =>
         (byKey.get(k)?.active || []).map((d) => {
           const n = next.get(d.id);
-          return { id: d.id, base: baseOf(d.hk), placed: placedByLookup(d), candidate: !!(n?.candidate && n.ps && !d.conf) };
+          return {
+            id: d.id,
+            base: baseOf(d.hk),
+            fam: famOf(d.hk),
+            placed: placedByLookup(d),
+            candidate: !!(n?.candidate && n.ps && !d.conf),
+            complex: effectivePs(d) === 'complex',
+          };
         });
-      const { place, distrust, revert } = stackPolicy({ cands, answers, doorsOnKey });
+      const cohortFor = (c) => cohorts.summaryFor({ street: c.street, zip5: c.zip5 });
+      const { place, complex, distrust, revert } = lookupPolicy({ cands, answers, doorsOnKey, cohortFor });
       const now = new Date();
       const ops = [];
       for (const p of place) {
         const d = activeById.get(p.id);
         const a = answers.get(p.id);
+        // A far door confirmed within 250 m keeps its own pin (the answer only vouches for it); every other
+        // placement writes the answer's point (an in-place one is the same spot to ~1.1 m).
+        const to = p.near ? d.loc : [a.lng, a.lat];
         ops.push({
           op: {
             updateOne: {
               filter: { _id: d.id, 'location.coordinates': d.loc, coordSource: d.cs, locationConfirmedAt: null },
               update: {
                 $set: {
-                  location: { type: 'Point', coordinates: [a.lng, a.lat] },
+                  location: { type: 'Point', coordinates: to },
                   coordSource: 'geocodio',
-                  coordConfidence: 'exact',
+                  coordConfidence: answerClass(a) === 'exact' ? 'exact' : 'interpolated',
                   pinPlacement: {
                     from: d.loc,
-                    to: [a.lng, a.lat],
+                    to,
                     at: now,
                     kind: next.get(d.id).ps,
                     by: 'lookup',
+                    answer: answerClass(a),
                     accuracyType: a.accuracyType,
                     stackSize: Math.max(0, (facts.get(d.k)?.size || 1) - 1),
                   },
                 },
-                $unset: { pinSuspect: 1 },
+                $unset: { pinSuspect: 1, pinComplexKey: 1 },
               },
             },
           },
           id: d.id,
           movedId: p.inPlace ? null : d.id,
           kind: 'place',
+        });
+      }
+      // Complexes: the members converge on the exact point (change #8). A member already there and already
+      // marked is a no-op re-judge and gets no write — rewriting its placement on every re-import would
+      // erase the vendor-spot departure its `from` records.
+      for (const m of complex) {
+        const d = activeById.get(m.id);
+        const a = answers.get(m.id);
+        if (!m.moveTo && d.ps === 'complex' && d.ck === m.key) continue;
+        const to = m.moveTo ? [a.lng, a.lat] : d.loc;
+        ops.push({
+          op: {
+            updateOne: {
+              filter: { _id: d.id, 'location.coordinates': d.loc, coordSource: d.cs, locationConfirmedAt: null },
+              update: {
+                $set: {
+                  pinSuspect: 'complex',
+                  pinComplexKey: m.key,
+                  pinPlacement: {
+                    from: d.loc,
+                    to,
+                    at: now,
+                    kind: next.get(d.id).ps,
+                    by: 'lookup',
+                    answer: 'exact',
+                    accuracyType: a.accuracyType,
+                    stackSize: Math.max(0, (facts.get(d.k)?.size || 1) - 1),
+                  },
+                  // A member that leaves its spot is a geocoded door, never a holding-spot one.
+                  ...(m.moveTo ? { location: { type: 'Point', coordinates: to }, coordSource: 'geocodio', coordConfidence: 'exact' } : {}),
+                },
+              },
+            },
+          },
+          id: d.id,
+          movedId: m.moveTo ? d.id : null,
+          kind: 'complex',
         });
       }
       for (const [id, key] of revert) {
@@ -429,7 +587,9 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
               update: {
                 $set: {
                   location: { type: 'Point', coordinates: d.pp.from },
-                  coordSource: 'file',
+                  // A parked home the lookup placed goes back to its holding spot AS a holding-spot door, so
+                  // the importer's "the geocoder filled it" rule never swallows its next successful geocode.
+                  coordSource: d.pp.kind === 'unlocated' ? 'holding' : 'file',
                   coordConfidence: null,
                   pinSuspect: d.pp.kind || 'placeholder',
                   'pinPlacement.releasedAt': now,
@@ -469,9 +629,10 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
         for (const h of docs) {
           const b = byId.get(String(h._id));
           const landed =
-            b.kind === 'place' ? +h.pinPlacement?.at === +now : +h.pinPlacement?.releasedAt === +now;
+            b.kind === 'revert' ? +h.pinPlacement?.releasedAt === +now : +h.pinPlacement?.at === +now;
           if (!landed) continue;
           if (b.kind === 'place') out.placed += 1;
+          else if (b.kind === 'complex') out.complexMarked += 1;
           else out.reverted += 1;
           if (b.movedId) moved.add(b.movedId);
         }
@@ -507,14 +668,26 @@ export async function placeStackedPins({ campaign, importJob, paidScope, tallyId
     for (let i = 0; i < ids.length; i += ID_CHUNK) {
       const docs = await Household.find(
         { _id: { $in: ids.slice(i, i + ID_CHUNK) } },
-        { coordSource: 1, pinSuspect: 1, locationConfirmedAt: 1, pinPlacement: 1 }
+        { coordSource: 1, coordConfidence: 1, pinSuspect: 1, locationConfirmedAt: 1, pinPlacement: 1 }
       ).lean();
       for (const h of docs) {
         const pl = h.pinPlacement;
+        // A complex member first: a moved member is also lookup-placed and must not count as placed again.
+        if (h.pinSuspect === 'complex' && !h.locationConfirmedAt) {
+          out.pinsComplex += 1;
+          continue;
+        }
         if (pl?.by === 'lookup' && !pl.releasedAt && h.coordSource === 'geocodio' && pl.at && new Date(pl.at) >= since) {
-          if (keyOfCoords(pl.from) === keyOfCoords(pl.to)) out.pinsConfirmedInPlace += 1;
+          // An estimate (in place or not) sits in the approximate queue, so the line says "check them".
+          if (h.coordConfidence === 'interpolated') out.pinsPlacedApprox += 1;
+          else if (keyOfCoords(pl.from) === keyOfCoords(pl.to)) out.pinsConfirmedInPlace += 1;
           else out.pinsPlacedExact += 1;
-        } else if (h.pinSuspect && !h.locationConfirmedAt) out.pinsStillUnplaced += 1;
+          continue;
+        }
+        if (isPinUnplaced(h)) {
+          out.pinsStillUnplaced += 1;
+          if (h.pinSuspect === 'unlocated') out.pinsUnlocated += 1;
+        }
       }
     }
     return out;

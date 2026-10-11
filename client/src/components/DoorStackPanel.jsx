@@ -52,9 +52,17 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, o
   // The flags decide (lib/buildings.js stackKind); multiStreet stays the fallback for a stack whose doors
   // carry no flags at all — a campaign imported before the address lookup existed.
   const kind = near ? 'near' : stackKind(doors);
-  const groups = useMemo(() => (kind === 'unplaced' ? addressGroups(doors) : null), [kind, doors]);
+  // 'complex' (the pin-fixes build): a condo complex — separate homes like 'unplaced', but its spot is right.
+  const homesKind = kind === 'unplaced' || kind === 'complex';
+  const groups = useMemo(() => (homesKind ? addressGroups(doors) : null), [homesKind, doors]);
   const heading =
-    kind === 'near' ? `${doors.length} doors near here` : kind === 'unplaced' ? `${doors.length} homes at one map spot` : title;
+    kind === 'near'
+      ? `${doors.length} doors near here`
+      : kind === 'complex'
+        ? `${doors.length} homes at a complex`
+        : kind === 'unplaced'
+          ? `${doors.length} homes at one map spot`
+          : title;
 
   const sorted = useMemo(
     () => [...doors].sort((a, b) => unitLabel(a).localeCompare(unitLabel(b), undefined, { numeric: true })),
@@ -80,7 +88,7 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, o
           {d.lastActionAt ? ` · ${formatInTz(d.lastActionAt, tz, { month: 'numeric', day: 'numeric' })}` : ''}
         </span>
       </button>
-      {kind === 'unplaced' && onMovePin && (
+      {homesKind && onMovePin && (
         <button
           type="button"
           onClick={() => onMovePin(d)}
@@ -105,7 +113,7 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, o
           </div>
           <div className="mt-1 text-xs text-fg-muted">
             <strong className="tabular-nums text-fg">{doors.length.toLocaleString()}</strong>{' '}
-            {kind === 'near' ? 'doors' : kind === 'unplaced' ? 'homes share this spot' : 'doors share this pin'} ·{' '}
+            {kind === 'near' ? 'doors' : homesKind ? 'homes share this spot' : 'doors share this pin'} ·{' '}
             <span className="tabular-nums">{worked.toLocaleString()}</span> worked
           </div>
         </div>
@@ -121,6 +129,11 @@ export default function DoorStackPanel({ doors, selectedId, onSelect, onClose, o
       {kind === 'near' ? (
         <p className="border-b border-border bg-sunken px-4 py-2 text-[11px] leading-snug text-fg-muted">
           These doors sit close together on the map. Pick one to open it.
+        </p>
+      ) : kind === 'complex' ? (
+        <p className="border-b border-border bg-sunken px-4 py-2 text-[11px] leading-snug text-fg-muted">
+          A complex: the file and the address lookup agree these homes share this spot. Each home has its own
+          Directions on the phone; <strong>Move pin</strong> puts one on its own building if you want it there.
         </p>
       ) : kind === 'unplaced' ? (
         <p className="border-b border-warning/30 bg-warning-tint px-4 py-2 text-[11px] leading-snug text-warning-fg">

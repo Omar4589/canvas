@@ -49,6 +49,8 @@ Reviewing records a decision — it never deletes the entry or changes any repor
 
 **A wrong pin is forgiven the same way.** Some pins are looked up from the address and land a house or two off, so a canvasser who walked to the real door still gets flagged — and the flag used to stick forever, because the distance is measured once, when the door is recorded. Now, if the pin is **corrected after** the fact and the entry turns out to sit right beside the corrected spot, the flag drops to **low** and shows both distances. It can only ever lower a flag, never raise one. And if the person who moved the pin is the same person who recorded the door, it stays at full severity and says so — nobody grades their own work. (Only leads and admins can move pins; see [Fixing a house pin](fix-pin-location).)
 
+**Two pins are allowed for automatically.** A door recorded while its pin was an **estimate nobody had checked yet** (an *Approximate location* placed by the address lookup) reads **low** on Far, with *"Recorded at an estimated pin — counted as low severity until a lead checks the pin."* — the canvasser may have walked to the real house a few doors down. And a door in a **condo complex** is measured against the complex's one spot: within about **1,000 ft** it isn't far at all; beyond that it reads **low**, with *"Recorded at a complex; the pin is the complex, not the door."* Both are decided by the pin as it was when the door was recorded, so confirming or moving the pin later doesn't change them. Both count in each canvasser's **forgiven by pin** number.
+
 > Tip: The **flagged** count means *still open* — as you review, dismiss, or confirm flags, that number drops, so you can work a day's flags down to zero.
 
 ## Clearing a backlog: review many at once

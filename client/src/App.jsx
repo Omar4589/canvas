@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import ReauthModal from './components/ReauthModal.jsx';
 import RoleGate from './components/RoleGate.jsx';
 import Layout from './components/Layout.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -100,6 +101,9 @@ function LegacyPassesRedirect() {
 export default function App() {
   return (
     <Suspense fallback={<PageFallback />}>
+      {/* The password, in place, over any page (select-org and change-password included) when a
+          sign-in runs out. See components/ReauthModal.jsx. */}
+      <ReauthModal />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />

@@ -8,7 +8,7 @@ import { columnSamples, sampleWarning } from '../lib/columnSamples.js';
 import { zeroGateText } from '../lib/idListPreview.js';
 import RowMenu from '../components/RowMenu.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
-import { importPinLine, isCheckingPins, PINS_STAGE_LABEL } from '../lib/importPins.js';
+import { importPinLine, isCheckingPins, PINS_STAGE_LABEL, isPinLookupJob, pinLookupLabel } from '../lib/importPins.js';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // server-enforced upload cap
 // Previews always run on the worker (enqueued + polled) — the old 15 MB sync/async
@@ -271,6 +271,49 @@ function ReviewPanel({ diff }) {
                   : 'homes sit on an apartment building’s or park’s spot but have a different address.'}
               </div>
             )}
+          </SampleList>
+        )}
+        {/* The pin-fixes build's four counts (finish() in csvImporter.js; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md
+            S10.7). A refused coordinate (0,0, or outside the address's state) counts as none: the home is looked
+            up, or parked at its ZIP's holding spot — never dropped, never placed there. Far pins are the cohort
+            rule over this file's placed homes. Nothing here is skipped. */}
+        {(rowIssues.offWorldDoors || 0) > 0 && (
+          <SampleList title="Homes with no location in the file (0,0)" count={rowIssues.offWorldDoors}>
+            <div>
+              The file gives these homes 0,0, a spot in the ocean off Africa, so Doorline ignores it.{' '}
+              {diff.geocoding?.enabled
+                ? 'It places them by address instead. Any it can’t find are kept at a holding spot in their ZIP and listed in Pin Fixes.'
+                : 'Address lookups are off, so they’re kept at a holding spot in their ZIP and listed in Pin Fixes.'}
+            </div>
+          </SampleList>
+        )}
+        {(rowIssues.outsideStateDoors || 0) > 0 && (
+          <SampleList title="Homes whose coordinate is outside their state" count={rowIssues.outsideStateDoors}>
+            <div>
+              The file’s coordinate for these homes is outside the state in their address, so Doorline ignores it.{' '}
+              {diff.geocoding?.enabled
+                ? 'It places them by address instead. Any it can’t find are kept at a holding spot in their ZIP and listed in Pin Fixes.'
+                : 'Address lookups are off, so they’re kept at a holding spot in their ZIP and listed in Pin Fixes.'}
+            </div>
+          </SampleList>
+        )}
+        {(rowIssues.farPinDoors || 0) > 0 && (
+          <SampleList title="Homes pinned far from their street" count={rowIssues.farPinDoors}>
+            <div>
+              Each of these pins sits far from the rest of its street.{' '}
+              {diff.geocoding?.enabled
+                ? 'After import, Doorline looks each one up by its address. A lookup that finds the house moves the pin there, or clears the flag when the pin was right. Any it can’t settle are listed in Pin Fixes.'
+                : 'Doorline flags them, and they’re listed in Pin Fixes.'}
+            </div>
+          </SampleList>
+        )}
+        {(rowIssues.unlocatableDoors || 0) > 0 && (
+          <SampleList title="Homes with no street address" count={rowIssues.unlocatableDoors}>
+            <div>
+              These homes have no house number, or their ZIP is 00000, so the address lookup can’t place them. They keep
+              the file’s pin when it has a usable one. Otherwise they’re kept at a holding spot in their ZIP and listed in
+              Pin Fixes, where you can place them by hand or set them aside.
+            </div>
           </SampleList>
         )}
       </div>
@@ -546,9 +589,12 @@ export default function ImportPage() {
     queryFn: () => api('/admin/imports/profiles'),
   });
 
+  // includeLookups: this list also shows Pin Fixes' Look up by address runs (the Exports page's picker,
+  // which reads the same endpoint, does not) — so its own key, under the ['imports', campaignId] prefix
+  // every invalidation already names.
   const { data, isLoading } = useQuery({
-    queryKey: ['imports', campaignId],
-    queryFn: () => api(`/admin/imports?campaignId=${campaignId}`),
+    queryKey: ['imports', campaignId, 'with-lookups'],
+    queryFn: () => api(`/admin/imports?campaignId=${campaignId}&includeLookups=1`),
     refetchInterval: (q) => {
       const jobs = q.state.data?.jobs || [];
       return jobs.some((j) => ACTIVE_STATUSES.includes(j.status)) ? 1500 : false;
@@ -1169,11 +1215,11 @@ export default function ImportPage() {
                 <tr key={j._id} className="border-t border-border">
                   <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                   <td className="px-4 py-2">
-                    {j.filename || '—'}
+                    {isPinLookupJob(j) ? pinLookupLabel(j) : j.filename || '—'}
                     {(j.geocodedNew > 0 || j.geocodedCached > 0 || j.geocodeUnmatched > 0) && (
                       <div className="text-xs text-fg-subtle">
                         geocoded {fmt((j.geocodedNew || 0) + (j.geocodedCached || 0))}
-                        {j.geocodeUnmatched > 0 ? ` · ${fmt(j.geocodeUnmatched)} unplaced` : ''}
+                        {j.geocodeUnmatched > 0 ? ` · ${fmt(j.geocodeUnmatched)} not found by address` : ''}
                         {j.geocodeFailed > 0 ? ` · ${fmt(j.geocodeFailed)} retry` : ''}
                       </div>
                     )}
@@ -1232,7 +1278,9 @@ export default function ImportPage() {
                   <td className="px-4 py-2 text-right">{fmt(j.movedVoters)} / {fmt(j.deactivatedDoors)}</td>
                   <td className="px-4 py-2 text-right">{fmt(j.errorCount)}</td>
                   <td className="px-4 py-2 text-right">
-                    {j.status === 'completed' && !j.undone ? (
+                    {/* A Pin Fixes lookup inserted nothing: no menu — no new homes to view, nothing to undo
+                        (the server refuses an undo too). */}
+                    {j.status === 'completed' && !j.undone && !isPinLookupJob(j) ? (
                       <RowMenu
                         items={[
                           ...(j.campaignId?._id ? [{ label: 'View on map', onClick: () => navigate(`/campaigns/${j.campaignId._id}/map?importId=${j._id}`) }] : []),

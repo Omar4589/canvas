@@ -138,12 +138,15 @@ test('a majority of rows outvotes row order — the fix for first-row-wins', () 
   assert.ok(!d.coordConflict);
 });
 
-test('an out-of-state candidate loses to an in-state one even at 1-1', () => {
+// Rewritten by the pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.7): an out-of-state file
+// coordinate is now refused before the vote, so there is no candidate to lose — the in-state row fills.
+test('an out-of-state coordinate is refused before the vote; the in-state row fills; no conflict is recorded', () => {
   // Colorado coordinates on a Florida address — the gross case a state check catches.
   const r = validateRows([coordRow('A', 39.7, -104.9), coordRow('B', 26.1, -80.2)], MAPPING, HEADERS);
-  assert.equal(r.coordConflicts, 1);
+  assert.equal(r.coordConflicts, 0);
   assert.equal(r.coordConflictTies, 0);
   assert.equal(onlyDoor(r).latitude, 26.1);
+  assert.equal(onlyDoor(r).coordRefused, null, 'the real row cleared the refusal');
 });
 
 test('a genuine tie keeps the first pin and is RECORDED, never nulled', () => {
@@ -589,4 +592,61 @@ test('explodeRow emits member 1 as-is and skips empty-ID members', () => {
   assert.equal(rows[0], row); // member 1 is the raw row object itself
   assert.equal(rows[1].ID1, 'C');
   assert.equal(rows[1].FN1, 'Cy');
+});
+
+// ── Refused file coordinates and the new preview counts (the pin-fixes build, S4.7) ───────────────
+const withEnv = (value, fn) => {
+  const prev = process.env.GEOCODE_ENABLED;
+  if (value == null) delete process.env.GEOCODE_ENABLED;
+  else process.env.GEOCODE_ENABLED = value;
+  try { return fn(); } finally {
+    if (prev == null) delete process.env.GEOCODE_ENABLED;
+    else process.env.GEOCODE_ENABLED = prev;
+  }
+};
+
+test('a 0,0 row survives the validator in both modes, with no coordinate and the refusal recorded', () => {
+  for (const mode of [null, 'true']) {
+    withEnv(mode, () => {
+      const r = validateRows([coordRow('A', 0, 0)], MAPPING, HEADERS);
+      assert.equal(r.errors.length, 0, `lookups ${mode ?? 'off'}`);
+      const d = onlyDoor(r);
+      assert.equal(d.latitude, null);
+      assert.equal(d.coordRefused, 'offworld');
+      assert.equal(r.offWorldDoors, 1);
+    });
+  }
+});
+
+test('a lat/lng swap is refused as outside the state; malformed coordinates are still bad_coords', () => {
+  const swapped = validateRows([coordRow('A', -80.2, 26.1)], MAPPING, HEADERS);
+  assert.equal(onlyDoor(swapped).coordRefused, 'outside_state');
+  assert.equal(swapped.outsideStateDoors, 1);
+  const bad = validateRows([{ ...coordRow('A', 0, 0), LAT: 'abc', LNG: 'def' }], MAPPING, HEADERS);
+  assert.equal(bad.errors[0].code, 'bad_coords');
+  assert.equal(bad.householdMap.size, 0);
+});
+
+test('every source row is still accounted for with refused rows in the file', () => {
+  const r = validateRows([coordRow('A', 0, 0), coordRow('B', 26.1, -80.2), { ...coordRow('C', 0, 0), ADDR: '9 Elm St', LAT: 'x', LNG: 'y' }], MAPPING, HEADERS);
+  assert.equal(r.validCount + r.errors.length + r.dupRows, r.totalRows);
+});
+
+test('far, unlocatable and bare-unit pairs in the preview counts', () => {
+  const st = (id, addr, lat, lng, zip = '33935') => ({ ...at(id, addr, lat, lng), ZIP: zip });
+  const rows = [
+    // Six homes ~80 m apart on Elm St, and one Elm St home 60 km away.
+    ...[0, 1, 2, 3, 4, 5].map((i) => st(`E${i}`, `${10 + i * 2} Elm St`, 26.76 + i * 0.0007, -81.45)),
+    st('EF', '99 Elm St', 27.3, -81.0),
+    // No street address to look up.
+    st('U1', 'Fairfield University No Know', 26.761, -81.451),
+    st('U2', '5 Oak St', 26.77, -81.46, '00000'),
+    // One house written two ways on one spot: one address, so not a placeholder.
+    st('P1', '533 Black Rock Tpke', 26.762, -81.452),
+    st('P2', '533 Black Rock Tpke 3', 26.762, -81.452),
+  ];
+  const r = validateRows(rows, MAPPING, HEADERS);
+  assert.equal(r.farPinDoors, 1);
+  assert.equal(r.unlocatableDoors, 2);
+  assert.equal(r.placeholderPinDoors, 0, 'the bare-unit pair is one address');
 });

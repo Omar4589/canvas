@@ -151,3 +151,25 @@ test('web and phone return identical text from every helper they share', () => {
     }
   }
 });
+
+// The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.7): the server's two knock-pin downgrades
+// print their own sentence on the web flag cards. The phone mirror follows with its next update, so only the
+// web side is pinned here.
+test('a far knock at an estimated pin or a complex prints its sentence, and nothing else does', () => {
+  const farRow = (detail) => ({ reasons: [{ type: 'far', severity: 'low', detail: { meters: 400, effectiveMeters: 390, ...detail } }] });
+  const estimated = farAssessment({ ...row(400, 10), knockPin: 'estimated' }, undefined);
+  const complex = farAssessment({ ...row(400, 10), knockPin: 'complex' }, undefined);
+  assert.strictEqual(estimated.detail.estimatedPin, true);
+  assert.strictEqual(complex.detail.complexPin, true);
+  assert.strictEqual(
+    web.knockPinText(farRow(estimated.detail)),
+    'Recorded at an estimated pin — counted as low severity until a lead checks the pin.'
+  );
+  assert.strictEqual(web.knockPinText(farRow(complex.detail)), 'Recorded at a complex; the pin is the complex, not the door.');
+  assert.strictEqual(web.isComplexKnock(farRow(complex.detail)), true);
+  assert.strictEqual(web.isComplexKnock(farRow(estimated.detail)), false);
+  assert.ok(web.farDowngradeLines(farRow(complex.detail)).includes('Recorded at a complex; the pin is the complex, not the door.'));
+  assert.strictEqual(web.knockPinText(farRow({})), null);
+  assert.deepStrictEqual(web.farDowngradeLines(farRow({})), []);
+  assert.strictEqual(farAssessment({ ...row(250, 10), knockPin: 'complex' }, undefined), null, 'a complex knock within ~1,000 ft is not far');
+});

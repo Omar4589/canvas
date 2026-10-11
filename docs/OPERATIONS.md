@@ -501,7 +501,9 @@ by itself after the deploy; do these in order:
 3. **Import the Nye file again** from the campaign's Import page. Its status reads **Checking map pins**
    while it works, and the line under the file then says how many homes were placed by address, how many
    were confirmed at their spot, and how many wait in Pin Fixes.
-4. **Leads work Pin Fixes** until it's empty for Nye.
+4. **Leads work Pin Fixes** until it's empty for Nye. Since Pin Fixes at scale (below), start with the cards
+   at the top: **Look up by address** on each card, **Start checking** the approximate pins, **Place along
+   the street** for the rest, and **Set aside** any home nobody can place.
 5. **Turf.** If **Remove apartments** was used on the round before this release, press **Re-include**, use
    Remove apartments again (it now takes only real apartments), then cut.
 
@@ -510,6 +512,45 @@ Nothing already placed is undone, and an address already looked up is answered f
 
 `PIN_PLACEMENT_MAX_HOMES` (config var, default 25,000) is the most homes one import will look up; any more
 stay marked in Pin Fixes, and importing the file again looks up the rest.
+
+### Release: Pin Fixes at scale (October 2026)
+
+Imports refuse coordinates that can't be real (0,0, outside the state) and catch pins far from their
+street; the lookup uses one answer rule everywhere and recognises condo complexes; homes nobody can place
+wait at a holding spot instead of being dropped; Pin Fixes groups its work by cause with **Look up by
+address**, **Place along the street** and **Set aside**; the cut leaves flagged homes out unless told
+otherwise ([IMPORTS.md](IMPORTS.md), [MAPS.md](MAPS.md), [PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
+Everything is additive: no new index, no client-version bump, no store build. In order:
+
+1. **Check two config vars** (Heroku dashboard → Settings → Reveal Config Vars): `GEOCODE_ENABLED` is
+   `true` and `GEOCODIO_API_KEY` is set. Optional: `PIN_INTERP_MIN_ACCURACY` (the confidence an estimate
+   needs to replace a shared or far pin; default 0.8 — step 4 measures it).
+2. **Deploy server and web from `main`**, outside field hours.
+3. **Run console — confirm there is nothing to build:**
+
+   ```
+   npm run migrate:build-indexes
+   ```
+
+   It is a dry run; it must report nothing new.
+4. **Run console — measure the estimates once** (about thirty cents of lookups; it looks up a sample of the
+   campaign's ordinary vendor pins and prints how far Geocodio's answers land from them, by answer type,
+   with the street estimates split at the confidence floor):
+
+   ```
+   npm run pins:measure-estimates -- --campaign=<campaignId> --sample=300
+   ```
+
+   If the 90th-percentile error at confidence 0.8 and above is over about 60 m (200 ft), set
+   `PIN_INTERP_MIN_ACCURACY` higher in the dashboard; otherwise leave the default.
+5. **In Pin Fixes, per campaign with a backlog:** **Look up by address** on the *Share one spot* card (the
+   complexes become one row each, and a 0,0 home with an answer leaves the ocean); that first lookup also
+   marks far homes campaign-wide, so click **Look up by address** on the *Pinned far* card next. Then **Start
+   checking** the approximate pins, **Place along the street** for what remains, **Set aside** the ones
+   nobody can place, and cut with **Leave out N homes without a reliable map spot** ticked.
+
+**If a lookup says another pin check is running or couldn't finish:** click **Look up by address** again in a
+minute. Marks stand, and an address already looked up is free.
 
 ### Release "Door counts to FbTime" — and the switch that stops it (October 2026)
 
@@ -822,6 +863,7 @@ fraud audit).
 | `npm run repair:import-pins -- --geocode` | Same, but lets unconfirmed suspects hit **Geocodio** (costs money; a cache-only dry run first prints exactly how many addresses it would pay for) |
 | `npm run repair:import-pins -- --verify-all --campaign=<id>` | **Full audit** — checks *every* imported pin against its own address, not just the four signals' suspects. The only way to catch a pin that is wrong but **self-consistent**: a real building placed on the wrong lot, or a street whose every door sits on one wrong spot (it *is* its own cohort). Requires a `--campaign`/`--org` scope |
 | `npm run repair:import-pins -- --apply --user=<userId>` | Commits the confirmed corrections. **`--user` is mandatory** — the audit row's `userId` is required, and without it a door would save and then fail its audit write |
+| `npm run pins:measure-estimates -- --campaign=<id> --sample=300` | **Costs lookups** (about thirty cents for 300; the price prints first; cached answers are free). Once per release of the answer ladder: looks up a seeded sample of the campaign's ordinary vendor pins (unflagged, unvouched) and prints, per answer type, the median and 90th-percentile distance from Geocodio's answer to the vendor's pin — for `range_interpolation`, also at or above the current floor and the share the street test would refuse — so `PIN_INTERP_MIN_ACCURACY` is set from data. Writes no household; new answers land in the shared address cache, as with `repair:import-pins` ([measureEstimates.js](../server/src/migrations/measureEstimates.js)) |
 | `npm run audit:stale-overwrites` | **Read-only, no `--apply` by design.** Survey responses overwritten by another canvasser, where the archived row's note would be lost by an automatic restore |
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
 | `npm run audit:voter-id-spellings` | **Read-only.** Per campaign: share of voter IDs starting with 0, ID widths (mixed widths = rows already lost zeros); per organization: one person stored under two spellings, the same person twice in one campaign, Person-directory keys that would collide once zeros are ignored, parked early-vote / do-not-contact IDs matching a voter only after ignoring zeros. `--org <slug>`, `--json`, `--samples N`. Rule in [`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js); test `auditVoterIdSpellings.int.test.js` runs it as a child process over the real script |

@@ -90,7 +90,7 @@ async function forecastPersons(validRows, uidSource, orgId) {
  * a person who exists only in a SIBLING campaign forecasts as a NEW voter here (their
  * row here will be an insert), and never as a move/orphan.
  */
-export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null, coordConflicts = 0, coordConflictTies = 0, placeholderPins = 0, placeholderPinDoors = 0, strayPinDoors = 0 }) {
+export async function computeImportDiff(campaign, { validRows, householdMap, errors = [], dupSvids, dupRows = 0, totalRows = 0, uidSource = null, coordConflicts = 0, coordConflictTies = 0, placeholderPins = 0, placeholderPinDoors = 0, strayPinDoors = 0, offWorldDoors = 0, outsideStateDoors = 0, farPinDoors = 0, unlocatableDoors = 0 }) {
   const campaignId = campaign._id;
   const orgId = campaign.organizationId;
 
@@ -306,6 +306,13 @@ export async function computeImportDiff(campaign, { validRows, householdMap, err
       placeholderPins,
       placeholderPinDoors,
       strayPinDoors,
+      // The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.4): file coordinates refused as
+      // 0,0 or outside their state (looked up or parked, never placed there), homes pinned far from their
+      // street, and homes with no street address to look up.
+      offWorldDoors,
+      outsideStateDoors,
+      farPinDoors,
+      unlocatableDoors,
     },
     samples: {
       moved,

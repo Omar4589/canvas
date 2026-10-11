@@ -2,6 +2,8 @@ import { GeocodeCache } from '../../../models/GeocodeCache.js';
 import { looseAddressKey } from '../../../utils/normalizeAddress.js';
 import { inStateBounds } from '../../../utils/stateBounds.js';
 import { geocodeBatch as geocodioBatch } from './geocodioProvider.js';
+import { GEOCODE_MIN_ACCURACY } from './geocodeFloors.js';
+import { answerClass, zipMatches, zipOfMatched, cityOfMatched } from '../../households/pinTrust.js';
 
 // Resolves missing-coordinate households to lat/long via Geocodio, cache-first.
 // Mutates each MATCHED household's { latitude, longitude, coordSource, coordConfidence }
@@ -15,14 +17,14 @@ const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 // platform request timeout, so the 180s ceiling is generous on purpose.
 const BATCH_SIZE = () => num(process.env.GEOCODE_BATCH_SIZE, 1000);
 const TIMEOUT_MS = () => num(process.env.GEOCODE_BATCH_TIMEOUT_MS, 180000);
-const MIN_ACCURACY = () => num(process.env.GEOCODE_MIN_ACCURACY, 0.5);
 const NEG_TTL_DAYS = () => num(process.env.GEOCODE_NEGCACHE_TTL_DAYS, 30);
 const NEG_MAX_ATTEMPTS = () => num(process.env.GEOCODE_NEGCACHE_MAX_ATTEMPTS, 4);
 
-// Accept rooftop/street-level matches; REJECT true centroids (place/county/state) — a
-// door pin must never be a city centroid.
-const ACCEPTED_TYPES = new Set(['rooftop', 'point', 'nearest_rooftop_match', 'range_interpolation', 'street_center']);
-const ROOFTOP_TYPES = new Set(['rooftop', 'point', 'nearest_rooftop_match']);
+// Which answers may place a door is one ladder, owned by services/households/pinTrust.js (answerClass):
+// rooftop/point are 'exact'; range_interpolation, street_center and nearest_rooftop_match (another,
+// nearby address's roof) are placed as 'interpolated' — "Approximate location", listed in Pin Fixes;
+// true centroids (place/county/state) never place a door. Since the pin-fixes build a
+// nearest_rooftop_match is no longer 'exact' (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S2).
 const UNIT_RE = /^(APT|UNIT|STE|SUITE|#|RM|ROOM|FL|FLOOR)\b/i;
 
 export function geocodeCacheKey(h) {
@@ -49,11 +51,22 @@ export function zipEligible(h) {
   return /^\d{5}$/.test(String(h.zipCode ?? '').trim().slice(0, 5));
 }
 
-function confidenceFor(accuracyType) {
-  if (ROOFTOP_TYPES.has(accuracyType)) return 'exact';
-  if (ACCEPTED_TYPES.has(accuracyType)) return 'interpolated';
-  return 'none';
+export function confidenceFor(accuracyType) {
+  const cls = answerClass({ accuracyType });
+  if (cls === 'exact') return 'exact';
+  if (cls === 'none') return 'none';
+  return 'interpolated';
 }
+
+// The answer's ZIP must be the address's, or the answer must be in the same city (a ZIP line running
+// down a road). An answer with no matched address skips the test here, as import-time placement always
+// did — the placement pass applies the strict form, where a missing matched ZIP refuses.
+const zipRefusal = (matchedAddress, h) => {
+  if (!matchedAddress) return null;
+  const matchedZip = zipOfMatched(matchedAddress);
+  if (zipMatches({ matchedZip, matchedCity: cityOfMatched(matchedAddress) }, h)) return null;
+  return `Matched in ZIP ${matchedZip || 'unknown'}, but the address says ${String(h.zipCode ?? '').trim().slice(0, 5) || 'none'}.`;
+};
 
 function staleUnmatched(entry) {
   if (!entry || entry.status !== 'unmatched') return false;
@@ -69,21 +82,44 @@ function addressString(h) {
   return [h.addressLine1, h.city, `${String(h.state || '').trim()} ${zip}`.trim()].filter(Boolean).join(', ');
 }
 
-// Apply the confidence + bounding-box gates to one provider result.
-function evaluate(r, h) {
+// Apply the confidence, bounding-box and ZIP gates to one provider result.
+export function evaluate(r, h) {
   if (!r || r.status !== 'matched' || r.lat == null || r.lng == null) {
     return { ok: false, code: 'geocode_no_match', detail: 'Address could not be located.' };
   }
-  if (!ACCEPTED_TYPES.has(r.accuracyType) || (r.accuracy != null && r.accuracy < MIN_ACCURACY())) {
+  if (answerClass(r) === 'none' || (r.accuracy != null && r.accuracy < GEOCODE_MIN_ACCURACY())) {
     return { ok: false, code: 'geocode_low_confidence', detail: `Best match was too imprecise (${r.accuracyType || 'unknown'}).` };
   }
   if (!inStateBounds(h.state, r.lat, r.lng)) {
     return { ok: false, code: 'geocode_out_of_bounds', detail: `Geocode landed outside ${String(h.state || '').toUpperCase()} — rejected.` };
   }
+  const wrongZip = zipRefusal(r.matchedAddress, h);
+  if (wrongZip) return { ok: false, code: 'geocode_wrong_zip', detail: wrongZip };
   return {
     ok: true, location: [r.lng, r.lat], confidence: confidenceFor(r.accuracyType),
     accuracyType: r.accuracyType, accuracy: r.accuracy, matchedAddress: r.matchedAddress,
   };
+}
+
+// Fill a household from a cached 'matched' answer — or refuse it. Returns null when filled, else the
+// refusal sentence (the cached answer fails today's ZIP rule). The confidence is recomputed from the
+// answer type, so a nearest_rooftop_match cached before the pin-fixes build fills as 'interpolated',
+// not the 'exact' it was stored with; a row without a type falls back to its stored confidence.
+// Evidence for callers that must decide whether this answer may OVERRULE an existing pin (the placement
+// pass, repair:import-pins): the raw accuracy type, score and matched address. The importer never
+// persists these — household docs pick fields explicitly.
+export function fillFrom(h, entry) {
+  const refusal = zipRefusal(entry.matchedAddress, h);
+  if (refusal) return refusal;
+  const [lng, lat] = entry.location.coordinates;
+  h.longitude = lng; h.latitude = lat;
+  h.coordSource = 'geocodio';
+  const confidence = entry.accuracyType ? confidenceFor(entry.accuracyType) : entry.confidence;
+  h.coordConfidence = confidence === 'none' ? null : confidence ?? null;
+  h.geocodeAccuracyType = entry.accuracyType ?? null;
+  h.geocodeMatchedAddress = entry.matchedAddress ?? null;
+  h.geocodeAccuracy = entry.accuracy ?? null;
+  return null;
 }
 
 // Build one cache upsert op; flushed in batches per geocode batch (vs. ~15k single writes).
@@ -161,24 +197,16 @@ export async function resolve(householdMap, opts = {}) {
     ).catch(() => {});
   }
 
-  const fillFrom = (h, entry) => {
-    const [lng, lat] = entry.location.coordinates;
-    h.longitude = lng; h.latitude = lat;
-    h.coordSource = 'geocodio';
-    h.coordConfidence = entry.confidence === 'none' ? null : entry.confidence;
-    // Evidence for callers that must decide whether this answer may OVERRULE an existing pin
-    // (repair:import-pins): the raw accuracy type and the address the provider thinks it
-    // matched. The importer never persists these — household docs pick fields explicitly.
-    h.geocodeAccuracyType = entry.accuracyType ?? null;
-    h.geocodeMatchedAddress = entry.matchedAddress ?? null;
-  };
-
   // 3. Split into cache-hits vs the unique cacheKeys to geocode.
   const toGeocode = new Map(); // cacheKey -> { h, unitlessKey, members:[target...] }
   for (const t of targets) {
     const entry = cacheByKey.get(t.cacheKey);
     if (entry?.status === 'matched' && entry.location?.coordinates?.length === 2) {
-      fillFrom(t.h, entry); stats.geocodedCached += 1; continue;
+      // A cached answer that fails today's ZIP rule is not filled and not re-bought: it is Geocodio's
+      // answer for that address string and won't change until the address does (a new cache key).
+      const refusal = fillFrom(t.h, entry);
+      if (refusal) { unmatched.set(t.normAddr, { code: 'geocode_wrong_zip', detail: refusal }); stats.geocodeUnmatched += 1; continue; }
+      stats.geocodedCached += 1; continue;
     }
     if (entry?.status === 'unmatched' && !staleUnmatched(entry)) {
       unmatched.set(t.normAddr, { code: 'geocode_no_match', detail: 'Address could not be located.' });
@@ -187,7 +215,11 @@ export async function resolve(householdMap, opts = {}) {
     if (t.unitlessKey) {
       const u = cacheByKey.get(t.unitlessKey);
       if (u?.status === 'matched' && u.location?.coordinates?.length === 2) {
-        fillFrom(t.h, u); stats.geocodedCached += 1; continue;
+        // The building's answer, for a unit. A refused one is final for the unit too: the address sent
+        // to the provider omits the unit, so buying the unit's own lookup would return the same answer.
+        const refusal = fillFrom(t.h, u);
+        if (refusal) { unmatched.set(t.normAddr, { code: 'geocode_wrong_zip', detail: refusal }); stats.geocodeUnmatched += 1; continue; }
+        stats.geocodedCached += 1; continue;
       }
     }
     let g = toGeocode.get(t.cacheKey);
@@ -246,6 +278,7 @@ export async function resolve(householdMap, opts = {}) {
           t.h.coordSource = 'geocodio'; t.h.coordConfidence = d.confidence === 'none' ? null : d.confidence;
           t.h.geocodeAccuracyType = d.accuracyType ?? null;
           t.h.geocodeMatchedAddress = d.matchedAddress ?? null;
+          t.h.geocodeAccuracy = d.accuracy ?? null;
         }
         stats.geocodedNew += g.members.length;
       } else {

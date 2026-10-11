@@ -304,7 +304,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **does not widen** — a linked org still cannot see when that person was last online. The cost of
   the decision, recorded so it is not re-litigated: the org Users page's mislabeled "Recently active"
   sort could not be repointed at real activity and was renamed **"Recently signed in"** on both
-  clients instead. Had this field reached org admins it **would** have needed new published-policy
+  clients instead. *[v6 2026-10-10: renamed again — the sort to **"Recent password login"** and the
+  column to **"Last password login"** — because a used sign-in is now extended without a typed password
+  (gap 29), so the date can honestly read months old for a daily user.]* Had this field reached org
+  admins it **would** have needed new published-policy
   text — the Privacy Policy's admin-visibility sentence is scoped to *"activity at a door"*, and
   nothing tells a canvasser their employer can see when they last opened the app (see the open
   finding in *THINGS YOU DID NOT ASK ABOUT* (c)).
@@ -315,6 +318,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   paragraph) and in *THE HONEST GAPS*. Asserted by `test/accountDeletion.int.test.js`. It survives an
   *org* deletion like the rest of the `User` row. `requireAuth` refuses a `deletedAt` user **before**
   the stamp runs, so a tombstone cannot be re-stamped by the deleted holder's still-valid 30-day token.
+  *[v6 2026-10-10: tokens are now extended while used, up to 90 days from the typed password (gap 29);
+  the deleted-account refusal still runs before the stamp, so this holds.]*
   **Assessment: NO published-policy change.** No new category of data about a *voter*; nothing leaves
   the tenant; no subprocessor receives it; no export, report or share link carries it. The Privacy
   Policy's *"information collected automatically"* paragraph already describes "the date and time of
@@ -1055,6 +1060,22 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `doorPush.js` `clearPhase`) and pinned by the body-key tests named in the stamp above. Any change to
   what that request carries must re-verify this line, the stamp, DPA §6 and `privacy.html:106`.
 
+- *(v6 2026-10-10)* **Sessions — "We use local storage on your device to keep you signed in" and the
+  phone's walk-list copy "is deleted when you sign out".** Both stay true with the session-expiry build
+  ([PROPOSAL_SESSION_EXPIRY.md](PROPOSAL_SESSION_EXPIRY.md); [USERS.md](USERS.md) → *Sessions*): a used
+  sign-in is extended up to 90 days from the typed password (30 days idle; staff 30 days flat). A
+  sign-in that RUNS OUT asks for the password **in place** and is NOT a sign-out: the phone keeps its
+  walk-list copy while the prompt waits — including after **Later**, with no time limit — exactly as an
+  expired session always did (`bootstrapQuery.js` serves the disk copy on a 401). Every sign-out
+  (manual, password changed elsewhere, account deleted) still deletes the copy, and the roster write
+  guard (`mobile/lib/cache.js` `setRosterWriteGuard`, checked at write time) stops a late save writing
+  it back. The prompt is **not** a privacy control (Later reveals the app, as an expired session did). A
+  password change heard while the prompt is up keeps the copy too while the prompt came up, was last
+  used, or switched to asking for the new password in the last 30 minutes (gap 29 (e)). Re-verify this
+  line, the v6 stamp under *THINGS YOU DID NOT ASK ABOUT* §1, privacy.html's offline-copy paragraph and
+  its "until a connection is available" sentence (privacy.html:94, an owner item in gap 29) on any
+  change to extension, the cap, the prompt, or what a sign-out clears.
+
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
 1. **Voter-facing rights: PARTIALLY closed (2026-07-17).** An **admin-operated do-not-contact
@@ -1143,7 +1164,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    in code: the "the migration" comments in `share.js` / `ReportShareLink.js` still name a migration
    that does not exist (the switch is the real control); the bulk revoke skips per-campaign
    `manages()`, so a lead can revoke legacy links on campaigns they do not manage; and the unlock-JWT
-   is never re-checked after a password change (≤24h residual access).
+   is never re-checked after a password change (≤24h residual access). *[v6 2026-10-10: unchanged —
+   `requireAuth` now has its own verifier (`verifySessionToken`, which ignores expiry and checks it
+   after the user lookup); share unlocks keep `verifyToken` and their 24-hour expiry, pinned by
+   `test/sessionLifetime.int.test.js`.]*
 6. **The offline queue**: no TTL, no cap, survives sign-out, and 4xx-failed items are still silently
    dropped (account deletion now flushes the queue first, closing the billable-knock loss). On iOS it
    rides device backups.
@@ -2393,8 +2417,105 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     unplaced }`, a count of the door's own address's units. Still no route returns `pinPlacement` or
     `pinDistrustedKeys`. No new collection, recipient, export, report or link; no published sentence
     changes. Plan: [PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE2.md).)*
+    *[v6 2026-10-10 — Pin Fixes at scale ([PROPOSAL_PIN_FIXES_AT_SCALE.md](PROPOSAL_PIN_FIXES_AT_SCALE.md),
+    build plan S12). Said out loud: this changes **when** addresses go to Geocodio and **what the import
+    keeps**. Not a new subprocessor, not a new data category, not a new export, report or link: **no DPA §6
+    notice**, and no published sentence changes (`privacy.html:106`, "we send only the street address —
+    never anyone's name", stays true).
+    **(a) Sharing — new lookup triggers, same fields** (line 1, city, state, ZIP5; never line 2, never a
+    name; through the same `geocodeService.resolve()` and its cache): at import, a file coordinate refused as
+    0,0 or outside its state (now looked up like a missing one), and that file's homes pinned **far from their
+    street** (homes that HAVE coordinates, believed wrong); in Pin Fixes, **Look up by address** — an
+    `ImportJob` of kind `pin_lookup`, started by a lead or admin (`canManageCampaign`), whose targets are
+    flagged homes of that one campaign, earlier imports' included (capped at `PIN_FIX_LIST_CAP`, default
+    10,000 per job; gated on `GEOCODE_ENABLED` plus a key); and the operator script `npm run
+    pins:measure-estimates` (a seeded sample, at most 5,000, of one campaign's ordinary vendor pins — homes
+    whose coordinates are believed right — to measure Geocodio's estimates). Recorded on "GEOCODIO — the
+    loud one" (v6 2026-10-10 stamp).
+    **(b) Retention — unchanged.** `GeocodeCache` holds these addresses under the same 540-day disuse TTL;
+    the pass behind the lookup job stops buying on the same three deletion signals (EXCEPTION 1, v6
+    2026-10-10 stamp). A `pin_lookup` ImportJob is deleted with its campaign and organization like every
+    ImportJob.
+    **(c) What the import keeps — more of the customer's own upload.** A home whose address the lookup can't
+    place, with its voters, is now **kept** at a holding spot in its ZIP instead of dropped (only a home no
+    spot can be derived for is still dropped). These are records the customer uploaded for the campaign,
+    stored like every other door and deleted with it; no published sentence promised the drop.
+    **(d) Who can see what.** `pinLookupTargets` (the job's target ids, a ledger like `pinProbedIds`) is
+    hidden from organizations (`ORG_HIDDEN_IMPORT_FIELDS`); organizations see the outcome counts, now also
+    `pinsPlacedApprox`, `pinsComplex`, `pinsUnlocated`, `pinsFarMarked`, and the preview counts
+    `offWorldDoors`, `outsideStateDoors`, `farPinDoors`, `unlocatableDoors`. `GET /admin/imports` leaves
+    lookup jobs out unless asked (`includeLookups=1`). The Pin Fixes payload adds condo complexes and
+    set-aside homes — the same households, to the same `canManageCampaign` roles.
+    **(e) New fields — no new personal data.** `Household.pinSuspect` gains `'far' | 'unlocated' |
+    'complex'` (data-quality marks on the pin); `pinComplexKey` (a ~1.1 m key of the coordinates the
+    household already has); `pinSetAside { at, by }` (`by` is a staff user id, like `correctedBy`; the
+    payload sends only a boolean, so the id never leaves the server); `pinPlacement.answer` (the answer
+    class); `coordSource: 'holding'` — the holding spot, a Doorline-derived point (the middle of other homes'
+    coordinates in the ZIP, nudged off any door), deliberately **not** the home and labelled so on every
+    surface; `CanvassActivity.knockPin` (`'estimated' | 'complex'`, a property of the pin at knock time,
+    read only by the GPS audit's downgrade); `HouseholdLocationChange.scope: 'spot'`. Deleted with the
+    household, campaign and organization exactly as before.]*
 
 ---
+
+29. **[v6 2026-10-10 — Sessions are extended while used, and Sign out ends the session on the server.]**
+    Built from [PROPOSAL_SESSION_EXPIRY.md](PROPOSAL_SESSION_EXPIRY.md) after three review rounds; the
+    contract is in [USERS.md](USERS.md) → *Sessions*. What changed: a sign-in used at least once every
+    30 days is extended (`GET /auth/me`) up to **90 days from the typed password** (`auth_ms`, carried
+    through every extension); super-admin sign-ins are not extended (30 days, as before); someone with
+    no memberships left stops being extended. **Sign out now ends that session server-side** when the
+    request reaches the server (`POST /auth/logout` pushes its `sid` onto the new `User.endedSessionIds`,
+    and `requireAuth` refuses every copy of that token); tokens minted before `sid` existed use one id
+    derived from their signature, so their copies end together too. Revocation on a self-set password
+    change now compares in **milliseconds**. Bull Board accepts only its own cookie ticket (HOLE 4
+    stamp). Every ended session answers `401 SESSION_REVOKED` with a `reason`; server faults are 503.
+    **Remaining gaps, stated honestly:** (a) a sign-out made with no signal never reaches the server,
+    and one the server fails to record answers 503; either way that session runs out on its own; (b) an
+    ended session could only come back after **200 later sign-outs by the same account** within its
+    90-day cap (the kept list); (c) app versions that never receive the update now sign out on every
+    run-out (the coded 401 reaches their July 2026 sign-out handler; before this change an expired
+    session dead-ended on "Invalid token" and kept its copy), and on that old path a door save landing
+    after the clear can write the walk list back — so for old apps that race behind "deleted when you
+    sign out" now opens on every expiry (updated apps close it with the roster write guard); (d) the
+    password-in-place screen keeps the walk-list copy on the phone with no time limit, as any expired
+    session always did; (e) a device whose password screen came up, or was last used (a sign-in attempt,
+    "Forgot password?", Later, Go back, the notice), less than 30 minutes before it next hears from the
+    server after a password change — the person's own "Forgot password?" from it — asks for the new
+    password in place and keeps its walk-list copy — but only until it has gone half an hour without
+    being used since it switched to asking for the new password (`keepReauthInPlace`, from the latest of
+    `raisedAt`, `activeAt` and `changeHeardAt`): the next answer after that signs it out and deletes the
+    copy; so "change your password" deletes a lost phone's copy the next time it connects, or, if its
+    password screen came up or was used in that half hour, at the first answer it hears after half an
+    hour untouched; until it connects, an offline phone keeps working on its copy, and a phone on a door
+    screen holds the sign-out until it leaves the door flow. **New data:** `User.endedSessionIds` —
+    random session ids (or, for a token minted before `sid` existed, one derived from its signature)
+    from the account's last 200 sign-outs; `select: false`, read only by `requireAuth`; survives
+    organization deletion; cleared by account deletion; never sent to a client; covered by
+    privacy.html's technical-information paragraph. **Assessment: privacy-affecting** (how long a
+    signed-in device keeps access; what signing out does) — NOT a new category of voter data, no
+    subprocessor, no new disclosure or export; **no published sentence becomes false** (no published
+    text states a session length; "disable access promptly" stays true because membership is checked on
+    every request). **DPA §4** ("shall not materially decrease the overall protection of Personal
+    Information") is the owner's judgment: the build ships the plan's recommended package (90-day cap,
+    staff not extended, server-side sign-out, the Bull Board tightening). **Owner to confirm (plan
+    §F):** privacy.html:94 says results recorded offline are saved on the device "until a connection is
+    available". After **Later**, results — including ones recorded with signal — wait on the phone until
+    the password is entered. That is true in substance (an expired session always held them), but the
+    sentence no longer says when they leave; candidate wording: "…are saved on your device until they
+    can be delivered to our servers, and each is removed once it has been delivered." The public app
+    page (`client/public/app.html`) gained an "Asked to sign in again?" section whose claims (the prompt
+    is routine; Later keeps work saved on the phone until the password is entered; sign back in as
+    yourself; after a password change a lost phone can't be used without the new password once it next
+    connects) are true as built. The page doesn't state the limits recorded in (e): an offline phone
+    keeps working on its saved houses until it connects, and one open on a door holds the sign-out until
+    it leaves the door. **Closed in passing (review round 4):** signing in on the web now clears every
+    cached page first, so on a shared computer a previous person's data can no longer show under the
+    next person who signs in on the same tab — before, a sign-out followed by someone else's sign-in
+    there showed the first person's cached pages until the new person's own fetches replaced them, and
+    could keep showing them where those fetches were refused (most console query keys name neither the
+    person nor the org); and a tab that holds no person (it forgot its person because someone else
+    signed in elsewhere, or never had one) no longer ends that other person's session when it signs out
+    (review round 5 added the second case).
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -2577,9 +2698,9 @@ The web console has **no** in-product deletion. `client/src/pages/DeleteAccountP
 | 1 | Writes a **new record containing the user's identity** — `DeletedUserRecord` with firstName, lastName, email, phone, userId, organizationIds[], deletedAt, retentionUntil | `:190-204` |
 | 2 | `releaseAssignedWork()` — hard-deletes, across **all orgs and all campaigns**, every `TurfAssignment`, `EffortMember`, `CampaignAssignment`, `CampaignManager` row **where the deleted user is the assignee**; nulls `Membership.coordinatorId` on anyone they supervised | `:212`, `:268`, `:274-286` *[v4 2026-07-21: line drift only — now `:285-290`]* |
 | 3 | `Membership.updateMany({userId}, {$set:{isActive:false}})` — memberships are **retained**, only deactivated | `:217` |
-| 4 | One `User.updateOne $set` overwriting exactly 11 fields *[v4 2026-07-22: now **13** — `lastLoginAt` and `lastSeenAt` joined the scrub]* | `:219-236` *[v4 2026-07-22: line drift — the block is `:224-248`]* |
+| 4 | One `User.updateOne $set` overwriting exactly 11 fields *[v4 2026-07-22: now **13** — `lastLoginAt` and `lastSeenAt` joined the scrub]* *[v6 2026-10-10: now **14** — `endedSessionIds → []`]* | `:219-236` *[v4 2026-07-22: line drift — the block is `:224-248`]* |
 
-**The 11 scrubbed fields:** `firstName → 'Deleted'`, `lastName → 'user'`, `email → deleted+<userId>@deleted.doorline.invalid`, `phone → null`, `passwordHash → a fresh random unusable bcrypt hash` (not null — the field is `required`), `isActive → false`, `deletedAt → now`, `mustChangePassword → false`, `tempPasswordSetAt → null`, `passwordResetToken → null`, `passwordResetExpiresAt → null`. *[v4 2026-07-22: **13 fields.** Add `lastLoginAt → null` and `lastSeenAt → null` — a tombstone no longer carries either activity clock.]*
+**The 11 scrubbed fields:** `firstName → 'Deleted'`, `lastName → 'user'`, `email → deleted+<userId>@deleted.doorline.invalid`, `phone → null`, `passwordHash → a fresh random unusable bcrypt hash` (not null — the field is `required`), `isActive → false`, `deletedAt → now`, `mustChangePassword → false`, `tempPasswordSetAt → null`, `passwordResetToken → null`, `passwordResetExpiresAt → null`. *[v4 2026-07-22: **13 fields.** Add `lastLoginAt → null` and `lastSeenAt → null` — a tombstone no longer carries either activity clock.]* *[v6 2026-10-10: **14 fields** — add `endedSessionIds → []`, the session ids of the account's last 200 sign-outs (gap 29).]*
 
 **The User row is never deleted.** It is tombstoned in place. Fields explicitly NOT touched and therefore persisting indefinitely: `_id`, `createdAt`, `updatedAt`, **`lastLoginAt`**, `isSuperAdmin`, `platformRole`, `deletionLocked`. *[v4 2026-07-22: **CORRECTED — `lastLoginAt` is now SCRUBBED.** The sentence above stands as history. The not-touched set is now `_id`, `createdAt`, `updatedAt`, `isSuperAdmin`, `platformRole`, `deletionLocked`. The new `User.lastSeenAt` is scrubbed alongside it and never joins that list. Rationale: the tombstone exists so the org's field records stay attributable to a stable id — a rolling "when were they last online" adds nothing to that and only a re-identification hint about someone who asked to be forgotten. Asserted by `test/accountDeletion.int.test.js`.]*
 
@@ -2735,6 +2856,13 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 > on the three retention paths; the reference plan's review (§O) found nothing implementing that. That gap
 > predates this release and was not re-checked here.
 
+> **[v6 2026-10-10 — Pin Fixes at scale (item 28 stamp) adds entries the same way.]** Addresses looked up
+> by the widened import pass, by a Pin Fixes **Look up by address** job, or by `pins:measure-estimates` land in
+> `GeocodeCache` under the same 540-day disuse TTL. The lookup job runs the same pass, so it stops buying on
+> the same three deletion signals (`deletionRequested` in `placeStackedPins.js`). `pins:measure-estimates`
+> is operator-run against one named campaign and checks no deletion signal; it should not be run against a
+> campaign or organization with a pending deletion.
+
 ### EXCEPTION 2 — Identity snapshots can be orphaned. **VERIFIED.**
 
 `PersonMergeCandidate`, `PersonEditProposal` (by personId) and `PersonMergeLog` are deleted **only inside a loop over `personIds` collected from that org's Voter rows** (`deleteOrganization.js:74-77`, `:119-127`). The belt-and-braces `Person.deleteMany({organizationId})` at `:130` cascades **nothing**. `PersonMergeLog` and `PersonMergeCandidate` carry **no organizationId** of their own, so nothing else can reach them.
@@ -2745,7 +2873,7 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 
 | Survives | Contains | Why it survives |
 |---|---|---|
-| **`User` accounts** | name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: add `lastSeenAt` — a `User` surviving an **org** deletion now also carries a rolling last-activity clock. **Account** deletion scrubs both clocks; org deletion scrubs neither, by design.]* | Deliberate: *"global identities are kept even when this was their only org"* (`deleteOrganization.js:59-62`). Only `Membership` rows are removed. |
+| **`User` accounts** | name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: add `lastSeenAt` — a `User` surviving an **org** deletion now also carries a rolling last-activity clock. **Account** deletion scrubs both clocks; org deletion scrubs neither, by design.]* *[v6 2026-10-10: and `endedSessionIds` — up to 200 session ids from sign-outs (gap 29); org deletion keeps it, account deletion clears it.]* | Deliberate: *"global identities are kept even when this was their only org"* (`deleteOrganization.js:59-62`). Only `Membership` rows are removed. |
 | **`AccessLog`** | staff actor id, org id, route template | Not in `ORG_SCOPED`. No voter PII. |
 | **`SupportAccessGrant`** | staff actor id, org id, **required free-text `reason` (500 chars)** | Not in `ORG_SCOPED`. The free text can name the customer or its people. |
 | **`GeocodeCache`** | street addresses + coordinates | See Exception 1. |
@@ -3406,6 +3534,13 @@ I did **not** execute this and did **not** fully trace the `POST /admin/membersh
 
 ### HOLE 4 — The Bull Board job console is outside everything. **VERIFIED.**
 
+> *[v6 2026-10-10: the guard now accepts ONLY its own 10-minute ticket (`purpose: 'bullboard'`) and ONLY
+> from the `bb_token` cookie — a session token (revoked or not), `Bearer` and `?t=` are refused, so no
+> credential is logged through the query string and a revoked super-admin token no longer opens it. A
+> still-valid super-admin token can still mint a ticket through the console's Jobs page, by design. A
+> ticket already minted keeps working for up to its 10 minutes (the guard never reads the database).
+> The job-payload findings below are unchanged.]*
+
 `app.use('/admin/queues', requireBullBoardAuth, createBullBoardRouter())` — mounted at the **app root**, outside `/api` (`server/src/app.js:97` *[v3: line drifted from :77 as app.js grew; the finding itself was re-verified 2026-07-16 and still stands — no grant, no audit]*). It therefore never traverses `routes/index.js`, where `orgContext` and `accessLog` live. `queues/bullBoard.js` calls it *"a cross-tenant job console (all orgs' jobs)."* **No grant, no audit.**
 
 I looked for voter PII and did **not** find any rendered: job payloads are ids (`{importJobId}`), and turf jobs carry `{campaignId, passId, mode, params, generatedBy}`. **But:**
@@ -3574,6 +3709,17 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 > geocoding)") and `privacy.html:106` ("we send only the street address — never anyone's name") stay true.
 > `repair:import-pins` is unchanged by this release and still checks shared spots.
 
+> **[v6 2026-10-10 — Pin Fixes at scale (item 28 stamp): wider import triggers and two more callers. NOT a
+> new subprocessor, NOT a DPA §6 event.]** At import the pass now also looks up a file's homes pinned **far
+> from their street** and any home whose file coordinate was **refused** (0,0, outside its state). A lead or
+> admin can start the same pass from Pin Fixes (**Look up by address**: an ImportJob of kind `pin_lookup`
+> over flagged homes of one campaign, earlier imports' included), and an operator can run `npm run
+> pins:measure-estimates`, which looks up a sample of one campaign's ordinary vendor pins. All three use the
+> same `geocodeService.resolve()`, the same address string and the same gate (`GEOCODE_ENABLED === 'true'`
+> plus `GEOCODIO_API_KEY`). The bullet *"Only households MISSING coordinates are sent"* gains these
+> exceptions; *"The unit/apartment number is deliberately omitted"* still holds for line 2 only (v6
+> 2026-10-05 stamp). `docs/DPA.md` §6 and `privacy.html:106` stay true.
+
 **COULD NOT DETERMINE:** whether `GEOCODE_ENABLED` is `true` in production — it is an environment variable, not in the repo. A persistent `GeocodeCache` collection, a geocoding-cost model, and an owner-facing cost page all indicate it is in real use. **Treat as live and disclose.**
 
 ### MAPBOX — telemetry is DISABLED on mobile but NOT on web. **VERIFIED.**
@@ -3682,6 +3828,20 @@ The currently-published policy states *"Voters do not interact with the Services
 
 > **Do NOT write** anything implying that logging out, or changing your password, terminates existing sessions. **Neither does.** *[v4 2026-07-18: half-flipped — a password CHANGE now does terminate other sessions, and the policy may say so. LOGOUT remains a server-side no-op; still do not claim logout ends the session.]*
 
+> *[v6 2026-10-10 — SESSIONS revisited (gap 29): (1) **LOGOUT now ends the session server-side** when the
+> request reaches the server — its `sid` goes on `User.endedSessionIds` and `requireAuth` refuses that
+> token and every copy of it. The policy MAY say signing out ends that sign-in on Doorline's servers; it
+> must NOT say signing out always does (an offline sign-out never arrives). (2) A self-set password
+> change revokes by the sign-in time in milliseconds (`auth_ms`), carried through every extension, so an
+> extended token dies exactly when its parent would. (3) Deactivation and removal are per MEMBERSHIP: they
+> end access to that organization on the next request (still true, keep the sentence) but never ended
+> the sign-in itself; a person left with no memberships stops being extended. (4) A used sign-in now
+> lasts up to 90 days from the typed password (30 days idle; staff 30 days flat). A stolen copy of a
+> session token can extend itself via `/auth/me`, so it works until 90 days after its owner last typed
+> the password unless the owner signs out with signal (same `sid`) or changes the password; signing in
+> again does not end it — the owner's DPA §4 call. (5) The JWT payload described above now also
+> carries `auth_ms` (when the password was typed) and `sid` (the session id).]*
+
 ---
 
 # THINGS YOU DID NOT ASK ABOUT BUT MUST DISCLOSE
@@ -3705,7 +3865,13 @@ The currently-published policy states *"Voters do not interact with the Services
 
 On a 16,000-door turf this is a **multi-megabyte file of named residents at mapped addresses on a temporary field worker's device.**
 
-**It IS cleared on sign-out** (`mobile/lib/authState.js:41-50` calls `clearBootstrap()`) — credit that. **But nothing else clears it, there is no expiry, and it persists indefinitely as long as the user stays logged in and the app stays installed.**
+**It IS cleared on sign-out** (`mobile/lib/authState.js:41-50` calls `clearBootstrap()`) — credit that.
+*[v6 2026-10-10: still true — the clear is now `authState.js:33-34` (`clearCaches`), run by
+`sessionStore.js` `signOutSteps` on every sign-out (manual, password changed elsewhere, account
+deleted), and a roster write guard stops a late save writing it back. A sign-in that merely RUNS OUT
+is not a sign-out: the copy stays — through the prompt, after "Later", and after the password is typed
+— until someone signs out, as with any expired session before (gap 29).]*
+**But nothing else clears it, there is no expiry, and it persists indefinitely as long as the user stays logged in and the app stays installed.**
 
 ### 2. Nothing opts these files out of iCloud / Google device backup. **VERIFIED ABSENCE; CONSEQUENCE INFERRED.**
 
@@ -3812,5 +3978,5 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 18. **A failed customer deletion request produces a green success receipt and is never retried.** (B6)
 19. **Doorline cannot answer "was MY record accessed?"** — `AccessLog` stores a route template and a resource class, never a record id. **Do not offer record-level access transparency.** (E12) *[v4 2026-07-19: NARROWED — single-record opens and exports now carry subject ids, and org admins can read a per-voter staff-access panel. The advisory flips to: you MAY offer record-level transparency for staff access, scoped exactly as the v3-gap-3 stamp states (browse stays request-level; pre-2026-07-19 rows are request-level history).]*
 20. **After the 180-day purge, the field data is PSEUDONYMOUS, not anonymous.** The GPS trail, timestamps, notes and survey submissions remain permanently linked to a stable identifier, and the tombstoned `User` row still exists carrying that identifier and `lastLoginAt`. **Two code comments call this "permanently anonymous." They are wrong, and one of them is already user-facing copy.** (A3) *[v4 2026-07-22: **NARROWED, not closed** — the tombstone no longer carries `lastLoginAt` (scrubbed, as is the new `lastSeenAt`). The finding rests on `_id`/`createdAt`/`deletedAt` and the id-embedding tombstone email, all of which remain.]*
-21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: and now `lastSeenAt`. The gap is otherwise unchanged — a **live** row keeps both clocks; only account deletion scrubs them.]* — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5) *[v4 2026-07-29: the parenthetical is now half-wrong — staff CAN delete an account from the web console (break-glass, typed-email confirmation, every blocker intact). **The gap itself is unchanged**: there is still no retention limit and still no SELF-service web deletion, and a staff-initiated delete is not a retention policy.]*
+21. **`User` accounts have no retention limit at all.** A volunteer who canvassed for one weekend in 2024 still has a live row — name, email, phone, bcrypt hash, `lastLoginAt` *[v4 2026-07-22: and now `lastSeenAt`. The gap is otherwise unchanged — a **live** row keeps both clocks; only account deletion scrubs them.]* *[v6 2026-10-10: and `endedSessionIds` — up to 200 session ids from sign-outs (gap 29); org deletion keeps it, account deletion clears it.]* — indefinitely, unless they personally delete their account **from the mobile app** (there is no web deletion, and the operator CLI cannot delete a sole admin, sole billing admin, sole super-admin, or a `deletionLocked` account). (A1, B5) *[v4 2026-07-29: the parenthetical is now half-wrong — staff CAN delete an account from the web console (break-glass, typed-email confirmation, every blocker intact). **The gap itself is unchanged**: there is still no retention limit and still no SELF-service web deletion, and a staff-initiated delete is not a retention policy.]*
 22. **Voters — the actual data subjects, who never consented to anything — have no account, no access, no correction, no deletion, no opt-out, and no do-not-contact mechanism.** Every request from a voter is a manual process with no tooling behind it. **This is the largest structural gap in the product from a privacy-law standpoint, and no sentence you write can paper over it.** (H16(d)) *[v3 2026-07-17: narrowed — do-not-contact is now admin-tooled (see v3 gap 1); the voter-initiated half of this finding is unchanged.]*

@@ -99,6 +99,15 @@ function withBootstrapLock(fn) {
 let pendingSave = null;
 let queuedSave = null;
 
+// Whether a snapshot may reach disk right now — set by lib/authState.js (which imports this module,
+// so it can't be imported here). False once a sign-out has begun or while signed out: privacy.html
+// promises the walk-list copy "is deleted when you sign out", and a door saved during the
+// sign-out's clears, or a roster fetch that lands after them, used to be able to write it back.
+let rosterWriteGuard = () => true;
+export const setRosterWriteGuard = (fn) => {
+  rosterWriteGuard = fn;
+};
+
 // Save-health signal: a failed snapshot write means offline progress is NOT being
 // persisted — the realistic cause is a full disk (the atomic tmp write needs room
 // for a complete second copy of the multi-MB roster, so it fails first). The old
@@ -125,12 +134,16 @@ export function saveBootstrap(data) {
   // fromDiskCache is a serving-path annotation (set by the cold-start fallback in
   // bootstrapQuery.js), never data — persisting it would make every later load
   // wear the offline marker regardless of how fresh the snapshot really is.
-  pendingSave = { ...data, fromDiskCache: undefined, cachedAt: new Date().toISOString() };
+  pendingSave = { ...data, fromDiskCache: undefined, fallbackReason: undefined, cachedAt: new Date().toISOString() };
   if (queuedSave) return queuedSave;
   queuedSave = withBootstrapLock(async () => {
     queuedSave = null; // saves arriving once this write starts queue a fresh one
     const snapshot = pendingSave;
     pendingSave = null;
+    // Checked HERE, at write time and after the coalescer's bookkeeping above: refusing before it
+    // would leave queuedSave set and silently swallow every later save. A refused write is not a
+    // failed one, so the save-health banner is left alone.
+    if (!rosterWriteGuard()) return;
     try {
       await FileSystem.writeAsStringAsync(BOOTSTRAP_TMP, JSON.stringify(snapshot));
       await FileSystem.moveAsync({ from: BOOTSTRAP_TMP, to: BOOTSTRAP_FILE });

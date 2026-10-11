@@ -57,3 +57,27 @@ test('super-admin badge: busy, failed with its cause, over the ceiling, or nothi
   assert.equal(pinCheckBadge({ pinLookupsOverCap: 0, pinPassError: null }), null);
   assert.equal(pinCheckBadge(null), null);
 });
+
+// ── The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.7) ──
+import { isPinLookupJob, pinLookupLabel } from './importPins.js';
+
+test('the new parts: on the street, complexes, the holding spot inside "without an exact spot", far marks', () => {
+  assert.deepEqual(
+    importPinLine({ pinsPlacedExact: 520, pinsPlacedApprox: 41, pinsConfirmedInPlace: 28, pinsComplex: 212, pinsStillUnplaced: 18, pinsUnlocated: 5, pinsFarMarked: 130 }),
+    {
+      text: 'Map pins: 520 placed by address · 41 placed on the street (check them) · 28 confirmed at their spot · 212 in complexes · 18 without an exact spot, 5 of them kept at a holding spot · 130 flagged far from their street — look them up',
+      pinFixes: true,
+      failed: false,
+    }
+  );
+  assert.equal(importPinLine({ pinsComplex: 1 }).text, 'Map pins: 1 in a complex');
+  assert.equal(importPinLine({ pinsComplex: 3 }).pinFixes, false, 'a complex is a place, not something to fix');
+  assert.equal(importPinLine({ pinsPlacedApprox: 1 }).pinFixes, true, 'approximate pins are worth a check');
+});
+
+test('a Pin Fixes lookup row', () => {
+  assert.equal(isPinLookupJob({ kind: 'pin_lookup' }), true);
+  assert.equal(isPinLookupJob({ kind: 'apply' }), false);
+  assert.equal(pinLookupLabel({ totalRows: 76 }), 'Pin lookup · 76 homes');
+  assert.equal(pinLookupLabel({ totalRows: 1 }), 'Pin lookup · 1 home');
+});

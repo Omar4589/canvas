@@ -146,6 +146,35 @@ export const stackBaseOf = (line1) => {
   return s.split(' ').filter(Boolean).map((w) => STREET_WORDS[w] || w).join(' ') || '(NO ADDRESS)';
 };
 
+// ── Base families: a bare unit number glued onto the street line ─────────────────────────────
+// "533 Black Rock Tpke 3" and "533 Black Rock Tpke" are one house: the vendor appended the unit with no
+// designator. stackBaseOf cannot strip it — "1644 County Rd 78", "5001 Hwy 160" and "1000 W Road 36" end
+// the same way and the number IS the road — so the fold lives here, applied ONLY where two street
+// addresses are compared on one map spot (the placement pass's spot verdict, the lookup's collision test,
+// the import preview's counts). stackBaseOf, homeKeyOf, the packets' street bands and the web and phone
+// mirrors never see it, so nothing else can change. Server-only, pure
+// (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md, change #1 and S1.4).
+export const NUMBERED_ROAD_WORDS = new Set(['HWY', 'HIGHWAY', 'RTE', 'ROUTE', 'RT', 'CR', 'SR', 'FM', 'RR', 'US', 'LOOP', 'SPUR']);
+export const ROAD_PREFIX_WORDS = new Set(['COUNTY', 'STATE', 'FARM', 'RANCH', 'TOWNSHIP', 'FOREST', 'FIRE', 'TOWN']);
+const DIRECTIONAL_SET = new Set(DIRECTIONALS);
+export const baseFamily = (base) => {
+  const t = String(base || '').split(' ').filter(Boolean);
+  const n = t.length;
+  if (n < 4 || !/^\d{1,5}[A-Z]?$/.test(t[n - 1])) return base;
+  const type = t[n - 2];
+  if (!STREET_TYPE.has(type) || NUMBERED_ROAD_WORDS.has(type) || ROAD_PREFIX_WORDS.has(t[n - 3])) return base;
+  // The name between the house number and the type must hold a word that is not a directional:
+  // "1000 WEST ROAD 36" is the numbered road "Road 36", not a unit.
+  if (!t.slice(1, n - 2).some((w) => !DIRECTIONAL_SET.has(w))) return base;
+  return t.slice(0, n - 1).join(' ');
+};
+
+// The street a street address is on, for the "far from its street" cohorts (utils/pinCohorts.js): the
+// house number dropped from a stackBaseOf/baseFamily result ("857 POST ROAD" → "POST ROAD"). Upper-case and
+// with street words expanded, so "Main St" and "Main Street" are one cohort. Server-only; the repair script
+// keeps streetOf, its old key.
+export const streetOfBase = (base) => String(base || '').replace(/^\d+[A-Z]?(?:\s+|$)/, '').trim() || '(NO STREET)';
+
 // Does this address name a unit? Line 2 set, a '#' unit in line 1 (spaced or not), or a unit
 // stripped by step 3. Server-only (Remove apartments).
 export const isUnitAddress = (h) =>

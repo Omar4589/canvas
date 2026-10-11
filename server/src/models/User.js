@@ -32,11 +32,13 @@ const userSchema = new mongoose.Schema(
     },
     isActive: { type: Boolean, default: true },
     // Set when the user deletes their own account (App Store 5.1.1(v) / Play's
-    // account-deletion policy). Deliberately NOT the same thing as isActive:false:
-    // deactivate is a reversible admin toggle (PATCH /:userId/password re-issues a temp
-    // password and revives the account), and Apple is explicit that "only offering to
-    // temporarily deactivate or disable an account is insufficient". Deletion is terminal —
-    // every auth path refuses a deletedAt user and every admin write route rejects one.
+    // account-deletion policy). Deletion sets isActive:false too, and nothing else does today:
+    // the admin Deactivate and Remove actions are per organization and change the Membership,
+    // never this row (a person removed from one org keeps their sign-in and their other orgs).
+    // Older rows may still carry isActive:false from pre-multitenancy code; requireAuth answers
+    // those `inactive`. Apple is explicit that "only offering to temporarily deactivate or
+    // disable an account is insufficient". Deletion is terminal — every auth path refuses a
+    // deletedAt user and every admin write route rejects one.
     //
     // The document itself must SURVIVE: CanvassActivity.userId, SurveyResponse.userId and
     // FlagReview.reviewedBy all declare the ref as `required`, and that knock ledger is what
@@ -54,19 +56,30 @@ const userSchema = new mongoose.Schema(
     tempPasswordSetAt: { type: Date, default: null },
     passwordResetToken: { type: String, default: null },
     passwordResetExpiresAt: { type: Date, default: null },
-    // Session revocation anchor: any JWT issued BEFORE this instant is refused by requireAuth
-    // (401 SESSION_REVOKED). Stamped when the USER sets a new password themselves (self-serve
-    // change or emailed reset) — "I changed my password" must mean "everyone else holding my
-    // old session is out." Deliberately NOT stamped by an admin temp reset: that path already
-    // suspends live sessions via mustChangePassword (passwordGate.js), and the stamp lands the
-    // moment the user completes the forced change. null = never changed → all tokens honored
-    // (grandfathers every session issued before this field shipped).
+    // Session revocation anchor: any session whose sign-in time (the token's auth_ms, carried
+    // through every extension) is BEFORE this instant is refused by requireAuth
+    // (401 SESSION_REVOKED, reason password_changed). Stamped when the USER sets a new password
+    // themselves (self-serve change or emailed reset) — "I changed my password" must mean
+    // "everyone else holding my old session is out." Deliberately NOT stamped by an admin temp
+    // reset: that path already suspends live sessions via mustChangePassword (passwordGate.js),
+    // and the stamp lands the moment the user completes the forced change. null = never changed
+    // → all tokens honored (grandfathers every session issued before this field shipped).
     passwordChangedAt: { type: Date, default: null },
-    // Written in exactly ONE place: POST /auth/login (routes/auth.js). It is "when they last typed
-    // a password", NOT "when they were last here" — tokens live 30d (services/auth/tokens.js) and
-    // the mobile app skips the login screen whenever a stored one is present, so a canvasser who
-    // knocks doors every day legitimately reads "27d ago". Use lastSeenAt for the second question.
+    // Written in exactly ONE place: POST /auth/login (routes/auth.js), which the apps' sign-in
+    // screens AND their in-place password prompts both call. It is "when they last typed a
+    // password", NOT "when they were last here" — a sign-in is extended while it is used (up to
+    // 90 days, services/auth/tokens.js) and extending never writes this, so a canvasser who knocks
+    // doors every day can legitimately read "2 months ago". The consoles label it "Last password
+    // login". Use lastSeenAt for "when were they last here".
     lastLoginAt: { type: Date, default: null },
+    // Session ids this account signed out of (POST /auth/logout); requireAuth refuses any token
+    // carrying one, so signing out ends every copy of that session. Keeps the last
+    // ENDED_SESSIONS_KEPT (services/auth/tokens.js). default: undefined so it isn't written as []
+    // on every create and save. select: false — up to 200 ids would otherwise ride along on every
+    // user read (member lists, populates); requireAuth is the one reader and asks for it with
+    // .select('+endedSessionIds'). Never leaves the server: absent from toSafeJSON() and every
+    // projection. Cleared by account deletion.
+    endedSessionIds: { type: [String], default: undefined, select: false },
     // The real last-activity clock: stamped by requireAuth on ANY authenticated request, throttled
     // to ~15 min per user per process (middleware/lastSeen.js), so it is approximate by design.
     // Deliberately absent from toSafeJSON() below and from GET /admin/memberships: this is a

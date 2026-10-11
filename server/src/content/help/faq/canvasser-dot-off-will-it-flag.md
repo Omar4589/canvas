@@ -15,7 +15,7 @@ What the accuracy number means: on Android it's the radius the phone is 68% sure
 
 **When a Far flag does appear, check two things before asking the canvasser:**
 
-- **The pin.** A door that reads **Approximate location** (the flag panel and the Audit card say *House pin is approximate*) was placed by looking up the address and often sits on the street in front of the lot. Move or confirm it from Pin Fixes — a correction by a lead or admin also downgrades older far flags that turn out to sit beside the corrected pin. See [Fixing a house pin](fix-pin-location).
-- **The building.** Every unit of a complex shares one pin, so someone at the back building is legitimately far from it.
+- **The pin.** A door that reads **Approximate location** (the flag panel and the Audit card say *House pin is approximate*) was placed by looking up the address and often sits on the street in front of the lot. A door recorded while its pin was an unchecked estimate already reads **low** on Far, with *Recorded at an estimated pin — counted as low severity until a lead checks the pin.* Move or confirm it from Pin Fixes — a correction by a lead or admin also downgrades older far flags that turn out to sit beside the corrected pin. See [Fixing a house pin](fix-pin-location).
+- **The building.** Every unit of an apartment building shares one pin, so someone at the back building is legitimately far from it. A **condo complex** is handled for you: a door there within about **1,000 ft** of the complex's spot isn't far at all, and beyond that it reads **low**, with *Recorded at a complex; the pin is the complex, not the door.*
 
 Then read the pattern, not the single flag: compare a canvasser's typical ± against the crew's on the same streets (everyone's number widens under porches). A run of high Far flags with tight accuracy numbers, doors logged seconds apart, or a whole street entered from one spot is a conversation. How each flag works is in [The GPS audit](audit).

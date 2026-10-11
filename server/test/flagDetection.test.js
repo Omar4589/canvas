@@ -25,6 +25,7 @@ function mkRow(o) {
     distanceFromHouseMeters: 'distanceFromHouseMeters' in o ? o.distanceFromHouseMeters : null,
     replaced: 'replaced' in o ? o.replaced : null,
     wasOfflineSubmission: o.wasOfflineSubmission || false,
+    ...('knockPin' in o ? { knockPin: o.knockPin } : {}),
   };
 }
 
@@ -625,4 +626,37 @@ test('the detector projects pin precision for display and never ships a staff id
   const household = src.slice(src.indexOf('household: h\n'), src.indexOf('reasons: reasonList'));
   assert.ok(household.includes('coordConfidence') && household.includes('locationConfirmedAt'));
   assert.ok(!/correctedBy|locationConfirmedBy/.test(household.replace(/\/\/.*$/gm, '')), 'no staff id in entry.household');
+});
+
+// ── The pin-fixes build: the frozen knock pin (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.7) ─────────
+test('a knock frozen at an unconfirmed estimate reads low with its reason; an ordinary knock is unchanged', () => {
+  const base = { _id: 'E1', userId: 'e', householdId: 'he', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: 5 }, distanceFromHouseMeters: 400 };
+  assert.equal(farAssessment(mkRow(base), undefined).severity, 'high');
+  const est = farAssessment(mkRow({ ...base, knockPin: 'estimated' }), undefined);
+  assert.equal(est.severity, 'low');
+  assert.equal(est.detail.estimatedPin, true);
+});
+
+test('a complex knock within 300 m is not far at all; beyond it, low with the complex reason', () => {
+  const at300 = { _id: 'C1', userId: 'c', householdId: 'hc', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: 5 }, knockPin: 'complex' };
+  assert.equal(farAssessment(mkRow({ ...at300, distanceFromHouseMeters: 280 }), undefined), null, '275 m effective: inside the complex');
+  const beyond = farAssessment(mkRow({ ...at300, distanceFromHouseMeters: 600 }), undefined);
+  assert.equal(beyond.severity, 'low');
+  assert.equal(beyond.detail.complexPin, true);
+});
+
+test('the KPI counts both stamps as forgiven by pin, and the map wire forwards the reasons', async () => {
+  const rows = [
+    mkRow({ _id: 'K1', userId: 'k', householdId: 'hk1', timestamp: at(0), location: { lat: 30, lng: -95, accuracy: 5 }, distanceFromHouseMeters: 400, knockPin: 'estimated' }),
+    mkRow({ _id: 'K2', userId: 'k', householdId: 'hk2', timestamp: at(60), location: { lat: 30, lng: -95, accuracy: 5 }, distanceFromHouseMeters: 900, knockPin: 'complex' }),
+  ];
+  // farKpiForRows looks up pins for candidates; an empty in-memory org makes that query return nothing.
+  const kpi = await farKpiForRows(rows, { organizationId: 'org-without-households' }).catch(() => null);
+  if (kpi) {
+    assert.equal(kpi.farCount, 0);
+    assert.equal(kpi.farForgivenByPinCount, 2);
+  }
+  const wire = farVerdictForWire(farAssessment(rows[1], undefined));
+  assert.equal(wire.detail.complexPin, true);
+  assert.equal(farVerdictForWire(farAssessment(rows[0], undefined)).detail.estimatedPin, true);
 });

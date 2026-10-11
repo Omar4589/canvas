@@ -255,11 +255,14 @@ it shows where you were; that is normal GPS, it never blocks a door, and it neve
 itself. Why it happens, what the app records when you tap, and which phone settings matter are in
 [GPS_ACCURACY.md](GPS_ACCURACY.md).
 
-Two data-trust notices can appear at the top of the map (same soft-banner family as the location
+Three data-trust notices can appear at the top of the map (same soft-banner family as the location
 notice): an **amber offline notice** when the app is showing the saved copy of your houses because
-it can't reach the server (with how old that copy is), and a **red storage notice** when your phone
-is too full to save map data for offline use — free up space, or the next signal-less cold start
-will show older houses than you expect.
+it can't reach the server (with how old that copy is) — it reads *"Showing houses saved on this
+phone…"* instead when the app reached Doorline but needs your password again; an amber **"Couldn't
+refresh the houses… Try again"** row when a refresh failed but the houses you already had stay on
+screen (tap it to try again; your books screen shows the same row for your books); and a **red
+storage notice** when your phone is too full to save map data for offline use — free up space, or
+the next signal-less cold start will show older houses than you expect.
 
 **Precise Location has to be on, and this is enforced rather than suggested.** Approximate location
 puts your fix kilometres wide, which makes the distance between you and the door meaningless, so
@@ -555,6 +558,48 @@ Play**, and the app will tell you in one of two ways:
 Either way — restart or store update — it never costs you work: every door you've knocked and every
 survey you've saved is already on the server (or safely queued on the phone).
 
+## When the app asks for your password
+
+**Nothing is wrong.** For security, Doorline asks for your password again from time to time: after
+**30 days without opening the app**, or **90 days after you last typed your password**, however often
+you use it. Using the app at least once every 30 days quietly keeps you signed in up to that 90-day
+mark (once your app is up to date).
+
+When it happens, a screen covers the app: **"Enter your password to keep going"**. Your email is
+already filled in. Type your password and you're back exactly where you were — the same map, the same
+book, the same list. Nothing is deleted while the screen waits.
+
+- **It never interrupts a door.** If it comes up while you're at a door or in a survey, the app lets you
+  finish: anything you save is kept on the phone, and the screen appears once you're back on the map or
+  your list.
+- **No signal to sign in?** After a sign-in attempt fails for lack of signal, a **Later** button
+  appears. Tap it and keep knocking — the map then shows *"Password needed. 3 items are waiting to send,
+  and your team sees them once you enter your password."* Tap that notice, or **Refresh**, when you have
+  signal. Later shows on the map, your books and a building's homes; on any other screen the button is
+  **Go back**, when there's a screen to go back to (those screens need signal anyway).
+- **Forgot your password?** Tap **Forgot password?** on the screen, reset it in the browser, come back,
+  and type the new one. Back within half an hour of tapping it, your houses are still there; once the
+  screen asks for your new password, type it within half an hour. Later than that, the app plays safe
+  and signs out: anything you recorded stays on the phone and is sent once you sign in with the new
+  password, and the houses download again.
+- **Not you?** **Not you? Sign out** signs this phone out. If work is waiting, the app asks first:
+  signing out removes the saved houses, and saved work goes up under whoever signs in next.
+
+**Some sign-outs are deliberate**, and those really sign you out: your password was changed on another
+device, or the account was deleted. The app waits until you're off a door, shows **Signing out…**, and
+lands on the sign-in screen with a note saying why.
+
+**Always sign back in as yourself.** Work saved on the phone is sent under whoever signs in next.
+Doorline can still turn an item down (for example, if you were taken off the campaign meanwhile), and
+those items aren't kept. **Never delete the app** while the pending badge shows a number.
+
+**Lost your phone while signed in? Change your password yourself** (Forgot password? on the sign-in
+screen). The next time the lost phone connects, it can't be used without the new password: it signs out
+and deletes its saved houses. The one exception is a phone whose password screen came up or was used in
+the half hour before (that's what tapping **Forgot password?** there and coming straight back looks
+like): it stays on that screen and asks for the new password instead, until it has been left untouched
+for half an hour. Until it connects, a phone with no signal keeps working on the houses it saved.
+
 ---
 
 # Part 2 — Technical reference
@@ -580,12 +625,68 @@ Expo Router, file-based. The authenticated group is a flat stack with native hea
 The app used to cache `user` + `memberships` at **login only** and never refetch, so a role changed
 server-side mid-session left it rendering screens whose every query 403'd onto a Retry button that could
 never succeed. [lib/session.js](../mobile/lib/session.js)'s `refreshSession()` re-pulls `/auth/me` and
-re-saves the identity payload. It is throttled (≤1/min), idempotent, and **failure-tolerant** — offline it
-keeps the cached copy and tries later, so a canvasser in a dead zone is never logged out. It runs on app
+re-saves the identity payload. It is throttled (≤1/min), idempotent, and **failure-tolerant** — being
+offline never signs anyone out; only the server saying the session ended does. It runs on app
 **foreground**, on the authenticated shell **mounting** (cold start), and **before the org picker lists
-memberships**, so the root re-router always decides on fresh roles.
+memberships**, so the root re-router always decides on fresh roles. It is also how a used sign-in stays
+alive: about once a day `/auth/me` answers with an extended token for the same session, which
+`refreshSession` adopts **after** saving the identity (and saves nothing if the session changed while the
+request was out).
 
-Two error codes drive the central recovery in [app/_layout.jsx](../mobile/app/_layout.jsx)'s
+**Ended sessions** (any `401 SESSION_REVOKED`, with a `reason`) are reported by `lib/api.js` itself —
+several callers swallow that 401 before react-query would see it — and handled in `app/_layout.jsx`'s
+module-scope `onSessionEnded`. The token state lives in [lib/sessionStore.js](../mobile/lib/sessionStore.js)
+behind ONE lock, wired by [lib/authState.js](../mobile/lib/authState.js). A sign-in that ran out raises
+the in-place password screen ([components/ReauthSheet.jsx](../mobile/components/ReauthSheet.jsx)); a
+deliberate end (password changed elsewhere, account deleted) and the forced password change are queued in
+[components/SessionGate.jsx](../mobile/components/SessionGate.jsx) and run only off the door flow
+(`CANVASS_FLOW` in [lib/sessionEnd.js](../mobile/lib/sessionEnd.js), shared with OtaUpdatePrompt). The
+roster write guard in `lib/cache.js` keeps a late save from writing the walk list back after a sign-out.
+A failed refresh no longer replaces a working screen. The map and books show their full-screen error
+only with nothing to show, or when the server's answer is final (`rosterErrorIsFinal`: a 4xx with
+Doorline's own JSON error, except 401 and 429, so an archived campaign's 404 and a not-assigned 403 keep
+their way out, while a captive portal's or proxy's 4xx page is a passing failure). Otherwise the map's
+DataHealthBanner offers *Couldn't refresh the houses… Try again* and the books screen the same row for
+its books (`RefreshFailedRow`); while the password is pending, Retry and Refresh bring the password
+screen back. Neither screen ever shows another campaign's roster or failure: `['bootstrap']` is one
+cache entry for every campaign and some seat paths leave it alone, so both screens read it through
+`useSeatedRoster` ([lib/bootstrapQuery.js](../mobile/lib/bootstrapQuery.js); the rules are the plain,
+tested [lib/seatedRoster.js](../mobile/lib/seatedRoster.js)). `bootstrapQueryFn` tags every failure with
+the campaign it was for; a roster or failure for another campaign counts as nothing loaded, the loader
+stays up, and the screen in front fetches this campaign's roster — again each time the cached roster or
+failure changes, so a download still running for the previous campaign is followed by this one's, and
+only this campaign's own failure ends the wait. Only the focused screen fetches, because two field
+screens left mounted on different campaigns would otherwise replace each other's roster in a loop. A
+refresh cancelled by a door write is not a failure. The roster's one retry is made inside
+`bootstrapQueryFn` (both screens set `retry: false`), so both attempts fetch the same campaign:
+react-query re-reads the query's options for each of its own retries, and the door screens subscribe to
+`['bootstrap']` without a query function, which left such a retry with none (*Couldn't refresh the
+houses: Missing queryFn* under the map). The retry is skipped for a 401, for Doorline's final answer,
+once the person on the phone changed, once another campaign is seated, and once react-query has let go
+of the fetch (a door write or a Refresh cancelled it, a newer fetch replaced it, or the query was
+removed), so it never downloads a stray copy. Doorline's final answer (`rosterErrorIsFinal`: an archived
+campaign's 404, a not-assigned 403) skips the saved-copy fallback, so a canvasser taken off a campaign
+never knocks its saved houses; a captive portal's error page falls back to the saved houses like any
+other passing failure.
+
+After a sign-in attempt fails for lack of signal, the field screens offer **Later** and any other screen
+offers **Go back** when there is a screen to go back to (Android Back does the same). The collapsed
+screen comes back when its notice, Refresh or Retry is tapped, on a real return from the background (not
+an iOS Control Center pull), and on its own when another ended-session answer (a coded 401) arrives 30+
+minutes after Later while the person is off a door (`expandReauthIfStale`). A password change heard
+while the screen is up keeps it in place only within 30 minutes of the latest of: the screen coming up,
+someone last using it (Sign in, Forgot password?, Later, Go back, the notice), and the screen switching
+to ask for the new password (`keepReauthInPlace`; `resetWindowOpen` measures from `max(raisedAt,
+activeAt, changeHeardAt)`). Otherwise it is a sign-out — a screen already asking for the new password
+included, so a lost phone left untouched for half an hour signs out at the next answer it hears instead
+of keeping its houses behind the screen. The store-update soft banner steps aside while the password is
+pending (the full screen or its notice) and during **Signing out…**; its hard wall still paints on top.
+The OTA restart offer also waits while the password is pending. A sign-in clears every cached query
+except the store-update check, which belongs to the phone, and a password change from the profile or the
+forced-change screen reruns whatever failed with the old token. The full contract, server and both
+clients, is in [USERS.md](USERS.md) → *Sessions*.
+
+Two more error codes drive the central recovery in [app/_layout.jsx](../mobile/app/_layout.jsx)'s
 `QueryCache.onError` (tagged in [lib/api.js](../mobile/lib/api.js)):
 
 - **`ORG_CONTEXT`** — the active org is invalid (stale id, removed from the org). Clear the org +
@@ -698,7 +799,9 @@ Three mechanisms steer people to newer versions, and they answer different quest
   so it also notices a bundle the native launch check downloaded on its own. It then **offers** a
   restart, never forces one: `reloadAsync()` destroys in-memory state, and survey answers are plain
   component state until Save. Politeness rules: the banner never renders on the canvass-flow
-  screens (`/household/*`, `/voter/*`) — the download still happens there, only the offer waits;
+  screens (`/household/*`, `/voter/*`, `/survey-practice/*` — `CANVASS_FLOW` in
+  [lib/sessionEnd.js](../mobile/lib/sessionEnd.js), the same screens a sign-out waits for) or while the
+  password is pending — the download still happens, only the offer waits;
   **Restart** waits (bounded) for any in-flight door POST to settle and **refuses to reload while
   one is still unsettled** — or if a canvass screen was opened during the wait — re-offering
   instead (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js): an

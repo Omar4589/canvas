@@ -256,6 +256,9 @@ export async function deleteAccount(userId, { reason = 'self', deletedBy = null 
         // see the v4 stamps in docs/PRIVACY_VERIFICATION.md.
         lastLoginAt: null,
         lastSeenAt: null,
+        // Ended session ids carry nothing about the person, but they are account data with no
+        // purpose once the account is gone (requireAuth refuses a deleted account first anyway).
+        endedSessionIds: [],
       },
     }
   );

@@ -21,7 +21,7 @@ import PullableSheet, { SHEET_TIMING } from '../../components/PullableSheet';
 import * as Location from 'expo-location';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
-import { signOut } from '../../lib/authState';
+import { signOut, getSessionState, expandReauth, subscribeSession, useSessionState } from '../../lib/authState';
 import {
   saveBootstrap,
   loadActiveCampaign,
@@ -39,7 +39,7 @@ import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
 import { foldDeltaVoters, foldDeltaHouseholds, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
-import { bootstrapQueryFn } from '../../lib/bootstrapQuery';
+import { bootstrapQueryFn, rosterErrorIsFinal, useSeatedRoster } from '../../lib/bootstrapQuery';
 import { guardedPush } from '../../lib/navGuard';
 import { MAPBOX_PUBLIC_TOKEN } from '../../lib/config';
 import { initMapbox } from '../../lib/mapbox';
@@ -52,6 +52,7 @@ import MapContextCard from '../../components/MapContextCard';
 import EntitlementBanner from '../../components/EntitlementBanner';
 import LocationBlockedBanner from '../../components/LocationBlockedBanner';
 import DataHealthBanner from '../../components/DataHealthBanner';
+import ReauthNotice from '../../components/ReauthNotice';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { buildListEntries } from '../../lib/listEntries';
@@ -206,6 +207,8 @@ function ProgressStat({ pinStatus, value, label }) {
 export default function MapScreen() {
   const router = useRouter();
   const qc = useQueryClient();
+  // While the password is pending, the password screen (or its notice) speaks for failed fetches.
+  const { reauth: reauthPending } = useSessionState();
   const { styleId, styleURL, setStyle } = useMapStyle();
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -291,7 +294,7 @@ export default function MapScreen() {
     [activeFilters]
   );
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
+  const rosterQuery = useQuery({
     queryKey: ['bootstrap'],
     // Shared with books.jsx (lib/bootstrapQuery.js): pending overlays applied to
     // every fresh fetch; disk cache is a cold-start fallback only — a failed
@@ -300,6 +303,8 @@ export default function MapScreen() {
     queryFn: bootstrapQueryFn(qc, activeCampaign?.id),
     enabled: !!activeCampaign?.id,
     staleTime: 30 * 1000,
+    // bootstrapQueryFn retries once itself, so both attempts fetch this campaign.
+    retry: false,
     // Never auto-refetch the whole campaign on (re)mount. A full bootstrap refetch
     // returns the server's CURRENT state, which lags a just-recorded action by the
     // round-trip — so an automatic one resolving right after an optimistic recolor
@@ -308,6 +313,12 @@ export default function MapScreen() {
     // pull-to-refresh, in line with the app's delta-based, battery-conscious design.
     refetchOnMount: false,
   });
+  const { isLoading, refetch, isFetching } = rosterQuery;
+  // Never another campaign's houses or failure, never a cancelled refresh shown as a failure; and
+  // when something else sits in the shared cache, `waiting` holds the loader while this campaign's
+  // roster is fetched — refetchOnMount is off, so nothing else would (lib/bootstrapQuery.js
+  // useSeatedRoster, rules in lib/seatedRoster.js).
+  const { data, error, waiting: rosterWaiting } = useSeatedRoster(rosterQuery, activeCampaign?.id);
 
   // Scope the map to the selected book(s): the live nav param when entering from
   // the books overview, otherwise the last selection restored from storage on
@@ -661,6 +672,17 @@ export default function MapScreen() {
     return () => sub.remove();
   }, [refreshPending]);
 
+  // The password was entered again (the in-place screen cleared): send what waited during it and
+  // bring the pending badge down. flushQueue shares any flush already running.
+  useEffect(() => {
+    let wasPending = !!getSessionState().reauth;
+    return subscribeSession(() => {
+      const pendingNow = !!getSessionState().reauth;
+      if (wasPending && !pendingNow) flushQueue().then(refreshPending).catch(() => {});
+      wasPending = pendingNow;
+    });
+  }, [refreshPending]);
+
   // Drain the offline queue the MOMENT connectivity returns — not only when the
   // app foregrounds or the map refocuses. Completes the "records sync as soon as
   // you have signal again" model for canvassers working dead-zone doors.
@@ -754,6 +776,12 @@ export default function MapScreen() {
   }
 
   async function onRefresh() {
+    // While the password is pending, every refetch would just 401 again (and used to blank the map
+    // with an error and a Retry that can never work): Refresh brings the password screen back.
+    if (getSessionState().reauth) {
+      expandReauth();
+      return;
+    }
     try {
       await flushQueue();
     } catch {}
@@ -777,7 +805,7 @@ export default function MapScreen() {
   if (
     activeCampaign === undefined ||
     viewMode === undefined ||
-    (activeCampaign && isLoading) ||
+    (activeCampaign && (isLoading || rosterWaiting)) ||
     (!params.selectedBooks && restoredBooks === undefined)
   ) {
     return (
@@ -790,8 +818,13 @@ export default function MapScreen() {
   // An archived (or deleted) campaign answers 404 "Campaign inactive" from /mobile/bootstrap, and
   // Retry against that can never succeed — the screen was a trap you could only leave by
   // force-quitting. Name it, and make the escape the primary action.
-  if (error) {
-    const gone = error?.status === 404;
+  //
+  // Any other answer from the server about this campaign (not assigned to you, say) replaces the
+  // map too: those houses can't be worked. A passing failure (no signal, a server blip, a sign-in
+  // that ran out) replaces it only when there is nothing to show: a background refetch that failed
+  // keeps the houses already on screen instead of blanking a working map.
+  if (error && (!data || rosterErrorIsFinal(error))) {
+    const gone = error?.status === 404 && rosterErrorIsFinal(error);
     return (
       <SafeAreaView style={styles.center}>
         <Text style={styles.errorText}>
@@ -1089,7 +1122,16 @@ export default function MapScreen() {
             map + list mode, same soft-banner family as the two above. asOf is the
             snapshot's SERVER stamp (generatedAt): cachedAt is re-stamped by every
             local optimistic save, so it understates how old the server truth is. */}
-        <DataHealthBanner fromCache={!!data?.fromDiskCache} asOf={data?.generatedAt || data?.cachedAt} />
+        <DataHealthBanner
+          fromCache={!!data?.fromDiskCache}
+          asOf={data?.generatedAt || data?.cachedAt}
+          reason={data?.fallbackReason}
+          refreshError={error && data && !rosterErrorIsFinal(error) && !reauthPending ? error.message : null}
+          onRetry={onRefresh}
+        />
+
+        {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
+        <ReauthNotice />
 
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>

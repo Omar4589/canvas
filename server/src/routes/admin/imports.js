@@ -275,9 +275,9 @@ router.post('/csv/preview', uploadCsv, async (req, res, next) => {
     // Destructure and pass the coordinate-quality counters too, or the SYNC preview stays
     // silent about disagreeing/placeholder pins while the worker preview warns — the two
     // previews must tell the same story.
-    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors } =
+    const { totalRows, errors, validRows, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors, offWorldDoors, outsideStateDoors, farPinDoors, unlocatableDoors } =
       await buildImportRows(fs.readFileSync(req.file.path), req.file.originalname, resolved.mapping, { explode });
-    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors });
+    const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: resolved.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors, offWorldDoors, outsideStateDoors, farPinDoors, unlocatableDoors });
     diff.detection = detection;
     res.json({ diff });
   } catch (err) {
@@ -421,8 +421,12 @@ router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     // Exclude preview jobs ($ne also matches legacy docs with no `kind`) so the
-    // ephemeral large-file previews don't clutter the import history.
-    const filter = { organizationId: activeOrgId(req), kind: { $nin: ['preview', 'geocode_check'] } };
+    // ephemeral large-file previews don't clutter the import history. Pin Fixes' Look up by address jobs
+    // (kind 'pin_lookup': no file, nothing inserted) are left out too unless asked for: the web Import page
+    // lists them (includeLookups=1); the Exports page's and the phone's "export from an import" pickers,
+    // which read this list without the flag, must never offer one.
+    const hidden = ['preview', 'geocode_check', ...(req.query.includeLookups === '1' ? [] : ['pin_lookup'])];
+    const filter = { organizationId: activeOrgId(req), kind: { $nin: hidden } };
     if (req.query.campaignId) filter.campaignId = req.query.campaignId;
     // A lead only sees import history for the campaigns they manage.
     if (!isOrgAdmin(req)) {
@@ -458,6 +462,7 @@ const ORG_HIDDEN_IMPORT_FIELDS = {
   pinLookupsCached: 0,
   pinLookupsOverCap: 0,
   pinPassCause: 0,
+  pinLookupTargets: 0, // a Pin Fixes lookup's target ids (kind 'pin_lookup'), a ledger like pinProbedIds
 };
 
 const IMPORT_DETAIL_PROJECTION = {
@@ -577,18 +582,21 @@ router.post('/:importId/undo', async (req, res, next) => {
     }
     // A lead may only undo an import into a campaign they manage — check before
     // claiming (admins skip this fast path; the claim query is org-scoped anyway).
-    if (!isOrgAdmin(req)) {
-      const pre = await ImportJob.findOne(
-        { _id: req.params.importId, organizationId: activeOrgId(req) },
-        { campaignId: 1 }
-      ).lean();
-      if (!pre) return res.status(404).json({ error: 'Import not found' });
-      if (!(await manages(req, res, pre.campaignId))) return;
+    const pre = await ImportJob.findOne(
+      { _id: req.params.importId, organizationId: activeOrgId(req) },
+      { campaignId: 1, kind: 1 }
+    ).lean();
+    if (!pre) return res.status(404).json({ error: 'Import not found' });
+    if (!isOrgAdmin(req) && !(await manages(req, res, pre.campaignId))) return;
+    // A Pin Fixes "Look up by address" job (kind 'pin_lookup') inserted nothing and has nothing to undo.
+    if (pre.kind === 'pin_lookup') {
+      return res.status(400).json({ error: 'A pin lookup has nothing to undo.', code: 'NOTHING_TO_UNDO' });
     }
     // Atomically claim the undo (compare-and-set on `undone`) so two concurrent
-    // requests can't both run it — only the winner gets a non-null job.
+    // requests can't both run it — only the winner gets a non-null job. The kind term keeps a race from
+    // ever claiming a pin lookup.
     const job = await ImportJob.findOneAndUpdate(
-      { _id: req.params.importId, organizationId: activeOrgId(req), status: 'completed', undone: { $ne: true } },
+      { _id: req.params.importId, organizationId: activeOrgId(req), status: 'completed', undone: { $ne: true }, kind: { $ne: 'pin_lookup' } },
       { $set: { undone: true, undoneAt: new Date(), undoneBy: req.user._id } },
       { new: true }
     );

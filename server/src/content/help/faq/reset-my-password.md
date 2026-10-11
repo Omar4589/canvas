@@ -24,8 +24,11 @@ or, if you're a canvasser, the **team lead** who runs your campaign — to issue
 password**. It's valid for **72 hours**, and you'll be prompted to set your own new password right
 away when you sign in with it.
 
-> Requesting a reset never locks your account — you can keep signing in with your current
-> password even if you asked for a link and didn't use it. **Completing** a reset, though, signs
-> you out everywhere else: any phone or browser still signed in with the old password gets sent
-> back to the sign-in screen. Work recorded in the field app is safe — anything not yet synced
-> waits and syncs after you sign back in.
+> Requesting a reset never locks your account — you can keep signing in with your current password
+> even if you asked for a link and didn't use it. **Completing** a reset, though, signs you out
+> everywhere else: any phone or browser still signed in with the old password goes back to the
+> sign-in screen the next time it reaches Doorline — except one whose password screen came up or was
+> used in the half hour before (you tapped **Forgot password?** there and came straight back), which
+> asks for the new password in place until it has been left untouched for half an hour. Work
+> recorded in the field app stays on the phone — anything not yet synced is sent after you sign back
+> in **as yourself**.

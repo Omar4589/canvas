@@ -63,16 +63,20 @@ const SORT_DEFAULT_DIR = {
 // Sorting is CLIENT-side here (unlike the super-admin tables, which sort on the server): the roster
 // is one campaign's people and the page already holds all of them for the crew grouping, so paging
 // the server would cost a round trip and break the grouping for nothing.
-function SortCol({ label, sortKey, right, sort, onSort }) {
+function SortCol({ label, sortKey, right, nowrap, sort, onSort }) {
   const active = sort.key === sortKey;
   return (
     <button
       type="button"
       onClick={() => onSort(sortKey)}
       aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`uppercase tracking-wide hover:text-fg ${right ? 'text-right' : 'text-left'} ${
-        active ? 'text-fg' : ''
-      }`}
+      // `nowrap` is for "Last password login" only: it is wider than its 7.5rem column, so it stays
+      // on one line and runs into the empty space above the row chevrons (gap + chevron column)
+      // instead of wrapping — widening the column would take that width from the names at every
+      // screen size. Every other label keeps wrapping its sort arrow when space runs out.
+      className={`${nowrap ? 'whitespace-nowrap ' : ''}uppercase tracking-wide hover:text-fg ${
+        right ? 'text-right' : 'text-left'
+      } ${active ? 'text-fg' : ''}`}
     >
       {label}
       {active && (sort.dir === 'asc' ? ' ▴' : ' ▾')}
@@ -94,7 +98,7 @@ function TeamHeaderRow({ isSurvey, sort, onSort }) {
       <SortCol label="Doors" sortKey="doors" right {...s} />
       {isSurvey && <SortCol label="Surveys" sortKey="surveys" right {...s} />}
       <SortCol label="Last door" sortKey="lastDoor" right {...s} />
-      <SortCol label="Last login" sortKey="lastLogin" right {...s} />
+      <SortCol label="Last password login" sortKey="lastLogin" right nowrap {...s} />
       <span aria-hidden />
     </li>
   );
@@ -596,7 +600,7 @@ function TeamMemberPanel({ member, campaignId, campaignType, notTargetInUse = fa
           {member.status === 'removed' && <Badge variant="neutral">No longer in the org</Badge>}
           {member.status === 'deleted' && <Badge variant="danger">Account deleted</Badge>}
           <span className="text-xs text-fg-muted">
-            On this campaign since {formatDate(member.assignedAt)} · Last login{' '}
+            On this campaign since {formatDate(member.assignedAt)} · Last password login{' '}
             {formatRelative(member.lastLoginAt, { never: 'never' })} · Last door knocked{' '}
             {formatRelative(activity?.lastActivityAt, { never: 'none yet' })}
           </span>

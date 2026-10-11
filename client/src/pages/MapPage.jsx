@@ -30,6 +30,7 @@ import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { formatInTz } from '../lib/datetime.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { groupHouseholds, buildingKeyForCoords, stackKind } from '../lib/buildings.js';
+import { isOffWorld } from '../lib/pinFixes.js';
 import { visibleMapDoors, countExcludedDoors } from '../lib/excludedDoors.js';
 import MapDoorCount from '../components/MapDoorCount.jsx';
 import { pluralize } from '../lib/mapCounts.js';
@@ -913,6 +914,7 @@ export default function MapPage() {
   // buildings · 80 stacked doors" must never include houses that only share a vendor's coordinate.
   const stackCounts = useMemo(() => {
     const c = { buildingN: 0, buildingDoors: 0, homeSpots: 0, homeDoors: 0 };
+    // A condo complex counts with the buildings: it is a place, not a home without a spot.
     for (const b of buildings) {
       if (b.kind === 'unplaced') {
         c.homeSpots += 1;
@@ -943,7 +945,11 @@ export default function MapPage() {
     // the continental-US default.
     if (!mapRef.current._didFitBounds) {
       const bounds = new mapboxgl.LngLatBounds();
-      for (const f of geojson.features) bounds.extend(f.geometry.coordinates);
+      // A door at 0,0 (a vendor's "no location", not yet fixed in Pin Fixes) never frames the Atlantic.
+      for (const f of geojson.features) {
+        const [lng, lat] = f.geometry.coordinates;
+        if (!isOffWorld(lat, lng)) bounds.extend(f.geometry.coordinates);
+      }
       if (bounds.isEmpty() && mapBounds) {
         bounds.extend([mapBounds.minLng, mapBounds.minLat]);
         bounds.extend([mapBounds.maxLng, mapBounds.maxLat]);

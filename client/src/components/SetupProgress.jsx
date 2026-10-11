@@ -13,7 +13,7 @@ import { Card, Badge, Button, IconButton, IconX } from './ui/index.js';
 // Step routes that live under the campaign drill-in (/campaigns/:id/...); the rest
 // (/surveys library, /campaigns, /users) are org-level and link as-is; '/survey' (singular)
 // is the in-campaign Survey tab.
-const CAMPAIGN_SCOPED = new Set(['/survey', '/import', '/efforts', '/passes', '/turfs', '/walklists', '/map']);
+const CAMPAIGN_SCOPED = new Set(['/survey', '/import', '/efforts', '/passes', '/turfs', '/walklists', '/map', '/pin-fixes']);
 
 const STATUS_BADGE = {
   done: { variant: 'success', dot: true, label: 'Done' },

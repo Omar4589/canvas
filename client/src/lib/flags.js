@@ -245,6 +245,18 @@ export const gpsAccuracyText = (distanceM, accuracyM) => {
   return `Too imprecise to judge the distance (${pm})`;
 };
 
+// The pin a far knock was measured against, as the knock row froze it (server flagDetection.js, the pin-fixes
+// build: docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.7) — an address-lookup estimate nobody had confirmed, or a
+// condo complex's one spot. Both read low. Null otherwise. The phone mirror follows with its next update.
+export const knockPinText = (entry) => {
+  const d = farDetailOf(entry);
+  if (d?.complexPin) return 'Recorded at a complex; the pin is the complex, not the door.';
+  if (d?.estimatedPin) return 'Recorded at an estimated pin — counted as low severity until a lead checks the pin.';
+  return null;
+};
+// The estimate sentence already says "counted as low severity"; the complex one needs the list's suffix.
+export const isComplexKnock = (entry) => !!farDetailOf(entry)?.complexPin;
+
 // The sentences under a far verdict the audit lowered, or kept despite a pin move.
 export const farDowngradeLines = (row) => {
   const d = farDetailOf(row);
@@ -253,6 +265,8 @@ export const farDowngradeLines = (row) => {
   if (d.downgraded) lines.push('The earlier entry was recorded at the door — this correction is flagged low for reference.');
   if (d.pinDowngraded) lines.push('The pin was corrected to a spot this entry sits next to — flagged low for reference.');
   if (d.pinMovedBySelf) lines.push('The person who recorded this door also moved the pin — kept at full severity for review.');
+  const knockPin = knockPinText(row);
+  if (knockPin) lines.push(knockPin);
   return lines;
 };
 

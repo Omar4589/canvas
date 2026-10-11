@@ -3,7 +3,7 @@ import { Household } from '../../models/Household.js';
 import { User } from '../../models/User.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
-import { FLAG_THRESHOLDS, maxSeverity } from './flagThresholds.js';
+import { FLAG_THRESHOLDS, COMPLEX_FAR_M, maxSeverity } from './flagThresholds.js';
 
 // GPS canvassing-quality detector. Computes flags LIVE from the CanvassActivity ledger —
 // nothing about which actions are flagged is stored; only the reviewer's DECISION is
@@ -36,7 +36,7 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
 
   const rows = await CanvassActivity.find(
     scanFilter,
-    '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters replaced wasOfflineSubmission'
+    '_id userId householdId campaignId effortId passId actionType timestamp location distanceFromHouseMeters knockPin replaced wasOfflineSubmission'
   )
     .sort({ userId: 1, timestamp: 1 })
     .lean();
@@ -290,6 +290,8 @@ export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS, toEffectiv
   if (effective > T.FAR_CONFIRM_M) farSev = 'high';
   else if (effective > T.FAR_WARN_M) farSev = 'med';
   if (!farSev) return null;
+  // A condo-complex home: the pin is the complex, not the door (row.knockPin, frozen at knock time).
+  if (row.knockPin === 'complex' && effective <= COMPLEX_FAR_M) return null;
 
   const detail = { meters: d, effectiveMeters: Math.round(effective), accuracy: acc_m ?? null };
   if (row.replaced) {
@@ -345,6 +347,17 @@ export const farAssessment = (row, fix, thresholds = FLAG_THRESHOLDS, toEffectiv
         detail.pinDowngraded = true;
       }
     }
+  }
+  // The pin the knock was measured against, frozen on the row (CanvassActivity.knockPin; the pin-fixes build,
+  // docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.7). Still ONLY downgrades: a complex knock beyond COMPLEX_FAR_M,
+  // or any far knock at an approximate lookup pin nobody had confirmed, reads low with its reason. Knocks
+  // recorded after a lead confirmed an estimate carry no stamp and are judged in full.
+  if (row.knockPin === 'complex') {
+    farSev = 'low';
+    detail.complexPin = true;
+  } else if (row.knockPin === 'estimated' && farSev !== 'low') {
+    farSev = 'low';
+    detail.estimatedPin = true;
   }
   return { severity: farSev, detail };
 };

@@ -115,3 +115,32 @@ test('Save gate: a home without an exact map spot saves only once dragged clearl
   assert.equal(canSaveMove(null, far), false);
   assert.equal(canSaveMove({ ...at, unplaced: true }, null), false);
 });
+
+// ── Place along the street: click mode's pure half (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.3) ──
+import { placeAtBody, placeAtCopy, isNothingMoved, NOTHING_PLACED } from './movePin.js';
+
+test('placeAt sends the clicked point with the row’s scope, and a building row places every unit', () => {
+  assert.deepEqual(placeAtBody({ scope: 'unit' }, { lng: -73.25, lat: 41.15 }), { lat: 41.15, lng: -73.25, scope: 'unit' });
+  assert.deepEqual(placeAtBody({ scope: 'building' }, { lng: '-73.25', lat: '41.15' }), { lat: 41.15, lng: -73.25, scope: 'building' });
+  assert.equal(placeAtBody({ scope: 'spot' }, { lng: 1, lat: 2 }).scope, 'unit', 'only unit or building ever reaches the PATCH');
+  assert.ok(Number.isNaN(placeAtBody({ scope: 'unit' }, null).lat), 'no point → NaN, which placeAt refuses');
+});
+
+test('a save the server moved nothing on keeps the row armed', () => {
+  assert.equal(isNothingMoved({ moved: 0 }), true);
+  assert.equal(isNothingMoved({ unchanged: true }), true);
+  assert.equal(isNothingMoved({ moved: 3 }), false);
+  assert.equal(isNothingMoved(undefined), false);
+  assert.match(NOTHING_PLACED, /^Nothing moved/);
+});
+
+test('the rail sentence: first try, Back, and a multi-unit row', () => {
+  const plain = (c) => c.body.map((b) => b.text).join('');
+  assert.equal(plain(placeAtCopy({ scope: 'unit', addressLine1: '1002 Foxboro Dr' })), 'Click the roof of 1002 Foxboro Dr.');
+  assert.equal(plain(placeAtCopy({ scope: 'unit', addressLine1: '1002 Foxboro Dr', retry: true })), 'Click the right roof for 1002 Foxboro Dr.');
+  assert.equal(
+    plain(placeAtCopy({ scope: 'building', count: 4, addressLine1: '533 Black Rock Tpke' })),
+    'Click the roof of 533 Black Rock Tpke — this places all 4 units together.'
+  );
+  assert.equal(placeAtCopy({}).body[1].strong, true);
+});

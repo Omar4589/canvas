@@ -90,3 +90,27 @@ export const movePinToast = (scope, moved) => {
   const n = Number(moved) || 0;
   return `Building pin moved · ${n.toLocaleString()} ${pluralize(n, 'unit')}`;
 };
+
+// ── Place along the street (Pin Fixes; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.3) ───────────────
+// useMovePin's click mode: no marker — the admin clicks the roof and that click is the save. The same
+// PATCH as a drag (same writer, same audit row, same outline redraw), the target's scope included, so a
+// multi-unit row places all its units with one click.
+export const placeAtBody = (target, at) => ({ lat: Number(at?.lat), lng: Number(at?.lng), scope: target?.scope === 'building' ? 'building' : 'unit' });
+// The server moved nothing (res.moved === 0, or an unchanged answer).
+export const isNothingMoved = (res) => res?.moved === 0 || !!res?.unchanged;
+// Click mode's "nothing moved": the click landed on the home's own pin, or back on the shared spot it left.
+export const NOTHING_PLACED = 'Nothing moved — click the house itself, away from the old pin.';
+// What the rail says for the armed row. `retry`: Back re-armed it after a mis-click.
+export const placeAtCopy = ({ scope, count, addressLine1, retry } = {}) => {
+  const building = scope === 'building';
+  const address = addressLine1 || (building ? 'this building' : 'this home');
+  const n = Number(count) || 0;
+  return {
+    title: 'Place along the street',
+    body: [
+      { text: retry ? 'Click the right roof for ' : 'Click the roof of ' },
+      { text: address, strong: true },
+      { text: building ? ` — this places all ${n} ${pluralize(n, 'unit')} together.` : '.' },
+    ],
+  };
+};

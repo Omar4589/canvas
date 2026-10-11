@@ -360,7 +360,7 @@ export default function CanvasserOverview() {
               ) : null}
               {s.user.lastLoginAt ? (
                 <Text style={styles.lastLogin}>
-                  · last login {timeAgo(s.user.lastLoginAt)}
+                  · last password login {timeAgo(s.user.lastLoginAt)}
                 </Text>
               ) : null}
             </View>

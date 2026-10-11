@@ -4,7 +4,13 @@ import { z } from 'zod';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CampaignManager } from '../models/CampaignManager.js';
-import { signUserToken } from '../services/auth/tokens.js';
+import {
+  signUserToken,
+  renewUserToken,
+  renewalDue,
+  SESSION_MAX_MS,
+  ENDED_SESSIONS_KEPT,
+} from '../services/auth/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
 import { strongPasswordSchema } from '../utils/validators.js';
@@ -89,6 +95,10 @@ async function loadMembershipsForUser(userId) {
 
 router.post('/login', async (req, res, next) => {
   try {
+    // The sign-in time is taken BEFORE the user is read, so a login that read the old password
+    // hash is always older than the password change that replaced it (requireAuth revokes by
+    // auth_ms < passwordChangedAt). See services/auth/tokens.js.
+    const authMs = Date.now();
     const { email, password } = loginSchema.parse(req.body);
     const user = await User.findOne({ email: email.toLowerCase() });
     // A deleted account can never log in again — that is the difference between deletion and
@@ -113,7 +123,7 @@ router.post('/login', async (req, res, next) => {
 
     User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } }).catch(() => {});
 
-    const token = signUserToken(user);
+    const token = signUserToken(user, { authMs });
     const memberships = await loadMembershipsForUser(user._id);
     res.json({ token, user: user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION });
   } catch (err) {
@@ -201,10 +211,36 @@ router.post('/reset-password', async (req, res, next) => {
   }
 });
 
+// A sign-in is extended here, about once a day, while it is used: the phone calls /auth/me on
+// every cold start and every return to the foreground, and the web on page load and on an
+// interaction-gated check. The new token carries the same auth_ms and sid, so the 90-day cap,
+// password-change revocation and sign-out all still apply to it. Not extended: a session suspended
+// for a forced password change, someone removed from every organization, Doorline staff (their
+// tokens reach every customer's data, so they keep a plain 30-day sign-in), and a token already at
+// its cap. Extending writes nothing — in particular never lastLoginAt, which stays "the last time
+// they typed a password". A failure here must never fail the identity call both apps depend on.
+const extendedToken = (req, memberships) => {
+  try {
+    const { user, auth } = req;
+    if (!auth || !renewalDue(auth)) return null;
+    if (user.mustChangePassword || user.isSuperAdmin || memberships.length === 0) return null;
+    if (Date.now() >= auth.authMs + SESSION_MAX_MS) return null;
+    return renewUserToken(user, { authMs: auth.authMs, sid: auth.sid });
+  } catch (err) {
+    console.error('[auth/me] extension failed:', err?.message || err);
+    return null;
+  }
+};
+
 router.get('/me', requireAuth, async (req, res, next) => {
   try {
+    // It can carry a credential now; no browser or proxy may keep a copy.
+    res.set('Cache-Control', 'no-store');
     const memberships = await loadMembershipsForUser(req.user._id);
-    res.json({ user: req.user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION });
+    const body = { user: req.user.toSafeJSON(), memberships, minClientApiVersion: MIN_CLIENT_API_VERSION };
+    const token = extendedToken(req, memberships);
+    if (token) body.token = token;
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -224,6 +260,10 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
     }
 
     const passwordHash = await User.hashPassword(newPassword);
+    // ONE instant for both the revocation stamp and the new token's sign-in time: the new token's
+    // auth_ms equals passwordChangedAt, so it passes the strict `<` check and every older session
+    // fails it.
+    const changedAt = new Date();
     const user = await User.findByIdAndUpdate(
       req.user._id,
       // passwordChangedAt revokes every OTHER session (requireAuth's SESSION_REVOKED check);
@@ -236,14 +276,14 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
         passwordHash,
         mustChangePassword: false,
         tempPasswordSetAt: null,
-        passwordChangedAt: new Date(),
+        passwordChangedAt: changedAt,
         passwordResetToken: null,
         passwordResetExpiresAt: null,
       },
       { new: true }
     );
     const memberships = await loadMembershipsForUser(user._id);
-    res.json({ token: signUserToken(user), user: user.toSafeJSON(), memberships });
+    res.json({ token: signUserToken(user, { authMs: changedAt.getTime() }), user: user.toSafeJSON(), memberships });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -289,7 +329,25 @@ router.post('/memberships/:membershipId/acknowledge', requireAuth, async (req, r
   }
 });
 
+// Signing out ends the session on the server too, not just on the device: the session id goes on
+// the user's ended list, and requireAuth refuses that session and every copy of its token from then
+// on. Tokens minted before sid existed use a stable id derived from their signature, so copies of
+// an old token end together as well. The list keeps the last ENDED_SESSIONS_KEPT ids; an ended
+// session could only come back after that many later sign-outs by the same account within its
+// cap. timestamps: false so a sign-out doesn't move the user's updatedAt. Clients call this
+// fire-and-forget before forgetting the token; with no signal it never arrives, and the session
+// simply runs out.
 router.post('/logout', requireAuth, async (req, res) => {
+  try {
+    await User.updateOne(
+      { _id: req.user._id },
+      { $push: { endedSessionIds: { $each: [req.auth.sid], $slice: -ENDED_SESSIONS_KEPT } } },
+      { timestamps: false }
+    );
+  } catch (err) {
+    console.error('[auth/logout] could not record the sign-out:', err?.message || err);
+    return res.status(503).json({ error: 'Sign-out could not be recorded. Try again.' });
+  }
   res.json({ ok: true });
 });
 

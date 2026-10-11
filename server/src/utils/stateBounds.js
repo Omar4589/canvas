@@ -39,3 +39,23 @@ export function inStateBounds(state, lat, lng) {
   if (!b) return true; // unknown state/territory → fail open (insurance, not a gate)
   return lat >= b[0] && lat <= b[1] && lng >= b[2] && lng <= b[3];
 }
+
+// ── File coordinates that can't be real ─────────────────────────────────────────────────────
+// A voter file writes 0,0 where it has no location (the Fairfield file: 279 rows), and a vendor's
+// lower-grade match can land a house in another town. Both are inside the world, so isValidLatLng
+// passes them; both are provably not the home. The import treats a refused pair as NO coordinate
+// (the home is looked up by address, or parked at a holding spot), never as a place
+// (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S1.1, S4.1).
+export const OFF_WORLD_EPSILON = 1e-5; // ~1 m of Null Island, where 0,0 vendors put the missing
+export const isOffWorld = (lat, lng) => Math.abs(lat) < OFF_WORLD_EPSILON && Math.abs(lng) < OFF_WORLD_EPSILON;
+
+// 'offworld' | 'outside_state' | null. Only ever called with a pair that already passed isValidLatLng
+// (the range test stays in csvImporter's mapRow); a non-finite pair reads as outside its state, the
+// same answer inStateBounds gives. The state is the ROW'S own State column — a required import
+// field — so an unknown code fails open exactly as inStateBounds does.
+export const fileCoordRefusal = ({ lat, lng, state }) => {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 'outside_state';
+  if (isOffWorld(lat, lng)) return 'offworld';
+  if (!inStateBounds(state, lat, lng)) return 'outside_state';
+  return null;
+};

@@ -28,10 +28,13 @@ Super admins work in a **platform view** (no single active organization). From t
 any org to work inside it, then come back out.
 
 **Where you land, on both clients:** *signing in starts you in the platform view; reloading keeps you
-where you were.* Typing your password always clears the remembered organization, so a super admin who
-is also an admin of some org lands on the Control Room rather than that org's home — your home is the
-platform. Reload, session restore, and app resume deliberately leave the remembered org alone, so a
-refresh mid-task doesn't throw away your place.
+where you were.* Typing your password on the sign-in page always clears the remembered organization, so
+a super admin who is also an admin of some org lands on the Control Room rather than that org's home —
+your home is the platform. Reload, session restore, app resume, and the in-place password prompt after
+a sign-in runs out ([USERS.md](USERS.md) → *Sessions*) deliberately keep the org you were working in, so
+a refresh mid-task doesn't throw away your place. On the web each tab keeps its own org; a reload starts
+from the org last chosen in any tab, or the org of the last tab that continued at the password prompt
+inside an org (a tab that continues in the platform view leaves the remembered org as it was).
 
 The rule lives in `activeOrgIdForLogin` ([client/src/lib/roles.js](../client/src/lib/roles.js)) and,
 on mobile, in `app/login.jsx`. Note it can't be expressed by simply not auto-picking: a super admin
@@ -153,14 +156,15 @@ so "signed out then in" and "session expired then in" landed in different places
   (dates only — never the retained name, which stays org-scoped on reports). All of it is account
   metadata: no support grant needed, no audit row written. The headline counts real accounts and lists **deleted tombstones separately** (they carry a
   "deleted" badge and never inflate the total); filters cover super admins, active/inactive, deleted,
-  temp-password (never finished onboarding), and accounts with no memberships. **Three clocks are
-  shown apart**, because they answer three different questions: **Last login** (the last time they
-  typed a password — sessions last 30 days and the phone app skips the login screen, so this can
-  honestly read weeks old for someone who works every day), **Last active** (the last time their app
-  talked to us at all, on any surface — recorded at most every 15 minutes, and it means the session
-  was live, not that a human was tapping), and **Last canvassed** (the last door they knocked), which
-  sits in the expanded row because most accounts — admins, leads, staff — never canvass at all. An
-  account with no clock yet reads "—", not "Never": before someone's first request after this
+  temp-password (never finished onboarding), and accounts with no memberships. **Three clocks are shown
+  apart**, because they answer three different questions: **Last password login** (the last time they
+  typed a password — a used sign-in is extended up to 90 days without one and the phone app skips the
+  login screen, so this can honestly read weeks or months old for someone who works every day), **Last
+  active** (the last time their app talked to us at all, on any surface — recorded at most every 15
+  minutes, and it means the session was live, not that a human was tapping), and **Last canvassed** (the
+  last door they knocked), which sits in the expanded row because most accounts — admins, leads, staff —
+  never canvass at all.
+  An account with no clock yet reads "—", not "Never": before someone's first request after this
   shipped there is simply nothing recorded, and the page fills in as people use it. Expanding a row
   shows the account's details, its **login-lockout state** (read live — "Locked, N failed attempts", honestly
   labeled *on this server* — with the Clear button beside it), and, for break-glass operators, the
@@ -282,7 +286,7 @@ The client mirrors this: `ProtectedRoute requireSuperAdmin` + `AuthContext.isSup
 | Imports | [SuperAdminImportsPage.jsx](../client/src/pages/SuperAdminImportsPage.jsx) | `GET /super-admin/imports` — cross-org import + geocoding-cost aggregation (real persisted lookup counts; cost derived from `GEOCODE_COST_PER_1000_CENTS`, never sent to clients); opt-in `skip`/`limit`, `q` (file/uploader/org), `orgId`, `sort=cost\|new`, `excludeUndone=1`, `groupBy=month\|org` rollups ([imports.js](../server/src/routes/superAdmin/imports.js)) |
 | People | [SuperAdminPeoplePage.jsx](../client/src/pages/SuperAdminPeoplePage.jsx) + [PersonDetailPage.jsx](../client/src/pages/PersonDetailPage.jsx) | `/super-admin/persons/*` ([persons.js](../server/src/routes/superAdmin/persons.js)) — see [PERSONS.md](PERSONS.md) |
 | Support access | [SupportAccessPage.jsx](../client/src/pages/SupportAccessPage.jsx) | `/super-admin/access/*` ([access.js](../server/src/routes/superAdmin/access.js)) — grants CRUD (`GET /grants` returns `scope: all\|mine` + per-grant `read {requests, rows, bytes}` totals), the audit log (`GET /log` — `skip`/`limit` + exact `total`, filters `organizationId`/`actorUserId`/`grantId`/`from`/`to`/**`subjectId`** (record-level: which voter/person/household a row touched — single-record opens + exports carry `subjects`/`subjectCount`/`subjectsTruncated`; browse rows stay request-level), each entry carrying `rows`/`bytes`/`route`), `GET /log-facets` (filter options + the log's true extent: `logTotal`, `oldestAt`), retention health, and deletion requests (`GET` paged + `status` filter + per-row `overdue`; `POST` files; `POST /:id/cancel`). The customer-facing half is `GET /admin/voters/:voterId/staff-access` (the voter profile's "Doorline staff access" panel — first-name-only). Grant/logging services in [services/access/supportAccess.js](../server/src/services/access/supportAccess.js); the full verified picture is in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) (E12/E13 + v3/v4) |
-| Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)) |
+| Jobs | queues page | Bull Board at `/admin/queues` (`requireBullBoardAuth`, mounted in [app.js](../server/src/app.js)). It accepts ONLY its own 10-minute ticket (`purpose: 'bullboard'`), ONLY from the `bb_token` cookie the Jobs page sets via `GET /api/admin/queues/ticket` — never a session token, `Bearer` or `?t=` (a revoked super-admin token used to open it, and `?t=` was logged in full) |
 
 ## Internal (Doorline-owned) organizations
 

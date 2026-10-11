@@ -29,7 +29,8 @@ const householdLocationChangeSchema = new mongoose.Schema(
     // (services/households/confirmHouseholdLocation.js filters its targets), so a corrected
     // door's latest row stays an honest move record.
     source: { type: String, enum: ['gps', 'drag', 'admin_drag', 'import_repair', 'confirm'], required: true },
-    scope: { type: String, enum: ['unit', 'building'], default: 'unit' },
+    // 'spot': a vouch fanned out to every member of a condo complex (confirmHouseholdLocation scope 'spot').
+    scope: { type: String, enum: ['unit', 'building', 'spot'], default: 'unit' },
     accuracy: { type: Number, default: null }, // GPS accuracy (m) when source === 'gps'
     from: { type: pointSchema, default: null }, // pre-move point (null if the door had none)
     to: { type: pointSchema, required: true }, // the corrected point

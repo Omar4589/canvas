@@ -157,3 +157,22 @@ test('the phone copy matches the server: the 130-case table, every word list and
   }
   assert.equal(mobile.UNIT_SUFFIX.source, server.UNIT_SUFFIX.source);
 });
+
+// ── baseFamily (the pin-fixes build, change #1): a bare unit number glued to the street line folds onto
+// its street address — only where addresses are compared on one spot. Server-only; no mirror.
+test('baseFamily: bare unit numbers fold; numbered roads, directional-only names and non-types stay', () => {
+  const fam = (line) => server.baseFamily(server.stackBaseOf(line));
+  assert.equal(fam('857 Post Rd 146'), '857 POST ROAD');
+  assert.equal(fam('533 Black Rock Tpke 3'), '533 BLACK ROCK TPKE');
+  assert.equal(fam('533 Black Rock Tpke'), '533 BLACK ROCK TPKE');
+  for (const line of ['1644 County Rd 78', '5001 Hwy 160', '1000 W Road 36', '1234 RM 2222', '100 Slip 5', '100 Pier A', '10A Bloomfield Dr', '1101 S Nevada Highway 160']) {
+    assert.equal(fam(line), server.stackBaseOf(line), line);
+  }
+});
+
+test('baseFamily leaves every existing stackBaseOf fixture unchanged, and the parser itself is untouched', () => {
+  for (const [line, expected] of cases) {
+    assert.equal(server.stackBaseOf(line), expected, line);
+    assert.equal(server.baseFamily(expected), expected, `baseFamily changed the fixture ${line}`);
+  }
+});

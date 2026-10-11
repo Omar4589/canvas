@@ -1,4 +1,6 @@
-const TOKEN_KEY = 'canvass.token';
+import { sessionEndDecision, webAction, isPublicPath } from '../lib/sessionEnd.js';
+
+export const TOKEN_KEY = 'canvass.token';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 
 export function getToken() {
@@ -10,26 +12,106 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+// THIS tab's active org. Read from localStorage the first time it's needed (the remembered org a
+// new tab or a reload starts from), then owned by the tab: another tab switching org, signing in
+// or signing out writes localStorage but no longer re-points this tab's requests underneath it.
+// That used to send one org's header from a page showing another org — and, with the in-place
+// password prompt, it stripped the org from a tab holding unsaved edits behind its prompt (a
+// password reset or a sign-in in another tab clears or resets the stored org).
+let tabOrgId;
 export function getActiveOrgId() {
-  return localStorage.getItem(ACTIVE_ORG_KEY);
+  if (tabOrgId === undefined) tabOrgId = localStorage.getItem(ACTIVE_ORG_KEY);
+  return tabOrgId;
 }
 
 export function setActiveOrgId(orgId) {
+  tabOrgId = orgId || null;
   if (orgId) localStorage.setItem(ACTIVE_ORG_KEY, orgId);
   else localStorage.removeItem(ACTIVE_ORG_KEY);
 }
 
-export async function api(
-  path,
-  { method = 'GET', body, headers = {}, formData, public: isPublic = false, shareToken, signal } = {}
-) {
+// A request answered "your sign-in ran out" waits here while the password prompt is up, then runs
+// once more with the restored session — the 401 came from the sign-in check, so the request itself
+// never ran. Nothing fails underneath the prompt: a page never swaps its form for an error (and
+// loses what was typed), and a Save clicked at the wrong moment completes after the password.
+// AuthContext resolves it when the session is back, and rejects it on a sign-out.
+let restore = null;
+const pendingRestore = () => {
+  if (!restore) {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    promise.catch(() => {}); // a rejection with nothing waiting on it is expected
+    restore = { promise, resolve, reject };
+  }
+  return restore.promise;
+};
+export const resolveSessionRestore = () => {
+  const r = restore;
+  restore = null;
+  r?.resolve();
+};
+export const rejectSessionRestore = () => {
+  const r = restore;
+  restore = null;
+  r?.reject(new Error('Signed out'));
+};
+
+// Whether this tab's password prompt is up — set by AuthContext on every change to it. While it is,
+// a password change or another tab's sign-out is held too: the prompt answers those as well. (Not
+// "a request is already waiting": one aborted while held leaves that behind with no prompt.)
+let promptUp = false;
+export const setSessionPromptUp = (up) => {
+  promptUp = !!up;
+};
+
+const waitOrAbort = (promise, signal) => {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      }
+    );
+  });
+};
+
+export async function api(path, options = {}) {
+  const {
+    method = 'GET',
+    body,
+    headers = {},
+    formData,
+    public: isPublic = false,
+    shareToken,
+    signal,
+    // An explicit bearer token, e.g. ending one specific session on the server.
+    token: tokenOverride,
+    // Never report a session end from this call (the page-load check, the password prompt's login,
+    // a sign-out).
+    quiet = false,
+    // Internal: this is the one retry after the session was restored.
+    _retried = false,
+  } = options;
   const finalHeaders = { ...headers };
   // Public (share-link) calls carry no user identity — only the optional share access token.
-  // sentToken is held so the SESSION_REVOKED handler below can tell "this very session was
-  // revoked" from a stale in-flight request that predates a token rotation.
+  // sentToken is held so an ended-session answer can tell "this very session ended" from a stale
+  // in-flight request that predates a token change. Read synchronously, before the first await,
+  // so a caller can clear the stored token right after calling (logout does).
   let sentToken = null;
   if (!isPublic) {
-    sentToken = getToken();
+    sentToken = tokenOverride !== undefined ? tokenOverride : getToken();
     const orgId = getActiveOrgId();
     if (sentToken) finalHeaders.Authorization = `Bearer ${sentToken}`;
     if (orgId) finalHeaders['X-Org-Id'] = orgId;
@@ -102,36 +184,48 @@ export async function api(
         })
       );
     }
-    // The password was changed elsewhere (self-serve reset or change on another device) and the
-    // server revoked this session. Clear the dead token and land on sign-in — without this,
-    // every panel fails with a Retry button that can never succeed. Two guards:
-    //  - Act only if the token THIS request carried is still the stored one. After
-    //    change-password rotates the token, a poll that left with the OLD token can land 401
-    //    here (another tab, or a request already in flight) — clearing then would wipe the
-    //    just-adopted session and sign out the very person who changed their password.
-    //  - Never redirect off a PUBLIC page. The AuthProvider probes /auth/me on every route,
-    //    so a stale token would otherwise yank someone out of /reset-password/:token (mid
-    //    reset!) or a shared report; clearing the dead token alone ends the noise there.
-    if (
-      res.status === 401 &&
-      data?.code === 'SESSION_REVOKED' &&
-      typeof window !== 'undefined' &&
-      sentToken &&
-      sentToken === getToken()
-    ) {
-      setToken(null);
-      const p = window.location.pathname;
-      const isPublic =
-        p === '/' ||
-        ['/login', '/forgot-password', '/reset-password', '/r', '/privacy', '/terms', '/delete-account', '/update-required']
-          .some((base) => p === base || p.startsWith(`${base}/`));
-      if (!isPublic) window.location.assign('/login');
-    }
-
     const err = new Error(data?.error || `Request failed: ${res.status}`);
     err.status = res.status;
     err.code = data?.code || null; // so callers can branch without digging into err.data
     err.data = data;
+
+    // The server says this session ended — every such 401 is code SESSION_REVOKED plus a reason
+    // (lib/sessionEnd.js). Reported to the AuthProvider as a window event, like the support-access
+    // prompt above, because it can surface from any request on any page. The provider decides:
+    // a sign-in that ran out → the password prompt IN PLACE (the token is NOT cleared here —
+    // clearing it would push every other open tab into a sign-out and throw away their unsaved
+    // work); a deliberate end (password changed elsewhere, account deleted, signed out in another
+    // tab) → the sign-in page with a note. Without this every panel failed with a Retry button
+    // that could never succeed. Acted on only when this request carried the token still stored
+    // (sessionEndDecision): after a password change rotates the token, a poll that left with the
+    // OLD one can land 401 here, and must not touch the new session.
+    if (!quiet && typeof window !== 'undefined') {
+      const ended = sessionEndDecision({ status: res.status, data, sentToken, storedToken: getToken() });
+      if (ended) {
+        // Held for the password (see pendingRestore above): a run-out, or — while the prompt is
+        // already up — a password change or another tab's sign-out, which the prompt also answers.
+        // Never on a public page (no prompt there) and never twice for one request.
+        const hold =
+          !_retried &&
+          !isPublicPath(window.location.pathname) &&
+          (webAction(ended.reason) === 'reauth' ||
+            (promptUp && (ended.reason === 'password_changed' || ended.reason === 'missing')));
+        // Created BEFORE the event, so a provider that decides "sign out" can reject it at once.
+        const waiting = hold ? pendingRestore() : null;
+        window.dispatchEvent(
+          new CustomEvent('doorline:session-ended', { detail: { reason: ended.reason, sentToken } })
+        );
+        if (waiting) {
+          try {
+            await waitOrAbort(waiting, signal);
+          } catch (waitErr) {
+            if (waitErr?.name === 'AbortError') throw waitErr;
+            throw err;
+          }
+          return api(path, { ...options, _retried: true });
+        }
+      }
+    }
     throw err;
   }
   return data;

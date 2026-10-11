@@ -440,7 +440,7 @@ export default function AdminUserDetail() {
               Member since {formatDate(user.createdAt)}
             </Text>
             <Text style={styles.headerMeta}>
-              Last login {formatRelative(user.lastLoginAt)}
+              Last password login {formatRelative(user.lastLoginAt)}
             </Text>
           </View>
 

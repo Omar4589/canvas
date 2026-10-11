@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 import { API_BASE_URL } from './config';
 import { getToken } from './auth';
 import { loadActiveOrgId } from './cache';
+import { refreshSession } from './session';
 
 // Fetch a CSV from the backend (using the same auth/org headers as api()),
 // write it to a file in the app cache, then open the OS share sheet.
@@ -22,6 +23,9 @@ export async function downloadCsv(path, filename) {
 
     const res = await fetch(`${API_BASE_URL}/api${path}`, { headers });
     if (!res.ok) {
+      // This bypasses api(), so it can't see an ended session itself: ask /auth/me through api(),
+      // which reports it if the sign-in really ended (lib/api.js).
+      if (res.status === 401) refreshSession({ force: true });
       throw new Error(`Download failed: ${res.status}`);
     }
     const text = await res.text();

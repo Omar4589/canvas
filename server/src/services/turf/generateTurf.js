@@ -59,6 +59,15 @@ export function cutStatusExclusion({ excludeRestricted, excludeNoSoliciting } = 
   return drop.length ? { status: { $nin: drop } } : {};
 }
 
+// "Leave out homes without a reliable map spot" (Turf Cutting's toggle; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md
+// S3.4, S10.6). A door cuts when it carries no pin flag, when its flag is 'complex' (the spot IS right —
+// a complex cuts as one point, like a tower), or when a lead has vouched for it. Everything flagged and
+// unvouched — a shared spot, a pin far from its street, a holding spot — is left out, to be added after
+// its pin is fixed (Add as new book). A set-aside door is already out through KNOCKABLE_DOOR_FILTER.
+export const CUTTABLE_PIN = Object.freeze({
+  $or: [{ pinSuspect: { $exists: false } }, { pinSuspect: 'complex' }, { locationConfirmedAt: { $ne: null } }],
+});
+
 // Doors the effort still considers unreachable — the per-round truth the global-status toggle
 // above cannot see.
 //
@@ -116,6 +125,7 @@ export async function cutExclusionFilter({
   campaignType,
   excludeRestricted,
   excludeNoSoliciting,
+  excludeUnplaced,
 } = {}) {
   const clauses = [];
   const status = cutStatusExclusion({ excludeRestricted, excludeNoSoliciting });
@@ -124,6 +134,7 @@ export async function cutExclusionFilter({
     const ids = await restrictedDoorIdsForEffort({ campaignId, effortId, campaignType });
     if (ids.length) clauses.push({ _id: { $nin: ids } });
   }
+  if (excludeUnplaced) clauses.push(CUTTABLE_PIN);
   return clauses.length ? { $and: clauses } : {};
 }
 
@@ -171,6 +182,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       campaignType: campaign.type,
       excludeRestricted: params.excludeRestricted,
       excludeNoSoliciting: params.excludeNoSoliciting,
+      excludeUnplaced: params.excludeUnplaced,
     })),
   };
 
@@ -327,7 +339,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // through the normal Accept → Assign steps) and the whole pass is re-tessellated
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
-export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false, onProgress }) {
+export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false, excludeUnplaced = false, onProgress }) {
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
   // Same mid-delete guard as generateTurf above.
@@ -361,6 +373,7 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
       campaignType: campaign.type,
       excludeRestricted,
       excludeNoSoliciting,
+      excludeUnplaced,
     })),
   };
 

@@ -33,20 +33,24 @@ function readCookie(req, name) {
   return null;
 }
 
-export function requireBullBoardAuth(req, res, next) {
+// Only the ticket, and only from its cookie. A session token is not a ticket: it would skip the
+// user lookup every API request makes, so a revoked or demoted super admin's token would still open
+// this cross-tenant job console, and a ?t= query string lands in the access log in full. The
+// console's Jobs page mints the ticket through GET /api/admin/queues/ticket (requireAuth +
+// requireSuperAdmin, so the database checks apply there) and sets this cookie, scoped to this path.
+export const requireBullBoardAuth = (req, res, next) => {
   const secret = process.env.JWT_SECRET;
-  const header = req.headers.authorization || '';
-  const bearer = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const token = readCookie(req, BULL_BOARD_COOKIE) || bearer || req.query.t;
+  const token = readCookie(req, BULL_BOARD_COOKIE);
   if (!token || !secret) return res.status(403).send('Forbidden');
   try {
     const payload = jwt.verify(token, secret);
+    if (payload.purpose !== 'bullboard') return res.status(403).send('Forbidden');
     if (!payload.isSuperAdmin) return res.status(403).send('Super admin only');
     return next();
   } catch {
     return res.status(403).send('Forbidden');
   }
-}
+};
 
 export function createBullBoardRouter() {
   const serverAdapter = new ExpressAdapter();

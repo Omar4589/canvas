@@ -39,7 +39,7 @@ const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name A–Z' },
   { value: 'name-desc', label: 'Name Z–A' },
   { value: 'recent-joined', label: 'Recently joined' },
-  { value: 'recent-signin', label: 'Recently signed in' },
+  { value: 'recent-signin', label: 'Recent password login' },
 ];
 
 function compareName(a, b, dir) {

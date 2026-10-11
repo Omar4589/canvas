@@ -23,6 +23,81 @@ import { reapplyDoNotKnock } from '../dnc/doNotKnock.js';
 import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
 import { collectRevisitHomes } from './collectRevisitHomes.js';
 import { placeStackedPins, PIN_PASS_FAILED } from '../households/placeStackedPins.js';
+import { createHoldingSpots } from './holdingSpot.js';
+import mongoose from 'mongoose';
+
+// The org-visible sentences for a Pin Fixes "Look up by address" job that didn't finish. The pass's own
+// sentences say "import the file again", which is the wrong advice for a lookup with no file.
+export const PIN_LOOKUP_BUSY = 'Another pin check is running in this campaign — click Look up by address again in a minute.';
+export const PIN_LOOKUP_FAILED = "The lookup couldn't finish — click Look up by address to try again.";
+
+// kind 'pin_lookup' (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S5.1): no upload, no rows — the placement pass
+// on a set of the campaign's existing homes, chosen by a lead in Pin Fixes. Dispatched BEFORE the upload is
+// loaded (loadRawImport would throw FileNotFound for a job that never had one). Same pins stage, heartbeat
+// and tally as an apply import; marks written by a busy or failed run stand, and the ledger (pinProbedIds)
+// is this job's own, so a retry never buys a home twice.
+async function processPinLookupJob({ job, importJob, campaign }) {
+  const importJobId = importJob._id;
+  await ImportJob.updateOne(
+    { _id: importJobId },
+    { $set: { status: 'importing', phase: 'pins', startedAt: new Date(), heartbeatAt: new Date(), progress: 0, queueJobId: String(job.id) } }
+  );
+  const beat = setInterval(() => {
+    ImportJob.updateOne({ _id: importJobId }, { $set: { heartbeatAt: new Date() } }).catch(() => {});
+  }, 30_000);
+  beat.unref?.();
+  try {
+    const ids = (importJob.pinLookupTargets || []).filter((id) => mongoose.isValidObjectId(id));
+    const targets = await Household.find({ _id: { $in: ids }, campaignId: campaign._id }, { normalizedAddress: 1 }).lean();
+    let pins;
+    try {
+      pins = await placeStackedPins({
+        campaign,
+        importJob,
+        paidScope: new Set(targets.map((t) => t.normalizedAddress)),
+        tallyIds: targets.map((t) => String(t._id)),
+        allowPaid: process.env.GEOCODE_ENABLED === 'true' && !!process.env.GEOCODIO_API_KEY,
+      });
+    } catch (err) {
+      console.error('[pin-lookup] pass failed:', err?.message);
+      pins = { pinPassError: PIN_LOOKUP_FAILED, pinPassCause: String(err?.message || err).slice(0, 300) };
+    }
+    if (pins.pinPassError) {
+      pins.pinPassError = String(pins.pinPassCause || '').startsWith('busy') ? PIN_LOOKUP_BUSY : PIN_LOOKUP_FAILED;
+    }
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      {
+        $set: {
+          status: 'completed',
+          completedAt: new Date(),
+          progress: 100,
+          totalRows: targets.length,
+          pinsPlacedExact: pins.pinsPlacedExact || 0,
+          pinsConfirmedInPlace: pins.pinsConfirmedInPlace || 0,
+          pinsStillUnplaced: pins.pinsStillUnplaced || 0,
+          pinsPlacedApprox: pins.pinsPlacedApprox || 0,
+          pinsComplex: pins.pinsComplex || 0,
+          pinsUnlocated: pins.pinsUnlocated || 0,
+          pinsFarMarked: pins.pinsFarMarked || 0,
+          pinLookupsCached: pins.pinLookupsCached || 0,
+          pinLookupsOverCap: pins.pinLookupsOverCap || 0,
+          pinPassError: pins.pinPassError || null,
+          pinPassCause: pins.pinPassCause || null,
+        },
+      }
+    );
+    return { ok: true, kind: 'pin_lookup', importJobId: String(importJobId) };
+  } catch (err) {
+    await ImportJob.updateOne(
+      { _id: importJobId },
+      { $set: { status: 'failed', lastError: "The lookup couldn't run. Try again in a minute.", completedAt: new Date() } }
+    ).catch(() => {});
+    throw err;
+  } finally {
+    clearInterval(beat);
+  }
+}
 
 // Chunk a large $in lookup so a 25k-element query document never balloons memory.
 // Returns the same lean docs as the inline query it replaces, just fetched in pages.
@@ -76,6 +151,8 @@ export async function processImportJob(job) {
   }
   const orgId = campaign.organizationId;
 
+  if (importJob.kind === 'pin_lookup') return processPinLookupJob({ job, importJob, campaign });
+
   await ImportJob.updateOne(
     { _id: importJobId },
     {
@@ -98,7 +175,7 @@ export async function processImportJob(job) {
     const buffer = await loadRawImport(importJobId);
     const useSpill = importJob.kind !== 'preview' && importJob.kind !== 'geocode_check';
     if (useSpill) fs.writeFileSync(spillRaw, '');
-    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors } = await buildImportRows(
+    const { totalRows, errors, validRows, validCount, householdMap, dupSvids, dupRows, detection, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors, offWorldDoors, outsideStateDoors, farPinDoors, unlocatableDoors } = await buildImportRows(
       buffer,
       importJob.filename,
       importJob.fieldMapping || {},
@@ -143,7 +220,7 @@ export async function processImportJob(job) {
     // writes. Persist the diff for the client to poll, then drop the raw file.
     if (importJob.kind === 'preview') {
       await ImportJob.updateOne({ _id: importJobId }, { $set: { phase: 'diffing', heartbeatAt: new Date() } });
-      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors });
+      const diff = await computeImportDiff(campaign, { validRows, householdMap, errors, dupSvids, dupRows, totalRows, uidSource: importJob.uidSource, coordConflicts, coordConflictTies, placeholderPins, placeholderPinDoors, strayPinDoors, offWorldDoors, outsideStateDoors, farPinDoors, unlocatableDoors });
       diff.detection = detection;
       await ImportJob.updateOne(
         { _id: importJobId },
@@ -189,6 +266,17 @@ export async function processImportJob(job) {
         },
       });
       geoStats = stats;
+      // Park, don't drop (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S5.2): a home the lookup couldn't place
+      // keeps its voters at its ZIP's holding spot, flagged 'unlocated'. Only a home no spot can be derived
+      // for is dropped, with its voters, exactly as before. A provider error (geocode_failed) is parked too:
+      // nothing was cached for it, so Pin Fixes' Look up by address retries it for free.
+      if (unmatched.size) {
+        const spots = await createHoldingSpots({ campaignId: campaign._id, householdMap });
+        for (const normAddr of [...unmatched.keys()]) {
+          const h = householdMap.get(normAddr);
+          if (h && (await spots.assign(h))) unmatched.delete(normAddr);
+        }
+      }
       if (unmatched.size) {
         for (const normAddr of unmatched.keys()) householdMap.delete(normAddr);
         if (validRows) {
@@ -204,6 +292,32 @@ export async function processImportJob(job) {
         // below (the spill is streamed there anyway — no extra read).
       }
       geocodeUnmatched = unmatched;
+    } else if (process.env.GEOCODE_ENABLED !== 'true') {
+      // Lookups off: a refused file coordinate (0,0, outside its state) is parked without a lookup; a home no
+      // spot can be derived for is dropped as bad_coords. Rows with no coordinate columns never got this far
+      // (the validator skips them with lookups off, as it always did). Nothing reaches applyImport without a pin.
+      const dropped = new Map();
+      let spots = null;
+      for (const [normAddr, h] of householdMap) {
+        if (!needsGeocode(h) || !h.coordRefused) continue;
+        spots ||= await createHoldingSpots({ campaignId: campaign._id, householdMap });
+        if (!(await spots.assign(h))) {
+          dropped.set(normAddr, { code: 'bad_coords', detail: 'No usable coordinate, and no holding spot could be derived.' });
+        }
+      }
+      if (dropped.size) {
+        for (const normAddr of dropped.keys()) householdMap.delete(normAddr);
+        if (validRows) {
+          for (let i = validRows.length - 1; i >= 0; i -= 1) {
+            const info = dropped.get(normalizeAddress(validRows[i].household));
+            if (info) {
+              errors.push({ code: info.code, reason: info.detail, stateVoterId: validRows[i].voter.stateVoterId || null });
+              validRows.splice(i, 1);
+            }
+          }
+        }
+        geocodeUnmatched = dropped; // the spill-mode link pass drops these rows
+      }
     }
 
     // ── Link voters to canonical Persons + reconcile identity (shared voter DB) ──
@@ -456,9 +570,17 @@ export async function processImportJob(job) {
           placeholderPins: placeholderPins || 0,
           placeholderPinDoors: placeholderPinDoors || 0,
           strayPinDoors: strayPinDoors || 0,
+          offWorldDoors: offWorldDoors || 0,
+          outsideStateDoors: outsideStateDoors || 0,
+          farPinDoors: farPinDoors || 0,
+          unlocatableDoors: unlocatableDoors || 0,
           pinsPlacedExact: pins?.pinsPlacedExact || 0,
           pinsConfirmedInPlace: pins?.pinsConfirmedInPlace || 0,
           pinsStillUnplaced: pins?.pinsStillUnplaced || 0,
+          pinsPlacedApprox: pins?.pinsPlacedApprox || 0,
+          pinsComplex: pins?.pinsComplex || 0,
+          pinsUnlocated: pins?.pinsUnlocated || 0,
+          pinsFarMarked: pins?.pinsFarMarked || 0,
           pinLookupsCached: pins?.pinLookupsCached || 0,
           pinLookupsOverCap: pins?.pinLookupsOverCap || 0,
           pinPassError: pins?.pinPassError || null,

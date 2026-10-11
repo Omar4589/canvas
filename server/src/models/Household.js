@@ -8,6 +8,16 @@ const pointSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Set aside from the Pin Fixes queue and from every book cut (services/households/setAsidePin.js, the ONE
+// writer): who and when. Presence is tested on `.at`, the pinPlacement pattern.
+const pinSetAsideSchema = new mongoose.Schema(
+  {
+    at: { type: Date },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  { _id: false }
+);
+
 // The record of the latest time this door left a judged shared spot (pinPlacement below). A
 // sub-schema with `default: undefined` rather than a plain nested path: a nested path would give
 // every household `from: []`, and presence is always tested on `.at`.
@@ -16,8 +26,12 @@ const pinPlacementSchema = new mongoose.Schema(
     from: { type: [Number], default: undefined }, // [lng, lat] it left
     to: { type: [Number], default: undefined }, // [lng, lat] it went to
     at: { type: Date },
-    kind: { type: String, enum: ['placeholder', 'stray'] },
+    kind: { type: String, enum: ['placeholder', 'stray', 'far', 'unlocated', 'complex'] }, // the flag it left
     by: { type: String, enum: ['lookup', 'person', 'file'] },
+    // The answer class the lookup placed with (services/households/pinTrust.js answerClass). Kept apart
+    // from `kind` on purpose: the revert path writes `kind` back into pinSuspect, and an answer class
+    // must never land there. Lookup only; absent on records written before the pin-fixes build.
+    answer: { type: String, enum: ['exact', 'estimate', 'street'] },
     accuracyType: { type: String }, // the lookup's answer type; lookup only
     stackSize: { type: Number }, // the spot's other homes at that moment
     releasedAt: { type: Date }, // it later left `to` without a person moving it
@@ -51,7 +65,10 @@ const householdSchema = new mongoose.Schema(
 
     location: { type: pointSchema, default: null },
     // How the coordinates were obtained: 'file' (supplied in the import), 'geocodio'
-    // (geocoded), or 'corrected' (a canvasser/admin moved the pin — see updateHouseholdLocation).
+    // (geocoded), 'corrected' (a canvasser/admin moved the pin — see updateHouseholdLocation), or
+    // 'holding' (no usable coordinate and the address lookup found nothing: a Doorline-derived spot in
+    // the home's ZIP that is deliberately NOT the home — services/import/holdingSpot.js; it always
+    // travels with pinSuspect 'unlocated').
     // coordConfidence is the geocoder's precision ('exact' rooftop vs 'interpolated'); null for
     // file-supplied and corrected coords. Lets the map/turf tooling flag and re-verify pins.
     coordSource: { type: String, default: null },
@@ -77,7 +94,22 @@ const householdSchema = new mongoose.Schema(
     // defaults into bulk upsert inserts. Sticky — only a writer that moves the door off the spot
     // clears it, and the pass only on positive evidence. A confirm keeps it: "unplaced now" is
     // pinSuspect && !locationConfirmedAt (isPinUnplaced), so an Undo of the confirm restores the door.
-    pinSuspect: { type: String, enum: ['placeholder', 'stray'] },
+    //
+    // The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S3.1) adds three kinds:
+    //   'far'       — the pin sits far from the other homes on its street (or in its ZIP); recomputed by
+    //                 every pass from the cohort, never sticky;
+    //   'unlocated' — no usable coordinate and the lookup found nothing: parked at a holding spot; sticky;
+    //   'complex'   — the vendor's spot and an exact lookup answer agree this home shares one point with
+    //                 other addresses (a condo complex). NOT unplaced: isPinUnplaced excludes it, every map
+    //                 still needs the fact, so it is sent whether or not a lead has vouched. Sticky until
+    //                 a writer moves the door off the spot.
+    pinSuspect: { type: String, enum: ['placeholder', 'stray', 'far', 'unlocated', 'complex'] },
+    // The ~1.1 m key of the complex's point, set with pinSuspect 'complex' and $unset with it. The one
+    // field the Pin Fixes complexes list, the sidebar count and the spot-scope vouch group on.
+    pinComplexKey: { type: String },
+    // Set aside: see pinSetAsideSchema above. Rides excludedFromTurf (every cut, count, phone and packet
+    // already honours it); Re-include apartments never clears a door carrying this stamp.
+    pinSetAside: { type: pinSetAsideSchema, default: undefined },
     // Written by the pass when it places the door (by 'lookup'), by updateHouseholdLocation when a
     // person moves a flagged door ('person'), and by an import whose file moves a flagged door
     // ('file'). Never $unset. "Currently placed by the lookup" = by 'lookup', no releasedAt, and

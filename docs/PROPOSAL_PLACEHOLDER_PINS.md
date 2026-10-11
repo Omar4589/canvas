@@ -1,5 +1,9 @@
 # Proposal: Homes on a vendor placeholder pin — place them by address, and stop calling them buildings
 
+> **Superseded in part (2026-10-10) by [Pin Fixes at scale](PROPOSAL_PIN_FIXES_AT_SCALE.md)**, which built its
+> answer rule (D2), a frozen knock stamp for estimated pins (D3b) and the cut's handling of flagged homes in a
+> different form.
+>
 > **Status: PLAN, revision 7, 2026-10-05. Review complete. Release 1 — the cut the owner chose for the Nye
 > campaign — was BUILT 2026-10-05 (see [PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md),
 > "F. As built"); everything this plan lists beyond that release is not built.** It answers a
@@ -452,7 +456,7 @@ collapses on files without coordinates, so "the voter file did this" would be fa
 | # | Question | Recommendation | Alternatives considered |
 |---|---|---|---|
 | D1 | Paid lookups at import | Only when `GEOCODE_ENABLED==='true'` and a key is set, and only for candidates at this file's addresses. Capped at `PIN_PLACEMENT_MAX_HOMES` (default 25,000) **distinct** homes per import, tracked in a probed-id set that survives retries. A failed provider batch makes the run mark-only. | Campaign-wide spend at import: breaks D8. Cache-only placement: makes the outcome depend on the cache (§O). |
-| D2 | Which answers may move a door | Placeholder: `rooftop` or `point`. `range_interpolation` only once `PIN_PLACEMENT_MAX_INTERP_M` is set, within it, and not an outlier against the street's placed pins. Stray: `rooftop` or `point` only. Never `nearest_rooftop_match` or `street_center`. | Rooftop-only forever: leaves more homes on the dot. Interpolation from day one: uncalibrated. |
+| D2 | Which answers may move a door | Placeholder: `rooftop` or `point`. `range_interpolation` only once `PIN_PLACEMENT_MAX_INTERP_M` is set, within it, and not an outlier against the street's placed pins. Stray: `rooftop` or `point` only. Never `nearest_rooftop_match` or `street_center`. | Rooftop-only forever: leaves more homes on the dot. Interpolation from day one: uncalibrated. *Superseded 2026-10-10 by Pin Fixes at scale's answer ladder (PROPOSAL_PIN_FIXES_AT_SCALE.md §3).* |
 | D3 | Far and One spot on knocks measured against a shared spot | Far downgrades to `low`, read from the frozen row stamp `knockPin: 'shared'`. The door is left out of One spot's spread. | A live derivation from household fields: flips back when later writes erase them (the round-1 blockers). |
 | D3b | Far and One spot against an unchecked street-level placement | `knockPin: 'estimated'`, with the same treatment until the pin is confirmed or moved. A confirm, or a save that leaves the pin where it was, ends it for later knocks; that is disclosed in D3b and Part 1. Enter never confirms one (the owner's decision). | Full Far against an estimate. Enter-to-confirm on these rows: one keystroke per row would end the downgrade for a whole list. |
 | D4 | Remove apartments | `apartmentStacks.js`: (spot, `stackBaseOf`) groups of N+, plus unit-addressed doors on N+ spots. Re-include only doors whose address names no unit and has no other door anywhere in the campaign, from a button that works on published rounds too, and reports how many of the lifted houses this round's target takes. | Spot-only (today): takes houses. (Spot, base) only: loses unit-addressed buildings whose lines don't normalize. |

@@ -31,3 +31,19 @@ test('the scope question only when other units of the address share the pin', ()
   assert.equal(needsScopeQuestion({ count: 1, unplaced: true }), false);
   assert.equal(needsScopeQuestion(undefined), false);
 });
+
+// ── The pin-fixes build (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.4) ──
+test('a complex badge, and a sentence for every kind of flag', () => {
+  assert.deepEqual(pinBadge({ pinSuspect: 'complex', locationConfirmedAt: '2026-10-10' }), { kind: 'complex', label: 'Complex', tone: 'brand', at: null });
+  assert.equal(pinBadge({ pinSuspect: 'far' }).label, 'No exact map spot');
+  assert.match(pinLine({ pinSuspect: 'far' }), /far from the rest of its street/);
+  assert.match(pinLine({ pinSuspect: 'unlocated' }), /holding spot in its ZIP, not the home/);
+  assert.match(pinLine({ pinSuspect: 'complex' }), /A complex/);
+  assert.match(pinLine({ pinSuspect: 'placeholder' }), /shared with other addresses/);
+});
+
+test('the placement line says what the home left', () => {
+  assert.equal(pinLine({ pinPlaced: { at: null, inPlace: false, stackSize: 4, kind: 'unlocated' } }), 'Placed by address. It had no location in the file.');
+  assert.equal(pinLine({ pinPlaced: { at: null, inPlace: false, stackSize: 0, kind: 'far' } }), 'Placed by address. Its earlier pin was far from its street.');
+  assert.match(pinLine({ pinPlaced: { at: null, inPlace: false, stackSize: 2, kind: 'placeholder' } }), /shared with 2 other homes/);
+});

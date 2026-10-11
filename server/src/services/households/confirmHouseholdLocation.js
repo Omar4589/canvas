@@ -1,7 +1,7 @@
 import { Household } from '../../models/Household.js';
 import { HouseholdLocationChange } from '../../models/HouseholdLocationChange.js';
 import { sameAddressDoors } from './updateHouseholdLocation.js';
-import { isPinUnplaced } from './pinState.js';
+import { isPinUnplaced, isComplex } from './pinState.js';
 
 // The ONE "this pin still needs a human look" predicate — spread it over a campaignId (or a
 // campaignId $in) everywhere the needs-fixing set is read: the Pin Fixes list endpoint, the
@@ -11,21 +11,39 @@ export const NEEDS_PIN_FIX = {
   isActive: true,
   coordConfidence: 'interpolated',
   locationConfirmedAt: null,
+  'pinSetAside.at': null, // set aside: out of the queue until brought back (setAsidePin.js)
 };
 
 // The queue's second set: doors judged to sit on a map spot shared with other addresses
 // (services/households/placeStackedPins.js) that nobody has vouched for. Disjoint from NEEDS_PIN_FIX
 // by construction (never 'interpolated' here), so the list and the badge read two queries and add
 // them — no $or, which would defeat both partial indexes.
+//
+// Since the pin-fixes build a complex member is NOT in this set (it has its own, below): the `$type` term
+// is kept beside the `$ne` because it is what lets the planner use the partial index
+// { campaignId, pinSuspect } (Household.js), whose filter is pinSuspect: { $type: 'string' }.
 export const UNPLACED_PIN = {
   isActive: true,
-  pinSuspect: { $type: 'string' },
+  pinSuspect: { $type: 'string', $ne: 'complex' },
   locationConfirmedAt: null,
   coordConfidence: { $ne: 'interpolated' },
+  'pinSetAside.at': null,
 };
 
-// What the confirm may vouch for: an approximate geocode, or a door unplaced now.
-export const isConfirmable = (h) => h?.coordConfidence === 'interpolated' || isPinUnplaced(h);
+// The queue's third set: condo-complex members nobody has vouched for. Counted once per complex in the
+// sidebar (pinComplexKey), listed as one row per complex in Pin Fixes. $type spelled out for the index.
+export const COMPLEX_TO_REVIEW = {
+  isActive: true,
+  pinSuspect: { $type: 'string', $eq: 'complex' },
+  locationConfirmedAt: null,
+  'pinSetAside.at': null,
+};
+
+// What the confirm may vouch for: an approximate geocode, a door unplaced now, or a complex member. Never a
+// home parked at a holding spot: that spot is by definition not the home, so "Looks right" there would
+// vouch for a point nobody saw.
+export const isConfirmable = (h) =>
+  h?.coordConfidence === 'interpolated' || (isPinUnplaced(h) && h.pinSuspect !== 'unlocated') || isComplex(h);
 // A sibling needing a vouch: approximate, or carrying a shared-spot flag (a vouched one keeps it).
 const needsVouch = (h) => h.coordConfidence === 'interpolated' || !!h.pinSuspect;
 
@@ -60,6 +78,10 @@ const pinChanged = () => {
 // primary's write match nothing, and the route answers 409 PIN_CHANGED instead of vouching for a pin
 // nobody saw. A sibling that changed is just skipped.
 //
+// `scope: 'spot'` (the pin-fixes build) vouches a whole condo complex: every active member on the primary's
+// pinComplexKey that needs a vouch — "Looks right — it's a complex" in Pin Fixes. Without a key it is
+// 'unit'. A confirm also brings a set-aside door back (setAsidePin.js): a person just vouched for it.
+//
 // `confirmed: false` is the undo: it clears the stamp — the primary's, and only siblings stamped by
 // the same confirm (same timestamp), so a sibling vouched separately stays vouched — and writes NO
 // audit row: un-stamping isn't a location event, and the stamp's absence is the record.
@@ -87,6 +109,14 @@ export async function confirmHouseholdLocation(
       excludeId: household._id,
     });
     targets = [household, ...siblings.filter(needsVouch)];
+  } else if (scope === 'spot' && household.pinComplexKey) {
+    const siblings = await Household.find({
+      campaignId: household.campaignId,
+      isActive: true,
+      pinComplexKey: household.pinComplexKey,
+      _id: { $ne: household._id },
+    });
+    targets = [household, ...siblings.filter(needsVouch)];
   }
 
   const now = new Date();
@@ -110,6 +140,12 @@ export async function confirmHouseholdLocation(
       if (!doc) {
         if (primary) throw pinChanged();
         continue;
+      }
+      if (doc.pinSetAside?.at) {
+        await Household.updateOne(
+          { _id: doc._id, 'pinSetAside.at': { $ne: null } },
+          { $set: { excludedFromTurf: false }, $unset: { pinSetAside: 1 } }
+        );
       }
       if (doc.coordSource !== 'corrected') {
         await HouseholdLocationChange.create({

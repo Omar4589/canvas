@@ -126,6 +126,22 @@ knocked and billed like any other door. Excluding it is purely about not sending
 door the campaign has decided to honor — it changes nothing about how the door was counted. See
 [METRICS.md](METRICS.md).
 
+**Leaving out homes without a reliable map spot.** Whenever the round has homes whose pin isn't the home —
+they share a spot with other addresses, sit far from their street, or couldn't be found by address and wait
+at a holding spot — the Generate panel shows a third toggle, **on by default**:
+
+> ☑ **Leave out 32 homes without a reliable map spot** — Fix in Pin Fixes →
+> *They share a spot with other addresses, sit far from their street, or couldn't be found by address — cut
+> as they are, they land in the wrong book.*
+
+Cut as they are, those homes land in whichever book surrounds the wrong spot. Left out, they wait outside
+the books; fix their pins in **Pin Fixes**, and the cut summary's *"N homes left out — fix their pins in Pin
+Fixes, then Add as new book"* line points at the way back in (**Add as new book**, or a spot's **Move to
+book…**). Untick it and the cut behaves exactly as before. **Approximate pins** (on the right block) and
+**condo complexes** are never left out — they cut fine — and neither is a home a lead confirmed. The count
+follows the target filter when one is set. Homes **set aside** in Pin Fixes are out of every cut already (the
+**Remove apartments** hold), whatever the toggle says; **Re-include apartments** never brings one back.
+
 Excluding them from the cut doesn't remove them from the **cut map**, though — like every door a cut leaves
 out of a book (already-worked doors a targeted cut skipped, restricted homes, voters added since the cut),
 they stay visible as gray *loose* dots, which pad the density so a round looks bigger than the walk. A single
@@ -533,7 +549,8 @@ A house pin in the wrong spot can be dragged to its correct location — an admi
 **Move pin →** in its popup, drag the blue marker, **Save location**; an apartment building's popup has
 **Move building pin →**, which moves every unit of that address at that pin together — never the separate
 houses that merely share the spot; a dot of different homes has no Move building pin, and its pop-up points
-to Pin Fixes, where each home is moved on its own), and a **team lead can do it in
+to Pin Fixes, where each home is moved on its own; a condo complex reads *"N homes · a complex"*, also with
+no building move — its spot is right — and each home keeps its own Move pin), and a **team lead can do it in
 the field** (**"Fix pin location,"** including "use my current GPS"). **Canvassers can't move pins** — a
 correction is a data change with an audit trail, so it is lead/admin-only ([MAPS.md](MAPS.md)); a
 canvasser who spots a bad pin tells their lead. Whichever way it's done, it corrects **only the
@@ -794,7 +811,15 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
    **`cutExclusionFilter`** ([generateTurf.js](../server/src/services/turf/generateTurf.js)), so
    inaccessible homes are dropped from **that** cut's books (opt-in; non-destructive — the homes are
    untouched in the DB). `addSupplementalBooks` and the `/preview` route take the same option and call
-   the same builder, so a preview count equals what the cut produces.
+   the same builder, so a preview count equals what the cut produces. **`params.excludeUnplaced`** (Pin
+   Fixes at scale) adds `CUTTABLE_PIN` — `$or: [{ pinSuspect absent }, { pinSuspect: 'complex' }, {
+   locationConfirmedAt set }]` — leaving out homes whose pin isn't the home; it rides `/generate`, the TURF
+   worker, `add-supplemental`, `target-preview` (whose response adds `unplacedCount`, the actual delta),
+   `attribute-preview` (`?excludeUnplaced=1`) and `manual-preview`. `GET /turfs` adds `unplacedDoorCount`
+   (what an untargeted cut would leave out) and the supplemental counterparts; `excludedApartmentCount` and
+   `POST /include-apartments` skip set-aside homes (`'pinSetAside.at': null`). A pre-existing drift, noted
+   and left alone: `attribute-preview` and `manual-preview` apply neither restricted toggle, so their counts
+   can exceed what a cut with those toggles produces.
 
    **Why it is no longer a bare `status` clause (fixed 2026-08-24).** `cutStatusExclusion` filtered on
    `Household.status`, which is resolved across **all** rounds with a **sticky completion**

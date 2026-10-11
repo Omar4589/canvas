@@ -69,6 +69,12 @@ const canvassActivitySchema = new mongoose.Schema(
 
     location: { type: locationSchema, required: true },
     distanceFromHouseMeters: { type: Number, default: null },
+    // What the door's pin was when this knock was recorded, frozen on the row (never re-derived): 'estimated'
+    // — an approximate lookup pin nobody had confirmed; 'complex' — a home in a condo complex, whose dot is
+    // the complex, not the door. The GPS audit forgives a Far against either
+    // (services/audit/flagDetection.js farAssessment; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.6–S8.7).
+    // No default: absent on every ordinary knock.
+    knockPin: { type: String, enum: ['estimated', 'complex'] },
     // null = a first entry (replaced nothing); legacy rows also lack it.
     replaced: { type: replacedSchema, default: null },
 

@@ -42,6 +42,16 @@ const DEFAULT_JOB_OPTIONS = {
 
 const queues = new Map();
 
+// Queue calls are time-bounded: ioredis buffers commands while disconnected, so without this a wedged or
+// absent Redis would HANG the request rather than failing it — a route's 503 path would be unreachable
+// exactly when it matters (the campaigns-delete enqueue pattern). Moved here from routes/admin/turfs.js so
+// Pin Fixes' Look up by address shares it; TURF_ENQUEUE_TIMEOUT_MS is still read.
+export const queueOp = (promise, ms = Number(process.env.QUEUE_ENQUEUE_TIMEOUT_MS || process.env.TURF_ENQUEUE_TIMEOUT_MS || 5000)) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('queue timeout')), ms).unref?.()),
+  ]);
+
 /**
  * Lazily construct (and cache) a producer-side Queue. Used by the web dyno, and by the worker
  * when a processor enqueues follow-on work (the retention triggers hand each condemned org to

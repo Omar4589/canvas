@@ -5,6 +5,7 @@ import { orgContext } from '../../middleware/orgContext.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Household } from '../../models/Household.js';
+import { NEEDS_PIN_FIX, UNPLACED_PIN, COMPLEX_TO_REVIEW } from '../../services/households/confirmHouseholdLocation.js';
 import { Effort } from '../../models/Effort.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
@@ -49,7 +50,7 @@ router.get('/', async (req, res, next) => {
     const campaignId = req.campaign._id;
     const organizationId = req.campaign.organizationId;
 
-    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds, activity, responses, effortDocs, activeEffortIdsRaw] =
+    const [households, ownedDoors, intakeDoors, passes, publishedTurfs, assignments, orgCanvassers, activeIds, activity, responses, effortDocs, activeEffortIdsRaw, approxPins, unplacedPins, complexKeys] =
       await Promise.all([
         Household.countDocuments({ campaignId, isActive: true }),
         Household.countDocuments({ campaignId, isActive: true, effortId: { $ne: null } }),
@@ -63,6 +64,11 @@ router.get('/', async (req, res, next) => {
         SurveyResponse.exists({ campaignId }),
         Effort.find({ campaignId, status: { $ne: 'archived' } }, { _id: 1 }).lean(),
         Pass.distinct('effortId', { campaignId, status: 'active' }),
+        // Pins to look at — the same three sets the sidebar badge sums (services/reports/campaignSummaries.js),
+        // a complex counted once.
+        Household.countDocuments({ organizationId, campaignId, ...NEEDS_PIN_FIX }),
+        Household.countDocuments({ organizationId, campaignId, ...UNPLACED_PIN }),
+        Household.distinct('pinComplexKey', { organizationId, campaignId, ...COMPLEX_TO_REVIEW }),
       ]);
 
     // Efforts that aren't live yet (no active round) — drives the dashboard nudge so
@@ -81,6 +87,7 @@ router.get('/', async (req, res, next) => {
         assignments,
         orgCanvassers,
         activePasses: activeIds.length,
+        pinsToFix: approxPins + unplacedPins + complexKeys.length,
       },
     });
 

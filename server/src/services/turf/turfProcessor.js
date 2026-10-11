@@ -35,7 +35,7 @@ export async function processTurfJob(job) {
   }
 
   if (job.name === 'supplemental') {
-    const { campaignId, passId, name, maxDoors, excludeRestricted, excludeNoSoliciting, requestedBy } = job.data;
+    const { campaignId, passId, name, maxDoors, excludeRestricted, excludeNoSoliciting, excludeUnplaced, requestedBy } = job.data;
     // The BINDING lock acquire lives here, not in the route: a route-held lock
     // could go stale while this job waits behind a long generate. Renew from the
     // progress callback (throttled) so a 250k-door supplemental outlives STALE_MS.
@@ -52,6 +52,7 @@ export async function processTurfJob(job) {
         maxDoors,
         excludeRestricted,
         excludeNoSoliciting,
+        excludeUnplaced: !!excludeUnplaced,
         onProgress: async (p) => {
           await job.updateProgress(p);
           if (Date.now() - lastRenew >= 30000) {

@@ -118,7 +118,10 @@ still the gate — but you now know what's behind the door.*
 
 # STEP 0d — 🛑 Drain the queue, while you still can
 
-**Open [`/admin/queues`](https://doorline.app/admin/queues) (Bull Board) NOW, before maintenance.**
+**Open Bull Board NOW, before maintenance:** in the console go to **Platform → Jobs** — the board opens
+right on that page (it sets the 10-minute ticket cookie Bull Board requires; reopen **Platform → Jobs** if
+the board stops loading). Typing `doorline.app/admin/queues` into the address bar also works for those 10
+minutes; following a link to it from another site doesn't, because the cookie is same-site only.
 Confirm **`import-queue`** and **`turf-queue`** have **zero** active / waiting / delayed jobs.
 **`campaign-delete-queue` and `org-delete-queue` aren't in Bull Board** — check them from the product
 instead: the Campaigns page of any org mid-delete shows a "Deleting…" card, and the super-admin
@@ -128,8 +131,8 @@ the campaign — or the whole organization — stays walled off until that retry
 the mess when a minute's wait avoids it; a half-deleted ORG locks its customer out entirely.)
 
 ***Do this first because you cannot do it later.*** *Bull Board is mounted on the **web** dyno
-([`app.js:77`](../server/src/app.js#L77)) — the moment maintenance goes on, it serves the maintenance page
-like everything else.*
+([`app.js:118`](../server/src/app.js#L118)) — the moment maintenance goes on, it serves the maintenance
+page like everything else.*
 
 ---
 

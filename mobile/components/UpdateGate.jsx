@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import * as Updates from 'expo-updates';
 import { api } from '../lib/api';
+import { useSessionState } from '../lib/authState';
 import { STORE_URL } from '../lib/config';
 import Logo from './Logo';
 import { radius, spacing } from '../lib/theme';
@@ -33,6 +34,9 @@ export default function UpdateGate() {
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles(makeStyles);
   const [dismissed, setDismissed] = useState(false);
+  // The soft banner steps aside while the password screen or "Signing out…" covers the app (it
+  // would otherwise paint over them: same layer, rendered later). The hard wall below still wins.
+  const { reauth, ending } = useSessionState();
 
   // The BINARY's runtimeVersion — constant per install, unaffected by OTAs. Absent in
   // plain `expo start`, which is one of the fail-open paths.
@@ -93,7 +97,7 @@ export default function UpdateGate() {
     );
   }
 
-  if (dismissed) return null;
+  if (dismissed || reauth || ending) return null;
 
   return (
     <View style={[styles.overlay, { paddingTop: insets.top + spacing.xs }]} pointerEvents="box-none">

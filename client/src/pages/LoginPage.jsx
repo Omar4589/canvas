@@ -1,15 +1,22 @@
 import { useState, useEffect } from 'react';
-import { Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
 import { postAuthPath } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
+import { parseSignedOut, signedOutNote } from '../lib/sessionEnd.js';
 
 export default function LoginPage() {
   const { login, user, loading, memberships, activeOrgId } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  // Why the last session ended, when it was deliberate (password changed elsewhere, account
+  // deleted, signed out in another tab): from the redirect's ?signedOut= (allowlisted) or from
+  // ProtectedRoute's state at page load.
+  const [searchParams] = useSearchParams();
+  const signedOut =
+    parseSignedOut(searchParams.get('signedOut')) || parseSignedOut(location.state?.signedOut);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -75,6 +82,11 @@ export default function LoginPage() {
         >
           {/* One-time note after a completed reset (navigate('/login', { state: { resetSuccess } })).
               Router state clears on the next navigation, so it never reappears on a manual visit. */}
+          {signedOut && !location.state?.resetSuccess && (
+            <div className="mb-4 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-sm text-info-fg">
+              {signedOutNote(signedOut)}
+            </div>
+          )}
           {location.state?.resetSuccess && (
             <div className="mb-4 rounded-md border border-success/30 bg-success-tint px-3 py-2 text-sm text-success">
               Password updated — sign in with your new password.

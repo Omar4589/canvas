@@ -176,7 +176,9 @@ selectable, and switching between them is how an admin-in-one/canvasser-in-anoth
 running a campaign and walking doors.
 
 Switching orgs in the console always lands you on that org's home page (Overview for an admin, Campaigns
-for a lead) — it never leaves you on a page belonging to the org you just left.
+for a lead) — it never leaves you on a page belonging to the org you just left. Each browser tab keeps its
+own organization: switching in one tab doesn't move your other open tabs ([USERS.md](USERS.md) →
+*Sessions*).
 
 ---
 
@@ -572,10 +574,14 @@ the one path `ChangePasswordPage` had always handled correctly.
 Breaking this rule is what made the bug unrecoverable rather than merely wrong.
 
 - [ProtectedRoute.jsx](../client/src/components/ProtectedRoute.jsx) is the **ORG-level** gate and wraps
-  `<Layout/>`, so it only ever `<Navigate>`s: not signed in → `/login`; owes a password change →
-  `/change-password`; no active org → `/select-org`; **active org but no console role in it** →
-  `/select-org`. Props are `requireActiveOrg`, `requireConsoleAccess`, `allowPasswordChange`. No
-  redirect loop is possible: every target is mounted with those flags off.
+  `<Layout/>`, so with a user it only ever `<Navigate>`s: owes a password change → `/change-password`;
+  no active org → `/select-org`; **active org but no console role in it** → `/select-org`. With no user
+  it redirects to `/login` (carrying the reason for a deliberate end), except in its only two
+  non-redirect branches, which render where no Layout exists and each keep a way out: a blank page under
+  the in-place password prompt when the page opened on a sign-in that ran out, and the "Couldn't reach
+  Doorline." card (Try again / Sign in again) when the page-load check couldn't reach the server
+  ([USERS.md](USERS.md) → *Sessions*). Props are `requireActiveOrg`, `requireConsoleAccess`,
+  `allowPasswordChange`. No redirect loop is possible: every target is mounted with those flags off.
 - [RoleGate.jsx](../client/src/components/RoleGate.jsx) is the **ROLE-level** gate and lives *inside*
   `<Layout/>` as a pathless layout route (`require="orgAdmin" | "billing" | "super"`). On failure it
   renders [Forbidden.jsx](../client/src/components/Forbidden.jsx) in the content area, with the sidebar,

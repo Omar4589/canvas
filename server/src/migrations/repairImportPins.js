@@ -13,6 +13,7 @@ import { haversineMeters } from '../utils/normalizeAddress.js';
 import { inStateBounds } from '../utils/stateBounds.js';
 import { streetOf, baseAddressOf } from '../utils/streetName.js';
 import { buildingKeyForCoords } from '../utils/buildingKey.js';
+import { cohortOutliers } from '../utils/pinCohorts.js';
 import { classifyStackedPins } from '../utils/stackedPins.js';
 import { resolve as geocodeResolve, geocodeCostCents } from '../services/import/geocode/geocodeService.js';
 import { updateHouseholdLocation } from '../services/households/updateHouseholdLocation.js';
@@ -144,75 +145,30 @@ if (VERIFY_ALL && !CAMPAIGN_ID && !ORG_SLUG) {
 // while still refusing to churn a door onto a spot that is effectively the same place.
 const STACKED_MIN_METERS = 25;
 
-// A cohort needs enough doors to have an opinion, and an outlier has to be well clear of the
-// cohort's own spread — the same street name recurs miles apart on rural routes, which is what
-// makes a fixed distance threshold useless here.
-const MIN_COHORT = 3;
-const OUTLIER_FACTOR = 4;
-
-const median = (xs) => {
-  if (!xs.length) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
-
-// The member minimising summed distance to the others. A medoid, never a mean: an outlier
-// drags a mean toward itself and can end up looking central.
-const medoidOf = (points) => {
-  let best = points[0];
-  let bestSum = Infinity;
-  for (const p of points) {
-    let sum = 0;
-    for (const q of points) sum += haversineMeters(p.lat, p.lng, q.lat, q.lng);
-    if (sum < bestSum) {
-      bestSum = sum;
-      best = p;
-    }
-  }
-  return best;
-};
-
 const coordsOf = (h) => {
   const c = h.location?.coordinates;
   return c?.length === 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]) ? { lng: c[0], lat: c[1] } : null;
 };
 
-// Doors on the same street + ZIP whose pin is far from where that street actually is.
-// Buildings are collapsed to one point first, or a 40-unit tower outvotes the street.
+// Doors on the same street + ZIP whose pin is far from where that street actually is. The rule lives in
+// utils/pinCohorts.js (shared with every import and the placement pass since the pin-fixes build); this
+// script keeps its exact old behaviour — no ZIP fallback, the --min-meters floor, the medoid everywhere —
+// which pinCohorts.test.js pins against the old body as an oracle.
 function streetOutliers(households) {
-  const cohorts = new Map();
+  const points = [];
   for (const h of households) {
     const c = coordsOf(h);
     if (!c) continue;
-    const key = `${streetOf(h.addressLine1)}|${String(h.zipCode || '').trim().slice(0, 5)}`;
-    const arr = cohorts.get(key) || [];
-    arr.push({ h, ...c });
-    cohorts.set(key, arr);
+    points.push({
+      id: String(h._id),
+      lat: c.lat,
+      lng: c.lng,
+      street: streetOf(h.addressLine1),
+      zip5: String(h.zipCode || '').trim().slice(0, 5),
+      spotKey: buildingKeyForCoords([c.lng, c.lat]),
+    });
   }
-
-  const flagged = new Map(); // householdId → { distance, cohortSize }
-  for (const members of cohorts.values()) {
-    // One point per distinct pin — an apartment tower is one opinion about where its street is.
-    const byPin = new Map();
-    for (const m of members) {
-      const k = buildingKeyForCoords([m.lng, m.lat]);
-      if (k && !byPin.has(k)) byPin.set(k, m);
-    }
-    const points = [...byPin.values()];
-    if (points.length < MIN_COHORT) continue;
-
-    const centre = medoidOf(points);
-    const dists = points.map((p) => haversineMeters(centre.lat, centre.lng, p.lat, p.lng));
-    const spread = median(dists.filter((d) => d > 0));
-    const threshold = Math.max(MIN_METERS, spread * OUTLIER_FACTOR);
-
-    for (const m of members) {
-      const d = haversineMeters(centre.lat, centre.lng, m.lat, m.lng);
-      if (d > threshold) flagged.set(String(m.h._id), { distance: Math.round(d), cohortSize: points.length });
-    }
-  }
-  return flagged;
+  return cohortOutliers(points, { minMeters: MIN_METERS, zipFallback: false, medoidMax: Infinity });
 }
 
 // Doors where the canvassers who actually stood there disagree with the pin. Free evidence:

@@ -66,12 +66,27 @@ const importJobSchema = new mongoose.Schema(
     // Doors on an apartment building's or park's spot with a different street address (the preview's
     // "N homes sit on a building's spot" line). Placeholder doors are placeholderPinDoors above.
     strayPinDoors: { type: Number, default: 0 },
+    // Coordinates the import refused (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S4.4), FILE-scoped and
+    // door-weighted, computed by the preview's finish() and re-saved at apply from the same function: rows
+    // at 0,0, rows outside their own state, homes pinned far from their street (the cohort rule over this
+    // file's homes), and homes with no street address to look up (reported; never looked up).
+    offWorldDoors: { type: Number, default: 0 },
+    outsideStateDoors: { type: Number, default: 0 },
+    farPinDoors: { type: Number, default: 0 },
+    unlocatableDoors: { type: Number, default: 0 },
     // The placement pass's outcome for THIS file's homes (services/households/placeStackedPins.js),
     // $set from state at the end: placed by the address lookup at a rooftop or point; placed "in
     // place" (the lookup confirmed the spot they already had); still without an exact spot (Pin Fixes).
     pinsPlacedExact: { type: Number, default: 0 },
     pinsConfirmedInPlace: { type: Number, default: 0 },
     pinsStillUnplaced: { type: Number, default: 0 },
+    // The pin-fixes build's outcome counts: placed on the street (an estimate, listed Approximate), in a
+    // complex, parked at a holding spot (a subset of still-unplaced), and far marks this pass set anywhere
+    // in the campaign (so the line can say "N flagged far — look them up").
+    pinsPlacedApprox: { type: Number, default: 0 },
+    pinsComplex: { type: Number, default: 0 },
+    pinsUnlocated: { type: Number, default: 0 },
+    pinsFarMarked: { type: Number, default: 0 },
     // Lookup spend for the pass. New = bought ($inc after each provider chunk); cached and over-ceiling
     // are a final $set (an $inc would double-count cache hits on a retry). Hidden from organizations.
     pinLookupsNew: { type: Number, default: 0 },
@@ -80,6 +95,9 @@ const importJobSchema = new mongoose.Schema(
     // The ceiling's ledger: household ids already sent to the provider by this import ($addToSet per
     // chunk), so a retried job never charges the same home twice. Hidden everywhere.
     pinProbedIds: { type: [String], default: undefined },
+    // kind 'pin_lookup' only: the household ids Look up by address was asked to look up. Hidden from
+    // organizations with the other ledgers.
+    pinLookupTargets: { type: [String], default: undefined },
     // Doors whose lookup placement this import's file merely echoed back, so the placed pin was kept.
     keptPlacements: { type: Number, default: 0 },
     // The pass's org-visible line when it didn't finish (generic, never a provider message), and the
@@ -143,7 +161,9 @@ const importJobSchema = new mongoose.Schema(
     keptConfirmed: { type: Number, default: 0 },
     // 'apply' = the real import (default; old docs read as apply). 'preview' = a
     // read-only diff run on the worker for large files (stores `diff`, no writes).
-    kind: { type: String, enum: ['preview', 'apply', 'geocode_check'], default: 'apply', index: true },
+    // 'pin_lookup' = Pin Fixes' "Look up by address": no file, no rows — the placement pass on a set of the
+    // campaign's existing homes (services/import/importProcessor.js processPinLookupJob).
+    kind: { type: String, enum: ['preview', 'apply', 'geocode_check', 'pin_lookup'], default: 'apply', index: true },
     diff: { type: mongoose.Schema.Types.Mixed, default: null },
     // "See exact placement" result (kind 'geocode_check'): exact placeable/unplaceable + sample.
     geocodeCheck: { type: mongoose.Schema.Types.Mixed, default: null },

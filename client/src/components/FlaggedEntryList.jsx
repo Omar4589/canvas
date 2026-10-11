@@ -5,6 +5,8 @@ import {
   correctionContextText,
   isDowngradedCorrection,
   isPinDowngraded,
+  knockPinText,
+  isComplexKnock,
   pinCorrectionText,
   pinPrecisionText,
 } from '../lib/flags.js';
@@ -111,6 +113,12 @@ export default function FlaggedEntryList({
               <div className="mt-1 text-xs text-fg-muted">
                 {pinCorrectionText(e)}
                 {isPinDowngraded(e) ? ' · counted as low severity' : ''}
+              </div>
+            )}
+            {knockPinText(e) && (
+              <div className="mt-1 text-xs text-fg-muted">
+                {knockPinText(e)}
+                {isComplexKnock(e) ? ' · counted as low severity' : ''}
               </div>
             )}
             <div className="mt-3 border-t border-border pt-3">

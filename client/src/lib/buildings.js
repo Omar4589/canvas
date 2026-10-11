@@ -30,10 +30,17 @@ export function buildingKeyForCoords(lng, lat) {
 //                flagged. Drawn as "N homes", never as a building.
 //   'building' — anything else. Its 'stray' members (a different address sitting on the building's spot) are
 //                listed apart, and the building's header address comes from its first non-stray member.
-// The one rule on the web and the phone (docs/PROPOSAL_PLACEHOLDER_PINS.md §J).
+// The one rule on the web and the phone (docs/PROPOSAL_PLACEHOLDER_PINS.md §J). The pin-fixes build adds two
+// cases (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.5), tested first:
+//   'complex'  — every member is 'complex': a condo complex, several homes on a spot that IS theirs. Drawn as
+//                homes, captioned "a complex", with no "No exact map spot" note.
+//   'building' — every member is 'far' and they are units of ONE street address: a real building whose pin sits
+//                far from its street is still a building (the phone mirror catches up with the next OTA).
 export const stackKind = (units) => {
   const list = units || [];
   if (!list.length) return 'building';
+  if (list.every((u) => u.pinSuspect === 'complex')) return 'complex';
+  if (list.every((u) => u.pinSuspect === 'far') && new Set(list.map((u) => stackBaseOf(u.addressLine1))).size === 1) return 'building';
   if (list.some((u) => u.pinSuspect === 'placeholder') || list.every((u) => !!u.pinSuspect)) return 'unplaced';
   return 'building';
 };
@@ -98,6 +105,7 @@ export function groupHouseholds(households, minUnits = BUILDING_MIN_UNITS) {
 // in the normal case; if an import disagreed, say so rather than picking one.
 export function buildingLabel(building) {
   if (!building) return '';
+  if (building.kind === 'complex') return `${building.total} homes at a complex`;
   if (building.kind === 'unplaced') return `${building.total} homes at one map spot`;
   const lines = new Set(building.units.map((u) => (u.addressLine1 || '').trim()).filter(Boolean));
   if (lines.size === 1) return [...lines][0];

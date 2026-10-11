@@ -23,8 +23,9 @@ import { currentDeskPassForDoor } from '../../services/canvass/deskRestrict.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { farKpiForRows, farVerdictForWire } from '../../services/audit/farKpi.js';
-import { pinWireFields, isPinUnplaced } from '../../services/households/pinState.js';
+import { pinWireFields, isPinFlaggedUnvouched } from '../../services/households/pinState.js';
 import { sameAddressDoors } from '../../services/households/updateHouseholdLocation.js';
+import { OFF_WORLD_EPSILON } from '../../utils/stateBounds.js';
 
 const router = Router();
 // Team leads reach the campaign Map (and its household-activity popup), so both routes
@@ -434,6 +435,14 @@ router.get('/map', async (req, res, next) => {
             isActive: true,
             'location.coordinates': { $exists: true, $ne: null },
             ...(campaignId ? { campaignId } : {}),
+            // A door at 0,0 (a vendor's "no location", not yet fixed in Pin Fixes) would stretch the extent
+            // across the Atlantic; utils/stateBounds.js isOffWorld's box, as a query.
+            $nor: [
+              {
+                'location.coordinates.0': { $gt: -OFF_WORLD_EPSILON, $lt: OFF_WORLD_EPSILON },
+                'location.coordinates.1': { $gt: -OFF_WORLD_EPSILON, $lt: OFF_WORLD_EPSILON },
+              },
+            ],
           },
         },
         {
@@ -547,7 +556,7 @@ router.get('/map', async (req, res, next) => {
             { ...activityMatch, householdId: { $in: householdIds }, via: { $ne: 'bulk' } },
             // `replaced` feeds the far verdict's honest-correction downgrade below and is read
             // server-side only: the activities map at the end ships named fields, never it.
-            'householdId userId actionType timestamp location distanceFromHouseMeters replaced'
+            'householdId userId actionType timestamp location distanceFromHouseMeters knockPin replaced'
           )
             .populate('userId', 'firstName lastName')
             .lean()
@@ -878,7 +887,8 @@ router.get('/:householdId/activity', async (req, res, next) => {
     res.json({
       rounds,
       currentPassId: currentPassId ? String(currentPassId) : null,
-      sameAddress: { count: sameAddress.length, unplaced: sameAddress.some(isPinUnplaced) },
+      // `unplaced` drives the web's Save gate near the spot: any flagged, unvouched unit (a complex member too).
+      sameAddress: { count: sameAddress.length, unplaced: sameAddress.some(isPinFlaggedUnvouched) },
     });
   } catch (err) {
     next(err);

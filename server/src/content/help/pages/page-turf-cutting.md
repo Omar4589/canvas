@@ -30,7 +30,7 @@ Status colors appear on their own once the round has knocks. While you're still 
 
 **Draft books aren't counted as unassigned.** Everything about assignment and progress — the pills, the "N books unassigned" note, **Crew load** — covers your **accepted** books only. A draft can't be handed to anyone yet, so calling it unassigned would overstate the work left to hand out. **Books** still counts your whole pass and tells you how many are drafts, which is why the pills can add up to less than it (92 accepted + 5 draft = 97 books). Picking a pill also hides drafts from the list and map, since there's no status on them to filter by.
 
-**If someone on the crew is deactivated.** Deactivating a person doesn't take their books away — that's on purpose, so their work and place in the round are kept. But it does mean a book can look covered when nobody who can still log in is holding it. The page now tells you: an amber note under the numbers counts how many of the crew are deactivated and how many books nobody on your roster can open, their initials show amber in the book list, and **Crew load** marks them. Nothing is re-counted behind your back — if you want those books back in the pool, **Unassign** them.
+**If someone on the crew is deactivated.** Deactivating a person doesn't take their books away — that's on purpose, so their work and place in the round are kept. But it does mean a book can look covered when nobody still active on your roster is holding it. The page now tells you: an amber note under the numbers counts how many of the crew are deactivated and how many books nobody on your roster can open, their initials show amber in the book list, and **Crew load** marks them. Nothing is re-counted behind your back — if you want those books back in the pool, **Unassign** them.
 
 **Hiding restricted and no-soliciting homes.** Once status colors are on, restricted and no-soliciting homes draw as the darkest dots on the map, and a round with a lot of them can bury the live work. A **Restricted & no soliciting** checkbox in the **Layers** box (it appears whenever there's something it can hide) hides them in one flip — it starts checked, so nothing hides until you say so. Hiding takes three things together: the dark single-home dots; any **apartment building whose units are all restricted or no-soliciting** (a building with even one workable unit stays, whole); and the **shape and label of any book that's left with nothing on the map** — so a fully restricted book stops sitting there as a solid empty shape. A book with any live door keeps its shape, and if you've selected the **Restricted** pill the shapes stay too (you asked to see those books). If hiding empties the map of books entirely, a small note on the map says so. The bar across the top keeps counting the hidden homes and the book list on the left never hides anything, so no number changes. One thing to know: a hidden home can't be picked with **Select doors** — to bulk-unmark homes you've hidden, re-check the box first.
 
@@ -44,14 +44,20 @@ Switch rounds with the **Pass** dropdown at the top right — the colors, the co
 
 ## Leaving homes out of the next round
 
-When you cut a round, two checkboxes appear above **Generate** whenever there's anything to skip:
+When you cut a round, checkboxes appear above **Generate** whenever there's anything to skip:
 
 - **Exclude N restricted-access homes** — doors nobody could reach.
 - **Exclude N no-soliciting homes** — doors with a posted sign your canvassers honored.
+- **Leave out N homes without a reliable map spot** — homes that share a spot with other addresses, sit
+  far from their street, or couldn't be found by address. Cut as they are, they land in whichever book
+  surrounds the wrong spot. **Fix in Pin Fixes →** takes you to [Pin Fixes](page-pin-fixes); once their
+  pins are fixed, add them with **Add as new book**. Approximate pins (already on the right block), condo
+  complexes and homes a lead confirmed are never left out.
 
-Both are **on by default** and both are independent — tick either, both, or neither. Either way it's
-non-destructive: the homes stay in the campaign and in every count, they're just left out of *this
-round's* books, and they come back automatically if someone re-records the door later.
+All are **on by default** and all are independent — tick any or none. Either way it's non-destructive:
+the homes stay in the campaign and in every count, they're just left out of *this round's* books, and the
+first two come back automatically if someone re-records the door later. Homes **set aside** in Pin Fixes
+are out of every cut until someone brings them back.
 
 **Remove apartments** (shown until you accept the round's books) holds out apartment units: pick a number of units, and the
 line under it says exactly what the button will take — *"Holds out 441 homes on 61 spots (4+ units at
@@ -177,8 +183,10 @@ card says how many (a house that merely shares the dot moves on its own). A dot 
 homes** rather than one building draws as two small houses, **"5 homes"**, and its pop-up says so — "5 homes at
 one map spot" — with each home's own **Move pin**, **Mark restricted…** and **Move to book…**, a **Move these N
 units** for any address with several units, and **Move all to book…** / **Mark all N restricted…** for the whole
-spot. It has no Move building pin, because these aren't one building. While a move is armed, clicks
-elsewhere on the map do nothing, so you can't select a book by accident.
+spot. It has no Move building pin, because these aren't one building. A **condo complex** — homes the voter
+file and the address lookup agree share the spot — reads **"5 homes · a complex"**: its spot is right, each home
+keeps its own Directions on the phone and its own **Move pin** here, and there's no building move either. While
+a move is armed, clicks elsewhere on the map do nothing, so you can't select a book by accident.
 
 When it saves, the dot moves and the **book outline redraws around it** — the door's own book, and any
 other book whose shape covered the new spot — so the house still sits inside its book's shape (below).

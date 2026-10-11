@@ -8,15 +8,20 @@ import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { updateHouseholdLocation } from '../../services/households/updateHouseholdLocation.js';
-import { effectivePinSuspect } from '../../services/households/pinState.js';
+import { effectivePinSuspect, pinWireFields } from '../../services/households/pinState.js';
 import {
   confirmHouseholdLocation,
   isConfirmable,
   NEEDS_PIN_FIX,
   PIN_CHANGED,
   UNPLACED_PIN,
+  COMPLEX_TO_REVIEW,
 } from '../../services/households/confirmHouseholdLocation.js';
+import { setAsidePins, bringBackPins } from '../../services/households/setAsidePin.js';
+import { ImportJob } from '../../models/ImportJob.js';
+import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
+import { streetOf } from '../../utils/streetName.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 
 // Campaign-nested household admin actions: correcting a door's pin
@@ -40,6 +45,29 @@ router.param('householdId', (req, res, next, householdId) => {
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
+}
+
+// The Pin Fixes list's backstop cap (env override read at call time, as the turf caps are). Also caps a
+// Look up by address or Set aside request's ids.
+const pinFixCap = () => (Number(process.env.PIN_FIX_LIST_CAP) > 0 ? Number(process.env.PIN_FIX_LIST_CAP) : 10000);
+
+// The campaign half of loadCampaignHousehold, for the queue-wide routes. Sends the 4xx and returns null.
+async function loadCampaignOnly(req, res) {
+  const orgId = activeOrgId(req);
+  if (!orgId) {
+    res.status(400).json({ error: 'Active organization required' });
+    return null;
+  }
+  if (!mongoose.isValidObjectId(req.params.campaignId)) {
+    res.status(400).json({ error: 'Invalid id' });
+    return null;
+  }
+  const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: orgId, ...NOT_DELETING }).lean();
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return null;
+  }
+  return { orgId, campaign };
 }
 
 const locationSchema = z.object({
@@ -99,39 +127,64 @@ router.get('/pin-fixes', async (req, res, next) => {
     // nobody vouched for, and doors on a map spot shared with other addresses (UNPLACED_PIN). The cap
     // applies to the sum.
     const scopeFilter = { organizationId: orgId, campaignId: campaign._id };
-    const projection = 'addressLine1 addressLine2 city state zipCode location status coordSource coordConfidence pinSuspect locationConfirmedAt';
-    const [approx, unplaced, approxTotal, unplacedTotal] = await Promise.all([
+    const projection =
+      'addressLine1 addressLine2 city state zipCode location status coordSource coordConfidence pinSuspect locationConfirmedAt pinPlacement pinSetAside pinComplexKey';
+    // The pin-fixes build adds two more lists beside the street rows (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md
+    // S8.1): condo complexes nobody has vouched for (one entry per complex, its members inside), and homes set
+    // aside. Neither is in `total`, which keeps meaning the street rows.
+    const [approx, unplaced, approxTotal, unplacedTotal, complexDocs, setAsideDocs] = await Promise.all([
       Household.find({ ...scopeFilter, ...NEEDS_PIN_FIX }, projection).sort({ addressLine1: 1, _id: 1 }).limit(cap).lean(),
       Household.find({ ...scopeFilter, ...UNPLACED_PIN }, projection).sort({ addressLine1: 1, _id: 1 }).limit(cap).lean(),
       Household.countDocuments({ ...scopeFilter, ...NEEDS_PIN_FIX }),
       Household.countDocuments({ ...scopeFilter, ...UNPLACED_PIN }),
+      Household.find({ ...scopeFilter, ...COMPLEX_TO_REVIEW }, projection).sort({ addressLine1: 1, _id: 1 }).limit(cap + 1).lean(),
+      Household.find({ ...scopeFilter, isActive: true, 'pinSetAside.at': { $ne: null } }, projection).sort({ addressLine1: 1, _id: 1 }).limit(cap + 1).lean(),
     ]);
     const rows = [...approx, ...unplaced]
       .sort((a, b) => (a.addressLine1 < b.addressLine1 ? -1 : a.addressLine1 > b.addressLine1 ? 1 : String(a._id) < String(b._id) ? -1 : 1))
       .slice(0, cap);
     const total = approxTotal + unplacedTotal;
+    const rowOf = (h) => ({
+      id: String(h._id),
+      addressLine1: h.addressLine1,
+      addressLine2: h.addressLine2 || null,
+      city: h.city,
+      state: h.state,
+      zipCode: h.zipCode,
+      location: h.location?.coordinates ? { lng: h.location.coordinates[0], lat: h.location.coordinates[1] } : null,
+      status: h.status,
+      coordSource: h.coordSource || null,
+      coordConfidence: h.coordConfidence || null,
+      // pinSuspect while the pin is not the home ('placeholder' | 'stray' | 'far' | 'unlocated'), or
+      // 'complex'; pinPlaced while the lookup's placement is current (pinState.js pinWireFields).
+      ...pinWireFields(h),
+      spotKey: buildingKeyForCoords(h.location?.coordinates),
+      complexKey: h.pinComplexKey || null,
+      setAside: !!h.pinSetAside?.at,
+    });
+    const byComplex = new Map();
+    for (const h of complexDocs.slice(0, cap)) {
+      const key = h.pinComplexKey || buildingKeyForCoords(h.location?.coordinates);
+      let c = byComplex.get(key);
+      if (!c) {
+        const loc = h.location?.coordinates;
+        byComplex.set(key, (c = { key, lng: loc?.[0] ?? null, lat: loc?.[1] ?? null, count: 0, streets: new Set(), rows: [] }));
+      }
+      c.count += 1;
+      c.streets.add(streetOf(h.addressLine1));
+      c.rows.push(rowOf(h));
+    }
+    const complexes = [...byComplex.values()]
+      .map((c) => ({ ...c, streets: [...c.streets].sort() }))
+      .sort((a, b) => b.count - a.count || (a.streets[0] < b.streets[0] ? -1 : 1));
     return res.json({
-      households: rows.map((h) => {
-        const pinSuspect = effectivePinSuspect(h);
-        return {
-          id: String(h._id),
-          addressLine1: h.addressLine1,
-          addressLine2: h.addressLine2 || null,
-          city: h.city,
-          state: h.state,
-          zipCode: h.zipCode,
-          location: h.location?.coordinates
-            ? { lng: h.location.coordinates[0], lat: h.location.coordinates[1] }
-            : null,
-          status: h.status,
-          coordSource: h.coordSource || null,
-          coordConfidence: h.coordConfidence || null,
-          // On a map spot shared with other addresses ('placeholder' | 'stray'); absent otherwise.
-          ...(pinSuspect ? { pinSuspect } : {}),
-        };
-      }),
+      households: rows.map(rowOf),
       total,
       truncated: total > rows.length,
+      complexes,
+      complexCount: complexes.length,
+      setAside: setAsideDocs.slice(0, cap).map(rowOf),
+      truncatedExtra: complexDocs.length > cap || setAsideDocs.length > cap,
       cap,
     });
   } catch (err) {
@@ -181,9 +234,102 @@ router.patch('/:householdId/location', async (req, res, next) => {
   }
 });
 
+// Look up by address (Pin Fixes): a group of the queue, or the homes a lead ticked. Exactly one.
+const pinLookupSchema = z
+  .object({
+    group: z.enum(['shared', 'far', 'unlocated', 'complexes']).optional(),
+    householdIds: z.array(z.string()).min(1).optional(),
+  })
+  .refine((d) => !!d.group !== !!d.householdIds, { message: 'Send a group or householdIds, not both.' });
+const idsSchema = z.object({ householdIds: z.array(z.string()).min(1) });
+
+// Pin Fixes' "Look up by address" (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.1): an ImportJob of kind
+// 'pin_lookup' — no file — that runs the placement pass on these homes in the import worker. Every target
+// filter is scoped to this campaign. The same people who can move a pin may ask; the same lookups at the same
+// internal rate, Doorline's cost, never shown to the organization. 202 { jobId }, polled through
+// GET /admin/imports/:id; 503 when the queue can't take it (the job is marked failed).
+router.post('/pin-lookup', async (req, res, next) => {
+  try {
+    const loaded = await loadCampaignOnly(req, res);
+    if (!loaded) return;
+    const { orgId, campaign } = loaded;
+    const data = pinLookupSchema.parse(req.body || {});
+    if (process.env.GEOCODE_ENABLED !== 'true' || !process.env.GEOCODIO_API_KEY) {
+      return res.status(409).json({ error: 'Address lookups are switched off for now.', code: 'LOOKUPS_OFF' });
+    }
+    const cap = pinFixCap();
+    const scopeFilter = { organizationId: orgId, campaignId: campaign._id };
+    let filter;
+    if (data.group === 'shared') filter = { ...scopeFilter, ...UNPLACED_PIN, pinSuspect: { $type: 'string', $in: ['placeholder', 'stray'] } };
+    else if (data.group === 'far' || data.group === 'unlocated') filter = { ...scopeFilter, ...UNPLACED_PIN, pinSuspect: { $type: 'string', $eq: data.group } };
+    else if (data.group === 'complexes') filter = { ...scopeFilter, ...COMPLEX_TO_REVIEW };
+    else {
+      const ids = data.householdIds.slice(0, cap).filter((id) => mongoose.isValidObjectId(id));
+      filter = { ...scopeFilter, _id: { $in: ids }, isActive: true, pinSuspect: { $type: 'string' } };
+    }
+    const docs = await Household.find(filter, { _id: 1 }).limit(cap).lean();
+    if (!docs.length) return res.status(400).json({ error: 'Nothing to look up.', code: 'NOTHING_TO_LOOK_UP' });
+    const ids = docs.map((d) => String(d._id));
+    for (const id of ids) addAuditSubjects(res, 'household', id);
+    const job = await ImportJob.create({
+      organizationId: orgId,
+      campaignId: campaign._id,
+      uploadedBy: req.user._id,
+      status: 'pending',
+      kind: 'pin_lookup',
+      pinLookupTargets: ids,
+      totalRows: ids.length,
+    });
+    try {
+      await queueOp(getQueue(QUEUE_NAMES.IMPORT).add('pin-lookup', { importJobId: String(job._id) }, { jobId: String(job._id) }));
+    } catch (err) {
+      const msg = "The lookup couldn't be queued — try again in a minute.";
+      await ImportJob.updateOne({ _id: job._id }, { $set: { status: 'failed', lastError: msg, completedAt: new Date() } });
+      return res.status(503).json({ error: msg, code: 'queue-unavailable', jobId: String(job._id) });
+    }
+    return res.status(202).json({ jobId: String(job._id) });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Set aside / bring back (Pin Fixes): out of the queue and every book cut, or back in. Only a door the queue
+// could show is set aside (services/households/setAsidePin.js).
+router.post('/set-aside', async (req, res, next) => {
+  try {
+    const loaded = await loadCampaignOnly(req, res);
+    if (!loaded) return;
+    const { householdIds } = idsSchema.parse(req.body || {});
+    const ids = householdIds.slice(0, pinFixCap());
+    for (const id of ids) if (mongoose.isValidObjectId(id)) addAuditSubjects(res, 'household', id);
+    const r = await setAsidePins({ campaignId: loaded.campaign._id, householdIds: ids, byUserId: req.user._id });
+    return res.json(r);
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+router.post('/bring-back', async (req, res, next) => {
+  try {
+    const loaded = await loadCampaignOnly(req, res);
+    if (!loaded) return;
+    const { householdIds } = idsSchema.parse(req.body || {});
+    const ids = householdIds.slice(0, pinFixCap());
+    for (const id of ids) if (mongoose.isValidObjectId(id)) addAuditSubjects(res, 'household', id);
+    const r = await bringBackPins({ campaignId: loaded.campaign._id, householdIds: ids });
+    return res.json(r);
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
 const confirmSchema = z.object({
   confirmed: z.boolean().optional(), // default true; false = undo the vouch
-  scope: z.enum(['unit', 'building']).optional(),
+  // 'spot': every member of a condo complex (pinComplexKey) — "Looks right — it's a complex".
+  scope: z.enum(['unit', 'building', 'spot']).optional(),
   // The pin Pin Fixes displayed ([lng, lat]). When the door has since moved to another ~1.1m spot
   // (a placement by address, another lead), the confirm is refused instead of vouching for a pin
   // nobody saw. Undo doesn't send it.

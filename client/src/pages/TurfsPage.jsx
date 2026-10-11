@@ -39,6 +39,8 @@ import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from 
 import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
 import { pickRound, roundMarkFromEntries, unmarkButtonLabel } from '../lib/restrictMark.js';
 import MoveTargetModal from '../components/MoveTargetModal.jsx';
+import { unplacedToggleCopy, unplacedLeftOutLine, unassignedDoorCount } from '../lib/turfUnplacedToggle.js';
+import { isOffWorld } from '../lib/pinFixes.js';
 import {
   moveTargetCandidates,
   planLassoMove,
@@ -213,8 +215,9 @@ function buildingMarkerEl(total, color, dark, badgeText, kind = 'building') {
     const c = i % 2;
     windows.push(`<rect x="${8.5 + c * 4}" y="${7 + r * 4}" width="2.6" height="2.6" rx="0.5" fill="#fff" opacity="0.92"/>`);
   }
+  // A condo complex (kind 'complex') draws the same two houses: several homes, one place.
   const glyph =
-    kind === 'unplaced'
+    kind === 'unplaced' || kind === 'complex'
       ? `<path d="M2.5 12.5 L7.5 7.5 L12.5 12.5 V20 H2.5 Z" fill="${color}" stroke="#fff" stroke-width="1.3" stroke-linejoin="round" opacity="0.8"/>` +
         `<path d="M10.5 13.5 L16 8 L21.5 13.5 V21 H10.5 Z" fill="${color}" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/>` +
         `<rect x="14.6" y="16.2" width="2.8" height="4.8" rx="0.4" fill="#fff" opacity="0.92"/>`
@@ -456,6 +459,8 @@ function bboxOfDoors(doors) {
   let a = Infinity; let b = Infinity; let c = -Infinity; let d = -Infinity;
   for (const p of doors || []) {
     const x = p.lng; const y = p.lat;
+    // A door at 0,0 (a vendor's "no location", not yet fixed in Pin Fixes) never frames the Atlantic.
+    if (isOffWorld(y, x)) continue;
     if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y;
   }
   return Number.isFinite(a) ? [[a, b], [c, d]] : null;
@@ -1226,7 +1231,9 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
   const [confirmMark, setConfirmMark] = useState(false);
   if (!building) return null;
   const { addressLine1, city, state, zipCode, units, total } = building;
-  const separateHomes = building.kind === 'unplaced' || !movePlan;
+  // A condo complex is separate homes too (no "Move building pin"), but its spot is right: no Pin Fixes nudge.
+  const complex = building.kind === 'complex';
+  const separateHomes = building.kind !== 'building' || !movePlan;
   const restrictedN = units.filter((u) => u.passStatus === 'restricted').length;
   const completedN = units.filter((u) => COMPLETED_STATUSES.has(u.passStatus)).length;
   const markableN = Math.max(0, total - restrictedN - completedN);
@@ -1243,10 +1250,14 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
             <span aria-hidden>🏢</span>
-            <span className="truncate">{separateHomes ? `${total} homes at one map spot` : movePlan ? movePlan.address : addressLine1 || 'Apartment building'}</span>
+            <span className="truncate">{complex ? `${total} homes · a complex` : separateHomes ? `${total} homes at one map spot` : movePlan ? movePlan.address : addressLine1 || 'Apartment building'}</span>
           </div>
           <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
-          {separateHomes ? (
+          {complex ? (
+            <div className="mt-0.5 text-[11px] text-fg-muted">
+              The file and the address lookup agree these homes share this spot. Each home has its own Directions on the phone.
+            </div>
+          ) : separateHomes ? (
             <div className="mt-0.5 text-[11px] text-fg-muted">
               These are different homes that share one map spot. Move each one to its house
               {pinFixesHref ? (
@@ -1550,6 +1561,10 @@ export default function TurfsPage() {
   // (only surfaced when the effort actually has restricted-status doors).
   const [excludeRestricted, setExcludeRestricted] = useState(true);
   const [excludeNoSoliciting, setExcludeNoSoliciting] = useState(true);
+  // "Leave out N homes without a reliable map spot" (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S10.6): default
+  // ON, shown only when the round has such homes. `unplacedLeftOut` remembers how many the last cut left out.
+  const [excludeUnplaced, setExcludeUnplaced] = useState(true);
+  const [unplacedLeftOut, setUnplacedLeftOut] = useState(0);
   const [flex, setFlex] = useState('compact');
   const [jobId, setJobId] = useState(null);
   // Which flow started the polled job — the done/failed message differs
@@ -1702,12 +1717,13 @@ export default function TurfsPage() {
   // the cut. Server-computed (GET /turfs rollup) so a targeted round's skipped doors and
   // an exclusion's removed doors never inflate the nag: they are bookless on purpose.
   // Restricted homes mirror the "exclude restricted" checkbox, same as the cut.
-  const unassignedCount = Math.max(
-    0,
-    (turfsQ.data?.supplementalDoorCount || 0) -
-      (excludeRestricted ? turfsQ.data?.supplementalRestrictedCount || 0 : 0) -
-      (excludeNoSoliciting ? turfsQ.data?.supplementalNoSolicitingCount || 0 : 0)
-  );
+  // Any home in the round without a reliable map spot? (the untargeted count; a targeted round can only have fewer)
+  const unplacedAny = (turfsQ.data?.unplacedDoorCount || 0) > 0;
+  const unassignedCount = unassignedDoorCount(turfsQ.data || {}, {
+    excludeRestricted,
+    excludeNoSoliciting,
+    excludeUnplaced: excludeUnplaced && unplacedAny,
+  });
   // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
   // can drop them from this cut so nobody is routed back to an unreachable door.
   const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
@@ -1773,11 +1789,11 @@ export default function TurfsPage() {
   // Manual mode: live houses + voters inside each drawn area.
   const manualAreasKey = JSON.stringify(drawnAreas.map((a) => a.geometry?.coordinates));
   const manualPreviewQ = useQuery({
-    queryKey: ['manual-preview', campaignId, passId, manualAreasKey],
+    queryKey: ['manual-preview', campaignId, passId, manualAreasKey, excludeUnplaced && unplacedAny],
     queryFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/manual-preview`, {
         method: 'POST',
-        body: { passId, polygons: drawnAreas.map((a) => a.geometry) },
+        body: { passId, polygons: drawnAreas.map((a) => a.geometry), excludeUnplaced: excludeUnplaced && unplacedAny },
       }),
     enabled: mode === 'manual' && !!campaignId && !!passId && drawnAreas.length > 0,
   });
@@ -1827,16 +1843,25 @@ export default function TurfsPage() {
   const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
   const excludeActive = sideActive(targetFilter.exclude);
   const targetPreviewQ = useQuery({
-    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting && noSolicitingDoorCount > 0],
+    queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting && noSolicitingDoorCount > 0, excludeUnplaced && unplacedAny],
     queryFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/target-preview`, {
         method: 'POST',
         // excludeRestricted rides along under the same condition Generate uses, so the
         // previewed count equals what the cut will actually produce.
-        body: { passId, filter: targetFilter, excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
+        body: {
+          passId,
+          filter: targetFilter,
+          excludeRestricted: excludeRestricted && restrictedDoorCount > 0,
+          excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0,
+          excludeUnplaced: excludeUnplaced && unplacedAny,
+        },
       }),
     enabled: !!campaignId && !!passId && targetActive,
   });
+  // The toggle's own count: what the clause removes from THIS cut (a targeted round's preview says, else the
+  // round's summary).
+  const unplacedDoorCount = (targetActive ? targetPreviewQ.data?.unplacedCount : turfsQ.data?.unplacedDoorCount) || 0;
   const targetedSet = useMemo(
     () => (targetActive && targetPreviewQ.data?.householdIds ? new Set(targetPreviewQ.data.householdIds.map(String)) : null),
     [targetActive, targetPreviewQ.data]
@@ -1959,8 +1984,9 @@ export default function TurfsPage() {
 
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
   const attributePreviewQ = useQuery({
-    queryKey: ['turf-attribute-preview', campaignId, passId, attribute],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/attribute-preview?passId=${passId}&attribute=${attribute}`),
+    queryKey: ['turf-attribute-preview', campaignId, passId, attribute, excludeUnplaced && unplacedAny],
+    queryFn: () =>
+      api(`/admin/campaigns/${campaignId}/turfs/attribute-preview?passId=${passId}&attribute=${attribute}${excludeUnplaced && unplacedAny ? '&excludeUnplaced=1' : ''}`),
     enabled: !!campaignId && !!passId && mode === 'attribute',
   });
 
@@ -2259,11 +2285,13 @@ export default function TurfsPage() {
       if (targetActive) params.targetFilter = targetFilter;
       if (excludeRestricted && restrictedDoorCount > 0) params.excludeRestricted = true;
       if (excludeNoSoliciting && noSolicitingDoorCount > 0) params.excludeNoSoliciting = true;
+      if (excludeUnplaced && unplacedAny) params.excludeUnplaced = true;
       return api(`/admin/campaigns/${campaignId}/turfs/generate`, { method: 'POST', body: { passId, mode, params } });
     },
     onSuccess: (res) => {
       setJobId(res.jobId);
       setJobKind('generate');
+      setUnplacedLeftOut(excludeUnplaced && unplacedAny ? unplacedDoorCount : 0);
       if (drawRef.current) drawRef.current.deleteAll();
       setDrawnAreas([]);
     },
@@ -2549,7 +2577,12 @@ export default function TurfsPage() {
     mutationFn: () =>
       api(`/admin/campaigns/${campaignId}/turfs/add-supplemental`, {
         method: 'POST',
-        body: { passId, excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
+        body: {
+          passId,
+          excludeRestricted: excludeRestricted && restrictedDoorCount > 0,
+          excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0,
+          excludeUnplaced: excludeUnplaced && unplacedAny,
+        },
       }),
     onSuccess: (res) => {
       setJobId(res.jobId);
@@ -3478,6 +3511,24 @@ export default function TurfsPage() {
             </label>
           )}
 
+          {unplacedDoorCount > 0 && publishedCount === 0 && (
+            <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={excludeUnplaced}
+                onChange={(e) => setExcludeUnplaced(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium text-fg">{unplacedToggleCopy(unplacedDoorCount).label}</span>{' '}
+                <Link to={`/campaigns/${campaignId}/pin-fixes`} className="font-semibold text-brand-accent hover:underline">
+                  {unplacedToggleCopy(unplacedDoorCount).link}
+                </Link>
+                <span className="mt-0.5 block text-[11px]">{unplacedToggleCopy(unplacedDoorCount).sub}</span>
+              </span>
+            </label>
+          )}
+
           <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
             {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
           </button>
@@ -3528,7 +3579,17 @@ export default function TurfsPage() {
                     </span>
                   )
                 ) : (
-                  <span className="text-success">Done — {job.result?.bookCount ?? draftCount} books.</span>
+                  <>
+                    <span className="text-success">Done — {job.result?.bookCount ?? draftCount} books.</span>
+                    {unplacedLeftOut > 0 && (
+                      <span className="mt-0.5 block text-fg-muted">
+                        {unplacedLeftOutLine(unplacedLeftOut)}{' '}
+                        <Link to={`/campaigns/${campaignId}/pin-fixes`} className="font-semibold text-brand-accent hover:underline">
+                          Pin Fixes →
+                        </Link>
+                      </span>
+                    )}
+                  </>
                 )
               ) : (
                 <>
@@ -3999,7 +4060,8 @@ export default function TurfsPage() {
                   : undefined
               }
               onMovePin={
-                selected?.isActive !== false && popupMovePlan && popupBuilding.kind !== 'unplaced'
+                // Only a real building moves as one: a spot of different homes, and a condo complex, never.
+                selected?.isActive !== false && popupMovePlan && popupBuilding.kind === 'building'
                   ? () =>
                       beginMovePin({
                         id: String(popupMovePlan.primary.id),

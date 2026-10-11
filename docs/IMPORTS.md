@@ -139,9 +139,22 @@ so the file can still import — just **leave the Latitude/Longitude columns unm
 optional; the mapping step no longer requires a coordinate column). The preview shows a **free
 forecast** (how many addresses need geocoding and how many are already cached), plus an opt-in
 **"See exact placement"** button that runs the real geocode and reports exactly what can and can't
-be placed. On import, unplaceable addresses are dropped (and listed) so every imported door keeps a
-walkable pin. *(Geocoding has an internal per-lookup cost, but that's Doorline's cost — it's never
+be placed. *(Geocoding has an internal per-lookup cost, but that's Doorline's cost — it's never
 shown to admins or clients. Only the platform owner sees it, on the super-admin Imports page.)*
+
+**An address the lookup can't place is kept, not dropped.** It goes to a **holding spot** — the middle of
+the other homes in its ZIP code — flagged **"Couldn't be found by address,"** listed in **Pin Fixes**, and
+left out of book cuts unless you say otherwise. Losing a house (and its voters) is worse than a flagged
+pin. Only a home with no placed neighbours to park it beside — none in its ZIP, and none in its town in
+the same file — is still dropped and listed, as before. With address lookups switched off, a file without
+coordinates can't be imported and its rows are skipped, exactly as before.
+
+**Not every answer is a pin.** The lookup's answer goes on the map only when it is good enough for the
+address: an exact rooftop always; an answer that is only a *nearby* roof, or the middle of the street, is
+used but shown as **Approximate location** (an amber ring, listed in Pin Fixes for a quick look); a
+city- or county-level answer is never used; and an answer in a different town from the address is
+refused and the home is parked instead. An answer just across a ZIP line in the **same town** is accepted
+(the ZIP line in Fairfield runs down the middle of Black Rock Turnpike).
 
 ## When two rows disagree about where a house is
 
@@ -164,6 +177,25 @@ A tie is never resolved by throwing the coordinates away: a door with no pin get
 import along with its voters, and losing a house is worse than a suspect pin. Ties are cleaned up
 afterwards — see **Fixing pins that came in wrong** below.
 
+## Coordinates the import refuses
+
+A file coordinate is used only when it is a plausible place for that home:
+
+- **Not 0,0.** Some vendors write 0,0 (a spot in the ocean off Africa) when they have no location. The
+  import treats it as *no coordinate*.
+- **Inside the home's own state** (the row's State column).
+
+A refused coordinate never puts a home in the ocean or in the wrong state, and never drops it. The home is
+looked up by its address (when lookups are on); if the lookup finds nothing, or lookups are off, it waits at
+its ZIP's **holding spot**, flagged **"Couldn't be found by address,"** in Pin Fixes. The preview says so
+before anything is written — *Homes with no location in the file (0,0)* and *Homes whose coordinate is
+outside their state* — and so does the line under the file afterwards.
+
+The preview also warns about two more things, and imports them all: **homes pinned far from their street**
+(the pin is far from the other homes on its street, or for a street too short to judge, from the rest of its
+ZIP; "far" grows with how spread out the street already is, so a long rural road isn't flagged for being long)
+and **homes with no street address** (no house number, or ZIP 00000), which the address lookup can't place.
+
 ## Homes that share a map spot with other addresses
 
 Some voter files give many **different** homes the **same** coordinate: the vendor couldn't place them,
@@ -172,27 +204,42 @@ they pile onto one dot and look like an apartment building, and a book cut aroun
 to the wrong place. Each import now deals with this itself:
 
 - **It spots them.** Homes on the same exact spot (to about a meter) are compared by street address.
-  Units of one address (*100 Main St Apt 1, Apt 2, …*) are a real building and are left alone. Different
-  addresses on one spot are marked, and so is a home that sits on an apartment building's or a park's
-  spot but has a different address.
-- **It looks each one up by its own address**, when address lookup is switched on (it is in production).
-  A home is moved only when the answer can be trusted: a rooftop or exact-point match, in the home's own
-  ZIP code and state, that doesn't land on the same spot as a different address's answer. When the
-  answer says the home really is on that spot, the mark simply comes off.
+  Units of one address (*100 Main St Apt 1, Apt 2, …*, and the bare-number form *533 Black Rock Tpke 3*) are
+  a real building and are left alone. Different addresses on one spot are marked, and so is a home that sits
+  on an apartment building's or a park's spot but has a different address.
+- **It looks each one up by its own address**, when address lookup is switched on (it is in production),
+  and also every home pinned **far from its street**. An answer replaces a pin only when it **beats what the
+  home has**: an exact rooftop beats anything; an answer that only puts the home on the right block (an
+  estimate along the street) may replace a shared spot, a far pin or a missing one, and arrives as
+  **Approximate location** to check in Pin Fixes; a street-only answer, or a neighbour's roof, may only fill a
+  home with no usable coordinate, or replace a pin far from its street when it lands among that street's
+  homes. Every answer must be in the home's own ZIP — or its own town, among that street's other homes —
+  and in its state. When the answer says the home really is where its pin is,
+  the mark simply comes off.
+- **A condo complex is one place, and that is the right answer.** When the file put several addresses on
+  one spot *and* the lookup gives those addresses the same exact point, the file and the lookup agree: they
+  are one complex. The spot is marked **a complex**, not "No exact map spot". Every map shows it as
+  *"N homes · a complex"* with each home listed and its own Directions; it is cut into books as one point,
+  like an apartment building; and Pin Fixes lists it once, under **Complexes**, with **Looks right — it's a
+  complex** (vouches every home at once) and **Spread on the map** (to put each unit on its own building).
+  If the file's spot was no place at all (0,0, or the wrong town), the complex moves to the lookup's point.
 - **A home it can't place stays where it is, marked "No exact map spot",** and is listed in **Pin
-  Fixes**, where a lead drags it onto the real house or confirms it's right. Nothing is dropped and
+  Fixes**, where a lead places it, confirms it, looks it up again, or sets it aside. Nothing is dropped and
   nothing is guessed.
 - **The preview warns first:** *Homes that share a map spot with other addresses (N)*. While the import
   works on them its status reads **Checking map pins**, and afterwards the line under the file in
-  **Recent imports** says what happened: *Map pins: 412 placed by address · 9 confirmed at their spot ·
-  60 without an exact spot (Pin Fixes →)*.
+  **Recent imports** says what happened: *Map pins: 412 placed by address · 41 placed on the street (check
+  them) · 9 confirmed at their spot · 212 in complexes · 60 without an exact spot, 5 of them kept at a
+  holding spot (Pin Fixes →)*. When the run marks homes far from their street anywhere in the campaign, the
+  line adds *130 flagged far from their street — look them up*.
 - **If it couldn't finish,** the line says so (*another import was placing pins in this campaign*, or
-  *Map pins weren't checked this time*), and the fix is the same either way: **import the file again**.
-  Nothing already placed is undone, and an address already looked up is answered from the cache for free.
+  *Map pins weren't checked this time*), and the fix is **Look up by address** in Pin Fixes. Nothing already
+  placed is undone, and an address already looked up is answered from the cache for free.
 - **People win.** A pin a lead moved or confirmed is never moved or marked by an import, and importing
   the same file again keeps the homes the lookup placed where they are.
-- **Only the file being imported is looked up.** Homes from earlier imports in the same campaign are
-  marked (so they show in Pin Fixes), but looking them up means importing their file again.
+- **Homes from earlier imports** in the same campaign are marked by every import (so they show in Pin
+  Fixes); **Look up by address** on a Pin Fixes card looks them up without a re-import. Its run appears in
+  Recent imports as *Pin lookup · N homes*, with its own pin line and no Undo (it inserts nothing).
 - **Cost:** each address looked up is one geocoding lookup at the usual rate; an address looked up before
   is answered from the cache for free.
 
@@ -221,9 +268,11 @@ An audit run finds them and can correct them:
   excluded a fake stack, fixing the pins does not put those doors back in books — re-include and re-cut
   (the script prints the exact steps).
 
-Ask your Doorline contact to run it — it's an operator tool, not a page in the app. Homes that share a
-map spot with other addresses no longer need it: each import looks those up itself (above), and what it
-can't place waits in Pin Fixes.
+Ask your Doorline contact to run it — it's an operator tool, not a page in the app. Most of its work now
+happens without it: each import refuses impossible coordinates, catches pins far from their street and looks
+up homes that share a map spot (above), and **Pin Fixes** looks up older imports' homes with **Look up by
+address**, groups the rest by cause, and fixes them in bulk. The script remains for settling disagreeing
+rows and for operator cleanups; it uses the same "far from its street" rule as the import.
 
 ## Shared voter database
 
@@ -364,13 +413,14 @@ walkthrough — including when to use **Claim all Intake** vs. a saved search �
   file to match the first before uploading.
 - **A new voter at an already-knocked door doesn't re-open it.** The door keeps its status, so a
   canvasser won't be sent back automatically.
-- **Bad/odd addresses aren't validated** beyond requiring coordinates; a coordinate-less row is skipped
-  (the preview counts it under *Rows skipped*).
-- **A file coordinate that is a valid number in the wrong place is accepted as-is.** The import only
-  rejects coordinates that aren't numbers or are outside the world; it doesn't check that a pin is
-  anywhere near its street. (In one real file a row sat 179 miles from its address, with the vendor's
-  own delivery-point status marking it doubtful.) The door imports, pinned wrong, and the post-import
-  pin audit — not the import — is what finds and corrects it. See *Fixing pins that came in wrong*.
+- **Bad/odd addresses aren't validated** beyond requiring a pin: with lookups off, a coordinate-less row is
+  skipped (the preview counts it under *Rows skipped*); with lookups on, it is looked up, and parked at its
+  ZIP's holding spot if nothing is found.
+- **A file pin inside the right state but on the wrong side of town is caught only when its street (or ZIP)
+  says so.** The import flags a pin far from the other homes on its street and looks it up; a street with
+  fewer than three homes falls back to its ZIP, and a home in a sparse ZIP with no neighbours to compare is
+  taken as it is. The far end of a long, unevenly built road can be flagged too; a lookup that agrees with the
+  pin clears it on the spot.
 - **Duplicate-ID skips are counted as rows, not values.** 37,000 rows all carrying the same junk ID read
   as 37,000 skipped rows — with the repeated value named — never as "1 duplicate".
 
@@ -823,14 +873,51 @@ endpoint (`api.geocod.io/v2/geocode`; override via `GEOCODIO_API_VERSION` — v1
 enterprise-only), cache-backed in `GeocodeCache` (org/campaign-agnostic, keyed on `looseAddressKey`). The validate gate is split:
 *invalid* coords → always `bad_coords`; *missing* coords + enabled → survive to grouping with
 null coords. `importProcessor` geocodes inline (per-batch cache writes), **fills matched
-households + drops unplaceable ones (with their voters)**, and stamps `coordSource`/
-`coordConfidence`. Safeguards: a per-state **bounding-box gate**, an `accuracy_type` + `accuracy`
-confidence gate (centroids rejected), and a negative cache with staleness. The preview forecast
-is **cache-only** (zero provider calls); the opt-in `POST /admin/imports/geocode-check` runs the
-live geocode (cost-confirmed, worker-backed) and caches results so a later apply is free. Off ⇒
-today's `bad_coords` behavior byte-for-byte. `GeocodeCache` indexes build at worker boot.
-`resolve(map, { cacheOnly: true })` serves whatever the cache already knows and never calls the
-provider — how `repair:import-pins` audits for free.
+households, parks unmatched ones at their ZIP's holding spot** (below), drops only a household no spot
+can be derived for (with its voters, `geocode_*` / `bad_coords` in the error list), and stamps
+`coordSource`/`coordConfidence`. Safeguards: a per-state **bounding-box gate**, an `accuracy_type` +
+`accuracy` confidence gate (centroids rejected), a **ZIP gate** (`geocode_wrong_zip`: the answer's ZIP5
+must be the address's, or its formatted city the address's city — `zipOfMatched` / `cityOfMatched` in
+`pinTrust.js`; fails open when the answer has no formatted address), and a negative cache with
+staleness. **One classifier** for import-time answers, `fillFrom(h, entry)`: `confidenceFor` maps
+`rooftop`/`point` to `exact` and every other accepted class (`range_interpolation`, `street_center`,
+`nearest_rooftop_match`) to `interpolated`, so a neighbour's roof arrives as **Approximate**, never as an
+exact pin; `h.geocodeAccuracy` carries the score to the pass. Floors:
+[`geocodeFloors.js`](../server/src/services/import/geocode/geocodeFloors.js) — `GEOCODE_MIN_ACCURACY`
+(0.5, filling a pin-less home) and `PIN_INTERP_MIN_ACCURACY` (0.8, an estimate replacing a shared or far
+pin; measured with `npm run pins:measure-estimates`). A cache hit is re-judged by the same rules (a
+cached wrong-ZIP answer is refused without a re-buy). The preview forecast is **cache-only** (zero
+provider calls); the opt-in `POST /admin/imports/geocode-check` runs the live geocode (cost-confirmed,
+worker-backed) and caches results so a later apply is free. **Off:** a coordinate-less row is skipped
+(`bad_coords`) as before; a refused file coordinate (0,0, outside the state) is parked without a lookup.
+`GeocodeCache` indexes build at worker boot. `resolve(map, { cacheOnly: true })` serves whatever the cache
+already knows and never calls the provider — how `repair:import-pins` audits for free.
+
+### Refused file coordinates and the holding spot (Pin Fixes at scale)
+
+[PROPOSAL_PIN_FIXES_AT_SCALE.md](PROPOSAL_PIN_FIXES_AT_SCALE.md), built to
+[PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md](PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md) S4–S5.
+
+- **Refusal** — `fileCoordRefusal({ lat, lng, state })` in
+  [`utils/stateBounds.js`](../server/src/utils/stateBounds.js): `'offworld'` (both within
+  `OFF_WORLD_EPSILON`, 1e-5°, of zero) or `'outside_state'` (`inStateBounds`, fails open on unknown codes).
+  `mapRow` sets `household.coordRefused` and nulls the pair, so the validator lets the row through (it no
+  longer skips a refused row) and grouping treats it as coordinate-less; the counts reach the preview as
+  `rowIssues.offWorldDoors` / `outsideStateDoors`, beside `farPinDoors` (the cohort rule over the file's
+  placed homes, `cohortOutliers` with the ZIP fallback, spot verdicts excluded) and `unlocatableDoors` (no
+  leading house number, or ZIP 00000), all door-weighted and copied onto `ImportJob`.
+- **Holding spot** — `createHoldingSpots({ campaignId, householdMap }).assign(h)` in
+  [`holdingSpot.js`](../server/src/services/import/holdingSpot.js): one point per ZIP per campaign — the
+  spot the campaign already parks that ZIP at, else the mean of the file's placed homes in the ZIP, else in
+  the same city, else the campaign's doors in the ZIP (a 2,000-door sample) — nudged 0.0005° north until no
+  door is within 1.5 m. A parked home is written `coordSource: 'holding'`, `coordConfidence: null`,
+  `pinSuspect: 'unlocated'` — so it sits in `UNPLACED_PIN`, never in the approximate set. `importProcessor` parks after geocoding (lookups on: every
+  unmatched address, provider failures included, so a Pin Fixes lookup retries them free) and in the
+  lookups-off branch (refused coordinates only).
+- **Write builder** (`applyImport`): an existing real pin is never replaced by a holding spot; a parked
+  home re-imported still unplaceable keeps its spot and its flag (`holding` → `holding` is a keep), and a
+  re-import with a usable coordinate or a geocoded answer replaces the holding spot; a door whose prior pin
+  was itself refused (0,0) is never kept at it. `pinComplexKey` is unset whenever the pin moves.
 
 ### Disagreeing coordinates across rows for one household
 
@@ -871,7 +958,9 @@ share a map spot with other addresses" block (count = placeholder + stray doors;
 ### Placing homes that share a map spot — `placeStackedPins` (every apply import)
 
 Release 1 of [PROPOSAL_PLACEHOLDER_PINS.md](PROPOSAL_PLACEHOLDER_PINS.md); what is built and what
-waits is in [PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md).
+waits is in [PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md](PROPOSAL_PLACEHOLDER_PINS_RELEASE1.md). Pin Fixes at
+scale (2026-10-10, [build plan](PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md) S6) widened it: far marks, the
+answer ladder, condo complexes and the file-less `pin_lookup` job — folded into the bullets below.
 [`services/households/placeStackedPins.js`](../server/src/services/households/placeStackedPins.js) runs
 in the worker after `recomputeHouseholdActive`, as its own stage (`ImportJob.phase: 'pins'`, with its own
 30 s heartbeat because one provider batch can wait 180 s). Non-fatal: a throw is stored as
@@ -887,28 +976,66 @@ in the worker after `recomputeHouseholdActive`, as its own stage (`ImportJob.pha
   `Household.pinSuspect` (partial index `{ campaignId, pinSuspect }`). A person's pin
   (`coordSource: 'corrected'` or `locationConfirmedAt`) is never marked or moved; a door the geocoder
   filled (`coordSource: 'geocodio'`) is marked but not looked up again. Mark writes are filtered on the
-  loaded location/source/confirm, so a person's move or confirm that lands mid-pass wins.
-- **Look up — this file only.** Candidates are this file's marked, file-coordinate doors (`paidScope` =
-  the file's `normalizedAddress` set). Probes are copies with null coordinates sent through
+  loaded location/source/confirm, so a person's move or confirm that lands mid-pass wins. **Precedence**
+  (one ladder, stated in the build plan's Part 2): a stored `unlocated` or `complex` beats any spot
+  verdict; a spot verdict (`placeholder`/`stray`) beats `far`; a set-aside door keeps whatever it has
+  (frozen); a person's move or vouch beats everything. A file-geocoded exact door landing on an existing
+  complex's point **joins** the complex (`pinSuspect: 'complex'`, `pinComplexKey`).
+- **Far marks (step 2b) — the whole campaign, recomputed each pass.** `cohortOutliers` in
+  [`utils/pinCohorts.js`](../server/src/utils/pinCohorts.js) over the campaign's real-location doors
+  (evidence: not off-world, not holding, no spot verdict, not unlocated), judging file-ish, unvouched,
+  unplaced, not-set-aside doors: a street cohort (`streetOfBase(baseFamily(stackBaseOf(line1)))` + ZIP5,
+  ≥ 3 homes, medoid centre, coordinate median past 2,000) flags a home farther than `max(floor,
+  4 × median distance)`; a street too small falls back to the ZIP (3 km floor). Marks `pinSuspect: 'far'`;
+  a `far` door its cohort no longer flags is cleared. `pinsFarMarked` counts new marks anywhere in the
+  campaign. `repair:import-pins`' `streetOutliers` calls the same function (no ZIP fallback, an
+  unbounded medoid), so the two can't drift.
+- **Look up — this file only (or the lookup job's targets).** Candidates are this file's marked doors of
+  class 0–2 (`paidScope` = the file's `normalizedAddress` set; for a `pin_lookup` job, its targets' set).
+  Probes are copies with null coordinates sent through
   `geocodeService.resolve`, so the shared cache, negative cache and cost accounting apply. Ceiling
   `PIN_PLACEMENT_MAX_HOMES` (25,000) per import, ledgered in `ImportJob.pinProbedIds` so a retry never
   pays twice; homes over it stay marked (`pinLookupsOverCap`). A failed provider chunk stops buying and
   places nothing (`PIN_PASS_FAILED`, cause from `causeOf`: `HTTP 401`, `timeout`, …). A campaign or org
   deletion request stops it.
-- **Trust gate** — `stackPolicy` in [`pinTrust.js`](../server/src/services/households/pinTrust.js). A
-  claim is a `rooftop` or `point` answer whose matched ZIP5 equals the address's ZIP5, inside the state.
-  Two different addresses claiming one point are both refused and remember the key
-  (`pinDistrustedKeys`); an answer landing on a home an earlier lookup placed reverts that home.
-  `range_interpolation` and every other accuracy are refused.
-- **Write.** A placement sets `location`, `coordSource: 'geocodio'`, `coordConfidence: 'exact'` and
-  `pinPlacement { from, to, at, kind, by: 'lookup', accuracyType, stackSize }`, and unsets `pinSuspect`.
+- **Trust gate** — `lookupPolicy` (alias `stackPolicy`) in
+  [`pinTrust.js`](../server/src/services/households/pinTrust.js). **Pin classes** (`pinClass`): 0 no
+  usable coordinate (holding, unlocated, or a refused own pin), 1 far, 2 shared spot or complex, 3 an
+  ordinary pin (never a candidate). **Answer classes** (`answerClass`): exact (`rooftop`, `point`),
+  estimate (`range_interpolation`), street (`street_center`, `nearest_rooftop_match`), none. The
+  ladder (`answerBeats`): exact beats class 0–2; an estimate fills class 0 at `GEOCODE_MIN_ACCURACY` and
+  replaces class 1–2 at `PIN_INTERP_MIN_ACCURACY` when it lands inside the street's cohort; a street answer
+  fills class 0 and replaces class 1 inside the cohort; nothing else. Every answer passes `zipMatches` (ZIP5
+  equal, or the same city and not a cohort outlier) and the state box. **Complex verdict** (before the
+  distrusted-key test, so release 1's `pinDistrustedKeys` record of a collapse doesn't block it): exact
+  answers grouped by the vendor spot × answer key with ≥ 2 distinct addresses (`baseFamily` or cache key)
+  make a complex; an answer key already holding complex doors is joined; the members converge on the exact
+  point (`moveTo`) unless it is their spot. Two different addresses on one non-complex point are still
+  refused and remember the key; an answer landing on a home an earlier lookup placed reverts that home,
+  but a complex door refuses the claimant instead. **Far in place:** a class-1 door whose exact or ≥ 0.5
+  estimate answer is within 250 m of its own pin is confirmed where it is (`inPlace`, `near`).
+- **Write.** A placement sets `location`, `coordSource: 'geocodio'`, `coordConfidence: 'exact'` (or
+  `'interpolated'` for an estimate or street answer) and `pinPlacement { from, to, at, kind, answer, by:
+  'lookup', accuracyType, stackSize }` (`kind` now one of `placeholder`/`stray`/`far`/`unlocated`/`complex`,
+  `answer` the answer class), and unsets `pinSuspect`. A complex sets `pinSuspect: 'complex'` and
+  `pinComplexKey` (the exact point's ~1.1 m key), moving the members there when the verdict says so.
   A revert puts `from` back, re-marks the door and sets `pinPlacement.releasedAt`. Live rounds whose books
   hold a moved door get their outlines redrawn once (`recomputePassTerritories`, best effort).
 - **Lease.** `Campaign.pinPass { owner, heartbeatAt }`: one placing pass per campaign, beat every 30 s,
   taken over after 90 s stale. An import that can't take it still marks, places nothing and stores
-  `PIN_PASS_BUSY` ("Import the file again to place them"). A pass with lookups off takes no lease.
-- **Tally — this file's doors, from state.** `pinsPlacedExact` (moved), `pinsConfirmedInPlace` (the
-  answer was the same spot), `pinsStillUnplaced` (marked and not vouched); plus `pinLookupsNew` (addresses
+  `PIN_PASS_BUSY`. A pass with lookups off takes no lease. A `pin_lookup` job stores its own sentences
+  (`PIN_LOOKUP_BUSY` / `PIN_LOOKUP_FAILED`, which say to click Look up by address again).
+- **The `pin_lookup` job** (`ImportJob.kind`, no file): `POST
+  /admin/campaigns/:id/households/pin-lookup { group | householdIds }` (lead-allowed, campaign-scoped,
+  `409 LOOKUPS_OFF`, `400 NOTHING_TO_LOOK_UP`) writes `pinLookupTargets` (hidden from orgs) and
+  enqueues it; `processImportJob` dispatches `processPinLookupJob` **before** `loadRawImport` (there is no
+  upload) and runs this pass with the targets as `paidScope` and `tallyIds`. Undo refuses it
+  (`400 NOTHING_TO_UNDO`), and the undo claim never picks one. `GET /admin/imports` leaves it out unless
+  `includeLookups=1` (the web Import page asks; the Exports page's and the phone's import pickers don't).
+- **Tally — this file's doors, from state.** `pinsComplex` (unvouched complex members, counted first),
+  `pinsPlacedApprox` (lookup-placed and approximate), `pinsPlacedExact` (moved), `pinsConfirmedInPlace` (the
+  answer was the same spot), `pinsStillUnplaced` (marked and not vouched; `pinsUnlocated` is the parked
+  subset), `pinsFarMarked` (new far marks anywhere in the campaign); plus `pinLookupsNew` (addresses
   the provider answered — what it bills, matched or not — counted at the provider call, because
   `resolve()`'s own `geocodedNew` counts matched DOORS: it misses unmatched addresses and counts two doors
   sharing one address twice), `pinLookupsCached` (doors answered from the cache) and `pinLookupsOverCap`.
@@ -924,11 +1051,14 @@ in the worker after `recomputeHouseholdActive`, as its own stage (`ImportJob.pha
   detail, cancel): the cache is shared across customers, so bought-vs-cached counts would reveal which
   addresses another customer's import had looked up. Super-admin Imports shows the lookups (the cost
   includes them) and a badge with the cause.
-- **Ops gate:** the new index needs `npm run migrate:build-indexes -- --apply` after the deploy (prod
-  autoIndex is off).
+- **Ops gate:** release 1's index needed `npm run migrate:build-indexes -- --apply` after its deploy (prod
+  autoIndex is off). Pin Fixes at scale adds no index (its queries ride `{ campaignId, pinSuspect }`).
 - **Tests:** `importPlaceholderPins.int.test.js` (the pass end to end with a fake provider),
-  `placeholderPinWriters.int.test.js` (the pin writers), `orgImportFields.int.test.js`,
-  `pinTrust.test.js`, `streetNameDrift.test.js`, `csvImporter.test.js`.
+  `pinFixesAtScale.int.test.js` (refused coordinates, the holding spot, the ladder, far marks, complexes,
+  the lookup job, set aside, the cut toggle, knock stamps), `placeholderPinWriters.int.test.js` (the pin
+  writers), `orgImportFields.int.test.js`, `pinTrust.test.js`, `pinCohorts.test.js`,
+  `stateBounds.test.js`, `geocodeService.test.js`, `pinState.test.js`, `streetNameDrift.test.js`,
+  `csvImporter.test.js`.
 
 ### `repair:import-pins` — settling ties and cleaning up old imports
 

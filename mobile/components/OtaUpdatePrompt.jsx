@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 import * as Updates from 'expo-updates';
 import { hasInFlightActions } from '../lib/recordAction';
+import { CANVASS_FLOW } from '../lib/sessionEnd';
+import { useSessionState } from '../lib/authState';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
@@ -14,8 +16,9 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // This closes that gap the polite way: check + download on launch and on every foreground,
 // then OFFER a restart, never force one. `reloadAsync()` destroys all in-memory state, and a
 // canvasser can be mid-survey — answers are plain component state until Save. Hence:
-//   · the banner never renders on the canvass-flow screens (/household/*, /voter/*) — the
-//     download still happens there; the offer just waits for a list or map screen;
+//   · the banner never renders on the canvass-flow screens (/household/*, /voter/*,
+//     /survey-practice/*) — the download still happens there; the offer just waits for a list
+//     or map screen;
 //   · Restart waits (bounded) for any in-flight door POST to settle, and REFUSES to reload
 //     while one is still unsettled — an action mid-POST is neither confirmed nor queued
 //     (the offline queue only enqueues after a FAILED submit, up to the 20 s API timeout
@@ -31,7 +34,9 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // FAILS QUIET, ALWAYS: dev (no real channel), a failed check, a failed download — all render
 // nothing. A missed update offer is not the canvasser's problem; the app runs fine on the
 // bundle it already has.
-const CANVASS_FLOW = /^\/(household|voter)\//;
+// CANVASS_FLOW (lib/sessionEnd.js) is the one shared definition of the door flow: the same screens
+// a sign-out and the password screen wait for. It includes /survey-practice/*, whose answers are
+// component state too.
 
 // Bounded settle-wait before reloading: 20 × 250 ms = 5 s worst case.
 const SETTLE_TRIES = 20;
@@ -52,6 +57,8 @@ const OtaUpdatePrompt = () => {
   const [dismissedId, setDismissedId] = useState(null);
   const [restarting, setRestarting] = useState(false);
   const checking = useRef(false);
+  // Hidden while the password screen is pending: one thing at a time, and the password comes first.
+  const { reauth } = useSessionState();
 
   useEffect(() => {
     if (__DEV__ || !Updates.isEnabled) return undefined;
@@ -113,6 +120,7 @@ const OtaUpdatePrompt = () => {
   // updateId undefined (hence readyId's 'pending' fallback).
   if (!isUpdatePending || !downloadedUpdate || dismissedId === readyId) return null;
   if (CANVASS_FLOW.test(pathname || '')) return null;
+  if (reauth) return null;
 
   return (
     <View style={[styles.overlay, { paddingTop: insets.top + spacing.xs }]} pointerEvents="box-none">

@@ -53,3 +53,8 @@ test('markerLabel and the homes glyph: N homes on a spot of different homes, N u
   assert.equal(markerSig('#f00', null, false, false), markerSig('#f00', null, false, false, 'building'));
   assert.notEqual(markerSig('#f00', null, false, false), markerSig('#f00', null, false, false, 'unplaced'));
 });
+
+test('a condo complex reads N homes and shares the homes signature', () => {
+  assert.equal(markerLabel({ kind: 'complex', count: 46 }), '46 homes');
+  assert.ok(markerSig('#000', null, false, false, 'complex').endsWith('|homes'));
+});

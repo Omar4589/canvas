@@ -54,6 +54,9 @@ function shape(job) {
     createdAt: job.createdAt,
     status: job.status,
     filename: job.filename,
+    // 'pin_lookup' (Pin Fixes' Look up by address): no file — the page labels it by its home count.
+    kind: job.kind || 'apply',
+    totalRows: job.totalRows || 0,
     organizationId: job.organizationId?._id ? String(job.organizationId._id) : null,
     organizationName: job.organizationId?.name || '—',
     campaignName: job.campaignId?.name || null,

@@ -8,7 +8,7 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { deriveSetupSteps } from './setupSteps.js';
 import { AUDIT_WINDOW_MAX_DAYS } from '../audit/flagThresholds.js';
-import { NEEDS_PIN_FIX, UNPLACED_PIN } from '../households/confirmHouseholdLocation.js';
+import { NEEDS_PIN_FIX, UNPLACED_PIN, COMPLEX_TO_REVIEW } from '../households/confirmHouseholdLocation.js';
 
 // One round-trip of cheap grouped counts for a set of campaigns, turned into the
 // per-campaign setup-progress + management state used by the campaigns list, the
@@ -24,7 +24,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix, unplacedPins] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix, unplacedPins, complexPins] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -65,6 +65,13 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       // …plus doors on a map spot shared with other addresses that nobody vouched for (UNPLACED_PIN,
       // the list's second set — disjoint, so the badge is the sum). Its own partial index.
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, ...UNPLACED_PIN } }, group]),
+      // …plus condo complexes nobody vouched for (COMPLEX_TO_REVIEW, the list's third set), counted ONCE per
+      // complex — a complex is one thing to look at, not 46 (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.4).
+      Household.aggregate([
+        { $match: { organizationId, campaignId: { $in: ids }, ...COMPLEX_TO_REVIEW } },
+        { $group: { _id: { c: '$campaignId', k: '$pinComplexKey' } } },
+        { $group: { _id: '$_id.c', n: { $sum: 1 } } },
+      ]),
     ]);
 
   const canvassedByStats = new Map(); // idStr → boolean, trusted stats only
@@ -114,6 +121,8 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   const activeBy = map(activePasses);
   const pinsToFixBy = map(pinsToFix);
   for (const [k, n] of map(unplacedPins)) pinsToFixBy.set(k, (pinsToFixBy.get(k) || 0) + n);
+  const complexBy = map(complexPins);
+  for (const [k, n] of complexBy) pinsToFixBy.set(k, (pinsToFixBy.get(k) || 0) + n);
 
   for (const campaign of campaigns) {
     const k = String(campaign._id);
@@ -132,6 +141,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
         publishedTurfs: pubTurfBy.get(k) || 0,
         assignments: assignBy.get(k) || 0,
         activePasses: activeBy.get(k) || 0,
+        pinsToFix: pinsToFixBy.get(k) || 0,
       },
     });
     out.set(k, {
@@ -144,6 +154,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       canEditType: !hasCanvassed,
       openMockFlags: openMockBy.get(k) || 0,
       pinsToFix: pinsToFixBy.get(k) || 0,
+      complexCount: complexBy.get(k) || 0,
     });
   }
   return out;

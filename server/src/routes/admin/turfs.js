@@ -7,7 +7,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
-import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
+import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
 import { Household } from '../../models/Household.js';
 import { apartmentCandidates, apartmentThreshold } from '../../services/turf/apartmentStacks.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
@@ -17,7 +17,7 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionFilter } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionFilter, CUTTABLE_PIN } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -58,14 +58,7 @@ function activeOrgId(req) {
   return req.activeOrg?._id;
 }
 
-// Queue calls are time-bounded: ioredis buffers commands while disconnected, so without
-// this a wedged/absent Redis would HANG the request rather than failing it — the 503 path
-// below would be unreachable exactly when it matters (the campaigns-delete enqueue pattern).
-const queueOp = (promise, ms = Number(process.env.TURF_ENQUEUE_TIMEOUT_MS || 5000)) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('queue timeout')), ms).unref?.()),
-  ]);
+// queueOp (time-bounded queue calls) lives in queues/index.js.
 
 // Chunked "which of these doors are knockable" set — one $in per 100k ids so the
 // query document stays bounded on 250k-door campaigns. Shared by GET / and /progress.
@@ -330,7 +323,7 @@ router.post('/accept', async (req, res, next) => {
 // (added/bookCount, including added: 0) lands in the job's returnvalue.
 router.post('/add-supplemental', async (req, res, next) => {
   try {
-    const { passId, name, maxDoors, excludeRestricted, excludeNoSoliciting } = req.body || {};
+    const { passId, name, maxDoors, excludeRestricted, excludeNoSoliciting, excludeUnplaced } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
@@ -354,6 +347,7 @@ router.post('/add-supplemental', async (req, res, next) => {
           maxDoors: Number(maxDoors) > 0 ? Number(maxDoors) : 65,
           excludeRestricted: !!excludeRestricted,
           excludeNoSoliciting: !!excludeNoSoliciting,
+          excludeUnplaced: !!excludeUnplaced,
           requestedBy: String(req.user._id),
         })
       );
@@ -633,6 +627,15 @@ router.get('/', async (req, res, next) => {
     let supplementalDoorCount = 0;
     let supplementalRestrictedCount = 0;
     let supplementalNoSolicitingCount = 0;
+    // Homes without a reliable map spot (docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md S8.2): what an untargeted
+    // cut with "Leave out N homes without a reliable map spot" would leave out, and — for the "not in any
+    // book" line — the bookless ones, with their restricted / no-soliciting overlaps so the client's
+    // subtraction stays exact whichever toggles are ticked.
+    let unplacedDoorCount = 0;
+    let supplementalUnplacedCount = 0;
+    let supplementalUnplacedRestrictedCount = 0;
+    let supplementalUnplacedNoSolicitingCount = 0;
+    const NOT_CUTTABLE_PIN = { pinSuspect: { $type: 'string', $ne: 'complex' }, locationConfirmedAt: null };
     if (filter.passId) {
       const pass = await Pass.findOne(
         { _id: filter.passId, campaignId: req.campaign._id },
@@ -649,7 +652,7 @@ router.get('/', async (req, res, next) => {
         // (services/reports/aggregations.js): doNotKnock > fullyDnc > fullyVoted. A door that is
         // several of these is reported once, in the strongest, so the three lines can be shown
         // side by side without double-counting.
-        [doNotKnockDoorCount, votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount] =
+        [doNotKnockDoorCount, votedDoorCount, dncDoorCount, excludedApartmentCount, knockCount, unplacedDoorCount] =
           await Promise.all([
             Household.countDocuments({ ...base, doNotKnock: true }),
             Household.countDocuments({
@@ -659,8 +662,10 @@ router.get('/', async (req, res, next) => {
               doNotKnock: { $ne: true },
             }),
             Household.countDocuments({ ...base, fullyDnc: true, doNotKnock: { $ne: true } }),
-            Household.countDocuments({ ...base, excludedFromTurf: true }),
+            // Remove apartments' own count: a home set aside in Pin Fixes rides the same flag but is not an apartment.
+            Household.countDocuments({ ...base, excludedFromTurf: true, 'pinSetAside.at': null }),
             CanvassActivity.countDocuments({ passId: filter.passId }),
+            Household.countDocuments({ ...base, ...KNOCKABLE_DOOR_FILTER, ...NOT_CUTTABLE_PIN }),
           ]);
         // Doors a supplemental book would actually pick up: bookless + knockable,
         // and — when the round is targeted — matching the pass's own recorded
@@ -680,7 +685,14 @@ router.get('/', async (req, res, next) => {
           });
           supplementalBase._id = { $in: householdIds };
         }
-        [supplementalDoorCount, supplementalRestrictedCount, supplementalNoSolicitingCount] = await Promise.all([
+        [
+          supplementalDoorCount,
+          supplementalRestrictedCount,
+          supplementalNoSolicitingCount,
+          supplementalUnplacedCount,
+          supplementalUnplacedRestrictedCount,
+          supplementalUnplacedNoSolicitingCount,
+        ] = await Promise.all([
           Household.countDocuments(supplementalBase),
           // The restricted slice, so the client can mirror its "exclude restricted"
           // checkbox: shown count = supplementalDoorCount − (checkbox ? this : 0).
@@ -688,6 +700,9 @@ router.get('/', async (req, res, next) => {
           // Same, for the "exclude no-soliciting" checkbox. Disjoint from the line above
           // (a door has ONE status), so subtracting both when both are ticked is correct.
           Household.countDocuments({ ...supplementalBase, status: 'no_soliciting' }),
+          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN }),
+          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN, status: 'restricted' }),
+          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN, status: 'no_soliciting' }),
         ]);
       }
     }
@@ -701,6 +716,10 @@ router.get('/', async (req, res, next) => {
       supplementalDoorCount,
       supplementalRestrictedCount,
       supplementalNoSolicitingCount,
+      unplacedDoorCount,
+      supplementalUnplacedCount,
+      supplementalUnplacedRestrictedCount,
+      supplementalUnplacedNoSolicitingCount,
     });
   } catch (err) {
     next(err);
@@ -759,8 +778,10 @@ router.post('/include-apartments', async (req, res, next) => {
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    // A home set aside in Pin Fixes rides the same flag; Re-include must never put it back into cuts
+    // (it would be cuttable at a holding spot while hidden from the queue). Bring back is its only way back.
     const r = await Household.updateMany(
-      { campaignId: req.campaign._id, effortId: pass.effortId, excludedFromTurf: true },
+      { campaignId: req.campaign._id, effortId: pass.effortId, excludedFromTurf: true, 'pinSetAside.at': null },
       { $set: { excludedFromTurf: false } }
     );
     res.json({ included: r.modifiedCount || 0 });
@@ -773,7 +794,7 @@ router.post('/include-apartments', async (req, res, next) => {
 // drawn polygon (same cut base filter), index-aligned with the input polygons.
 router.post('/manual-preview', async (req, res, next) => {
   try {
-    const { passId, polygons } = req.body || {};
+    const { passId, polygons, excludeUnplaced } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     if (!Array.isArray(polygons)) return res.status(400).json({ error: 'polygons required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
@@ -783,6 +804,7 @@ router.post('/manual-preview', async (req, res, next) => {
       effortId: pass.effortId,
       ...KNOCKABLE_DOOR_FILTER,
       'location.coordinates': { $exists: true, $ne: null },
+      ...(excludeUnplaced ? CUTTABLE_PIN : {}),
     };
     const areas = [];
     // Overlaps dedup first-area-wins, same as generation, so these live counts
@@ -813,7 +835,7 @@ router.post('/manual-preview', async (req, res, next) => {
 // previewed count equals what Generate will actually cut).
 router.post('/target-preview', async (req, res, next) => {
   try {
-    const { passId, filter, excludeRestricted, excludeNoSoliciting } = req.body || {};
+    const { passId, filter, excludeRestricted, excludeNoSoliciting, excludeUnplaced } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
@@ -825,16 +847,25 @@ router.post('/target-preview', async (req, res, next) => {
     // The same cuttability the cut itself applies (generateTurf's baseFilter) — including the
     // per-round restricted exclusion, so the preview's number equals what the cut produces. It
     // arrives as `$and` and the outer query owns `_id`, so the two cannot collide.
-    const cutBase = {
-      ...KNOCKABLE_DOOR_FILTER,
-      ...(await cutExclusionFilter({
-        campaignId: req.campaign._id,
-        effortId: pass.effortId,
-        campaignType: req.campaign.type,
-        excludeRestricted,
-        excludeNoSoliciting,
-      })),
+    const exclusionArgs = {
+      campaignId: req.campaign._id,
+      effortId: pass.effortId,
+      campaignType: req.campaign.type,
+      excludeRestricted,
+      excludeNoSoliciting,
     };
+    const cutBase = { ...KNOCKABLE_DOOR_FILTER, ...(await cutExclusionFilter({ ...exclusionArgs, excludeUnplaced })) };
+    // The toggle's own label: the matching doors the "reliable map spot" clause removes from an otherwise
+    // identical cut — the actual delta, never the raw flagged population (excludedDoorCount's pattern).
+    const cutBaseWithoutUnplaced = { ...KNOCKABLE_DOOR_FILTER, ...(await cutExclusionFilter(exclusionArgs)) };
+    const unplacedCount = householdIds.length
+      ? await Household.countDocuments({
+          _id: { $in: householdIds },
+          ...cutBaseWithoutUnplaced,
+          pinSuspect: { $type: 'string', $ne: 'complex' },
+          locationConfirmedAt: null,
+        })
+      : 0;
     const cuttable = householdIds.length
       ? (
           await Household.find(
@@ -859,6 +890,7 @@ router.post('/target-preview', async (req, res, next) => {
       doorCount: cuttable.length,
       voterCount,
       excludedDoorCount,
+      unplacedCount,
       excludeDegenerate,
       warnings,
       householdIds: cuttable.map(String),
@@ -873,7 +905,7 @@ router.post('/target-preview', async (req, res, next) => {
 // cutting. Same base filter as the cut, grouped by the attribute's column.
 router.get('/attribute-preview', async (req, res, next) => {
   try {
-    const { passId, attribute } = req.query;
+    const { passId, attribute, excludeUnplaced } = req.query;
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const col = ATTR_COLUMN[attribute];
     if (!col) return res.status(400).json({ error: 'Invalid attribute' });
@@ -887,6 +919,7 @@ router.get('/attribute-preview', async (req, res, next) => {
           effortId: pass.effortId,
           ...KNOCKABLE_DOOR_FILTER,
           'location.coordinates': { $exists: true, $ne: null },
+          ...(excludeUnplaced === '1' ? CUTTABLE_PIN : {}),
         },
       },
       { $group: { _id: `$${col}`, n: { $sum: 1 } } },

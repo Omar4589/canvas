@@ -72,6 +72,19 @@ time in three; iPhones report the radius without a stated confidence. Under open
 canvasser's typical ± against the crew's on the same streets, not against zero. The physics and the
 phone settings behind the number are in [GPS_ACCURACY.md](GPS_ACCURACY.md).
 
+**Two pins the audit allows for on its own.** Both are judged by the pin **as it stood when the door was
+recorded** (the entry keeps a note of it), so confirming or moving the pin later never changes them:
+
+- **An estimated pin.** A door whose pin was an address-lookup estimate nobody had checked yet (*Approximate
+  location*) reads **low** on Far, with *"Recorded at an estimated pin — counted as low severity until a lead
+  checks the pin."* — the canvasser may well have walked to the real house a few doors down. Doors recorded
+  after a lead confirmed the pin are judged in full.
+- **A condo complex.** The pin is the complex, not the unit: a door in a complex within about **1,000 ft**
+  of the complex's spot isn't far at all; beyond that it reads **low**, with *"Recorded at a complex; the pin
+  is the complex, not the door."*
+
+Both count under each canvasser's existing **forgiven by pin** number.
+
 **The map panels judge the same way.** On the web map, the flag panel and the canvasser-location panel
 call a door **far** only when the audit does, and print what is left after allowing for GPS accuracy
 (*853 ft after allowing for GPS accuracy (±131 ft)*). When the phone's own radius explains the distance
@@ -461,6 +474,29 @@ geometry as well, in the one direction that can only help.
   `isPinDowngraded` / `isSelfMovedPin` until its next update); `FlaggedEntryPanel` and
   `CanvasserPingPanel` print both distances side by side, because the map's leader line is drawn to the
   **current** pin and used to silently contradict the frozen label.
+
+### B.8 Knock-pin downgrade (estimated pins and complexes — Pin Fixes at scale)
+
+[PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md](PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md) S8.6–S8.7, decisions D10 and D14.
+
+- **Frozen on the row.** Both mobile knock writers (`routes/mobile/canvass.js`) stamp
+  `CanvassActivity.knockPin` from `knockPinOf(household)`
+  ([pinState.js](../server/src/services/households/pinState.js)) at write time — `'estimated'` for an
+  interpolated, unconfirmed pin; `'complex'` for a complex member (vouched or not); nothing otherwise. An
+  offline replay stamps at flush time, like `distanceFromHouseMeters`. A later confirm or move never
+  rewrites it, so the verdict on an old knock can't drift with the pin.
+- **The rule** (`farAssessment`): `knockPin === 'complex'` and an effective distance within `COMPLEX_FAR_M`
+  (300 m, its own export in `flagThresholds.js`, outside `FLAG_THRESHOLDS` so the web/phone mirror test is
+  unaffected) → not far (`null`); beyond it → `'low'` with `detail.complexPin`. `knockPin === 'estimated'`
+  and a med/high verdict → `'low'` with `detail.estimatedPin`. Still downgrade-only; the existing chain and
+  pin downgrades run as before.
+- **Readers.** The far-row projections carry `knockPin` (`flagDetection.js`, `farKpi.js`,
+  `routes/admin/households.js`, `migrations/auditGpsStamps.js`). `farForgivenByPinCount` counts
+  `pinDowngraded || estimatedPin || complexPin`; `farVerdictForWire` forwards both keys to the map pings.
+  Web sentences: `knockPinText` / `farDowngradeLines` (`client/src/lib/flags.js`), shown by
+  `FlaggedEntryList` (with *· counted as low severity* after the complex one), `FlaggedEntryPanel` and
+  `CanvasserPingPanel`; the phone mirror follows with its next update. Tests: `flagDetection.test.js`,
+  `flagsMirror.test.js` (the sentences), `pinFixesAtScale.int.test.js` (both writers stamp).
 
 ### B.6 Location-required enforcement (no location = no knock)
 

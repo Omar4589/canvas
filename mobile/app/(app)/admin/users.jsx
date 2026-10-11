@@ -38,7 +38,7 @@ const SORT_OPTIONS = [
   { key: 'name-asc', label: 'Name A–Z' },
   { key: 'name-desc', label: 'Name Z–A' },
   { key: 'recent-joined', label: 'Recently joined' },
-  { key: 'recent-signin', label: 'Recently signed in' },
+  { key: 'recent-signin', label: 'Recent password login' },
 ];
 
 function compareName(a, b, dir) {
@@ -264,6 +264,7 @@ export default function AdminUsers() {
     else if (sortMode === 'recent-joined')
       list.sort((a, b) => compareDate(a, b, 'addedAt'));
     // Sorts lastLoginAt, and says so — it used to be labeled "Recently active", which it never was.
+    // "Password login" because a used sign-in is extended without one (docs/PROPOSAL_SESSION_EXPIRY.md).
     // Can't be repointed either: lastSeenAt is super-admin-only and absent from /admin/memberships.
     else if (sortMode === 'recent-signin')
       list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));

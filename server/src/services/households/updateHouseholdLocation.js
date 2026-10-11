@@ -5,7 +5,7 @@ import { inStateBounds, isValidLatLng } from '../../utils/stateBounds.js';
 import { buildingKeyForCoords } from '../../utils/buildingKey.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { stackBaseOf } from '../../utils/streetName.js';
-import { isPinUnplaced } from './pinState.js';
+import { isPinFlaggedUnvouched } from './pinState.js';
 import { rehullBooksForMovedHouseholds } from '../turf/rehullAfterPinMove.js';
 
 // A save landing this close to the pin it started from moved nothing (a tap without a real drag).
@@ -93,7 +93,8 @@ export async function updateHouseholdLocation(
   const point = [lng, lat];
   const placement = household.pinPlacement;
   const keyOf = (c) => buildingKeyForCoords(c);
-  const savedOnItsOwnPin = (h) => isPinUnplaced(h) && metersBetween(h.location?.coordinates, point) <= NO_MOVE_METERS;
+  // Any flagged, unvouched door (a complex member included) saved onto its own pin moved nothing.
+  const savedOnItsOwnPin = (h) => isPinFlaggedUnvouched(h) && metersBetween(h.location?.coordinates, point) <= NO_MOVE_METERS;
   const backOntoTheSpotItLeft =
     !!placement?.at &&
     keyOf(placement.from) !== keyOf(placement.to) &&
@@ -135,9 +136,13 @@ export async function updateHouseholdLocation(
             // OLD spot, so leaving it would vouch for a pin nobody verified.
             locationConfirmedBy: null,
             locationConfirmedAt: null,
+            // A person placing a set-aside home brings it back into the queue's world and the cut
+            // (setAsidePin.js); a Remove-apartments exclusion (no stamp) is left as it was.
+            excludedFromTurf: { $cond: [{ $ifNull: ['$pinSetAside.at', false] }, false, '$excludedFromTurf'] },
           },
         },
-        { $unset: 'pinSuspect' },
+        // A moved door leaves its complex (pinComplexKey) and any set-aside stamp with its flag.
+        { $unset: ['pinSuspect', 'pinComplexKey', 'pinSetAside'] },
       ],
       { new: true }
     );

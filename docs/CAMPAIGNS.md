@@ -238,6 +238,11 @@ also disappears on its own once real **knocks start coming in** — the dashboar
 from then on. (The one exception: if you later add a walk list that isn't live yet, a small nudge
 reappears — see "Add more doors" below.)
 
+**Check map pins** sits just before *Cut books*: *"N to look at"* while Pin Fixes has homes whose pin isn't
+the home (counting a condo complex once), with a warning that homes without a reliable spot land in the wrong
+book, and *"All pins checked"* when the queue is empty. It never blocks: once books are cut it reads
+*"N still to look at — books were cut"* and is skipped, and its link opens Pin Fixes.
+
 The app also signposts each hand-off: after you create a campaign it points you to Import; after an
 import it points you to Walk Lists to claim; after a claim it points you to cut books; after
 accepting books it points you to assign + activate. And it guards the two silent dead-ends: it won't
@@ -1102,8 +1107,15 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
 
 The cold-start readiness chain is a pure derivation in
 [setupSteps.js](../server/src/services/reports/setupSteps.js) — `deriveSetupSteps({ campaign, counts })`
-→ 8 steps (`survey` skipped for lit_drop), each `done | current | todo | skipped`, plus
-`{ stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute }`.
+→ 9 steps (`survey` skipped for lit_drop), each `done | current | todo | skipped`, plus
+`{ stepsDone, stepsTotal, complete, nextStepKey, nextStepRoute }`. `pinsChecked` (Pin Fixes at scale)
+sits between `roundCreated` and `booksCut`: satisfied when `counts.pinsToFix` is 0, **skipped** when pins
+remain but books are published (the step never blocks completion), with a `warn` and `warnRoute:
+'/pin-fixes'` before a cut. Every `skipped` call now receives `counts` as its second argument (the
+`survey` def ignores it). Both callers put `pinsToFix` in `counts` — the campaigns rollup already had it,
+and `setupStatus.js` runs the three Pin Fixes aggregates (`NEEDS_PIN_FIX`, `UNPLACED_PIN`, complexes by
+`pinComplexKey`). `SetupProgress.jsx` adds `'/pin-fixes'` to `CAMPAIGN_SCOPED`. Covered by
+`setupSteps.test.js`.
 
 - **GET `/admin/campaigns/:id/setup-status`** ([setupStatus.js](../server/src/routes/admin/setupStatus.js))
   returns that object plus `hasCanvassed` and `effortsNeedingSetup` (non-archived efforts without an
