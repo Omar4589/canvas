@@ -87,7 +87,9 @@ Spread it alongside the query's own `refetchInterval`:
 `useQuery({ queryKey, queryFn, refetchInterval: 30_000, ...useFocusedPoll() })`. `q.refetch()`
 (pull-to-refresh via `lib/useRefresh.js`) is not blocked by `subscribed`.
 
-Gated queries: admin map `mapQ` (20s), admin Overview rollup (30s), admin timeline (20s when the
+Gated queries: admin map `mapQ` (20s), admin Overview rollup (30s), the campaign screen's five report
+sections (refreshed as one group by `lib/useRefreshGroup.js` on return, and on one 30s timer only when
+embedded as a team lead's Overview — never a `refetchInterval` per query, which drift apart), admin timeline (20s when the
 range includes today, pausable via its `LiveStatus` pill), super-admin overview + both activity
 feeds (30s), canvasser map `todayQ` (120s) + `changesQ` (30s — `sinceRef` persists across the pause,
 so the first refetch catches up on missed deltas).
@@ -209,7 +211,11 @@ commit: `app.use(compression())` ([app.js:49](../server/src/app.js#L49)); payloa
 compress ~85–90% (~12MB → ~1.5MB on the FL all-time map pull). Note gzip helps the WIRE only —
 JSON.parse cost and retained JS heap on mobile are unchanged, which is why the mobile assign map
 requests `/turfs/doors?slim=1` (address fields dropped server-side;
-[turfs.js](../server/src/routes/admin/turfs.js) `GET /doors`).
+[turfs.js](../server/src/routes/admin/turfs.js) `GET /doors`) and hands the downloaded file to the
+native map as a `file://` url instead of parsing it in JS. One cost remains on iOS: rnmapbox 10.3.0
+also decodes that file with Swift's `JSONDecoder` on every url set, so at 100k+ doors the phone still
+pays a decode off the main thread and a handoff on it — a known follow-up
+([PROPOSAL_BOOKS_MAP_GRAY_SCREEN.md](PROPOSAL_BOOKS_MAP_GRAY_SCREEN.md) §B7).
 
 **Delivered (scale-hardening Phase 2):** (1) `SurveyResponse.answers` is out of the map payload —
 lazy-loaded per door on panel open (the web `HouseholdDetailPanel` was its only reader; the mobile

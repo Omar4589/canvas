@@ -102,6 +102,9 @@ Where each step is enforced (all admin routes require an org **admin** role):
   `deriveSetupSteps` ([setupSteps.js](../server/src/services/reports/setupSteps.js)): campaign →
   voters → survey → doors-in-a-walk-list → **pass created** → books cut & accepted → canvassers
   assigned → **pass activated**. Rendered by [SetupProgress.jsx](../client/src/components/SetupProgress.jsx).
+  A step's warning link names where it goes: "No canvassers in this org yet" reads **add on Users →** for
+  an org admin and **add on Team →** (the campaign's Team page) for a team lead, who can't open the org
+  Users page; the Pin Fixes warning reads **open Pin Fixes →**.
 - **The go-live banner is dismissible.** `POST /admin/campaigns/:id/setup-status/dismiss-live` stamps
   `Campaign.setupLiveDismissedAt`; the GET returns `liveDismissed`, and the card hides for every admin
   once set. It only silences the go-live confirmation — an incomplete campaign still shows the full

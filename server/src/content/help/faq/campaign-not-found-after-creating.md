@@ -24,4 +24,4 @@ Then the campaign genuinely isn't available to you, and it's one of these:
 - **You're a team lead and this campaign isn't one of yours.** Leads only see the campaigns they've been given. Ask an admin to add you — see [Team lead vs. admin](team-lead-vs-admin).
 - **The link is mistyped**, or it's an old bookmark from before a campaign was removed.
 
-Use **Go to Campaigns** (or **Go to Overview**) on that screen to get back to the list of campaigns you can open.
+Use the button on that screen (**Go to Campaigns**, **Go to Overview** or **Go to your campaign**) to get back to the campaigns you can open.

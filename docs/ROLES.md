@@ -143,12 +143,19 @@ until an admin grants one.
 
 ## Where a team lead works
 
-- **Web console** — they sign in to the same console and land on **Campaigns**, which shows only the
-  campaigns they manage. Inside a campaign, every tab an admin sees is there — the campaign **Voters**
-  tab included. The org-only areas (Overview, Surveys, Tags, the org-wide Voters directory, Users)
-  simply aren't in their nav.
-- **Mobile admin app** — they get the same admin tab (Overview / Insights / Map / Books), scoped to
-  their campaigns; **More → Voter search** finds anyone in the campaign and opens their profile,
+- **Web console** — they sign in to the same console. With **one active campaign**, they land straight
+  on that campaign's **Home**; with more than one, or none yet, they land on **Campaigns**, which shows
+  only the campaigns they manage. **‹ Campaigns** at the top of the sidebar (the first icon when the
+  sidebar is collapsed; **More → ‹ All campaigns** in a narrow window) always opens that list — it's
+  where a campaign's **Edit** and **Assignments** live, and where archived campaigns are. Inside a
+  campaign, every tab an admin sees is there — the campaign **Voters** tab included. The org-only areas
+  (Overview, Surveys, Tags, the org-wide Voters directory, Users) simply aren't in their nav. The
+  campaign **Home** doesn't show a lead the organization's Doorline billing notes ("Not billing yet",
+  the after-Election-Day archive reminder) — only an org admin can act on those.
+- **Mobile admin app** — they get the same admin tabs (Overview / Timeline / Map / Books / More),
+  scoped to their campaigns. With **one active campaign**, the **Overview** tab *is* that campaign's
+  screen (captioned **Team Lead**), refreshing itself every 30 s while on screen, with any archived
+  campaigns near the bottom; with more than one, or none, it's the usual list. **More → Voter search** finds anyone in the campaign and opens their profile,
   scoped to that campaign just like the web tab. **People management is one surface: More → Users**
   (the old standalone campaign
   Team screen merged into it). A campaign's **Team** tile opens Users pre-filtered to that campaign.
@@ -175,8 +182,8 @@ The **mobile app** has no such restriction: every role has a home there, so *all
 selectable, and switching between them is how an admin-in-one/canvasser-in-another account moves between
 running a campaign and walking doors.
 
-Switching orgs in the console always lands you on that org's home page (Overview for an admin, Campaigns
-for a lead) — it never leaves you on a page belonging to the org you just left. Each browser tab keeps its
+Switching orgs in the console always lands you on that org's home page (Overview for an admin; for a lead,
+their campaign when they run exactly one active campaign there, otherwise Campaigns) — it never leaves you on a page belonging to the org you just left. Each browser tab keeps its
 own organization: switching in one tab doesn't move your other open tabs ([USERS.md](USERS.md) →
 *Sessions*).
 
@@ -559,6 +566,24 @@ persists in `localStorage`.
 any other role, so no role can silently land on `/admin` again. `resolveHomePath` counts *console*
 memberships: exactly one → enter it and skip the picker; two or more → the picker; zero → `null`.
 
+**A team lead with one active campaign lands inside it** (2026-10-13,
+[PROPOSAL_LEAD_CAMPAIGN_LANDING.md](PROPOSAL_LEAD_CAMPAIGN_LANDING.md)). The server puts
+`homeCampaignId` on every lead membership row from `/auth/login`, `/auth/me`, `/auth/change-password`
+and `PATCH /auth/me` ([routes/auth.js](../server/src/routes/auth.js) `loadMembershipsForUser`): the one
+campaign they hold a grant for in that org that is active and not mid-delete, else `null`. Admin rows
+never carry it. `consoleHomePath({ role: 'lead', homeCampaignId })` returns `/campaigns/<id>`, and
+`resolveHomePath` passes it for the active org and for the only console org, so every landing — sign-in,
+the org picker (including its auto-enter), the org switcher, a password change, the marketing CTA, the
+Forbidden button — follows. It is a **landing rule only**: `/campaigns` stays a real page (the only home
+of a campaign's Edit and Assignments), so nothing may ever redirect `/campaigns` or `/campaigns/:id`.
+Because a home can now be a campaign's root, never compare `homePath` to a string — use
+`isConsoleHomePath(path)` (LoginPage's deep-link restore) and `homeLinkLabel(path)` (the Forbidden and
+"Campaign not found" buttons: Go to Campaigns / Go to your campaign / Go to Control Room / Choose an
+organization / Go to Overview). `CampaignMissing` sends a lead whose own home is the missing campaign to
+`/campaigns` instead, so it can't loop. The phone decides the same thing from the lead's
+`/admin/campaigns` list (`mobile/lib/campaignSelection.js` `soleActiveCampaign`/`overviewChoice`);
+[leadHomeCampaign.int.test.js](../server/test/leadHomeCampaign.int.test.js) pins the two to one answer.
+
 **`null` is a destination, not an error.** `postAuthPath()` (same file) is `resolveHomePath(args) || '/select-org'`,
 and every post-auth caller uses it — `LoginPage` (both the submit path and the already-signed-in guard) and
 `ChangePasswordPage`. `/select-org` explains that the console is admins-and-leads only and carries the
@@ -594,6 +619,14 @@ never be pinned to an unusable org across reloads. Super admins are exempt — t
 `activeOrgId` for orgs they aren't members of. `AuthContext.homePath` is guaranteed non-null (falls back
 to `/select-org`) because six render-time consumers pass it straight to `<Link to>` / `navigate()`.
 
+Two more `AuthContext` rules every caller relies on. **`switchOrg` drops the previous org's cached pages**
+when the org actually changes (keeping only the platform org list), so the org pickers, the support prompt
+and the platform switcher can't forget it — a lead's home campaign would otherwise resolve against the old
+org's list. **`useSignOut()`** is the one way an in-console button signs someone out (the password prompt's **Not you?
+Sign out** does `logout()` plus a full load of `/login`, to the same effect): it ends the session and goes to a
+plain `/login`, so the sign-in page never sends the next person back to the page the last one was on (a bare
+`logout()` let `ProtectedRoute` stash `from`).
+
 ## Client & mobile scoping
 
 - **Web** — `AuthContext` derives `isOrgAdmin`, `isLead`, `isConsoleUser` (the *active* org) and
@@ -622,7 +655,8 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   with the server's `canManageSurvey` as the per-survey authority;
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) adds people **by email address** for
   both roles, and is the **one** place a crew is set (the org Users page shows crews read-only).
-  Login/select-org land a lead on `/campaigns` (they have no `/admin` Overview).
+  Login/select-org land a lead on `/campaigns` (they have no `/admin` Overview), or inside their one
+  active campaign when they have exactly one (`homeCampaignId`, above).
 - **The `/admin/memberships` fork** — that route is admin-only, so any *campaign* page that reads it for
   a name list breaks for a lead. Three pages branched on `isOrgAdmin` and called
   `/admin/campaigns/:id/crew` instead, keying the query `['admin','campaign-crew',campaignId]` so the two
@@ -648,7 +682,8 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   `consoleMemberships` selectable, renders `nonConsoleMemberships` as a muted, non-interactive **"No
   console access"** section pointing at the mobile app, and auto-enters when there is exactly one console
   org. [OrgSwitcher.jsx](../client/src/components/OrgSwitcher.jsx) lists only `consoleMemberships` and,
-  critically, **navigates to the new org's role home on every switch**. Not navigating was a second bug:
+  critically, **navigates to the new org's home on every switch** (for a lead with one active campaign
+  there, that campaign). Not navigating was a second bug:
   a URL is org-scoped, so switching while sitting on `/users` (admin → lead org) 403'd, and switching
   while drilled into `/campaigns/<old org's id>` produced "Campaign not found".
 - **Mobile** — canvasser-first, so **every** membership is selectable and there is no Forbidden screen
@@ -667,7 +702,8 @@ to `/select-org`) because six render-time consumers pass it straight to `<Link t
   it was deleted as dead code); the **Duplicate surveys** row is likewise `isConsoleUser`, but the
   Delete inside that screen is `isOrgAdmin`, since `admin/voters.js` is `requireOrgRole('admin')`
   router-wide — a lead reads every duplicate and can remove none. The campaign screen's **Team** tile
-  ([campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) opens the
+  ([components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx), hosted by
+  [campaign/\[campaignId\].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) opens the
   **Users hub pre-filtered to that campaign** ([users.jsx](../mobile/app/(app)/admin/users.jsx)) —
   since the 2026-07-23 change made `/admin/memberships` lead-scoped server-side, the hub is one
   surface for everyone. (The historical bug this area carried: before the scoping, a lead's
@@ -709,11 +745,18 @@ the roles × org-count matrix and locks the regressions — `homePathForRole('ca
 admin-in-A + canvasser-in-B resolves to `/admin` **even with a stale `activeOrgId` pointing at B**;
 `autoSelectOrgId` never picks a canvasser org; and `consoleHomePath` still handles the synthetic
 `'super_admin'` role the two org lists build (the trap in the refactor — a lookup map returns `null` for
-it, which would have silently broken super-admin org entry).
+it, which would have silently broken super-admin org entry). It also pins the home campaign: a lead with
+one lands in it, an admin with a stray id never does, and `isConsoleHomePath` / `homeLinkLabel` are total.
+[landingRender.smoke.test.js](../client/src/lib/landingRender.smoke.test.js) renders the screens that use
+them (CampaignMissing, Forbidden, the sidebar's campaign box).
 
 **The authorization matrix** is covered by throwaway-mongod integration tests (`npm --prefix server run
 test:int`):
 
+- [leadHomeCampaign.int.test.js](../server/test/leadHomeCampaign.int.test.js) — `homeCampaignId` on
+  `/auth/login` and `/auth/me` for every shape (one, one + archived, two, none, only archived, one +
+  mid-delete, two orgs, a grant pointing at another org's campaign, an admin row), plus the agreement
+  check against each lead's own `/admin/campaigns` list.
 - [teamLead.int.test.js](../server/test/teamLead.int.test.js) — seed an org, an admin, and a lead granted
   campaign A only (with a campaign B they don't manage), then assert the lead gets 200 on A's field
   routes / import / scoped reports (overview, the notes feed, campaign-rollup self-scoping) /

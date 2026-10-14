@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Navigate, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { getActiveOrgId } from '../api/client.js';
-import { postAuthPath } from '../lib/homePath.js';
+import { postAuthPath, isConsoleHomePath } from '../lib/homePath.js';
 import PasswordInput from '../components/PasswordInput.jsx';
 import Logo from '../components/Logo.jsx';
 import { parseSignedOut, signedOutNote } from '../lib/sessionEnd.js';
@@ -42,9 +42,11 @@ export default function LoginPage() {
         activeOrgId: getActiveOrgId(),
       });
       // Restore a deep link (stashed by ProtectedRoute) only when landing on the user's
-      // actual home — never skip the change-password / org-picker / super-admin routes.
+      // actual home — never skip the change-password / org-picker / super-admin routes. A home can
+      // be a campaign's root (a team lead with one active campaign), so it's tested by the shared
+      // helper, not by comparing strings.
       const from = location.state?.from?.pathname;
-      const restore = from && (dest === '/admin' || dest === '/campaigns');
+      const restore = from && isConsoleHomePath(dest);
       navigate(restore ? from : dest, { replace: true });
     } catch (err) {
       setError(err.message);

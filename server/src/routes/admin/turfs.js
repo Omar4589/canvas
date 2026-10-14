@@ -17,7 +17,7 @@ import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
-import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionFilter, CUTTABLE_PIN } from '../../services/turf/generateTurf.js';
+import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionParts, offLimitsDoorIds, CUTTABLE_PIN } from '../../services/turf/generateTurf.js';
 import { ATTR_COLUMN } from '../../services/turf/attributeCut.js';
 import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
@@ -27,8 +27,9 @@ import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/pas
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
+import { getTargetingStatusMap } from '../../services/walklist/targetingStatus.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
-import { effectivePinSuspect, pinWireFields } from '../../services/households/pinState.js';
+import { effectivePinSuspect, pinWireFields, isPinUnplaced } from '../../services/households/pinState.js';
 import {
   DESK_RESTRICT_MATCH,
   emptyDeskSkips,
@@ -632,6 +633,11 @@ router.get('/', async (req, res, next) => {
     // book" line — the bookless ones, with their restricted / no-soliciting overlaps so the client's
     // subtraction stays exact whichever toggles are ticked.
     let unplacedDoorCount = 0;
+    // The two box counts the cut page shows ("Exclude N restricted-access homes"): doors of the
+    // drawable base whose targeting status reads restricted / no_soliciting — the same ladder
+    // the boxes apply, counted server-side so the page's /doors load never has to.
+    let restrictedDoorCount = 0;
+    let noSolicitingDoorCount = 0;
     let supplementalUnplacedCount = 0;
     let supplementalUnplacedRestrictedCount = 0;
     let supplementalUnplacedNoSolicitingCount = 0;
@@ -685,6 +691,21 @@ router.get('/', async (req, res, next) => {
           });
           supplementalBase._id = { $in: householdIds };
         }
+        // Counts only — never a load of the bookless doors (every door of a fresh effort). The
+        // ladder's restricted / no-soliciting doors come once, bounded by the marks, over the
+        // DRAWABLE base (every door the cut page can draw): their sizes are the page's two
+        // "Exclude N …" box counts, and the supplemental slices are those ids intersected with the
+        // bookless base IN the database, inside $and so a targeted base's own `_id` survives.
+        const off = await offLimitsDoorIds({
+          campaignId: req.campaign._id,
+          effortId: pass.effortId,
+          campaignType: req.campaign.type,
+          filter: { ...base, ...KNOCKABLE_DOOR_FILTER },
+        });
+        restrictedDoorCount = off.restricted.length;
+        noSolicitingDoorCount = off.noSoliciting.length;
+        const within = (...clauses) => ({ $and: [supplementalBase, ...clauses] });
+        const inSet = (ids) => ({ _id: { $in: ids } });
         [
           supplementalDoorCount,
           supplementalRestrictedCount,
@@ -694,15 +715,11 @@ router.get('/', async (req, res, next) => {
           supplementalUnplacedNoSolicitingCount,
         ] = await Promise.all([
           Household.countDocuments(supplementalBase),
-          // The restricted slice, so the client can mirror its "exclude restricted"
-          // checkbox: shown count = supplementalDoorCount − (checkbox ? this : 0).
-          Household.countDocuments({ ...supplementalBase, status: 'restricted' }),
-          // Same, for the "exclude no-soliciting" checkbox. Disjoint from the line above
-          // (a door has ONE status), so subtracting both when both are ticked is correct.
-          Household.countDocuments({ ...supplementalBase, status: 'no_soliciting' }),
-          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN }),
-          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN, status: 'restricted' }),
-          Household.countDocuments({ ...supplementalBase, ...NOT_CUTTABLE_PIN, status: 'no_soliciting' }),
+          off.restricted.length ? Household.countDocuments(within(inSet(off.restricted))) : 0,
+          off.noSoliciting.length ? Household.countDocuments(within(inSet(off.noSoliciting))) : 0,
+          Household.countDocuments(within(NOT_CUTTABLE_PIN)),
+          off.restricted.length ? Household.countDocuments(within(NOT_CUTTABLE_PIN, inSet(off.restricted))) : 0,
+          off.noSoliciting.length ? Household.countDocuments(within(NOT_CUTTABLE_PIN, inSet(off.noSoliciting))) : 0,
         ]);
       }
     }
@@ -716,6 +733,8 @@ router.get('/', async (req, res, next) => {
       supplementalDoorCount,
       supplementalRestrictedCount,
       supplementalNoSolicitingCount,
+      restrictedDoorCount,
+      noSolicitingDoorCount,
       unplacedDoorCount,
       supplementalUnplacedCount,
       supplementalUnplacedRestrictedCount,
@@ -839,25 +858,26 @@ router.post('/target-preview', async (req, res, next) => {
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    const { householdIds, excludedHouseholdIds, excludeDegenerate, warnings } = await resolveWalkList(
-      req.campaign,
-      filter || {},
-      { effortId: pass.effortId }
-    );
-    // The same cuttability the cut itself applies (generateTurf's baseFilter) — including the
-    // per-round restricted exclusion, so the preview's number equals what the cut produces. It
-    // arrives as `$and` and the outer query owns `_id`, so the two cannot collide.
-    const exclusionArgs = {
+    const resolved = await resolveWalkList(req.campaign, filter || {}, { effortId: pass.effortId });
+    const { householdIds, excludedHouseholdIds, excludeDegenerate, warnings } = resolved;
+    // The same cuttability the cut itself applies (generateTurf's baseFilter) — including the two
+    // boxes, judged by the targeting ladder — so the preview's number equals what the cut produces.
+    // It arrives as `$and` and the outer query owns `_id`, so the two cannot collide. ONE builder
+    // call: `filter` is the cut's base, `filterWithoutUnplaced` the same minus the pin clause (the
+    // "reliable map spot" toggle's own delta), and `restrictedIds` / `noSolicitingIds` let the
+    // left-out doors be named below.
+    const parts = await cutExclusionParts({
       campaignId: req.campaign._id,
       effortId: pass.effortId,
       campaignType: req.campaign.type,
       excludeRestricted,
       excludeNoSoliciting,
-    };
-    const cutBase = { ...KNOCKABLE_DOOR_FILTER, ...(await cutExclusionFilter({ ...exclusionArgs, excludeUnplaced })) };
+      excludeUnplaced,
+    });
+    const cutBase = { ...KNOCKABLE_DOOR_FILTER, ...parts.filter };
     // The toggle's own label: the matching doors the "reliable map spot" clause removes from an otherwise
     // identical cut — the actual delta, never the raw flagged population (excludedDoorCount's pattern).
-    const cutBaseWithoutUnplaced = { ...KNOCKABLE_DOOR_FILTER, ...(await cutExclusionFilter(exclusionArgs)) };
+    const cutBaseWithoutUnplaced = { ...KNOCKABLE_DOOR_FILTER, ...parts.filterWithoutUnplaced };
     const unplacedCount = householdIds.length
       ? await Household.countDocuments({
           _id: { $in: householdIds },
@@ -878,9 +898,63 @@ router.post('/target-preview', async (req, res, next) => {
     // removed set (already ∩ the include result) narrowed to otherwise-cuttable doors.
     // NOT the raw exclusion population — a fully-voted/excludedFromTurf door with a
     // matching answer was never going to be cut, so it must not inflate M.
-    const excludedDoorCount = excludedHouseholdIds.length
-      ? await Household.countDocuments({ _id: { $in: excludedHouseholdIds }, ...cutBase })
-      : 0;
+    const excludedCuttable = excludedHouseholdIds.length
+      ? (await Household.find({ _id: { $in: excludedHouseholdIds }, ...cutBase }, { _id: 1 }).lean()).map((h) => String(h._id))
+      : [];
+    // The ids the page labels "removed by Exclude doors" are the excluded doors it DRAWS (knockable),
+    // a superset of excludedCuttable: an excluded door that a box would also have dropped is still
+    // the Exclude panel's doing first (the resolver runs before the boxes), and narrowing this list
+    // to cuttable left such a door in no set — the pop-up then blamed its status, which was ticked.
+    const excludedDrawn = excludedHouseholdIds.length
+      ? (await Household.find({ _id: { $in: excludedHouseholdIds }, ...KNOCKABLE_DOOR_FILTER }, { _id: 1 }).lean()).map((h) => String(h._id))
+      : [];
+    // WHY the rest of the include result is not in the cut — by the checkbox that removed it, in
+    // the order the page lists them. The page fades a door for any of five reasons and used to say
+    // none of them; a never-visited home with a flagged pin faded under every status tick, and the
+    // admin had no way to tell that from a status mismatch (2026-10-13). Judged by the boxes' own
+    // id lists (the ladder) and isPinUnplaced; `other` catches anything the clauses dropped that
+    // these rules did not name, so a future clause can never fade a door silently.
+    // KNOCKABLE-filtered, so doors the page never draws never appear.
+    const keptSet = new Set(cuttable.map(String));
+    const dropped = householdIds.filter((id) => !keptSet.has(String(id)));
+    const leftOut = { restricted: [], noSoliciting: [], unplaced: [], other: [] };
+    if (dropped.length) {
+      const restrictedIds = new Set(parts.restrictedIds.map(String));
+      const noSolicitingIds = new Set(parts.noSolicitingIds.map(String));
+      const docs = await Household.find(
+        { _id: { $in: dropped }, ...KNOCKABLE_DOOR_FILTER },
+        { pinSuspect: 1, locationConfirmedAt: 1 }
+      ).lean();
+      for (const h of docs) {
+        const id = String(h._id);
+        if (restrictedIds.has(id)) leftOut.restricted.push(id);
+        else if (noSolicitingIds.has(id)) leftOut.noSoliciting.push(id);
+        else if (excludeUnplaced && isPinUnplaced(h)) leftOut.unplaced.push(id);
+        else leftOut.other.push(id);
+      }
+    }
+    // The count line's parts, over everything the map CAN draw (the effort's knockable,
+    // coordinate-bearing doors): kept + removed by Exclude doors + each box's share + the rest,
+    // which failed the ticks. Server-side, because the page's drawn set shrinks the moment loose
+    // doors are hidden (after a cut, by default) and the boxes' doors are exactly the loose ones.
+    // The five parts are disjoint by construction (leftOut ⊆ the include result, which the exclude
+    // subtraction already left; excludedDrawn ⊆ the subtracted set), so `status` is the remainder.
+    const drawable = await Household.countDocuments({
+      campaignId: req.campaign._id,
+      effortId: pass.effortId,
+      ...KNOCKABLE_DOOR_FILTER,
+      'location.coordinates': { $exists: true, $ne: null },
+    });
+    const counts = {
+      drawable,
+      kept: cuttable.length,
+      excluded: excludedDrawn.length,
+      restricted: leftOut.restricted.length,
+      noSoliciting: leftOut.noSoliciting.length,
+      unplaced: leftOut.unplaced.length,
+      other: leftOut.other.length,
+    };
+    counts.status = Math.max(0, drawable - counts.kept - counts.excluded - counts.restricted - counts.noSoliciting - counts.unplaced - counts.other);
     // Door-population count minus do-not-contact individuals (matching the walk list's
     // own voter set) — every other resident of a cut door gets walked.
     const voterCount = cuttable.length
@@ -889,11 +963,14 @@ router.post('/target-preview', async (req, res, next) => {
     res.json({
       doorCount: cuttable.length,
       voterCount,
-      excludedDoorCount,
+      excludedDoorCount: excludedCuttable.length,
       unplacedCount,
       excludeDegenerate,
       warnings,
       householdIds: cuttable.map(String),
+      excludedHouseholdIds: excludedDrawn,
+      leftOut,
+      counts,
     });
   } catch (err) {
     next(err);
@@ -1235,15 +1312,25 @@ router.get('/doors', async (req, res, next) => {
     // Distinct from `status` below, which is Household.status (latest across ALL passes).
     let passStatusMap = null;
     let deskRowsByDoor = null;
+    let targetStatusMap = null;
     if (req.query.withStatus === '1' && placed.length) {
       // One more aggregate on the SAME opt-in, bounded by the desk rows themselves (a small
       // minority of any ledger — deskRestrict.js), not by the door count. It carries the desk
       // ROWS per door so the cut map's building pop-up and its "Select doors" bar can offer
       // Unmark on a SUPERSEDED mark: both used to gate on passStatus === 'restricted', which
       // goes false the moment a canvasser works the door and stranded the row with no undo.
-      [passStatusMap, deskRowsByDoor] = await Promise.all([
+      [passStatusMap, deskRowsByDoor, targetStatusMap] = await Promise.all([
         getPassStatusMap(pass._id, placed.map((h) => String(h._id)), req.campaign.type),
         deskMarkCountsForPasses(req.campaign._id, [String(pass._id)]),
+        // withTarget=1: the all-rounds TARGETING status — what Target doors reads
+        // (services/walklist/targetingStatus.js) — so the page can draw and explain it while
+        // that panel is open. Its own opt-in on top of withStatus: the aggregate walks every
+        // drawn door's history (measured ~0.4 s / 34 MB at 25k doors, ~4.5 s / 335 MB at 250k —
+        // round-2 review), so the page asks only while the panel is open, and the box counts it
+        // needs on every load come from GET /turfs instead.
+        req.query.withTarget === '1'
+          ? getTargetingStatusMap(req.campaign._id, placed.map((h) => String(h._id)), req.campaign.type)
+          : null,
       ]);
     }
 
@@ -1258,6 +1345,7 @@ router.get('/doors', async (req, res, next) => {
       if (passStatusMap) {
         d.passStatus = passStatusMap.get(String(h._id))?.status || 'unknocked';
         d.restrictedFrom = passStatusMap.get(String(h._id))?.restrictedFrom || null;
+        if (targetStatusMap) d.targetStatus = targetStatusMap.get(String(h._id))?.status || 'unknocked';
         // Emitted only where non-zero: an ordinary door's payload is byte-identical.
         const marks = deskRowsByDoor?.get(`${pass._id}|${h._id}`) || 0;
         if (marks > 0) d.deskMarks = marks;
@@ -1305,6 +1393,7 @@ router.get('/household/:householdId', async (req, res, next) => {
     const voters = await Voter.find({ householdId: hh._id }, { fullName: 1, party: 1, surveyStatus: 1 })
       .sort({ fullName: 1 })
       .lean();
+    const targeting = (await getTargetingStatusMap(req.campaign._id, [hh._id], req.campaign.type)).get(String(hh._id));
     res.json({
       household: {
         id: String(hh._id),
@@ -1315,6 +1404,10 @@ router.get('/household/:householdId', async (req, res, next) => {
         zipCode: hh.zipCode,
         county: hh.county || null,
         status: hh.status,
+        // All-rounds targeting status + newest visit, for the cut page's Target doors line
+        // (services/walklist/targetingStatus.js) — never a replacement for `status` above.
+        targetStatus: targeting?.status || 'unknocked',
+        lastActionAt: targeting?.lastActionAt || hh.lastActionAt || null,
         // Pin + provenance for the pop-up's Move pin action (same shape as the pin PATCH's
         // response): where the dot is, and whether a person corrected it / it is approximate.
         location: hh.location?.coordinates?.length === 2

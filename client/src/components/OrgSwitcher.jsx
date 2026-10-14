@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { consoleHomePath } from '../lib/homePath.js';
@@ -10,7 +10,6 @@ import { InternalBadge } from '../lib/billingStatus.jsx';
 export default function OrgSwitcher() {
   const { memberships, activeOrgId, switchOrg, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
   // Super admins pick from ALL orgs. Shares the SAME query key as OrganizationsPage's list, so a
@@ -39,18 +38,11 @@ export default function OrgSwitcher() {
 
   const active = list.find((m) => m.organizationId === activeOrgId);
 
-  // Switching orgs must drop the previous org's cached data — but KEEP the platform-level org list
-  // (org-agnostic), so the switcher itself doesn't blank + refetch on every switch.
-  function resetOrgScopedCache() {
-    qc.removeQueries({
-      predicate: (q) => !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations'),
-    });
-  }
-
-  function pick(orgId, role) {
+  // switchOrg drops the previous org's cached data itself (keeping the platform org list, so this
+  // switcher doesn't blank and refetch) — see AuthContext.
+  function pick(orgId, role, homeCampaignId = null) {
     switchOrg(orgId);
     setOpen(false);
-    resetOrgScopedCache();
     // ALWAYS land on the new org's role home. The old pick() didn't navigate at all, so the
     // URL survived the switch — and a URL is org-scoped:
     //   • admin-org → lead-org while sitting on /users → an admin-only URL in an org where
@@ -58,14 +50,14 @@ export default function OrgSwitcher() {
     //   • admin-org → admin-org while sitting on /campaigns/<A's id>/turfs → a campaign id
     //     that doesn't exist in the new org → "Campaign not found".
     // Going home on every switch fixes both classes at once.
-    const home = consoleHomePath({ isSuperAdmin, role, hasActiveOrg: true }) || '/select-org';
+    // A team lead with one active campaign in the new org lands inside it (lib/homePath.js).
+    const home = consoleHomePath({ isSuperAdmin, role, hasActiveOrg: true, homeCampaignId }) || '/select-org';
     navigate(home, { replace: true });
   }
 
   function pickPlatform() {
     switchOrg(null);
     setOpen(false);
-    resetOrgScopedCache();
     navigate('/super-admin');
   }
 
@@ -114,7 +106,7 @@ export default function OrgSwitcher() {
             {list.map((m) => (
               <li key={m.organizationId}>
                 <button
-                  onClick={() => pick(m.organizationId, m.role)}
+                  onClick={() => pick(m.organizationId, m.role, m.homeCampaignId)}
                   className={[
                     'flex w-full items-center justify-between px-3 py-2 text-left text-sm',
                     m.organizationId === activeOrgId

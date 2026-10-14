@@ -313,7 +313,9 @@ change or a deleted account. On the phone it waits until you're off a door, and 
 saved houses, as every sign-out does.
 
 **Signing out ends the sign-in on Doorline's servers too** (when you have signal), so a copy of it
-can't be used afterwards.
+can't be used afterwards. On the web console, **Sign out** always leaves you on a plain sign-in page: the
+console no longer remembers the page you were on, so whoever signs in next on that computer starts at
+their own home, not yours.
 
 **Lost a signed-in phone, or left a shared computer signed in? Change your password yourself** — Forgot
 password? on the sign-in page, or your profile. Every other device then needs the new password: the next
@@ -881,6 +883,17 @@ arrives, and a write failure answers 503. Either way that session simply runs ou
   `changePassword()` ignores every `password_changed` while the change is on its way (a request the
   prompt held and re-sent carries a token it can't know) — but not while the prompt still holds the
   change back, when such an answer can only be a change made elsewhere — then reruns whatever failed.
+- **Sign out buttons go through `useSignOut()`** (exported beside `useAuth`): `logout()` then
+  `navigate('/login', { replace: true })`, in one render. A bare `logout()` left `ProtectedRoute` to
+  redirect with `from` set, and the sign-in page sent the NEXT person back to the page the last one was
+  on. Every in-console Sign out button uses it — the account menu, the narrow-screen menu, Profile, the
+  Forbidden screen and the org picker. The password prompt's **Not you? Sign out** instead does
+  `logout()` plus a full load of `/login` (ReauthModal.jsx), which has the same effect. A session that
+  ends on its own still keeps its page.
+- **`switchOrg()` drops the previous org's cached pages** when the org actually changes (keeping the
+  platform org list), so every caller — the org pickers, the support prompt, the platform switcher —
+  gets it. A team lead's home campaign ([ROLES.md](ROLES.md)) would otherwise resolve against the
+  old org's campaign list and read "Campaign not found".
 
 **Tests:** server `test/sessionLifetime.test.js` (unit) and `test/sessionLifetime.int.test.js` (the
 HTTP contract, old tokens, the race, the cap, sign-out, bull board); phone

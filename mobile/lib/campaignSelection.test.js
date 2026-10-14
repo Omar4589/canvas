@@ -4,7 +4,9 @@ import {
   archiveStateOf,
   campaignShape,
   isArchivedCampaign,
+  overviewChoice,
   resolveChipSelection,
+  soleActiveCampaign,
 } from './campaignSelection.js';
 
 // campaignSelection.js is the ONE place the admin campaign chip's selection is decided, so this
@@ -97,4 +99,38 @@ test('campaignShape emits exactly the five persisted keys, with a stringified id
   assert.deepEqual(Object.keys(shaped).sort(), ['id', 'name', 'state', 'timeZone', 'type']);
   assert.equal(shaped.id, 'a1');
   assert.equal(typeof shaped.id, 'string');
+});
+
+// The phone's half of a team lead's home campaign — mirrors server/test/leadHomeCampaign.int.test.js.
+test('soleActiveCampaign: exactly one campaign that is not archived, else null', () => {
+  assert.equal(soleActiveCampaign([ACTIVE]), ACTIVE);
+  assert.equal(soleActiveCampaign([ACTIVE, ARCHIVED]), ACTIVE, 'archived campaigns do not count');
+  assert.equal(soleActiveCampaign([ACTIVE, ACTIVE_2]), null);
+  assert.equal(soleActiveCampaign([ARCHIVED]), null);
+  assert.equal(soleActiveCampaign([]), null);
+  assert.equal(soleActiveCampaign(undefined), null, 'still loading');
+  // A row from an older server that omits isActive reads as active.
+  assert.deepEqual(soleActiveCampaign([{ _id: 'x', name: 'No flag' }]), { _id: 'x', name: 'No flag' });
+});
+
+test('overviewChoice: an admin never gets the lead\'s embedded home, even with a one-campaign list cached', () => {
+  // The round-3 trap: admins fill ['admin','campaigns'] from other screens, and a disabled query
+  // still returns it.
+  assert.equal(overviewChoice({ role: 'admin', campaigns: [ACTIVE], listLoading: false }), 'org');
+  assert.equal(overviewChoice({ role: 'super', campaigns: [ACTIVE], listLoading: false }), 'org');
+});
+
+test('overviewChoice: a lead is decided from the list', () => {
+  assert.equal(overviewChoice({ role: 'lead', campaigns: [ACTIVE, ARCHIVED], listLoading: false }), 'sole:a1');
+  assert.equal(overviewChoice({ role: 'lead', campaigns: [ACTIVE, ACTIVE_2], listLoading: false }), 'org');
+  assert.equal(overviewChoice({ role: 'lead', campaigns: [], listLoading: false }), 'org');
+  // Data present after a failed refetch: still decided from the data (one dropped request must not
+  // flip the screen away and back).
+  assert.equal(overviewChoice({ role: 'lead', campaigns: [ACTIVE], listLoading: false }), 'sole:a1');
+});
+
+test('overviewChoice: undecided while the role or the first list load is pending; org if the list failed', () => {
+  assert.equal(overviewChoice({ role: undefined, campaigns: [ACTIVE], listLoading: false }), null);
+  assert.equal(overviewChoice({ role: 'lead', campaigns: undefined, listLoading: true }), null);
+  assert.equal(overviewChoice({ role: 'lead', campaigns: undefined, listLoading: false }), 'org');
 });

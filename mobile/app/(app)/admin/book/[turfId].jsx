@@ -26,6 +26,7 @@ import { useTheme } from '../../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../../lib/useThemedStyles';
 import { useMapStyle } from '../../../../lib/mapStyles';
 import { outlineRing } from '../../../../lib/bookDensity';
+import { boundsOf } from '../../../../lib/mapCamera';
 import {
   restrictCounts,
   doorMarkState,
@@ -91,7 +92,8 @@ export default function AdminBookDetail() {
   const selfId = self?.id ? String(self.id) : null;
 
   const cameraRef = useRef(null);
-  const camInit = useRef(false);
+  // The turfId this (single, reused) screen instance has framed — see the framing effect.
+  const framedFor = useRef(null);
   const [mapReady, setMapReady] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -180,26 +182,23 @@ export default function AdminBookDetail() {
     };
   }, [households]);
 
-  // Frame the camera to the book's homes once they're loaded. IMPORTANT: don't lock
-  // on the centroid fallback while the homes query is still in flight — otherwise a
-  // fast map-load beats the network and we'd never frame the actual houses.
+  // Frame the camera to the book's homes once they're loaded — once per BOOK, not once
+  // per instance: this screen is one reused Tabs instance, so opening another book
+  // swaps turfId without a remount and the camera must move with it. Keyed on the
+  // turfId (not a boolean) because cached data arrives in the same render as the new
+  // id, and a flag reset in a later effect would land after this one had already bailed.
+  // IMPORTANT: don't lock on the centroid fallback while the homes query is still in
+  // flight — otherwise a fast map-load beats the network and we'd never frame the houses.
   useEffect(() => {
-    if (camInit.current || !mapReady || !cameraRef.current) return;
-    const pts = households.map((h) => [h.lng, h.lat]);
-    if (pts.length) {
-      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-      for (const [lng, lat] of pts) {
-        if (lng < minLng) minLng = lng;
-        if (lng > maxLng) maxLng = lng;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-      }
-      if (pts.length === 1 || (maxLng === minLng && maxLat === minLat)) {
-        cameraRef.current.setCamera({ centerCoordinate: [minLng, minLat], zoomLevel: 16, animationDuration: 0 });
+    if (framedFor.current === turfId || !mapReady || !cameraRef.current) return;
+    const b = boundsOf(households.map((h) => [h.lng, h.lat]));
+    if (b) {
+      if (b.single) {
+        cameraRef.current.setCamera({ centerCoordinate: b.ne, zoomLevel: 16, animationDuration: 0 });
       } else {
-        cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [56, 40, 56, 40], 0);
+        cameraRef.current.fitBounds(b.ne, b.sw, [56, 40, 56, 40], 0);
       }
-      camInit.current = true;
+      framedFor.current = turfId;
     } else if (bookQ.isFetched) {
       // The query actually ran and the book has no homes → settle on the centroid,
       // then stop. Gate on isFetched (not !isLoading): a query still disabled while
@@ -207,9 +206,9 @@ export default function AdminBookDetail() {
       if (turf?.centroid?.coordinates?.length === 2) {
         cameraRef.current.setCamera({ centerCoordinate: turf.centroid.coordinates, zoomLevel: 14, animationDuration: 0 });
       }
-      camInit.current = true;
+      framedFor.current = turfId;
     }
-  }, [households, mapReady, turf, bookQ.isFetched]);
+  }, [households, mapReady, turf, bookQ.isFetched, turfId]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin', 'book-assign', cId, turfId] });

@@ -39,9 +39,14 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
    filters with **AND** (match all) or **OR** (match any). Use this when the people you want can be
    *described* by their data.
    - **Door status:** pick a **"from pass"** to filter on the status *within that round* (e.g. "not-home
-     in Round 1"); leave it blank to filter on the door's **current status** across all rounds (e.g.
-     "still unknocked"). *(Previously, choosing a status without a pass silently matched everything —
-     fixed.)*
+     in Round 1"); leave it blank to filter on the door's **all-rounds targeting status** — its whole
+     history, one status per door, in this order: *Restricted* if any round ever recorded it (it wins
+     over everything until unmarked or unknocked); else *Surveyed* if surveyed in any round; else the
+     most recent of *Refused / Wrong address / No soliciting / Not a target voter*; else *Not home* when
+     nobody has ever answered; else *Unknocked*, never visited. This is the same rule Turf Cutting's
+     Target doors and its two exclude boxes use — see [PASSES_AND_TURF.md](PASSES_AND_TURF.md) — and it
+     decides only what a list includes; the Map page and coverage keep the door's latest visit.
+     *(Previously, choosing a status without a pass silently matched everything — fixed.)*
    - **Survey answers:** filter by the actual answers to your choice questions (e.g. *Support / Likely*,
      or *Undecided*) — one or more options per question.
    - **Survey tags:** filter by a survey **tag** instead of by question. A tag is a label you can
@@ -54,8 +59,8 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
      says which to *throw out* — doors matching **any** of its conditions (door status, survey answers,
      tags, has-response) are removed from the result, **even when they match the filters above**, and
      the AND/OR choice never touches them. The classic use: a sign-drop pass that targets supporters
-     but skips every door that already answered *Yard Sign Delivered*. Statuses use the door's current
-     status; survey answers match any round.
+     but skips every door that already answered *Yard Sign Delivered*. Statuses use the door's all-rounds
+     targeting status (above); survey answers match any round.
 
 2. **Upload a Voter-ID CSV** — upload a file that has a column of Voter IDs. The app matches those IDs
    to this campaign's voters and freezes the doors they live at into a saved search. Use this when you already
@@ -186,10 +191,21 @@ filter or re-reads the CSV.
     treats `{ exclude: {} }` as inactive while honoring a legitimate exclude-*only* filter. Extra return
     keys: `excludedHouseholdIds` / `excludedDoorCount` (exactly the doors removed — the intersection
     with the include result, not the raw exclusion population), `excludeDegenerate`, `warnings`.
-  - **Template scoping.** `answerFilters` (both sides) match `surveyTemplateId` when the campaign has a
-    template — the same questionKey under a different template (an effort's survey override) no longer
-    cross-matches, aligning the resolver with the map/report endpoints. `surveyResponse`
+  - **Template scoping.** `answerFilters` (both sides) match `surveyTemplateId` — the same questionKey
+    under a different template no longer cross-matches, aligning the resolver with the map/report
+    endpoints. The template is the one the doors actually answer: with `options.effortId` (a cut, its
+    preview, its supplemental books, the pass rollup) it is the walk list's **override** when it has
+    one (`effectiveSurveyTemplateIdFor`), else the campaign's; a campaign-wide resolve (this page's
+    builder, the exports) has no walk list to ask and uses the campaign's. `surveyResponse`
     exists/not_exists deliberately stays unscoped: a response is a response.
+  - **Door status (`priorPassStatuses` with no `priorPassId`).** Reads the all-rounds **targeting
+    ladder** — `getTargetingStatusMap` ([targetingStatus.js](../server/src/services/walklist/targetingStatus.js))
+    → `resolveTargetingStatus` ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)) — never
+    `Household.status`: a history ladder, restricted › completion › newest answered outcome › not_home
+    › unknocked, run in the database (`targetingIdsMatching`) so only the matching ids come back; each
+    side asks for its own statuses. With a `priorPassId` the status is still that
+    round's own (`getPassStatusMap`, what the phones showed). The rule and the owner's matrix are in
+    [PASSES_AND_TURF.md](PASSES_AND_TURF.md) Part 2.
   - **Survey tags (`filter.answerTagFilters`).** Each `{ tag }` resolves to **one** predicate set:
     `resolveWalkList` loads the campaign's `SurveyTemplate`, then for the tag calls
     `answerTagClause(template, tag)` ([answerAgg.js](../server/src/services/surveys/answerAgg.js)) — a

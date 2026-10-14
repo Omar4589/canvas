@@ -37,6 +37,7 @@ import { getToken } from '../../../lib/auth';
 import { loadActiveOrgId } from '../../../lib/cache';
 import { refreshSession } from '../../../lib/session';
 import { doorDotsRequest, doorDotFilterExpr } from '../../../lib/doorDots';
+import { boundsOf, cameraSeed, DEFAULT_CENTER } from '../../../lib/mapCamera';
 import { restrictCountsFromStatusCounts } from '../../../lib/restrictBooks';
 import { bookStatusSet as sharedBookStatusSet, matchesBookStatus } from '../../../lib/bookStatusFilter';
 import { confirmMarkRestricted, confirmUnmarkRestricted } from '../../../lib/restrictBooksConfirm';
@@ -607,16 +608,14 @@ export default function AdminBooks() {
     return { type: 'FeatureCollection', features };
   }, [visibleBooks, progressByTurf, promotedId]);
 
-  // Round-wide density dots. Memoized on the doors payload ALONE — tapping or
-  // selecting books must never re-serialize ~16k features across the RN bridge;
-  // promotion/scoping happen in the LAYER filter below. Uncut doors (turfId
-  // null) are hidden by design: this screen is about book workloads; never-
-  // booked doors live on the web Turf Cutting page.
-  // No feature building here anymore — doorsQ.data IS the file:// URL the
-  // ShapeSource reads natively. Uncut doors (turfId null) are in the file now
-  // (the server no longer pre-filters) and are hidden by the LAYER filter:
-  // this screen is about book workloads; never-booked doors live on the web
-  // Turf Cutting page.
+  // Round-wide density dots: doorsQ.data IS the file:// URL the native map reads
+  // itself — nothing is built here and the feed never enters JS (the old flow
+  // serialized ~100k features across the RN bridge and froze the phone). Uncut
+  // doors (turfId null) are in the file (the server no longer pre-filters) and are
+  // hidden by the LAYER filter, where promotion/scoping also live: this screen is
+  // about book workloads; never-booked doors live on the web Turf Cutting page.
+  // The source itself is rendered LAST in the MapView, url-only, and only once the
+  // file exists — see the note at the source for why that shape is load-bearing.
   const visibleBookIds = useMemo(() => visibleBooks.map((b) => b.id), [visibleBooks]);
   const doorDotFilter = useMemo(
     () => doorDotFilterExpr(visibleBookIds, books.length, promotedId),
@@ -667,25 +666,22 @@ export default function AdminBooks() {
     return dpa ? Math.round(dpa * 10) / 10 : null;
   }, [promotedQ.data, promotedId]);
 
-  // Fit the camera to the round's books once, per scope.
+  // The books' centroids feed both the fit and the camera seed below.
+  const bookCentroids = useMemo(() => books.map((b) => b.centroid?.coordinates), [books]);
+  // Fit the camera to the round's books once per scope AND per map instance (the
+  // mapShown cleanup below resets the flags when the MapView unmounts, so a fresh
+  // instance fits itself again instead of sitting at Mapbox's built-in world view).
   useEffect(() => {
     if (bookView !== 'map' || view !== 'book' || !mapReady || camInit.current || !cameraRef.current) return;
-    const pts = books.map((b) => b.centroid?.coordinates).filter((c) => c?.length === 2);
-    if (!pts.length) return;
-    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-    for (const [lng, lat] of pts) {
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    }
-    if (pts.length === 1 || (minLng === maxLng && minLat === maxLat)) {
-      cameraRef.current.setCamera({ centerCoordinate: pts[0], zoomLevel: 14, animationDuration: 0 });
+    const b = boundsOf(bookCentroids);
+    if (!b) return;
+    if (b.single) {
+      cameraRef.current.setCamera({ centerCoordinate: b.ne, zoomLevel: 14, animationDuration: 0 });
     } else {
-      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [60, 40, 60, 40], 0);
+      cameraRef.current.fitBounds(b.ne, b.sw, [60, 40, 60, 40], 0);
     }
     camInit.current = true;
-  }, [bookView, view, mapReady, books]);
+  }, [bookView, view, mapReady, bookCentroids]);
 
   // Size the pullable sheet when a book is promoted; reset when it closes so
   // the next promote opens at PEEK again. Switching promoted books keeps the
@@ -756,6 +752,28 @@ export default function AdminBooks() {
 
   const loading =
     effortsQ.isLoading || (!!passId && (turfsQ.isLoading || assignmentsQ.isLoading || rosterQ.isLoading || membersQ.isLoading));
+
+  // ONE gate for the map subtree — the JSX renders on it and the cleanup below keys on
+  // it, so the two can never drift.
+  const mapShown =
+    view === 'book' && bookView === 'map' && !!cId && !!passId && !!MAPBOX_PUBLIC_TOKEN && (books.length > 0 || loading);
+  // A map INSTANCE's "ready" and "fitted" flags die with it. The List/Map and By
+  // canvasser toggles unmount the MapView, and so does a scope switch that must first
+  // load its round (passId is null for a commit); a fresh instance sits at Mapbox's
+  // built-in world view until it is fitted — so the next one must wait for its own
+  // load event and fit itself again. Refetches, and switches whose round is already
+  // known, keep the instance (the [cId, passId, view] reset above re-fits those).
+  useEffect(() => {
+    if (!mapShown) return undefined;
+    return () => {
+      camInit.current = false;
+      setMapReady(false);
+    };
+  }, [mapShown]);
+  // Where the map opens BEFORE the fit lands: the books' bounding-box center, or a
+  // neutral default while the round is still loading. Read once, at the camera's
+  // creation; the fit above refines it. Every sibling map screen seeds its camera.
+  const cameraDefaults = useMemo(() => cameraSeed(bookCentroids, DEFAULT_CENTER), [bookCentroids]);
 
   function toggleSelect(id) {
     setSelectedBooks((prev) => {
@@ -911,10 +929,11 @@ export default function AdminBooks() {
         </View>
       )}
 
-      {view === 'book' && bookView === 'map' && !!cId && !!passId && !!MAPBOX_PUBLIC_TOKEN && (books.length > 0 || loading) ? (
-        // Note the gate: the MapView stays mounted through refetches and scope
-        // switches (a loading overlay rides on top) — unmounting it re-downloads
-        // tiles and drops the camera.
+      {mapShown ? (
+        // The MapView stays mounted through refetches and through scope switches whose
+        // round is already known (a loading overlay rides on top). A switch that must
+        // first load its round, the List/Map toggle and By canvasser do unmount it — by
+        // design, and the mapShown cleanup above makes the next instance fit itself again.
         <View style={{ flex: 1 }}>
           <Mapbox.MapView
             style={{ flex: 1 }}
@@ -925,7 +944,7 @@ export default function AdminBooks() {
             pitchEnabled={false}
             rotateEnabled={false}
           >
-            <Mapbox.Camera ref={cameraRef} />
+            <Mapbox.Camera ref={cameraRef} defaultSettings={cameraDefaults} />
             <Mapbox.ShapeSource id="assign-books" shape={bookPolyFeatures} onPress={onBookPress}>
               <Mapbox.FillLayer
                 id="assign-book-fill"
@@ -966,27 +985,6 @@ export default function AdminBooks() {
                 }}
               />
             </Mapbox.ShapeSource>
-            {/* Always-on density dots — neutral gray, NEVER status-colored (the
-                round-wide feed carries global status; see promotedQ). Dots merge
-                into an honest mass zoomed out and separate when zoomed in. */}
-            <Mapbox.ShapeSource
-              id="door-dots"
-              {...(doorsQ.data
-                ? { url: doorsQ.data }
-                : { shape: { type: 'FeatureCollection', features: [] } })}
-            >
-              <Mapbox.CircleLayer
-                id="door-dot"
-                filter={doorDotFilter}
-                style={{
-                  circleColor: colors.doorDot,
-                  circleRadius: ['interpolate', ['linear'], ['zoom'], 11, 1.6, 14, 2.6, 17, 4],
-                  circleOpacity: promotedId ? 0.22 : 0.85,
-                  circleStrokeColor: colors.bg,
-                  circleStrokeWidth: ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.6, 17, 1],
-                }}
-              />
-            </Mapbox.ShapeSource>
             {/* The promoted book's homes — per-round status colors, larger. */}
             <Mapbox.ShapeSource id="promoted-homes" shape={promotedFeatures}>
               <Mapbox.CircleLayer
@@ -1022,6 +1020,35 @@ export default function AdminBooks() {
                 }}
               />
             </Mapbox.ShapeSource>
+            {/* Always-on density dots — neutral gray, NEVER status-colored (the
+                round-wide feed carries global status; see promotedQ). Dots merge
+                into an honest mass zoomed out and separate when zoomed in.
+                LAST child on purpose, url-only, and mounted only once the file
+                exists. Two rules are load-bearing here
+                (docs/PROPOSAL_BOOKS_MAP_GRAY_SCREEN.md): never give this source a
+                `shape`, and never remove a prop from a mounted map element — on
+                Android a removed prop reaches the map library as null, which throws
+                inside a mount and tears the whole app down to a gray screen; mount
+                the whole element conditionally instead. And belowLayerID (which keeps
+                the dots under the promoted dots and labels) must name a layer that
+                ALREADY exists — rnmapbox never completes a deferred position on iOS —
+                which the child order guarantees in every mount and remount path. */}
+            {doorsQ.data && (
+              <Mapbox.ShapeSource id="door-dots" url={doorsQ.data}>
+                <Mapbox.CircleLayer
+                  id="door-dot"
+                  belowLayerID="promoted-home-dot"
+                  filter={doorDotFilter}
+                  style={{
+                    circleColor: colors.doorDot,
+                    circleRadius: ['interpolate', ['linear'], ['zoom'], 11, 1.6, 14, 2.6, 17, 4],
+                    circleOpacity: promotedId ? 0.22 : 0.85,
+                    circleStrokeColor: colors.bg,
+                    circleStrokeWidth: ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.6, 17, 1],
+                  }}
+                />
+              </Mapbox.ShapeSource>
+            )}
           </Mapbox.MapView>
           {loading && (
             <View style={styles.mapLoading} pointerEvents="none">

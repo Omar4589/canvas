@@ -7,7 +7,14 @@ import {
   autoSelectOrgId,
   activeOrgIdForLogin,
 } from './roles.js';
-import { homePathForRole, consoleHomePath, resolveHomePath, postAuthPath } from './homePath.js';
+import {
+  homePathForRole,
+  consoleHomePath,
+  resolveHomePath,
+  postAuthPath,
+  isConsoleHomePath,
+  homeLinkLabel,
+} from './homePath.js';
 
 // The web console is an admin + team-lead surface. These two files are the ONE place that
 // rule lives, so this is where it gets locked down. The regression under test: a user who
@@ -175,4 +182,62 @@ test('postAuthPath leaves every real destination untouched', () => {
     postAuthPath({ user: { ...USER, mustChangePassword: true }, memberships: [M('A', 'canvasser')] }),
     '/change-password'
   );
+});
+
+// A team lead with exactly one active campaign lands inside it (docs/PROPOSAL_LEAD_CAMPAIGN_LANDING.md).
+// The server ships it as homeCampaignId on the lead's membership row; nothing else may honour it.
+const L = (organizationId, homeCampaignId) => ({ ...M(organizationId, 'lead'), homeCampaignId });
+
+test('a lead with one active campaign lands inside it; otherwise on /campaigns', () => {
+  assert.equal(consoleHomePath({ role: 'lead', homeCampaignId: 'c1', hasActiveOrg: true }), '/campaigns/c1');
+  assert.equal(consoleHomePath({ role: 'lead', homeCampaignId: null, hasActiveOrg: true }), '/campaigns');
+  assert.equal(consoleHomePath({ role: 'lead', hasActiveOrg: true }), '/campaigns');
+  // Never for anyone else, even if a stray id rode along.
+  assert.equal(consoleHomePath({ role: 'admin', homeCampaignId: 'c1', hasActiveOrg: true }), '/admin');
+  assert.equal(consoleHomePath({ role: 'canvasser', homeCampaignId: 'c1', hasActiveOrg: true }), null);
+  assert.equal(
+    consoleHomePath({ isSuperAdmin: true, role: 'lead', homeCampaignId: 'c1', hasActiveOrg: true }),
+    '/admin'
+  );
+});
+
+test('resolveHomePath carries the home campaign for the active org and the only org', () => {
+  // The only console org.
+  assert.equal(resolveHomePath({ user: USER, memberships: [L('A', 'c1')] }), '/campaigns/c1');
+  assert.equal(resolveHomePath({ user: USER, memberships: [L('A', 'c1'), M('B', 'canvasser')] }), '/campaigns/c1');
+  // Two console orgs: the picker, unless one is active — then that org's home.
+  const two = [L('A', 'c1'), L('B', null)];
+  assert.equal(resolveHomePath({ user: USER, memberships: two }), '/select-org');
+  assert.equal(resolveHomePath({ user: USER, memberships: two, activeOrgId: 'A' }), '/campaigns/c1');
+  assert.equal(resolveHomePath({ user: USER, memberships: two, activeOrgId: 'B' }), '/campaigns');
+  // A password change still comes first.
+  assert.equal(
+    resolveHomePath({ user: { ...USER, mustChangePassword: true }, memberships: [L('A', 'c1')] }),
+    '/change-password'
+  );
+  assert.equal(postAuthPath({ user: USER, memberships: [L('A', 'c1')] }), '/campaigns/c1');
+});
+
+test('isConsoleHomePath: the three homes, nothing else', () => {
+  assert.equal(isConsoleHomePath('/admin'), true);
+  assert.equal(isConsoleHomePath('/campaigns'), true);
+  assert.equal(isConsoleHomePath('/campaigns/c1'), true);
+  assert.equal(isConsoleHomePath('/campaigns/c1/map'), false);
+  assert.equal(isConsoleHomePath('/campaigns/'), false);
+  assert.equal(isConsoleHomePath('/select-org'), false);
+  assert.equal(isConsoleHomePath('/change-password'), false);
+  assert.equal(isConsoleHomePath('/super-admin'), false);
+  assert.equal(isConsoleHomePath(undefined), false);
+  assert.equal(isConsoleHomePath(null), false);
+});
+
+test('homeLinkLabel names where each home button goes', () => {
+  assert.equal(homeLinkLabel('/campaigns'), 'Go to Campaigns');
+  assert.equal(homeLinkLabel('/campaigns/c1'), 'Go to your campaign');
+  assert.equal(homeLinkLabel('/super-admin'), 'Go to Control Room');
+  assert.equal(homeLinkLabel('/select-org'), 'Choose an organization');
+  assert.equal(homeLinkLabel('/admin'), 'Go to Overview');
+  // Total: a stub with no path gets today's fallback rather than throwing.
+  assert.equal(homeLinkLabel(undefined), 'Go to Overview');
+  assert.equal(homeLinkLabel('/campaigns/c1/map'), 'Go to Overview');
 });

@@ -22,7 +22,7 @@ import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDat
 import { metricHelp } from '../lib/metricHelp.js';
 import { todayInTz, shiftDays } from '../lib/datePresets.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
-import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
@@ -51,6 +51,11 @@ export default function DashboardPage() {
   const location = useLocation();
   const justCreated = location.state?.justCreated; // set by CampaignsPage right after create
   const orgTz = useOrgTimeZone();
+  // The org-billing notes below are for org admins: a team lead can't act on them (no Archive, no
+  // Billing page), and a lead may be the paying client, to whom the firm's subscription is not
+  // theirs to read. A one-campaign lead now LANDS on this page, so it follows the Campaigns page's
+  // rule (CampaignsPage.jsx gates ArchiveNudge on isOrgAdmin the same way).
+  const { isOrgAdmin } = useAuth();
   // dateRange stays null until the campaign's timezone is known, so presets resolve in
   // the campaign's clock (not the device's) and range queries never fetch a device-tz window.
   const [dateRange, setDateRange] = useState(null);
@@ -417,8 +422,8 @@ export default function DashboardPage() {
               <span className="text-fg-subtle">·</span> {selectedCampaign.state}
             </div>
           )}
-          {/* Setup-is-free hint — only until the first knock, then it quietly drops. */}
-          {selectedCampaign && !hasBeenCanvassed && (
+          {/* Setup-is-free hint — only until the first knock, then it quietly drops. Org admins only. */}
+          {isOrgAdmin && selectedCampaign && !hasBeenCanvassed && (
             <div className="mt-1 text-xs text-fg-subtle">
               Not billing yet — setup is free until the first knock
             </div>
@@ -515,8 +520,8 @@ export default function DashboardPage() {
 
       {current && current.isActive === false && (
         <div className="mb-6 rounded-md border border-warning/30 bg-warning-tint px-4 py-2 text-sm text-warning-fg">
-          This campaign is archived — data is read-only. Reactivate it from
-          Campaigns to resume canvassing.
+          This campaign is archived — data is read-only. An org admin can reactivate it from
+          Campaigns.
         </div>
       )}
 
@@ -548,10 +553,12 @@ export default function DashboardPage() {
           fake-GPS app and {openMockFlags === 1 ? "hasn't" : "haven't"} been reviewed.
         </NextStepBanner>
       )}
-      {/* Election day has passed and this campaign is still live — so it's still billing.
+      {/* Election day has passed and this campaign is still live — so it's still billing. Org admins
+          only, like the Campaigns page: a lead has nothing to press (no Archive) and no business with
+          the subscription.
           ArchiveNudge's own isActive check keeps it from ever appearing beside the archived
           notice above. Archiving is offered from Campaigns, which owns the mutation. */}
-      {current && <ArchiveNudge campaigns={[current]} className="mb-6" />}
+      {isOrgAdmin && current && <ArchiveNudge campaigns={[current]} className="mb-6" />}
       {current && current.isActive !== false && (
         <div className="mb-6">
           <SetupProgress campaignId={campaignId} />

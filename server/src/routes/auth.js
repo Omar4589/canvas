@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { User } from '../models/User.js';
 import { Membership } from '../models/Membership.js';
 import { CampaignManager } from '../models/CampaignManager.js';
+import { Campaign } from '../models/Campaign.js';
+import { NOT_DELETING } from '../services/campaigns/deletionState.js';
 import {
   signUserToken,
   renewUserToken,
@@ -66,6 +68,10 @@ async function loadMembershipsForUser(userId) {
   // For a team lead, ship the campaigns they manage (per org) so the client can scope
   // its console + nav to those campaigns without an extra round-trip on load.
   const grantsByOrg = new Map();
+  // Granted campaign id → its own org, for the granted campaigns that are live (active, not
+  // mid-delete). Strings throughout: lean() hands back ObjectIds, and === between two of those is
+  // always false.
+  let liveOrgOf = new Map();
   if (active.some((m) => m.role === 'lead')) {
     const grants = await CampaignManager.find({ userId }).select('organizationId campaignId').lean();
     for (const g of grants) {
@@ -73,24 +79,47 @@ async function loadMembershipsForUser(userId) {
       if (!grantsByOrg.has(k)) grantsByOrg.set(k, []);
       grantsByOrg.get(k).push(String(g.campaignId));
     }
+    // `$ne: false`, not `true`: the clients read archived as isActive === false, so a row that
+    // somehow lacks the field reads as active on both sides.
+    const live = grants.length
+      ? await Campaign.find({
+          _id: { $in: grants.map((g) => g.campaignId) },
+          isActive: { $ne: false },
+          ...NOT_DELETING,
+        })
+          .select('organizationId')
+          .lean()
+      : [];
+    liveOrgOf = new Map(live.map((c) => [String(c._id), String(c.organizationId)]));
   }
 
-  return active.map((m) => ({
-    membershipId: String(m._id),
-    organizationId: String(m.organizationId._id),
-    organizationName: m.organizationId.name,
-    organizationSlug: m.organizationId.slug,
-    organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
-    role: m.role,
-    // Only admins with billingAccess see the Billing surface (the bill-payers).
-    billingAccess: !!m.billingAccess,
-    // Only leads carry a managed-campaign scope; admins/canvassers omit it.
-    ...(m.role === 'lead'
-      ? { managedCampaignIds: grantsByOrg.get(String(m.organizationId._id)) || [] }
-      : {}),
-    // null acknowledgedAt = the user hasn't dismissed the "added to org" banner yet.
-    isNew: !m.acknowledgedAt,
-  }));
+  return active.map((m) => {
+    const orgKey = String(m.organizationId._id);
+    const managed = grantsByOrg.get(orgKey) || [];
+    // The campaigns a lead could open here and still canvass: granted in this org, and the campaign
+    // lives in this org — exactly what their /admin/campaigns list holds, minus archived rows. The
+    // phone decides the same thing from that list (mobile/lib/campaignSelection.js
+    // soleActiveCampaign); the two are pinned together by test/leadHomeCampaign.int.test.js.
+    const live = managed.filter((id) => liveOrgOf.get(id) === orgKey);
+    return {
+      membershipId: String(m._id),
+      organizationId: orgKey,
+      organizationName: m.organizationId.name,
+      organizationSlug: m.organizationId.slug,
+      organizationTimeZone: m.organizationId.timeZone || 'America/New_York',
+      role: m.role,
+      // Only admins with billingAccess see the Billing surface (the bill-payers).
+      billingAccess: !!m.billingAccess,
+      // Only leads carry a managed-campaign scope; admins/canvassers omit it. homeCampaignId is the
+      // one campaign a lead with exactly one live campaign lands in on the web console
+      // (client/src/lib/homePath.js); null when there are none or several. Always present on a lead.
+      ...(m.role === 'lead'
+        ? { managedCampaignIds: managed, homeCampaignId: live.length === 1 ? live[0] : null }
+        : {}),
+      // null acknowledgedAt = the user hasn't dismissed the "added to org" banner yet.
+      isNew: !m.acknowledgedAt,
+    };
+  });
 }
 
 router.post('/login', async (req, res, next) => {

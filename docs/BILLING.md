@@ -814,7 +814,7 @@ Added with the month-ledger work (Sep 2026):
 - **[ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)** — on
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (aggregate, org-admin only, archives via
   the existing mutation) and [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)
-  (single, links to Campaigns). Fires when `electionDay` has passed and the campaign is still active;
+  (single, org-admin only since 2026-10-13 — a team lead sees neither; links to Campaigns). Fires when `electionDay` has passed and the campaign is still active;
   escalates tone inside the end-grace window. **Holds the client copy of `END_GRACE_DAYS`.**
 
 Mobile: `entitlement` rides the bootstrap; [EntitlementBanner.jsx](../mobile/components/EntitlementBanner.jsx)

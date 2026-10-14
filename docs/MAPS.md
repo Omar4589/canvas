@@ -239,7 +239,7 @@ An organizer sees the whole campaign at once:
 - **Marking one door restricted from the desk.** A door's panel carries a **Restricted access** section:
   an unmarked door offers **Mark restricted…** (one plain confirm; the home gets the same desk mark a
   whole-book restrict writes — canvassers see it slate, it stays out of every rate and knock count, and
-  the next cut's "Exclude restricted-access homes" toggle picks it up); a desk-marked door reads *Marked
+  every later cut's "Exclude restricted-access homes" toggle picks it up until it is unmarked); a desk-marked door reads *Marked
   from the desk by … · date* with **Unmark restricted**; a door a canvasser restricted at the door reads
   *Recorded at the door by …* and offers no desk action. **Which round the mark lands on:** a per-pass
   deep link (`?passId=`) marks that round; otherwise the server picks the door's walk list's **active**

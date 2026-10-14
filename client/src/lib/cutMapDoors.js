@@ -35,12 +35,19 @@ export const visibleCutDoors = (doors, bookIds, showLoose) => {
 export const countLooseDoors = (doors, bookIds) =>
   bookIds.size ? (doors || []).filter((d) => isLooseDoor(d, bookIds)).length : 0;
 
-// Per-round statuses that mean "off the table": restricted access and a posted no-soliciting
-// sign. In status mode their dots are the darkest on the map (slate/pink), and on a heavily
+// Which status a /doors row shows. `passStatus` is THIS round's (what colors the dot normally);
+// `targetStatus` is the all-rounds targeting status the Target doors panel reads — the page
+// switches to it while that panel is open, so what you tick is what you see. Every helper below
+// takes the reader as `statusOf` so the two can never be mixed inside one memo.
+export const passStatusOf = (d) => d.passStatus || 'unknocked';
+export const targetStatusOf = (d) => d.targetStatus || 'unknocked';
+
+// Statuses that mean "off the table": restricted access and a posted no-soliciting sign. In
+// status mode their dots are the darkest on the map (slate/pink), and on a heavily
 // desk-restricted round they bury the work — so the Layers box offers to hide them. Judged on
-// `passStatus` (what colors the dot), never the global `Household.status` a prior round set.
+// the status the map is DRAWING (statusOf), never the global `Household.status` a prior round set.
 export const OFF_LIMITS_STATUSES = new Set(['restricted', 'no_soliciting']);
-export const isOffLimitsDoor = (d) => OFF_LIMITS_STATUSES.has(d.passStatus);
+export const isOffLimitsDoor = (d, statusOf = passStatusOf) => OFF_LIMITS_STATUSES.has(statusOf(d));
 
 // A stack is off the table only as a WHOLE: every unit off-limits. A mixed stack keeps all
 // its units on the map — its pin is a book-membership object over several statuses, and
@@ -48,7 +55,8 @@ export const isOffLimitsDoor = (d) => OFF_LIMITS_STATUSES.has(d.passStatus);
 // stack, though, is the building-shaped version of the solid empty book: badged
 // "12/12 hit" in book color while nobody could enter — so the page paints it slate and the
 // off-limits toggle hides it whole.
-export const isOffLimitsStack = (units) => (units || []).length > 0 && units.every(isOffLimitsDoor);
+export const isOffLimitsStack = (units, statusOf = passStatusOf) =>
+  (units || []).length > 0 && units.every((u) => isOffLimitsDoor(u, statusOf));
 
 // The books that toggle leaves with NOTHING drawn — the ones whose polygon would otherwise sit
 // on the map as an empty filled shell. A fully off-limits book reads knocked === total, so its
@@ -67,7 +75,7 @@ export const isOffLimitsStack = (units) => (units || []).length > 0 && units.eve
 // Only books emptied BY the hiding are named: one that already drew no dots (all its doors
 // non-knockable, so /doors never returned them) never enters `had`, and keeps the bare shape it
 // has always drawn. Call only while hiding is on.
-export const booksEmptiedByOffLimits = ({ singles = [], buildings = [] } = {}) => {
+export const booksEmptiedByOffLimits = ({ singles = [], buildings = [] } = {}, statusOf = passStatusOf) => {
   const had = new Set(); // books with at least one door in the drawn set
   const kept = new Set(); // …of those, the ones with at least one door still drawn
   const note = (turfId, drawn) => {
@@ -77,10 +85,10 @@ export const booksEmptiedByOffLimits = ({ singles = [], buildings = [] } = {}) =
     if (drawn) kept.add(id);
   };
   for (const b of buildings) {
-    const drawn = !isOffLimitsStack(b.units); // a hidden stack keeps no book on the map
+    const drawn = !isOffLimitsStack(b.units, statusOf); // a hidden stack keeps no book on the map
     for (const u of b.units || []) note(u.turfId, drawn);
   }
-  for (const d of singles) note(d.turfId, !isOffLimitsDoor(d));
+  for (const d of singles) note(d.turfId, !isOffLimitsDoor(d, statusOf));
   const emptied = new Set();
   for (const id of had) if (!kept.has(id)) emptied.add(id);
   return emptied;
@@ -107,7 +115,7 @@ export const booksEmptiedByOffLimits = ({ singles = [], buildings = [] } = {}) =
 const NO_DOORS = []; // one stable reference, so a houses-off render doesn't churn every memo
 const doorKey = (d) => buildingKeyForCoords(d.lng, d.lat);
 
-export const drawnCutDoors = ({ doors, bookIds, showLoose, visibleBookIds = null, housesVisible = true, hideOffLimits = false, keyOf = doorKey }) => {
+export const drawnCutDoors = ({ doors, bookIds, showLoose, visibleBookIds = null, housesVisible = true, hideOffLimits = false, keyOf = doorKey, statusOf = passStatusOf }) => {
   if (!housesVisible) return NO_DOORS;
   let visible = visibleCutDoors(doors, bookIds, showLoose);
   if (hideOffLimits) {
@@ -123,10 +131,10 @@ export const drawnCutDoors = ({ doors, bookIds, showLoose, visibleBookIds = null
       const k = keyOf(d);
       if (!k) continue;
       sizes.set(k, (sizes.get(k) || 0) + 1);
-      if (!isOffLimitsDoor(d)) live.add(k);
+      if (!isOffLimitsDoor(d, statusOf)) live.add(k);
     }
     visible = visible.filter((d) => {
-      if (!isOffLimitsDoor(d)) return true;
+      if (!isOffLimitsDoor(d, statusOf)) return true;
       const k = keyOf(d);
       return !!k && sizes.get(k) >= 2 && live.has(k);
     });

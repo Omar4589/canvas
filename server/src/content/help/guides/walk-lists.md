@@ -27,7 +27,7 @@ A campaign can have many active walk lists at once, each with its own active pas
 
 You claim doors two ways:
 
-- **From a saved search** — build one on the [Saved Searches](saved-searches) page (by filter or by uploading a Voter-ID CSV), then seed the walk list from it. Use this when Intake holds a mix of doors and you only want some.
+- **From a saved search** — build one on the [Saved Searches](saved-searches) page (by filter or by uploading a Voter-ID CSV), then seed the walk list from it. Use this when Intake holds a mix of doors and you only want some. If some of its doors already belong to another walk list, the claim line says how many weren't moved and offers **Move them here…** — the same confirm described below.
 - **Claim all Intake** — grabs every unowned door at once. Quick, but only when all current Intake is exactly what you want.
 
 ## Re-carving an existing campaign

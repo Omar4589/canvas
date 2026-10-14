@@ -21,6 +21,6 @@ A few related things worth knowing:
 
 - **If there's only one organization you can run from the console, signing in takes you straight into it.** You'll only see the org picker when you have two or more.
 - **Switching organizations always lands you on the new org's home page** — never on a page that belonged to the org you just left.
-- **Landed on an "access required" notice?** Your navigation is still there. Use **Go to Overview** (or **Go to Campaigns**), or **Switch organization**, to get back.
+- **Landed on an "access required" notice?** Your navigation is still there. Use **Go to Overview**, **Go to Campaigns** or **Go to your campaign** (whichever you see), or **Switch organization**, to get back.
 
 See [What can a team lead do vs. an admin?](team-lead-vs-admin).

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useSignOut } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import { consoleHomePath } from '../lib/homePath.js';
 import { consoleMemberships, nonConsoleMemberships } from '../lib/roles.js';
@@ -13,7 +13,8 @@ import Logo from '../components/Logo.jsx';
 const SHOW_NO_CONSOLE_ORGS = true;
 
 export default function SelectOrgPage() {
-  const { user, memberships, isSuperAdmin, switchOrg, logout } = useAuth();
+  const { user, memberships, isSuperAdmin, switchOrg } = useAuth();
+  const signOut = useSignOut();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -43,18 +44,20 @@ export default function SelectOrgPage() {
         organizationId: m.organizationId,
         organizationName: m.organizationName,
         role: m.role,
+        // A team lead with exactly one active campaign here lands inside it (lib/homePath.js).
+        homeCampaignId: m.homeCampaignId || null,
         isActive: true,
       }));
 
   // Never for super admins — they can enter every org.
   const noConsoleItems = isSuperAdmin ? [] : nonConsoleMemberships(memberships);
 
-  function pick(orgId, role) {
+  function pick(orgId, role, homeCampaignId = null) {
     switchOrg(orgId);
     // NOT homePathForRole(role): that returns null for a canvasser and, crucially, null for
     // the synthetic 'super_admin' role this page builds for super admins. consoleHomePath
     // knows about both.
-    const home = consoleHomePath({ isSuperAdmin, role, hasActiveOrg: true }) || '/select-org';
+    const home = consoleHomePath({ isSuperAdmin, role, hasActiveOrg: true, homeCampaignId }) || '/select-org';
     // Honor a real deep link if one brought them here.
     const deepLink = location.state?.from?.pathname;
     navigate(deepLink && deepLink !== '/select-org' ? deepLink : home, { replace: true });
@@ -70,7 +73,7 @@ export default function SelectOrgPage() {
   const onlyOrg = !isSuperAdmin && consoleItems.length === 1 ? consoleItems[0] : null;
   useEffect(() => {
     if (!onlyOrg) return;
-    pick(onlyOrg.organizationId, onlyOrg.role);
+    pick(onlyOrg.organizationId, onlyOrg.role, onlyOrg.homeCampaignId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlyOrg?.organizationId]);
 
@@ -153,7 +156,7 @@ export default function SelectOrgPage() {
               {consoleItems.map((m) => (
                 <li key={m.organizationId}>
                   <button
-                    onClick={() => pick(m.organizationId, m.role)}
+                    onClick={() => pick(m.organizationId, m.role, m.homeCampaignId)}
                     className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-brand-tint"
                     disabled={!m.isActive}
                   >
@@ -201,10 +204,7 @@ export default function SelectOrgPage() {
 
         <div className="mt-4 text-center">
           <button
-            onClick={() => {
-              logout();
-              navigate('/login', { replace: true });
-            }}
+            onClick={signOut}
             className="text-xs font-semibold text-fg-muted hover:text-fg-muted"
           >
             Sign out

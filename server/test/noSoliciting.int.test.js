@@ -35,7 +35,7 @@ const { Pass } = await import('../src/models/Pass.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { KNOCK_ACTIONS } = await import('../src/services/reports/aggregations.js');
 const { resolveStatus, ACTION_TO_STATUS } = await import('../src/utils/statusPrecedence.js');
-const { cutStatusExclusion } = await import('../src/services/turf/generateTurf.js');
+const { cutExclusionParts } = await import('../src/services/turf/generateTurf.js');
 const { computeWindowStats } = await import('../src/services/reports/computeReport.js');
 const { recomputeCampaignStats } = await import('../src/services/reports/campaignCounters.js');
 
@@ -171,7 +171,10 @@ const EXPECTED_KNOCKS = 7;
 //     This is what the per-outcome report buckets speak in, exactly like refusedKnocks — a door
 //     can appear in two of these buckets, and they deliberately do NOT partition the knocks.
 // Conflating the two is the specific mistake this pair of constants exists to prevent.
-const EXPECTED_NO_SOLICITING_BY_STATUS = 2; // doors 4, 5
+const EXPECTED_NO_SOLICITING_BY_STATUS = 2; // doors 4, 5 — coverage reads Household.status, the latest visit
+// The cut box reads the targeting ladder over each door's whole history (utils/statusPrecedence.js):
+// door 7's later not-home does not clear the sign, so the box drops 4, 5 AND 7.
+const EXPECTED_NO_SOLICITING_BY_HISTORY = 3; // doors 4, 5, 7
 const EXPECTED_NO_SOLICITING_KNOCKS = 3; // doors 4, 5, 7
 const EXPECTED_RESTRICTED_DOORS = 1;
 const EXPECTED_CONTACT_RATE = 29; // (1 surveyed + 1 refused) / 7
@@ -306,16 +309,24 @@ test('the write route records it, on BOTH campaign types, and is replaceable', {
   await Household.deleteMany({ _id: { $in: [fresh._id, litDoor._id] } });
 });
 
-test('cut exclusion: each toggle alone, and BOTH together (the $nin case)', { skip }, () => {
-  // Two toggles, one `status` key. Spreading two `{ status: { $ne } }` objects would keep only the
-  // last — silently re-cutting the doors the admin asked to drop. This is that regression's pin.
-  assert.deepEqual(cutStatusExclusion({}), {});
-  assert.deepEqual(cutStatusExclusion({ excludeRestricted: true }), { status: { $nin: ['restricted'] } });
-  assert.deepEqual(cutStatusExclusion({ excludeNoSoliciting: true }), { status: { $nin: ['no_soliciting'] } });
+test('cut exclusion: each box alone, and BOTH together (one $nin over the ladder)', { skip }, async () => {
+  // Two boxes, one clause. Each box's doors come from the targeting ladder over the door's whole
+  // history — doors 4, 5 and 7 read no_soliciting (7's later not-home does not clear the sign),
+  // door 6 reads restricted — and both sets ride ONE `_id: $nin`, so ticking both really drops both.
+  // (The original regression here was two `{ status: { $ne } }` spreads keeping only the last.)
+  const args = { campaignId: ctx.campaign._id, effortId: ctx.effort._id, campaignType: 'survey' };
+  const ids = (list) => list.map(String).sort();
+  assert.deepEqual(await cutExclusionParts(args), { filter: {}, filterWithoutUnplaced: {}, restrictedIds: [], noSolicitingIds: [] });
+  const r = await cutExclusionParts({ ...args, excludeRestricted: true });
+  assert.deepEqual(ids(r.restrictedIds), ids([ctx.doors[5]._id]));
+  assert.deepEqual(r.filter, { $and: [{ _id: { $nin: r.restrictedIds } }] });
+  const n = await cutExclusionParts({ ...args, excludeNoSoliciting: true });
+  assert.deepEqual(ids(n.noSolicitingIds), ids([ctx.doors[3]._id, ctx.doors[4]._id, ctx.doors[6]._id]));
+  const both = await cutExclusionParts({ ...args, excludeRestricted: true, excludeNoSoliciting: true });
   assert.deepEqual(
-    cutStatusExclusion({ excludeRestricted: true, excludeNoSoliciting: true }),
-    { status: { $nin: ['restricted', 'no_soliciting'] } },
-    'both toggles must survive together'
+    ids(both.filter.$and[0]._id.$nin),
+    ids([ctx.doors[3]._id, ctx.doors[4]._id, ctx.doors[5]._id, ctx.doors[6]._id]),
+    'both boxes must survive together'
   );
 });
 
@@ -330,8 +341,8 @@ test('cut exclusion actually removes the doors from a target preview', { skip },
   assert.equal(dropped.status, 200);
   assert.equal(
     all.json.doorCount - dropped.json.doorCount,
-    EXPECTED_NO_SOLICITING_BY_STATUS,
-    'excluding no-soliciting must drop exactly those doors'
+    EXPECTED_NO_SOLICITING_BY_HISTORY,
+    'excluding no-soliciting must drop exactly those doors — door 7 included, its sign still stands'
   );
 
   const both = await call('POST', `/admin/campaigns/${ctx.campaign._id}/turfs/target-preview`, {
@@ -339,7 +350,7 @@ test('cut exclusion actually removes the doors from a target preview', { skip },
   });
   assert.equal(
     all.json.doorCount - both.json.doorCount,
-    EXPECTED_NO_SOLICITING_BY_STATUS + EXPECTED_RESTRICTED_DOORS,
+    EXPECTED_NO_SOLICITING_BY_HISTORY + EXPECTED_RESTRICTED_DOORS,
     'both toggles together must drop both sets'
   );
 });

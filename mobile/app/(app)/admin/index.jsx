@@ -4,16 +4,21 @@ import {
   Text,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { useRefresh } from '../../../lib/useRefresh';
-import { loadCurrentUser, loadActiveCampaign } from '../../../lib/cache';
-import Logo from '../../../components/Logo';
+import { loadActiveCampaign } from '../../../lib/cache';
+import { useConsoleRole } from '../../../lib/useConsoleRole';
+import { useTodayInTz } from '../../../lib/useTodayInTz';
+import { isArchivedCampaign, overviewChoice } from '../../../lib/campaignSelection';
+import AdminHeaderRow from '../../../components/AdminHeaderRow';
+import CampaignHome from '../../../components/CampaignHome';
 import CoverageBar from '../../../components/CoverageBar';
 import SectionHeader from '../../../components/SectionHeader';
 import DateRangeBar from '../../../components/DateRangeBar';
@@ -28,7 +33,7 @@ import InsetGroup, {
   GroupFooter,
 } from '../../../components/InsetGroup';
 import MetricSheet from '../../../components/MetricSheet';
-import { rangeFor, deviceTimezone } from '../../../lib/dateRanges';
+import { rangeFor, deviceTimezone, effectiveRange } from '../../../lib/dateRanges';
 import { timeAgo } from '../../../lib/datetime';
 import { metricHelp } from '../../../lib/metricHelp';
 import { shortCount } from '../../../lib/goalPace';
@@ -92,12 +97,126 @@ function RowAccessory({ campaign, styles }) {
   );
 }
 
-export default function AdminOverview() {
+// The archived campaigns' query — the key OrgOverview's pull refreshes while the group is open.
+const ARCHIVED_KEY = ['admin', 'reports', 'campaign-rollup', 'archived'];
+
+// The Overview tab. For a team lead with exactly ONE active campaign it IS that campaign's screen
+// (components/CampaignHome.jsx, embedded) — not a list with one row in it; for everyone else it's
+// the org Overview, as always. docs/PROPOSAL_LEAD_CAMPAIGN_LANDING.md §E.4.
+//
+// This component only decides, so no early return can change a hook's order: the org Overview's
+// hooks live in OrgOverview, and only the one being shown mounts (so the org totals don't keep
+// polling behind an embedded home).
+const AdminOverview = () => {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
+  // Read once per mount from the cached session, the same read the admin tab gate makes
+  // (admin/_layout.jsx). Every org switch and sign-out unmounts these tabs, so it can't go stale
+  // across organizations.
+  const role = useConsoleRole();
+  const caption = role ? { lead: 'Team Lead', admin: 'Admin', super: 'Admin · super' }[role] : null;
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: () => api('/admin/campaigns'),
+    // Never a bare flag: an undefined `enabled` counts as on, which would fetch before the role is read.
+    enabled: role === 'lead',
+    // Refetch when the lead comes back to the tab, so a granted or archived campaign moves them
+    // between the list and the embedded home in either direction.
+    ...useFocusedPoll(),
+  });
+  const choice = overviewChoice({
+    role,
+    campaigns: campaignsQ.data?.campaigns,
+    listLoading: campaignsQ.isLoading,
+  });
+  // Remember the last decision, so "deciding" only ever shows before the FIRST one. Coming back after
+  // the list aged out of the cache must not unmount OrgOverview and reset its range and Archived
+  // toggle. (Setting state during render is allowed for a component's own state; React re-runs this
+  // render once.)
+  const [last, setLast] = useState(null);
+  if (choice && choice !== last) setLast(choice);
+  const shown = choice ?? last;
+
+  if (!shown) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <AdminHeaderRow caption={caption} />
+        <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
+      </SafeAreaView>
+    );
+  }
+  if (shown.startsWith('sole:')) {
+    const id = shown.slice('sole:'.length);
+    const hasArchived = (campaignsQ.data?.campaigns || []).some(isArchivedCampaign);
+    return (
+      <CampaignHome
+        key={id}
+        campaignId={id}
+        embedded
+        caption={caption}
+        footer={hasArchived ? <ArchivedGroup /> : null}
+      />
+    );
+  }
+  return <OrgOverview caption={caption} extraRefetch={role === 'lead' ? campaignsQ.refetch : null} />;
+};
+
+export default AdminOverview;
+
+// The archived campaigns, revealed on demand — owns its toggle and its query (all-time data, so no
+// range). Rendered in the org Overview, and under a team lead's embedded home when they have any.
+// Its rows open the campaign screen, whose "‹ Overview" comes back here.
+const ArchivedGroup = () => {
+  const { colors } = useTheme();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const archivedQ = useQuery({
+    queryKey: ARCHIVED_KEY,
+    queryFn: () => api(`/admin/reports/campaign-rollup?scope=archived&tz=${deviceTimezone()}`),
+    enabled: open,
+  });
+  const archived = archivedQ.data?.campaigns || [];
+  return (
+    <>
+      {/* A reveal, not a navigation — so it is an action row, and it carries no chevron. */}
+      <SectionHeader title="Archived" />
+      <InsetGroup>
+        <InsetActionRow
+          label={open ? 'Hide archived campaigns' : 'Show archived campaigns'}
+          onPress={() => setOpen((v) => !v)}
+        />
+        {open && archivedQ.isLoading ? <InsetNoteRow loading /> : null}
+        {open && !archivedQ.isLoading && archived.length === 0 ? (
+          <InsetNoteRow>No archived campaigns.</InsetNoteRow>
+        ) : null}
+        {open && !archivedQ.isLoading
+          ? archived.map((c) => (
+              <InsetNavRow
+                key={c.id}
+                label={c.name}
+                labelLines={2}
+                badge={{ text: 'Read-only', bg: colors.warnBg, fg: colors.warnFg }}
+                value={fmt(c.knocks)}
+                unit={`${fmt(c.households)} households · ${c.knockedPct ?? 0}% knocked`}
+                hint="Opens this archived campaign, read-only"
+                onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
+              />
+            ))
+          : null}
+      </InsetGroup>
+    </>
+  );
+};
+
+// The org Overview: every active campaign added together, then one row per campaign.
+//   caption       the header's role label, from the decider
+//   extraRefetch  a team lead's campaigns-list refetch, so pulling this list can also turn it into
+//                 their embedded home
+function OrgOverview({ caption, extraRefetch }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const router = useRouter();
-  const [user, setUser] = useState(null);
-  const [archivedOpen, setArchivedOpen] = useState(false);
+  const qc = useQueryClient();
 
   // Anchor date presets to the org's active campaign timezone (not the device clock).
   const [tzCampaign, setTzCampaign] = useState(undefined);
@@ -105,10 +224,13 @@ export default function AdminOverview() {
   // to the campaign tz once it resolves (below). Never leaves the range unresolved.
   const tz = tzCampaign?.timeZone || deviceTimezone();
 
-  const [range, setRange] = useState(() => {
+  // What the admin picked; everything reads `range` — Today pinned to the current day, so totals left
+  // on screen past midnight move to the new day instead of stretching over two (dateRanges.js).
+  const [pickedRange, setRange] = useState(() => {
     const r = rangeFor('today', null, deviceTimezone());
     return { preset: 'today', from: r.from, to: r.to };
   });
+  const range = effectiveRange(pickedRange, useTodayInTz(tz));
   const rangeTouchedRef = useRef(false);
   function onRangeChange(v) {
     rangeTouchedRef.current = true;
@@ -116,7 +238,6 @@ export default function AdminOverview() {
   }
 
   useEffect(() => {
-    loadCurrentUser().then((u) => setUser(u));
     loadActiveCampaign().then((c) => setTzCampaign(c || null));
   }, []);
 
@@ -142,16 +263,13 @@ export default function AdminOverview() {
     // refresh on return) whenever another screen covers it.
     ...useFocusedPoll(),
   });
-  // Archived is reviewed as historical data → always all-time.
-  const archivedQ = useQuery({
-    queryKey: ['admin', 'reports', 'campaign-rollup', 'archived'],
-    queryFn: () => api(`/admin/reports/campaign-rollup?scope=archived&tz=${deviceTimezone()}`),
-    enabled: archivedOpen,
-  });
-
+  // The pull also refreshes the Archived group when it's open: a closed group's query is disabled,
+  // so `type: 'active'` skips it — what `archivedOpen ? archivedQ.refetch : null` did before the
+  // group took its own state.
   const { refreshing, onRefresh } = useRefresh([
     activeQ.refetch,
-    archivedOpen ? archivedQ.refetch : null,
+    () => qc.refetchQueries({ queryKey: ARCHIVED_KEY, type: 'active' }),
+    extraRefetch,
   ]);
 
   const cumulative = activeQ.data?.cumulative || {};
@@ -224,14 +342,10 @@ export default function AdminOverview() {
     seamNames.length <= 2
       ? seamNames.join(' and ')
       : `${seamNames.slice(0, 2).join(', ')} and ${seamNames.length - 2} more`;
-  const archived = archivedQ.data?.campaigns || [];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <View style={styles.header}>
-        <Logo size={26} />
-        <Text style={styles.headerLabel}>Admin{user?.isSuperAdmin ? ' · super' : ''}</Text>
-      </View>
+      <AdminHeaderRow caption={caption} />
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
@@ -347,32 +461,7 @@ export default function AdminOverview() {
             )}
           </InsetGroup>
 
-          {/* A reveal, not a navigation — so it is an action row, and it carries no chevron. */}
-          <SectionHeader title="Archived" />
-          <InsetGroup>
-            <InsetActionRow
-              label={archivedOpen ? 'Hide archived campaigns' : 'Show archived campaigns'}
-              onPress={() => setArchivedOpen((v) => !v)}
-            />
-            {archivedOpen && archivedQ.isLoading ? <InsetNoteRow loading /> : null}
-            {archivedOpen && !archivedQ.isLoading && archived.length === 0 ? (
-              <InsetNoteRow>No archived campaigns.</InsetNoteRow>
-            ) : null}
-            {archivedOpen && !archivedQ.isLoading
-              ? archived.map((c) => (
-                  <InsetNavRow
-                    key={c.id}
-                    label={c.name}
-                    labelLines={2}
-                    badge={{ text: 'Read-only', bg: colors.warnBg, fg: colors.warnFg }}
-                    value={fmt(c.knocks)}
-                    unit={`${fmt(c.households)} households · ${c.knockedPct ?? 0}% knocked`}
-                    hint="Opens this archived campaign, read-only"
-                    onPress={() => router.push(`/(app)/admin/campaign/${c.id}`)}
-                  />
-                ))
-              : null}
-          </InsetGroup>
+          <ArchivedGroup />
         </View>
       </ScrollView>
 
@@ -390,15 +479,6 @@ function makeStyles(t) {
   const { colors, type } = t;
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerLabel: { ...type.caption, color: colors.textSecondary },
 
   seamBanner: {
     backgroundColor: colors.warnBg,

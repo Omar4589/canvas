@@ -55,9 +55,20 @@ When you cut a round, checkboxes appear above **Generate** whenever there's anyt
   complexes and homes a lead confirmed are never left out.
 
 All are **on by default** and all are independent — tick any or none. Either way it's non-destructive:
-the homes stay in the campaign and in every count, they're just left out of *this round's* books, and the
-first two come back automatically if someone re-records the door later. Homes **set aside** in Pin Fixes
-are out of every cut until someone brings them back.
+the homes stay in the campaign and in every count, they're just left out of *this round's* books. The
+first two read each door's whole history, the same way **Target doors** does: a restricted-access home is
+one with a Restricted entry in **any** round, from the desk or at the door, and it stays out — even if a
+canvasser later got in or someone there was later surveyed — until you **Unmark** the desk mark or
+**Unknock** the entry on Door Outcomes; a no-soliciting home comes back once a later visit records an
+answer or a survey (a later not-home alone doesn't clear it). Homes **set aside** in Pin Fixes are out of
+every cut until someone brings them back.
+
+They apply **on top of** the **Target doors** panel too. With a target ticked, the map fades every door the
+cut would leave out — because its all-rounds status isn't ticked, because **Exclude doors** removed it, or
+because one of these boxes left it out — and the count line under the panel names each box's share. Click
+any faded house to see its status across all rounds, its last visit, and the exact reason. The map-spot
+box stays on screen for the whole round (reading "none in this target" when the current target has no
+such home), so it can't disappear under one tick and come back ticked under the next.
 
 **Remove apartments** (shown until you accept the round's books) holds out apartment units: pick a number of units, and the
 line under it says exactly what the button will take — *"Holds out 441 homes on 61 spots (4+ units at

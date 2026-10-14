@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useSignOut } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import PasswordRequirements from '../components/PasswordRequirements.jsx';
 import { isStrongPassword, passwordProblem } from '../lib/validators.js';
@@ -10,7 +10,8 @@ import { Card, Button, Input } from '../components/ui/index.js';
 const labelCls = 'block text-xs font-semibold text-fg-muted';
 
 export default function ProfilePage() {
-  const { user, activeMembership, updateProfile, changePassword, logout } = useAuth();
+  const { user, activeMembership, updateProfile, changePassword } = useAuth();
+  const signOut = useSignOut();
 
   useEffect(() => {
     document.title = 'Your account';
@@ -188,7 +189,7 @@ export default function ProfilePage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button variant="secondary" onClick={logout}>
+        <Button variant="secondary" onClick={signOut}>
           Sign out
         </Button>
       </div>

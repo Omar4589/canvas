@@ -16,6 +16,6 @@ Almost always: **archive**.
 
 ## Reading an archived campaign later
 
-You don't lose access when you archive. On the web, archived campaigns sit in their own section at the bottom of the **Campaigns** page — open one and every tab works as before, just read-only. On your phone, tap **Show archived campaigns** on the admin **Overview**, or open the campaign chip at the top of any admin screen and pick one from under the **Archived · read-only** divider. Either way you'll see an **Archived — read-only** note, and the buttons that would change something are gone rather than failing when you press them.
+You don't lose access when you archive. On the web, archived campaigns sit in their own section at the bottom of the **Campaigns** page — open one and every tab works as before, just read-only. On your phone, tap **Show archived campaigns** on the admin **Overview** (if you're a team lead with just one active campaign, Overview *is* that campaign's screen, and **Show archived campaigns** is near its bottom, above **Switch to canvass mode**), or open the campaign chip at the top of any admin screen and pick one from under the **Archived · read-only** divider. Either way you'll see an **Archived — read-only** note, and the buttons that would change something are gone rather than failing when you press them.
 
 See [Creating and managing campaigns](campaigns-manage).

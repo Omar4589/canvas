@@ -2,7 +2,8 @@ import { consoleMemberships, isConsoleRole } from './roles.js';
 
 // Where each console ROLE lands. Org admins & super admins get the org Overview (/admin);
 // team leads are campaign-scoped and have no Overview, so they land on their Campaigns list
-// (/campaigns). Mirrors the server console split (admin/super vs lead) and the App.jsx
+// (/campaigns) — or, with exactly one active campaign, straight inside it (consoleHomePath's
+// homeCampaignId, below). Mirrors the server console split (admin/super vs lead) and the App.jsx
 // guards. Keep this the ONE source of truth for post-auth landing so a lead is never dumped
 // on /admin.
 //
@@ -23,11 +24,18 @@ export function homePathForRole(role) {
 // build super-admin rows with a synthetic role of 'super_admin', which homePathForRole
 // deliberately does not know about; they call THIS instead.
 //
+// A team lead with exactly ONE active campaign in the org lands inside it rather than on a list with
+// one card in it. The server works that out (routes/auth.js loadMembershipsForUser) and ships it
+// on the lead's membership row as `homeCampaignId`; it is never set for an admin, and ignored if it
+// were. This is a LANDING rule only — /campaigns stays a real page (it is the only home of a
+// campaign's Edit and Assignments), so nothing may ever redirect /campaigns into the campaign.
+//
 // Returns null only for a non-super user with no console role in that org.
-export function consoleHomePath({ isSuperAdmin = false, role, hasActiveOrg = false } = {}) {
+export const consoleHomePath = ({ isSuperAdmin = false, role, hasActiveOrg = false, homeCampaignId = null } = {}) => {
   if (isSuperAdmin) return hasActiveOrg ? '/admin' : '/super-admin';
+  if (role === 'lead' && homeCampaignId) return `/campaigns/${homeCampaignId}`;
   return homePathForRole(role);
-}
+};
 
 // Where an authenticated user should land — the ONE source of truth shared by the
 // post-login navigation AND the /login redirect-if-already-authenticated guard, so the two
@@ -49,9 +57,11 @@ export function resolveHomePath({ user, memberships = [], activeOrgId } = {}) {
   // A remembered org we can actually use wins. A remembered org we CAN'T use (stale id,
   // demoted since) is ignored here and cleared by AuthContext's self-heal effect.
   const active = consoles.find((m) => m.organizationId === activeOrgId);
-  if (active) return homePathForRole(active.role);
+  if (active) return consoleHomePath({ role: active.role, homeCampaignId: active.homeCampaignId });
 
-  if (consoles.length === 1) return homePathForRole(consoles[0].role);
+  if (consoles.length === 1) {
+    return consoleHomePath({ role: consoles[0].role, homeCampaignId: consoles[0].homeCampaignId });
+  }
   return '/select-org';
 }
 
@@ -65,5 +75,23 @@ export function resolveHomePath({ user, memberships = [], activeOrgId } = {}) {
 export function postAuthPath(args) {
   return resolveHomePath(args) || '/select-org';
 }
+
+// Is this path somebody's console home — /admin, /campaigns, or one campaign's root
+// (/campaigns/<id> with nothing after it)? LoginPage restores a stashed deep link only when the
+// person is landing on their home, never in place of the change-password, org-picker or
+// super-admin routes. Total over any input.
+export const isConsoleHomePath = (path) =>
+  typeof path === 'string' && (path === '/admin' || path === '/campaigns' || /^\/campaigns\/[^/]+$/.test(path));
+
+// The label for a button that takes someone to `path` — one family, so the "you can't open this"
+// and "campaign not found" screens name where they go. Total over any input: a render stub that
+// leaves the path undefined gets today's fallback.
+export const homeLinkLabel = (path) => {
+  if (path === '/campaigns') return 'Go to Campaigns';
+  if (typeof path === 'string' && /^\/campaigns\/[^/]+$/.test(path)) return 'Go to your campaign';
+  if (path === '/super-admin') return 'Go to Control Room';
+  if (path === '/select-org') return 'Choose an organization';
+  return 'Go to Overview';
+};
 
 export { isConsoleRole };

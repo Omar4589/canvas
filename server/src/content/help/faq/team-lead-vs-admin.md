@@ -22,7 +22,7 @@ What stays with an **org admin**:
 
 So a lead runs the operation; an admin owns the organization.
 
-**Where a lead lands in the console:** on **Campaigns** — a lead has no org Overview, so that's their home page. The org-only areas (Voters, Surveys, Tags, Billing) aren't in their navigation. If a lead reaches one of those pages by URL, they'll see an "admin access required" notice with their navigation still on screen — no dead end.
+**Where a lead lands in the console:** a lead has no organization Overview. With one active campaign, they open straight into it; with more than one, or none yet, on **Campaigns**. **‹ Campaigns** at the top of the sidebar always opens the list. The org-only areas (Voters, Surveys, Tags, Billing) aren't in their navigation. If a lead reaches one of those pages by URL, they'll see an "admin access required" notice with their navigation still on screen — no dead end.
 
 **Users, scoped.** In the mobile app a team lead **does** get the Users page — showing only the people on campaigns they manage, never the whole organization. There (and on a campaign's **Team** page in the console) a lead can create canvassers onto their campaign (with an optional coordinator), set **temporary passwords**, **switch canvasser accounts off and back on**, and **edit a canvasser's name, email, and phone** — handy for fixing a typo in an account they created. Two limits worth knowing: a lead can't change anyone's **role**, and they can't touch **admins or fellow leads** at all — the server refuses, not just the app. (And if a canvasser also works with another organization, their login email is locked for everyone — only that person or Doorline support can change it.)
 

@@ -1,7 +1,9 @@
 # Proposal: A team lead with one campaign opens straight into it
 
-> **Status: PLAN v6, after five review rounds, 2026-10-08. Awaiting the owner's approval; nothing is
-> built.** Line references are to HEAD `b1e0b0d`. One server change (an added field on the sign-in
+> **Status: BUILT 2026-10-13 (uncommitted at time of writing), to plan v6, which the owner approved
+> after five review rounds.** Where the build differs from the plan is listed in
+> [§O, "As built"](#o-as-built-2026-10-13), with what was verified and what still needs the owner's
+> checks. Everything else below is the plan as approved, so line references are to HEAD `b1e0b0d`. One server change (an added field on the sign-in
 > responses), the web console, and a phone update over the air (no new build). Not
 > privacy-affecting, and three existing exposures get smaller on the way (§J). Review history in §N.
 
@@ -17,9 +19,9 @@ A team lead who runs exactly **one active campaign** no longer starts on a list 
 
 - **Web console.** Signing in opens that campaign's **Home**, with the campaign's tabs in the
   sidebar.
-  - The full list is still one click away: **‹ Campaigns** at the top of the sidebar, a
-    **Campaigns** icon at the top of the collapsed icon rail, or **More → ‹ All campaigns** in a
-    narrow window.
+  - The full list is still one click away: **‹ Campaigns** at the top of the sidebar, an **All
+    campaigns** icon (the Campaigns flag) at the top of the collapsed icon rail, or **More → ‹ All
+    campaigns** in a narrow window.
   - The list is where a campaign's **Edit** (name, survey, door goal) and **Assignments** live, and
     where archived campaigns are.
 - **Phone.** The **Overview** tab *is* that campaign's screen, headed by the campaign's name: the
@@ -71,24 +73,27 @@ Small fixes that come with this change and apply to every role:
     back to it, even someone else. The next person could also glimpse the previous person's campaign
     list for a moment. Both are gone.
   - On the phone, tapping **Sign out** on most screens already wiped the numbers and lists the app
-    was holding. Now signing in wipes them too, which covers the other ways out, including the times
-    the app signed you out by itself. Saved and queued doors are never touched.
+    was holding. Signing in now wipes them too (shipped with *Stay signed in*, `f906408`), which
+    covers the other ways out, including the times the app signed you out by itself. Saved and queued
+    doors are never touched.
 - **The campaign box in the web sidebar.**
   - Inside a campaign, the box under **‹ Campaigns** is a dropdown for jumping to another campaign.
     When there's nowhere else to jump, it shows the campaign's name as plain text instead of a
     dropdown with one item.
   - While the list is loading, it shows a grey placeholder bar instead of the word "Campaign".
-  - The collapsed icon rail gains a **Campaigns** icon at the top, so the list is always reachable.
+  - The collapsed icon rail gains an **All campaigns** icon at the top, so the list is always
+    reachable.
 - **Archived campaigns say who can reactivate them.** Everywhere the console and the phone say a
   campaign is archived, the second sentence now reads *An org admin can reactivate it from
-  Campaigns* (on the phone: *…from Campaigns on the web*). Before, it told everyone to reactivate it
-  themselves, which only an org admin can do.
+  Campaigns* (on the phone: *…from Campaigns on the web*; the web map's door-selection bar: *…an org
+  admin can reactivate it to mark doors*). Before, it told everyone to reactivate it themselves, which
+  only an org admin can do. The phone's duplicate-surveys screen keeps its admin-only wording.
 - **The page-you-can't-open button** names where it goes: **Go to Campaigns**, **Go to your
   campaign**, **Go to Control Room**, **Choose an organization**, or **Go to Overview**. The note
   above it for a team lead now reads *Team leads work inside the campaigns they run*.
 - **The phone's campaign screen** (for admins too):
   - you can pull down to refresh;
-  - coming back to it after half a minute, or coming back to the app, refreshes the numbers all
+  - coming back to it, or to the app, after more than half a minute refreshes the numbers all
     together;
   - **Today** moves to the new day at midnight instead of quietly stretching over two days;
   - on a weak signal, sections keep their last numbers. The **By pass** breakdown adds a note that it
@@ -1231,3 +1236,67 @@ many citation and wording corrections are not listed.
 **Where this leaves it.** Round 5 found no blockers. Its two majors (the archived wording on twelve
 screens, the subfolder clean check) are fixed in v6, and the simplifications removed mechanisms
 rather than adding them.
+
+## O. As built (2026-10-13)
+
+Built on HEAD `f906408`, two commits after the plan's `b1e0b0d`. The newer one, *Stay signed in…*,
+reworked sign-in and sign-out on both clients, so the plan was re-checked against it before any code
+was written. Line references above are the plan's; a few moved in `f906408`. For example,
+`loadMembershipsForUser` is now auth.js:56 on, and MapPage's archived `readOnlyReason` is :1966.
+
+**Where the build differs from the plan:**
+1. **Web cache clear (§D.2).** `f906408` already clears the query cache in `login()`, so that part was
+   not added. No second clear was added to `logout()`: that commit deliberately clears at sign-in, and
+   with the sign-out navigate (§D.3) nothing is left on screen to show the old data.
+2. **Phone sign-in clear (§E.7).** Already done by `f906408` (`login.jsx` removes every query but the
+   store-update check before `signIn`), so nothing was changed there.
+3. **`useSignOut` (§D.2)** is a hook exported beside `useAuth`, as planned. The reason given in §D.2 no
+   longer applies: since `f906408` the provider already calls `useLocation()` and re-renders on every
+   navigation. It stays a hook to keep the navigate out of the provider.
+4. **`CampaignSwitcher` (§D.8)** takes `campaignId`, `currentSlug`, `campaigns` and `loaded` — no
+   `currentName`. The name comes from the list it's given, which holds the current campaign whenever the
+   list does; otherwise it reads "Campaign", as planned.
+5. **Setup checklist link (§D.11).** `f906408` added a second warning link, the Pin Fixes step's
+   `/pin-fixes`, which showed the fixed **add on Users →** label too. `warnLink` labels it **open Pin
+   Fixes →** alongside the planned **add on Users →** / **add on Team →**.
+6. **The collapsed rail's "All campaigns" icon (§D.8)** reuses Layout's own `NavItem` (with `end`, so it doesn't
+   light up on every `/campaigns/:id` page).
+
+7. **Privacy record (§J).** §J predates `f906408`, which added item 29 to
+   [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md): web sign-out ends the session server-side, and
+   signing in on the web clears every cached page first. This build keeps both true (`useSignOut` goes
+   through `logout()`, which ends the session on the server; `login()` still clears the cache), and
+   the record makes no claim about what a lead sees on the campaign Home or about the membership
+   shape, so it stays untouched. Of the three exposures §J lists as reduced, the phone sign-in clear
+   shipped with `f906408`; this build adds the other two (web sign-out, the Home's billing notes).
+
+**What was verified, in this session:**
+- **Server.**
+  - `leadHomeCampaign.int.test.js` passes 10 of 10.
+  - Mutation check: with the in-this-org check removed from `loadMembershipsForUser`, the cross-org case
+    and the agreement check fail; restored, they pass.
+  - The suites that read auth responses pass: `multiOrgRoles`, `orgDeleteJob`, `leadWalkthrough`,
+    `sessionInvalidation`, `accountDeletion`, `mailFlow`, `sessionLifetime` and `teamLead` — 109 tests
+    with the new suite.
+  - `npm --prefix server test`: 564 pass, 0 fail (the integration suites skip without a database).
+  - `helpLinks` 3/3 and `help.int` 3/3 after the Help Center edits.
+- **Web.**
+  - `npm --prefix client test`: 650 pass, 0 fail. That includes the new `homePath` cases (19 in the
+    file) and `landingRender.smoke.test.js` (8): CampaignMissing's two targets and the admin fallback,
+    Forbidden's label and hidden duplicate button, and the campaign box's four states.
+  - `npm --prefix client run build` succeeds; its chunk-size warning was already there.
+- **Phone.**
+  - `npm run test:mobile`: 245 pass, 0 fail. That includes `soleActiveCampaign` and `overviewChoice`
+    (the admin-with-a-cached-list case among them), `refreshGroup.test.js` and `dateRanges.test.js`.
+  - The tested modules import nothing.
+  - `npx expo export` for iOS and Android, into the session scratchpad, nothing published: both bundle.
+- **Mobile API.** `npm run audit:mobile-api` flags `auth.js` only. The diff keeps every membership field
+  and adds `homeCampaignId`, so no version-gate bump.
+
+**Not verified: these need the owner.** There's no browser or phone in this session, so none of the
+owner checks in §H has been run. In particular:
+- the web landing and sign-out on a real account;
+- the collapsed rail;
+- the phone's embedded home, its 30 s refresh, pull-to-refresh, midnight roll-over and weak-signal
+  behaviour;
+- the first sign-in after the phone update.

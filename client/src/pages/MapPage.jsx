@@ -1963,7 +1963,7 @@ export default function MapPage() {
               // An archived campaign is read-only server-side (requireActiveCampaign guards the
               // whole turf router), so say so before the confirm ladder, not after it.
               readOnly={selectedCampaign?.isActive === false}
-              readOnlyReason="This campaign is archived — reactivate it to mark doors."
+              readOnlyReason="This campaign is archived — an org admin can reactivate it to mark doors."
               busy={markSelection.isPending ? 'mark' : unmarkSelection.isPending ? 'unmark' : null}
               error={markSelection.error || unmarkSelection.error || null}
               // The DOOR SET is in motion (a filter or viewport fetch is landing), not merely

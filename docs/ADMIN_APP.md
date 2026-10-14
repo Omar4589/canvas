@@ -29,6 +29,8 @@ An admin lands on the **bottom-tab** app (super admins get here by tapping an or
 dashboard). Five tabs:
 
 - **Overview** — the org dashboard: active campaigns, cumulative knocks/surveys/connection, coverage.
+  For a **team lead with exactly one active campaign**, Overview *is* that campaign's screen instead
+  (see *A team lead's one campaign* below).
 - **Timeline** — the live per-canvasser dashboard: hourly knock grid, leaderboard tools
   (search/sort/compare/CSV), overlap warnings. (Replaced the old **Insights** tab; its
   leaderboard folded in here.)
@@ -61,9 +63,10 @@ read-only). Below it, a "Round 1 · 340/600 doors done" line and a "N books · M
 By-book view also has a **Map** chip: the whole round drawn as book outlines (green = assigned, gray =
 not, red = selected) over a neutral dot for every door, so you can see *where* the unassigned turf
 actually sits before handing it out. Tap a book to promote it — its own doors color by status and its
-sheet offers the same assign actions (and **Mark restricted…**, below). This view stays smooth at any
-campaign size — a round of **100k+ doors** renders without freezing the phone, and every door stays an
-individual dot (nothing is clustered).
+sheet offers the same assign actions (and **Mark restricted…**, below). The map opens over the round's
+books and comes back framed on them every time you switch between **List** and **Map** or **By book**
+and **By canvasser**. This view stays smooth at any campaign size — a round of **100k+ doors** renders
+without freezing the phone, and every door stays an individual dot (nothing is clustered).
 
 Tapping a book opens a **map detail**: the book's homes color-coded by status (with its outline, framed
 to the area), tap a house for its address/status/voters, and assign/unassign canvassers right there.
@@ -155,7 +158,9 @@ the vocabulary holds across a whole journey rather than changing shape at each t
   `MetricSheet` affordance the campaign screen uses, so "How these are counted" means the same
   thing at both levels. Each campaign is an `InsetNavRow`: its coverage bar is the row's
   accessory (full width), the mock-GPS nudge is the standard badge, and the connection rate is
-  the tier-colored accent. Archived campaigns sit behind an `InsetActionRow` reveal.
+  the tier-colored accent. Archived campaigns sit behind an `InsetActionRow` reveal (`ArchivedGroup`,
+  which owns its toggle and query). The header is the shared `AdminHeaderRow` (logo + role caption:
+  **Team Lead**, **Admin**, **Admin · super**).
 - **Canvasser detail** (`admin/canvasser/[id]/index.jsx`) — the "Drill down" tile grid is a menu
   of destinations, so it becomes a group of `InsetNavRow`s. **`Export CSV` is now an
   `InsetActionRow`**: it does not navigate, and as a tile it carried a chevron that lied.
@@ -163,6 +168,38 @@ the vocabulary holds across a whole journey rather than changing shape at each t
   `type.title` name (two lines, full width) instead of centering a `type.h3` between two magic
   spacers (`width: 64` and `width: 80`, both deleted); a long campaign name no longer truncates.
   Timeline takes the same left-aligned title without a back link, since it is a tab root.
+
+**A team lead's one campaign (2026-10-13).** A lead whose `/admin/campaigns` list has exactly one
+campaign that isn't archived sees that campaign's screen *as* the Overview tab — the same screen tapping
+its row used to open — headed by the logo, **Team Lead** and the campaign's name, with no back link, and
+any archived campaigns (the `ArchivedGroup` reveal) above **Switch to canvass mode**. With two or more, or
+none, it's the list. Design: [PROPOSAL_LEAD_CAMPAIGN_LANDING.md](PROPOSAL_LEAD_CAMPAIGN_LANDING.md) §E.
+
+- `AdminOverview` is a thin decider: role from `useConsoleRole()` (read once per mount, like the tab
+  gate), the lead's `['admin','campaigns']` list (`enabled: role === 'lead'` — never a bare flag — with
+  `useFocusedPoll()` so it catches up on return), and the plain `overviewChoice()` in
+  [campaignSelection.js](../mobile/lib/campaignSelection.js): `null` (a spinner — never org totals
+  first), `'org'` (`OrgOverview`, today's body) or `'sole:<id>'` (`CampaignHome` embedded). It tests the
+  **role**, not the query's `enabled`: a disabled query still returns cached data, and admins fill that
+  cache from other screens. It decides from data whenever data is present, and remembers its last
+  decision so "deciding" only shows before the first one.
+- The campaign screen's body is [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx),
+  hosted by the hidden tab [campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)
+  with **`key={campaignId}`** — a hidden tab is not remounted per param by expo-router, so before the key
+  the walk-list, crew and pass choices made on one campaign carried into the next one opened.
+
+**The campaign screen keeps itself fresh (for everyone).** Its five report sections — Coverage, Activity
+(rollup), By pass, Top canvassers and Survey results — refresh **together** through
+[useRefreshGroup.js](../mobile/lib/useRefreshGroup.js) (rules in the plain
+[refreshGroup.js](../mobile/lib/refreshGroup.js)), because they're read against each other ("Passes add
+up to the N above"; the door goal vs Coverage): on return to the screen or to the app when any is over
+30 s old, and — embedded, as a lead's home — on one 30 s timer while on screen (the web Home's rate;
+one timer, so they can't drift apart). Pull-to-refresh covers everything. **Today** rolls to the new day
+at midnight (`useTodayInTz` + `effectiveRange`, also on the Overview totals). If a refresh fails, the
+sections keep their last numbers; **By pass** says *Couldn't refresh just now, so these may be behind
+the numbers above* instead of "add up", and shows its error row only when it has nothing to show. An
+archived campaign reads, on every admin screen, *An org admin can reactivate it from Campaigns on the
+web.*
 
 **The conversion is complete — and it now covers the canvasser drawer too.** Every admin screen
 speaks the grammar: More, response-details, Notes, answer-voters, Users (list), GPS audit, Overlaps,
@@ -918,7 +955,15 @@ by book or by canvasser.
   passId, epoch)` names both the request — `GET …/turfs/doors?passId=&slim=1&format=geojson` (the
   `format` param is additive; the plain response is byte-identical without it) — and a cache filename;
   the response is downloaded with `FileSystem.downloadAsync` to `cacheDirectory` and the `ShapeSource`
-  gets the **`file://` URL**, so the native map SDK fetches and parses it **off the JS thread**. The
+  gets the **`file://` URL**, so the native map SDK fetches and parses it **off the JS thread**. That
+  source is **url-only, mounted only once the file exists, and the last child of the MapView**, with
+  `belowLayerID="promoted-home-dot"` on its layer so the dots draw under the promoted dots and the
+  labels. Two rules sit behind that shape, both learned the hard way
+  ([PROPOSAL_BOOKS_MAP_GRAY_SCREEN.md](PROPOSAL_BOOKS_MAP_GRAY_SCREEN.md)): **never remove a prop
+  from a mounted rnmapbox element** (on Android a removed `shape` reaches the library as null, which
+  throws inside a mount and tears the whole app down to a gray screen — conditionally mount the whole
+  element instead), and **`belowLayerID` must name a layer that already exists** (rnmapbox never
+  completes a deferred position on iOS; the child order is what guarantees it). The
   old flow — `api()` `JSON.parse` on the JS thread, 100k feature objects, `shape={…}` serialized
   across the RN bridge — froze the phone at 106k doors. A `ShapeSource` refetches only when its URL
   *changes*, so invalidation bumps `doorEpoch`, which is baked into the filename → native refetches
@@ -926,7 +971,11 @@ by book or by canvasser.
   to-boolean test when no chip narrows (never a ~3k-id literal `in` against 100k features for a
   no-op), the literal `in` only when chips narrow, and the promoted book excluded (its doors come from
   the status-colored layer). Camera fit + promoted density read `promotedQ` (the tapped book's own
-  households) — the round-wide feed never enters JS. JS-only change → OTA-safe.
+  households) — the round-wide feed never enters JS. The camera opens on a seed from the books'
+  bounding box (`lib/mapCamera.js` `cameraSeed`; a neutral default while the round loads) and every
+  map INSTANCE fits itself once: the List/Map and By canvasser toggles unmount the MapView, and a
+  `mapShown` cleanup resets the ready/fitted flags so the next instance fits again instead of sitting
+  at Mapbox's world view. JS-only change → OTA-safe.
 - Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign
   / **archived campaign** — banner, and every assign path suppressed (Select mode and the bulk bar,
   including **Unassign all**; the map sheet's `⋯` restrict menu, both `AssignRow` buttons; the rows
@@ -942,7 +991,9 @@ book's homes for assignment in context. Hidden route, pushed from the Books list
   `getPassStatusMap`). Assignees from `GET …/turfs/:turfId/assignments` (populated `userId`). Roster as
   on the list.
 - Map (SymbolLayer, not MarkerView): status→house-icon pins, optional boundary `FillLayer`+`LineLayer`,
-  selected-pin halo; camera `fitBounds` to the homes (fallback `centroid`).
+  selected-pin halo; camera `fitBounds` to the homes (fallback `centroid`). Framing is keyed on the
+  book (`framedFor` holds the `turfId` this single reused instance last framed), so opening a second
+  book from the list moves the camera to it, cached data included.
 - Tap a house → bottom sheet (address/status + voters via the existing
   `GET …/turfs/household/:householdId`). An **Assign** sheet lists the roster with Assign/Unassign
   (`POST/DELETE …/turfs/:turfId/assignments`), invalidating the list's queries.
@@ -975,7 +1026,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
+| [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen; route [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |
@@ -1120,7 +1171,7 @@ shaped copies or the persisted active-campaign blob to carry the fields instead
 
 | Screen | Shown when in use | Source |
 |---|---|---|
-| [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx) — Activity | a "Not a target" row after the rate: value = the count, unit "doors", sub-line "N% of knocks"; `metricHelp.notTarget` in the shared `MetricSheet` | `/admin/reports/campaign-rollup` row `notTargetKnocks`, over its `knocks` |
+| [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen) — Activity | a "Not a target" row after the rate: value = the count, unit "doors", sub-line "N% of knocks"; `metricHelp.notTarget` in the shared `MetricSheet` | `/admin/reports/campaign-rollup` row `notTargetKnocks`, over its `knocks` |
 | — By pass | "N not target · " ahead of each row's Conn accent | `/admin/reports/knocks-by-pass` rows' `notTargetKnocks` |
 | — Top canvassers | `topCanvasserRows` maps `dayNotTarget: c.notTarget ?? 0` and passes `notTargetInUse` to `CanvasserCard`; the group's *How these are counted* key explains Contact % with `metricHelp.contactRateNotTargetInUse` (names the outcome) instead of `metricHelp.contactRate` (never does) | `/admin/reports/canvassers` row `notTarget` |
 | [admin/timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) | `notTargetInUse` on its `CanvasserCard`s | `/admin/reports/canvasser-timeline` rows' `dayNotTarget` |

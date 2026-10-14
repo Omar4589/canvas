@@ -1,5 +1,6 @@
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext.jsx';
+import { homeLinkLabel } from '../../lib/homePath.js';
 import { Skeleton } from '../ui/index.js';
 
 // The two non-page states of a campaign drill-in, shared by all eight pages so they cannot
@@ -27,15 +28,21 @@ export function CampaignLoading() {
 // distinguishes "no campaign selected" from "campaign not found".
 export function CampaignMissing({ title = 'Campaign not found', hint = '' }) {
   const { homePath } = useAuth();
+  const { campaignId } = useParams();
+  // A team lead with one active campaign has that campaign as their home. If it is the very one
+  // that's missing (grant revoked or campaign deleted since they signed in), going "home" would land
+  // right back here — so send them to the list instead. Only a lead has a campaign home, and a lead's
+  // list is always /campaigns. Any other missing campaign: their home, whatever it is.
+  const target = campaignId && homePath === `/campaigns/${campaignId}` ? '/campaigns' : homePath;
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
       <h1 className="text-xl font-semibold text-fg">{title}</h1>
       {hint && <p className="text-sm text-fg-muted">{hint}</p>}
       <Link
-        to={homePath}
+        to={target}
         className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
       >
-        {homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview'}
+        {homeLinkLabel(target)}
       </Link>
     </div>
   );

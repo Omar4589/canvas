@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { focusManager, useQueryClient } from '@tanstack/react-query';
 import {
   api,
@@ -457,7 +457,18 @@ export function AuthProvider({ children }) {
     putReauth(null);
   };
 
+  // Entering another org drops the previous org's cached pages: most console query keys name
+  // neither the org nor the person (['admin','campaigns'] is the one that bites — a team lead's home
+  // campaign would resolve against the old org's list and read "Campaign not found"). The
+  // platform-level org list is org-agnostic and kept, so the switcher doesn't blank and refetch.
+  // Every caller gets this — the org pickers, the support prompt, the platform switcher — so none
+  // can forget it. Re-picking the org you're already in changes nothing.
   function switchOrg(orgId) {
+    if ((orgId || null) !== (activeOrgId || null)) {
+      queryClient.removeQueries({
+        predicate: (q) => !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations'),
+      });
+    }
     setActiveOrgId(orgId);
     setActiveOrgIdState(orgId);
   }
@@ -555,8 +566,10 @@ export function AuthProvider({ children }) {
   );
   const mustChangePassword = !!user?.mustChangePassword;
   // Post-auth landing for THIS user (see lib/homePath.js): leads have no org Overview, so
-  // they land on /campaigns; admins/super land on /admin. Render-time link/redirect sites
-  // read this instead of hardcoding /admin (which a lead can't reach).
+  // they land on /campaigns — or inside their campaign when they have exactly one active one
+  // (the server's homeCampaignId); admins/super land on /admin. Render-time link/redirect sites
+  // read this instead of hardcoding /admin (which a lead can't reach). It can be a campaign's root,
+  // so compare it with lib/homePath.js helpers (isConsoleHomePath, homeLinkLabel), never by string.
   //
   // ALWAYS a real path — the '/select-org' fallback is load-bearing, do not "clean it up".
   // Six render-time consumers pass homePath straight to <Link to> / navigate() (the
@@ -569,6 +582,7 @@ export function AuthProvider({ children }) {
       isSuperAdmin,
       role: activeMembership?.role,
       hasActiveOrg: !!activeOrgId,
+      homeCampaignId: activeMembership?.homeCampaignId,
     }) || '/select-org';
   // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
   // in the active org's timezone so they read the same for every admin.
@@ -621,3 +635,17 @@ export function useAuth() {
 export function useOrgTimeZone() {
   return useAuth().orgTimeZone;
 }
+
+// The one way a button signs someone out: end the session, then go to a plain sign-in page. The
+// navigate matters — a bare logout() left ProtectedRoute to redirect with `from` set, and the
+// sign-in page then sent whoever signed in NEXT back to the page the last person was on. Both land
+// in one render (BrowserRouter has no transition flag), so `from` is never stashed. A session that
+// ends on its own (run out, revoked) doesn't come through here and still keeps its page.
+export const useSignOut = () => {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  return () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+};

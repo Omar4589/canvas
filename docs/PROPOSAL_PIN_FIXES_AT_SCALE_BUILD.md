@@ -409,7 +409,7 @@ two terms on one field (the `$type` term is what lets the planner use the partia
 ```js
 export const CUTTABLE_PIN = { $or: [{ pinSuspect: { $exists: false } }, { pinSuspect: 'complex' }, { locationConfirmedAt: { $ne: null } }] };
 ```
-beside `cutStatusExclusion`; `cutExclusionFilter({ …, excludeUnplaced })` pushes it into `$and` when
+beside `cutStatusExclusion` *(superseded 2026-10-13: the status clause became the targeting-ladder `_id: $nin` in `cutExclusionParts`, see PASSES_AND_TURF.md)*; `cutExclusionFilter({ …, excludeUnplaced })` pushes it into `$and` when
 `excludeUnplaced` is true. A complex cuts; a vouched home cuts; everything flagged and unvouched is left out.
 
 **Done when** `node --test` is green (pinState has no test today; add `services/households/pinState.test.js`

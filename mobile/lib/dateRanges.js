@@ -14,15 +14,23 @@ export const PRESETS = [
   { key: 'custom', label: 'Custom' },
 ];
 
-// Current date in `tz` as 'YYYY-MM-DD'.
-export function todayInTz(tz) {
+// Current date in `tz` as 'YYYY-MM-DD'. `now` is injectable so the day roll can be tested; every
+// existing caller passes only `tz`.
+export function todayInTz(tz, now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz || 'UTC',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(now);
 }
+
+// The range a screen should actually query: 'today' pinned to the CURRENT today, so a screen left
+// open past midnight doesn't quietly widen into yesterday-plus-today under a "Today" label (the
+// rangeFor('today') value is { from: <the day it was made>, to: null }). The same rule the Timeline
+// applies with its fromDay. Every other preset, and a custom range, comes back unchanged.
+export const effectiveRange = (range, today) =>
+  range?.preset === 'today' && today && range.from !== today ? { ...range, from: today } : range;
 
 // Add n calendar days to a 'YYYY-MM-DD' via UTC math (no tz/DST drift).
 export function shiftDays(ymd, n) {

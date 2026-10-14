@@ -51,4 +51,4 @@ An admin can delete an extra response straight from the expanded card: tap **Del
 
 Replaced responses look different: instead of Delete they read **Preserved**. Tap one to open its full detail — that's where an admin finds **Restore**, which makes those earlier answers current again (the answers they displace are preserved in their place, so nothing is lost either way).
 
-On an **archived** campaign the report still opens and every filter still works, but **Delete** and **Restore** are gone — an archived campaign is read-only, and the server refuses the change even if a button were there. Reactivate it from the web if you genuinely need to remove or restore a response.
+On an **archived** campaign the report still opens and every filter still works, but **Delete** and **Restore** are gone — an archived campaign is read-only, and the server refuses the change even if a button were there. An org admin can reactivate it from Campaigns on the web if a response genuinely needs removing or restoring.

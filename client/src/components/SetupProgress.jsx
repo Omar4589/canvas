@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import NextStepBanner from './NextStepBanner.jsx';
 import { Card, Badge, Button, IconButton, IconX } from './ui/index.js';
 
@@ -25,6 +26,7 @@ const STATUS_BADGE = {
 export default function SetupProgress({ campaignId }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { isOrgAdmin } = useAuth();
   const [showSteps, setShowSteps] = useState(false);
   const [dismissedLocal, setDismissedLocal] = useState(false); // optimistic hide
 
@@ -52,6 +54,20 @@ export default function SetupProgress({ campaignId }) {
   }
   function go(route) {
     navigate(scopedRoute(route));
+  }
+  // Where a step's warning link goes and what it says. The server names one route per warning; the
+  // label used to be a fixed "add on Users →", which also sat on the Pin Fixes warning. And /users is
+  // org administration a team lead can't open — a lead who lands on a new campaign's Home (they do,
+  // with one active campaign) would get "Admin access required" — so a lead's "no canvassers" link
+  // goes to the campaign's Team page, where they can add people.
+  function warnLink(route) {
+    if (route === '/users') {
+      return isOrgAdmin
+        ? { to: scopedRoute(route), label: 'add on Users →' }
+        : { to: `/campaigns/${campaignId}/team`, label: 'add on Team →' };
+    }
+    if (route === '/pin-fixes') return { to: scopedRoute(route), label: 'open Pin Fixes →' };
+    return { to: scopedRoute(route), label: 'open →' };
   }
 
   // Render nothing while the status loads. An already-live campaign resolves this to `null`
@@ -158,11 +174,11 @@ export default function SetupProgress({ campaignId }) {
                         <button
                           type="button"
                           onClick={() =>
-                            navigate(`${scopedRoute(s.warnRoute)}?return=${encodeURIComponent(`/campaigns/${campaignId}`)}`)
+                            navigate(`${warnLink(s.warnRoute).to}?return=${encodeURIComponent(`/campaigns/${campaignId}`)}`)
                           }
                           className="ml-1 font-medium underline hover:no-underline"
                         >
-                          add on Users →
+                          {warnLink(s.warnRoute).label}
                         </button>
                       )}
                     </span>

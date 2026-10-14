@@ -9,8 +9,9 @@ import { resolveWalkList, isActiveTargetFilter } from '../walklist/resolveWalkLi
 import { computeBoundary, computeCentroid, computeTerritories } from './boundary.js';
 import { computeWalkOrder } from './walkOrder.js';
 import { KNOCKABLE_DOOR_FILTER } from '../canvass/knockableDoorFilter.js';
+import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
-import { getPassStatusMapMulti } from '../passes/passStatus.js';
+import { getTargetingStatusMap } from '../walklist/targetingStatus.js';
 
 const CUT_COLUMNS = {
   location: 1,
@@ -45,20 +46,6 @@ const byId = (docs) => docs.sort((a, b) => {
 // Orchestrates a turf generation run: load the pass's walk-list households,
 // dispatch to the cut mode, compute boundary/centroid/walk-order per book, and
 // persist Turf docs as drafts atomically (clearing prior drafts for the pass so
-// Admin-reviewed second-pass removal. Two independent cut-time toggles both exclude by
-// Household.status, so they MUST share one `$nin` — two `{ status: { $ne } }` spreads into the
-// same object would silently keep only the last one, quietly re-cutting the doors the admin
-// asked to drop. Non-destructive either way: the homes stay in the campaign and its counts, and
-// re-enter scope automatically the moment they're re-dispositioned.
-//   excludeRestricted   — inaccessible homes (gate/locked building; never reached the door)
-//   excludeNoSoliciting — a posted sign ended the visit (the door WAS reached; still a knock)
-export function cutStatusExclusion({ excludeRestricted, excludeNoSoliciting } = {}) {
-  const drop = [];
-  if (excludeRestricted) drop.push('restricted');
-  if (excludeNoSoliciting) drop.push('no_soliciting');
-  return drop.length ? { status: { $nin: drop } } : {};
-}
-
 // "Leave out homes without a reliable map spot" (Turf Cutting's toggle; docs/PROPOSAL_PIN_FIXES_AT_SCALE_BUILD.md
 // S3.4, S10.6). A door cuts when it carries no pin flag, when its flag is 'complex' (the spot IS right —
 // a complex cuts as one point, like a tower), or when a lead has vouched for it. Everything flagged and
@@ -68,58 +55,60 @@ export const CUTTABLE_PIN = Object.freeze({
   $or: [{ pinSuspect: { $exists: false } }, { pinSuspect: 'complex' }, { locationConfirmedAt: { $ne: null } }],
 });
 
-// Doors the effort still considers unreachable — the per-round truth the global-status toggle
-// above cannot see.
+// Admin-reviewed second-pass removal: the two cut-time boxes.
+//   excludeRestricted   — inaccessible homes (gate/locked building; never reached the door)
+//   excludeNoSoliciting — a posted sign ended the visit (the door WAS reached; still a knock)
+// Both are judged by the TARGETING ladder (utils/statusPrecedence.js resolveTargetingStatus) over
+// the door's whole history — the same rule a Target doors tick reads — never by Household.status
+// and never by one round. The owner's ruling (2026-10-13), "restricted wins every time": any
+// Restricted entry in any round, desk or field, even one a canvasser later knocked through or a
+// survey later completed, keeps the home out of every cut with the box on, until the mark is
+// unmarked (desk) or the entry unknocked (Door Outcomes). Two earlier rules this replaces, so the
+// history is not re-learned: a bare `status: { $nin }` on Household.status (completion-sticky, so
+// a home surveyed in round 1 and desk-marked in round 2 was cut straight back in — the 2026-08-24
+// bug), and the per-round fix that judged each mark in the round holding it (right for the phones,
+// but blind to another walk list's rounds after a move, and it cut a superseded mark back in).
+// Non-destructive: the homes stay in the campaign and in every count.
 //
-// WHY THIS EXISTS. `Household.status` is resolved across ALL rounds with a STICKY completion
-// (services/canvass/status.js → utils/statusPrecedence.js): one survey, in any round, ever, pins
-// it to 'surveyed' permanently. So a gated home surveyed once in Round 1 and then marked
-// Restricted in Round 2 has a live, counted, console-visible mark and a global status of
-// 'surveyed' — and `cutStatusExclusion` above, which filters on that global value, cut it
-// straight back into Round 3 with "Exclude restricted-access homes" ticked. The published
-// promise that the toggle "picks it up on the next cut" was false in exactly that case.
-//
-// THE ROUND THAT DECIDES is the one holding the door's NEWEST restricted row, not the effort's
-// newest round. Marks normally live on the ACTIVE round while the round being cut is a fresh
-// draft with no rows at all, so judging by "the latest round" would find nothing and re-open the
-// very hole this closes. Each door is therefore judged in its own round: if that round still
-// resolves to `restricted`, the door is excluded; if a later field row out-voted it there, the
-// door is cut back in — the crew got in, so the home is reachable.
-//
-// Bounded by the RESTRICTED ROWS, never by the effort's doors: one aggregate over
-// { campaignId, passId ∈ non-archived rounds, actionType:'restricted' } yields the only doors
-// that could qualify (a small minority of any ledger) with the round to judge each in, and one
-// status resolve covers that set. Desk and field marks both count — the toggle's promise is
-// about doors nobody can reach, not about who said so.
-export async function restrictedDoorIdsForEffort({ campaignId, effortId, campaignType }) {
-  if (!effortId) return [];
-  const passes = await Pass.find({ campaignId, effortId, status: { $ne: 'archived' } }, { _id: 1 }).lean();
-  if (!passes.length) return [];
-  const passIds = passes.map((p) => p._id);
-  const newest = await CanvassActivity.aggregate([
-    { $match: { campaignId, passId: { $in: passIds }, actionType: 'restricted' } },
-    { $sort: { timestamp: -1 } },
-    { $group: { _id: '$householdId', passId: { $first: '$passId' } } },
-  ]);
-  if (!newest.length) return [];
-  const statuses = await getPassStatusMapMulti(
-    passIds,
-    newest.map((r) => r._id),
-    campaignType
-  );
-  return newest
-    .filter((r) => statuses.get(`${r.passId}|${r._id}`)?.status === 'restricted')
-    .map((r) => r._id);
+// Bounded by the MARKS, never by the effort's doors: only a door with a restricted or no-soliciting
+// row can read either status (the ladder's rungs 1 and 3), so the candidates are the campaign's
+// doors with such a row — a few hundred on a big campaign — narrowed to the doors asked for (an
+// effort, or a `filter`), and the ladder runs over those alone. Enumerating the effort's doors here
+// instead was measured at ~400 ms and ~40 MB per preview tick at 25k doors, i.e. seconds and the
+// whole dyno at 250k (round-1 review, 2026-10-14).
+export async function offLimitsDoorIds({ campaignId, effortId, campaignType, filter = null } = {}) {
+  const restricted = [];
+  const noSoliciting = [];
+  const marked = await CanvassActivity.distinct('householdId', {
+    campaignId,
+    actionType: { $in: ['restricted', 'no_soliciting'] },
+  });
+  if (!marked.length) return { restricted, noSoliciting };
+  // $and, so a `filter` that already owns `_id` (a targeted rollup's `$in`) keeps it.
+  const scope = filter || { campaignId, effortId, isActive: true };
+  const candidates = (await Household.find({ $and: [scope, { _id: { $in: marked } }] }, { _id: 1 }).lean()).map((h) => h._id);
+  const map = await getTargetingStatusMap(campaignId, candidates, campaignType);
+  for (const id of candidates) {
+    const status = map.get(String(id))?.status;
+    if (status === 'restricted') restricted.push(id);
+    else if (status === 'no_soliciting') noSoliciting.push(id);
+  }
+  return { restricted, noSoliciting };
 }
 
-// The cut's status exclusions as $and CLAUSES rather than a spread fragment.
+// The cut's exclusions as $and CLAUSES rather than a spread fragment.
 //
 // It must be `$and` and not a spread: two of the three cut filters already own an `_id` key
 // (`addSupplementalBooks`' `$nin: alreadyBooked`, and the preview route's `$in: householdIds`),
-// so returning `{ _id: { $nin } }` to be spread would silently clobber one of them — the exact
-// failure the `status` comment above warns about, one key over. Neither call site uses `$and`
-// for anything else, and each merges this once.
-export async function cutExclusionFilter({
+// so returning `{ _id: { $nin } }` to be spread would silently clobber one of them. Neither call
+// site uses `$and` for anything else, and each merges this once.
+//
+// `cutExclusionParts` is the builder for a caller that must also NAME the doors the boxes removed
+// (the target preview's "why is this door faded"): `filter` is the cut's own clauses,
+// `filterWithoutUnplaced` the same minus the pin clause (the "reliable map spot" box's own delta),
+// and `restrictedIds` / `noSolicitingIds` the doors each box dropped. `cutExclusionFilter` is its
+// `filter`, so every cut keeps calling one builder.
+export async function cutExclusionParts({
   campaignId,
   effortId,
   campaignType,
@@ -128,14 +117,26 @@ export async function cutExclusionFilter({
   excludeUnplaced,
 } = {}) {
   const clauses = [];
-  const status = cutStatusExclusion({ excludeRestricted, excludeNoSoliciting });
-  if (status.status) clauses.push(status);
-  if (excludeRestricted) {
-    const ids = await restrictedDoorIdsForEffort({ campaignId, effortId, campaignType });
-    if (ids.length) clauses.push({ _id: { $nin: ids } });
+  let restrictedIds = [];
+  let noSolicitingIds = [];
+  if (excludeRestricted || excludeNoSoliciting) {
+    const off = await offLimitsDoorIds({ campaignId, effortId, campaignType });
+    if (excludeRestricted) restrictedIds = off.restricted;
+    if (excludeNoSoliciting) noSolicitingIds = off.noSoliciting;
+    const drop = [...restrictedIds, ...noSolicitingIds];
+    if (drop.length) clauses.push({ _id: { $nin: drop } });
   }
-  if (excludeUnplaced) clauses.push(CUTTABLE_PIN);
-  return clauses.length ? { $and: clauses } : {};
+  const and = (list) => (list.length ? { $and: list } : {});
+  return {
+    filter: and(excludeUnplaced ? [...clauses, CUTTABLE_PIN] : clauses),
+    filterWithoutUnplaced: and(clauses),
+    restrictedIds,
+    noSolicitingIds,
+  };
+}
+
+export async function cutExclusionFilter(args = {}) {
+  return (await cutExclusionParts(args)).filter;
 }
 
 // Wipe a pass's DRAFT books cleanly: drop their assignments and clear the
@@ -168,6 +169,20 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'loading', pct: 5 });
 
+  // Targeted follow-up round: restrict the universe to the effort's doors matching
+  // a walk-list-shaped filter (knock status + survey answers, minus its exclude
+  // branch). The existing fullyVoted/fullyDnc/excludedFromTurf/coords exclusions
+  // still apply (intersection). The active check is shared with the resolver.
+  // Resolved first, so a degenerate exclusion refuses before any filter is built.
+  const targeted = isActiveTargetFilter(params.targetFilter);
+  const resolved = targeted ? await resolveWalkList(campaign, params.targetFilter, { effortId: pass.effortId }) : null;
+  // The admin asked to exclude doors but every exclude condition was unusable —
+  // cutting anyway would silently send canvassers to the doors they removed. Fail
+  // the job loudly instead (the throw surfaces via the generation job status).
+  if (resolved?.excludeDegenerate) {
+    throw new Error('The exclusion filter has no valid conditions — fix or remove it, then re-cut');
+  }
+
   // A round cuts from its EFFORT's owned households (Household.effortId). Skip
   // fully-voted doors (everyone there already voted early) — they're not knockable,
   // so including them would balance books on dead doors. Mirrors the canvasser list.
@@ -185,24 +200,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
       excludeUnplaced: params.excludeUnplaced,
     })),
   };
-
-  // Targeted follow-up round: restrict the universe to the effort's doors matching
-  // a walk-list-shaped filter (knock status + survey answers, minus its exclude
-  // branch). The existing fullyVoted/fullyDnc/excludedFromTurf/coords exclusions
-  // still apply (intersection). The active check is shared with the resolver.
-  const targeted = isActiveTargetFilter(params.targetFilter);
-  if (targeted) {
-    const { householdIds, excludeDegenerate } = await resolveWalkList(campaign, params.targetFilter, {
-      effortId: pass.effortId,
-    });
-    // The admin asked to exclude doors but every exclude condition was unusable —
-    // cutting anyway would silently send canvassers to the doors they removed. Fail
-    // the job loudly instead (the throw surfaces via the generation job status).
-    if (excludeDegenerate) {
-      throw new Error('The exclusion filter has no valid conditions — fix or remove it, then re-cut');
-    }
-    baseFilter._id = { $in: householdIds };
-  }
+  if (resolved) baseFilter._id = { $in: resolved.householdIds };
   // Record (or clear) what this round targeted — for reproducibility + a label.
   await Pass.updateOne({ _id: passId }, { $set: { targetFilter: targeted ? params.targetFilter : null } });
 
@@ -360,13 +358,24 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
     { householdIds: 1 }
   ).lean();
   const alreadyBooked = ownBooks.flatMap((t) => t.householdIds || []);
+  // A targeted round only ever wants its matching doors: resolve the pass's own
+  // recorded targetFilter (exclude branch included) and constrain to it. Without
+  // this, a supplemental book would sweep up every bookless door — including the
+  // ones the target skipped or the exclusion deliberately removed. A genuinely new
+  // door still flows in (it's unknocked and has no survey answers, so it matches
+  // the usual follow-up targets and can't match an answer-based exclusion).
+  const resolved = isActiveTargetFilter(pass.targetFilter)
+    ? await resolveWalkList(campaign, pass.targetFilter, { effortId: pass.effortId })
+    : null;
+  if (resolved && !resolved.householdIds.length) return { added: 0, bookCount: 0, bookIds: [] };
+
   const baseFilter = {
     campaignId,
     effortId: pass.effortId,
     ...(alreadyBooked.length ? { _id: { $nin: alreadyBooked } } : {}),
     ...KNOCKABLE_DOOR_FILTER,
     'location.coordinates': { $exists: true, $ne: null },
-    // $and, so the restricted-door exclusion cannot collide with the `_id` above.
+    // $and, so the box exclusions cannot collide with the `_id` above.
     ...(await cutExclusionFilter({
       campaignId,
       effortId: pass.effortId,
@@ -376,20 +385,11 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
       excludeUnplaced,
     })),
   };
-
-  // A targeted round only ever wants its matching doors: resolve the pass's own
-  // recorded targetFilter (exclude branch included) and constrain to it. Without
-  // this, a supplemental book would sweep up every bookless door — including the
-  // ones the target skipped or the exclusion deliberately removed. A genuinely new
-  // door still flows in (it's unknocked and has no survey answers, so it matches
-  // the usual follow-up targets and can't match an answer-based exclusion).
-  if (isActiveTargetFilter(pass.targetFilter)) {
-    const { householdIds } = await resolveWalkList(campaign, pass.targetFilter, { effortId: pass.effortId });
-    if (!householdIds.length) return { added: 0, bookCount: 0, bookIds: [] };
+  if (resolved) {
     // Compose with the already-booked exclusion above — assigning `_id` twice would
     // silently drop whichever condition wrote first.
     const booked = new Set(alreadyBooked.map(String));
-    const fresh = householdIds.filter((id) => !booked.has(String(id)));
+    const fresh = resolved.householdIds.filter((id) => !booked.has(String(id)));
     if (!fresh.length) return { added: 0, bookCount: 0, bookIds: [] };
     baseFilter._id = { $in: fresh };
   }

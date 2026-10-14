@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ORG_NAV, CAMPAIGN_NAV, CAMPAIGN_NAV_GROUPS, SUPER_NAV } from './navItems.js';
 import { navIcon } from './navIcons.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useSignOut } from '../auth/AuthContext.jsx';
 import { api } from '../api/client.js';
 import Logo from './Logo.jsx';
 
@@ -43,7 +43,8 @@ function sheetLinkClass({ isActive }) {
 }
 
 export default function BottomNav() {
-  const { user, logout, isSuperAdmin, isLead } = useAuth();
+  const { user, isSuperAdmin, isLead } = useAuth();
+  const signOut = useSignOut();
   const [open, setOpen] = useState(false);
   const campaignMatch = useMatch('/campaigns/:campaignId/*');
   const inCampaign = !!campaignMatch;
@@ -223,7 +224,7 @@ export default function BottomNav() {
               <button
                 onClick={() => {
                   close();
-                  logout();
+                  signOut();
                 }}
                 className="mt-2 text-xs font-semibold text-brand-accent hover:text-brand-accent"
               >

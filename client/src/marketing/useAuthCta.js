@@ -1,7 +1,8 @@
 import { useAuth } from '../auth/AuthContext.jsx';
 
 // One source of truth for the marketing pages' primary call-to-action. A signed-in
-// visitor is offered their dashboard (homePath — /campaigns for a lead, else /admin); a
+// visitor is offered their dashboard (homePath — /admin for an admin; for a lead, their campaign
+// when they run exactly one active campaign, else /campaigns); a
 // signed-out visitor is offered sign-in. Reuses the app's own auth (useAuth), so the
 // landing page can never disagree with the app about who's logged in. Every CTA on the
 // landing page (nav, hero, cta band, footer) should read from here rather than hardcode

@@ -9,7 +9,7 @@ summary: What the campaign dashboard shows and when to use it.
 tags: dashboard, home, metrics, not a target voter
 ---
 
-The campaign **Home** is your dashboard — the first screen when you drill into a campaign. It does two jobs depending on where the campaign is in its life.
+The campaign **Home** is your dashboard — the first screen when you open a campaign. If you're a team lead who runs just one active campaign, it's also where you land when you sign in. It does two jobs depending on where the campaign is in its life.
 
 Opening a campaign — especially one you just created — can land a beat before the app has finished reading your campaign list. That moment shows a plain grey **loading placeholder**. If you get **"Campaign not found"** and it stays, that's a different thing entirely: see [I created a campaign and it said "Campaign not found"](campaign-not-found-after-creating).
 

@@ -31,6 +31,7 @@ const { Pass } = await import('../src/models/Pass.js');
 const { Household } = await import('../src/models/Household.js');
 const { Voter } = await import('../src/models/Voter.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { Turf } = await import('../src/models/Turf.js');
@@ -72,7 +73,7 @@ before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
   for (const M of [Organization, User, Membership, Subscription, Campaign, Effort, Pass,
-    Household, Voter, SurveyResponse, SurveyTemplate, SavedSearch, Turf]) {
+    Household, Voter, SurveyResponse, SurveyTemplate, SavedSearch, Turf, CanvassActivity]) {
     await M.deleteMany({});
   }
 
@@ -144,8 +145,12 @@ before(async () => {
     roundNumber: 2, name: 'Pass 2', status: 'active',
   });
 
-  // Twelve doors, each one edge of the contract (statuses are set directly — the
-  // resolver reads Household.status; no report endpoint here needs the ledger).
+  // Twelve doors, each one edge of the contract. A door's status is set directly AND backed by
+  // the knock row that would have produced it: since 2026-10-13 a status tick reads the LEDGER
+  // (the all-rounds targeting ladder, utils/statusPrecedence.js), not Household.status, so a
+  // "surveyed" door with no survey_submitted row would read unknocked here and be swept into
+  // every unknocked/not-home target. H11 deliberately keeps no row: it stands for a door whose
+  // only mark is a response under the OLD template, and it must survive the exclude side.
   //   H1  unknocked                      → include via status
   //   H2  not_home                       → include via status
   //   H3  Support, no sign answer        → include via answer, kept
@@ -181,6 +186,15 @@ before(async () => {
     mk(11),
     mk(12, { status: 'surveyed', excludedFromTurf: true }),
   ]);
+
+  // The knock rows behind the statuses above (see the comment on the twelve doors).
+  const knock = (home, actionType) => CanvassActivity.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: effort._id, passId: p2._id,
+    householdId: home._id, userId: admin._id, actionType,
+    location: { lat: 28.47, lng: -82.5 }, timestamp: new Date('2026-07-01T13:00:00Z'),
+  });
+  await knock(h2, 'not_home');
+  for (const home of [h3, h4, h5, h6, h7, h8, h12]) await knock(home, 'survey_submitted');
 
   let seq = 0;
   const voter = (home, extra = {}) => Voter.create({
@@ -412,14 +426,23 @@ test('7. /target-preview: M counts only doors the CUT would have walked; preview
   assert.equal(rDnc.json.voterCount, beforeCount - 1, 'the flagged voter dropped out');
   await Voter.updateOne({ _id: v3._id }, { $set: { doNotContact: null } });
 
-  // excludeRestricted now reaches the preview, so its count matches the cut.
+  // excludeRestricted now reaches the preview, so its count matches the cut. The box reads the
+  // LEDGER (the targeting ladder — any Restricted row, any round), so the fixture writes the desk
+  // mark a restricted door really carries, not just the status field.
+  const mark = await CanvassActivity.create({
+    organizationId: ctx.org._id, campaignId: campaign._id, effortId: ctx.effort._id, passId: p2._id,
+    householdId: h3._id, userId: ctx.admin._id, actionType: 'restricted', via: 'bulk',
+    location: { lat: 28.47, lng: -82.5 }, timestamp: new Date('2026-07-02T13:00:00Z'),
+  });
   await Household.updateOne({ _id: h3._id }, { $set: { status: 'restricted' } });
   const rOn = await call(path, {
     method: 'POST', body: { passId: String(p2._id), filter: HD54(), excludeRestricted: true },
   });
   const rOff = await call(path, { method: 'POST', body: { passId: String(p2._id), filter: HD54() } });
   assert.equal(rOn.json.doorCount, rOff.json.doorCount - 1, 'the restricted door is previewed out');
+  assert.deepEqual(rOn.json.leftOut.restricted, [String(h3._id)], 'and the preview names it as the box\'s doing');
   // Restore rather than reorder — later tests must not depend on this one.
+  await CanvassActivity.deleteOne({ _id: mark._id });
   await Household.updateOne({ _id: h3._id }, { $set: { status: 'surveyed' } });
 });
 

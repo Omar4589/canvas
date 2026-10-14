@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useSignOut } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/useTheme.js';
 import { resolveMenuPosition } from '../lib/rowMenuPosition.js';
 import { Avatar } from './ui/Avatar.jsx';
@@ -17,7 +17,8 @@ import { IconChevronUpDown, IconHelp, IconMoon, IconSignOut, IconSun, IconUser }
 // beside the rail when collapsed, sharing the sidebar's left edge when expanded. ui/Popover's
 // Popover is not reusable for this — it hard-codes `top: r.bottom + 6` and cannot open upward.
 export default function AccountMenu({ collapsed }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const signOut = useSignOut();
   const { dark, toggle: toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [anchor, setAnchor] = useState(null); // the trigger's rect at open time
@@ -160,7 +161,7 @@ export default function AccountMenu({ collapsed }) {
                 label="Sign out"
                 onClick={() => {
                   close();
-                  logout();
+                  signOut();
                 }}
                 className="text-brand-accent hover:bg-brand-tint hover:text-brand-hover"
               />

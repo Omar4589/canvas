@@ -34,7 +34,7 @@ const { ExportJob } = await import('../src/models/ExportJob.js');
 const { getPassStatusMap } = await import('../src/services/passes/passStatus.js');
 const { computeCampaignStats } = await import('../src/services/reports/campaignCounters.js');
 const { monthlyStatement, currentMonth } = await import('../src/services/billing/statement.js');
-const { cutStatusExclusion } = await import('../src/services/turf/generateTurf.js');
+const { cutExclusionFilter } = await import('../src/services/turf/generateTurf.js');
 const { processExportJob } = await import('../src/services/export/exportProcessor.js');
 const { openArtifactDownloadStream } = await import('../src/services/export/exportArtifactStore.js');
 const { DESK_RESTRICT_MATCH, buildDeskRestrictRow, removeDeskRestrict } = await import('../src/services/canvass/deskRestrict.js');
@@ -518,8 +518,11 @@ test('14. unmark: field marks never touched; desk rows removed by exact round; n
 });
 
 test('15. the cut: Exclude restricted drops a single-home mark; supplemental and book counts include it (Option B)', { skip }, async () => {
+  const excludeRestricted = await cutExclusionFilter({
+    campaignId: ctx.camp._id, effortId: ctx.e1._id, campaignType: 'survey', excludeRestricted: true,
+  });
   assert.strictEqual(
-    await Household.countDocuments({ _id: ctx.d9._id, ...cutStatusExclusion({ excludeRestricted: true }) }),
+    await Household.countDocuments({ _id: ctx.d9._id, ...excludeRestricted }),
     0,
     'd9 is out of the next cut once excluded'
   );

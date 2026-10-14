@@ -57,12 +57,9 @@ export default function SupportAccessGate() {
   // organization — which is also the honest state to be in.
   function decline() {
     setOrg(null);
+    // switchOrg drops the org-scoped cache and keeps the platform org list, so the switcher doesn't
+    // blank and refetch on the way out (AuthContext).
     switchOrg(null);
-    // Drop the org-scoped cache but KEEP the platform org list, or the switcher blanks and refetches
-    // on the way out. Same predicate OrgSwitcher.resetOrgScopedCache uses.
-    qc.removeQueries({
-      predicate: (q) => !(q.queryKey?.[0] === 'super-admin' && q.queryKey?.[1] === 'organizations'),
-    });
     navigate('/super-admin', { replace: true });
   }
 

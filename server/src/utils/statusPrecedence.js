@@ -34,6 +34,13 @@ export const STATUS_RANK = {
 const COMPLETION_ACTION = { survey: 'survey_submitted', lit_drop: 'lit_dropped' };
 const COMPLETION_STATUS = { survey: 'surveyed', lit_drop: 'lit_dropped' };
 
+// The completion pair for a campaign type, for a ladder built OUTSIDE this file (the aggregation
+// pipeline in services/walklist/targetingStatus.js). null/null for an unknown type.
+export const completionFor = (campaignType) => ({
+  action: COMPLETION_ACTION[campaignType] || null,
+  status: COMPLETION_STATUS[campaignType] || null,
+});
+
 /**
  * Resolve a household's status from a set of CanvassActivity-like rows
  * ({ actionType, timestamp }). Completion is sticky; otherwise latest wins.
@@ -83,6 +90,69 @@ export const resolveStatusFromSummary = (campaignType, summary) => {
   const completion = COMPLETION_ACTION[campaignType];
   if (completion && actions.includes(completion)) return COMPLETION_STATUS[campaignType];
 
+  return ACTION_TO_STATUS[summary?.latestActionType] || 'unknocked';
+};
+
+// ── Targeting status: what a status TICK means on Turf Cutting's Target / Exclude doors, the
+// saved-search builder's Door status filter (no round chosen), and the two cut boxes (Exclude
+// restricted-access / no-soliciting homes) — the logic that decides what a re-cut round or a new
+// walk list includes. It is NOT Household.status (coverage, the Map page, reports) and NOT the
+// per-round ladder the phones show (services/passes/passStatus.js); both stay "latest visit,
+// completion sticky", and a canvasser's own round keeps showing their latest tap.
+//
+// Owner's rule (2026-10-13): look at the door's whole HISTORY, not its latest entry, in this
+// order — one status per door:
+//   1. restricted   — any Restricted entry in any round, desk or field, superseded or not.
+//                     "Restricted wins every time": the way back is Unmark (a desk mark) or
+//                     Unknock (any entry, Door Outcomes), never a later knock or survey.
+//   2. completion   — surveyed / lit_dropped, if ever recorded, whatever came before or after.
+//   3. answered     — refused / wrong_address / no_soliciting / not_target, if any; several →
+//                     the most recent of them (the one place order matters).
+//   4. not_home     — the only entries are not-homes: nobody has ever answered.
+//   5. unknocked    — no entries at all.
+// So a door that refused once and was not-home'd later reads refused; one surveyed in round 1
+// and desk-marked in round 2 reads restricted; one desk-marked and then knocked through still
+// reads restricted.
+export const ANSWERED_ACTIONS = Object.freeze(['refused', 'wrong_address', 'no_soliciting', 'not_target']);
+
+const newestOf = (rows) => {
+  let latest = null;
+  for (const a of rows) if (!latest || new Date(a.timestamp) > new Date(latest.timestamp)) latest = a;
+  return latest;
+};
+
+export function resolveTargetingStatus(campaignType, activities) {
+  const rows = (activities || []).filter((a) => a.actionType !== 'note_added' && ACTION_TO_STATUS[a.actionType]);
+  if (!rows.length) return 'unknocked';
+  if (rows.some((a) => a.actionType === 'restricted')) return 'restricted';
+  const completion = COMPLETION_ACTION[campaignType];
+  if (completion && rows.some((a) => a.actionType === completion)) return COMPLETION_STATUS[campaignType];
+  const answered = rows.filter((a) => ANSWERED_ACTIONS.includes(a.actionType));
+  if (answered.length) return ACTION_TO_STATUS[newestOf(answered).actionType];
+  if (rows.some((a) => a.actionType === 'not_home')) return 'not_home';
+  // Only the OTHER campaign type's completion can be left (a lit_dropped row on a survey
+  // campaign — unreachable through the app's type gate); with no not-home beside it, it reads
+  // through the table, newest first.
+  return ACTION_TO_STATUS[newestOf(rows).actionType] || 'unknocked';
+}
+
+/**
+ * The SAME ladder as resolveTargetingStatus, for the per-door $group in
+ * services/walklist/targetingStatus.js (no rows shipped, no $sort):
+ *   summary.actions                  — $addToSet of actionType over STATUS_ROW_MATCH rows
+ *   summary.latestAnsweredActionType — actionType of the newest row among ANSWERED_ACTIONS
+ *   summary.latestActionType         — actionType of the newest row (the fallback rung only)
+ * test/targetingStatus.test.js pins that the two forms agree on every row set with distinct
+ * instants; at a tie they resolve on actionType, like resolveStatusFromSummary.
+ */
+export const resolveTargetingStatusFromSummary = (campaignType, summary) => {
+  const actions = (summary?.actions || []).filter((a) => a !== 'note_added' && ACTION_TO_STATUS[a]);
+  if (!actions.length) return 'unknocked';
+  if (actions.includes('restricted')) return 'restricted';
+  const completion = COMPLETION_ACTION[campaignType];
+  if (completion && actions.includes(completion)) return COMPLETION_STATUS[campaignType];
+  if (actions.some((a) => ANSWERED_ACTIONS.includes(a))) return ACTION_TO_STATUS[summary?.latestAnsweredActionType] || 'unknocked';
+  if (actions.includes('not_home')) return 'not_home';
   return ACTION_TO_STATUS[summary?.latestActionType] || 'unknocked';
 };
 

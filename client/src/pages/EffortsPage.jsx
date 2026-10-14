@@ -137,7 +137,12 @@ function MoveConfirmModal({ effortName, data, pending, onCancel, onConfirm }) {
 
 // Shared claim-job progress/result line: the claim runs on the worker; this polls
 // it and reports "Claimed N (M moved)" when it lands. onDone fires once on completion.
-function ClaimJobStatus({ campaignId, jobId, doneLink, onDone }) {
+// A create-time seed claims Intake only and SKIPS doors another walk list owns
+// (`skippedOwned` in the job result) — it used to skip them silently, so a saved search
+// built from a client's updated file looked claimed while most of its doors stayed on the
+// old list until the admin noticed and claimed again from the Passes panel. Now the line
+// says so and `onMoveSkipped` opens the same move-confirm the Claim panel uses.
+function ClaimJobStatus({ campaignId, jobId, doneLink, onDone, onMoveSkipped }) {
   const job = useJobPoll({ campaignId, jobId });
   const doneRef = useRef(null);
   useEffect(() => {
@@ -150,12 +155,26 @@ function ClaimJobStatus({ campaignId, jobId, doneLink, onDone }) {
   if (job.status === 'failed') return <p className="mt-2 text-xs text-danger">Move failed: {job.error || 'unknown error'}</p>;
   if (job.status === 'completed') {
     const r = job.result || {};
+    const skipped = r.skippedOwned || 0;
     return (
-      <p className="mt-2 text-xs text-success-fg">
-        Claimed {(r.claimed ?? 0).toLocaleString()} door(s)
-        {r.reassigned ? ` (${r.reassigned.toLocaleString()} moved from other walk lists)` : ''}.{' '}
-        {doneLink}
-      </p>
+      <div className="mt-2 text-xs">
+        <p className="text-success-fg">
+          Claimed {(r.claimed ?? 0).toLocaleString()} door(s)
+          {r.reassigned ? ` (${r.reassigned.toLocaleString()} moved from other walk lists)` : ''}.{' '}
+          {doneLink}
+        </p>
+        {skipped > 0 && (
+          <p className="mt-1 text-warning-fg">
+            {skipped.toLocaleString()} door{skipped === 1 ? '' : 's'} in that saved search belong{skipped === 1 ? 's' : ''} to another walk list and{' '}
+            {skipped === 1 ? 'was' : 'were'} not moved.{' '}
+            {onMoveSkipped && (
+              <button type="button" onClick={onMoveSkipped} className="font-semibold underline">
+                Move {skipped === 1 ? 'it' : 'them'} here…
+              </button>
+            )}
+          </p>
+        )}
+      </div>
     );
   }
   return (
@@ -423,6 +442,9 @@ export default function EffortsPage() {
   // per-row Claim panel — those doors belong to another list.
   const [createClaimJobId, setCreateClaimJobId] = useState(null);
   const [createMove, setCreateMove] = useState(null); // { effortId, effortName, walkListId, data }
+  // The saved search a create seeded from, so "Move them here…" on the finished claim line can
+  // re-claim it without force — the expected 409 opens the move-confirm modal with the stakes.
+  const [createdSeed, setCreatedSeed] = useState(null); // { effortId, effortName, walkListId }
   const revisitClaim = useMutation({
     mutationFn: ({ effortId, walkListId, force }) =>
       api(`/admin/campaigns/${campaignId}/efforts/${effortId}/claim`, { method: 'POST', body: { walkListId, force } }),
@@ -454,7 +476,11 @@ export default function EffortsPage() {
         method: 'POST',
         body: { name, surveyTemplateId: surveyTemplateId || undefined, ...doors },
       });
-      return { ...res, revisitWalkListId: isRevisitSeed ? effectiveSource : null };
+      return {
+        ...res,
+        revisitWalkListId: isRevisitSeed ? effectiveSource : null,
+        seedWalkListId: !isRevisitSeed && effectiveSource && effectiveSource !== '__intake__' ? effectiveSource : null,
+      };
     },
     onSuccess: (res) => {
       setName('');
@@ -463,6 +489,11 @@ export default function EffortsPage() {
       invalidate();
       qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] });
       setCreateClaimJobId(res.claimJobId || null);
+      setCreatedSeed(
+        res.seedWalkListId && res.effort?._id
+          ? { effortId: res.effort._id, effortName: res.effort.name, walkListId: res.seedWalkListId }
+          : null
+      );
       if (res.revisitWalkListId && res.effort?._id) {
         // No force: the expected 409 opens the move-confirm modal with the stakes.
         revisitClaim.mutate({
@@ -571,6 +602,7 @@ export default function EffortsPage() {
             qc.invalidateQueries({ queryKey: ['turfs', campaignId] });
             qc.invalidateQueries({ queryKey: ['turf-doors', campaignId] });
           }}
+          onMoveSkipped={createdSeed ? () => revisitClaim.mutate({ ...createdSeed, force: false }) : undefined}
         />
         {revisitClaim.error && revisitClaim.error?.data?.code !== 'doors-owned' && (
           <p className="mt-1 text-xs text-danger">{revisitClaim.error.message}</p>

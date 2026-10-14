@@ -89,7 +89,8 @@ the right with the things you reach for occasionally:
 - **Help center** — guides, FAQ, and tips.
 - **Appearance** — Light / Dark / System.
 - **Switch organization** — only if you belong to more than one (or you're a super admin).
-- **Admin dashboard** — only if you're an admin (jumps to the admin side).
+- **Admin dashboard** — only if you're an admin or a team lead (jumps to the admin side; a team lead with
+  one active campaign lands on that campaign's screen).
 - **Sign out.**
 
 At the top of the menu, a card shows the **organization you're working in** with your **name + email**;

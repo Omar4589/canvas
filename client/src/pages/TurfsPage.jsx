@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import mapboxgl from '../lib/mapboxInit.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -19,7 +19,7 @@ import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
-import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits } from '../lib/cutMapDoors.js';
+import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits, passStatusOf, targetStatusOf } from '../lib/cutMapDoors.js';
 import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { crewCounts } from '../lib/turfCrewCounts.js';
 import { inBoundsWithMargin, markerSig, markerLabel, diffMarkers, MAX_DOM_MARKERS } from '../lib/buildingMarkers.js';
@@ -40,6 +40,7 @@ import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js
 import { pickRound, roundMarkFromEntries, unmarkButtonLabel } from '../lib/restrictMark.js';
 import MoveTargetModal from '../components/MoveTargetModal.jsx';
 import { unplacedToggleCopy, unplacedLeftOutLine, unassignedDoorCount } from '../lib/turfUnplacedToggle.js';
+import { indexPreview, fadeReasonOf, fadeReasonLine, fadeReasonShort, targetCountParts, targetCensus, targetDeadEnds, TARGET_RULE_HINT } from '../lib/targetFade.js';
 import { isOffWorld } from '../lib/pinFixes.js';
 import {
   moveTargetCandidates,
@@ -68,10 +69,10 @@ const colorFor = (i) => BOOK_COLORS[i % BOOK_COLORS.length];
 // the only status surface a building has, and book-colored + "12/12 hit" read as a worked
 // building nobody could actually enter. All-no-soliciting reads pink; any restricted unit
 // reads slate (the dominant semantic when the two mix). Mixed stacks stay book-colored.
-const offLimitsStackColor = (units) =>
-  (units || []).every((u) => u.passStatus === 'no_soliciting') ? STATUS_COLORS.no_soliciting : STATUS_COLORS.restricted;
-const offLimitsStackBadge = (units, total) =>
-  (units || []).every((u) => u.passStatus === 'no_soliciting') ? `${total} no soliciting` : `${total} restricted`;
+const offLimitsStackColor = (units, statusOf = passStatusOf) =>
+  (units || []).every((u) => statusOf(u) === 'no_soliciting') ? STATUS_COLORS.no_soliciting : STATUS_COLORS.restricted;
+const offLimitsStackBadge = (units, total, statusOf = passStatusOf) =>
+  (units || []).every((u) => statusOf(u) === 'no_soliciting') ? `${total} no soliciting` : `${total} restricted`;
 
 // One stable reference, so a render where the off-limits toggle empties nothing doesn't churn
 // the paint effect (same reason lib/cutMapDoors.js keeps NO_DOORS).
@@ -137,7 +138,7 @@ function booksToLabelGeoJSON(turfs, selected, progressByTurf, statusMode) {
 // fill carries THIS ROUND's door status and the ring keeps book identity, so both read at once —
 // which matters because a book's outline provably need not contain all of its own doors (the
 // Voronoi clip in services/turf/boundary.js), while the ring is keyed on turfId and always right.
-function doorsToGeoJSON(doors, colorByTurf, targetedSet, statusMode, dark) {
+function doorsToGeoJSON(doors, colorByTurf, targetedSet, statusMode, dark, statusOf = passStatusOf) {
   const statusColors = statusColorsForTheme(dark);
   return {
     type: 'FeatureCollection',
@@ -149,7 +150,7 @@ function doorsToGeoJSON(doors, colorByTurf, targetedSet, statusMode, dark) {
         properties: {
           id: d.id,
           turfId: d.turfId ? String(d.turfId) : '',
-          color: statusMode ? statusColors[d.passStatus || 'unknocked'] || statusColors.unknocked : bookColor,
+          color: statusMode ? statusColors[statusOf(d)] || statusColors.unknocked : bookColor,
           ringColor: bookColor,
           // When a target filter is active, dim doors that aren't in the matched set.
           dim: targetedSet ? !targetedSet.has(String(d.id)) : false,
@@ -1094,7 +1095,7 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
   );
 }
 
-function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled }) {
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled, target }) {
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
@@ -1154,6 +1155,21 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
                 <option key={t._id} value={t._id}>{t.name}</option>
               ))}
           </select>
+        </div>
+      )}
+      {/* While Target doors is open: the door's status across ALL rounds — the one a tick reads —
+          and, once a target is live, the exact reason the map fades it (lib/targetFade.js). */}
+      {hh && target?.view && (
+        <div className="mt-2 border-t border-border pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Target doors · all rounds</div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS[target.status] || STATUS_COLORS.unknocked }} />
+            <span className="font-medium text-fg">{STATUS_LABELS[target.status] || 'Unknocked'}</span>
+            {target.lastActionAt && (
+              <span className="text-fg-muted">· last recorded {formatInTz(target.lastActionAt, tz, { month: 'short', day: 'numeric' }, false)}</span>
+            )}
+          </div>
+          {target.active && <div className="mt-0.5 text-[11px] text-fg-muted">{fadeReasonLine(target.reason, { targetStatus: target.status, mode: target.mode })}</div>}
         </div>
       )}
       {/* Always rendered (not gated on showRound): a desk mark is allowed any time the door is
@@ -1221,7 +1237,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
 // On a spot of different homes (building.kind 'unplaced', or no address holding the pin) the pop-up lists each
 // home with its own Move pin (`onMovePinDoor(unit, { scope, count, addressLine1, unplaced })`), Mark restricted… and
 // Move to book…; units of one address are grouped with "Move these N units"; there is no Move building pin.
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, onMovePinDoor, moveDisabled, movePlan, pinFixesHref }) {
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, onMovePinDoor, moveDisabled, movePlan, pinFixesHref, target }) {
   // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
   // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
   // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
@@ -1430,6 +1446,15 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
                           <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
                         </span>
                       </div>
+                      {target?.view && (
+                        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-muted">
+                          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_COLORS[u.targetStatus || 'unknocked'] || STATUS_COLORS.unknocked }} />
+                          <span>
+                            {STATUS_LABELS[u.targetStatus || 'unknocked'] || 'Unknocked'} across all rounds
+                            {target.active ? ` · ${fadeReasonShort(fadeReasonOf(u.id, target.index), { mode: target.mode })}` : ''}
+                          </span>
+                        </div>
+                      )}
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         {onMovePinDoor && (
                           <button
@@ -1591,6 +1616,19 @@ export default function TurfsPage() {
   ];
   const [showTarget, setShowTarget] = useState(false);
   const [showExclude, setShowExclude] = useState(false);
+  // One side of the filter (include or exclude) is "on" when it holds a predicate. Mirrors the
+  // server's isActiveTargetFilter — an exclude-only filter must still reach the server, so the
+  // exclude side counts too. Defined here, above the doors query, because `targetView` below
+  // decides what that query asks for.
+  const sideActive = (f) => !!f && ((f.priorPassStatuses?.length || 0) > 0 || (f.answerFilters?.length || 0) > 0);
+  const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
+  const excludeActive = sideActive(targetFilter.exclude);
+  // While Target doors / Exclude doors is open (or a target is live), the map shows the ALL-ROUNDS
+  // targeting status those ticks read instead of this round's — a fresh round has no status of its
+  // own, and ticking against a status the page never showed is how the 2026-10-13 list swap went
+  // wrong. The doors query asks the server for that status only then (withTarget=1): the aggregate
+  // behind it walks every drawn door's history, too much to pay on every page load.
+  const targetView = showTarget || showExclude || targetActive;
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
   const [manualSplit, setManualSplit] = useState(false);
@@ -1681,9 +1719,12 @@ export default function TurfsPage() {
   // withStatus=1 rides along so each door carries its status FOR THIS ROUND — what colors
   // the dots. Counts never come from here; see progressQ (the single count oracle).
   const doorsQ = useQuery({
-    queryKey: ['turf-doors', campaignId, passId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/doors?passId=${passId}&withStatus=1`),
+    queryKey: ['turf-doors', campaignId, passId, targetView ? 'target' : 'round'],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/doors?passId=${passId}&withStatus=1${targetView ? '&withTarget=1' : ''}`),
     enabled: !!campaignId && !!passId,
+    // Opening the panel changes the key; keep the round's doors on the map until the all-rounds
+    // payload lands instead of blanking the map for the fetch.
+    placeholderData: keepPreviousData,
   });
   const turfs = turfsQ.data?.turfs || [];
   const draftCount = turfs.filter((t) => t.status === 'draft').length;
@@ -1724,12 +1765,14 @@ export default function TurfsPage() {
     excludeNoSoliciting,
     excludeUnplaced: excludeUnplaced && unplacedAny,
   });
-  // Inaccessible homes a canvasser flagged (Household.status === 'restricted'). The admin
-  // can drop them from this cut so nobody is routed back to an unreachable door.
-  const restrictedDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'restricted').length;
-  // Homes where a posted sign ended the visit. Unlike restricted these WERE knocked (they count
-  // as billable doors); the toggle is about not sending anyone back, not about billing.
-  const noSolicitingDoorCount = (doorsQ.data?.doors || []).filter((d) => d.status === 'no_soliciting').length;
+  // Inaccessible homes: any Restricted entry in any round — the same all-rounds ladder the box
+  // and the Target ticks read, never the latest-visit `status` — counted by GET /turfs over every
+  // door this page can draw. The admin can drop them from this cut so nobody is routed back to an
+  // unreachable door.
+  const restrictedDoorCount = turfsQ.data?.restrictedDoorCount || 0;
+  // Homes where a posted sign ended the visit, by the same ladder. Unlike restricted these WERE
+  // knocked (they count as billable doors); the toggle is about not sending anyone back.
+  const noSolicitingDoorCount = turfsQ.data?.noSolicitingDoorCount || 0;
   // Dead-end guard: the effort owns no mappable doors. /doors returns the effort's
   // knockable doors (booked or not), so 0 here = nothing to cut. Don't trip while loading.
   const hasNoDoors = !!passId && !!doorsQ.data && (doorsQ.data.doors || []).length === 0;
@@ -1836,12 +1879,6 @@ export default function TurfsPage() {
   const targetQuestions = (targetSurveyQ.data?.questions || []).filter(
     (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
   );
-  // One side of the filter (include or exclude) is "on" when it holds a predicate.
-  // Mirrors the server's isActiveTargetFilter — an exclude-only filter must still
-  // reach the server, so the exclude side counts too.
-  const sideActive = (f) => !!f && ((f.priorPassStatuses?.length || 0) > 0 || (f.answerFilters?.length || 0) > 0);
-  const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
-  const excludeActive = sideActive(targetFilter.exclude);
   const targetPreviewQ = useQuery({
     queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting && noSolicitingDoorCount > 0, excludeUnplaced && unplacedAny],
     queryFn: () =>
@@ -1861,11 +1898,22 @@ export default function TurfsPage() {
   });
   // The toggle's own count: what the clause removes from THIS cut (a targeted round's preview says, else the
   // round's summary).
-  const unplacedDoorCount = (targetActive ? targetPreviewQ.data?.unplacedCount : turfsQ.data?.unplacedDoorCount) || 0;
+  // A target's own count once its preview has answered; until then (loading, errored) the round's,
+  // so the box never flips to "(none in this target)" on an empty read. `previewReady` also gates
+  // the pop-ups' fade line, which would otherwise print "In this cut." for every door mid-fetch.
+  const previewReady = targetActive && !!targetPreviewQ.data;
+  const unplacedDoorCount = (previewReady ? targetPreviewQ.data.unplacedCount : turfsQ.data?.unplacedDoorCount) || 0;
   const targetedSet = useMemo(
     () => (targetActive && targetPreviewQ.data?.householdIds ? new Set(targetPreviewQ.data.householdIds.map(String)) : null),
     [targetActive, targetPreviewQ.data]
   );
+  // Combinations that can only cut nothing, said before Generate instead of after (lib/targetFade.js).
+  const deadEnds = targetDeadEnds({
+    statuses: targetFilter.priorPassStatuses,
+    answersOn: targetFilter.answerFilters.length > 0,
+    combine: targetFilter.combine,
+    boxes: { excludeRestricted: excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting: excludeNoSoliciting && noSolicitingDoorCount > 0 },
+  });
   const toggleTargetStatus = (s) =>
     setTargetFilter((t) => ({
       ...t,
@@ -1942,7 +1990,11 @@ export default function TurfsPage() {
   // which getPassStatusMap excludes. A notes-only pass would otherwise flip the page to an
   // all-gray map. `statusOverride` is the Layers-box checkbox; null = follow the round.
   const [statusOverride, setStatusOverride] = useState(null);
-  const statusMode = statusOverride ?? roundProgress.knocked > 0;
+  // In targetView (defined above the doors query) the dots carry `targetStatus`; status coloring
+  // is forced on for the same reason. `statusOf` is the one reader every status-driven memo below
+  // takes (lib/cutMapDoors.js).
+  const statusOf = targetView ? targetStatusOf : passStatusOf;
+  const statusMode = targetView || (statusOverride ?? roundProgress.knocked > 0);
 
   // The "Restricted & no soliciting" Layers row: in status mode those dots are the darkest on
   // the map, and a heavily desk-restricted round buries the live work under them. Unchecking
@@ -1958,17 +2010,17 @@ export default function TurfsPage() {
     // Everything the toggle hides: off-limits singles + every unit of a fully off-limits
     // stack (those stacks hide whole; a mixed stack's units never hide).
     () =>
-      grouped.singles.filter(isOffLimitsDoor).length +
-      grouped.buildings.reduce((n, b) => n + (isOffLimitsStack(b.units) ? b.units.length : 0), 0),
-    [grouped]
+      grouped.singles.filter((d) => isOffLimitsDoor(d, statusOf)).length +
+      grouped.buildings.reduce((n, b) => n + (isOffLimitsStack(b.units, statusOf) ? b.units.length : 0), 0),
+    [grouped, statusOf]
   );
   const drawnBuildings = useMemo(
-    () => (offLimitsHidden ? grouped.buildings.filter((b) => !isOffLimitsStack(b.units)) : grouped.buildings),
-    [grouped, offLimitsHidden]
+    () => (offLimitsHidden ? grouped.buildings.filter((b) => !isOffLimitsStack(b.units, statusOf)) : grouped.buildings),
+    [grouped, offLimitsHidden, statusOf]
   );
   const drawnSingles = useMemo(
-    () => (offLimitsHidden ? grouped.singles.filter((d) => !isOffLimitsDoor(d)) : grouped.singles),
-    [grouped, offLimitsHidden]
+    () => (offLimitsHidden ? grouped.singles.filter((d) => !isOffLimitsDoor(d, statusOf)) : grouped.singles),
+    [grouped, offLimitsHidden, statusOf]
   );
   // …and the BOOK SHAPES the same toggle empties. Hiding the dots alone left a fully off-limits
   // book as an empty filled polygon — and since a restricted door counts as knocked, its
@@ -1978,8 +2030,8 @@ export default function TurfsPage() {
   // otherwise cancel into a blank map.
   const hideEmptiedBooks = offLimitsHidden && !statusFilter.has('restricted');
   const emptiedBookIds = useMemo(
-    () => (hideEmptiedBooks ? booksEmptiedByOffLimits(grouped) : NO_BOOKS),
-    [grouped, hideEmptiedBooks]
+    () => (hideEmptiedBooks ? booksEmptiedByOffLimits(grouped, statusOf) : NO_BOOKS),
+    [grouped, hideEmptiedBooks, statusOf]
   );
 
   // Group-sizes preview for attribute mode (knockable doors per precinct/zip/…).
@@ -2089,9 +2141,21 @@ export default function TurfsPage() {
         visibleBookIds,
         housesVisible: layerVis.houses,
         hideOffLimits: offLimitsHidden,
+        statusOf,
       }),
-    [doorsQ.data, passTurfIds, layerVis.notInBook, layerVis.houses, visibleBookIds, offLimitsHidden]
+    [doorsQ.data, passTurfIds, layerVis.notInBook, layerVis.houses, visibleBookIds, offLimitsHidden, statusOf]
   );
+  // The live target preview, indexed for "why is this door faded" (lib/targetFade.js), and the
+  // all-rounds legend over the DRAWN doors while Target doors is open. The count line's parts come
+  // from the preview's own `counts` (server-side, over everything the map can draw).
+  const fadeIndex = useMemo(() => (targetActive ? indexPreview(targetPreviewQ.data) : null), [targetActive, targetPreviewQ.data]);
+  // What "failed the ticks" means for the copy: statuses, answers, or both (and how combined).
+  const fadeMode = {
+    statusesOn: targetFilter.priorPassStatuses.length > 0,
+    answersOn: targetFilter.answerFilters.length > 0,
+    combine: targetFilter.combine,
+  };
+  const targetLegend = useMemo(() => (targetView ? targetCensus(drawnDoors) : null), [targetView, drawnDoors]);
   // The selection RESOLVED against what is drawn. A door a refetch dropped from the cut, or one
   // a chip just hid, stops resolving — so it is neither counted in the bar nor sent to the
   // server, and it can't leave an orphan ring floating over nothing.
@@ -2145,9 +2209,19 @@ export default function TurfsPage() {
     () => (targetedSet ? selectedRows.filter((d) => !targetedSet.has(String(d.id))).length : 0),
     [selectedRows, targetedSet]
   );
-  const selectionScopeNote = dimmedSelected
-    ? `Includes ${dimmedSelected.toLocaleString()} door${dimmedSelected === 1 ? '' : 's'} the target filter you're previewing doesn't match — the preview fades them on the map, it doesn't limit what you can pick.`
-    : null;
+  const selectionScopeNote =
+    [
+      dimmedSelected
+        ? `Includes ${dimmedSelected.toLocaleString()} door${dimmedSelected === 1 ? '' : 's'} the target filter you're previewing doesn't match — the preview fades them on the map, it doesn't limit what you can pick.`
+        : null,
+      // The dots are colored by ALL-ROUNDS status while Target doors is open; this breakdown stays
+      // per-round because a desk mark acts on this round (planDoorSelection forRound).
+      targetView
+        ? "While Target doors is open the dots show all-rounds status; this breakdown is this round's, which is what a desk mark acts on."
+        : null,
+    ]
+      .filter(Boolean)
+      .join(' ') || null;
   // Ring geometry, fed from the DRAWN rows: blue "will be marked", slate "will be skipped".
   const selectionFC = useMemo(
     () => ({
@@ -2831,7 +2905,7 @@ export default function TurfsPage() {
     map.getSource('book-labels').setData(booksToLabelGeoJSON(turfs, selectedBooks, progressByTurf, statusMode));
     // drawnSingles, not grouped.singles: the off-limits Layers row filters single-home dots
     // at the data level (the ring layer shares this source, so it follows for free).
-    map.getSource('doors').setData(doorsToGeoJSON(drawnSingles, colorByTurf, targetedSet, statusMode, darkBase));
+    map.getSource('doors').setData(doorsToGeoJSON(drawnSingles, colorByTurf, targetedSet, statusMode, darkBase, statusOf));
     // Buildings ride their own circle layer so they stay visible/clickable even
     // when the DOM markers are viewport-culled (see the building sync effect).
     if (map.getSource('buildings')) {
@@ -2846,8 +2920,8 @@ export default function TurfsPage() {
             key: b.key,
             turfId: b.turfId ? String(b.turfId) : null,
             color:
-              statusMode && isOffLimitsStack(b.units)
-                ? offLimitsStackColor(b.units)
+              statusMode && isOffLimitsStack(b.units, statusOf)
+                ? offLimitsStackColor(b.units, statusOf)
                 : colorByTurf.get(String(b.turfId)) || '#9ca3af',
             dim: targetedSet ? !(b.units || []).some((u) => targetedSet.has(String(u.id))) : false,
           },
@@ -2892,7 +2966,7 @@ export default function TurfsPage() {
   // drawnSingles / drawnBuildings / emptiedBookIds MUST be here: paint() draws from them, and
   // all three are memos over `grouped`, so the "Not in a book" and off-limits toggles (which
   // change only those memos, not doorsQ.data) re-run this through them.
-  useEffect(() => { paint(); }, [drawnSingles, drawnBuildings, emptiedBookIds, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, darkBase]);
+  useEffect(() => { paint(); }, [drawnSingles, drawnBuildings, emptiedBookIds, turfsQ.data, doorsQ.data, selectedBooks, mapReady, styleEpoch, targetedSet, visibleBookIds, progressByTurf, statusMode, statusOf, darkBase]);
 
   // Selection rings. Deliberately NOT folded into paint(): adding the selection to that
   // effect's deps would re-serialize the whole book/door/building GeoJSON on every lasso.
@@ -2942,12 +3016,12 @@ export default function TurfsPage() {
       // and its badge names the state — "12 restricted", never "12/12 hit": every unit has an
       // entry, but nobody entered, and `hit` (a bare not-unknocked test) can't tell the two
       // apart. Same rule as the door dots and the paint() building-dots color.
-      const offLimits = statusMode && isOffLimitsStack(b.units);
-      const color = offLimits ? offLimitsStackColor(b.units) : colorByTurf.get(String(b.turfId)) || '#9ca3af';
+      const offLimits = statusMode && isOffLimitsStack(b.units, statusOf);
+      const color = offLimits ? offLimitsStackColor(b.units, statusOf) : colorByTurf.get(String(b.turfId)) || '#9ca3af';
       const hit = statusMode
-        ? (b.units || []).filter((u) => (u.passStatus || 'unknocked') !== 'unknocked').length
+        ? (b.units || []).filter((u) => statusOf(u) !== 'unknocked').length
         : 0;
-      const badgeText = statusMode ? (offLimits ? offLimitsStackBadge(b.units, b.total) : `${hit}/${b.total} hit`) : null;
+      const badgeText = statusMode ? (offLimits ? offLimitsStackBadge(b.units, b.total, statusOf) : `${hit}/${b.total} hit`) : null;
       const dimmed = !!(targetedSet && !(b.units || []).some((u) => targetedSet.has(String(u.id))));
       wanted.set(b.key, { b, color, badgeText, dimmed, sig: markerSig(color, badgeText, dimmed, darkBase, b.kind) });
     }
@@ -2990,7 +3064,7 @@ export default function TurfsPage() {
   // Inputs changed → re-sync (and once at mapReady).
   useEffect(() => {
     syncRef.current();
-  }, [drawnBuildings, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode]);
+  }, [drawnBuildings, colorByTurf, mapReady, darkBase, styleEpoch, targetedSet, layerVis.houses, layerVis.buildings, visibleBookIds, statusMode, statusOf]);
 
   // Pan/zoom → re-sync from the ref (registered ONCE, so no listener churn), and
   // keep the zoom≥16 badge behavior for the markers that exist.
@@ -3140,11 +3214,22 @@ export default function TurfsPage() {
       )}
 
       {/* Round coverage — the whole pass's door mix. Doubles as the legend for the map's
-          status colors, which is why the page needs no separate legend widget. */}
-      {statusMode && roundProgress.total > 0 && (
+          status colors, which is why the page needs no separate legend widget. While Target
+          doors is open the map shows ALL-ROUNDS status instead, so the legend is the drawn
+          doors' census by that status (lib/targetFade.js targetCensus), captioned as such. */}
+      {targetLegend ? (
         <div className="mb-4">
-          <CoverageBar canvass={roundProgress.counts} compact />
+          <div className="mb-1 text-[11px] text-fg-muted">
+            Colors show each door's status across <strong className="text-fg">all rounds</strong> — what Target doors reads — not this round's.
+          </div>
+          <CoverageBar canvass={targetLegend} compact />
         </div>
+      ) : (
+        statusMode && roundProgress.total > 0 && (
+          <div className="mb-4">
+            <CoverageBar canvass={roundProgress.counts} compact />
+          </div>
+        )
       )}
       </div>
 
@@ -3325,6 +3410,7 @@ export default function TurfsPage() {
                   <p className="text-[11px] text-fg-muted">
                     Cut this pass over only the doors that match — e.g. follow up on the unknocked, re-try not-homes, or GOTV your supporters.
                   </p>
+                  <p className="text-[11px] text-fg-subtle">{TARGET_RULE_HINT}</p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="font-medium text-fg-muted">Status:</span>
                     {cutStatuses.map((s) => (
@@ -3334,6 +3420,9 @@ export default function TurfsPage() {
                       </label>
                     ))}
                   </div>
+                  {deadEnds.map((note) => (
+                    <p key={note} className="text-[11px] text-warning-fg">{note}</p>
+                  ))}
                   {targetQuestions.length > 0 && (
                     <AnswerFilters
                       questions={targetQuestions}
@@ -3362,8 +3451,8 @@ export default function TurfsPage() {
                         {targetPreviewQ.isFetching
                           ? '…'
                           : `${(targetPreviewQ.data?.doorCount ?? 0).toLocaleString()} doors · ${(targetPreviewQ.data?.voterCount ?? 0).toLocaleString()} voters${
-                              targetPreviewQ.data?.excludedDoorCount > 0
-                                ? ` · ${targetPreviewQ.data.excludedDoorCount.toLocaleString()} excluded`
+                              targetPreviewQ.data?.counts?.excluded > 0
+                                ? ` · ${targetPreviewQ.data.counts.excluded.toLocaleString()} excluded`
                                 : ''
                             }`}
                       </span>
@@ -3421,8 +3510,8 @@ export default function TurfsPage() {
                     <p className="text-[11px] text-danger">
                       {targetPreviewQ.isFetching
                         ? '…'
-                        : `${(targetPreviewQ.data?.excludedDoorCount ?? 0).toLocaleString()} door${
-                            (targetPreviewQ.data?.excludedDoorCount ?? 0) === 1 ? '' : 's'
+                        : `${(targetPreviewQ.data?.counts?.excluded ?? 0).toLocaleString()} door${
+                            (targetPreviewQ.data?.counts?.excluded ?? 0) === 1 ? '' : 's'
                           } removed from this cut`}
                     </p>
                   )}
@@ -3471,11 +3560,14 @@ export default function TurfsPage() {
           {doorsQ.data && !hasNoDoors && publishedCount === 0 && (() => {
             const total = doorsQ.data.doors?.length || 0;
             const n = targetActive ? targetPreviewQ.data?.doorCount ?? null : total;
-            const m = targetActive ? targetPreviewQ.data?.excludedDoorCount ?? 0 : 0;
+            // With a target live, every faded door is accounted for by name — the Exclude panel,
+            // one of the three boxes, or the ticks themselves (lib/targetFade.js, from the preview's
+            // own counts) — never a bare "excluded".
+            const reasons = targetActive && targetPreviewQ.data?.counts ? targetCountParts(targetPreviewQ.data.counts, fadeMode).slice(1) : [];
             return (
               <p className="mb-2 text-xs text-fg-muted">
                 <strong>{(n ?? 0).toLocaleString()}</strong> {targetActive ? 'targeted' : 'knockable'} doors
-                {m > 0 ? ` · ${m.toLocaleString()} excluded` : ''}
+                {reasons.map((r) => ` · ${r}`).join('')}
                 {mode === 'geometric' && n != null ? ` → ~${Math.max(1, Math.ceil(n / (Number(maxDoors) || 65)))} books` : ''}
               </p>
             );
@@ -3511,7 +3603,10 @@ export default function TurfsPage() {
             </label>
           )}
 
-          {unplacedDoorCount > 0 && publishedCount === 0 && (
+          {/* Shown whenever the round has such homes at all (unplacedAny), not only when the current
+              target holds some: a box that vanished under one tick and came back ticked under the next
+              is how the 2026-10-13 list swap hid what was fading the never-visited homes. */}
+          {(unplacedAny || unplacedDoorCount > 0) && publishedCount === 0 && (
             <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
               <input
                 type="checkbox"
@@ -3520,7 +3615,9 @@ export default function TurfsPage() {
                 className="mt-0.5"
               />
               <span>
-                <span className="font-medium text-fg">{unplacedToggleCopy(unplacedDoorCount).label}</span>{' '}
+                <span className="font-medium text-fg">
+                  {unplacedDoorCount > 0 ? unplacedToggleCopy(unplacedDoorCount).label : 'Leave out homes without a reliable map spot (none in this target)'}
+                </span>{' '}
                 <Link to={`/campaigns/${campaignId}/pin-fixes`} className="font-semibold text-brand-accent hover:underline">
                   {unplacedToggleCopy(unplacedDoorCount).link}
                 </Link>
@@ -3924,10 +4021,11 @@ export default function TurfsPage() {
                 <input
                   type="checkbox"
                   checked={statusMode}
+                  disabled={targetView}
                   onChange={(e) => setStatusOverride(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-border-strong text-brand-accent focus-visible:ring-ring"
+                  className="h-3.5 w-3.5 rounded border-border-strong text-brand-accent focus-visible:ring-ring disabled:opacity-60"
                 />
-                <span className="text-fg">Door status</span>
+                <span className="text-fg">{targetView ? 'Door status — all rounds while Target or Exclude doors is open' : 'Door status'}</span>
               </label>
             </div>
           )}
@@ -3994,6 +4092,14 @@ export default function TurfsPage() {
               status={popupDoor?.passStatus || 'unknocked'}
               tz={tz}
               showRound={statusMode}
+              target={{
+                view: targetView,
+                active: previewReady,
+                status: householdQ.data?.household?.targetStatus || popupDoor?.targetStatus || 'unknocked',
+                lastActionAt: householdQ.data?.household?.lastActionAt || null,
+                reason: fadeReasonOf(popupHouseholdId, fadeIndex),
+                mode: fadeMode,
+              }}
               onRestrict={() => {
                 // The door left the cut between load and click (re-cut, exclusion, import
                 // re-housing) — nothing to mark here; close rather than act on a ghost.
@@ -4029,6 +4135,7 @@ export default function TurfsPage() {
             <BuildingPopup
               key={popupBuilding.key}
               building={popupBuilding}
+              target={{ view: targetView, active: previewReady, index: fadeIndex, mode: fadeMode }}
               books={turfs}
               colorByTurf={colorByTurf}
               moving={moveDoor.isPending || moveDoors.isPending}
@@ -4110,8 +4217,9 @@ export default function TurfsPage() {
           {selectMode && (
             <DoorSelectionBar
               plan={selectionPlan}
-              // This page's dots always carry the SELECTED round's passStatus, so the breakdown
-              // and the ⓘ speak per-round here — there is no global-status mode to fall back to.
+              // The breakdown and the ⓘ speak per-round here even while Target doors colors the
+              // dots by all-rounds status: a desk mark acts on THIS round (planDoorSelection
+              // forRound), and selectionScopeNote says so.
               statusBasis="round"
               passLabel={passLabel}
               scopeNote={selectionScopeNote}

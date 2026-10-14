@@ -29,6 +29,10 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
+      {/* No `future` flags on purpose for now: useSignOut (auth/AuthContext.jsx) relies on logout()
+          and navigate('/login') landing in ONE render, so ProtectedRoute never stashes the signed-out
+          page for the next person. Turning on v7_startTransition (or moving to v7) defers the navigate;
+          re-check Sign out when that happens. */}
       <BrowserRouter>
         <AuthProvider>
           <ErrorBoundary>

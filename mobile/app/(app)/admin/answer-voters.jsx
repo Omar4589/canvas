@@ -203,7 +203,7 @@ export default function AnswerVoters() {
     : 'All canvassers';
 
   // Open the admin map pre-filtered to this exact drill (answer + canvasser +
-  // window). Same idiom as campaign/[campaignId]'s goTimeline: save the active
+  // window). Same idiom as components/CampaignHome.jsx's goTimeline: save the active
   // campaign first, then push; the map consumes the seed params one-shot.
   async function goMap() {
     if (!campaign) return;

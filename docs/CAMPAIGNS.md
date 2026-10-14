@@ -197,8 +197,11 @@ Print Packets). Item order inside each group kept the old flat order on purpose,
 added structure without moving muscle memory; the collapsed icon rail shows thin dividers where
 the expanded sidebar shows the group labels (the same treatment the super-admin Platform section
 already used), and the mobile-web More sheet mirrors the same groups. A
-**"‹ Campaigns"** link exits, and a **campaign switcher** dropdown hops to another campaign
-without leaving the page you're on. (Passes aren't a top-level tab — they live inside each walk
+**"‹ Campaigns"** link exits (with the sidebar collapsed to icons, it's the first icon, "All
+campaigns"), and a **campaign switcher** dropdown hops to another campaign without leaving the page
+you're on. When there's no other campaign to jump to — one active campaign, the usual case for a team
+lead — the switcher is just the campaign's name as plain text; while the list is loading it's a grey
+placeholder bar. (Passes aren't a top-level tab — they live inside each walk
 list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
 `/campaigns/:id/…`. There are no more per-screen "Campaign" dropdowns — the URL plus the sidebar
 switcher are how you pick which campaign you're working in.
@@ -211,8 +214,16 @@ is selected. Counting rules in [METRICS.md](METRICS.md).
 
 The switcher lists **active campaigns only** — archived ones are reached from **Campaigns** or
 **Overview**, each of which has an archived section, and that is also where you reactivate them.
-An archived campaign you are *currently in* stays in the switcher (labelled `· Archived`) so the
-control is never blank and you can always switch back out of it.
+An archived campaign you are *currently in* stays in the campaign box (labelled `· Archived`), so it
+is never blank. With another active campaign it sits in the dropdown and you can switch straight out;
+with none, the box is just its name, and **‹ Campaigns** takes you back to the list.
+
+**A team lead with one active campaign lands on its Home** when they sign in, instead of a Campaigns
+list with one card ([ROLES.md](ROLES.md) → *Where a team lead works*). **‹ Campaigns** still opens the
+list, which is where the campaign's **Edit** and **Assignments** are. On the Home, a lead doesn't see
+the organization's Doorline billing notes ("Not billing yet — setup is free until the first knock", the
+after-Election-Day archive reminder) — those are for org admins, who are the ones who can act on them.
+An archived campaign says, for everyone, *An org admin can reactivate it from Campaigns.*
 
 **"Still loading" and "not found" are different screens (fixed 2026-09).** Opening a campaign can
 land a beat before the console has finished re-reading your campaign list — most reliably right
@@ -603,7 +614,8 @@ is new work and always lands.
   **It is also what stops the campaign billing** — a live campaign bills every month whether or not
   anyone knocks, so a finished race left un-archived quietly keeps costing money. Once a campaign's
   `electionDay` has passed and it is still active, the Campaigns page and the campaign dashboard show
-  an **archive nudge** ([ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)); archiving in
+  org admins an **archive nudge** ([ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx));
+  a team lead sees neither (they can't archive, and the subscription isn't theirs to read); archiving in
   the first 3 days of a month with no field activity that month also makes that month free. Full
   rules in [BILLING.md](BILLING.md). Note that **reactivating clears `archivedAt`**, which makes the
   skipped months billable again on any statement that hasn't been issued — which is why **Reactivate
@@ -1117,6 +1129,11 @@ and `setupStatus.js` runs the three Pin Fixes aggregates (`NEEDS_PIN_FIX`, `UNPL
 `pinComplexKey`). `SetupProgress.jsx` adds `'/pin-fixes'` to `CAMPAIGN_SCOPED`. Covered by
 `setupSteps.test.js`.
 
+The warning link's words and target come from its `warnRoute` (`SetupProgress.jsx` `warnLink`):
+`/users` reads **add on Users →** for an org admin and, for a team lead (who can't open the org Users
+page), goes to the campaign's Team page as **add on Team →**; `/pin-fixes` reads **open Pin Fixes →**.
+The label used to be a fixed "add on Users →", which also sat on the Pin Fixes warning.
+
 - **GET `/admin/campaigns/:id/setup-status`** ([setupStatus.js](../server/src/routes/admin/setupStatus.js))
   returns that object plus `hasCanvassed` and `effortsNeedingSetup` (non-archived efforts without an
   active pass). Polled by [SetupProgress.jsx](../client/src/components/SetupProgress.jsx), which
@@ -1140,7 +1157,15 @@ and `setupStatus.js` runs the three Pin Fixes aggregates (`NEEDS_PIN_FIX`, `UNPL
 - Two-level drill-in nav: [navItems.js](../client/src/components/navItems.js) (`ORG_NAV` for the top
   level + `CAMPAIGN_NAV` for the in-campaign tabs), rendered by
   [Layout.jsx](../client/src/components/Layout.jsx) (sidebar with the "‹ Campaigns" exit + campaign
-  switcher) and [BottomNav.jsx](../client/src/components/BottomNav.jsx).
+  switcher, [CampaignSwitcher.jsx](../client/src/components/campaigns/CampaignSwitcher.jsx); collapsed,
+  the rail's first item is an "All campaigns" link to `/campaigns`) and
+  [BottomNav.jsx](../client/src/components/BottomNav.jsx).
+  `CampaignSwitcher` has three states: not loaded (`!data && !isError`) → a `Skeleton` the select's
+  height; loaded with **another** campaign to go to → the `<select>` (`aria-label="Switch campaign"`);
+  otherwise (nowhere else to go, or the list failed) → the name as plain text with a transparent border
+  (same height, no box), plus `· Archived`. "Another campaign", not "two or more", so a current campaign
+  missing from the list still leaves the one other campaign one click away; `loaded` reads `data`, not
+  `isSuccess`, which a failed background refetch turns false.
   The switcher's `pickerCampaigns` filters the shared `['admin','campaigns']` cache to
   `isActive !== false`, **plus the current campaign whichever it is**. Three things that filter
   must not become: (1) the request — the endpoint stays unfiltered, because ~25 call sites share
@@ -1300,7 +1325,7 @@ and `setupStatus.js` runs the three Pin Fixes aggregates (`NEEDS_PIN_FIX`, `UNPL
   [CampaignCard.jsx](../client/src/components/campaigns/CampaignCard.jsx) and reused by
   [CampaignsTable.jsx](../client/src/components/campaigns/CampaignsTable.jsx), the same way
   `CountdownChip` already is. Mobile mirrors the web placement rather than the web markup: a two-line pressable in the
-  key-dates block of `admin/campaign/[campaignId].jsx`, beside `ElectionCountdownChip` and above
+  key-dates block of the campaign screen ([components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx)), beside `ElectionCountdownChip` and above
   `DateRangeBar`, which replaced a tall `InsetGroup` that sat *below* all three filter controls it
   ignores. It opens the shared `MetricSheet` (the screen's convention for explaining a metric)
   rather than carrying a caption. The compact goal bar in `RowAccessory` on `admin/index.jsx` is
@@ -1323,7 +1348,8 @@ and `setupStatus.js` runs the three Pin Fixes aggregates (`NEEDS_PIN_FIX`, `UNPL
   On mobile, the in-campaign chip is one shared component,
   [ElectionCountdownChip.jsx](../mobile/components/ElectionCountdownChip.jsx), reused by the canvasser
   Books header ([books.jsx](../mobile/app/(app)/books.jsx)) and the mobile admin campaign detail
-  ([admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)).
+  ([components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx), the body of
+  [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)).
 
   Invariants worth keeping:
   - **`earlyVotingState` names both bounds in every state**, `upcoming` included. It used to return

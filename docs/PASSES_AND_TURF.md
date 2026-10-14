@@ -109,16 +109,22 @@ campaign, fully counted and visible. But when you cut the **next** round, you us
 don't want to send someone back to a door nobody could reach. So the Turf Cutting page shows an
 **"Exclude N restricted-access homes"** toggle whenever any exist (**on by default**). Leaving it on
 skips those homes from **that round's books only** — it's **non-destructive** (the homes stay in the
-campaign, still counted and shown on the coverage bar as their own slate segment) and **overridable**
-(re-disposition a door in the field and it re-enters scope on the next cut). This is **opt-in per cut**,
-never automatic: turn it off to include them (e.g. if access has since opened up). It's the second-pass
-counterpart to the field marker — the field records "can't get in," the admin decides per round whether
-to keep trying.
+campaign, still counted and shown on the coverage bar as their own slate segment). A home counts as
+restricted-access here if **any round, of any walk list, ever recorded Restricted** at it, from the desk
+or at the door — even if a canvasser later got in, or someone there was later surveyed ("restricted wins
+every time", owner ruling 2026-10-13). It comes back only when the mark is removed: **Unmark** a desk
+mark from the Turf Cutting map, the Map page or the phone, or **Unknock** the entry on Door Outcomes.
+This is **opt-in per cut**, never automatic: turn it off to include them (e.g. if access has since opened
+up). It's the second-pass counterpart to the field marker — the field records "can't get in," the admin
+decides per round whether to keep trying.
 
 **Excluding no-soliciting homes from a later round.** The exact same mechanism, for the pink
 **No soliciting** disposition: a separate **"Exclude N no-soliciting homes"** toggle (also on by
 default) appears whenever any exist. It is independent of the restricted toggle — tick either, both,
-or neither — and the two are folded into one `status: { $nin: [...] }` on the cut, so ticking both
+or neither — and both read the same all-rounds rule as **Target doors** (above): a home reads No
+soliciting while that is its strongest history entry, so a later not-home never clears it, while a later
+refusal, wrong address or survey does — and a home that also carries a Restricted entry reads Restricted,
+so with only this box ticked it stays in the cut. The two fold into one clause on the cut, so ticking both
 really does drop both sets.
 
 The difference worth knowing: a restricted home was never *reached*, while a no-soliciting home was
@@ -177,7 +183,7 @@ sheet, or the book detail screen reached from List view) — **Mark restricted�
 `POST .../turfs/restrict-bulk { turfIds[], scope? }` creates a real restricted activity row per
 targeted door (`via: 'bulk'`, the acting admin's user, the house's own coordinates, the book's round),
 so canvassers see the slate doors **immediately** in their round view and the excludeRestricted toggle
-above catches them on the next cut.
+above catches them on every later cut, until the mark is unmarked.
 
 **Two scopes, because a book is often only *partly* inaccessible.** If the crew already worked some of
 the book, you usually don't want to relabel the doors they reached:
@@ -220,7 +226,7 @@ book (Books → List → book → tap a house) has the same. It is the **same ma
 (`via: 'bulk'`, the acting admin, the house's own pin, the round it belongs to), so everything above
 about desk marks applies: canvassers see the door slate in their round view immediately, it stays out
 of every rate and knock count, it never bills, and the **Exclude N restricted-access homes** toggle
-picks it up on the next cut. One plain confirm, **no note or reason field**. Together the two are the
+picks it up on every later cut, until the mark is unmarked. One plain confirm, **no note or reason field**. Together the two are the
 campaign's **desk marks — a whole book or a single home.**
 
 - **Allowed any time the house is on the page** — in a draft book, an accepted book, or as a loose dot no
@@ -243,17 +249,21 @@ campaign's **desk marks — a whole book or a single home.**
 - **A desk mark is a note, not a lock.** It predicts that nobody can get in; it does not stop anyone.
   The door is still cut into books, still sent to phones, and every outcome button on it still works —
   a canvasser who gets through the gate records normally and **their result supersedes the mark**
-  (pinned server-side by `bulkRestrict.int.test.js` — *"field re-disposition overrides a bulk mark"*).
-  That is deliberate: the person at the door knows more than the map. What the canvasser now sees is a
+  on the phone, in coverage and in reports (pinned server-side by `bulkRestrict.int.test.js` —
+  *"field re-disposition overrides a bulk mark"*). For **cutting** the mark still wins: the home
+  stays out of every later cut with the box ticked, and Target doors reads it as Restricted, until
+  the mark is unmarked (the targeting ladder, owner ruling 2026-10-13). That split is deliberate:
+  the person at the door knows more than the map about that visit; whether to send people back is
+  the office's call. What the canvasser now sees is a
   **Marked restricted by the office** card above the outcome buttons — informational, nothing disabled,
   driven by the additive per-round `restrictedFrom` field (`'desk' | 'field' | null`).
 - **Superseded marks.** The canvasser's write does **not** delete the admin's row (the server's
   `deleteMany` is scoped to the recording canvasser's own `userId`), so the row stays on file, keeps
   counting in `Unmark restricted (N)`, in `activityCount` and in exports. Every per-door surface now
   reports that state — *Desk mark by … — no longer in effect* plus **Remove desk mark** — and the book
-  says how many of its marks the crew has worked past. Removing a superseded mark changes nothing about
-  the door (the field result already governs); it clears the record. **This is the signal worth acting
-  on:** one reachable home in a gated block usually means the rest are reachable too.
+  says how many of its marks the crew has worked past. Removing a superseded mark leaves the field
+  result in place and puts the door back into later cuts; it clears the record. **This is the signal
+  worth acting on:** one reachable home in a gated block usually means the rest are reachable too.
 - **Unmark removes desk marks only.** Open the same popup: a desk-marked door reads *Marked from the
   desk by … · date* and offers **Unmark restricted** (`POST .../turfs/unrestrict-doors`); a door a
   canvasser marked restricted in the field reads *Recorded at the door by …* and offers **no desk
@@ -601,8 +611,25 @@ picks it up. Plumbing behind both layers is in [MAPS.md](MAPS.md); the field flo
 
 A new round normally cuts the effort's **whole** door universe. For a **follow-up round** you can cut
 over only a **subset** — open **Target doors** on the Turf Cutting page and pick any mix of:
-- **knock status** — e.g. *Unknocked* (never reached), *Not home* (re-try); and
+- **knock status** — e.g. *Unknocked* (never visited), *Not home* (re-try); and
 - **survey answers** — e.g. *Undecided* (persuasion), *Support / Likely* (GOTV).
+
+**What a status tick means.** A tick reads the door's **whole history across every round**, not the
+map's per-round color and not just its latest entry. Each door gets one status, checked in this order:
+**Restricted** if any round ever recorded Restricted, from the desk or at the door — it wins over
+everything, including a later survey or a later knock, and the only ways back are **Unmark** (a desk
+mark) or **Unknock** the entry on Door Outcomes; otherwise **Surveyed** if any round ever recorded a
+survey; otherwise **Refused, Wrong address, No soliciting or Not a target voter** if any was ever
+recorded (the most recent of them when there are several — the one place order matters); otherwise
+**Not home** if the only entries are not-homes, so nobody has ever answered; otherwise **Unknocked**,
+nobody has ever visited. So a door that refused once and was not-home'd later reads *Refused*, a door
+surveyed in round 1 and desk-marked in round 2 reads *Restricted*, and a desk mark a canvasser later
+knocked through still reads *Restricted*. This rule decides **only** what a re-cut or a new walk list
+includes and excludes, and the two checkboxes above Generate read it too — the Map page, coverage and
+reports keep the door's latest visit, and a canvasser's phone keeps showing their own round's latest
+tap. While the panel is open, the Turf Cutting map **colors every door by this all-rounds status** (the
+legend says so), so what you tick is what you see; on a fresh round the per-round colors would all read
+Unknocked.
 
 On a survey campaign that has had **Not a target voter** turned on, the status list offers it too — target
 those doors to go back for the listed voters nobody reached there, or exclude them to skip those doors.
@@ -611,7 +638,9 @@ stays visible after you switch, so you can untick it). There is no separate togg
 the restricted-access and no-soliciting toggles above): like a refusal, it is cut back in and knocked
 again next round unless a target or an exclusion says otherwise.
 
-Combine with **OR** (the union — "unknocked **or** supporters") or **AND** ("not-home **and** supporters").
+Combine with **OR** (the union — "unknocked **or** supporters") or **AND** ("surveyed **and** Undecided").
+A door with a survey answer reads *Surveyed* (or *Restricted*, when it also carries a mark), so AND
+between a survey answer and only **other** statuses can match nothing — the panel says so before you cut.
 The panel shows a live door/voter count, and the cut produces books over just those doors — scoped to
 **this effort only** (it never pulls another effort's doors). Recut without a target = the full universe,
 unchanged.
@@ -623,9 +652,21 @@ pass**: target *unknocked + not-home + Support/Likely/Undecided*, exclude *Yard 
 back to everyone persuadable-or-better whose yard isn't already converted, without re-knocking the doors
 that took a sign (a sibling option like *Candidate Follow-Up* stays in). Exclusion is **door-level**:
 one household member with a matching answer removes the whole door, and it matches answers from **any**
-round. The count line reads "*N* doors · *V* voters · *M* excluded", where *M* counts only doors the cut
-would otherwise have walked. A malformed exclusion (one with no valid conditions) refuses to cut rather
-than silently walking the doors you removed.
+round. The count line reads "*N* doors · *V* voters · *M* excluded", where *M* counts the doors
+Exclude doors removed among those the map draws (a door a checkbox would also have dropped still counts
+as the panel's). A malformed exclusion (one with no valid conditions) refuses to cut rather than silently
+walking the doors you removed.
+
+**Why a door is faded.** The preview fades every door the cut would leave out, for one of five reasons,
+and the page says which: its all-rounds status isn't ticked; **Exclude doors** removed it; or one of
+the three boxes above Generate left it out — **Exclude restricted-access homes**, **Exclude no-soliciting
+homes**, **Leave out homes without a reliable map spot** (all on by default, and applied **on top of**
+the target). The count line names each box's share ("… · 12 without a reliable map spot left out"),
+and clicking a faded house shows its all-rounds status, its last visit, and the exact reason. The
+map-spot box stays on screen for the whole round (reading "none in this target" when the current
+target holds no such home), so it can never vanish under one tick and come back ticked under the next.
+Ticking *Restricted* or *No soliciting* while the matching box is on cuts nothing — the panel warns
+instead of letting you find out after the cut.
 
 ## Each round is its own pass — door status is per-round
 
@@ -821,30 +862,32 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
    and left alone: `attribute-preview` and `manual-preview` apply neither restricted toggle, so their counts
    can exceed what a cut with those toggles produces.
 
-   **Why it is no longer a bare `status` clause (fixed 2026-08-24).** `cutStatusExclusion` filtered on
-   `Household.status`, which is resolved across **all** rounds with a **sticky completion**
-   ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)): one survey, in any round, ever,
-   pins it to `'surveyed'` permanently. So a gated home surveyed once in Round 1 and then desk-marked
-   in Round 2 had a live, counted, console-visible mark **and** a global status of `'surveyed'` — and
-   the toggle cut it straight back into Round 3. The published promise that the toggle "picks it up on
-   the next cut" was false in exactly that case, and nothing covered it. `cutExclusionFilter` now
-   unions the old global-status clause with `restrictedDoorIdsForEffort` — doors that still read
-   `restricted` in **the round holding their own newest restricted row**, desk marks and field marks
-   alike. That "own round" wording is load-bearing: marks normally sit on the **active** round while the
-   round being cut is a fresh draft with no activity at all, so judging by *the effort's latest round*
-   would inspect the empty draft, find nothing, and re-open the very hole this closes (pinned by case
-   10b in [deskMarkSuperseded.int.test.js](../server/test/deskMarkSuperseded.int.test.js)). Bounded by
-   the restricted ROWS — one aggregate over `{campaignId, passId ∈ non-archived rounds,
-   actionType:'restricted'}` sorted newest-first and grouped per door, then one status resolve over
-   that set — never by the effort's door count; no new index.
+   **Both boxes read the targeting ladder (2026-10-13; the third rule here).** `cutExclusionParts`
+   asks `offLimitsDoorIds` for the effort's doors whose **targeting status** — `resolveTargetingStatus`
+   in [statusPrecedence.js](../server/src/utils/statusPrecedence.js), the door's whole history —
+   reads `restricted` / `no_soliciting`, and emits one `_id: { $nin }` over them — bounded by the
+   MARKS (`CanvassActivity.distinct` of doors with a restricted or no-soliciting row, narrowed to
+   the asked doors, then the ladder over those alone), never by the effort's door count. That
+   `distinct` rides the single-field actionType index today (it examines the platform's marks, not
+   the campaign's — ~120 ms with a 100k-door neighbour); should marks grow platform-wide, a
+   `{ campaignId: 1, actionType: 1, householdId: 1 }` index would cover it (build-indexes gate). History, so it is
+   not re-learned: the first rule was a bare `status: { $nin }` on `Household.status`, which is
+   completion-sticky, so a gated home surveyed once in Round 1 and desk-marked in Round 2 was cut
+   straight back into Round 3 (the 2026-08-24 bug); the second (`restrictedDoorIdsForEffort`) judged
+   each mark in the round holding it — right for the phones, but it cut a superseded mark back in and
+   was blind to another walk list's rounds, so after a **move** the same home was cut back in again.
+   Under the owner's ruling "restricted wins every time", any Restricted entry in any round keeps the
+   home out until the mark is unmarked or the entry unknocked (pinned by case 10 in
+   [deskMarkSuperseded.int.test.js](../server/test/deskMarkSuperseded.int.test.js) and case 3 in
+   [turfTargeting.int.test.js](../server/test/turfTargeting.int.test.js)). The `GET /turfs` rollup's
+   `supplementalRestrictedCount` / `supplementalNoSolicitingCount` slices come from the same call, as
+   `countDocuments` of its id lists ∩ the bookless base — counts only, never a load of the bookless doors.
 
    It returns **`$and` clauses, never a spread `_id`**: two of the three cut filters already own an
    `_id` key (`addSupplementalBooks`' `$nin: alreadyBooked`, the preview route's `$in: householdIds`),
-   so a spread would silently clobber one of them — the same hazard the two-`status`-spreads comment
-   warns about, one key over. A door whose mark a canvasser **superseded** is deliberately cut back in:
-   the crew got in, so the home is reachable.
+   so a spread would silently clobber one of them.
 
-   `cutStatusExclusion` knows only `restricted` and `no_soliciting`. **`not_target` deliberately has no
+   The boxes know only `restricted` and `no_soliciting`. **`not_target` deliberately has no
    toggle** (2026-10-02): like `refused` it is a reached door that the next round cuts back in, and a
    follow-up round that wants to revisit or skip those doors says so through the target filter's
    `priorPassStatuses` — include side or `exclude` branch ([WALKLISTS.md](WALKLISTS.md) §B) —
@@ -854,6 +897,59 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
    (`targetFilter` survives a campaign switch, and a hidden tick could never be unticked), and every
    status in them is labelled from `STATUS_LABELS` ("Not home") rather than the slug under CSS
    `capitalize` ("Not Home").
+
+   **Target doors reads the TARGETING ladder, not `Household.status` (2026-10-13).** A status in
+   `priorPassStatuses` with no `priorPassId` resolves each door's rows across every round through
+   the targeting ladder (`resolveTargetingStatus` in
+   [statusPrecedence.js](../server/src/utils/statusPrecedence.js) — one status per door:
+   `restricted` if any Restricted row exists; else the completion if any; else the newest row among
+   `ANSWERED_ACTIONS` (refused, wrong_address, no_soliciting, not_target); else `not_home`; else
+   `unknocked`). Two forms of one pipeline in
+   [targetingStatus.js](../server/src/services/walklist/targetingStatus.js): `targetingIdsMatching`
+   runs the ladder IN the database (a `$switch` over the per-door `$group`) and returns only the ids
+   that read the wanted statuses — what a status tick needs, and a fifth of the heap of the full map
+   at 25k doors — while `getTargetingStatusMap` returns every door's status and newest visit for the
+   surfaces that draw them (`/doors?withTarget=1`, the house pop-up, the boxes' candidates). Both
+   share one `$group` (no `$sort`: a `$max` over `{ ts, actionType }` documents), fetch rows by door
+   id in 10k-id chunks (never a campaign-wide scan), and ride `{ householdId: 1, timestamp: -1 }` by
+   hint — left to itself the planner picked a single-field actionType index and walked 580k keys per
+   chunk instead of 30k — falling back unhinted should the index ever be missing. Test 8 in
+   turfTargeting.int.test.js pins that the two forms agree door for door.
+   `Household.status` (coverage, the Map page,
+   reports) and the per-round ladder the phones show (`getPassStatusMap`) are untouched — the rule
+   decides only what a re-cut or a new walk list includes. The same resolve also scopes
+   `answerFilters` to the **walk list's effective survey** (`effectiveSurveyTemplateIdFor`, the
+   override when the effort has one) whenever `options.effortId` is set; before, it always used the
+   campaign's template, so an answer target on an override walk list matched nothing while the page
+   listed the override's questions. `GET /turfs/doors?withStatus=1&withTarget=1` adds `targetStatus`
+   per door — its own opt-in, sent by the page only while the Target / Exclude panel is open, because
+   the aggregate behind it walks every drawn door's history (~0.4 s / 34 MB at 25k doors, ~4.5 s /
+   335 MB at 250k) — and `GET /turfs/household/:id` adds `targetStatus` + `lastActionAt`, which is
+   what the page colors and explains while the panel is open. The page's two box counts ("Exclude N
+   restricted-access homes" / "no-soliciting") come from `GET /turfs?passId=` as `restrictedDoorCount`
+   / `noSolicitingDoorCount`, counted by the same ladder over every drawable door and bounded by the
+   marks, so a plain page load pays no history aggregate at all. `POST /turfs/target-preview` adds `excludedHouseholdIds` (the
+   Exclude panel's removals ∩ knockable — every excluded door the map draws, a superset of the
+   cuttable-only set behind `excludedDoorCount`, so an excluded door a box would also drop is still
+   named as the panel's) and `leftOut`
+   `{ restricted, noSoliciting, unplaced, other }`, the include-result doors each box removed, and
+   `counts` `{ drawable, kept, excluded, restricted, noSoliciting, unplaced, other, status }` — the
+   count line's parts over everything the map can draw (the drawn set shrinks once loose doors hide,
+   and the boxes' doors are exactly the loose ones), judged
+   on the same fields the clauses read via `cutExclusionParts` (`cutExclusionFilter`'s builder, which
+   also returns the per-round `restrictedIds`); a drawn door in none of those sets and not in
+   `householdIds` faded on its status. `other` must stay empty — a future clause that drops a door
+   without naming it lands there rather than fading it silently. Client: `lib/targetFade.js`
+   (reason per door, count-line parts, pop-up lines, dead-end notes) and `lib/cutMapDoors.js`'s
+   `statusOf` reader (`passStatusOf` / `targetStatusOf`), so every status-driven memo on the page
+   draws one field; the page's "Exclude N …" counts are the drawn doors' `targetStatus`, the same
+   ladder the boxes apply. Pinned by
+   [turfTargeting.int.test.js](../server/test/turfTargeting.int.test.js) (the matrix, the boxes'
+   buckets, the override, preview == cut) and
+   [targetingStatus.test.js](../server/test/targetingStatus.test.js) (row form == summary form);
+   [targetExclusion.int.test.js](../server/test/targetExclusion.int.test.js)'s fixture now backs each
+   status with the knock row that would have produced it, because a status tick no longer reads
+   `Household.status`.
 2. **Cut** by mode: `attributeCut` ([attributeCut.js](../server/src/services/turf/attributeCut.js)) —
    group by a denormalized cut column (precinct/county/city/zip/districts), optional `capN`
    geometric subdivision; `geometricCut` ([geometricCut.js](../server/src/services/turf/geometricCut.js))
@@ -1203,8 +1299,9 @@ unit test):
   honest version of density.
 
 **SUPERSEDED desk marks: `kind` and `deskRows` answer different questions.** A canvasser who works a
-desk-marked door wins — designed behavior, pinned by `bulkRestrict.int.test.js`'s *"field re-disposition
-overrides a bulk mark"* — and the server does **not** delete the admin's row when they do
+desk-marked door wins for the per-round status — designed behavior, pinned by `bulkRestrict.int.test.js`'s
+*"field re-disposition overrides a bulk mark"*; a **cut** still honors the mark until it is unmarked (the
+targeting ladder, 2026-10-13) — and the server does **not** delete the admin's row when they do
 ([canvass.js](../server/src/routes/mobile/canvass.js) `recordHouseholdAction`'s `deleteMany` is scoped
 to `{ userId, householdId, passId }`, the RECORDING canvasser's own id). So the row on disk and the
 door's status come apart, and every surface has to report both:

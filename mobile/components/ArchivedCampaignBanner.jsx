@@ -19,10 +19,11 @@ export default function ArchivedCampaignBanner({ campaignId, extra, style }) {
 
   return (
     <View style={[styles.banner, style]}>
-      {/* Same sentence the campaign screen has always shown, so archived reads identically
-          wherever you meet it. */}
+      {/* Same sentence the campaign screen shows, so archived reads identically wherever you meet
+          it. One sentence for every role: it names who can reactivate (only an org admin can) and
+          where, instead of telling a team lead to do something they can't. */}
       <Text style={styles.text}>
-        This campaign is archived — data is read-only. Reactivate it from the web to resume canvassing.
+        This campaign is archived — data is read-only. An org admin can reactivate it from Campaigns on the web.
       </Text>
       {extra ? <Text style={[styles.text, styles.extra]}>{extra}</Text> : null}
     </View>

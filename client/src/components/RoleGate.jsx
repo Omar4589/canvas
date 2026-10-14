@@ -21,7 +21,9 @@ const GATES = {
   orgAdmin: {
     allow: (a) => a.isOrgAdmin,
     title: 'Admin access required',
-    hint: 'This page is part of organization administration. Team leads work from Campaigns.',
+    // Only a team lead ever meets this gate. "Work inside the campaigns they run" reads right beside
+    // either home button they can get: Go to Campaigns, or Go to your campaign (one active campaign).
+    hint: 'This page is part of organization administration. Team leads work inside the campaigns they run.',
   },
   billing: {
     allow: (a) => a.canViewBilling,

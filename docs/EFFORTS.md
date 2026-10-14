@@ -117,7 +117,10 @@ people leave when you unassign their book on the Turf page).
    pick a **survey override** (else it uses the campaign's survey); pick the saved search under **Seed
    door-set**.
 3. Click **Create walk list**. It claims that saved search's unclaimed (Intake) doors in the
-   background — a progress line under the form shows the claim landing (moments for small lists).
+   background — a progress line under the form shows the claim landing (moments for small lists). If
+   some of the saved search's doors already belong to another walk list, the finished line says how
+   many were **not moved** and offers **Move them here…**, which opens the same move (re-carve) confirm
+   as the Claim panel — no second trip through the list's Passes panel.
 
 ### Run a pass (canvass a walk list)
 1. **Walk Lists** page → open the walk list (**Manage**) → the **Passes** panel. Pass 1 already exists
@@ -223,6 +226,10 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   TURF queue and returns `202 {jobId, claimable, conflicts}` (poll `GET .../turfs/jobs/:jobId`;
   `503 queue-unavailable` when Redis is down; `{jobId: null}` when nothing would move). The old
   inline move outlived Heroku's 30s router timeout at 24k doors and took no lock (2026-08 incident).
+  A create-time seed (`POST /efforts` + `seedWalkListId`) enqueues with `force:false`, so owned doors
+  are **skipped**, not refused — the job result's `skippedOwned` says how many, and the Walk Lists
+  page's claim line offers **Move them here…**, which re-claims the seed list without force and lets
+  the expected 409 open the move-confirm modal (2026-10-13; before that the skip was silent).
   The job (`executeClaim` in [claimDoors.js](../server/src/services/walklist/claimDoors.js)):
   **snapshots every donor pass BEFORE mutating** (`TurfSnapshot` `reason:'move'`, deduped on the
   job id so a stall-redelivery can't double-capture), holds + renews the per-pass `recutLock` on
@@ -273,9 +280,10 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 - Activation ([passes.js](../server/src/routes/admin/passes.js)) archives other active passes **of the
   same walk list only**. `GET /passes?effortId=` filters.
 - Turf cut scope ([generateTurf.js](../server/src/services/turf/generateTurf.js)) = the pass's
-  **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`, plus
-  `status: { $ne: 'restricted' }` when the cut's `params.excludeRestricted` is set — the opt-in
-  "exclude restricted-access homes" toggle, see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)));
+  **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`, plus the restricted /
+  no-soliciting boxes' `_id: { $nin }` from `cutExclusionParts` when `params.excludeRestricted` /
+  `excludeNoSoliciting` are set — the targeting ladder over each door's whole history, see
+  [PASSES_AND_TURF.md](PASSES_AND_TURF.md)));
   `addSupplementalBooks` adds the walk list's owned-but-unbooked doors (same `excludeRestricted` option).
 
 ## D. Attribution & per-walk-list survey (mobile write path)

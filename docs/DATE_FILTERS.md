@@ -176,7 +176,7 @@ the custom pickers take a `tz` prop; child display components
 ([QuestionResults.jsx](../client/src/components/QuestionResults.jsx),
 [CanvasserResponsesModal.jsx](../client/src/components/CanvasserResponsesModal.jsx)) also receive `tz`
 for rendering ([TIMEZONES.md](TIMEZONES.md) §F). Mobile mirrors this per screen —
-`campaign/[campaignId]` uses its route campaign's tz, other admin screens the active campaign's.
+the campaign screen ([components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx)) uses its own campaign's tz (from its `campaignId` prop, whether pushed or embedded as a team lead's Overview), other admin screens the active campaign's.
 
 ## D. How the range reaches the backend
 
@@ -241,7 +241,12 @@ ignores it and uses `req.anchorTz`. The custom pickers emit the picked **calenda
 Each admin screen feeds its campaign's `timeZone` to the bar/builders. Unlike web (which gates on the
 always-available org tz — §C), mobile has no synchronous org tz and the active campaign tz is async and
 can be stale, so a screen **seeds the device tz immediately** (loads on open) and **refines** to the
-campaign tz once it resolves (`campaign?.timeZone || deviceTimezone()`; `campaign/[campaignId]` uses its
-route campaign). Defaults are mostly **Today** (canvasser drilldowns open wider — `7d`/`30d`). The
+campaign tz once it resolves (`campaign?.timeZone || deviceTimezone()`; the campaign screen uses its
+own campaign). **Today rolls over at midnight** on the campaign screen and the admin Overview: the range
+state is what was picked, and every reader gets `effectiveRange(pickedRange, useTodayInTz(tz))`
+([dateRanges.js](../mobile/lib/dateRanges.js), [useTodayInTz.js](../mobile/lib/useTodayInTz.js)) — `today`
+pinned to the current day, worked out at render and re-checked once a minute — so a screen left open past
+midnight queries the new day, and the drills it opens get the same dates as the numbers tapped. The
+Timeline does the same with its `fromDay`. Defaults are mostly **Today** (canvasser drilldowns open wider — `7d`/`30d`). The
 personal canvasser stats screen and the super-admin control room intentionally have **no** date filter
 (personal/all-time / fixed live windows).

@@ -50,3 +50,37 @@ export const resolveChipSelection = ({ value, campaigns }) => {
   const firstActive = campaigns.find((c) => !isArchivedCampaign(c));
   return firstActive ? campaignShape(firstActive) : null;
 };
+
+// A team lead's ONE active campaign, or null — the phone's half of the home-campaign rule
+// (docs/PROPOSAL_LEAD_CAMPAIGN_LANDING.md §B). `campaigns` is the lead's /admin/campaigns list,
+// which is already their grants in this org with mid-delete rows split out; counting the rows that
+// aren't archived gives exactly the server's homeCampaignId (server/src/routes/auth.js), and
+// test/leadHomeCampaign.int.test.js pins the two together. null for anything that isn't a list
+// (still loading).
+export const soleActiveCampaign = (campaigns) => {
+  if (!Array.isArray(campaigns)) return null;
+  const live = campaigns.filter((c) => !isArchivedCampaign(c));
+  return live.length === 1 ? live[0] : null;
+};
+
+// What the admin Overview tab shows: null (not decided yet — show a spinner, never the org totals
+// first), 'org' (the org Overview, as always), or 'sole:<id>' (a team lead's one campaign, embedded).
+//
+//   role         useConsoleRole(): undefined until read, then 'lead' | 'admin' | 'super'
+//   campaigns    the lead's /admin/campaigns list (campaignsQ.data?.campaigns), or undefined
+//   listLoading  campaignsQ.isLoading — true only while there is no data at all
+//
+// The role test is the rule, never the query's `enabled`: a disabled query still hands back whatever
+// is cached under its key, and admins fill ['admin','campaigns'] from other screens — an admin with
+// one campaign must never get the lead's embedded home. With data present, decide from it whatever
+// the error flags say (one dropped refetch must not flip the screen away and back); with no data,
+// wait while it loads and fall back to the org Overview if it failed.
+export const overviewChoice = ({ role, campaigns, listLoading }) => {
+  if (!role) return null;
+  if (role !== 'lead') return 'org';
+  if (Array.isArray(campaigns)) {
+    const sole = soleActiveCampaign(campaigns);
+    return sole ? `sole:${sole._id}` : 'org';
+  }
+  return listLoading ? null : 'org';
+};

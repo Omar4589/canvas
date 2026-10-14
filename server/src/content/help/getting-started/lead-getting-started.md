@@ -26,7 +26,7 @@ On any campaign you've been granted, you're as powerful as an admin:
 - Build your crew, including [creating new canvasser accounts](add-a-canvasser-account)
 - [Print walk packets](printing-walk-packets) for a paper canvass
 - [Export your campaign's data](exports) — org-wide exports and a few admin-only types stay with admins
-- See all the reporting: map, timeline, insights, early voting, and client reports
+- See all the reporting: map, timeline, survey explorer, early voting, and client reports
 - Look up any voter in your campaigns and read their profile — the campaign's **Voters** tab. It's read-only for you (contact details, the household, this campaign's survey answers and notes, and any do-not-contact flag with its reason), and you can add a note
 
 ## What stays with admins
@@ -51,9 +51,11 @@ what it affects before you confirm.
 
 ## Your day to day
 
-1. Sign in to the console. You'll land on **Campaigns**, showing only the campaigns you manage.
-2. Pick your campaign to open its tabs.
+1. Sign in to the console. If you run one active campaign, you go straight to its **Home**. If you run more than one, or none yet, you land on **Campaigns**, showing only the campaigns you manage — pick one to open its tabs.
+2. **‹ Campaigns**, at the top of the sidebar, always opens the full list. That's where your campaign's **Edit** (name, survey, door goal) and **Assignments** are, and any archived campaigns. With the sidebar collapsed it's the first icon; in a narrow browser window it's **More → ‹ All campaigns**.
 3. Keep books assigned so canvassers always have doors ([assigning canvassers](assigning-canvassers)).
 4. Watch the dashboard and [metrics](metrics) to see coverage and knocks.
+
+On your phone, the **Overview** tab works the same way: with one active campaign, it *is* that campaign's screen, and its numbers refresh on their own while you watch. Pull down to refresh them. If you still see a list with just your one campaign in it, your app hasn't picked up this change yet: when it says **A new version of Doorline is ready**, tap **Restart** (or, if it asks you to update from the App Store or Google Play, do that).
 
 > Tip: If you also walk doors yourself, an admin adds you to a campaign's walker roster like any canvasser, and you use the mobile canvassing flow for your own books.

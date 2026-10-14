@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useSignOut } from '../auth/AuthContext.jsx';
+import { homeLinkLabel } from '../lib/homePath.js';
 import { Button, EmptyState } from './ui/index.js';
 import { consoleMemberships } from '../lib/roles.js';
 
@@ -20,11 +21,17 @@ export default function Forbidden({
   hint = null,
 }) {
   const navigate = useNavigate();
-  const { homePath, memberships, isSuperAdmin, logout, activeMembership } = useAuth();
+  const { homePath, memberships, isSuperAdmin, activeMembership } = useAuth();
+  const signOut = useSignOut();
 
-  // Offer the switcher only when there is somewhere else to go.
-  const canSwitchOrg = isSuperAdmin || consoleMemberships(memberships).length > 1;
-  const homeLabel = homePath === '/campaigns' ? 'Go to Campaigns' : 'Go to Overview';
+  // Offer the switcher only when there is somewhere else to go — and not when the home button
+  // already IS the picker (a multi-org user with no org entered), which would be two buttons to one
+  // page.
+  const canSwitchOrg =
+    (isSuperAdmin || consoleMemberships(memberships).length > 1) && homePath !== '/select-org';
+  // homePath can be a campaign's root (a team lead with one active campaign), so the label comes
+  // from the shared helper rather than a string comparison.
+  const homeLabel = homeLinkLabel(homePath);
   const roleLabel = activeMembership?.role === 'lead' ? 'team lead' : activeMembership?.role;
 
   return (
@@ -51,13 +58,7 @@ export default function Forbidden({
               Switch organization
             </Button>
           )}
-          <Button
-            variant="ghost"
-            onClick={() => {
-              logout();
-              navigate('/login', { replace: true });
-            }}
-          >
+          <Button variant="ghost" onClick={signOut}>
             Sign out
           </Button>
         </div>

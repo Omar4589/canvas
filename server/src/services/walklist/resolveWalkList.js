@@ -5,6 +5,9 @@ import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
 import { answerFilterClause, answerTagClause } from '../surveys/answerAgg.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
+import { Effort } from '../../models/Effort.js';
+import { effectiveSurveyTemplateIdFor } from '../surveys/effectiveTemplate.js';
+import { targetingIdsMatching } from './targetingStatus.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const arr = (a) => (Array.isArray(a) && a.length ? a : null);
@@ -91,13 +94,16 @@ async function collectPredicateSets(campaign, f, ctx) {
       const statusMap = await getPassStatusMap(f.priorPassId, baseIds, campaign.type);
       for (const id of baseIds) if (wanted.has(statusMap.get(id)?.status || 'unknocked')) s.add(id);
     } else {
-      // No round chosen → the door's current/global status (fixes "unknocked"
-      // returning everything when no prior pass was picked).
-      const hs = await Household.find(
-        { campaignId, _id: { $in: baseOids }, status: { $in: [...wanted] } },
-        { _id: 1 }
-      ).lean();
-      for (const h of hs) s.add(String(h._id));
+      // No round chosen → the door's all-rounds TARGETING status (resolveTargetingStatus,
+      // utils/statusPrecedence.js): restricted wins, then surveyed in any round, then the
+      // newest answer, then nobody ever answered, then never visited. The ladder runs in the
+      // database and only the matching ids come back (ctx.statusIds). Deliberately NOT
+      // Household.status: that is the coverage/Map rule (latest visit), under which a door that
+      // refused once and was then not-home'd reads not_home — which the owner ruled is not a
+      // "not home" door for a re-cut (2026-10-13). A door with no rows reads unknocked, so
+      // picking no round still never matches everything (the bug this branch originally fixed).
+      const matched = await ctx.statusIds([...wanted]);
+      for (const id of baseIds) if (matched.has(id)) s.add(id);
     }
     sets.push(s);
   }
@@ -208,11 +214,25 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
   const baseOids = baseIds.map(oid);
 
   // Loaded once, shared by both sides: the tag predicate needs the template's option
-  // map, and the answer predicate scopes to it.
-  const template = campaign.surveyTemplateId
-    ? await SurveyTemplate.findById(campaign.surveyTemplateId).lean()
-    : null;
-  const ctx = { campaignId, orgId, baseIds, baseOids, template };
+  // map, and the answer predicate scopes to it. The template is the one the doors actually
+  // answer: an effort-scoped resolve (a cut, its preview, its supplemental books, the pass
+  // rollup) takes the walk list's survey override when it has one
+  // (services/surveys/effectiveTemplate.js), else the campaign's. Until 2026-10-13 this was
+  // always the campaign's template, so on a walk list with an override every answer target
+  // matched NOTHING: the page listed the override's questions while the resolver scoped to a
+  // template no response at those doors carried (turfTargeting.int.test.js pins the fix).
+  const effort = options.effortId ? await Effort.findById(options.effortId, { surveyTemplateId: 1 }).lean() : null;
+  const templateId = effectiveSurveyTemplateIdFor(campaign, effort);
+  const template = templateId ? await SurveyTemplate.findById(templateId).lean() : null;
+  const ctx = {
+    campaignId,
+    orgId,
+    baseIds,
+    baseOids,
+    template,
+    // Each side asks for its own statuses; the ladder runs in the database and returns ids.
+    statusIds: (wanted) => targetingIdsMatching(campaignId, baseIds, campaign.type, wanted),
+  };
 
   const inc = await collectPredicateSets(campaign, filter, ctx);
   const warnings = [...inc.warnings];

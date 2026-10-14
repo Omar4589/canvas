@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useMatch } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -13,6 +13,7 @@ import IconButton from './ui/IconButton.jsx';
 import AccountMenu from './AccountMenu.jsx';
 import OrgSwitcher from './OrgSwitcher.jsx';
 import SupportAccessGate from './SupportAccessGate.jsx';
+import CampaignSwitcher from './campaigns/CampaignSwitcher.jsx';
 import BottomNav from './BottomNav.jsx';
 import AddedToOrgBanner from './AddedToOrgBanner.jsx';
 import BillingBanner from './BillingBanner.jsx';
@@ -86,7 +87,6 @@ export default function Layout() {
     .filter((n) => n.to !== '/billing' || canViewBilling);
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
-  const navigate = useNavigate();
 
   // Campaign drill-in: when the URL is /campaigns/:campaignId(/...), the sidebar shows the
   // campaign-scoped nav instead of the org nav. The splat is the current screen slug.
@@ -269,22 +269,21 @@ export default function Layout() {
                   <NavLink to="/campaigns" className="inline-flex items-center gap-1 px-3 text-xs font-medium text-fg-muted hover:text-brand-accent">
                     ‹ Campaigns
                   </NavLink>
-                  <select
-                    value={campaignId}
-                    onChange={(e) => navigate(`/campaigns/${e.target.value}${currentSlug ? '/' + currentSlug : ''}`)}
-                    title="Switch campaign"
-                    className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm font-semibold text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                  >
-                    {/* Covers every case the list can't: still loading, and a campaign this
-                        viewer's list doesn't contain (a lead's scope, or one deleted under a
-                        stale cache). Without it the select would render blank. */}
-                    {!pickerCampaigns.some((c) => String(c._id) === String(campaignId)) && (
-                      <option value={campaignId}>{currentCampaign?.name || 'Campaign'}</option>
-                    )}
-                    {pickerCampaigns.map((c) => (
-                      <option key={c._id} value={c._id}>{c.name}{c.isActive === false ? ' · Archived' : ''}</option>
-                    ))}
-                  </select>
+                  <CampaignSwitcher
+                    campaignId={campaignId}
+                    currentSlug={currentSlug}
+                    campaigns={pickerCampaigns}
+                    loaded={!!campaignsQ.data || campaignsQ.isError}
+                  />
+                </div>
+              )}
+              {/* Collapsed, the "‹ Campaigns" link above is hidden with the rest of the text — and a
+                  team lead with one active campaign now starts INSIDE it, so the rail needs its own
+                  way back to the list (the only home of Edit, Assignments and archived campaigns).
+                  `end` keeps it from lighting up for every /campaigns/:id page. */}
+              {collapsed && (
+                <div className="mb-2">
+                  <NavItem n={{ to: '/campaigns', label: 'All campaigns', end: true }} collapsed />
                 </div>
               )}
               {/* Home rides ungrouped at the top; the rest render in CAMPAIGN_NAV_GROUPS order —

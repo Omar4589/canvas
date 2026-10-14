@@ -32,7 +32,7 @@ export const PACKET_DOOR_CAP = 1200;
 // to whoever holds the paper, which services/export/exportScope.js:14 forbids for the
 // same reason. `restricted` and `no_soliciting` are deliberately absent: they are door
 // OUTCOMES, not suppressions, so those doors print. (A campaign that doesn't want to walk
-// them again drops them at CUT time — services/turf/generateTurf.js cutStatusExclusion.)
+// them again drops them at CUT time — services/turf/generateTurf.js cutExclusionParts, the Exclude restricted-access box.)
 const omissionReason = (h) => {
   if (h.isActive === false) return 'inactive';
   // Precedence mirrors the coverage buckets (services/reports/aggregations.js): the

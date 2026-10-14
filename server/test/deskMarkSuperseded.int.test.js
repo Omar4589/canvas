@@ -43,7 +43,7 @@ const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { getPassStatusMap } = await import('../src/services/passes/passStatus.js');
 const { deskMarkStateForPasses, countDeskMarksByBook } = await import('../src/services/canvass/deskRestrict.js');
-const { cutExclusionFilter, restrictedDoorIdsForEffort } = await import('../src/services/turf/generateTurf.js');
+const { cutExclusionFilter, offLimitsDoorIds } = await import('../src/services/turf/generateTurf.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -301,18 +301,27 @@ test('9. countDeskMarksByBook reports rows and superseded, and 0/0 for an archiv
   assert.deepStrictEqual(stub.get(String(ctx.book._id)), { rows: 0, superseded: 0 });
 });
 
-test('10. THE CUT BUG: a live desk mark excludes the door even when global status says surveyed', { skip }, async () => {
+test('10. THE CUT BUG: a desk mark excludes the door even when global status says surveyed', { skip }, async () => {
   // `held` was surveyed in a PRIOR round, so its global Household.status is completion-sticky
   // 'surveyed' forever — while its desk mark in the CURRENT round is live, counted and visible in
-  // the console. Before this fix, cutStatusExclusion filtered on that global value alone and cut
-  // the gated home straight back into the next round with "Exclude restricted" ticked.
+  // the console. The original bug: cutStatusExclusion filtered on that global value alone and cut
+  // the gated home straight back into the next round with "Exclude restricted" ticked. Since the
+  // owner's 2026-10-13 ruling ("restricted wins every time") the box reads the targeting ladder
+  // over each door's whole history, so EVERY door with a Restricted entry still on file stays out
+  // — the held mark and `knocked` (desk-marked, then not-home'd by the crew) — until the mark is
+  // unmarked or the entry unknocked. `gated` shows the way back: case 8 removed its superseded
+  // mark, so it carries no Restricted entry any more and cuts like any surveyed door.
   await Household.updateOne({ _id: ctx.held._id }, { $set: { status: 'surveyed' } });
   assert.strictEqual(await passStatusOf(ctx.held), 'restricted', 'the CURRENT round still says restricted');
 
-  const ids = await restrictedDoorIdsForEffort({
+  const { restricted } = await offLimitsDoorIds({
     campaignId: ctx.camp._id, effortId: ctx.eff._id, campaignType: 'survey',
   });
-  assert.deepStrictEqual(ids.map(String), [String(ctx.held._id)], 'only the mark that still holds');
+  assert.deepStrictEqual(
+    restricted.map(String).sort(),
+    [ctx.knocked._id, ctx.held._id].map(String).sort(),
+    'every door with a Restricted entry still on file, superseded or not (gated\'s was removed in case 8)'
+  );
 
   const filter = await cutExclusionFilter({
     campaignId: ctx.camp._id, effortId: ctx.eff._id, campaignType: 'survey', excludeRestricted: true,
@@ -324,14 +333,15 @@ test('10. THE CUT BUG: a live desk mark excludes the door even when global statu
   const cutIds = cuttable.map((h) => String(h._id));
   assert.ok(!cutIds.includes(String(ctx.held._id)), 'the gated home is NOT cut back in');
   assert.ok(cutIds.includes(String(ctx.plain._id)), 'an ordinary door still is');
-  assert.ok(cutIds.includes(String(ctx.gated._id)), 'a door whose mark was superseded IS cut back in — the crew got in');
+  assert.ok(cutIds.includes(String(ctx.gated._id)), 'its mark was REMOVED in case 8, so it cuts again — Unmark is the way back');
+  assert.ok(!cutIds.includes(String(ctx.knocked._id)), 'a superseded mark still on file stays out — restricted wins every time (owner ruling 2026-10-13); the phone shows the knock, the cut keeps the mark');
 });
 
-test('10b. the deciding round is the one holding the MARK, not the effort\'s newest round', { skip }, async () => {
+test('10b. a mark on the ACTIVE round excludes the door when the round being cut is an empty draft', { skip }, async () => {
   // The normal shape of a follow-up cut: the marks live on the ACTIVE round, and the round being
-  // cut is a brand-new draft with no activity at all. Judging by "the effort's latest round"
-  // would look at the empty draft, find nothing, and re-open the very hole this closes — so this
-  // case is the one that actually guards the fix.
+  // cut is a brand-new draft with no activity at all. Any rule that judged "the round being cut"
+  // (or the effort's newest round) would look at the empty draft, find nothing, and cut the gated
+  // home back in. The ladder reads every round, so this case guards that it keeps doing so.
   const draft = await Pass.create({
     organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.eff._id,
     roundNumber: 2, name: 'Round 2', status: 'draft',
@@ -342,10 +352,10 @@ test('10b. the deciding round is the one holding the MARK, not the effort\'s new
     'the round being cut is empty, as a fresh draft always is'
   );
 
-  const ids = (await restrictedDoorIdsForEffort({
+  const ids = (await offLimitsDoorIds({
     campaignId: ctx.camp._id, effortId: ctx.eff._id, campaignType: 'survey',
-  })).map(String);
-  assert.deepStrictEqual(ids, [String(ctx.held._id)], "the ACTIVE round's live mark is still found");
+  })).restricted.map(String);
+  assert.ok(ids.includes(String(ctx.held._id)), "the ACTIVE round's live mark is still found");
 
   const filter = await cutExclusionFilter({
     campaignId: ctx.camp._id, effortId: ctx.eff._id, campaignType: 'survey', excludeRestricted: true,

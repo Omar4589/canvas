@@ -27,7 +27,7 @@ One account, one email — but a **separate role in each organization**. Someone
 - **If there's only one org they can run from the console, sign-in takes them straight into it** — no picker.
 - **The mobile app** shows *all* their organizations, because every role has a home there.
 
-Switching organizations in the console always lands on the new org's home page — Overview for an admin, Campaigns for a team lead. Each browser tab keeps its own organization: switching in one tab doesn't move your other open tabs.
+Switching organizations in the console always lands on the new org's home page — Overview for an admin; for a team lead, their campaign if they run just one active campaign there, otherwise Campaigns. Each browser tab keeps its own organization: switching in one tab doesn't move your other open tabs.
 
 ## What a team lead can do
 
@@ -55,8 +55,8 @@ You can change the checked campaigns anytime — unchecking one revokes it right
 
 ## Where a team lead works
 
-- **In the console**, they sign in the same way you do and land on **Campaigns**, showing only the campaigns they manage. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, the org-wide Voters directory, Users — simply aren't in their nav; the campaign **Voters** tab is.
-- **In the mobile app**, they get the same admin view, scoped to their campaigns — and **More → Users** is one shared surface: a lead sees it too, filtered to the people on *their* campaigns, never the whole organization. There they create canvassers, set temporary passwords, switch canvasser accounts off and on, and edit a canvasser's name, email, or phone; roles and account deletion stay with you. A campaign's **Team** tile opens that same Users view pre-filtered to the campaign.
+- **In the console**, they sign in the same way you do. With one active campaign they land straight in it; otherwise on **Campaigns**, showing only the campaigns they manage. **‹ Campaigns** at the top of the sidebar always opens their list. Inside a campaign, every tab you see is there. The org-only areas — Overview, Surveys, Tags, the org-wide Voters directory, Users — simply aren't in their nav; the campaign **Voters** tab is.
+- **In the mobile app**, they get the same admin view, scoped to their campaigns (with one active campaign, **Overview** is that campaign's screen) — and **More → Users** is one shared surface: a lead sees it too, filtered to the people on *their* campaigns, never the whole organization. There they create canvassers, set temporary passwords, switch canvasser accounts off and on, and edit a canvasser's name, email, or phone; roles and account deletion stay with you. A campaign's **Team** tile opens that same Users view pre-filtered to the campaign.
 
 ## Coordinators and crews
 
