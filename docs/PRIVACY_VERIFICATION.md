@@ -2517,6 +2517,49 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     signed in elsewhere, or never had one) no longer ends that other person's session when it signs out
     (review round 5 added the second case).
 
+30. **[v6 2026-10-15 — Error recovery, Part A (phone, JavaScript only) and its server switch. No SDK, no
+    new recipient; the "no crash-reporting" negative stands.]** Built from
+    [PROPOSAL_ERROR_RECOVERY.md](PROPOSAL_ERROR_RECOVERY.md) (§H is the analysis). Three platform paths
+    already carried error data off the phone before this change, and are recorded here for the first
+    time: (a) on iOS a fatal JavaScript error ends in `RCTFatal`, whose exception name includes the
+    error's message — received by Apple from phones whose owners share analytics; (b) inside
+    expo-updates' error window (launch until 10 s after the first screen; on iOS again after every
+    reload), up to 1,024 characters of a fatal error — on iOS including the message — go to Expo in the
+    `Expo-Fatal-Error` header of the next update check, and every update check sends a per-install
+    `EAS-Client-ID`; (c) an Android crash reaches Google Play's vitals from phones that share
+    diagnostics (a gray screen produced no report at all). **What Part A changes:** a fatal JavaScript
+    error after launch now stays on the phone — shown in the app until dismissed, until sign-out (the
+    copy is cleared then, so the next person to sign in never sees it) or until a restart, and written
+    to the device log as before — so (a) and (b) now occur only for launch-time errors, native-wrapped
+    errors, errors with no screen to draw on, and while the switch below is off. The next sign-in after a
+    sign-out clears it too, so an error that lands on the sign-in screen doesn't carry over to the next
+    person. **New data:** an
+    in-memory copy of the error (name, message, stack, time) — never persisted, never sent. Its text is
+    whatever the failing code put in its message; it is shown only on that phone. The details sheet asks
+    the person to screenshot it and send it to their team lead or admin (Doorline support, for a team
+    lead or admin) — a share the person makes through their own channels, like any screenshot; nothing
+    is sent automatically. **The switch:** `MOBILE_ERROR_RECOVERY` (a server config var; `off` = the old
+    behavior) rides the existing public `GET /api/build-status` answer as `errorRecovery`; the phone
+    remembers only the word `off` (AsyncStorage key `canvass.errorRecovery`) — no personal data. That
+    check now also repeats when the app comes back to the screen, at most once every 15 minutes: the
+    same platform and build version, to Doorline's own server, already covered by `:97`. **Timing of a
+    deliberate sign-out (stated honestly):** while a crash screen is up, the queue that runs a deliberate
+    sign-out (a password changed elsewhere, a deleted account) is unmounted, so the sign-out — and the
+    deletion of the saved houses it does — waits until the person taps Restart (which runs it first) or
+    Reset, or reopens the app (the stored, ended token brings it back on the first answer). This was
+    already true of the old crash screen for a screen that failed to draw; the loop takeover is a new way
+    in. While an asked-for restart waits to happen, the sign-out waits for the reload too, so a reload
+    can't cut it between forgetting the token and deleting the houses.
+    **Assessment: not privacy-affecting** under CLAUDE.md's list — nothing new is collected off the
+    phone, no recipient, nothing kept on the server, no export; it reduces two flows that exist today.
+    The Expo and Apple/Google sentence in `client/public/privacy.html` (`:106`), its technical-information
+    paragraph (`:97`) and DPA §6 stay
+    true; no customer notice. **Part B is not built:** the Android host-failure handler, which would turn
+    a native host failure into a crash that Google Play receives (exception classes and stack frames,
+    never a message), is deferred to the app-store build after Election Day; its half of this entry, and
+    the owner's check of Play's Data safety answers, come with it. Optional at the next policy revision:
+    "…and, on phones whose owners allow it, send us crash reports."
+
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
 > **[v3 — 2026-07-16]** v2 is itself now partially historical. Its gap list: **8 is resolved** (the
@@ -3665,7 +3708,7 @@ The `Person` layer **is** now org-scoped: `organizationId` is required and index
 | 3 | **GEOCODIO** (`api.geocod.io`) | **VOTERS' FULL HOME STREET ADDRESSES.** | VERIFIED — **MUST BE DISCLOSED AS A SUBPROCESSOR** |
 | 4 | **Mapbox** | Map tiles + a public token from web **and** mobile. **Web additionally sends usage telemetry with a persistent identifier.** | VERIFIED (asymmetric — see below) |
 | 5 | **Heroku Key-Value Store (Redis)** | BullMQ job payloads: ids, plus turf **targeting criteria and drawn polygons**; failed-job error strings retained 30 days. | PARTIAL |
-| 6 | **Expo / EAS** | OTA update checks (device IP + update metadata). EAS Build receives the app **source code**. | VERIFIED |
+| 6 | **Expo / EAS** | OTA update checks (device IP + update metadata). EAS Build receives the app **source code**. *[v6 2026-10-15: precisely — device IP, a per-install `EAS-Client-ID`, update metadata, and after a fatal error inside expo-updates' error window up to 1,024 characters of it (the error text on iOS). Error recovery Part A keeps post-launch JavaScript errors out of that window — item 30.]* | VERIFIED |
 | 7 | **Apple / Google** | App distribution and review. Plus **platform location services** (see below). | PARTIAL |
 
 ### GEOCODIO — the loud one. **VERIFIED.**
@@ -3751,7 +3794,7 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 > **COULD NOT DETERMINE:** Heroku's log retention, and whether a **log drain** forwards these to a further third party. No drain, log add-on, or error-tracker is configured anywhere in the repo — **but drains are attached via the Heroku dashboard/CLI and would not appear in code.** **This must be confirmed from the Heroku dashboard before the subprocessor list is final.**
 
 ### APPLE / GOOGLE — more than distribution. **PARTIAL.**
-`mobile/eas.json:34-45` configures EAS Submit to App Store Connect and the Google Play `internal` track. **Doorline embeds no Apple or Google analytics, crash-reporting, advertising, push (no FCM/APNs), or payment SDK** — verified across all four `package.json` files.
+`mobile/eas.json:34-45` configures EAS Submit to App Store Connect and the Google Play `internal` track. **Doorline embeds no Apple or Google analytics, crash-reporting, advertising, push (no FCM/APNs), or payment SDK** — verified across all four `package.json` files. *[v6 2026-10-15: stands — error recovery adds no SDK; what the platforms already receive about errors is recorded in item 30.]*
 
 **But two things are not "distribution only":**
 1. **On Android, every location fix the app takes is served by Google Play Services' Fused Location Provider.** `expo-location` links `com.google.android.gms:play-services-location` and calls `LocationServices.getFusedLocationProviderClient`. On iOS the equivalent is Apple's CoreLocation. **Our code does not transmit canvassing data to Apple or Google, but we cannot assert from this codebase that these platform location SDKs send nothing to their vendors.**
@@ -3762,7 +3805,7 @@ The server builds a single-line address string — `addressLine1, city, STATE ZI
 
 ### NOT PRESENT — verified negatives you may rely on
 - **NO PAYMENT PROCESSOR. Stripe is NOT integrated and receives NO data.** There is no `stripe` package in any of the four `package.json` files. `models/Subscription.js:44-47` contains dormant placeholder fields (`source` enum permitting `'stripe'`, a null `stripeCustomerId`) with comments describing Stripe as a **future** phase. Billing is manual/internal. **Do NOT disclose Stripe as a subprocessor.** If the business collects payment out-of-band, that is outside this codebase.
-- **NO email provider, NO SMS provider, NO crash-reporting, NO error-tracking, NO product analytics SDK.** Swept all four `package.json` files for Sentry, Bugsnag, Datadog, New Relic, LogRocket, Nodemailer, SMTP, SendGrid, Mailgun, Postmark, Resend, Twilio, AWS SES/S3, Segment, Amplitude, Mixpanel, PostHog, Firebase, GA, GTM: **zero.** The web page has no third-party script tags and self-hosts its fonts. **Consequence: there is no automated password-reset email — recovery is admin-issued temporary passwords only, and there is no mechanism to warn anyone of anything.** *[v4 2026-07-17: **THE EMAIL HALF OF THIS NEGATIVE FLIPS.** Transactional email via **Resend** now exists — `services/mail/mailer.js` POSTs to `api.resend.com` with global fetch, so the package.json sweep still finds zero mailer dependencies, but the CONCLUSION is void: self-serve password reset, invite/set-password links, org/campaign-add notices, support-grant notices, and pre-deletion warnings all send once `RESEND_API_KEY` + `MAIL_FROM` are set (dormant until then — the DPA §6 go-live switch). Emails carry the recipient's name + address to Resend: **Resend is a subprocessor and must appear in DPA §6 and the privacy policy's service-providers paragraph BEFORE the vars are set.** Emails never contain passwords. SMS/analytics/crash negatives all stand.]*
+- **NO email provider, NO SMS provider, NO crash-reporting, NO error-tracking, NO product analytics SDK.** Swept all four `package.json` files for Sentry, Bugsnag, Datadog, New Relic, LogRocket, Nodemailer, SMTP, SendGrid, Mailgun, Postmark, Resend, Twilio, AWS SES/S3, Segment, Amplitude, Mixpanel, PostHog, Firebase, GA, GTM: **zero.** The web page has no third-party script tags and self-hosts its fonts. **Consequence: there is no automated password-reset email — recovery is admin-issued temporary passwords only, and there is no mechanism to warn anyone of anything.** *[v4 2026-07-17: **THE EMAIL HALF OF THIS NEGATIVE FLIPS.** Transactional email via **Resend** now exists — `services/mail/mailer.js` POSTs to `api.resend.com` with global fetch, so the package.json sweep still finds zero mailer dependencies, but the CONCLUSION is void: self-serve password reset, invite/set-password links, org/campaign-add notices, support-grant notices, and pre-deletion warnings all send once `RESEND_API_KEY` + `MAIL_FROM` are set (dormant until then — the DPA §6 go-live switch). Emails carry the recipient's name + address to Resend: **Resend is a subprocessor and must appear in DPA §6 and the privacy policy's service-providers paragraph BEFORE the vars are set.** Emails never contain passwords. SMS/analytics/crash negatives all stand.]* *[v6 2026-10-15: the crash-reporting and error-tracking negatives still stand — the phone's error recovery (item 30) keeps post-launch JavaScript errors on the device and adds no SDK.]*
 - **OpenStreetMap / Overpass** appears in a **one-time developer script** that builds a committed demo fixture (`server/src/utils/demoData/fetchDemoAddresses.js`). It sends a hard-coded bounding box, no personal data, and nothing in the production request path imports it. **Does not need disclosure as a subprocessor.**
 
 ---

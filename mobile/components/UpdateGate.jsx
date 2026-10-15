@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, Linking, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { usePathname } from 'expo-router';
 import * as Updates from 'expo-updates';
 import { api } from '../lib/api';
 import { useSessionState } from '../lib/authState';
 import { STORE_URL } from '../lib/config';
+import { saveErrorRecoveryEnabled } from '../lib/cache';
+import { errorStore } from '../lib/errorRecovery';
+import { useReloadPending } from '../lib/appRestart';
+import { inCanvassFlow } from '../lib/sessionEnd';
 import Logo from './Logo';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -30,6 +35,10 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // which is strictly worse than a missed nag. The related contract gate (CLIENT_API_VERSION vs
 // minClientApiVersion in index.jsx) stays separate: that one is about the JS bundle and is
 // OTA-fixable; this one is about the binary and is not.
+
+// How often the check may re-run when the app comes back to the screen.
+const RECHECK_MS = 15 * 60 * 1000;
+
 export default function UpdateGate() {
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles(makeStyles);
@@ -37,6 +46,10 @@ export default function UpdateGate() {
   // The soft banner steps aside while the password screen or "Signing out…" covers the app (it
   // would otherwise paint over them: same layer, rendered later). The hard wall below still wins.
   const { reauth, ending } = useSessionState();
+  // The hard wall waits for the person to be off a door or a survey (below).
+  const pathname = usePathname();
+  // components/RestartCover.jsx is on top while a Restart waits; nothing here is reachable then.
+  const reloadPending = useReloadPending();
 
   // The BINARY's runtimeVersion — constant per install, unaffected by OTAs. Absent in
   // plain `expo start`, which is one of the fail-open paths.
@@ -49,13 +62,31 @@ export default function UpdateGate() {
         `/build-status?platform=${Platform.OS}&runtimeVersion=${encodeURIComponent(runtimeVersion)}`
       ),
     enabled: !!runtimeVersion,
-    staleTime: 60 * 1000,
-    // Re-ask a few times a day so a flip reaches long-running sessions; the global
-    // focusManager wiring pauses this while the app is backgrounded.
+    // Re-ask when the app comes back to the screen (app/_layout.jsx turns that off for every other
+    // query), at most once per 15 minutes: field phones almost never cold start, and the error-recovery
+    // switch below must reach a phone that stays open. 15 minutes keeps a whole crew behind one venue IP
+    // far under the route's limit (300 per 15 minutes per IP; a 429 fails open anyway). A failed check
+    // (offline, a 5xx, a 429) leaves the query stale — query-core marks it invalidated even when an older
+    // answer is kept — so after a failure the next try waits 15 minutes from the failure.
+    staleTime: RECHECK_MS,
+    refetchOnWindowFocus: (query) =>
+      query.state.status !== 'error' || Date.now() - query.state.errorUpdatedAt >= RECHECK_MS,
+    // And a few times a day while it stays on screen; the global focusManager wiring pauses this while
+    // the app is backgrounded or the password screen is up.
     refetchInterval: 4 * 60 * 60 * 1000,
   });
 
-  if (!data || data.status !== 'outdated') return null;
+  // The server's on/off switch for in-app error recovery (MOBILE_ERROR_RECOVERY, lib/errorRecovery.js)
+  // rides this same answer, on every status. Remembered on the phone, so an "off" also holds from the
+  // next launch before this query answers. An answer without the field (an older server) changes nothing.
+  const errorRecovery = data?.errorRecovery;
+  useEffect(() => {
+    if (typeof errorRecovery !== 'boolean') return;
+    errorStore.setEnabled(errorRecovery);
+    saveErrorRecoveryEnabled(errorRecovery).catch(() => {});
+  }, [errorRecovery]);
+
+  if (!data || data.status !== 'outdated' || reloadPending) return null;
 
   async function openStore() {
     try {
@@ -68,6 +99,10 @@ export default function UpdateGate() {
   }
 
   if (data.mode === 'hard') {
+    // Never over a door or a survey (lib/sessionEnd.js CANVASS_FLOW): answers there live only on that
+    // screen, and the wall would strand them behind it. It goes up the moment the person is back on the
+    // map or a list — the rule the update banner and the session screens already follow.
+    if (inCanvassFlow(pathname)) return null;
     return (
       <View style={styles.wall}>
         <View style={styles.wallBody}>

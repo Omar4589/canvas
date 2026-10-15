@@ -27,6 +27,8 @@ import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
+import { useStagingCrash } from '../../../lib/stagingCrash';
+import { DoorCrashCard } from '../../../components/CrashCard';
 
 function findHouseholdAndVoters(bootstrap, householdId) {
   const household = (bootstrap?.households || []).find(
@@ -169,7 +171,13 @@ function VoterCard({ voter, onPress }) {
   );
 }
 
+// A render crash here replaces only this screen, never the app (components/CrashCard.jsx,
+// docs/PROPOSAL_ERROR_RECOVERY.md §B13). expo-router wraps the route in its boundary for this export.
+export const ErrorBoundary = ({ error, retry }) => <DoorCrashCard kind="household" error={error} retry={retry} />;
+
 export default function HouseholdDetail() {
+  // Staging test hook (lib/stagingCrash.js): first, before any early return.
+  useStagingCrash('household');
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();

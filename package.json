@@ -73,6 +73,7 @@
     "migrate:platform-roles": "npm --prefix server run migrate:platform-roles --"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.7",
     "concurrently": "^9.1.0"
   }
 }

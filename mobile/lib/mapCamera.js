@@ -6,7 +6,9 @@
 // nothing is known yet (they keep their own copies; this one is the shared source).
 export const DEFAULT_CENTER = [-84.5, 39.0];
 
-const isPoint = (c) =>
+// Also guards the camera calls that run inside a tap (app/(app)/map.jsx's pin press): the camera
+// validates through turf, which throws on a non-number — stricter than turf, which accepts "12".
+export const isPoint = (c) =>
   Array.isArray(c) && c.length === 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]);
 
 // Bounding box of the usable points ([lng, lat] pairs — anything else is ignored), or

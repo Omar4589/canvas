@@ -3,7 +3,10 @@
 // Functions take an optional `tz` (IANA, the campaign's): when given, the time is
 // formatted in THAT zone with its short label (CDT/CST…), so every admin sees the
 // same clock time regardless of their own device timezone. Omit `tz` for the
-// device-local personal lens (unchanged behavior).
+// device-local personal lens (unchanged behavior). An unknown zone falls back to the phone's own
+// (lib/timeZone.js) — Intl throws on one, and a throw in a tap handler used to take the app down.
+
+import { safeTimeZone } from './timeZone.js';
 
 export function tzAbbrev(tz, at = new Date()) {
   if (!tz) return '';
@@ -21,9 +24,10 @@ export function formatInTz(instant, tz, opts = { month: 'short', day: 'numeric',
   const d = instant instanceof Date ? instant : new Date(instant);
   if (Number.isNaN(d.getTime())) return '';
   if (!tz) return d.toLocaleString(undefined, opts);
-  const base = new Intl.DateTimeFormat(undefined, { ...opts, timeZone: tz }).format(d);
+  const zone = safeTimeZone(tz);
+  const base = new Intl.DateTimeFormat(undefined, { ...opts, timeZone: zone }).format(d);
   const hasTime = opts.hour || opts.minute || opts.second;
-  return withLabel && hasTime ? `${base} ${tzAbbrev(tz, d)}` : base;
+  return withLabel && hasTime ? `${base} ${tzAbbrev(zone, d)}` : base;
 }
 
 export function timeAgo(date) {
@@ -46,7 +50,7 @@ export function formatExact(date, tz) {
   if (!date) return '';
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return '';
-  const z = tz ? { timeZone: tz } : {};
+  const z = tz ? { timeZone: safeTimeZone(tz) } : {};
   const datePart = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', ...z }).format(d);
   const timePart = new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
@@ -68,7 +72,7 @@ export function formatRange(first, last, tz) {
   if (f && Number.isNaN(f.getTime())) return '';
   if (l && Number.isNaN(l.getTime())) return '';
 
-  const z = tz ? { timeZone: tz } : {};
+  const z = tz ? { timeZone: safeTimeZone(tz) } : {};
   const fmtTime = (d) => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', ...z }).format(d);
   const fmtDate = (d) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', ...z }).format(d);
   const dayKey = (d) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...z }).format(d);

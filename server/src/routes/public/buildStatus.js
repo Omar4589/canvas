@@ -19,6 +19,12 @@ import rateLimit from 'express-rate-limit';
 //                                   off for that platform — everyone reads "ok".
 //   MOBILE_UPDATE_MODE              "hard" = blocking wall; anything else = dismissible banner.
 //   MOBILE_UPDATE_NOTE              optional one-line copy shown on the nag (e.g. a deadline).
+//   MOBILE_ERROR_RECOVERY           "off" = phones stop catching the JavaScript errors that escape a tap
+//                                   or a timer, and those fall back to the old behavior
+//                                   (docs/PROPOSAL_ERROR_RECOVERY.md). Anything else, or unset = on. Rides
+//                                   every answer as `errorRecovery`; a phone picks it up at launch, when
+//                                   the app comes back to the screen (at most every 15 minutes) and every
+//                                   four hours while it stays open, and remembers it.
 //
 // The runtimeVersion to set after a build: `eas build:list` → the build's "Runtime Version".
 //
@@ -54,15 +60,21 @@ const limiter = rateLimit({
 
 const router = Router();
 
+// The kill switch for the phone's in-app error recovery. Fails open the same way: only an explicit
+// "off" turns it off.
+const errorRecoveryOn = () =>
+  String(process.env.MOBILE_ERROR_RECOVERY || '').trim().toLowerCase() !== 'off';
+
 router.get('/', limiter, (req, res) => {
   const platform = String(req.query.platform || '');
   const runtimeVersion = String(req.query.runtimeVersion || '');
   const current = currentRuntimes(platform);
+  const errorRecovery = errorRecoveryOn();
 
   // Fail open on anything unexpected — a malformed request or an unconfigured platform must
   // read as "ok", never as a nag. The cost of a wrong "outdated" is a fleet-wide false alarm.
   if (!current || !runtimeVersion || current.includes(runtimeVersion)) {
-    return res.json({ status: 'ok' });
+    return res.json({ status: 'ok', errorRecovery });
   }
 
   const mode =
@@ -77,7 +89,7 @@ router.get('/', limiter, (req, res) => {
     String(
       process.env[platform === 'ios' ? 'MOBILE_STORE_URL_IOS' : 'MOBILE_STORE_URL_ANDROID'] || ''
     ).trim() || null;
-  res.json({ status: 'outdated', mode, note, storeUrl });
+  res.json({ status: 'outdated', mode, note, storeUrl, errorRecovery });
 });
 
 export default router;

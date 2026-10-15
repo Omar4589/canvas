@@ -38,6 +38,12 @@ dashboard). Five tabs:
 - **Books** — **assign/unassign books** (turf) to canvassers for the active round (see below).
 - **More** — everything else (a hub).
 
+**When something goes wrong** on an admin screen, it works the way it does for canvassers
+([CANVASSER_APP.md](CANVASSER_APP.md) → *When something goes wrong*): a *"Something went wrong"* banner
+under the top bar with **Restart**, details to screenshot (an admin or team lead is told to send them to
+Doorline support at hello@doorline.app), and a full crash screen when a screen can't be shown or errors pour
+in non-stop.
+
 ### The Books tab
 Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). It
 works the effort's **active round** — a read-only **"Pass N · active"** chip under the pickers names it
@@ -897,6 +903,10 @@ Full rules (which round, Intake, archived rounds, skips) in [PASSES_AND_TURF.md]
 # Part 2 — Technical reference
 
 ## Navigation
+Error recovery (the global handler, the banner, the crash screens, the server switch) is app-wide and
+documented once, in [CANVASSER_APP.md](CANVASSER_APP.md) → *Error recovery*; the admin tabs add nothing of
+their own.
+
 [app/(app)/admin/_layout.jsx](../mobile/app/(app)/admin/_layout.jsx) is a `Tabs` navigator: visible
 tabs `index` (Overview), `timeline` (Timeline), `map`, `books`, `more`;
 all detail screens are `href:null` (pushed). **A new file under `(app)/admin/` MUST get its own

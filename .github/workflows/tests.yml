@@ -38,6 +38,7 @@ jobs:
           node-version: 20 # root package.json: engines.node = 20.x
           cache: npm
           cache-dependency-path: |
+            package-lock.json
             server/package-lock.json
             client/package-lock.json
 
@@ -58,8 +59,11 @@ jobs:
         run: npm test
         working-directory: client
       # Every mobile/lib/*.test.js (the root script's glob), the phone's survey stepper among them. They
-      # import nothing outside mobile/lib and no npm package, so no install: a React Native import in any
-      # module one of them loads would fail this step.
+      # import nothing outside mobile/lib and no React Native, so there is no mobile install: a React
+      # Native import in any module one of them loads would fail this step. The one npm package they use
+      # is @babel/parser — mobile/lib/nativeProps.test.js parses every screen for the map rule — which
+      # is a root devDependency, hence the root install (locally it resolves from mobile/node_modules).
+      - run: npm ci
       - name: mobile unit tests
         run: npm run test:mobile
       - name: web build

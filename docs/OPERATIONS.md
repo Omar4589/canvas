@@ -621,6 +621,46 @@ could do, but don't remove it.
 **Two kill switches:** unset `FBTIME_DOOR_COUNTS` (every organization at once, no deploy), or **Turn off**
 on one organization's card.
 
+### Release: the phone keeps running after an error — and the switch that turns it off (October 2026)
+
+**What ships:** when something a canvasser taps fails, the phone app no longer goes to a flat gray screen
+(Android) or closes (iPhone). It keeps running and shows a one-line *"Something went wrong"* banner with
+**Restart**; a door screen that crashes is replaced by its own card; errors pouring in off the doors bring
+up the full crash screen with **Restart Doorline** first. What it is and how it behaves:
+[CANVASSER_APP.md](CANVASSER_APP.md) → *When something goes wrong* and *Error recovery*; the design:
+[PROPOSAL_ERROR_RECOVERY.md](PROPOSAL_ERROR_RECOVERY.md). JavaScript only — no store build.
+
+**The off switch is one config var, `MOBILE_ERROR_RECOVERY`** (**Settings ▸ Reveal Config Vars**). The
+server reads it on every request; saving it restarts the dynos — no deploy.
+
+| `MOBILE_ERROR_RECOVERY` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships | On. |
+| **`off`** (any case) | Phones stop catching the JavaScript errors that escape a tap or a timer, and those go back to the old behavior: no banner, no loop takeover. A phone picks it up when Doorline is opened or brought back to the screen (at most once every 15 minutes), or within four hours while it stays on screen, and remembers it across restarts. A phone sitting on a crash screen doesn't check until its Restart or Reset is tapped. The door cards, the crash screen for a screen that fails to draw, the time-zone fallback and the map guards stay — they are ordinary code, not behind the switch. |
+| **Unset again** | On again, on the same schedule. |
+
+**To release it, in this order:**
+
+1. **Deploy server and web from `main`** (**Deploy** tab ▸ **Manual deploy**), so the switch exists before
+   any phone has the new code. `npm run audit:mobile-api` flags `server/src/routes/public/buildStatus.js` —
+   one added field (`errorRecovery`), which older apps ignore. No index build, no client-version bump. The
+   Help Center article *The phone app says "Something went wrong" — did I lose anything?* goes live with this
+   deploy.
+2. **Staging:** `npm run ota:staging` from `mobile/`. On a TestFlight or Play-internal phone, long-press the
+   build stamp on **Profile** and run the test rows with the log open ([mobile/README.md](../mobile/README.md)
+   → *Reading it off a phone*; the full checklist is the proposal's §E).
+3. **Production:** `npm run ota:production` from `mobile/` on `main` — `ota:production` publishes the whole
+   tree, so check what else is unreleased under `mobile/` first. For a cautious first day:
+   `npm run ota:production -- --rollout-percentage=20` (the `--` is what passes the flag through; without
+   it the update goes to everyone). Then, from `mobile/`, raise it to everyone with
+   `eas update:edit <group id> --rollout-percentage 100`, or back it out with
+   `eas update:revert-update-rollout --group <group id>` — the publish prints the group id, and
+   `eas update:list --branch production` lists it. Once per platform if the publish made one group each.
+
+**If something looks wrong after release:** set `MOBILE_ERROR_RECOVERY` = `off` first (no deploy; the
+server takes it in seconds, and phones as described above). To take the phone code back out entirely, republish the previous update ([mobile/README.md](../mobile/README.md)
+→ *Undoing an OTA*).
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.

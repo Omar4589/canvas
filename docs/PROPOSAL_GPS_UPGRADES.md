@@ -1131,7 +1131,7 @@ const FeedAwarePuck = () => {
   return (
     <>
       <Mapbox.LocationPuck visible pulsing={grey ? PUCK_PULSING_OFF : PUCK_PULSING}
-        scale={PUCK_SCALE} {...puckImageProps(Platform.OS, grey)} />
+        scale={PUCK_SCALE} /* native-props-ok: puckLook.test.js */ {...puckImageProps(Platform.OS, grey)} />
       <Mapbox.Images images={PUCK_SOURCES} />
     </>
   );
@@ -1283,7 +1283,11 @@ constants come the same way. Rows get a word for B's step `near` if B ships. `de
 Release, Version, Manufacturer, Model, systemName and osVersion, never Serial or Fingerprint. No
 derivation reads the Android mock bit. `buildShareText` is test-pinned to carry no coordinate, address,
 mock bit, Serial or Fingerprint even when its inputs do. **New** `mobile/lib/buildInfo.js` lifts the
-profile's build line into a pure function both screens use.
+profile's build line into a pure function both screens use. *[2026-10-15: already built — the error
+recovery (PROPOSAL_ERROR_RECOVERY.md §B9) created it with `buildLine({ runtimeVersion, channel,
+isEmbeddedLaunch, updateId, createdAt } = {}, formatDate = (d) => d.toLocaleString())`, called as
+`buildLine(Updates)` by the profile and the error screens, and `buildInfo.test.js`. M1 uses it rather
+than creating it.]*
 
 **G.4 Behaviour.** While focused: settings re-read every 5 s (a quick-settings toggle doesn't background
 the app) and a 1 s clock, both stopped when covered (`useFocusEffect`), per PERFORMANCE.md rule 2. Fix
@@ -2025,8 +2029,8 @@ gitignored `mobile/dist/` source maps match every term.
 | `mobile/lib/locationHealth.test.js` | new | the fold, freshness table (every case also read from a tick's published snapshot, so an unanswered restart publishes `lost` on the next tick with no other event, with `lostSinceMount` and `answeredInTime` set), which events open a window (mount, the grant, `active` after `background`; never `background`), a dot lost at `background` staying lost through `active`, `greyAtBackground` held until a new fix, the time step on every event (`lost` entered on a background or an error event counted once; two restarts 5 s apart each `answeredInTime: false` at their own 15 s; a restart pending at lock `abandoned` after the unlock; a one-day clock jump writing at most 60 rows), no coordinate and no `mocked` key, single writer, single mount, the history (closing passed minutes as zero rows, background seconds split, an iOS `inactive` minute in its own row), `firstNewFixAt` and the restart ring, `resetLocationHealthHistory` clearing everything a person could read but the mount counters |
 | [`mobile/lib/locationFeed.test.js`](../mobile/lib/locationFeed.test.js) | changed | error-restart policy, backwards clock, one watcher call inside `subscribe()`, every restart removes before subscribing, the writer-wiring pin (delivery, app state, mount, unmount, attempt, tick, and permission at both grant sites; mutation-tested) |
 | `mobile/lib/gateLog.test.js`, `gateSlow.test.js`, `gateSlowWiring.test.js` | new | trace shape and safety (no coordinate, door id or `mocked`), `signOut()` clears the log, slow-label timing and keys |
-| `mobile/lib/puckLook.test.js` | new | grey mapping (`isGreyDot` with `awaitingResume`: a lock never greys; grey only 5 s after a return for a phone not lost at lock; a dot grey at lock, lost or reacquiring, stays grey with no flip), image props per platform, scale per density, PNG sizes and colours, no `visible={false}` |
-| `mobile/lib/locationCheck.test.js`, `buildInfo.test.js` | new | every derivation (fixed bands with no speed claims, `doorTapSentence` at a 20 and a 40 m bar, for a reading older than 15 s and for a `null` and a `0` accuracy, "Accuracy unknown" in the hero, the freshness word and the return-to-first-reading figure, `gateRunRow` and the share text in full form incl. "map closed", the settings row following the polled flags while `hasFusedFix` is held), the share text's two forms pinned line by line, no coordinate and never the per-minute history, background seconds or the restart ring, `hasFusedFixAsync` staying true after location goes off and on (the row reads Off, not Unknown), screen pins (exactly one `getCanvassLocation` call with `source: 'test'`, the button disabled while a run is in progress, the gate subscriber ignoring `NO_FIX`, no other location, submit or queue import, no `mocked`) |
+| `mobile/lib/puckLook.test.js` | new | grey mapping (`isGreyDot` with `awaitingResume`: a lock never greys; grey only 5 s after a return for a phone not lost at lock; a dot grey at lock, lost or reacquiring, stays grey with no flip), image props per platform, scale per density, PNG sizes and colours, no `visible={false}`; it is also the test the puck's `native-props-ok:` comment names — `mobile/lib/nativeProps.test.js` (PROPOSAL_ERROR_RECOVERY.md §B10) fails any spread on a map element without that comment, so it must pin every key `puckImageProps` can return, on both platforms, as defined |
+| `mobile/lib/locationCheck.test.js`, `buildInfo.test.js` (exists — built with the error recovery, 2026-10-15) | new | every derivation (fixed bands with no speed claims, `doorTapSentence` at a 20 and a 40 m bar, for a reading older than 15 s and for a `null` and a `0` accuracy, "Accuracy unknown" in the hero, the freshness word and the return-to-first-reading figure, `gateRunRow` and the share text in full form incl. "map closed", the settings row following the polled flags while `hasFusedFix` is held), the share text's two forms pinned line by line, no coordinate and never the per-minute history, background seconds or the restart ring, `hasFusedFixAsync` staying true after location goes off and on (the row reads Off, not Unknown), screen pins (exactly one `getCanvassLocation` call with `source: 'test'`, the button disabled while a run is in progress, the gate subscriber ignoring `NO_FIX`, no other location, submit or queue import, no `mocked`) |
 | `mobile/lib/flags.test.js`, `accuracyRing.test.js` | new | phone helpers (M1 or M2, §H.1); byte-identical circle module; no circle above 250 m and none below `ACCURACY_RING_MIN_ZOOM` (an empty set at overview zooms); one withheld-note string; no onPress on the circle source and no circle layer inside a pressable source; the co-presence pin (lands with §H.5): circle text on the phone only alongside the `admin-accuracy-rings` source; `ringsZoomOk` set before `handleMapIdle`'s early returns and the circles memo's zoom dependency |
 | `mobile/lib/privacyGrep.test.js` | new (M1; extended in N1) | one watcher, zero background terms, across `app/`, `components/`, `lib/` (tests included) and `app.json`, and from N1 `patches/` and `plugins/`; the expo-location plugin's background flags off and both Always options `false` |
 | `mobile/lib/locationPuck.test.js` | new (N1) | written against the merged component: one puck per screen; every ring expression ends in `RING_ON`/`RING_OFF` behind the kill switch; ring colours only through `processColor`; the ring only through the prop, never a JS layer; field maps only, by attribute in any order; the patch's six hunks and exactly six `diff --git` paths; the exact pin, `postinstall` and devDependency; the installed patch (skipped in CI); the expo-location method on the main queue; the pause plugin and its `app.json` entry if it ships |
@@ -2146,7 +2150,10 @@ publish. Rules 1, 5, 6 and 8 are this plan's own.
    on M1's, §O.7 on M2's), nobody else publishes to staging, or the testers lose the build under test.
    M1's staging publish waits until D28's production publish is out. If M1 misses its cutoff, its commit
    is first reverted on `main` (rule 8); then §O pauses and staging returns to the other sessions until
-   after the election.
+   after the election. *[2026-10-15: the error recovery's Part A (PROPOSAL_ERROR_RECOVERY.md) takes the
+   staging channel and the production queue first, by the owner's ruling that day; M1's staging publish
+   waits until Part A is at 100 %. If that pushes M1 past D35's cutoffs below, D35's fallback applies — M1
+   moves to after the election.]*
 8. **Election-season gate (D35).** Election Day is 2026-11-03. From 2026-10-27 through 2026-11-04 nothing
    from this plan is published or deployed except an emergency fix or a rollback; a rollout revert counts
    as a rollback, a rollout raise as a publish. "After the election" in this plan always means from

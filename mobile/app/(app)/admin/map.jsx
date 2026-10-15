@@ -1137,7 +1137,9 @@ export default function AdminMap() {
     clearTimeout(moveDoneTimer.current);
     setMoveNote(null);
     setMoveTarget({ ...h, scope: opts.scope === 'building' ? 'building' : 'unit', count: opts.count || 1, unplaced: !!opts.unplaced });
-    if (h?.location != null) {
+    // Both coordinates finite, not just present: setCamera validates through turf, which throws on a
+    // non-number inside this tap. Move mode still opens either way; it just doesn't recenter.
+    if (Number.isFinite(h?.location?.lng) && Number.isFinite(h?.location?.lat)) {
       cameraRef.current?.setCamera({
         centerCoordinate: [h.location.lng, h.location.lat],
         zoomLevel: 18,

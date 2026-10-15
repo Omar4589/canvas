@@ -381,10 +381,18 @@ Unset = feature off. To flip it, set Heroku config vars — Dashboard → your A
 | `MOBILE_UPDATE_NOTE` | optional one-line custom message shown on the nag |
 | `MOBILE_STORE_URL_IOS` / `_ANDROID` | optional override of where the Update button goes; absent → the app's baked-in `STORE_URL`. **iOS: leave unset** — since the public App Store release the baked-in URL is correct. **Android: set it** while the legacy `com.canvassapp.mobile` fleet still exists, because their baked-in URL points at the app being retired, not at `com.doorline.app`. |
 
+The same answer carries one more switch, unrelated to the nag:
+
+| Var | Value |
+|---|---|
+| `MOBILE_ERROR_RECOVERY` | `off` = phones stop catching the JavaScript errors that escape a tap or a timer, and those go back to the old behavior (an Android gray screen, an iPhone closing): no banner, no loop takeover. The crash screens for a screen that fails to draw stay. Unset or anything else = **on**. Phones pick it up when Doorline is opened or comes back to the screen (at most once every 15 minutes) and every four hours while it stays on screen, and remember it. See `docs/CANVASSER_APP.md` → *Error recovery*. |
+
 Builds whose runtimeVersion isn't listed show the nag; everyone else sees nothing. Everything
 fails open — server unreachable, endpoint erroring, var typo'd to nonsense → **no nag**, never a
 wrong wall. Don't flip `hard` until you've eyeballed the wall once on a real device: it blocks
-the entire app (login included) until the store update is installed.
+the entire app (login included) until the store update is installed. It never goes up over a door or a
+survey — it waits until the canvasser is back on the map or a list. Phones re-check when Doorline comes
+back to the screen (at most once every 15 minutes) as well as at launch and every four hours.
 
 > **The nag can't tell your lanes apart.** It keys on platform + runtimeVersion only, and a
 > `staging` build shares its fingerprint with the `production` build cut from the same commit. So
@@ -402,14 +410,28 @@ the nag walks people back to the listing you're retiring.
 
 **Profile → the build stamp at the bottom** prints `v<runtimeVersion> · <channel> · update <id> · <date>`,
 or `embedded build` if no OTA has ever landed. That one line tells you which binary a device has and
-whether it is receiving updates.
+whether it is receiving updates. The error screens print the same line (`lib/buildInfo.js`), so a
+screenshot of one names the exact update.
+
+**Staging builds only:** long-press that build stamp to reveal the **error-recovery test rows** — Tap
+error, Repeated errors, Delayed error, Burst on a door, Keep looping, Error in a sheet, Ask for password,
+Crash the next door / survey / practice survey, Crash the app frame, and on Android Native failure (a
+deliberate gray screen). Each row says what to expect. Run them with the log open:
+
+```
+~/Desktop/android/platform-tools/adb logcat -v time | grep -E "handleHostException|ReactNativeJS|ReactNative|AndroidRuntime"
+```
+
+The full checklist is `docs/PROPOSAL_ERROR_RECOVERY.md` §E. On a production build the long-press does
+nothing and the rows are never loaded.
 
 ### Applying it
 
 Default expo-updates behavior is **download in the background, apply on the *next* launch** — and the
 in-app restart offer (`components/OtaUpdatePrompt.jsx`) closes the gap for open apps: it checks on
 launch and on every foreground, downloads, and offers **Restart** (suppressed on door/survey screens;
-**Later** defers to the next cold start). So after publishing: open the app, wait ~30s, background and
+**Later** defers to the next cold start; the restart rule itself is `lib/appRestart.js`, shared with the
+error banner and crash screens). So after publishing: open the app, wait ~30s, background and
 foreground it, and accept the restart prompt — or force-quit and reopen. Relaunching once with no
 prompt accepted and seeing the old bundle proves nothing.
 

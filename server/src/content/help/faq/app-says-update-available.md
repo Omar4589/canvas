@@ -29,3 +29,5 @@ you've knocked and recorded is already saved.
 
 If the update won't install — not enough space on your phone, or the store just won't finish —
 tell your campaign admin. They can confirm the new version has finished rolling out to everyone.
+
+If the app says "Something went wrong" instead, see [this article](something-went-wrong).

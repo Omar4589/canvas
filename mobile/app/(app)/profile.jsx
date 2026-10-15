@@ -15,6 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import { api } from '../../lib/api';
+import { buildLine } from '../../lib/buildInfo';
 import { rotateToken } from '../../lib/authState';
 import { loadCurrentUser, saveCurrentUser, saveMemberships } from '../../lib/cache';
 import PasswordInput from '../../components/PasswordInput';
@@ -54,6 +55,8 @@ export default function ProfileScreen() {
   const [pwSaved, setPwSaved] = useState(false);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Staging builds only: a long-press on the build line shows the error-recovery test rows.
+  const [testsOpen, setTestsOpen] = useState(false);
 
   useEffect(() => {
     loadCurrentUser().then((u) => {
@@ -140,15 +143,15 @@ export default function ProfileScreen() {
 
   // Which JS bundle is actually running — so "is my latest fix live?" is a glance,
   // not a guess. `embedded` = the build's baked-in bundle; otherwise it's the OTA
-  // update id + when it was published. (Constants from expo-updates; safe to read.)
-  const buildInfo = (() => {
-    const rt = Updates.runtimeVersion || '—';
-    const channel = Updates.channel ? ` · ${Updates.channel}` : '';
-    if (Updates.isEmbeddedLaunch || !Updates.updateId) return `v${rt}${channel} · embedded build`;
-    const id = Updates.updateId.slice(0, 8);
-    const when = Updates.createdAt ? ` · ${new Date(Updates.createdAt).toLocaleString()}` : '';
-    return `v${rt}${channel} · update ${id}${when}`;
-  })();
+  // update id + when it was published. Shared with the error screens (lib/buildInfo.js).
+  const buildInfo = buildLine(Updates);
+
+  // The error-recovery test rows (docs/PROPOSAL_ERROR_RECOVERY.md §B11) exist only on the staging
+  // channel (TestFlight and Play internal). On a store build the long-press isn't attached and the
+  // component is never loaded — required here, inside the staging branch, not imported at the top.
+  const staging = Updates.channel === 'staging';
+  const ErrorRecoveryTests =
+    staging && testsOpen ? require('../../components/ErrorRecoveryTests').default : null;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -321,7 +324,14 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.buildStamp}>{buildInfo}</Text>
+          {staging ? (
+            <Text style={styles.buildStamp} onLongPress={() => setTestsOpen((open) => !open)}>
+              {buildInfo}
+            </Text>
+          ) : (
+            <Text style={styles.buildStamp}>{buildInfo}</Text>
+          )}
+          {ErrorRecoveryTests ? <ErrorRecoveryTests /> : null}
         </ScrollView>
       </KeyboardAvoidingView>
 

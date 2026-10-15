@@ -601,6 +601,55 @@ the half hour before (that's what tapping **Forgot password?** there and coming 
 like): it stays on that screen and asks for the new password instead, until it has been left untouched
 for half an hour. Until it connects, a phone with no signal keeps working on the houses it saved.
 
+## When something goes wrong
+
+Doorline is built to keep going when one of its own steps trips over something unexpected.
+
+- **A one-line banner: "Something went wrong".** If something you tap fails, the app keeps running and
+  a banner appears just under the top bar, with **Restart** and **✕**. If it happens again, it counts:
+  *"Something went wrong (3)"*. The thing you tapped may not have gone through, so check it — on a
+  door, look at the door's result. If the tap was inside a pop-up sheet, the banner appears once the
+  sheet closes.
+- **Tap the words for the details.** *What went wrong* shows when it happened, which version of
+  Doorline you have, and the error. A screenshot of it tells Doorline exactly what failed. Canvassers:
+  send it to your team lead or admin. Team leads and admins: send it to Doorline support at
+  hello@doorline.app, with the time and what was tapped.
+- **Restart is offered, never forced.** It waits for any knock that is still saving, and it isn't
+  offered while you're on a door or in a survey, or while the app is asking for your password. It
+  reopens Doorline in a few seconds, still signed in, and picks up a downloaded update if one is
+  waiting. Meanwhile the screen says *Restarting Doorline…*; on a weak signal it can take a minute while
+  Doorline finishes an update check. If it can't restart yet, the banner says why — for example *"Still
+  saving — try again in a moment."* If that keeps happening, close Doorline and open it again.
+- **On a door, nothing takes the door away.** Doors and surveys you already saved are safe. If the
+  door's own buttons stop working, go back to the map and restart Doorline — or close and reopen it if
+  Restart isn't offered — then record the door again.
+- **If a door screen itself crashes**, only that screen is replaced: *"This door hit a problem."* (or
+  *"This survey…"*, *"This practice survey…"*), with **Go back** and **Try again**. Answers on that
+  screen that weren't saved are gone; doors and surveys you already saved are not.
+- **The full "Something crashed" screen** appears when a screen other than a door can't be shown, or
+  when errors pour in non-stop off the doors — five within three seconds, something stuck in a loop.
+  **Restart Doorline** reopens the app in a few
+  seconds, usually still signed in. If Doorline was about to sign you out anyway (your password was
+  changed somewhere else), you'll sign in again and your houses download again, so you need signal.
+  **Reset & go home** is for when Restart brings you straight back: you choose your organization and
+  campaign again and your houses download again, so you need signal; saved work waiting to send is
+  kept.
+- **If the app's outer frame fails**, a plain *"Doorline hit a problem"* screen with **Restart
+  Doorline** appears instead of a blank screen.
+
+**What it can't catch:**
+
+- A step that fails *after* it started waiting on something (the network, a GPS fix, the phone's
+  storage, a question on screen) still shows nothing: the step just doesn't finish.
+- A failure in the first moments after Doorline opens still closes the app, or on Android turns it
+  gray.
+- A failure inside a built-in piece of the app (the map, the animations) still closes the app on an
+  iPhone, and on Android can still leave a **flat gray screen** until a future app-store version. Close
+  Doorline and reopen it; saved work is safe.
+
+**Nothing new leaves your phone.** The details stay in the app until you dismiss them, sign out or
+restart, plus the phone's own system log, as always.
+
 ---
 
 # Part 2 — Technical reference
@@ -641,7 +690,8 @@ behind ONE lock, wired by [lib/authState.js](../mobile/lib/authState.js). A sign
 the in-place password screen ([components/ReauthSheet.jsx](../mobile/components/ReauthSheet.jsx)); a
 deliberate end (password changed elsewhere, account deleted) and the forced password change are queued in
 [components/SessionGate.jsx](../mobile/components/SessionGate.jsx) and run only off the door flow
-(`CANVASS_FLOW` in [lib/sessionEnd.js](../mobile/lib/sessionEnd.js), shared with OtaUpdatePrompt). The
+(`CANVASS_FLOW` in [lib/sessionEnd.js](../mobile/lib/sessionEnd.js), shared with every in-app restart,
+[lib/appRestart.js](../mobile/lib/appRestart.js), and with the error crash screen's takeover rule). The
 roster write guard in `lib/cache.js` keeps a late save from writing the walk list back after a sign-out.
 A failed refresh no longer replaces a working screen. The map and books show their full-screen error
 only with nothing to show, or when the server's answer is final (`rosterErrorIsFinal`: a 4xx with
@@ -682,7 +732,9 @@ activeAt, changeHeardAt)`). Otherwise it is a sign-out — a screen already aski
 included, so a lost phone left untouched for half an hour signs out at the next answer it hears instead
 of keeping its houses behind the screen. The store-update soft banner steps aside while the password is
 pending (the full screen or its notice) and during **Signing out…**; its hard wall still paints on top.
-The OTA restart offer also waits while the password is pending. A sign-in clears every cached query
+Every in-app restart ([lib/appRestart.js](../mobile/lib/appRestart.js) — the update banner, the error
+banner) refuses while the password is pending, collapsed or not; the crash screens' Restart is the one
+exception, and says what it costs (*Error recovery*). A sign-in clears every cached query
 except the store-update check, which belongs to the phone, and a password change from the profile or the
 forced-change screen reruns whatever failed with the old token. The full contract, server and both
 clients, is in [USERS.md](USERS.md) → *Sessions*.
@@ -790,7 +842,11 @@ Three mechanisms steer people to newer versions, and they answer different quest
   env-driven — see [mobile/README.md](../mobile/README.md) for the ops runbook). `soft` → dismissible
   banner (session-scoped dismissal); `hard` → an opaque wall drawn **above the navigator**, not a
   route — nothing to navigate around, no redirect loop possible, with an "I've updated — check
-  again" refetch as the ops escape valve.
+  again" refetch as the ops escape valve. The wall waits while the person is on a door or in a survey
+  (`CANVASS_FLOW`) and goes up as soon as they are back on the map or a list. The check runs at launch,
+  when the app comes back to the screen (at most once every 15 minutes, failures included) and every four
+  hours while it stays on screen. Every answer also carries `errorRecovery` — the server's on/off switch
+  for the in-app error recovery (`MOBILE_ERROR_RECOVERY`, *Error recovery* below).
 - **The OTA restart offer** — "is a newer **JS bundle** already downloaded and waiting?" Plain
   expo-updates defaults fetch an update at cold start and apply it on the *next* cold start — and
   field phones essentially never cold start, so a published fix could sit unused for days.
@@ -803,11 +859,16 @@ Three mechanisms steer people to newer versions, and they answer different quest
   screens (`/household/*`, `/voter/*`, `/survey-practice/*` — `CANVASS_FLOW` in
   [lib/sessionEnd.js](../mobile/lib/sessionEnd.js), the same screens a sign-out waits for) or while the
   password is pending — the download still happens, only the offer waits;
-  **Restart** waits (bounded) for any in-flight door POST to settle and **refuses to reload while
-  one is still unsettled** — or if a canvass screen was opened during the wait — re-offering
-  instead (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js): an
-  action mid-POST is neither confirmed nor queued until the 20 s API timeout fails it into the
-  queue, so a reload at that instant would lose the knock);
+  **Restart** goes through [lib/appRestart.js](../mobile/lib/appRestart.js), the one owner of the
+  restart rule (pure and tested in [lib/restartPolicy.js](../mobile/lib/restartPolicy.js), shared with
+  the error banner and the crash screens): within one 5 s bound it waits for any in-flight door POST
+  and for the session store's change chain (`sessionSettled()` in
+  [lib/authState.js](../mobile/lib/authState.js) — a password change or a sign-out mid-way), and
+  **refuses to reload while either is still unsettled** — or if a canvass screen was opened during the
+  wait, a sign-out is running, or the password screen is pending — re-offering instead
+  (`hasInFlightActions()` in [lib/recordAction.js](../mobile/lib/recordAction.js): an action mid-POST
+  is neither confirmed nor queued until the 20 s API timeout fails it into the queue, so a reload at
+  that instant would lose the knock);
   **Later** dismisses that update for the session, keyed by `updateId`, so only a newer publish
   re-arms the banner — the dismissed one applies on the next cold start anyway. Needs no server
   and no store: the bundle is already on the phone.
@@ -828,6 +889,119 @@ against.
 Note these are the **update** override, for someone who already has the app. Where a NEW canvasser
 goes to *install* it is a separate pair — `MOBILE_INSTALL_URL_IOS`/`_ANDROID`, rendered into their
 invite email (see [EMAIL.md](EMAIL.md) and `server/src/config/storeLinks.js`).
+
+## Error recovery
+
+A JavaScript error that escapes a tap, a timer or a native callback is reported by React Native as
+**fatal**: on Android that destroys the React host, and because expo-updates stops handling host failures
+ten seconds after the first screen, the phone was left on a flat gray screen with the process alive; on
+an iPhone the app closed. The design, the verified error path and the review log are in
+[PROPOSAL_ERROR_RECOVERY.md](PROPOSAL_ERROR_RECOVERY.md); this is what is built (Part A, JavaScript only).
+
+- **The global handler** — [lib/errorRecovery.js](../mobile/lib/errorRecovery.js) (pure, tested).
+  `installGlobalErrorHandler()` runs once at `app/_layout.jsx`'s module scope and wraps whatever
+  `ErrorUtils` handler is installed. `decide()` **forwards** (today's path) in development, for non-fatal
+  reports, when no boundary is mounted to draw on (no "host"), for native exceptions C++ wrapped as
+  `Non-js exception: …` (native state is unknown, and one that escaped the scheduler has stalled
+  JavaScript), and whenever the server's switch is off. Otherwise it **intercepts**: the previous handler
+  gets `(error, false)` — the device-log line without the teardown — and the error store records it.
+  `normalizeError()` turns any thrown value into a capped Error and never throws; the handler never throws
+  on the intercept path, and a forwarded fatal is passed through unwrapped on purpose.
+- **The store** — one immutable snapshot `{ count, last, takeover }`, replaced only on change (the
+  `lib/sessionStore.js` rule), read with `useSyncExternalStore`. Five intercepted errors inside three
+  seconds is an escalate; `shouldTakeOver()` sets `takeover` only for an escalate decided **off** the door
+  flow (`CANVASS_FLOW`), so nothing ever tears a door down, and nothing is sticky: a loop still running when
+  the person leaves a door escalates again on its next tick. `dismiss()` drops the in-app copy; `clear()`
+  (a sign-out — token string → null — and the next sign-in after one — null → string; a module-scope
+  `subscribeSession` listener in `app/_layout.jsx` — or Reset) never touches the host count or the switch.
+- **The banner** — [components/ErrorNotice.jsx](../mobile/components/ErrorNotice.jsx), mounted inside
+  `RootErrorBoundary` after the other overlays (every root overlay shares zIndex 1000 and relies on render
+  order), one row at `insets.top + 56` so both top corners stay usable. *Something went wrong* (with a
+  count), **Restart** and **✕**; the message opens *What went wrong* (when, the build line, the error, the
+  stack, the saved-safe line, the door or practice line chosen as it opens, and who to send it to —
+  `loadRoleContext().isConsoleUser` → Doorline support at hello@doorline.app). Restart is hidden on the door
+  flow, while the password is pending (collapsed or not) and when `Updates.isEnabled` is false. A refusal's
+  reason replaces the message (up to three lines, and in Details) until the next error, Restart, ✕ or a move
+  to another screen. On Android the banner is a live region for the first error only — a loop on a door
+  would otherwise re-announce the count every few tenths of a second. `NoticeBoundary` renders nothing after
+  a banner bug and retries on the next error. Hidden during *Signing out…*. Limits: a root view can't paint
+  over an RN `Modal` (the banner shows when the sheet closes), and an error inside an `async` handler is a
+  silent promise rejection.
+- **The crash screen** — [components/RootErrorBoundary.jsx](../mobile/components/RootErrorBoundary.jsx) is
+  the store's host while mounted. Its wrapper keeps `setInDoorFlow(inCanvassFlow(pathname))` current in a
+  layout effect. It takes over when `takeover` turns true — never over a render crash it already shows —
+  and keeps the error in its own state. `takeover` is not sticky: it is true only on the report that
+  escalated. **Restart Doorline** leads; **Reset & go home** drops the active org and campaign and clears the
+  store right before the screens come back (it is disabled while a Restart waits to happen). When the
+  handler caught a different error less than two seconds before a render crash — typically a screen whose
+  code failed to load: Metro reports that error, then the route crashes on the empty module — the screen
+  also shows it, as *Just before*.
+- **Restart from a crash screen** — [components/CrashRestart.jsx](../mobile/components/CrashRestart.jsx)
+  `RestartBlock` calls `restartWhenSettled({ fromCrashScreen: true, beforeReload: runQueuedSessionAction })`:
+  it skips the password refusal (that screen is gone with the screens it covered) and first runs a sign-out
+  `SessionGate` was holding back (`runQueuedSessionAction` in
+  [components/SessionGate.jsx](../mobile/components/SessionGate.jsx)). `usePendingSessionAction` re-renders
+  it when a sign-out is queued, even after the screen came up, so it says what Restart will cost in words
+  that follow the reason: a changed password — sign in again, houses download again; a deleted or
+  switched-off account — Doorline signs out on this phone; any other pending password screen — Doorline asks
+  for the password again, or signs out if the password was reset meanwhile (that screen's state lives only in
+  memory). After a sign-out there, the sign-in screen has no "why" note (it lived in memory too).
+- **Waiting for the reload** — expo-updates runs `reloadAsync()` in the same serial queue as its update
+  checks and downloads (Android `EnabledUpdatesController.kt`, `StateMachineSerialExecutorQueue.kt`; iOS
+  `EnabledAppController.swift`), so a reload can wait behind one — seconds, or a minute on a weak signal —
+  while the app stays usable. The restart rule checks for a save in flight in the same step as the reload
+  call and then raises `reloadPending` ([lib/appRestart.js](../mobile/lib/appRestart.js)), lowered only if
+  the reload fails. [components/RestartCover.jsx](../mobile/components/RestartCover.jsx), mounted last in
+  `app/_layout.jsx`, covers the app with *Restarting Doorline…* meanwhile — after 10 s it says it is
+  finishing an update check, after 60 s to close and reopen Doorline if it doesn't — so no door, typed
+  answer or knock can start and then be cut off. While it is up the navigator is hidden from screen readers
+  and the other overlays step aside (on Android a screen reader's double-tap reaches a view without a
+  touch), the cover takes screen-reader focus, and Android Back does nothing. SessionGate's queued sign-out
+  waits too — checked again right before it takes the session lock — so a reload can't cut it between
+  forgetting the token and deleting the houses. A second Restart joins the reload already waiting. A crash
+  screen shows the same lines under its own Restart. This covers the update banner's Restart as well.
+- **The outer frame** — `export const ErrorBoundary` in [app/_layout.jsx](../mobile/app/_layout.jsx):
+  expo-router wraps the root layout in its own `Try` boundary, which catches RootLayout's own hooks and
+  providers. `OuterFrameCrash` always renders (*"Doorline hit a problem"*, Restart), in the light theme
+  (it is above `ThemeProvider`), and registers as a host in a layout effect.
+- **The door routes** — `household/[id].jsx`, `voter/[id]/survey.jsx` and `survey-practice/[surveyId].jsx`
+  each export `ErrorBoundary` → `DoorCrashCard` ([components/CrashCard.jsx](../mobile/components/CrashCard.jsx)):
+  only that screen is replaced, with **Go back** and **Try again**. `CrashCard.jsx` imports nothing that
+  saves or signs out (the practice screen's no-writes promise). Caught errors stay out of the store.
+- **The switch** — `MOBILE_ERROR_RECOVERY=off` on the server makes every `GET /api/build-status` answer
+  carry `errorRecovery: false`; [UpdateGate.jsx](../mobile/components/UpdateGate.jsx) feeds it to
+  `errorStore.setEnabled()` and remembers it (`saveErrorRecoveryEnabled` in
+  [lib/cache.js](../mobile/lib/cache.js)), so it holds from the next launch before the query answers
+  (`hydrateEnabled`, ignored once the server has answered). On the server, unset or anything but `off` = on;
+  an answer without the field (an older server) changes nothing on the phone. Off means the
+  old behavior for errors that escape a tap or a timer: every fatal is forwarded (no banner, no takeover);
+  the boundaries stay. The phone re-asks at launch, whenever Doorline comes back to the screen (at most once
+  every 15 minutes — this one query overrides the app-wide `refetchOnWindowFocus: false`), and every four
+  hours while it stays on screen.
+- **Fewer errors to catch** — [lib/timeZone.js](../mobile/lib/timeZone.js) `safeTimeZone()` (an unknown
+  campaign zone falls back to the phone's own, once warned) in `lib/datetime.js` and `lib/dateRanges.js`;
+  `isPoint()` ([lib/mapCamera.js](../mobile/lib/mapCamera.js)) guards the map's pin-press `flyTo`, and the
+  admin map's Move pin checks both coordinates before `setCamera`.
+- **The map rule, enforced** — [lib/nativeProps.test.js](../mobile/lib/nativeProps.test.js) parses every
+  screen and component (`@babel/parser`, a root devDependency so CI's root `npm ci` installs it) and fails
+  on any `<Mapbox.*>` prop that can disappear: a logical, `void` or optional-chaining (`?.`) value, a
+  conditional with such a branch or an undefined/null one, `undefined`/`null` itself, or a spread without a
+  `native-props-ok: <test>.test.js` comment naming an existing test. It requires `import Mapbox from
+  '@rnmapbox/maps'` (no `require`, named or namespace import) and follows `const` aliases of it. It can't
+  see a variable that becomes undefined. It flags the Books-map source that grayed the screen
+  (`f906408`).
+- **Staging test rows** — on a staging build, long-press the Profile build line
+  ([components/ErrorRecoveryTests.jsx](../mobile/components/ErrorRecoveryTests.jsx), `require`d only on
+  the staging channel): tap error, repeated errors, delayed error, burst on a door, keep looping, error in
+  a sheet, ask for password, crash the next door / survey / practice survey / the app frame
+  ([lib/stagingCrash.js](../mobile/lib/stagingCrash.js) — the hook throws on every render while armed and
+  `CrashFrame` disarms it once a boundary caught it), and, on Android, a native failure (the deliberate
+  gray screen).
+
+**Not yet built (Part B, with the next app-store build):** an Android host-failure handler that turns the
+gray screen into a crash. Until then a native failure inside a map or animation library (A3/A6 in the
+proposal) still grays Android after launch, and every fatal error in the first seconds after launch keeps
+today's path.
 
 ## The profile screen
 
@@ -853,6 +1027,11 @@ still `null`.
   **live checklist** under the field as you type, `isStrongPassword` /`PasswordRequirements` from
   [lib/validators.js](../mobile/lib/validators.js)) and clears the fields on success. There is no
   email-reset flow — the user is logged in, so it's always a known-password change.
+- **Build stamp:** the line at the bottom names the running bundle — `v<runtime> · <channel> · update
+  <id> · <published>`, or `v<runtime> · <channel> · embedded build` — from `buildLine(Updates)` in
+  [lib/buildInfo.js](../mobile/lib/buildInfo.js), the same line the error screens show. On a **staging**
+  build a long-press on it reveals the error-recovery test rows (*Error recovery* above); on a store build
+  the long-press isn't attached and the test component is never loaded.
 
 ## The My Stats page
 
@@ -1617,7 +1796,17 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `components/SurveyForm.jsx` (the survey form, moved out of `voter/[id]/survey.jsx`, plus
   `SurveyWall`), `lib/doorSurvey.js` (+ `doorSurvey.test.js` — which survey a door uses and which
   surveys practice offers), `app/(app)/survey-practice/index.jsx` and
-  `app/(app)/survey-practice/[surveyId].jsx` (Practice the survey).
+  `app/(app)/survey-practice/[surveyId].jsx` (Practice the survey),
+  `lib/errorRecovery.js`, `lib/restartPolicy.js`, `lib/timeZone.js`, `lib/buildInfo.js` (each with its
+  `.test.js`), `lib/appRestart.js`, `lib/stagingCrash.js`, `lib/nativeProps.test.js`,
+  `components/ErrorNotice.jsx`, `components/CrashCard.jsx`, `components/CrashRestart.jsx`,
+  `components/ErrorRecoveryTests.jsx`, `components/RestartCover.jsx` (error recovery).
+- Changed (error recovery): `app/_layout.jsx`, `components/RootErrorBoundary.jsx`,
+  `components/OtaUpdatePrompt.jsx`, `components/UpdateGate.jsx`, `components/SessionGate.jsx`,
+  `lib/authState.js`, `lib/cache.js`, `lib/datetime.js`, `lib/dateRanges.js`, `lib/mapCamera.js`,
+  `app/(app)/profile.jsx`, the three door routes, `app/(app)/map.jsx`, `app/(app)/admin/map.jsx`,
+  `lib/recordAction.js` and `lib/sessionEnd.js` (comments only), `server/src/routes/public/buildStatus.js`
+  (`errorRecovery`).
 - Changed: `app/(app)/_layout.jsx`, `app/(app)/select-org.jsx`, `app/(app)/campaigns.jsx`,
   `app/(app)/books.jsx`, `app/(app)/map.jsx` (+ the Not target chip, legend entry and pin; the
   `/changes` URL through `changesPath`, the `doorConfig` fold, and `restrictedFrom` in the delta fold),

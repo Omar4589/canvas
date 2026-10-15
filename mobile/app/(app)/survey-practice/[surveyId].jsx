@@ -4,6 +4,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import SurveyForm, { SurveyWall } from '../../../components/SurveyForm';
 import { practiceSurveys } from '../../../lib/doorSurvey';
+import { useStagingCrash } from '../../../lib/stagingCrash';
+import { DoorCrashCard } from '../../../components/CrashCard';
 
 // Practice the survey (docs/PROPOSAL_SURVEY_PRACTICE.md): the door's own survey form, walked with
 // no voter and no save, so a canvasser can rehearse before knocking. Reached from the canvasser
@@ -14,6 +16,8 @@ import { practiceSurveys } from '../../../lib/doorSurvey';
 // never reach the server, the offline queue, a door's color or anyone's counts. It never asks for
 // location either, because only a real save needs the GPS stamp. Keep it that way.
 const SurveyPractice = () => {
+  // Staging test hook (lib/stagingCrash.js): first, before any early return.
+  useStagingCrash('practice');
   const router = useRouter();
   const { surveyId: rawSurveyId } = useLocalSearchParams();
   const surveyId = Array.isArray(rawSurveyId) ? rawSurveyId[0] : rawSurveyId;
@@ -50,5 +54,9 @@ const SurveyPractice = () => {
     />
   );
 };
+
+// A render crash here replaces only this screen, never the app (components/CrashCard.jsx,
+// docs/PROPOSAL_ERROR_RECOVERY.md §B13). expo-router wraps the route in its boundary for this export.
+export const ErrorBoundary = ({ error, retry }) => <DoorCrashCard kind="practice" error={error} retry={retry} />;
 
 export default SurveyPractice;

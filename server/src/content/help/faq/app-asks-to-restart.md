@@ -25,3 +25,5 @@ until you're back on your list or map.
 This is different from [the app saying an update is available or required](app-says-update-available) —
 that one is about installing a new version from the **App Store** or **Google Play**, which takes
 about a minute. This restart takes seconds.
+
+If the app says "Something went wrong" instead, see [this article](something-went-wrong).

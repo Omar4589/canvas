@@ -82,7 +82,8 @@ export const tokenToEnd = ({ sentToken, heldAtSend, current }) => {
 
 // The door flow: screens whose typed input lives only in component memory (a survey, a note, a
 // walk-up voter, a practice run). Nothing that would tear them down runs while one is open — not
-// an OTA reload (components/OtaUpdatePrompt.jsx), not a sign-out, not the password screen.
+// an in-app restart (lib/appRestart.js), not a sign-out, not the password screen, not the error
+// crash screen (lib/errorRecovery.js takes over only off these screens).
 export const CANVASS_FLOW = /^\/(household|voter|survey-practice)\//;
 export const inCanvassFlow = (path) => CANVASS_FLOW.test(path || '');
 export const shouldDefer = (path, inFlight) => inCanvassFlow(path) || !!inFlight;

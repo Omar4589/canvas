@@ -31,6 +31,7 @@ const ENV_KEYS = [
   'MOBILE_UPDATE_NOTE',
   'MOBILE_STORE_URL_ANDROID',
   'MOBILE_STORE_URL_IOS',
+  'MOBILE_ERROR_RECOVERY',
 ];
 
 let server;
@@ -64,19 +65,19 @@ async function check(params) {
 
 test('unconfigured platform reads ok (feature off by default)', { skip }, async () => {
   const body = await check({ platform: 'android', runtimeVersion: OLD_RV });
-  assert.deepEqual(body, { status: 'ok' });
+  assert.deepEqual(body, { status: 'ok', errorRecovery: true });
 });
 
 test('matching runtimeVersion reads ok', { skip }, async () => {
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   const body = await check({ platform: 'android', runtimeVersion: ANDROID_RV });
-  assert.deepEqual(body, { status: 'ok' });
+  assert.deepEqual(body, { status: 'ok', errorRecovery: true });
 });
 
 test('superseded runtimeVersion reads outdated, soft by default, no note/storeUrl', { skip }, async () => {
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   const body = await check({ platform: 'android', runtimeVersion: OLD_RV });
-  assert.deepEqual(body, { status: 'outdated', mode: 'soft', note: null, storeUrl: null });
+  assert.deepEqual(body, { status: 'outdated', mode: 'soft', note: null, storeUrl: null, errorRecovery: true });
 });
 
 test('hard mode and note come from env; mode tolerates case and whitespace', { skip }, async () => {
@@ -89,6 +90,7 @@ test('hard mode and note come from env; mode tolerates case and whitespace', { s
     mode: 'hard',
     note: 'Old versions stop working Friday.',
     storeUrl: null,
+    errorRecovery: true,
   });
 
   // Any unrecognized mode string degrades to the safe one.
@@ -114,14 +116,14 @@ test('comma-separated list: every listed build is current (staged rollout)', { s
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = `${ANDROID_RV}, ${OLD_RV}`;
   for (const rv of [ANDROID_RV, OLD_RV]) {
     const body = await check({ platform: 'android', runtimeVersion: rv });
-    assert.deepEqual(body, { status: 'ok' }, `expected ok for ${rv}`);
+    assert.deepEqual(body, { status: 'ok', errorRecovery: true }, `expected ok for ${rv}`);
   }
 });
 
 test('platforms are independent: an old iOS build is not judged by the android var', { skip }, async () => {
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   const iosUnconfigured = await check({ platform: 'ios', runtimeVersion: OLD_RV });
-  assert.deepEqual(iosUnconfigured, { status: 'ok' });
+  assert.deepEqual(iosUnconfigured, { status: 'ok', errorRecovery: true });
 
   process.env.MOBILE_CURRENT_RUNTIME_IOS = IOS_RV;
   const iosOutdated = await check({ platform: 'ios', runtimeVersion: OLD_RV });
@@ -138,7 +140,7 @@ test('malformed requests fail open to ok', { skip }, async () => {
     { platform: 'windows', runtimeVersion: OLD_RV },
   ]) {
     const body = await check(params);
-    assert.deepEqual(body, { status: 'ok' }, `expected ok for ${JSON.stringify(params)}`);
+    assert.deepEqual(body, { status: 'ok', errorRecovery: true }, `expected ok for ${JSON.stringify(params)}`);
   }
 });
 
@@ -149,4 +151,20 @@ test('env flips take effect with no restart (read per-request)', { skip }, async
   process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
   const after_ = await check({ platform: 'android', runtimeVersion: OLD_RV });
   assert.equal(after_.status, 'outdated');
+});
+
+test('the error-recovery switch rides every answer and fails open', { skip }, async () => {
+  // Unset → on, on both the ok and the outdated answer.
+  assert.equal((await check({ platform: 'android', runtimeVersion: OLD_RV })).errorRecovery, true);
+  process.env.MOBILE_CURRENT_RUNTIME_ANDROID = ANDROID_RV;
+  assert.equal((await check({ platform: 'android', runtimeVersion: OLD_RV })).errorRecovery, true);
+  // Only an explicit "off" (any case, any padding) turns it off — on every answer.
+  process.env.MOBILE_ERROR_RECOVERY = ' OFF ';
+  assert.equal((await check({ platform: 'android', runtimeVersion: OLD_RV })).errorRecovery, false);
+  assert.equal((await check({ platform: 'android', runtimeVersion: ANDROID_RV })).errorRecovery, false);
+  assert.equal((await check({})).errorRecovery, false);
+  for (const v of ['on', 'false', '0', '']) {
+    process.env.MOBILE_ERROR_RECOVERY = v;
+    assert.equal((await check({ platform: 'ios', runtimeVersion: IOS_RV })).errorRecovery, true, `"${v}" stays on`);
+  }
 });

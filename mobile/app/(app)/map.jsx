@@ -65,6 +65,7 @@ import VoterMeta from '../../components/VoterMeta';
 import DirectionsButton from '../../components/DirectionsButton';
 import { timeAgo, formatExact } from '../../lib/datetime';
 import { makeRateColors, formatPace } from '../../lib/rates';
+import { isPoint } from '../../lib/mapCamera';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -746,8 +747,10 @@ export default function MapScreen() {
       setSelected(h);
       // Center the camera on the tapped pin so it ends up roughly behind the
       // sheet's peek view rather than wherever the user happened to scroll.
+      // isPoint, not just truthy: flyTo validates through turf, which throws on a non-number — and a
+      // throw inside a tap used to take the whole app down.
       const coords = h.location?.coordinates;
-      if (coords && cameraRef.current) {
+      if (isPoint(coords) && cameraRef.current) {
         cameraRef.current.flyTo(coords, 500);
       }
     },

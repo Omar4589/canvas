@@ -9,13 +9,21 @@ import { surveyForDoor } from '../../../../lib/doorSurvey';
 import { optimisticSubmit } from '../../../../lib/recordAction';
 import SurveyForm, { SurveyWall } from '../../../../components/SurveyForm';
 import { useTheme } from '../../../../lib/ThemeContext';
+import { useStagingCrash } from '../../../../lib/stagingCrash';
+import { DoorCrashCard } from '../../../../components/CrashCard';
 
 // The survey at a door. This screen owns the VOTER: which survey the door uses, the prompts before
 // the form, the do-not-contact wall, and the save. The form itself (every block, both
 // presentations, Note and Save) is components/SurveyForm.jsx, which Practice the survey walks too,
 // saving nothing (docs/PROPOSAL_SURVEY_PRACTICE.md).
 
+// A render crash here replaces only this screen, never the app (components/CrashCard.jsx,
+// docs/PROPOSAL_ERROR_RECOVERY.md §B13). expo-router wraps the route in its boundary for this export.
+export const ErrorBoundary = ({ error, retry }) => <DoorCrashCard kind="survey" error={error} retry={retry} />;
+
 export default function VoterSurvey() {
+  // Staging test hook (lib/stagingCrash.js): first, before any early return.
+  useStagingCrash('survey');
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const qc = useQueryClient();

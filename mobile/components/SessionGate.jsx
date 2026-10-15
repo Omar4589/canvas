@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { usePathname, router } from 'expo-router';
 import { useSessionState, endSessionIfCurrent, getCurrentToken } from '../lib/authState';
 import { hasInFlightActions } from '../lib/recordAction';
 import { inCanvassFlow, isFieldScreen } from '../lib/sessionEnd';
+import { isReloadPending, useReloadPending } from '../lib/appRestart';
 import ReauthSheet from './ReauthSheet';
 import { spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -40,7 +41,32 @@ export const queueSessionAction = (action) => {
 // Where the person is right now — read by the module-scope handlers, which have no hooks.
 export const sessionPath = { current: null };
 
-// Same bounded settle-wait as OtaUpdatePrompt: 20 × 250 ms = 5 s worst case.
+// For a crash screen's Restart (lib/appRestart.js, docs/PROPOSAL_ERROR_RECOVERY.md §B6). This component
+// is unmounted under a crash screen, so its queue can't run there. A queued deliberate sign-out runs now
+// instead — the ended token is still stored, so the next answered request would queue it again anyway;
+// running it now deletes the houses now rather than whenever the phone next has signal. A queued forced
+// password change is left alone: it comes back on the first request after the reload.
+//
+// usePendingSessionAction re-renders when an action is queued or taken, so the crash screen can say what
+// its Restart will cost even for a sign-out queued after the screen came up.
+const subscribePending = (fn) => {
+  pendingListeners.add(fn);
+  return () => {
+    pendingListeners.delete(fn);
+  };
+};
+const getPending = () => pending;
+export const usePendingSessionAction = () => useSyncExternalStore(subscribePending, getPending);
+export const runQueuedSessionAction = async () => {
+  const next = pending;
+  if (next?.type !== 'signout') return 'none';
+  pending = null;
+  emitPending();
+  await endSessionIfCurrent({ reason: next.reason, token: next.token });
+  return 'signed-out';
+};
+
+// Same bounded settle-wait as an in-app restart (lib/appRestart.js): 20 × 250 ms = 5 s worst case.
 const SETTLE_TRIES = 20;
 const SETTLE_INTERVAL_MS = 250;
 // How often a pending action re-checks when nothing else (a path change) wakes it — an end stored
@@ -65,6 +91,8 @@ const SessionGate = () => {
   const { token, reauth, ending } = useSessionState();
   const styles = useThemedStyles(makeStyles);
   const [action, setAction] = useState(pending);
+  // components/RestartCover.jsx is on top while a Restart waits; nothing here is reachable then.
+  const reloadPending = useReloadPending();
 
   useEffect(() => {
     pendingListeners.add(setAction);
@@ -82,14 +110,18 @@ const SessionGate = () => {
     let cancelled = false;
     let running = false;
     const attempt = async () => {
-      if (cancelled || running || inCanvassFlow(sessionPath.current)) return;
+      // Not while a Restart waits to happen (lib/appRestart.js): the reload could cut a sign-out between
+      // forgetting the token and deleting the houses. After the reload the ended token brings it back.
+      if (cancelled || running || inCanvassFlow(sessionPath.current) || isReloadPending()) return;
       running = true;
       try {
         for (let tries = 0; tries < SETTLE_TRIES && hasInFlightActions(); tries += 1) {
           await sleep(SETTLE_INTERVAL_MS);
           if (cancelled) return;
         }
-        if (cancelled || inCanvassFlow(sessionPath.current)) return;
+        // Again after the wait: a Restart may have been asked for meanwhile. No await between this check
+        // and the sign-out taking the session lock, so the two can't overlap.
+        if (cancelled || inCanvassFlow(sessionPath.current) || isReloadPending()) return;
         const next = pending;
         if (!next) return;
         pending = null;
@@ -116,6 +148,7 @@ const SessionGate = () => {
     };
   }, [action, pathname]);
 
+  if (reloadPending) return null;
   if (ending) {
     return (
       <View style={styles.cover} accessibilityViewIsModal>

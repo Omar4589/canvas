@@ -37,6 +37,7 @@ const MAP_STYLE_KEY = 'canvass.mapStyle';
 const EXPORT_OPTIONS_KEY = 'canvass.exportOptions';
 const SERVER_META_KEY = 'canvass.serverMeta';
 const THEME_KEY = 'canvass.themePreference';
+const ERROR_RECOVERY_KEY = 'canvass.errorRecovery';
 
 // Serialize every bootstrap file op (mirrors offlineQueue's withQueueLock).
 // Three writers interleave — the bootstrap fetch, the 30s changes poll, and
@@ -457,3 +458,14 @@ export async function saveThemePreference(pref) {
 export async function loadThemePreference() {
   return readItem(THEME_KEY);
 }
+
+// The server's on/off switch for in-app error recovery (MOBILE_ERROR_RECOVERY on Heroku, served by
+// routes/public/buildStatus.js; lib/errorRecovery.js). Remembered so a phone that starts offline keeps
+// the last answer. Stored only when off; missing or unreadable reads as on — the switch exists to turn
+// the feature OFF in a hurry, never to be the reason it's off.
+export const saveErrorRecoveryEnabled = async (enabled) => {
+  if (enabled === false) await AsyncStorage.setItem(ERROR_RECOVERY_KEY, 'off');
+  else await AsyncStorage.removeItem(ERROR_RECOVERY_KEY);
+};
+
+export const loadErrorRecoveryEnabled = async () => (await readItem(ERROR_RECOVERY_KEY)) !== 'off';

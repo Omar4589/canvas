@@ -5,6 +5,8 @@
 // inclusive days (the server window covers the whole `to` day). Mirrors the web
 // client/src/lib/datePresets.js.
 
+import { safeTimeZone } from './timeZone.js';
+
 export const PRESETS = [
   { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
@@ -15,10 +17,10 @@ export const PRESETS = [
 ];
 
 // Current date in `tz` as 'YYYY-MM-DD'. `now` is injectable so the day roll can be tested; every
-// existing caller passes only `tz`.
+// existing caller passes only `tz`. An unknown zone falls back to the phone's own (lib/timeZone.js).
 export function todayInTz(tz, now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz || 'UTC',
+    timeZone: safeTimeZone(tz) || 'UTC',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

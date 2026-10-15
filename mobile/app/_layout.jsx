@@ -11,7 +11,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { clearActiveOrgId, clearActiveCampaign } from '../lib/cache';
+import { clearActiveOrgId, clearActiveCampaign, loadErrorRecoveryEnabled } from '../lib/cache';
 import {
   getSessionState,
   subscribeSession,
@@ -26,7 +26,13 @@ import { promptSupportAccess } from '../lib/supportAccessState';
 import { refreshSession } from '../lib/session';
 import { loadRoleContext } from '../lib/role';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
+import { errorStore, installGlobalErrorHandler } from '../lib/errorRecovery';
+import { useStagingCrash } from '../lib/stagingCrash';
 import RootErrorBoundary from '../components/RootErrorBoundary';
+import ErrorNotice from '../components/ErrorNotice';
+import RestartCover from '../components/RestartCover';
+import { useReloadPending } from '../lib/appRestart';
+import { OuterFrameCrash } from '../components/CrashRestart';
 import UpdateGate from '../components/UpdateGate';
 import OtaUpdatePrompt from '../components/OtaUpdatePrompt';
 import SessionGate, { queueSessionAction, sessionPath, useSessionCoverUp } from '../components/SessionGate';
@@ -121,6 +127,15 @@ const onSessionEnded = ({ reason, token }) => {
 };
 setSessionEndedHandler(onSessionEnded);
 
+// A JavaScript error that escapes a tap, a timer or a native callback keeps the app running and shows
+// the "Something went wrong" banner, instead of a gray screen on Android or a closed app on an iPhone
+// (lib/errorRecovery.js, components/ErrorNotice.jsx, docs/PROPOSAL_ERROR_RECOVERY.md). The server can
+// switch it off (MOBILE_ERROR_RECOVERY, read by UpdateGate); the last answer is remembered on the phone.
+installGlobalErrorHandler();
+loadErrorRecoveryEnabled()
+  .then((enabled) => errorStore.hydrateEnabled(enabled))
+  .catch(() => {});
+
 // A manual sign-out also ends the session on the server (POST /auth/logout), so copies of the
 // token stop working. Fire-and-forget and quiet: with no signal it simply never arrives.
 setServerSignOutNotifier((token) => api('/auth/logout', { method: 'POST', token, quiet: true }));
@@ -163,6 +178,18 @@ const syncFocus = (status = AppState.currentState) => {
 };
 subscribeSession(() => syncFocus());
 
+// A sign-out clears the error banner, and so does the next sign-in after one (an error can land on the
+// sign-in screen too), so the next person never sees the previous person's error. The token is undefined
+// until the session store hydrates; a string → string change is a renewal, not a new person.
+let lastToken = getSessionState().token;
+subscribeSession(() => {
+  const { token } = getSessionState();
+  const signedOut = typeof lastToken === 'string' && token === null;
+  const signedIn = lastToken === null && typeof token === 'string';
+  if (signedOut || signedIn) errorStore.clear();
+  lastToken = token;
+});
+
 // iOS reports inactive→active for a Notification Center or Control Center pull; only a real return
 // from the background brings a collapsed password screen back.
 let lastAppState = AppState.currentState;
@@ -183,12 +210,17 @@ function onAppStateChange(status) {
 }
 
 export default function RootLayout() {
+  // Staging test hook (lib/stagingCrash.js): first, so the hook order never changes.
+  useStagingCrash('root');
   useEffect(() => {
     const sub = AppState.addEventListener('change', onAppStateChange);
     return () => sub.remove();
   }, []);
   // While a full-screen session cover is up, screen readers must not walk the screen underneath.
   const coverUp = useSessionCoverUp();
+  // Same while "Restarting Doorline…" covers the app (components/RestartCover.jsx): on Android a screen
+  // reader's double-tap reaches a view without a touch, so the cover alone can't stop it.
+  const reloadPending = useReloadPending();
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -203,7 +235,7 @@ export default function RootLayout() {
               <View
                 style={{ flex: 1 }}
                 collapsable={false}
-                importantForAccessibility={coverUp ? 'no-hide-descendants' : 'auto'}
+                importantForAccessibility={coverUp || reloadPending ? 'no-hide-descendants' : 'auto'}
               >
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="index" />
@@ -224,6 +256,13 @@ export default function RootLayout() {
               {/* Above the whole Stack (login included): the store-update nag/wall for
                   superseded native builds. Server-driven; fails open. */}
               <UpdateGate />
+              {/* LAST, so no other root overlay hides it: the "Something went wrong" banner for an
+                  error that escaped a tap or a timer. Inside the boundary, so a crash-screen
+                  takeover removes it with everything else. */}
+              <ErrorNotice />
+              {/* On top of everything while an asked-for restart waits to happen, so nothing new can
+                  start and then be cut off by the reload. */}
+              <RestartCover />
             </RootErrorBoundary>
           </ThemeProvider>
         </QueryClientProvider>
@@ -231,3 +270,8 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+// expo-router wraps this layout in its own boundary when it exports one (views/Try.js), which catches
+// what a boundary inside RootLayout can't: RootLayout's own hooks and every provider it renders. It
+// always shows its screen — by the time RootLayout can fail, the first screen has already appeared.
+export const ErrorBoundary = ({ error }) => <OuterFrameCrash error={error} />;

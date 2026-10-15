@@ -54,6 +54,20 @@ const internalLinks = (a) =>
     .map((m) => m[1])
     .filter((href) => !/^(https?:|mailto:|#|\/)/i.test(href));
 
+// Both renderers open http(s) links outside the app and treat every other href as an article slug
+// (client/src/components/help/HelpBlocks.jsx, mobile/components/HelpBlocks.jsx). A mailto: or tel: link
+// therefore lands on "Article not found" — write the address or number as plain text instead.
+test('no help article uses a link scheme the Help renderers cannot open', () => {
+  const unopenable = [];
+  for (const a of articles) {
+    // [^)]+ rather than the slug pattern above: the server parser keeps spaces in an href.
+    for (const m of a.body.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+      if (/^\s*(mailto|tel|sms):/i.test(m[1])) unopenable.push(`${a.file} -> ${m[1].trim()}`);
+    }
+  }
+  assert.deepStrictEqual(unopenable, [], `links neither Help renderer can open:\n  ${unopenable.join('\n  ')}`);
+});
+
 test('every help article parses its frontmatter and declares a slug', () => {
   for (const a of articles) {
     assert.ok(a.slug, `${a.file}: no slug — a leading blank line before --- is the usual cause, and the article is silently dropped`);

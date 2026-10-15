@@ -52,6 +52,10 @@ export const getCurrentToken = () => store.getState().token;
 export const getSessionState = () => store.getState();
 export const getSessionGeneration = () => store.getGeneration();
 export const subscribeSession = (fn) => store.subscribe(fn);
+// The store's current change chain: it resolves once every change queued so far has run. An in-app
+// restart (lib/appRestart.js) waits on it so a password change or a sign-out finishes first; a new
+// chain after it resolves means more work was queued meanwhile.
+export const sessionSettled = () => store.settled();
 
 export const signIn = (token) => store.signIn(token);
 export const signOut = () => store.signOut();

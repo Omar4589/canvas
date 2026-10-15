@@ -197,10 +197,10 @@ export function reconcilePendingLocations(households) {
 // Cleared when the submit settles.
 const inFlightPaths = new Set();
 
-// The OTA restart offer (components/OtaUpdatePrompt.jsx) consults this before reloading the
-// JS bundle: an action still in this set is neither confirmed nor queued — the lock is taken
-// at optimisticSubmit entry (before the GPS gate) and released only when the submit settles —
-// so a reload at that instant would lose the knock silently.
+// Every in-app restart (lib/appRestart.js — the update banner, the error banner, the crash
+// screens) consults this before reloading the JS bundle: an action still in this set is neither
+// confirmed nor queued — the lock is taken at optimisticSubmit entry (before the GPS gate) and
+// released only when the submit settles — so a reload at that instant would lose the knock silently.
 export const hasInFlightActions = () => inFlightPaths.size > 0;
 
 // Native alerts must only be REQUESTED while the app is active. Both platforms

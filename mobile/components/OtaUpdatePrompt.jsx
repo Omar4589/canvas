@@ -3,9 +3,9 @@ import { AppState, View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 import * as Updates from 'expo-updates';
-import { hasInFlightActions } from '../lib/recordAction';
 import { CANVASS_FLOW } from '../lib/sessionEnd';
 import { useSessionState } from '../lib/authState';
+import { restartWhenSettled, useReloadPending } from '../lib/appRestart';
 import { radius, spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
 
@@ -19,11 +19,13 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 //   · the banner never renders on the canvass-flow screens (/household/*, /voter/*,
 //     /survey-practice/*) — the download still happens there; the offer just waits for a list
 //     or map screen;
-//   · Restart waits (bounded) for any in-flight door POST to settle, and REFUSES to reload
-//     while one is still unsettled — an action mid-POST is neither confirmed nor queued
-//     (the offline queue only enqueues after a FAILED submit, up to the 20 s API timeout
-//     later), so a reload at that instant would lose the knock silently. Same refusal if a
-//     canvass screen was opened during the wait; either way the banner just re-offers;
+//   · Restart goes through lib/appRestart.js, the one owner of the restart rule (shared with the
+//     error banner and the crash screens): it waits (bounded) for any in-flight door POST and any
+//     session change to settle, and REFUSES to reload while one is still unsettled — an action
+//     mid-POST is neither confirmed nor queued (the offline queue only enqueues after a FAILED
+//     submit, up to the 20 s API timeout later), so a reload at that instant would lose the knock
+//     silently. Same refusal if a canvass screen was opened during the wait, or a sign-out or the
+//     password screen started; either way the banner just re-offers;
 //   · Later dismisses THIS update for the session, keyed by updateId — it applies on the
 //     next cold start anyway, and only a newer publish re-arms the banner.
 //
@@ -37,10 +39,6 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // CANVASS_FLOW (lib/sessionEnd.js) is the one shared definition of the door flow: the same screens
 // a sign-out and the password screen wait for. It includes /survey-practice/*, whose answers are
 // component state too.
-
-// Bounded settle-wait before reloading: 20 × 250 ms = 5 s worst case.
-const SETTLE_TRIES = 20;
-const SETTLE_INTERVAL_MS = 250;
 
 const OtaUpdatePrompt = () => {
   const insets = useSafeAreaInsets();
@@ -59,6 +57,8 @@ const OtaUpdatePrompt = () => {
   const checking = useRef(false);
   // Hidden while the password screen is pending: one thing at a time, and the password comes first.
   const { reauth } = useSessionState();
+  // components/RestartCover.jsx is on top while a Restart waits; nothing here is reachable then.
+  const reloadPending = useReloadPending();
 
   useEffect(() => {
     if (__DEV__ || !Updates.isEnabled) return undefined;
@@ -99,18 +99,13 @@ const OtaUpdatePrompt = () => {
   const restart = async () => {
     if (restarting) return;
     setRestarting(true);
-    for (let tries = 0; tries < SETTLE_TRIES && hasInFlightActions(); tries += 1) {
-      await new Promise((resolve) => setTimeout(resolve, SETTLE_INTERVAL_MS));
-    }
-    // Never reload over anything unsettled. A weak-signal POST can outlive the wait
-    // (the API timeout is 20 s, and only a FAILED submit enqueues), and the canvasser
-    // may have opened a door screen while the wait ticked. Bail instead: isUpdatePending
-    // stays true, so the banner simply re-offers at the next safe moment.
-    if (hasInFlightActions() || CANVASS_FLOW.test(pathnameRef.current || '')) {
-      setRestarting(false);
-      return;
-    }
-    Updates.reloadAsync().catch(() => setRestarting(false));
+    // Never reload over anything unsettled (lib/restartPolicy.js). Anything but a reload — a save or a
+    // session change still running, a door opened during the wait, the password screen, a failed
+    // reload — just resets: isUpdatePending stays true, so the banner re-offers at the next safe moment.
+    // A reload hands over to the cover (this banner steps aside while it waits); if it fails, the banner
+    // comes back ready, not stuck on "Restarting…".
+    await restartWhenSettled({ getPath: () => pathnameRef.current }).catch(() => {});
+    setRestarting(false);
   };
 
   // downloadedUpdate as well as isUpdatePending: a FAILED fetch can leave isUpdatePending
@@ -120,7 +115,7 @@ const OtaUpdatePrompt = () => {
   // updateId undefined (hence readyId's 'pending' fallback).
   if (!isUpdatePending || !downloadedUpdate || dismissedId === readyId) return null;
   if (CANVASS_FLOW.test(pathname || '')) return null;
-  if (reauth) return null;
+  if (reauth || reloadPending) return null;
 
   return (
     <View style={[styles.overlay, { paddingTop: insets.top + spacing.xs }]} pointerEvents="box-none">

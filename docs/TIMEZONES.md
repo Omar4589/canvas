@@ -216,6 +216,10 @@ formatters:
   reads the active org's tz from the `/auth/me` payload.
 - Mobile: [mobile/lib/datetime.js](../mobile/lib/datetime.js) — `formatInTz`, `tzAbbrev`, and
   `formatExact(date, tz)` / `formatRange(first, last, tz)` (the optional `tz` anchors + labels them).
+  A zone name the phone's `Intl` doesn't know falls back to the **phone's own zone**, with one console
+  warning per name, instead of throwing — a throw inside a tap used to take the app down
+  ([mobile/lib/timeZone.js](../mobile/lib/timeZone.js) `safeTimeZone`, also used by `todayInTz` in
+  `mobile/lib/dateRanges.js`; [PROPOSAL_ERROR_RECOVERY.md](PROPOSAL_ERROR_RECOVERY.md) §B7).
 
 Who passes which tz:
 
