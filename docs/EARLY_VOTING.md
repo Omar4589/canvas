@@ -197,7 +197,13 @@ Notes:
    voter still re-opens its door. Graduation matches the way the upload matched — leading zeros
    ignored, inside the campaign — and clears parked rows by canonical ID, whatever spelling they were
    parked under. (Its do-not-contact twin, `reapplyDncLists`, is deliberately exact: it is org-wide,
-   and two states can issue the same digits; see [VOTERS.md](VOTERS.md).)
+   and two states can issue the same digits; see [VOTERS.md](VOTERS.md).) The clear
+   (`clearParkedByCanonical`, shared with both upload routes) deletes on the index — every spelling of
+   each ID up to the widest spelling parked in scope, always inside the caller's own campaign or
+   organization — and never reads the parked pile itself; since a list parks its unmatched IDs once per
+   upload, the pile runs to millions of rows during early voting (2026-10-19;
+   [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md) has the rest of that fix, planned for after Election
+   Day).
 
 ## C. Endpoint reference
 

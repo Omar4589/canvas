@@ -1,6 +1,13 @@
 # Proposal: The import line — honest waiting, and imports that fit in memory
 
-> **Status: DESIGN, 2026-10-13. Nothing built. Review rounds 1–4 done** (seven adversarial reviewers: four
+> **2026-10-19: §H item 1 (the indexed parked-ID clear) BUILT, uncommitted at time of writing; the rest of
+> the early-voting fix moved to after Election Day by the owner's ruling — tracked in
+> [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md). Piece 1 and memory fixes 1–3 are not built. Measured
+> 2026-10-19: the clear saves ~80 MB on the worker's worst case (1,207 → 1,125 MB footprint at a 1024 cap)
+> and removes the pile load from the web dyno's list uploads; a graduating import still exceeds a
+> Standard-2X, so the Performance-M stop-gap below still applies.**
+>
+> **Status: DESIGN, 2026-10-13. Review rounds 1–4 done** (seven adversarial reviewers: four
 > blockers — the capacity gate, the early-voting measurement, the stuck clock, and a do-not-contact clear
 > that would have deleted other organizations' requests — plus 35 major and 79 minor findings; the
 > load-bearing ones re-verified against the code; all folded in). Round 4 still found a blocker and seven
@@ -161,11 +168,13 @@ early-voting fix (§H, first item), the door re-check, previews and a few smalle
 The election is **2026-11-03**, three weeks out, and imports are busiest right before it — which is also
 when early-voting data piles up. Recommended order:
 
-1. **First, alone, as soon as possible: stop loading the whole pile to clear it** (§H, first item). One
+1. **First, alone, as soon as possible: stop loading the whole pile to clear it** (§H, first item) —
+   **BUILT 2026-10-19.** One
    small server change — `clearParkedByCanonical` deletes by index with its caller's own filter instead of
    loading every parked row — removes the pile load from the website's voted and do-not-contact uploads and
    the worker's second load during graduation. No result changes; a server deploy, no phone release.
-2. **Then, before the election: the rest of the early-voting fix** (§H) — graduation looks up only the
+2. **The rest of the early-voting fix** (§H) — **moved to after Election Day by the owner's ruling
+   (2026-10-19); see [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md)** — graduation looks up only the
    parked ids this file can graduate, in bounded chunks; the same for the do-not-contact pile; nightly
    backstops catch the rare cases a file-scoped lookup can miss; the two upload routes stop holding whole
    files in memory.

@@ -21,8 +21,10 @@ const VARIANT_CHUNK = 5000; // total spellings per $in, not IDs — a 3-digit ID
 
 // The widest all-digit ID stored in the scope: how far a canonical ID must be padded to reach every
 // stored spelling. 0 when the scope holds no numeric IDs (letter-bearing states, an empty campaign).
-export async function widestNumericIdWidth(scopeFilter) {
-  const [row] = await Voter.aggregate([
+// `Model` is Voter for lookups, or a parked-ID model (VotedPendingId / DncPendingId) for the clear
+// below — the width that matters is the widest spelling stored in the collection being searched.
+export async function widestNumericIdWidth(scopeFilter, Model = Voter) {
+  const [row] = await Model.aggregate([
     { $match: scopeFilter },
     { $project: { s: { $trim: { input: { $ifNull: ['$stateVoterId', ''] } } } } },
     { $match: { s: { $regex: /^[0-9]+$/ } } },
@@ -150,15 +152,43 @@ export async function zeroOnlyMatchesForMisses(campaignId, missedSvids, { exampl
 }
 
 // Delete parked IDs (VotedPendingId / DncPendingId rows) whose canonical ID is in `canonicals`,
-// whatever spelling they were parked under. Parked rows are few (one per ID a list could not match)
-// and carry only short strings, so folding them in memory is cheaper than any query trick.
+// whatever spelling they were parked under, inside `filter`.
+//
+// Parked rows are NOT few: a list parks every ID it can't match, once per upload, so a campaign that
+// uploads its county's cumulative early-vote file every day parks the same IDs again every day —
+// over a million rows within a week of early voting. This used to load every parked row in `filter`
+// to pick a handful, on every voted-list or do-not-contact upload that matched anyone (on the web
+// dyno) and on every import that graduated an ID (on the worker). It now deletes each wanted ID's
+// spellings on the index the parked collections already carry ({campaignId, stateVoterId} and
+// {organizationId, stateVoterId}), padded to the widest numeric spelling actually parked in scope — so
+// it removes exactly the rows the old in-memory fold removed (a spelling wider than
+// MAX_VOTER_ID_WIDTH, which no real ID is, is the one exception; widestNumericIdWidth warns on it).
+//
+// `filter` is the caller's scope and is ALWAYS spread into the delete: a campaign for voted lists, an
+// organization plus its state rule for do-not-contact. DncPendingId is organization-wide and has no
+// campaignId — under strictQuery a filter on a field the model doesn't declare is silently dropped,
+// so a wrong scope here deletes other organizations' do-not-contact requests.
 export async function clearParkedByCanonical(Model, filter, canonicals) {
-  const wanted = canonicals instanceof Set ? canonicals : new Set(canonicals);
-  if (!wanted.size) return 0;
-  const rows = await Model.find(filter, { stateVoterId: 1 }).lean();
-  const ids = rows.filter((r) => wanted.has(canonicalVoterId(r.stateVoterId))).map((r) => r._id);
-  for (let i = 0; i < ids.length; i += VARIANT_CHUNK) {
-    await Model.deleteMany({ _id: { $in: ids.slice(i, i + VARIANT_CHUNK) } });
+  // Canonical values only, as the callers pass: a non-canonical value ('08719967') matched nothing in
+  // the old in-memory fold, and still matches nothing.
+  const wanted = [...new Set(canonicals)].filter((c) => c != null && canonicalVoterId(c) === c);
+  if (!wanted.length) return 0;
+  // Padding is only worth measuring when some ID is numeric; letter-bearing IDs are only themselves.
+  const width = wanted.some((c) => /^[0-9]+$/.test(c)) ? await widestNumericIdWidth(filter, Model) : 0;
+  let deleted = 0;
+  let chunk = [];
+  const flush = async () => {
+    if (!chunk.length) return;
+    const res = await Model.deleteMany({ ...filter, stateVoterId: { $in: chunk } });
+    deleted += res?.deletedCount || 0;
+    chunk = [];
+  };
+  for (const c of wanted) {
+    // Every spelling of one ID stays in one chunk (at most MAX_VOTER_ID_WIDTH of them).
+    const spellings = voterIdVariants(c, width);
+    if (chunk.length + spellings.length > VARIANT_CHUNK) await flush();
+    for (const s of spellings) chunk.push(s);
   }
-  return ids.length;
+  await flush();
+  return deleted;
 }
