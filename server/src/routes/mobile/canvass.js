@@ -273,12 +273,35 @@ const buildReplacedSnapshot = (mineRows) => {
 // canvasser's own rows (`mineRows`, mirroring the deleteMany's userId scope), so both timestamps
 // come from one device — cross-device clock skew cannot affect it. That is what makes trusting a
 // client timestamp defensible here and nowhere else.
-function supersededByNewer(data, mineRows, ts) {
+//
+// A row with the SAME tap time and the same action is this very submission, already delivered: the
+// phone timed out waiting for the first 200 and queued it again. Re-applying it used to be harmless,
+// until an admin could edit what it wrote — a duplicate delivery after that edit silently put the
+// canvasser's original answers back. So it counts as delivered (`sameDelivery`), and the caller
+// heals the door's derived state in case the first attempt was cut off mid-write.
+function supersededByNewer(data, mineRows, ts, actionType) {
   if (!data.wasOfflineSubmission) return null;
-  return (
-    mineRows.find((r) => r.timestamp && new Date(r.timestamp).getTime() > ts.getTime()) || null
+  const at = ts.getTime();
+  const newer = mineRows.find((r) => r.timestamp && new Date(r.timestamp).getTime() > at);
+  if (newer) return { row: newer, sameDelivery: false };
+  const same = mineRows.find(
+    (r) => r.timestamp && new Date(r.timestamp).getTime() === at && r.actionType === actionType
   );
+  return same ? { row: same, sameDelivery: true } : null;
 }
+
+// The first delivery of a duplicated submission normally finished, so this is a no-op. If it was cut
+// off after its activity row landed but before the door was re-derived, this finishes that part.
+// Everything here is recomputed from the stored rows, so it is idempotent and can't regress
+// lastActionAt.
+const healDuplicateDelivery = async (household, campaignType, ts, userId) => {
+  await recomputeHouseholdStatus(household, campaignType);
+  if (!household.lastActionAt || new Date(household.lastActionAt).getTime() < ts.getTime()) {
+    household.lastActionAt = ts;
+    household.lastActionBy = userId;
+  }
+  await household.save();
+};
 
 // Deterministic attribution: a door belongs to its book on one of the campaign's
 // ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
@@ -392,7 +415,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // (in the minimal PER-ROUND wire shape — toWireHousehold) lets the client's optimistic overlay
   // reconcile to the round's truth for free (it reads response.household.status), so a superseded
   // replay self-corrects the pin to the round's newer action with no client change.
-  if (supersededByNewer(data, mineRows, ts)) {
+  const superseding = supersededByNewer(data, mineRows, ts, actionType);
+  if (superseding) {
+    if (superseding.sameDelivery) await healDuplicateDelivery(household, campaign.type, ts, userId);
     return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
   }
 
@@ -820,7 +845,12 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // below — that upsert runs ahead of this route's deleteMany and is keyed on (voterId, passId)
     // alone, not on user or time, so a stale replay would blindly overwrite a newer submission's
     // answers and clear its editedBy/editedAt audit trail before we ever reached the delete.
-    if (supersededByNewer(data, mineRows, ts)) {
+    const superseding = supersededByNewer(data, mineRows, ts, 'survey_submitted');
+    if (superseding) {
+      if (superseding.sameDelivery) {
+        await healDuplicateDelivery(household, campaign.type, ts, req.user._id);
+        await recomputeSurveyStatus([voter._id]);
+      }
       return res
         .status(200)
         .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
@@ -881,7 +911,20 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       wasOfflineSubmission: !!data.wasOfflineSubmission,
       editedBy: null,
       editedAt: null,
+      // The note's own edited stamp resets with the answers' (a fresh submission is nobody's edit).
+      // Null, not absent: an answer edit later reads null as "not edited", where absent would make
+      // it copy editedBy/editedAt across (answerEditWriter.js noteCarry).
+      noteEditedBy: null,
+      noteEditedAt: null,
+      // When the server received THIS submission. A re-submit is a new receipt; without this the
+      // replace path kept the first submit's time.
+      syncedAt: new Date(),
     };
+    // A field submission is never desk-entered, so a re-survey clears the stamp. Left in place, the
+    // profile labelled the canvasser's real answers "Entered by ‹admin›", and undoing that desk
+    // entry (surveyConversion.js revert: deleteMany on deskEntry.runId) deleted them outright. Nor
+    // is it any answer edit's output, so the landing marks go too (answerEditWriter.js).
+    const surveyUpdate = { $set: surveyFields, $unset: { deskEntry: '', answerEditMarks: '' } };
     const surveyFilter = { voterId: voter._id, passId };
     // Replace-vs-insert is decided by which WRITE actually ran, not by pre-read truthiness. The
     // old blind upsert had a race the parity oracle tolerated but this fix cannot: a racer whose
@@ -893,18 +936,20 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     //
     // Full findOne (was .exists): same point-seek on the unique index, and the doc body is
     // exactly what a cross-canvasser overwrite must preserve before the $set destroys it. A
-    // same-user re-submit is the designed self-heal and archives nothing.
+    // same-user re-submit over their own field answers is the designed self-heal and archives
+    // nothing; over answers an admin desk-entered it archives them, because those were typed by
+    // someone else.
     let surveyInserted = false;
     let surveyResponse = null;
     const replaceSeenRow = async (seen) => {
-      if (String(seen.userId) !== String(req.user._id)) {
+      if (String(seen.userId) !== String(req.user._id) || seen.deskEntry) {
         // Snapshot-before-write: answers, note, authorship, GPS and any admin edit survive
         // for the admin surfaces + restore.
         await archiveOverwrittenResponse(seen, { byUserId: req.user._id });
       }
       // No upsert: this must only ever hit the row we just read (deleted-in-between falls
       // through to the insert path below).
-      return SurveyResponse.findOneAndUpdate(surveyFilter, { $set: surveyFields }, { new: true });
+      return SurveyResponse.findOneAndUpdate(surveyFilter, surveyUpdate, { new: true });
     };
     const existing = await SurveyResponse.findOne(surveyFilter).lean();
     if (existing) surveyResponse = await replaceSeenRow(existing);
@@ -923,7 +968,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
           // resort blind upsert; the tiny counter drift is the documented reconcile-healed class.
           surveyResponse = await SurveyResponse.findOneAndUpdate(
             surveyFilter,
-            { $set: surveyFields },
+            surveyUpdate,
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
         }

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { Drawer, Badge, Skeleton } from './ui/index.js';
 import { formatInTz } from '../lib/datetime.js';
-import { labelForField, formatValue, isNotable, teamMoveSummary } from '../lib/campaignHistory.js';
+import { labelForField, formatValue, isNotable, teamMoveSummary, answerEditSentence } from '../lib/campaignHistory.js';
 
 // Who changed what on this campaign, newest first.
 //
@@ -27,6 +27,11 @@ function Row({ item, tz }) {
     <li className={`px-5 py-3.5 ${notable ? 'border-l-2 border-l-warning bg-warning-tint/30' : ''}`}>
       {item.kind === 'team' ? (
         <TeamBody item={item} />
+      ) : item.field === 'answerEdit' || item.field === 'answerEditUndo' ? (
+        <div className="text-sm text-fg">
+          <span className="font-medium">{answerEditSentence(item).headline}:</span>{' '}
+          <span className="text-fg-muted">{answerEditSentence(item).detail}</span>
+        </div>
       ) : (
         <div className="text-sm text-fg">
           <span className="font-medium">{labelForField(item.field)}</span>{' '}

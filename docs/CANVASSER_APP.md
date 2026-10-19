@@ -1330,6 +1330,17 @@ the door to `refused`. Un-guarded, the replay deleted the newer `refused`, reins
 | `wasOfflineSubmission` | stamped at **enqueue** time, never at record time (`offlineQueue.js`) | marks exactly the replay population — including a replay caused by a timeout *while online* |
 | `timestamp` | frozen when the canvasser taps (`recordAction.js`) | reports when the action happened, not when it arrived |
 
+**An equal timestamp is the same delivery, not a newer one.** The comparison was a strict `>`, so a
+replay carrying the very `timestamp` of a row already recorded — the same tap, delivered twice (the
+first delivery landed but its response was lost, so the queue sent it again) — passed as new. On
+the survey route that re-applied its answers over an admin's edit made in between, silently. Now a
+row of this canvasser's with the **same timestamp and the same action** answers the replay as
+superseded too (`{ row, sameDelivery: true }`), after `healDuplicateDelivery` re-derives the door's
+status (and, on the survey route, the voter's) and never moves `lastActionAt` backwards — the
+re-send changes nothing that the first delivery already wrote. A different action at the same
+instant is still a new write. A replay with an *older* timestamp than one of this canvasser's rows
+is rejected exactly as before.
+
 **Scoped to replays on purpose.** A live write is never rejected, so online last-arrival-wins is
 untouched and no clock-skewed phone can lock itself out. The comparison is also always against *this
 canvasser's own* rows (`mineRows`, mirroring the `deleteMany`'s `userId` scope), so both timestamps

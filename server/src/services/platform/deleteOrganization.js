@@ -19,6 +19,8 @@ import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
+import { AnswerEditRun } from '../../models/AnswerEditRun.js';
+import { AnswerEditRunChunk } from '../../models/AnswerEditRunChunk.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 import { IntegrationEvent } from '../../models/IntegrationEvent.js';
 import { deleteArtifactsForScope } from '../export/exportArtifactStore.js';
@@ -70,6 +72,7 @@ export const ORG_SCOPED = [
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
   Membership, Pass,
   ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun, UnknockRun, UnknockRunChunk,
+  AnswerEditRun, AnswerEditRunChunk,
   SurveyResponse, SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
 ];

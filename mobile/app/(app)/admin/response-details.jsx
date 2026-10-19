@@ -32,9 +32,22 @@ function one(p) {
   return Array.isArray(p) ? p[0] : p;
 }
 
+// Where a preserved response can go back from — the web drawer's wording, pointed at the console.
+// The server refuses to restore answers into a visit that no longer reads Surveyed
+// (services/surveys/restoreGuard.js), so the screen says which undo brings them back instead of
+// offering a Restore that would refuse.
+const restoreBlockedHint = (reason) =>
+  reason === 'unknocked'
+    ? 'This visit was unknocked. Undo the unknock on Door Outcomes in the web console to bring these answers back.'
+    : reason === 'converted'
+      ? "This door's outcome was changed from Surveyed. Undo that change on Door Outcomes in the web console to bring these answers back."
+      : "This visit no longer reads Surveyed, so these answers can't be put back.";
+
 function answerText(a) {
-  if (a == null) return '—';
-  return Array.isArray(a) ? a.join(', ') : String(a);
+  if (a == null || a === '') return '—';
+  // An empty pick-several is a skipped question (or one an edit emptied), never a blank.
+  if (Array.isArray(a)) return a.length ? a.join(', ') : '—';
+  return String(a);
 }
 
 // Full detail for one survey response — reached by tapping a row on the
@@ -211,7 +224,7 @@ export default function ResponseDetails() {
                 <InsetRow
                   label="Edited by"
                   value={`${d.response.editedBy ? `${d.response.editedBy.firstName} ${d.response.editedBy.lastName || ''}`.trim() : 'Unknown'}`}
-                  sub={formatExact(d.response.editedAt, tz)}
+                  sub={`${formatExact(d.response.editedAt, tz)}${d.response.editedEarlier ? ' · the earlier answers are kept on the voter record' : ''}`}
                 />
               ) : null}
               {d.response.replacedEarlier ? (
@@ -255,11 +268,15 @@ export default function ResponseDetails() {
                 />
               ) : null}
               {d.response.archived && canRestore ? (
-                <InsetActionRow
-                  label={restoreMut.isPending ? 'Restoring…' : 'Restore these answers…'}
-                  disabled={restoreMut.isPending}
-                  onPress={confirmRestore}
-                />
+                d.response.restorable === false ? (
+                  <InsetRow label="Can't restore here" labelLines={2} sub={restoreBlockedHint(d.response.restoreBlockedReason)} />
+                ) : (
+                  <InsetActionRow
+                    label={restoreMut.isPending ? 'Restoring…' : 'Restore these answers…'}
+                    disabled={restoreMut.isPending}
+                    onPress={confirmRestore}
+                  />
+                )
               ) : null}
               <InsetRow
                 label="Distance from home"

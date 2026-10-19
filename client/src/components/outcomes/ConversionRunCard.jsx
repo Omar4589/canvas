@@ -10,6 +10,9 @@ import { ACTION_LABELS } from '../../lib/statusColors.js';
 // A FAILED run offers both Revert and Resume, and neither is a guess: what landed stays landed —
 // every converted door is individually correct and individually revertible — so Resume picks up
 // exactly where it stopped and Revert undoes precisely what happened.
+//
+// A stopped UNDO (revert_failed) offers only Retry undo. The undo is re-entrant, so running it again
+// finishes it; resuming would run the conversion forward and make the change again.
 const label = (r) =>
   r.direction === 'to_survey'
     ? `${(r.sources || []).map((s) => ACTION_LABELS[s] || s).join(', ') || 'Door entries'} → Surveyed`
@@ -39,6 +42,7 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
         {run.status === 'completed' && <Badge variant="success">Done</Badge>}
         {run.status === 'reverted' && <Badge variant="neutral">Undone</Badge>}
         {run.status === 'failed' && <Badge variant="danger">Stopped</Badge>}
+        {run.status === 'revert_failed' && <Badge variant="danger">Undo stopped</Badge>}
         {running && <Badge variant="neutral">{run.progress?.phase === 'reverting' ? 'Undoing' : 'Working'}</Badge>}
       </div>
 
@@ -64,16 +68,22 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
           it stopped.
         </p>
       )}
+      {run.status === 'revert_failed' && (
+        <p className="mt-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+          {run.error || 'The undo stopped before it finished.'} Everything it already put back is
+          correct. Retry the undo to finish putting the rest back.
+        </p>
+      )}
 
       {!running && (
         <ul className="mt-3 space-y-1 text-sm">
-          <Line n={c.responsesCreated}>survey responses recorded</Line>
-          <Line n={c.responsesArchived}>answers removed and preserved</Line>
+          <Line n={c.responsesCreated}>surveys recorded</Line>
+          <Line n={c.responsesArchived}>surveys removed and preserved</Line>
           <Line n={c.entriesConverted}>door entries changed</Line>
           <Line n={c.votersSkippedAlreadyAnswered}>voters already had an answer — left untouched</Line>
           <Line n={c.votersSkippedDnc}>voters skipped as do-not-contact</Line>
           <Line n={c.doorsNoVoters}>doors had nobody on file</Line>
-          <Line n={c.responsesNotRestored}>answers could not be put back — a newer field answer is there now</Line>
+          <Line n={c.responsesNotRestored}>surveys could not be put back — a newer field survey is there now</Line>
         </ul>
       )}
 
@@ -109,7 +119,9 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
           <Button size="sm" onClick={onResume} disabled={busy}>Pick up where it stopped</Button>
         )}
         {!run.revertedAt && !running && (
-          <Button variant="secondary" size="sm" onClick={onRevert} disabled={busy}>Undo this change</Button>
+          <Button variant="secondary" size="sm" onClick={onRevert} disabled={busy}>
+            {run.status === 'revert_failed' ? 'Retry undo' : 'Undo this change'}
+          </Button>
         )}
         {!running && (
           <Button variant="secondary" size="sm" onClick={onDismiss} disabled={busy}>Dismiss</Button>

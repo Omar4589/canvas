@@ -18,6 +18,7 @@ import { choiceKeyStages, mergeOptionRows, voterAnswerClause, answerTagClause } 
 import { currentVoterSetsByTag } from '../../services/surveys/currentTags.js';
 import { OTHER_OPTION_ID } from '../../services/surveys/otherOption.js';
 import { isStatement } from '../../services/surveys/routing.js';
+import { restoreStates } from '../../services/surveys/restoreGuard.js';
 import { tagOptionMap, normalizeTag } from '../../services/surveys/tags.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Organization } from '../../models/Organization.js';
@@ -1899,11 +1900,32 @@ router.get('/responses/:responseId', async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
     // On the LIVE path, say whether this response replaced a preserved earlier one (the
-    // "replaced X's earlier answers" line + the pointer the restore UI needs).
+    // "replaced X's earlier answers" line + the pointer the restore UI needs). Only a REPLACED
+    // response counts: answers an admin took away on Door Outcomes (a conversion or an unknock)
+    // were never replaced by this one, and an answer edit's copy is this very survey before an
+    // admin's change (`editedEarlier` below).
     let replacedEarlier = null;
+    let editedEarlier = null;
     if (!archived) {
+      const slot = { voterId: r.voterId?._id || r.voterId, passId: r.passId?._id || r.passId || null };
+      const edit = await SurveyResponseArchive.findOne({ ...slot, overwrittenVia: 'answer_edit' }, 'overwrittenBy overwrittenAt')
+        .sort({ overwrittenAt: -1 })
+        .populate('overwrittenBy', 'firstName lastName')
+        .lean();
+      if (edit) {
+        editedEarlier = {
+          overwriteId: String(edit._id),
+          by: edit.overwrittenBy
+            ? { id: String(edit.overwrittenBy._id), firstName: edit.overwrittenBy.firstName, lastName: edit.overwrittenBy.lastName }
+            : null,
+          at: edit.overwrittenAt,
+        };
+      }
       const prior = await SurveyResponseArchive.findOne(
-        { voterId: r.voterId?._id || r.voterId, passId: r.passId?._id || r.passId || null },
+        {
+          ...slot,
+          overwrittenVia: { $nin: ['outcome_convert', 'unknock', 'answer_edit'] },
+        },
         'userId submittedAt overwrittenAt'
       )
         .sort({ overwrittenAt: -1 })
@@ -1919,6 +1941,22 @@ router.get('/responses/:responseId', async (req, res, next) => {
           overwrittenAt: prior.overwrittenAt,
         };
       }
+    }
+    // An archived response can be restored only into a visit that still reads Surveyed — the same
+    // rule the restore route enforces (services/surveys/restoreGuard.js), so the screen can say why
+    // up front instead of offering a Restore that refuses.
+    let restore = null;
+    if (archived) {
+      const idOf = (v) => v?._id || v || null;
+      const states = await restoreStates([
+        {
+          _id: archived._id,
+          householdId: idOf(archived.householdId),
+          passId: idOf(archived.passId),
+          userId: idOf(archived.userId),
+        },
+      ]);
+      restore = states.get(String(archived._id));
     }
     const coords = r.householdId?.location?.coordinates;
     res.json({
@@ -1943,6 +1981,7 @@ router.get('/responses/:responseId', async (req, res, next) => {
           ? { at: r.deskEntry.at, fromOutcome: r.deskEntry.fromOutcome || null }
           : null,
         replacedEarlier,
+        editedEarlier,
         ...(archived
           ? {
               archived: true,
@@ -1956,6 +1995,9 @@ router.get('/responses/:responseId', async (req, res, next) => {
                   }
                 : null,
               voterId: String(archived.voterId?._id || archived.voterId),
+              fromDoorOutcomes: !!archived.answerEditRunId,
+              restorable: restore?.restorable ?? true,
+              restoreBlockedReason: restore?.reason ?? null,
             }
           : {}),
       },
@@ -2848,9 +2890,11 @@ router.get('/duplicate-surveys', async (req, res, next) => {
           coll: SurveyResponseArchive.collection.name,
           pipeline: [
             // Fraud-cleanup archives are excluded: a response removed because an admin converted
-            // its door AWAY from Surveyed is not evidence that "somebody was surveyed twice", and
-            // leaving them in dumps every reverted door into an operator's duplicate queue.
-            { $match: { ...cFilter, ...dateRange, overwrittenVia: { $ne: 'outcome_convert' } } },
+            // its door AWAY from Surveyed, or unknocked the visit outright, is not evidence that
+            // "somebody was surveyed twice", and leaving them in dumps every reverted or unknocked
+            // door into an operator's duplicate queue. An answer edit's copy is the same survey
+            // before an admin changed some answers — one person surveyed once — so it never joins.
+            { $match: { ...cFilter, ...dateRange, overwrittenVia: { $nin: ['outcome_convert', 'unknock', 'answer_edit'] } } },
             { $set: { overwritten: true } },
           ],
         },
@@ -4891,7 +4935,7 @@ router.get('/notes', async (req, res, next) => {
       wants('survey')
         ? SurveyResponse.find(
             surveyMatch,
-            '_id note submittedAt userId householdId voterId editedBy editedAt'
+            '_id note submittedAt userId householdId voterId editedBy editedAt noteEditedBy noteEditedAt'
           )
             .sort({ submittedAt: -1 })
             .limit(NOTES_RESULT_CAP)
@@ -4912,7 +4956,7 @@ router.get('/notes', async (req, res, next) => {
     const userIdSet = new Set();
     const addU = (id) => id && userIdSet.add(String(id));
     for (const r of doorRows) addU(r.userId);
-    for (const r of surveyRows) { addU(r.userId); addU(r.editedBy); }
+    for (const r of surveyRows) { addU(r.userId); addU(r.editedBy); addU(r.noteEditedBy); }
     for (const r of voterRows) { addU(r.authorId); addU(r.editedBy); }
     const users = userIdSet.size
       ? await User.find({ _id: { $in: [...userIdSet] } }, 'firstName lastName email').lean()
@@ -4969,7 +5013,12 @@ router.get('/notes', async (req, res, next) => {
         actionType: 'survey_submitted',
         household: hhItem(r.householdId),
         voter: vItem(r.voterId),
-        edited: editedItem(r.editedBy, r.editedAt),
+        // The NOTE's own stamp when the survey has one (an answer edit never marks a note);
+        // absent, the old meaning — editedBy/editedAt — still applies.
+        edited:
+          r.noteEditedAt !== undefined || r.noteEditedBy !== undefined
+            ? editedItem(r.noteEditedBy, r.noteEditedAt)
+            : editedItem(r.editedBy, r.editedAt),
       })),
       ...voterRows.map((r) => ({
         id: String(r._id),

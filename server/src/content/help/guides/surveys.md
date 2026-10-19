@@ -6,7 +6,7 @@ kind: guide
 order: 11
 sourceDoc: SURVEYS.md
 summary: Build a survey or a door script, attach it to a campaign, run different surveys per walk list, and edit it safely.
-tags: surveys, questions, branching, tags, walk lists, editing, results, percentages, script, statements, closings, default closing, go to, canvasser notes, links, one block per screen, try it, placeholder
+tags: surveys, questions, branching, tags, walk lists, editing, results, percentages, script, statements, closings, default closing, go to, canvasser notes, links, one block per screen, try it, placeholder, edit answers, correct an answer, earlier answers
 ---
 
 A **survey** is the questionnaire your canvassers run at the door. You build it once, then attach it to a campaign — and canvassers on that campaign start seeing it.
@@ -124,6 +124,17 @@ An answer you removed after people had already given it keeps its real wording a
 Counts tell you *how many* picked an answer; the drill tells you **who**. On the campaign Home, click any answer in the survey results: every entry shows the voter, the address, **which canvasser recorded it and exactly when**, any note, and an Offline badge if it synced later. Click an entry for the full response — including an *"Edited by …"* line if an admin changed it. A **tag** drill works the same way, with one difference in the numbers: the list counts **entries** (one per round — someone surveyed in two rounds appears twice), while the tag's own number counts **people, once** — the list says so right at the top. Tag drills have no per-canvasser view (several questions can feed one voter's tag, so "who recorded it" has no single answer) — the **By team** table is the split that adds up.
 
 For the full workbench, open the campaign's **Survey Explorer** tab: filters (question, answer, canvasser, walk list, dates), a **By canvasser** ranking ("who's entering Opposed the most, and how much of their own answers is that?"), a map of exactly the matching doors, and a CSV export of the drill. See [The Survey Explorer page](page-survey-explorer) and [How do I see who recorded a survey answer?](who-entered-an-answer).
+
+## Correcting a recorded answer
+
+When a recorded answer is wrong — a canvasser picked an answer for a question they should have skipped, say — an org admin can fix it without touching the visit. For one voter it's **Edit** on the voter's profile. For many at once it's **Edit answers…** on the Door Outcomes page, which can take just the wrong picks out of a multiple-choice question and leave the rest, or clear or change a single-choice answer. Either way:
+
+- **The survey stays a survey.** Knocks, billable doors, contact rate and survey rate don't move, and the voter stays surveyed. Survey results, the Survey Explorer, tag counts and exports follow the corrected answers.
+- **The survey's own logic is followed.** An answer the survey would no longer have asked after the change goes too, and it's named before anything is saved.
+- **Nothing is lost.** The earlier answers are kept on the voter's profile, the survey reads *Edited by ‹admin› on ‹date›*, and the change can be taken back (**Undo** on Door Outcomes, or **Restore** on the profile).
+- **Typed words are never copied around.** A text answer or an **Other** write-in can be rewritten one person at a time; across many surveys at once it can only be cleared.
+
+Team leads see corrected surveys and their earlier answers, but the change itself is an org admin's — ask one.
 
 ## Who can edit what
 

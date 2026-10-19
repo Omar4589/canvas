@@ -8,7 +8,8 @@ import { processTurfJob } from './services/turf/turfProcessor.js';
 import { processExportJob } from './services/export/exportProcessor.js';
 import { processCampaignDeleteJob } from './services/campaigns/deleteCampaignProcessor.js';
 import { processOrgDeleteJob } from './services/platform/deleteOrgProcessor.js';
-import { processConversionJob } from './services/canvass/conversionProcessor.js';
+import { processConversionJob, reconcileFailedConversionJob } from './services/canvass/conversionProcessor.js';
+import { processAnswerEditJob, reconcileFailedAnswerEditJob } from './services/canvass/answerEditRuns.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
@@ -17,6 +18,8 @@ import { ImportJob } from './models/ImportJob.js';
 import { Campaign } from './models/Campaign.js';
 import { Organization } from './models/Organization.js';
 import { SurveyConversionRun } from './models/SurveyConversionRun.js';
+import { AnswerEditRun } from './models/AnswerEditRun.js';
+import { AnswerEditRunChunk } from './models/AnswerEditRunChunk.js';
 
 const IMPORT_CONCURRENCY = Number(process.env.IMPORT_JOB_CONCURRENCY || 2);
 const TURF_CONCURRENCY = Number(process.env.TURF_JOB_CONCURRENCY || 1);
@@ -31,6 +34,9 @@ const ORG_DELETE_CONCURRENCY = Number(process.env.ORG_DELETE_JOB_CONCURRENCY || 
 // Desk-entry conversions: 1, because two runs on the same campaign would race the
 // recomputeCampaignStats each one ends with, and the loser would persist a stale counter set.
 const OUTCOME_CONVERT_CONCURRENCY = Number(process.env.OUTCOME_CONVERT_JOB_CONCURRENCY || 1);
+// Answer edits: 1. Two jobs of one run must never race their own chunks (the writer survives it,
+// but the counts would drift), and a run per campaign is enforced on the web side anyway.
+const ANSWER_EDIT_CONCURRENCY = Number(process.env.ANSWER_EDIT_JOB_CONCURRENCY || 1);
 
 // A long-lived worker must survive transient Redis/Mongo faults instead of
 // exiting. Without these, a stray unhandled rejection — or a Worker 'error'
@@ -65,6 +71,13 @@ async function main() {
   // And the desk-entry run collection — another new one this dyno writes and the web polls.
   await SurveyConversionRun.syncIndexes().catch((e) =>
     console.error('[worker] SurveyConversionRun.syncIndexes failed', e?.message || e)
+  );
+  // And the two answer-edit collections, new in the same way. The chunk index is UNIQUE on
+  // (runId, seq): built here so a deploy that skipped migrate:build-indexes still can't write a
+  // chunk twice.
+  await AnswerEditRun.syncIndexes().catch((e) => console.error('[worker] AnswerEditRun.syncIndexes failed', e?.message || e));
+  await AnswerEditRunChunk.syncIndexes().catch((e) =>
+    console.error('[worker] AnswerEditRunChunk.syncIndexes failed', e?.message || e)
   );
 
   // Bound the boot probe: against an unreachable Redis, ioredis
@@ -149,6 +162,13 @@ async function main() {
       concurrency: OUTCOME_CONVERT_CONCURRENCY,
       // One stall redelivery is safe: the processor re-reads its work set and convertibleMatch
       // excludes rows it already stamped, so a resumed job skips finished doors on its own.
+      maxStalledCount: 2,
+    }),
+    new Worker(QUEUE_NAMES.ANSWER_EDIT, processAnswerEditJob, {
+      connection: getSharedRedis(),
+      concurrency: ANSWER_EDIT_CONCURRENCY,
+      // A stall redelivery reuses the job id and is welcome: a done chunk is skipped, and the
+      // writer classifies what a dead attempt left by the landing marks (answerEditWriter.js).
       maxStalledCount: 2,
     }),
   ];
@@ -243,23 +263,25 @@ async function main() {
       console.error('[worker] org-delete reconcile error:', e?.message || e);
     }
   });
-  // Same reconcile for desk-entry conversions. What landed STAYS landed — every converted door is
-  // individually correct and individually revertible by the run's own stamp sweep, so a rollback
-  // pass here would be a second destructive operation with its own failure mode. The run card
-  // offers Revert and Resume instead; this listener only makes sure the doc says `failed` rather
-  // than freezing at `running` forever.
+  // Same reconcile for desk-entry conversions, by direction: a stopped conversion reads `failed`,
+  // a stopped undo `revert_failed` (services/canvass/conversionProcessor.js says why they differ).
   const convertWorker = workers.find((w) => w.name === QUEUE_NAMES.OUTCOME_CONVERT);
   convertWorker.on('failed', async (job, err) => {
-    if (!job?.data?.runId) return;
-    const attemptsAllowed = job.opts?.attempts || 1;
-    if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
     try {
-      await SurveyConversionRun.updateOne(
-        { _id: job.data.runId, status: { $in: ['pending', 'running', 'reverting'] } },
-        { $set: { status: 'failed', error: String(err?.message || err || 'unknown') } }
-      );
+      await reconcileFailedConversionJob(job, err);
     } catch (e) {
       console.error('[worker] conversion reconcile error:', e?.message || e);
+    }
+  });
+  // And for answer edits: a stopped apply reads `failed` (Pick up, or Undo what landed), a stopped
+  // undo `undo.status: failed` (Retry undo) — matched on the failing job's own id, so a job that
+  // Start again superseded changes nothing (services/canvass/answerEditRuns.js).
+  const answerEditWorker = workers.find((w) => w.name === QUEUE_NAMES.ANSWER_EDIT);
+  answerEditWorker.on('failed', async (job, err) => {
+    try {
+      await reconcileFailedAnswerEditJob(job, err);
+    } catch (e) {
+      console.error('[worker] answer-edit reconcile error:', e?.message || e);
     }
   });
 

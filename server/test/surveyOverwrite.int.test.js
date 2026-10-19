@@ -228,8 +228,16 @@ test('3. an admin-edited response, later overwritten, is archived WITH its edit 
   });
   assert.strictEqual(patch.status, 200);
 
+  // The profile edit itself keeps the version it replaced (owner ruling 4, 2026-10-19 —
+  // docs/PROPOSAL_SURVEY_ANSWER_EDITS.md §J): Alice's original answers, before the admin's change.
+  const before = await SurveyResponseArchive.findOne({ voterId: v2._id, overwrittenVia: 'answer_edit' }).lean();
+  assert.ok(before, 'the earlier answers are kept, not destroyed');
+  assert.strictEqual(before.answers[0].optionIds[0], 'o1');
+  assert.strictEqual(before.editedBy, null, 'as recorded, before any edit');
+  assert.strictEqual(String(before.overwrittenBy), String(admin._id));
+
   assert.strictEqual((await submit(ctx.bobTok, v2._id, 'o1')).status, 201);
-  const a = await SurveyResponseArchive.findOne({ voterId: v2._id }).lean();
+  const a = await SurveyResponseArchive.findOne({ voterId: v2._id, overwrittenVia: 'submit' }).lean();
   assert.ok(a, 'archived');
   assert.strictEqual(String(a.editedBy), String(admin._id), 'the admin edit audit rode into the archive');
   assert.ok(a.editedAt, 'editedAt too');
@@ -354,11 +362,16 @@ test('7. profile wire: replacedEarlier + overwrittenSurveys', { skip }, async ()
   assert.ok(s.replacedEarlier, 'winner carries the pointer');
   assert.strictEqual(s.replacedEarlier.by.name, 'Alice First');
   const ow = prof.json.overwrittenSurveys;
-  assert.strictEqual(ow.length, 1);
+  // Newest first: Bob's overwrite of Alice's (edited) survey, then the copy the admin's edit kept.
+  assert.strictEqual(ow.length, 2);
   assert.strictEqual(ow[0].by.name, 'Alice First');
   assert.strictEqual(ow[0].overwrittenBy.name, 'Bob Second');
   assert.strictEqual(ow[0].answers[0].answer, 'No', 'the preserved (edited) answers ship');
   assert.strictEqual(ow[0].overwrittenVia, 'submit');
+  assert.strictEqual(ow[1].overwrittenVia, 'answer_edit', "the admin's edit kept the answers it replaced");
+  assert.strictEqual(ow[1].by.name, 'Alice First');
+  assert.strictEqual(ow[1].answers[0].optionIds[0], 'o1');
+  assert.strictEqual(s.replacedEarlier.overwriteId, ow[0].id, "an edit's copy is never \"replaced X's earlier answers\"");
 });
 
 test('8. races: same-user double-tap never archives; cross-user race archives exactly once', { skip }, async () => {

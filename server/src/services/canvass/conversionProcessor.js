@@ -15,6 +15,30 @@ import { executeConversionRun, revertConversionRun } from './surveyConversion.js
 // GET /admin/campaigns/:id/survey-conversions/:runId, which is scoped by
 // {_id, campaignId, organizationId} — so a run id from another org reads as 404 by construction
 // rather than by an ownership check the route has to remember to write.
+// The worker's `failed` listener, for this queue. What landed STAYS landed — every converted door is
+// individually correct and individually revertible by the run's own stamp sweep, so a rollback
+// pass here would be a second destructive operation with its own failure mode. This only makes
+// sure the doc says what stopped instead of freezing at `running` / `reverting` forever, and says
+// it by DIRECTION: a stopped conversion reads `failed` (Pick up or Undo), a stopped undo reads
+// `revert_failed` (Retry undo only — picking it up would run the conversion forward again).
+export const reconcileFailedConversionJob = async (job, err) => {
+  if (!job?.data?.runId) return;
+  const attemptsAllowed = job.opts?.attempts || 1;
+  if ((job.attemptsMade || 0) < attemptsAllowed && !job.finishedOn) return; // a retry is coming
+  const error = String(err?.message || err || 'unknown');
+  if (job.name === 'revert') {
+    await SurveyConversionRun.updateOne(
+      { _id: job.data.runId, status: 'reverting' },
+      { $set: { status: 'revert_failed', error } }
+    );
+    return;
+  }
+  await SurveyConversionRun.updateOne(
+    { _id: job.data.runId, status: { $in: ['pending', 'running'] } },
+    { $set: { status: 'failed', error } }
+  );
+};
+
 export async function processConversionJob(job) {
   const { runId } = job.data;
   const run = await SurveyConversionRun.findById(runId);

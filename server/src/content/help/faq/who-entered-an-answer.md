@@ -6,7 +6,7 @@ kind: faq
 order: 45
 sourceDoc: SURVEYS.md
 summary: Click the answer in the survey results — every entry shows the canvasser, the exact time, and any note, with a By-canvasser breakdown and a map.
-tags: survey, answers, who, canvasser, audit, time, notes, map, opposed
+tags: survey, answers, who, canvasser, audit, time, notes, map, opposed, edited, edited by
 ---
 
 Click the answer. Two ways in:
@@ -25,7 +25,9 @@ Each entry has a **Map** link to its door, and the explorer shows a map of the w
 
 ## Was an entry changed?
 
-Click the entry to open the full response. If an admin later edited it, you'll see an *"Edited by … on …"* line; entries recorded offline also show when they synced.
+Click the entry to open the full response. If an admin later changed its answers — with Edit on the voter's profile, or Edit answers on the Door Outcomes page — you'll see an *"Edited by … on …"* line (on the phone too). On the web, when the earlier answers were kept, the line says so — *the earlier answers are kept on the voter record* — and the voter's profile shows them in full. Entries recorded offline also show when they synced.
+
+The drill lists each survey under the answer it holds **now**. If an admin took a pick out, that survey no longer appears under it, and it no longer counts in that canvasser's **By canvasser** row for that answer.
 
 ## Why doesn't a tag have "By canvasser"?
 

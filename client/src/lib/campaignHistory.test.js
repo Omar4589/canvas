@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { labelForField, formatValue, isNotable } from './campaignHistory.js';
+import { labelForField, formatValue, isNotable, answerEditSentence } from './campaignHistory.js';
 
 // The History rows for the two door settings. The server stores only the field key and raw values
 // (a list as its sorted comma-join, an empty one as null), so a lost label or branch here breaks
@@ -38,4 +38,21 @@ test('the Add-person policy reads in words both ways, and an unset one reads as 
   );
   // 'all' is the schema default, so a campaign saved before the setting existed reads as it.
   assert.strictEqual(formatValue('doorAddPolicy', null), 'Everyone on the campaign');
+});
+
+test('the Door Outcomes acts read in words, are highlighted, and an answer edit is one sentence', () => {
+  assert.strictEqual(row('surveyConversion', 'not_home', 'survey_submitted'), 'Surveyed entries: Not home → Surveyed');
+  assert.strictEqual(row('surveyConversion', 'mixed', 'survey_submitted'), 'Surveyed entries: several outcomes → Surveyed');
+  assert.strictEqual(row('unknock', 'recorded', 'unknocked'), 'Entries: recorded → unknocked');
+  for (const field of ['surveyConversion', 'unknock', 'answerEdit', 'answerEditUndo']) {
+    assert.strictEqual(isNotable({ kind: 'config', field }), true, field);
+  }
+  assert.deepStrictEqual(answerEditSentence({ field: 'answerEdit', toValue: 'Q3: took out A (214 surveys)' }), {
+    headline: 'Survey answers edited',
+    detail: 'Q3: took out A (214 surveys)',
+  });
+  assert.strictEqual(
+    answerEditSentence({ field: 'answerEditUndo', toValue: '212 surveys put back, 2 kept newer answers', fromValue: 'Q3: took out A' }).detail,
+    '212 surveys put back, 2 kept newer answers — Q3: took out A'
+  );
 });

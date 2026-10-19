@@ -14,8 +14,10 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
-import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { archiveOverwrittenResponse, snapshotFromArchive } from '../../services/surveys/archiveOverwrite.js';
+import { restoreStates, RESTORE_BLOCKED_MESSAGES } from '../../services/surveys/restoreGuard.js';
+import { planFromAnswers, applyEditPlan, editorVersion } from '../../services/canvass/answerEdit.js';
+import { writeOneSurvey } from '../../services/canvass/answerEditWriter.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { listVoters, pageParams, isDirectoryTimeout, DIRECTORY_TIMEOUT_MESSAGE } from '../../services/voters/voterDirectory.js';
 import { createVoterNote } from '../../services/voters/voterNotes.js';
@@ -525,37 +527,65 @@ const editSurveySchema = z.object({
     )
     .optional(),
   note: z.string().trim().max(2000).nullable().optional(),
+  // The editors' version (services/canvass/answerEdit.js editorVersion), captured when Edit opened:
+  // a survey that changed since — re-surveyed, edited in another tab, its note changed — refuses
+  // 409 RESPONSE_CHANGED instead of writing back what the editor saw. Optional so a request that
+  // doesn't send one still saves (it just isn't checked).
+  version: z.string().max(100).optional(),
 });
 
+// Edit one survey from the profile — through the SAME writer and per-person plan as Door
+// Outcomes' one-person-at-a-time walkthrough (docs/PROPOSAL_SURVEY_ANSWER_EDITS.md §J):
+//   • the posted answers become a per-question diff against what's stored, so an untouched save
+//     writes nothing and an old 3-key row nobody changed stays a 3-key row;
+//   • an answer the change makes hidden is dropped (owner ruling 2) — it stays in the copy;
+//   • the EARLIER version is archived (via 'answer_edit') before the write, as a restorable card
+//     (owner ruling 4) — this used to destroy it;
+//   • changed answers stamp editedBy/editedAt, a changed note stamps its own noteEdited* — so a
+//     note reads edited only when the note changed.
 router.patch('/:voterId/surveys/:responseId', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
-    if (!mongoose.isValidObjectId(req.params.responseId)) {
+    if (!mongoose.isValidObjectId(req.params.responseId) || !mongoose.isValidObjectId(req.params.voterId)) {
       return res.status(400).json({ error: 'Invalid responseId' });
     }
     const data = editSurveySchema.parse(req.body);
-    const sr = await SurveyResponse.findOne({
-      _id: req.params.responseId,
-      voterId: req.params.voterId,
+    const live = await SurveyResponse.collection.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.responseId),
+      voterId: new mongoose.Types.ObjectId(req.params.voterId),
       organizationId: activeOrgId(req),
     });
-    if (!sr) return res.status(404).json({ error: 'Survey response not found' });
-    if (data.answers !== undefined) {
-      // Normalize against the response's template, but PRESERVE history: keep
-      // answers even if new visibleIf logic would now hide them (dropHidden:false).
-      // Unknown ids/rows are still pruned. Missing template → no template-driven
-      // normalization possible, so store as-is rather than wipe the edit.
-      const template = await SurveyTemplate.findById(sr.surveyTemplateId);
-      sr.answers = template
-        ? normalizeAndFilterAnswers(template, data.answers, { dropHidden: false })
-        : data.answers;
-    }
-    if (data.note !== undefined) sr.note = data.note;
-    sr.editedBy = req.user._id;
-    sr.editedAt = new Date();
-    await sr.save();
-    await recomputeSurveyStatus([sr.voterId]);
+    if (!live) return res.status(404).json({ error: 'Survey response not found' });
+    const changedResponse = async () =>
+      res.status(409).json({
+        error: 'Someone changed this survey while you were editing. The latest answers are shown — make your change again.',
+        code: 'RESPONSE_CHANGED',
+        profile: await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) }),
+      });
+    if (data.version && editorVersion(live) !== data.version) return changedResponse();
 
+    const template = await SurveyTemplate.findById(live.surveyTemplateId).lean();
+    let nextAnswers = null;
+    if (data.answers !== undefined) {
+      if (template) {
+        const plan = planFromAnswers(template.questions, live.answers || [], data.answers);
+        const applied = plan.length
+          ? applyEditPlan(template.questions, live.answers || [], plan, { mode: 'person', flow: template.flow })
+          : null;
+        if (applied?.changed) nextAnswers = applied.answers;
+      } else {
+        // No template to diff against (deleted): normalize nothing, store what was sent.
+        nextAnswers = data.answers;
+      }
+    }
+    const note = data.note === undefined ? undefined : data.note || null;
+    const nextNote = note !== undefined && note !== (live.note ?? null) ? note : undefined;
+
+    if (nextAnswers || nextNote !== undefined) {
+      const w = await writeOneSurvey({ live, nextAnswers, nextNote, byUserId: req.user._id, at: new Date() });
+      if (w.conflict) return changedResponse();
+      await recomputeSurveyStatus([live.voterId]);
+    }
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     res.json(profile);
   } catch (err) {
@@ -596,6 +626,10 @@ router.delete('/:voterId/surveys/:responseId', async (req, res, next) => {
 // two steps leaves a duplicate archive row at worst — never a lost response. If the current
 // response was deleted meanwhile, restore resurrects: create + surveys:+1, the inverse of the
 // DELETE above. Re-restoring a promoted id is an honest 404 (the row was consumed).
+//
+// Only into a visit that still reads Surveyed (services/surveys/restoreGuard.js): an unknocked or
+// converted visit, or one the canvasser re-recorded, refuses 409 RESTORE_VISIT_NOT_SURVEYED rather
+// than putting a counted survey under a door that says it wasn't surveyed.
 router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -609,17 +643,65 @@ router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
     }).lean();
     if (!archived) return res.status(404).json({ error: 'Preserved response not found' });
 
+    const state = (await restoreStates([archived])).get(String(archived._id));
+    if (!state.restorable) {
+      return res.status(409).json({
+        error: RESTORE_BLOCKED_MESSAGES[state.reason],
+        code: 'RESTORE_VISIT_NOT_SURVEYED',
+        reason: state.reason,
+      });
+    }
+
     const snapshot = snapshotFromArchive(archived);
-    const current = await SurveyResponse.findOne({
+    const current = await SurveyResponse.collection.findOne({
       voterId: archived.voterId,
-      passId: archived.passId,
-    }).lean();
-    if (current) {
+      passId: archived.passId ?? null,
+    });
+    // An answer-edit copy going back onto the SAME survey (same canvasser, same moment — the
+    // survey's own visit) is itself an answer edit: through the writer, so the version it replaces
+    // is archived the same way, the edit is stamped, and the run that made the copy can still tell
+    // what happened to it. Onto a teammate's survey it is today's full swap below — writing one
+    // canvasser's answers into another's survey is what review round 2 reproduced.
+    const ownVisit =
+      current &&
+      archived.overwrittenVia === 'answer_edit' &&
+      String(current.userId) === String(archived.userId) &&
+      current.submittedAt &&
+      archived.submittedAt &&
+      new Date(current.submittedAt).getTime() === new Date(archived.submittedAt).getTime();
+    if (ownVisit) {
+      const w = await writeOneSurvey({
+        live: current,
+        nextAnswers: archived.answers || [],
+        nextNote: (archived.note ?? null) !== (current.note ?? null) ? archived.note ?? null : undefined,
+        byUserId: req.user._id,
+        at: new Date(),
+      });
+      if (w.conflict) {
+        return res.status(409).json({
+          error: 'Someone changed this survey a moment ago. The latest answers are shown — try the restore again.',
+          code: 'RESPONSE_CHANGED',
+          profile: await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) }),
+        });
+      }
+    } else if (current) {
       await archiveOverwrittenResponse(current, { byUserId: req.user._id, via: 'restore' });
-      await SurveyResponse.updateOne({ _id: current._id }, { $set: snapshot });
+      // The live row becomes the snapshot. Fields the snapshot doesn't carry must go too: a field
+      // snapshot has no deskEntry (left behind, undoing that desk entry would delete the restored
+      // field answers), and one copied before note stamps and landing marks existed has none —
+      // keeping the displaced survey's would show another note's stamp, or a mark that isn't true.
+      const unset = {};
+      for (const f of ['deskEntry', 'noteEditedBy', 'noteEditedAt', 'answerEditMarks']) {
+        if (snapshot[f] === undefined) unset[f] = '';
+      }
+      await SurveyResponse.updateOne(
+        { _id: current._id },
+        { $set: snapshot, ...(Object.keys(unset).length ? { $unset: unset } : {}) }
+      );
       // No stats change: one current row before and after the swap.
     } else {
-      await SurveyResponse.create(snapshot);
+      // Not re-validated: a verbatim copy of a row that was already on file (archiveOverwrite.js).
+      await SurveyResponse.create([snapshot], { validateBeforeSave: false });
       await bumpCampaignStats(archived.campaignId, { surveys: 1 });
     }
     await SurveyResponseArchive.deleteOne({ _id: archived._id });

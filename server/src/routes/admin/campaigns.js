@@ -18,6 +18,7 @@ import { usStateSchema, isoDateSchema } from '../../utils/validators.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { resolveEntryScope, sendScopeError, ScopeError } from '../../services/canvass/entryScope.js';
+import { objectIdish, entryScopeSchema } from '../../services/canvass/entryScopeSchema.js';
 import { describeScope } from '../../services/canvass/scopeSummary.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import {
@@ -60,6 +61,7 @@ import {
   revertReclassify,
 } from '../../services/canvass/reclassifyOutcomes.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
+import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR } from '../../services/canvass/answerEditRuns.js';
 import {
   surveyConvertCap,
   MAX_VOTERS_PER_DOOR_SYNC,
@@ -71,6 +73,9 @@ import {
   applyDoorToRun,
   closeConversionRun,
   revertConversionRun,
+  expireDeadInlineRevert,
+  INLINE_REVERT_MAX_ENTRIES,
+  STOPPED_UNDO_ERROR,
 } from '../../services/canvass/surveyConversion.js';
 import { Pass } from '../../models/Pass.js';
 import { ImportJob } from '../../models/ImportJob.js';
@@ -847,45 +852,8 @@ router.delete('/:campaignId', async (req, res, next) => {
 // is an org-admin act. The safety argument for why this can't move a number lives in
 // services/canvass/reclassifyOutcomes.js.
 
-// Date bounds are `dateFrom`/`dateTo`, NOT from/to — those two already name the OUTCOMES being
-// converted, and one body carries both.
-const objectIdish = z.string().refine((v) => mongoose.isValidObjectId(v), 'Invalid id');
-const entryScopeSchema = z.object({
-  // CONVERTIBLE_SOURCES, not RECLASSIFIABLE_OUTCOMES: the same scope object drives the entries
-  // TABLE, which lists surveyed rows so they can be handed to the survey-conversion routes below.
-  // The plain reclassify path stays safe without a second schema — buildEntryFilter intersects
-  // these against its own RECLASSIFIABLE_OUTCOMES default, so asking it for surveyed rows resolves
-  // to an empty selection (a 400) rather than to a bare flip.
-  outcomes: z.array(z.enum(CONVERTIBLE_SOURCES)).optional(),
-  userId: objectIdish.optional(),
-  effortId: objectIdish.optional(),
-  passId: objectIdish.optional(),
-  // isoDateSchema, not a bare string: these are civil 'YYYY-MM-DD' days resolved in the
-  // campaign's timezone, and an unparseable one used to reach Mongoose as an Invalid Date and
-  // surface as a 500. A malformed filter must refuse, never silently become "no filter" — that
-  // shows MORE rows than the filter claims, and under "Select all N" writes them.
-  dateFrom: isoDateSchema.optional(),
-  dateTo: isoDateSchema.optional(),
-  // The survey-answer filter. Wire shape B — the AnswerFilters.jsx / SavedSearch shape — so the
-  // picker component and answerFilterClause consume it untranslated. surveyTemplateId scopes the
-  // match to the RESPONSE's template (slugs are unique only within one survey); required-with-
-  // answers is enforced in resolveEntryScope, not here, so the refusal carries a real code.
-  surveyTemplateId: objectIdish.optional(),
-  answerFilters: z
-    .array(
-      z.object({
-        questionKey: z.string().min(1),
-        values: z.array(z.string()).max(200).default([]),
-        texts: z.array(z.string()).max(200).optional(),
-      })
-    )
-    .max(25)
-    .optional(),
-  answerTagFilters: z.array(z.object({ tag: z.string().min(1) })).max(25).optional(),
-  // Address search — resolved to door ids inside resolveEntryScope (it NARROWS, so it must ride
-  // the scope every write re-resolves, never be a table-only nicety).
-  search: z.string().trim().min(1).max(120).optional(),
-});
+// The wire scope every route below takes (entryScopeSchema) lives in
+// services/canvass/entryScopeSchema.js, shared with answer edits (routes/admin/answerEdits.js).
 
 /**
  * The entries table's query string as the SAME wire scope the POST bodies carry.
@@ -1476,6 +1444,9 @@ router.post('/:campaignId/unknock-entries', async (req, res, next) => {
       });
     }
 
+    // One change at a time (services/canvass/answerEditRuns.js): an answer edit writes through
+    // compare-and-swaps this read-archive-delete would race.
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
     const run = await runUnknock({
       campaign,
       rows: sel.rows,
@@ -1539,7 +1510,16 @@ router.post('/:campaignId/unknock-entries/revert', async (req, res, next) => {
         code: 'RUN_NOT_COMPLETED',
       });
     }
-    const reverted = await revertUnknock({ campaign, run, byUserId: req.user._id });
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    // The revert runs inline and UnknockRun has no running state, so it stamps one for its
+    // duration: an answer edit reads it to stay out of the way.
+    await UnknockRun.updateOne({ _id: run._id }, { $set: { revertingAt: new Date() } });
+    let reverted;
+    try {
+      reverted = await revertUnknock({ campaign, run, byUserId: req.user._id });
+    } finally {
+      await UnknockRun.updateOne({ _id: run._id }, { $set: { revertingAt: null } }).catch(() => {});
+    }
     res.json({ run: unknockWire(reverted) });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -1653,7 +1633,7 @@ async function loadRun(req, res, campaign) {
     res.status(404).json({ error: 'Conversion not found' });
     return null;
   }
-  return run;
+  return expireDeadInlineRevert(run);
 }
 
 const runWire = (r, by = null) => ({
@@ -1835,6 +1815,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       });
     }
 
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
     const run = await SurveyConversionRun.create({
       organizationId: campaign.organizationId,
       campaignId: campaign._id,
@@ -1962,6 +1943,7 @@ router.post('/:campaignId/survey-conversions/:runId/door', async (req, res, next
     if (run.status !== 'open') {
       return res.status(409).json({ error: 'That desk-entry session is already finished.', code: 'RUN_NOT_OPEN' });
     }
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
     const body = doorApplySchema.parse(req.body);
     if (!run.selection.actionIds.some((id) => String(id) === String(body.actionId))) {
       return res.status(400).json({ error: 'That door is not part of this session.', code: 'NOT_IN_SELECTION' });
@@ -2009,9 +1991,18 @@ router.post('/:campaignId/survey-conversions/:runId/resume', async (req, res, ne
     if (!campaign) return;
     const run = await loadRun(req, res, campaign);
     if (!run) return;
+    // A stopped UNDO is finished by undoing again. Resuming it would run the conversion forward and
+    // re-apply the change it was taking back.
+    if (run.status === 'revert_failed') {
+      return res.status(409).json({
+        error: 'That undo stopped part-way. Finish it with Retry undo — picking it up would make the change again.',
+        code: 'NOT_RESUMABLE',
+      });
+    }
     if (run.status !== 'failed') {
       return res.status(409).json({ error: 'Only a failed conversion can be resumed.', code: 'NOT_RESUMABLE' });
     }
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
     run.status = 'pending';
     run.error = null;
     await run.save();
@@ -2046,10 +2037,12 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
     if (run.status === 'running' || run.status === 'reverting') {
       return res.status(409).json({ error: 'That conversion is still running.', code: 'RUN_BUSY' });
     }
+    if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
 
     // A small run is undone inline so the page can show the result immediately; anything large
     // enough to have been a job going forward is a job coming back.
-    if (run.counts.entriesConverted > 500) {
+    if (run.counts.entriesConverted > INLINE_REVERT_MAX_ENTRIES) {
+      const statusWas = run.status;
       run.status = 'reverting';
       await run.save();
       try {
@@ -2060,8 +2053,9 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
         run.queueJobId = String(job.id);
         await run.save();
       } catch {
-        // Put the status back: `reverting` with no job would offer neither Revert nor Resume.
-        run.status = 'completed';
+        // Put the status back: `reverting` with no job would offer neither Revert nor Resume. Back
+        // to what it WAS, so a stopped undo stays a stopped undo (Retry undo), never `completed`.
+        run.status = statusWas;
         await run.save();
         return res.status(503).json({
           error: 'Could not start the undo. Nothing has been changed — try again shortly.',
@@ -2071,7 +2065,24 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
       return res.status(202).json({ run: runWire(run) });
     }
 
-    await revertConversionRun({ run, campaign });
+    try {
+      await revertConversionRun({ run, campaign });
+    } catch (err) {
+      // Never leave an inline undo reading `reverting`: there is no job to finish it, and every
+      // retry would be refused as busy. What it already put back stays put back, and Retry undo
+      // finishes the rest — the undo is re-entrant.
+      console.error('[survey-conversions] inline undo failed:', err?.message || err);
+      const stopped = await SurveyConversionRun.findOneAndUpdate(
+        { _id: run._id, status: 'reverting' },
+        { $set: { status: 'revert_failed', error: STOPPED_UNDO_ERROR } },
+        { new: true }
+      ).catch(() => null);
+      return res.status(500).json({
+        error: 'The undo stopped part-way. Everything it already put back is correct — use Retry undo to finish it.',
+        code: 'REVERT_FAILED',
+        run: stopped ? runWire(stopped) : null,
+      });
+    }
     res.json({ run: runWire(run) });
   } catch (err) {
     next(err);
@@ -2100,6 +2111,7 @@ router.get('/:campaignId/survey-conversions', async (req, res, next) => {
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
+    await Promise.all(runs.map(expireDeadInlineRevert));
     const people = await hydrateCanvassers(runs.map((r) => r.byUserId).filter(Boolean), activeOrgId(req));
     res.json({
       runs: runs.map((r) => {

@@ -53,7 +53,7 @@ still works** — that window exists precisely so you can take your data with yo
 | **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) — or, with **One row per voter at the door** ticked, one voter at that door for every knock that named nobody | the full field record; audits; "what happened at this address"; a voter-keyed file when every person at a not-home address needs a row |
 | **Doors by round** | one door in one round, with its round status and visit count | re-knock lists; per-round door detail that adds up to the invoice numbers |
 | **Survey results** | one survey taken, one column per question | analysis in a spreadsheet; one file per survey when a campaign ran several; opt-in contact/demographic columns for matching back |
-| **Survey answers (detailed)** | one recorded answer, exactly as captured at the door | the audit-grade record — survives question re-wording; takes the same opt-in columns |
+| **Survey answers (detailed)** | one recorded answer, as it stands now — as captured at the door unless an admin has since edited it | the audit-grade record — survives question re-wording; takes the same opt-in columns |
 | **Results by voter** | one registered voter at a door that was visited, with that door's outcome and their answers | the file you send a client — who lives there, what happened at their address, and what they said, in one row per person, with the outcome in plain English and answers grouped by round |
 | **Voter file** | one voter currently in the campaign | your file back; optionally with the column names from one of your uploads |
 | **Filtered voters** | one voter matching a saved search | handing a targeted subset to another tool |
@@ -195,6 +195,12 @@ It adds **rows** as well as columns, which is the part to understand before coun
 - **Two canvassers who surveyed the same person in one round keep a row each.** Only the later survey
   is the live record, and both rows carry it, with **Survey taken by** naming whose survey it is —
   blanking the first canvasser's row would make their knock look like it recorded nothing.
+- **The answers are the answers as they stand now.** When an org admin has changed a survey's answers
+  since it was recorded (Door Outcomes → **Edit answers…**, or the voter profile's Edit), the row
+  carries the edited answers and the file's **last column, Answers edited**, reads *yes*. It is
+  added at the end so no column a spreadsheet already reads moves. It describes the whole survey,
+  not one answer, and a profile edit made before this column existed — when any save there, even
+  one that changed only the note, stamped the survey — reads *yes* too.
 
 The choice is remembered for that campaign in the browser you queued from, so wanting the answers
 once means having them next time; unticking it and queueing is remembered too. It is frozen into the
@@ -234,7 +240,8 @@ side by side, in blocks labelled by walk list and round (`North Side R1 — …`
 nothing overwritten, so a change of mind is visible. One person can hold one survey per round, which
 is why the blocks are the rounds that actually happened rather than a grid of every possible one. A
 block's **Survey** cell reads *(desk entered)* when an admin typed those answers in instead of a
-canvasser recording them at the door.
+canvasser recording them at the door, and *(answers edited)* when an admin changed them after they
+were recorded; the answers beside it are the edited ones.
 
 Three limits, and they matter the moment you reconcile the file against anything:
 
@@ -557,6 +564,16 @@ columns. It returns three booleans and the distance between them is the design:
 person in one round keep one activity row each while the live response is the later one's, so BOTH
 rows carry the answers **of record** and the disclosure columns (`Survey taken by`, `Desk entered`)
 say whose survey it is; blanking the superseded row would read as "no survey taken", which is false.
+**`Answers edited`** (2026-10-19) is the layer's last column, APPENDED after `Response DB id` — the
+`Offline` precedent, so no column a client's spreadsheet reads by position moves: `yes` when the
+joined response has `editedAt` (an admin changed its answers after they were recorded, §N of
+[SURVEYS.md](SURVEYS.md)), blank otherwise, and blank on a fanned roster row, which carries no
+answers. Survey-level by design; the one-row-per-answer files (`survey-answers`, the in-page
+voters-by-answer CSV) don't carry it, because there it would read as "this answer was altered".
+And because an edited answer is no longer the one recorded at the door, the full backup's README now
+describes `survey-answers.csv` as *one row per answer as it stands now (an admin may have edited
+some; the file of record)* — it said *the as-recorded snapshot* until then
+([exportTypes.js](../server/src/services/export/exportTypes.js)).
 The response scope is its own `activityResponseQuery`, deliberately NOT `surveyBaseQuery`, because
 that one applies `params.userId` and would hide the very row the ruling is about.
 
@@ -687,8 +704,9 @@ remains the invoice-grade per-door file.
 discovered by a `$group` on `{surveyTemplateId, passId}`. Not a template × round cross product: a
 voter can hold at most ONE response per pass (`{voterId, passId}` is unique and DB-enforced), so a
 cross product would be mostly columns no row can fill — and blank reads as "not surveyed". A block is
-a `Survey` label cell (reading `Door Survey (desk entered)` when an admin typed the answers) + one
-column per question + optionally a `Note` cell. `orderAnswerBlocks` sorts walk list, then round, with
+a `Survey` label cell (reading `Door Survey (desk entered)` when an admin typed the answers, and
+`… (answers edited)` when the response has `editedAt` — both can apply) + one column per question +
+optionally a `Note` cell. `orderAnswerBlocks` sorts walk list, then round, with
 the legacy null-pass bucket LAST — NOT `pass.activatedAt`, which the archive path never sets and which
 interleaves walk lists. Blocks are prefixed `North Side R1 — ` only when more than one is in scope,
 and the prefix names the walk list because round numbers reset; duplicate labels are uniquified with
@@ -708,8 +726,11 @@ are **indistinguishable by design** (that is `exportScope.js`'s no-marker rule, 
 distinguishable would BE the marker). So the row count is NOT "the doors you worked" —
 `doors-by-round` is the file that accounts for every door. Unknock and pass-discard **hard-delete**
 ledger rows, which is why the universe is doors with a *surviving* visit. Overwritten answers live in
-`SurveyResponseArchive` and a same-user re-submit archives nothing, so the live response is the
-answer of record.
+`SurveyResponseArchive` (a same-user re-submit archives nothing, except over answers an admin
+desk-entered), and no export reads the archive, so the live response is the answer of record. The
+same holds for an answer an admin edited: the file carries the answers as they stand now, flagged
+*(answers edited)*, and the version from before the edit (`overwrittenVia: 'answer_edit'`) stays in
+the archive, which no export reads.
 
 **Owner ruling 2026-09-23 — lead-visible is CLIENT-visible.** This type is lead-visible, and a lead
 may use the contact/demographic and survey-note opt-ins exactly as an admin can. In the owner's
@@ -1081,8 +1102,9 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
   (`includeSurveyAnswers`; all four names come from `activityFileNames`) — the same columns, then
   after **Note**: Row source (`knock`|`survey`), Survey, Survey version, Survey submitted (ISO),
   Survey taken by, Desk entered, one column per question (the union across templates in scope,
-  prefixed `<survey name> — ` when more than one), and **Response DB id** last of all, after the
-  three DB ids. Every row is the same width whether or not a survey is attached to it. A
+  prefixed `<survey name> — ` when more than one), then **Response DB id** after the three DB ids,
+  and **Answers edited** (`yes` or blank, appended 2026-10-19) last of all. Every row is the same
+  width whether or not a survey is attached to it. A
   `Row source: survey` row has a **blank Activity DB id** and is NOT a knock; on it Via reads
   `field` and the two Replaces columns are blank. For a do-not-contact voter, a knock row blanks the
   answers **and the Note** along with the identity; a survey-source row is dropped whole.
@@ -1095,7 +1117,9 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
   birth, Phone, Phone type, Cell phone]*; Address block minus County; *[with
   `includeVoterDetail`: County, Latitude, Longitude, Precinct, Congressional district, State
   senate district, State house district]*; Canvasser + Team; Template,
-  Template version, Offline submission, Edited, Note; one column per question (current text,
+  Template version, Offline submission, Edited (`yes` when the response has `editedAt` — since
+  2026-10-19 stamped only when an admin changes answers; a profile save before then stamped it even
+  for a note-only change), Note; one column per question (current text,
   `Label (key)` on duplicates); Household/Voter/Response DB ids. An **"Other (specify)" write-in**
   renders as **`Other — <typed text>`** (the sentinel is seeded into the export's option lookup), so
   it can't be read as a canonical option that happens to share the typed wording; a multi-select
@@ -1130,7 +1154,9 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
   Edited at (ISO), Note; Voter DB id, Note DB id.
 - **`notes.csv`** — Created (ISO)/Date/Time; Source (Door/Survey/Admin), Outcome; **State voter
   ID, UID**, Voter first/last name; Address, City, State, Zip; Author first/last/status; Desk
-  entered, Desk entered by; Walk list, Pass, Pass name; Edited, Edited at (ISO), Note;
+  entered, Desk entered by; Walk list, Pass, Pass name; Edited, Edited at (ISO) (for a survey note,
+  the NOTE's own stamp, `noteEditedAt`, when the response has one — an answer edit never marks a
+  note — and `editedAt` when it has none), Note;
   *[with `includeDoorVoters`: Voters at this door, Voter count at this door]*; Household DB id,
   Voter DB id, Note DB id. **Author vs Desk entered by:** on a desk-converted survey the note was
   typed by an admin while the row's `userId` is still the field canvasser, so Author alone would

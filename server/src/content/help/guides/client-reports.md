@@ -31,6 +31,8 @@ A walk-list report scopes everything — the numbers, the breakdowns, the map �
 
 If any **mock-location flags** are still open in the report's window, the builder shows a red warning with a link to review them in the [GPS audit](audit). You can still publish — flags can be false alarms — but check them first so questionable knocks don't go into the numbers you freeze.
 
+Two **internal notes** can also sit above the preview, and your client never sees either. One counts the survey answers behind these figures that an admin entered on Door Outcomes rather than collected at a door; the other counts answers an admin **edited** after they were recorded — on the voter's profile, or with **Edit answers…** on Door Outcomes. Both kinds count like any other answer and the figures use the answers as they stand now; the notes are there so you know before you send it.
+
 The report header shows whether the client has opened it yet, and every report offers a one-click **Download PDF** (the map is left out of the PDF).
 
 ## Share it

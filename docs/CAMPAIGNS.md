@@ -160,6 +160,17 @@ The add-people setting reads in plain words — *Adding people at the door: Ever
 Team leads & admins only* — since October 2026. Before that, History showed the raw setting (*Door
 Add Policy: all → leads*).
 
+It also lists every **Door Outcomes** correction and its undo — reclassified entries, Surveyed
+conversions, unknocks and survey answer edits — highlighted, because each rewrites recorded history.
+An answer edit reads as its own sentence in the survey's own words, with the real count: *Survey
+answers edited: Could you help us by taking a yard sign?: took out Candidate Follow-Up, Volunteer
+Request (214 surveys)*, and later *Survey answer edit undone: 212 surveys put back, 2 kept newer
+answers — …*, by whoever pressed Undo. A change that stops part-way is listed when it stops, with what
+it had changed, and **Pick up** adds a second row for the rest (*… (94 more surveys)*). Conversions and
+unknocks read in plain words too (they printed raw keys before
+October 2026). On the phone these rows get the same words and highlight with its next app update;
+until then they show in the plain *changed from … to …* form.
+
 The feed also folds in **team reassignments**, which is the other way a number moves without anyone
 knocking a door: changing someone's coordinator re-stamps all of their past work onto the new team,
 so *"why did Bo's team jump by 3,907?"* is answerable here rather than only from a database console.
@@ -437,6 +448,9 @@ whole safety model:
 - **Surveyed CAN be converted, in both directions**, but not as a relabel — see the next section.
   Converting *into* Surveyed makes you enter the answers first; converting *out of* it removes
   real answers, so they are archived rather than deleted and you are shown exactly whose.
+- **A wrong answer on a real survey is a job of its own.** **Edit answers…** changes, takes out or
+  clears answers while the entry, the knock and the Surveyed status stay exactly as recorded — see
+  *Editing survey answers* below.
 
 Working the page: filter by outcome, canvasser, walk list, round, or a date range (the campaign's
 own days, like every other dated page) — or, on a survey campaign, by a **specific survey answer**
@@ -459,9 +473,12 @@ someone gave a particular answer — "everyone this canvasser surveyed who answe
 asks for one other narrowing first (canvasser, walk list, round or dates), it only ever matches
 Surveyed entries — the other chips lock while it's on — and on a campaign that has used more than
 one survey you pick which survey's answers you mean. Each matching row then shows who matched at
-that visit and who else answered there, because a Surveyed entry is the whole visit: changing it
-takes every answer that canvasser recorded at that door that round, and the review step names each
-person, matched or merely present. Each change also freezes a one-line description of the filter
+that visit, and a muted line counts anyone else surveyed there (*1 other surveyed at this visit, not
+matched*). That matters because a Surveyed entry is the whole visit: **Review removal** (Surveyed →
+another outcome) and **Unknock** take every answer that canvasser recorded at that door that round,
+and their review steps name each person, matched or merely present. **Edit answers…** is the
+exception: under an answer filter it changes only the surveys that matched and leaves everyone else
+at the visit as they are. Each change also freezes a one-line description of the filter
 that produced it ("Cara Canvasser · answered Opposed · Aug 1 – Aug 7"), so the run list can tell a
 narrow correction from a whole-campaign fold. **Everything else about each entry is kept** — the time, the GPS location, who knocked it,
 and which round and turf it belonged to. Only the label changes; door colors follow, and phones
@@ -515,7 +532,8 @@ required.
 Who gets an answer recorded: **every voter on file at that address, except anyone marked
 do-not-contact, and except anyone who already answered that round.** That last rule is absolute —
 a real answer a canvasser collected in the field is never overwritten by a desk entry. The confirm
-step names everyone who will be skipped and why.
+step names everyone who will be skipped and why. (Changing a recorded answer on purpose is a
+different tool, **Edit answers…** below, and it keeps the earlier answers.)
 
 **A Not a target voter entry can be converted to Surveyed too** (on campaigns that use it) — the fix
 when a canvasser really surveyed someone and then tapped the wrong button. Bear in mind what that
@@ -543,7 +561,8 @@ for the cleanup is that one person's work is suspect.
 
 Every run row — plain reclassifications and survey conversions alike — carries a **Details** view:
 the itemized list of doors changed (was → now, canvasser, round, when) and, for conversions, the
-answers recorded or removed per voter. Served from the stamps themselves
+surveys recorded or removed per voter (the rows and cards say *surveys* since October 2026, because
+an *answer* is now one reply — the thing **Edit answers…** changes). Served from the stamps themselves
 (`GET …/reclassify-outcomes/:runId/entries`, `GET …/survey-conversions/:runId/entries?kind=doors|answers`,
 paginated, org-admin only), which carries one honest consequence: **revert consumes the stamps, so
 an undone run keeps its summary but loses its itemization** — except reverse-run archives a revert
@@ -553,7 +572,12 @@ Both directions are priced like everything else on this page, always in red (rec
 answers always moves the survey rate at minimum), and both are **undoable in one click** — a
 door-by-door session undoes as a single unit. A large run happens in the background with a progress
 bar; if it stops part-way, everything that landed is correct and you can either undo it or pick up
-where it stopped.
+where it stopped. **An undo can stop part-way too** (the server restarts, or the database drops out
+mid-undo): the run then reads **Undo stopped**, everything it already put back is correct, and its
+only button is **Retry undo**, which finishes putting the rest back. It never offers *Pick up where it
+stopped* — that would make the change again. An undo that dies along with its page request shows
+**Undo stopped** within about ten minutes instead of reading *Undoing* forever. Technical:
+[SURVEYS.md](SURVEYS.md) §K.
 
 ### Unknock — striking entries from the record (added 2026-08)
 
@@ -592,12 +616,153 @@ show a drift warning on its next read (void-vs-reissue stays an account-manager 
 **published client report** keeps its frozen numbers with no warning at all; and answers a later
 *real* survey has since replaced stay archived on Undo rather than clobbering the newer work —
 the run row counts anything Undo couldn't put back, entries and answers alike, because a door
-re-knocked since the cleanup keeps its new, real entry.
+re-knocked since the cleanup keeps its new, real entry. The struck answers stay on the voter's
+profile as a **Removed** card, and its Restore is off while the visit stays unknocked (or was
+surveyed again since): restoring there would put struck answers back as a counted survey, or over
+the real one. Unknocked answers never show on **Duplicate Surveys** either — a struck visit is not
+somebody surveyed twice.
 
 One more piece of protection you'll never see: a phone that recorded one of the struck knocks
 **before** the cleanup and delivers it from its offline queue **after** can't sneak it back into
 the record — the server recognizes the replay and quietly drops it. A live knock at the same door
 is new work and always lands.
+
+### Editing survey answers — change one answer, keep the survey (added 2026-10)
+
+The page's fifth act, for when the survey was real but an answer on it is wrong. The case that
+prompted it: a yard-sign question with three picks — *Yard Sign Delivered*, *Candidate Follow-Up*,
+*Volunteer Request* — where one canvasser, not knowing a question can be skipped, picked *Volunteer
+Request* or *Candidate Follow-Up* whenever a voter said no to a sign. Those picks are wrong; her *Yard
+Sign Delivered* picks, and every other answer on those surveys, are real. **Surveyed → Not home**
+would take every answer and stop the doors counting as surveyed, and editing each voter's profile
+works one person at a time. **Edit answers…** changes just the answers you choose, on every survey
+you select, and keeps everything else.
+
+A word on wording: a **survey** is one person's answers from one visit, an **answer** is their reply
+to one question, and a **pick** is one ticked choice on a pick-several question. One entry in the
+table can hold several surveys, one per person surveyed at that visit.
+
+**Starting one.** Select Surveyed entries the usual way and press **Edit answers…** — the first
+button in the action bar, set apart from the ones that change or remove the entry itself. It shows
+only when every selected entry is Surveyed, and never on a lit-drop campaign. The form says how many
+surveys it found at the entries you selected, then lets you choose question by question:
+
+| Question type | Choices |
+|---|---|
+| Pick one | **Leave as recorded** · **Clear the answer** · **Change it to …** |
+| Pick several | **Leave as recorded** · **Take out picks** (optionally **Replace them with …**) · **Clear every pick** |
+| Written answer | **Leave as recorded** · **Clear the answer** |
+| A retired question (under *Retired questions*) | **Leave as recorded** · **Clear** (pick several: **Take out** too, with nothing put in) |
+
+- **Take out** lists every pick those surveys actually hold, each with its count — retired options,
+  "Other" and answers saved in an old format included — and removes only the ones you tick, leaving
+  the rest of each person's picks alone. **Replace them with …** puts a current pick in, but only on
+  surveys that just lost one. A survey left with no picks reads exactly as if the question was
+  skipped.
+- **Clear every pick** removes all of them, genuine ones too, so the form turns red and lists what it
+  would take: *Clearing removes every pick on these surveys: … To keep some of them, use Take out
+  picks.*
+- When you filtered the table by answers, the form offers one button for what you filtered on:
+  **Take out just Candidate Follow-Up and Volunteer Request**.
+- **Change it to** offers current answers only, never "Other". A change for everyone never writes
+  text: a written answer or an "Other" text can only be cleared or taken out, because the same words
+  typed onto many surveys would be fabrication.
+- If the entries hold answers from two surveys (a walk list with its own), the form asks which one
+  you're editing.
+
+**Who changes.** With an answer filter on, only the surveys that matched it change — the change
+applies to the whole question on those surveys, which is why Take out exists — and anyone else
+surveyed at the same visit is left alone and counted. With no answer filter, every survey at the
+selected entries changes. A date range applies to the surveys themselves too, and the review counts
+any your dates left out. Entries an earlier change converted aren't included; the form says how many
+(undo that change first, or edit those surveys on the voter's profile).
+
+**Nothing gets filled in that nobody recorded.** **Change it to** only touches surveys that have an
+answer to that question, and **Replace them with** only surveys that just lost a pick. A blank stays
+blank.
+
+**Later questions follow the survey's own logic.** If, after your change, the survey would never have
+asked a later question, that later answer goes too — exactly what the phone would have stored — and
+the review names each one (*… · 87 answers removed*). On a scripted survey a blank answer can end the
+script early, and the review says so in red. Those answers are kept with the earlier version and
+come back with Undo.
+
+**Same change for everyone, or one person at a time.** **Same change for everyone** applies one change
+to every selected survey, in the background, with a progress card. **One person at a time** (up to
+500 surveys) opens each survey with its recorded answers, following the survey's logic as you edit:
+a changed field shows what it *was*, an answer the change would drop is named in red before you save,
+and answers on file for questions this person's path doesn't ask are shown read-only and kept. Here
+you can fill in a blank or type a written answer for the person in front of you. **Save & next**,
+**Skip** (Save & next with nothing changed counts as a skip), or **Finish later**; the row then reads
+*Unfinished*, with **Resume** and **Stop here**. If somebody changed a survey while it was open, Save
+refuses and shows the latest answers: *This survey changed while you were editing. The latest answers
+are shown — make your change again.* The whole session undoes as one change.
+
+**Priced before it runs.** The review, *Change answers on N surveys*, opens with **No door, knock or
+billing number changes** — knocks, billable doors, contact rate and survey rate stay exactly where
+they are, and every voter stays surveyed. Then, in numbers you can check against what you saw:
+
+- plain sentences — *Taking out Volunteer Request from 139 surveys and Candidate Follow-Up from 97.
+  That's 214 surveys: 22 had both. 202 are left with no answer, as if skipped; 12 keep Yard Sign
+  Delivered.* — and who recorded them (*Recorded by: Cara Canvasser (214).*);
+- **your survey results for the whole campaign**, pick by pick, before → after, the changed figures
+  in red (*Volunteer Request 412 → 273 (−139)*) and the rest *· unchanged*;
+- for any tag a changed answer carries, its **Identified** and **Current** voter counts before →
+  after (if those can't be worked out at that moment, the review says so instead);
+- **Left as they are**, with the reasons that apply (no answer to change, already that answer, none
+  of the picks you're taking out, an old answer this tool can't safely adjust, outside your dates,
+  another survey, people at the same visits who didn't match);
+- **Who changes**, the first 50 people with each changed answer's before → after.
+
+The confirm button is red, because survey results are reported numbers. If one of those surveys
+changed between the review and the confirm — or the survey itself was saved meanwhile — nothing is
+written: *Something changed since you reviewed this — review again.* Surveys recorded after the
+review are simply not included.
+
+**Copies made before the change don't update.** Saved searches, walk lists and rounds already cut
+from these answers keep the people they had; a file already exported keeps the old answers; a
+published client report keeps its numbers until you unpublish it and publish it again. The review
+says so above the confirm button. The Survey Explorer's per-answer **Export CSV** is how you tell
+whoever holds such a list who to drop.
+
+**Everything else is kept, exactly** — the knock, the Surveyed status, every answer you didn't touch,
+the note, the time, the GPS location, the canvasser, the round and the team. Each changed survey
+carries an *Edited* line naming the admin and the date on the voter profile, in the response detail
+and on the web map's door panel, and the exports mark it: **Answers edited** as the last column of a
+Canvassing activity export that includes survey answers, *(answers edited)* in a Results by voter
+**Survey** cell, and the **Edited** column Survey results already had. A survey's **note** reads
+edited only when someone changed the note — this tool never does.
+
+**The earlier answers are kept, and Undo is exact.** Before a survey changes, its earlier answers are
+saved on the voter's record (*Before ‹admin›'s change on ‹date›*), where an admin can restore them or
+erase them for good ([VOTERS.md](VOTERS.md)). Each change is listed under **Survey answer changes**
+beside the Surveyed conversions, newest first — *Answers edited · Could you help us by taking a yard
+sign?: took out Candidate Follow-Up, Volunteer Request*, and beneath it *214 surveys changed · 139
+Volunteer Request and 97 Candidate Follow-Up picks taken out · ‹admin› · ‹time›* and the filter it
+was made under — with **Details** (every survey it changed, question by question) and **Undo**, and
+it appears in the campaign's **History**. Undo puts every survey back, with two exceptions it names:
+
+- a survey somebody re-surveyed or edited afterwards keeps the newer answers (*Undone · 212 put
+  back · 2 kept newer answers*, with **Undo again** in case that newer change is undone later);
+- a survey held by a later change — say its entry was unknocked in between — waits (*Partly undone ·
+  211 put back · 3 waiting on a later change*): undo that change, then press **Undo again**.
+
+A change that stops part-way reads *Stopped*, with **Pick up where it stopped** or **Undo what
+landed**; everything it already changed is correct. An undo that stops reads *Undo stopped*, with
+**Retry undo**. Once an undo has started, the change can never be picked up again. A change still
+waiting ten minutes after you asked reads *Waiting for the worker* (an undo, *Undo waiting for the
+worker*) and offers **Start again**.
+
+**One change at a time.** While an answer edit or its undo runs — or a one-person-at-a-time session
+is open — the campaign's other corrections wait: converting to or from Surveyed, Unknock and its
+undo, re-cuts that clear knocks or restore a snapshot, and another answer edit. An answer edit
+likewise waits for those, and for any round being re-cut. Close an open session with **Stop here**
+to free the page.
+
+**Who can do it, and who sees it.** Org admins only, like everything else on Door Outcomes. Team leads
+see these corrections exactly as they see every other: the History row, the *Edited* lines, the
+earlier answers on a voter's profile (read-only), the export columns, and the client report
+builder's internal note ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *The numbers*).
 
 ### Archive vs. delete
 
@@ -730,7 +895,15 @@ window where the save commits and the insert throws (one unlogged edit, a 500) i
 of that ordering, and it is the cheaper mistake than logging a change a failed save never made.
 Deliberately **not** `AccessLog`, for the reason `CoordinatorChange` already records: that
 collection is scoped to platform staff reading customer content under a support grant. In
-`CAMPAIGN_SCOPED` and `ORG_SCOPED`, so an audit row never outlives the thing it describes.
+`CAMPAIGN_SCOPED` and `ORG_SCOPED`, so an audit row never outlives the thing it describes. The Door
+Outcomes tools write their own rows under their own `source` (`outcome_reclassify`,
+`survey_conversion`, `unknock`, and since 2026-10-19 `answer_edit`), with keys that are not schema
+paths — `outcomeReclassify`, `surveyConversion`, `unknock`, `answerEdit` and `answerEditUndo`. The
+answer-edit pair stores **frozen English** (`toValue` = the run's `planSummary` plus *(N surveys)*, or
+*(N more surveys)* for what a picked-up run changed after it stopped — `writeRunHistory` reports only
+what History hasn't, CAS'd on `historyCount`; the undo row's `toValue` = what it put back, `fromValue`
+= the plan summary, `byUserId` = whoever pressed Undo), because it quotes the survey's own wording as
+the admin saw it, which a label built later could not rebuild.
 
 **`isActive: false` is enforced, not decorative.** [middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)
 refuses field-mutating writes on an archived campaign with **409 `{ code: 'campaign-archived' }`**,
@@ -1029,7 +1202,12 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   only when its visit triple is free of **outcome** rows — a surviving `note_added` at the triple
   does not block its own door's outcome from coming back (the field path never replaces a note) —
   and archived responses restore per-voter via promote-and-delete unless a newer real response
-  took the slot; both skips are counted (`rowsNotRestored`/`responsesNotRestored`). **The
+  took the slot; both skips are counted (`rowsNotRestored`/`responsesNotRestored`). The promote is
+  unvalidated (`validateBeforeSave: false`): the archive copy is a verbatim, raw-inserted row that
+  was already on file, and an old row today's schema would refuse must not fail the undo. A
+  response it could not put back stays archived and is **not** restorable from the profile while
+  its visit holds no entry from before the unknock ([restoreGuard.js](../server/src/services/surveys/restoreGuard.js),
+  [SURVEYS.md](SURVEYS.md) §F). **The
   offline-replay tombstone** ([mobile/canvass.js](../server/src/routes/mobile/canvass.js), both
   write paths): a replay (`wasOfflineSubmission` only) whose tap-time predates a standing run's
   `frozenAt` at that visit triple (`struckByUnknock` — `distinct('runId')` over chunk `visitKeys`,
@@ -1044,6 +1222,62 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   deploy. Pinned by [unknock.int.test.js](../server/test/unknock.int.test.js) — the money shot
   both ways (preview == landed, revert == baseline byte-for-byte), tombstone, revert-after-reknock,
   pending-run refusal, cascade.
+- **ANSWER EDITS** ([routes/admin/answerEdits.js](../server/src/routes/admin/answerEdits.js),
+  2026-10-19) are the page's fifth act, on their **own router** mounted at
+  `/admin/campaigns/:campaignId/answer-edits` ([routes/index.js](../server/src/routes/index.js)), not
+  in this file. **Org admins only**: the router admits `admin` and `lead`, and `loadForAnswerEdit`
+  (the `loadForReclassify` preamble) answers a lead 403 on every route, list and poll included; it
+  quarantines a deleting campaign (409 `campaign-deleting`) and, like the page's other acts, does not
+  block an archived one. Every run is read `{ _id, campaignId, organizationId }`, so a foreign run id
+  is a 404. Routes: `POST /` (`{ scope, actionIds?, surveyTemplateId?, mode: 'bulk'|'queue', plan?,
+  dryRun?, digest?, asOf?, templateVersion? }` — `dryRun` feeds the form without a plan and prices it
+  with one; otherwise `400 REVIEW_REQUIRED` without `digest`/`asOf`, the one-change-at-a-time check, a
+  re-scan under the same `asOf`, `409 REVIEW_STALE` on a digest or template-version mismatch (nothing
+  written), then the run: bulk → enqueue `apply` (201, or 503 `QUEUE_UNAVAILABLE` with the run left
+  `failed` for **Pick up**), queue → 201 with an `open` run and its first survey); `GET /` (newest 50,
+  completed runs that changed nothing and were never undone hidden); `GET /:runId` (the poll; an open
+  session also returns the survey at its cursor, so a cold page load resumes); `GET /:runId/entries`
+  (paginated itemization, ≤100 a page; once an undo has run, the stored `undo.summary.names` instead
+  — never the archive rows, which a re-cut or an Erase removes); `GET /:runId/response/:responseId`,
+  `POST /:runId/response`, `POST /:runId/skip`, `POST /:runId/close` (one person at a time);
+  `POST /:runId/resume` (Pick up, and Start again on a run pending 10 minutes; bulk only, refused
+  `NOT_RESUMABLE` once any undo has started); `POST /:runId/revert` (Undo, Undo again, Retry undo,
+  Start again on an undo pending 10 minutes; 202; `RUN_OPEN` for an open session, `RUN_BUSY` while a
+  phase runs). **The selection is the page's**: one `resolveEntryScope`, `resolveSelection` over
+  `CONVERTIBLE_SOURCES` narrowed to `survey_submitted`, and the same refusals —
+  `ANSWER_SCOPE_TRUNCATED` (an answer filter matching more than `ANSWER_SCOPE_MAX_RESPONSES`, 20k,
+  must be narrowed or the rows ticked), `SEARCH_SCOPE_TRUNCATED`, `SELECTION_SPANS_DIRECTIONS`,
+  `EMPTY_SELECTION`, `SELECTION_TOO_LARGE` past `RECLASSIFY_MAX_IMPACT_ENTRIES` (25k entries) — with
+  stamped entries excluded as everywhere here and counted as `heldByRuns` by the same filter
+  inverted. Caps of its own, so tuning them never moves the conversions':
+  `ANSWER_EDIT_MAX_RESPONSES` = 50,000 surveys (`answerEditCap()`, env-overridable at call time →
+  `409 TOO_MANY_RESPONSES`) and 500 for one person at a time (`ANSWER_EDIT_QUEUE_MAX` →
+  `409 QUEUE_TOO_LARGE`). **One change at a time per campaign, both ways.** An edit's create, resume
+  and revert call `otherChangeRunning`
+  ([answerEditRuns.js](../server/src/services/canvass/answerEditRuns.js)): another answer edit
+  `pending`/`running`/`open` or with its undo `pending`/`running`, a conversion
+  `pending`/`running`/`reverting` (an `open` door-by-door desk-entry session does not block an edit;
+  its next door step waits instead), an unknock `pending` and created in the last 10 minutes, an
+  unknock revert in flight (`UnknockRun.revertingAt`, stamped by the inline revert route for its
+  duration and cleared in a `finally`; a stamp older than 10 minutes no longer counts), or any round's
+  `Pass.recutLock` taken in the last 5 minutes — each `409 ANOTHER_CHANGE_RUNNING` with a worded
+  `error`. The other way, `answerEditBusy` (an edit's apply or undo `pending`/`running`, or a session
+  `open`) refuses with the same code the unknock create and revert, the conversion create, door step,
+  resume and revert in this file, and the clear-knocks discard and the restore-snapshot in
+  [turfs.js](../server/src/routes/admin/turfs.js) — checked after those two take the recut lock, which
+  the edit side reads, so neither can slip in between. The reason is the write model: conversions and
+  unknock read, archive, then delete by id (no compare-and-swap), and a clear-knocks re-cut snapshots
+  a round's surveys and archive rows in two reads, so an edit landing between them would leave the
+  snapshot holding the edited survey with its original nowhere. The plain reclassify path touches no
+  survey and is not guarded. The engine, the writer, the undo, the run model, the worker and every
+  reader are [SURVEYS.md](SURVEYS.md) §N. Both new models (`AnswerEditRun`, `AnswerEditRunChunk`) ride
+  BOTH delete cascades; the worker builds their indexes at boot, and the archive's two new partial
+  indexes need `npm run migrate:build-indexes -- --apply` before large undos or Details pages (a
+  small edit doesn't need them). Pinned by
+  [answerEdit.int.test.js](../server/test/answerEdit.int.test.js) — the yard-sign cleanup end to end,
+  money untouched, preview == landed, the undo orders, both one-change-at-a-time directions — and,
+  opt-in, the scale gate [answerEditScale.int.test.js](../server/test/answerEditScale.int.test.js)
+  (`ANSWER_EDIT_SCALE=1`: the dry run and the create under 10 s at 25k entries and 50k surveys).
 - **Where the fields surface:** GET `/admin/campaigns` (lean-doc spread — automatic), the
   per-campaign rows of GET `/admin/reports/campaign-rollup` (added to its projection + row object in
   [reports.js](../server/src/routes/admin/reports.js) — it picks fields, nothing flows automatically),
@@ -1260,6 +1494,14 @@ The label used to be a fixed "add on Users →", which also sat on the Pin Fixes
   `isNotable` highlights `enabledOutcomes` in both directions, like `disabledOutcomes` and
   `billRestrictedDoors`; `doorAddPolicy` is not highlighted. The mobile copy,
   [mobile/lib/campaignHistory.js](../mobile/lib/campaignHistory.js), carries the same words.
+  The Door Outcomes rows got words on 2026-10-19: `surveyConversion` → *Surveyed entries* (values
+  through `ACTION_LABELS`, `mixed` → *several outcomes*), `unknock` → *Entries* (*recorded* /
+  *unknocked*), and `answerEdit` / `answerEditUndo`, which the drawer renders as one sentence through
+  `answerEditSentence` (*Survey answers edited: ‹frozen summary›*; *Survey answer edit undone: ‹what
+  it put back› — ‹summary›*) instead of "changed from … to …"; `isNotable` highlights all four. The
+  phone's mirror and [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) carry the same and
+  ship with the next over-the-air update; until then an older phone falls back to its de-camel-cased
+  label and the raw values.
 - **The edit drawer is open to LEADS**, not just org admins — the server has always accepted
   `name`/`surveyTemplateId`/`timeZone` from them and now takes the goal too, so withholding the
   drawer entirely left a lead unable to reach a field they own. `canEditAdminFields={isOrgAdmin}`
@@ -1305,6 +1547,29 @@ The label used to be a fixed "add on Users →", which also sat on the Pin Fixes
   would refuse with `TARGET_DISABLED`, and a row with `wasOfflineSubmission` wears an **Offline**
   `Badge` beside its outcome. The chip gate and the tag are pinned by
   [doorOutcomesRender.smoke.test.js](../client/src/lib/doorOutcomesRender.smoke.test.js).
+  **Edit answers…** (2026-10-19) renders first in the action bar, behind a divider, when
+  `selectionHasSurveyed && isSurveyCampaign` on the bar's no-spans branch (so only an all-Surveyed
+  selection on a survey campaign). Its dry run opens
+  [AnswerEditForm.jsx](../client/src/components/outcomes/AnswerEditForm.jsx); a priced dry run opens
+  [AnswerEditReviewModal.jsx](../client/src/components/outcomes/AnswerEditReviewModal.jsx); the
+  create sends the review's `digest`, `asOf` and template version back. A live run renders
+  [AnswerEditRunCard.jsx](../client/src/components/outcomes/AnswerEditRunCard.jsx), polled by
+  [useAnswerEditRunPoll.js](../client/src/lib/useAnswerEditRunPoll.js) (1.2 s until
+  `isAnswerEditSettled`); one person at a time is
+  [AnswerEditWalkthrough.jsx](../client/src/components/outcomes/AnswerEditWalkthrough.jsx) over
+  [PerPersonAnswerEditor.jsx](../client/src/components/surveys/PerPersonAnswerEditor.jsx), the editor
+  the voter profile shares. Edit runs merge with the conversions under *Survey answer changes*,
+  newest first, and every run state's label and buttons come from **`runState`** in
+  [lib/answerEditPlan.js](../client/src/lib/answerEditPlan.js) — one owner for the list row and the
+  card — beside `planFromForm`, `suggestedTakeOut` (the *Take out just …* button an answer filter
+  implies), `reviewSentences`, `leftAsTheyAre` and `picksLine`. [RunDetailModal.jsx](../client/src/components/outcomes/RunDetailModal.jsx)
+  gained an `answerEdit` type (`AnswerEditDetail`, from `…/entries`). The row line for others at a
+  visit is now neutral for every action (*N other(s) surveyed at this visit, not matched*, muted;
+  it read *… at this visit — their answers go too*, red once selected, which was true only of
+  Review removal and Unknock), and
+  conversion rows, cards and Details say *surveys recorded / removed* — "answer" now means one reply.
+  Pinned by [answerEditPlan.test.js](../client/src/lib/answerEditPlan.test.js) and
+  [answerEditRender.smoke.test.js](../client/src/lib/answerEditRender.smoke.test.js).
 - **Door goal:** the server owns every number
   ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
   and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin

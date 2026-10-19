@@ -457,7 +457,9 @@ export const buildCanvassActivity = async (ctx, sink) => {
     'Replaces earlier action', 'Replaced at (ISO)', 'Note',
     ...(layer.on ? [...ANSWER_HEADERS, ...answers.cols.map((c) => c.header)] : []),
     'Household DB id', 'Voter DB id', 'Activity DB id',
-    ...(layer.on ? ['Response DB id'] : []),
+    // 'Answers edited' is APPENDED, after the last column (the Offline precedent): an admin changed
+    // this survey's answers after they were recorded. Survey-level, never per answer.
+    ...(layer.on ? ['Response DB id', 'Answers edited'] : []),
   ]);
 
   // The answer cells for one response — or the same number of empty cells, so every row is the same
@@ -585,6 +587,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
           ),
           String(r.householdId), v ? vid : '', '',
           String(r._id),
+          r.editedAt ? 'yes' : '',
         ]);
         continue;
       }
@@ -637,7 +640,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
           dncHit && a.actionType === 'survey_submitted' ? '' : a.note || '',
           ...(layer.on ? ['knock', ...answerCellsOf(rowResp)] : []),
           String(a.householdId), fv ? String(fv._id) : dncHit ? '' : vid || '', String(a._id),
-          ...(layer.on ? [rowResp ? String(rowResp._id) : ''] : []),
+          ...(layer.on ? [rowResp ? String(rowResp._id) : '', rowResp?.editedAt ? 'yes' : ''] : []),
         ]);
       }
     }
@@ -1426,7 +1429,7 @@ export const buildVoterResults = async (ctx, sink) => {
           const plan = planByTemplate.get(b.templateId);
           const r = mine.get(blockKey(b.templateId, b.passId));
           return [
-            r ? `${plan.templateName}${r.deskEntry ? ' (desk entered)' : ''}` : '',
+            r ? `${plan.templateName}${r.deskEntry ? ' (desk entered)' : ''}${r.editedAt ? ' (answers edited)' : ''}` : '',
             ...plan.cols.map((c) => (r ? plan.renderAnswer(c.key, r.answers) : '')),
             ...(wantNotes ? [r?.note || ''] : []),
           ];
@@ -1756,7 +1759,7 @@ export const buildNotes = async (ctx, sink) => {
   if (has('survey')) {
     streams.push(
       taggedNotes(
-        SurveyResponse.find(surveyQ, '_id note submittedAt userId householdId voterId passId editedBy editedAt deskEntry')
+        SurveyResponse.find(surveyQ, '_id note submittedAt userId householdId voterId passId editedBy editedAt noteEditedBy noteEditedAt deskEntry')
           .sort({ submittedAt: 1 }).lean().cursor({ batchSize: BATCH }),
         'survey', 'submittedAt',
       ),
@@ -1865,7 +1868,10 @@ export const buildNotes = async (ctx, sink) => {
         desk ? 'yes' : '', desk ? nameOf(desk) : '',
         p ? effortNameById.get(String(p.effortId)) || '' : '',
         p ? p.roundNumber : '', p ? p.name : '',
-        n.editedAt ? 'yes' : '', n.editedAt ? new Date(n.editedAt).toISOString() : '',
+        // A survey note's own stamp when it has one — an answer edit never marks the note.
+        ...((stamp) => [stamp ? 'yes' : '', stamp ? new Date(stamp).toISOString() : ''])(
+          n._source === 'survey' && (n.noteEditedAt !== undefined || n.noteEditedBy !== undefined) ? n.noteEditedAt : n.editedAt
+        ),
         (n._source === 'voter' ? n.body : n.note) || '',
         ...(withDoorVoters ? [names.join('; '), names.length || ''] : []),
         hid, dncHit ? '' : vid || '', String(n._id),

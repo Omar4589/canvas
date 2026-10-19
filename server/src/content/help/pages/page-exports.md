@@ -7,7 +7,7 @@ order: 115
 sourceDoc: EXPORTS.md
 
 summary: What each control on the campaign Exports page does — the type picker, the filters, the options dialog, and the export history.
-tags: exports, page, download, csv, results by voter, survey answers, not a target voter
+tags: exports, page, download, csv, results by voter, survey answers, not a target voter, answers edited
 ---
 
 Open a campaign and pick **Exports** in the sidebar.
@@ -19,7 +19,8 @@ Open a campaign and pick **Exports** in the sidebar.
   marked admin-only (voter profile notes, full backup) don't appear for team leads. **Notes** and
   **Results by voter** are available to leads — **Results by voter** is the card to reach for when
   the file is going to a client: one row per person at the doors you worked, with what happened at
-  their address and what they said.
+  their address and what they said (a round's **Survey** cell says *(answers edited)* when an admin
+  changed those answers afterwards).
 - **Filters** — only the filters that fit the chosen type appear: date range (in the campaign's timezone), walk list, round, canvasser, a saved search (for **Filtered voters**), the **Columns** selector (for **Voter file** — pick an upload to get its vendor's column names), the **Only doors with status** picker (for **Doors by round**), or the **Door outcome** chips (inline for **Notes**; inside the options dialog for **Canvassing activity** and **Results by voter** — tick the outcomes you want; nothing ticked means all). **Not a target voter** — an optional door button that stays off until an org admin turns it on — appears among the chips and statuses only on a campaign that has had it turned on. A chip or status you picked before switching to a campaign that doesn't offer it is dropped when you queue, so the file matches what's on screen.
 
 - **Include contact & demographic details** — on the two survey exports and on **Results by
@@ -45,7 +46,8 @@ Open a campaign and pick **Exports** in the sidebar.
     and the file is named `activity-log-by-voter` so its rows are never mistaken for knocks.
   - **Include survey answers** *(Canvassing activity)* — off by default; tick it and every survey
     row gains what was recorded, one column per question, plus which survey it was, when, who
-    took it and whether an admin typed it at a desk. It also adds a row for each survey the file
+    took it, whether an admin typed it at a desk, and — in a last **Answers edited** column —
+    whether an admin changed its answers afterwards. It also adds a row for each survey the file
     cannot otherwise show, because surveying three people at one door in one round is *one* knock
     and three surveys: those rows say **Row source: survey**, carry no Activity DB id, and must
     never be counted as knocks. Whenever it adds rows the file is named `activity-log-with-surveys` to say so. Tick

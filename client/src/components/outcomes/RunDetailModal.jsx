@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { Button, Modal, Skeleton } from '../ui/index.js';
 import { STATUS_COLORS, ACTION_LABELS } from '../../lib/statusColors.js';
 import { formatInTz } from '../../lib/datetime.js';
+import { undoReasonText } from './AnswerEditRunCard.jsx';
 
 // The itemized history behind one run row: exactly which doors changed (was → now, who knocked,
 // which round, when) and — for a survey conversion — exactly which answers were recorded or
@@ -59,9 +60,88 @@ const Pager = ({ page, setPage, total }) =>
     </div>
   ) : null;
 
+// An answer edit's itemization: every survey it changed, question by question, in the survey's own
+// words — or, once undone, what the undo couldn't put back and why (read from the undo's STORED
+// summary, never from rows a re-cut or an Erase may have removed).
+const AnswerEditDetail = ({ campaignId, run, tz }) => {
+  const [page, setPage] = useState(0);
+  const q = useQuery({
+    queryKey: ['run-detail', 'answerEdit', run.id, page],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/answer-edits/${run.id}/entries?skip=${page * PAGE}&limit=${PAGE}`),
+    placeholderData: keepPreviousData,
+  });
+  const data = q.data;
+  const entries = data?.entries || [];
+  if (q.isLoading) return <Skeleton className="h-40 w-full" />;
+  if (data?.kind === 'undo') {
+    return entries.length ? (
+      <>
+        <p className="mb-2 text-sm text-fg-muted">Undone. These surveys weren&rsquo;t put back:</p>
+        <ul className="max-h-80 overflow-y-auto rounded-card border border-border">
+          {entries.map((e, i) => (
+            <li key={`${e.voterId}-${i}`} className="border-b border-border px-3 py-2 text-sm last:border-0">
+              <span className="font-medium text-fg">{e.voterName}</span>
+              <span className="text-fg-muted"> · {undoReasonText(e)}</span>
+            </li>
+          ))}
+        </ul>
+        <Pager page={page} setPage={setPage} total={data?.total || 0} />
+      </>
+    ) : (
+      <p className="text-sm text-fg-muted">Undone — every survey this change touched was put back exactly.</p>
+    );
+  }
+  return (
+    <>
+      {!entries.length ? (
+        <p className="text-sm text-fg-muted">No survey was changed by this edit.</p>
+      ) : (
+        <ul className="max-h-80 overflow-y-auto rounded-card border border-border">
+          {entries.map((e) => (
+            <li key={e.id} className="border-b border-border px-3 py-2 text-sm last:border-0">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium text-fg">{e.voterName}</span>
+                <span className="text-xs text-fg-muted">
+                  {[e.address, e.round, `${e.deskEntered ? 'entered by an admin' : 'recorded by'} ${e.recordedBy}`, formatInTz(e.submittedAt, tz)].filter(Boolean).join(' · ')}
+                </span>
+              </div>
+              {e.changes.map((c) => (
+                <div key={c.questionKey} className="text-fg-muted">
+                  {c.label}: {c.before || '—'} → {c.dropped ? 'removed (no longer asked)' : c.after || 'blank'}
+                </div>
+              ))}
+              {e.changedSince && <div className="text-xs text-fg-subtle">Changed again since this edit.</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <Pager page={page} setPage={setPage} total={data?.total || 0} />
+      {run.samples?.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm font-medium text-brand-accent">
+            Left as they are ({(run.samplesTotal || run.samples.length).toLocaleString()})
+          </summary>
+          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-fg-muted">
+            {run.samples.map((sm, i) => (
+              <li key={`${sm.voterId}-${i}`}>
+                {sm.voterName || 'Voter'}
+                <span className="text-fg-subtle">
+                  {' '}· {sm.reason === 'not_found' ? 'no longer on file' : 'changed after the review — left as it was'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
+  );
+};
+
 export default function RunDetailModal({ campaignId, run, onClose, tz }) {
-  // run.type: 'reclassify' | 'conversion'. Conversions have two kinds; reclassifies only doors.
+  // run.type: 'reclassify' | 'conversion' | 'answerEdit'. Conversions have two kinds; reclassifies
+  // only doors; an answer edit lists surveys.
   const isConversion = run.type === 'conversion';
+  const isAnswerEdit = run.type === 'answerEdit';
   const [kind, setKind] = useState('doors');
   const [page, setPage] = useState(0);
 
@@ -74,10 +154,11 @@ export default function RunDetailModal({ campaignId, run, onClose, tz }) {
     queryKey: ['run-detail', run.type, run.id, kind, page],
     queryFn: () => api(`${base}${qs}`),
     placeholderData: keepPreviousData,
+    enabled: !isAnswerEdit,
   });
   const data = q.data;
   const entries = data?.entries || [];
-  const answersLabel = run.direction === 'from_survey' ? 'Answers removed' : 'Answers recorded';
+  const answersLabel = run.direction === 'from_survey' ? 'Surveys removed' : 'Surveys recorded';
 
   return (
     <Modal
@@ -87,6 +168,10 @@ export default function RunDetailModal({ campaignId, run, onClose, tz }) {
       size="lg"
       footer={<Button variant="secondary" onClick={onClose}>Close</Button>}
     >
+      {isAnswerEdit ? (
+        <AnswerEditDetail campaignId={campaignId} run={run} tz={tz} />
+      ) : (
+      <>
       {isConversion && (
         <div className="mb-3 flex gap-1.5">
           {[['doors', 'Doors'], ['answers', answersLabel]].map(([k, label]) => (
@@ -206,6 +291,8 @@ export default function RunDetailModal({ campaignId, run, onClose, tz }) {
             <p className="mt-1 text-xs text-fg-subtle">Showing the first {run.samples.length}.</p>
           )}
         </details>
+      )}
+      </>
       )}
     </Modal>
   );

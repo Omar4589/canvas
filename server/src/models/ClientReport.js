@@ -66,6 +66,10 @@ const windowStatsSchema = new mongoose.Schema(
     coverage: { type: mongoose.Schema.Types.Mixed, default: {} },
     surveyBreakdowns: { type: [surveyBreakdownSchema], default: [] },
     tagBreakdowns: { type: [tagBreakdownSchema], default: [] },
+    // INTERNAL counts for the builder's notes (desk-entered and edited responses behind these
+    // figures), never shown to the client: shapeWindow (clientReportView.js) is a whitelist. Must be
+    // declared — strict mode dropped it at the stats assignment, so the notes never appeared.
+    provenance: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { _id: false }
 );

@@ -982,12 +982,16 @@ test('survey answers: columns on the knock rows, and a row for the survey the le
   const { doc, text } = await runExport('canvass-activity', { includeSurveyAnswers: true });
   const { header, rows, col } = layerCols(text);
 
-  // 34 base columns + five metadata cells and Row source + one per question + Response DB id.
-  assert.strictEqual(header.length, 43, `header is ${header.join(' | ')}`);
+  // 34 base columns + five metadata cells and Row source + one per question + Response DB id, then
+  // 'Answers edited' APPENDED after the last column (docs/PROPOSAL_SURVEY_ANSWER_EDITS.md D2), so no
+  // column a client's spreadsheet reads moves.
+  assert.strictEqual(header.length, 44, `header is ${header.join(' | ')}`);
   assert.deepStrictEqual(header.slice(31, 37), [
     'Row source', 'Survey', 'Survey version', 'Survey submitted (ISO)', 'Survey taken by', 'Desk entered',
   ]);
-  assert.strictEqual(header[header.length - 1], 'Response DB id');
+  assert.strictEqual(header[header.length - 2], 'Response DB id');
+  assert.strictEqual(header[header.length - 1], 'Answers edited');
+  assert.ok(rows.every((r) => r.length === header.length), 'every row is the header’s width');
   assert.match(doc.artifact.filename, /-canvass-activity-with-surveys-\d{4}-\d{2}-\d{2}\.csv$/);
 
   // UNFANNED_ROWS knock rows plus TWO uncovered responses: Alice's p2 survey, and the fixture's

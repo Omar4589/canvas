@@ -21,6 +21,12 @@ import RemoveAnswersModal from '../components/outcomes/RemoveAnswersModal.jsx';
 import QueueWalkthrough from '../components/outcomes/QueueWalkthrough.jsx';
 import ConversionRunCard from '../components/outcomes/ConversionRunCard.jsx';
 import RunDetailModal from '../components/outcomes/RunDetailModal.jsx';
+import AnswerEditForm from '../components/outcomes/AnswerEditForm.jsx';
+import AnswerEditReviewModal from '../components/outcomes/AnswerEditReviewModal.jsx';
+import AnswerEditWalkthrough from '../components/outcomes/AnswerEditWalkthrough.jsx';
+import AnswerEditRunCard, { ACTION_LABEL as EDIT_ACTION_LABEL } from '../components/outcomes/AnswerEditRunCard.jsx';
+import { useAnswerEditRunPoll } from '../lib/useAnswerEditRunPoll.js';
+import { planFromForm, runState, picksLine } from '../lib/answerEditPlan.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { isOutcomeEnabled, outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
@@ -142,6 +148,15 @@ export default function DoorOutcomesPage() {
   const [walking, setWalking] = useState(null);
   const [queueTemplate, setQueueTemplate] = useState(null);
   const [detailRun, setDetailRun] = useState(null); // the run whose itemized history is open
+  // Edit answers… (docs/PROPOSAL_SURVEY_ANSWER_EDITS.md). `editDry` is the form's dry run, `editForm`
+  // its per-question choices, `editPreview` the priced review; `editWalk` a one-person session.
+  const [editDry, setEditDry] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [editMode, setEditMode] = useState('bulk');
+  const [editPreview, setEditPreview] = useState(null);
+  const [editError, setEditError] = useState(null);
+  const [activeEditRunId, setActiveEditRunId] = useState(null);
+  const [editWalk, setEditWalk] = useState(null);
 
   const { campaign: current, campaignsQ, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
@@ -339,6 +354,10 @@ export default function DoorOutcomesPage() {
     setUnknockPreview(null);
     setComposing(null);
     setError(null);
+    setEditDry(null);
+    setEditPreview(null);
+    setEditWalk(null);
+    setActiveEditRunId(null);
   }
   const afterWrite = () => {
     setPreview(null);
@@ -501,7 +520,16 @@ export default function DoorOutcomesPage() {
       afterWrite();
       qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => {
+      setError(e.message);
+      // An undo that stopped part-way changed some doors: show its card (Retry undo) and the
+      // fresh list rather than the state from before the click.
+      if (e.data?.run?.id) setActiveRunId(e.data.run.id);
+      if (e.code === 'REVERT_FAILED') {
+        afterWrite();
+        qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+      }
+    },
   });
 
   const convResume = useMutation({
@@ -510,6 +538,152 @@ export default function DoorOutcomesPage() {
     onSuccess: (d) => setActiveRunId(d.run.id),
     onError: (e) => setError(e.message),
   });
+
+  // ---- Edit answers… -------------------------------------------------------------------------
+  // The run list rides beside the conversions under "Survey answer changes"; the live card polls
+  // one run until it settles, then everything a change of answers moves is refetched.
+  const editRunsQ = useQuery({
+    queryKey: ['admin', 'campaigns', campaignId, 'answer-edits'],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/answer-edits`),
+    enabled: !!campaignId && isOrgAdmin,
+  });
+  const editRuns = editRunsQ.data?.runs || [];
+  const { run: liveEditRun, settled: editSettled } = useAnswerEditRunPoll({ campaignId, runId: activeEditRunId });
+  const afterEdit = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'answer-edits'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', campaignId] });
+    qc.invalidateQueries({ queryKey: ['reports'] });
+  };
+  const editSettledKey = liveEditRun ? `${liveEditRun.id}:${liveEditRun.status}:${liveEditRun.undo?.status}:${editSettled}` : null;
+  useEffect(() => {
+    if (editSettledKey && editSettled) afterEdit();
+    // afterEdit only invalidates caches; re-running it for an unchanged state is the bug to avoid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editSettledKey]);
+
+  const editBody = (extra = {}) => ({ ...selectionBody(), ...extra });
+  const editOpen = useMutation({
+    mutationFn: (surveyTemplateId) =>
+      api(`/admin/campaigns/${campaignId}/answer-edits`, {
+        method: 'POST',
+        body: editBody({ dryRun: true, ...(surveyTemplateId ? { surveyTemplateId } : {}) }),
+      }),
+    onSuccess: (d) => {
+      setEditDry(d);
+      setEditForm({});
+      setEditError(null);
+    },
+    onError: (e) => setError(e.message),
+  });
+  const editReview = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/answer-edits`, {
+        method: 'POST',
+        body: editBody({ dryRun: true, surveyTemplateId: editDry.template.id, plan: planFromForm(editDry.questions, editForm) }),
+      }),
+    onSuccess: (d) => {
+      setEditError(null);
+      setEditPreview(d);
+    },
+    onError: (e) => setEditError(e.message),
+  });
+  const editCreate = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/answer-edits`, {
+        method: 'POST',
+        body: editBody({
+          surveyTemplateId: editPreview.template.id,
+          plan: planFromForm(editDry.questions, editForm),
+          digest: editPreview.digest,
+          asOf: editPreview.asOf,
+          templateVersion: editPreview.template.version,
+        }),
+      }),
+    onSuccess: (d) => {
+      setEditPreview(null);
+      setEditDry(null);
+      resetSelection();
+      setActiveEditRunId(d.run.id);
+      afterEdit();
+    },
+    onError: (e) => {
+      // A 503 still created the run: its card offers Pick up. A stale review writes nothing.
+      setEditPreview(null);
+      if (e.data?.run?.id) {
+        setEditDry(null);
+        setActiveEditRunId(e.data.run.id);
+        afterEdit();
+      }
+      setError(e.message);
+    },
+  });
+  const editStartQueue = useMutation({
+    mutationFn: () =>
+      api(`/admin/campaigns/${campaignId}/answer-edits`, {
+        method: 'POST',
+        body: editBody({ mode: 'queue', surveyTemplateId: editDry.template.id, digest: editDry.digest, asOf: editDry.asOf, templateVersion: editDry.template.version }),
+      }),
+    onSuccess: (d) => {
+      setEditDry(null);
+      resetSelection();
+      setEditWalk({ run: d.run, current: d.current });
+      afterEdit();
+    },
+    onError: (e) => setEditError(e.message),
+  });
+  const editResumeQueue = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}`),
+    onSuccess: ({ run: r }) => setEditWalk({ run: r, current: r.current || null }),
+    onError: (e) => setError(e.message),
+  });
+  const editClose = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/close`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setActiveEditRunId(d.run.id);
+      afterEdit();
+    },
+    onError: (e) => setError(e.message),
+  });
+  const editPickUp = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/resume`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setActiveEditRunId(d.run.id);
+      afterEdit();
+    },
+    onError: (e) => {
+      if (e.data?.run?.id) setActiveEditRunId(e.data.run.id);
+      setError(e.message);
+    },
+  });
+  const editUndo = useMutation({
+    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/revert`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setActiveEditRunId(d.run.id);
+      afterEdit();
+    },
+    onError: (e) => {
+      if (e.data?.run?.id) setActiveEditRunId(e.data.run.id);
+      setError(e.message);
+    },
+  });
+  const editBusy =
+    editOpen.isPending || editReview.isPending || editCreate.isPending || editStartQueue.isPending || editResumeQueue.isPending ||
+    editClose.isPending || editPickUp.isPending || editUndo.isPending;
+  // One owner for what each run-state button does (lib/answerEditPlan.js runState names them).
+  const onEditAction = (action, r) => {
+    setError(null);
+    if (action === 'details') {
+      setDetailRun({ type: 'answerEdit', id: r.id, title: `Answers edited · ${r.planSummary || ''}`, by: r.by, createdAt: r.createdAt, samples: r.samples, samplesTotal: r.samplesTotal });
+    } else if (action === 'undo' || action === 'undoAgain' || action === 'retryUndo' || action === 'undoLanded' || action === 'startAgainUndo') {
+      editUndo.mutate(r.id);
+    } else if (action === 'pickUp' || action === 'startAgain') {
+      editPickUp.mutate(r.id);
+    } else if (action === 'resume') {
+      editResumeQueue.mutate(r.id);
+    } else if (action === 'stopHere') {
+      editClose.mutate(r.id);
+    }
+  };
 
   const dryRun = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/reclassify-outcomes`, { method: 'POST', body: body({ dryRun: true }) }),
@@ -556,6 +730,42 @@ export default function DoorOutcomesPage() {
     onSuccess: afterUnknock,
     onError: (e) => setError(e.message),
   });
+
+  // The "Survey answer changes" card lists conversions and answer edits together, newest first.
+  const changeRows = [
+    ...editRuns.map((r) => ({ k: 'edit', r })),
+    ...convRuns.map((r) => ({ k: 'conv', r })),
+  ].sort((a, b) => new Date(b.r.createdAt) - new Date(a.r.createdAt));
+  const renderEditRow = (r) => {
+    const st = runState(r);
+    const line = picksLine(r);
+    return (
+      <li key={`edit-${r.id}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
+        <div className="min-w-0 text-sm text-fg">
+          <span className="font-medium">Answers edited{r.planSummary ? ` · ${r.planSummary}` : ''}</span>
+          <div className="mt-0.5 text-xs text-fg-muted">
+            {st.label}
+            {line ? ` · ${line}` : ''}
+            {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
+          </div>
+          {r.scopeSummary && (
+            <div className="mt-0.5 text-xs text-fg-subtle">
+              Filtered to: {r.scopeSummary}
+              {r.byIds ? ' · hand-picked rows' : ''}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {st.tone === 'danger' && <Badge variant="danger">{st.key === 'undoStopped' ? 'Undo stopped' : 'Stopped'}</Badge>}
+          {st.actions.map((a) => (
+            <Button key={a} variant="secondary" size="sm" disabled={editBusy} onClick={() => onEditAction(a, r)}>
+              {EDIT_ACTION_LABEL[a] || a}
+            </Button>
+          ))}
+        </div>
+      </li>
+    );
+  };
 
   if (resolving) return <CampaignLoading />;
   if (notFound) return <CampaignMissing />;
@@ -982,12 +1192,11 @@ export default function DoorOutcomesPage() {
                           </span>
                         )}
                         {answerActive && e.survey.voters > (e.survey.matchedVoters || 0) && (
-                          <div
-                            className={`mt-0.5 text-xs ${selected.has(e.id) || allMatching ? 'text-danger' : 'text-fg-muted'}`}
-                            title={(e.survey.otherNames || []).join(', ')}
-                          >
+                          // Neutral for every action: Review removal and Unknock say in their own
+                          // review that the visit's other answers go too; Edit answers leaves them.
+                          <div className="mt-0.5 text-xs text-fg-muted" title={(e.survey.otherNames || []).join(', ')}>
                             {e.survey.voters - e.survey.matchedVoters} other
-                            {e.survey.voters - e.survey.matchedVoters === 1 ? '' : 's'} at this visit — their answers go too
+                            {e.survey.voters - e.survey.matchedVoters === 1 ? '' : 's'} surveyed at this visit, not matched
                           </div>
                         )}
                       </div>
@@ -1015,11 +1224,11 @@ export default function DoorOutcomesPage() {
 
       {/* Past runs — desk-entry conversions listed beside plain reclassifications, because from an
           admin's point of view they are the same act at different depths. */}
-      {convRuns.length > 0 && (
+      {changeRows.length > 0 && (
         <Card className="mt-6">
           <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-fg">Survey answer changes</h2>
           <ul>
-            {convRuns.map((r) => (
+            {changeRows.map(({ k, r }) => k === 'edit' ? renderEditRow(r) : (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
                 <div className="min-w-0 text-sm text-fg">
                   <span className="font-medium">
@@ -1028,9 +1237,11 @@ export default function DoorOutcomesPage() {
                       : `Surveyed → ${ACTION_LABELS[r.to] || r.to}`}
                   </span>
                   <div className="mt-0.5 text-xs text-fg-muted">
+                    {/* "Surveys", not "answers": an answer is one reply now (Edit answers changes
+                        those), and these runs record or remove whole surveys. */}
                     {r.direction === 'to_survey'
-                      ? `${(r.counts?.responsesCreated || 0).toLocaleString()} answers recorded`
-                      : `${(r.counts?.responsesArchived || 0).toLocaleString()} answers removed`}
+                      ? `${(r.counts?.responsesCreated || 0).toLocaleString()} ${(r.counts?.responsesCreated || 0) === 1 ? 'survey' : 'surveys'} recorded`
+                      : `${(r.counts?.responsesArchived || 0).toLocaleString()} ${(r.counts?.responsesArchived || 0) === 1 ? 'survey' : 'surveys'} removed`}
                     {' · '}
                     {(r.counts?.entriesConverted || 0).toLocaleString()} entries
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
@@ -1067,6 +1278,19 @@ export default function DoorOutcomesPage() {
                 </Button>
                 {r.revertedAt ? (
                   <Badge variant="neutral">Undone</Badge>
+                ) : r.status === 'reverting' ? (
+                  <Badge variant="neutral">Undoing…</Badge>
+                ) : r.status === 'revert_failed' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="danger">Undo stopped</Badge>
+                    <Button
+                      size="sm"
+                      disabled={convRevert.isPending}
+                      onClick={() => { setError(null); convRevert.mutate(r.id); }}
+                    >
+                      Retry undo
+                    </Button>
+                  </div>
                 ) : r.status === 'open' ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="neutral">
@@ -1246,6 +1470,21 @@ export default function DoorOutcomesPage() {
               </div>
             ) : (
             <div className="ml-auto flex items-center gap-2">
+              {/* Edit answers… first, quiet and fenced off: it changes ANSWERS on surveys that stay
+                  surveyed, where everything after the divider changes or removes the entry itself. */}
+              {selectionHasSurveyed && isSurveyCampaign && (
+                <>
+                  <Button
+                    variant="secondary"
+                    disabled={editOpen.isPending}
+                    title="Change, clear or take out answers on these surveys — the knocks and the Surveyed status stay"
+                    onClick={() => { setError(null); editOpen.mutate(); }}
+                  >
+                    {editOpen.isPending ? 'Loading…' : 'Edit answers…'}
+                  </Button>
+                  <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                </>
+              )}
               <span className="text-sm text-fg-muted">Change to</span>
               <Select value={target} onChange={(e) => setTarget(e.target.value)} className="w-44">
                 {OUTCOMES.filter((o) => isOutcomeEnabled(current, o, optInAvailable)).map((o) => (
@@ -1386,6 +1625,47 @@ export default function DoorOutcomesPage() {
             for real in the meantime keeps its new entry.
           </p>
         </Modal>
+      )}
+
+      {/* An answer edit in flight, or the result of the last one. */}
+      {liveEditRun && !editWalk && (
+        <AnswerEditRunCard run={liveEditRun} busy={editBusy} onAction={onEditAction} onDismiss={() => setActiveEditRunId(null)} />
+      )}
+
+      {editDry && !editPreview && (
+        <AnswerEditForm
+          dry={editDry}
+          answerFilters={answerActive ? answerFilters : []}
+          form={editForm}
+          setForm={setEditForm}
+          mode={editMode}
+          setMode={setEditMode}
+          busy={editReview.isPending || editStartQueue.isPending || editOpen.isPending}
+          error={editError}
+          onCancel={() => { setEditDry(null); setEditError(null); }}
+          onReview={() => editReview.mutate()}
+          onStart={() => editStartQueue.mutate()}
+          onChooseSurvey={(id) => editOpen.mutate(id)}
+        />
+      )}
+      {editPreview && (
+        <AnswerEditReviewModal
+          preview={editPreview}
+          tz={tz}
+          busy={editCreate.isPending}
+          onBack={() => setEditPreview(null)}
+          onConfirm={() => editCreate.mutate()}
+        />
+      )}
+      {editWalk && (
+        <AnswerEditWalkthrough
+          campaignId={campaignId}
+          run={editWalk.run}
+          initial={editWalk.current}
+          tz={tz}
+          onFinishLater={() => { setEditWalk(null); afterEdit(); }}
+          onStopped={(r) => { setEditWalk(null); setActiveEditRunId(r.id); afterEdit(); }}
+        />
       )}
 
       {/* A run in flight, or the result of the last one. */}

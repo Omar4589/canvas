@@ -50,7 +50,8 @@ export function createRedis() {
  *            first use of each other queue type after a restart added one more. 17 at rest,
  *            22 once the web dyno had touched every queue, and a deploy overlap counts both the
  *            old and the new dynos while the old ones drain.
- *   after  — worker 8: 1 shared + 7 blocking duplicates. Web 1.
+ *   after  — worker 8: 1 shared + 7 blocking duplicates. Web 1. (Now 9: answer-edit-queue added
+ *            an eighth Worker, 2026-10-19.)
  * Why it matters: on 2026-09-30 the app sat at the Mini plan's limit — the dashboard counted 18/18
  * ("Database connections over limit"; Heroku's plan page lists Mini at 20), so every deploy overlap, a second web dyno, or
  * the first use of a queue type after a restart hit the limit — a job that would not enqueue,

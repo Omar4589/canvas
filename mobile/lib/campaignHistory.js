@@ -32,6 +32,12 @@ const FIELD_LABELS = {
   enabledOutcomes: 'Off-by-default outcomes',
   doorAddPolicy: 'Adding people at the door',
   outcomeReclassify: 'Reclassified entries',
+  // The Door Outcomes acts that rewrite recorded history. Not schema paths: each tool writes its
+  // own key (models/CampaignChange.js).
+  surveyConversion: 'Surveyed entries',
+  unknock: 'Entries',
+  answerEdit: 'Survey answers edited',
+  answerEditUndo: 'Survey answer edit undone',
 };
 
 const DATE_FIELDS = new Set(['goalDate', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd']);
@@ -70,6 +76,10 @@ export function formatValue(field, value) {
   // Not a schema path: the outcome-reclassification tool writes the two outcome KEYS it folded
   // together, so the row reads "No soliciting → Not home" (and the reverse on a revert).
   if (field === 'outcomeReclassify') return ACTION_LABELS[value] || String(value ?? '');
+  // A survey conversion stores the two outcome keys too ('mixed' for a selection spanning several).
+  if (field === 'surveyConversion') return value === 'mixed' ? 'several outcomes' : ACTION_LABELS[value] || String(value ?? '');
+  // Unknock stores 'recorded' / 'unknocked' (swapped on an undo).
+  if (field === 'unknock') return value === 'unknocked' ? 'unknocked' : 'recorded';
   if (value === null || value === undefined || value === '') {
     return field === 'datesNote' ? 'empty' : 'not set';
   }
@@ -93,6 +103,8 @@ export function isNotable(item) {
   if (item.field === 'enabledOutcomes') return true;
   // Rewriting recorded history always deserves the eye, in either direction.
   if (item.field === 'outcomeReclassify') return true;
+  if (item.field === 'surveyConversion' || item.field === 'unknock') return true;
+  if (item.field === 'answerEdit' || item.field === 'answerEditUndo') return true;
   if (item.field === 'doorGoal') {
     const from = Number(item.fromValue);
     const to = Number(item.toValue);
@@ -125,3 +137,15 @@ export function actorLabel(person) {
   const name = person.name || 'Unknown user';
   return person.status && person.status !== 'active' ? `${name} (${person.status})` : name;
 }
+
+// One sentence for an answer-edit row (and its undo), instead of "changed from … to …": the
+// server froze the words when the change ran — the survey's own wording and the real counts —
+// which a label built now could not rebuild.
+//   "Survey answers edited: Could you help us by taking a yard sign? — took out … (214 surveys)"
+//   "Survey answer edit undone: 212 surveys put back, 2 kept newer answers"
+export const answerEditSentence = (item) => {
+  if (item.field === 'answerEditUndo') {
+    return { headline: 'Survey answer edit undone', detail: `${item.toValue || ''}${item.fromValue ? ` — ${item.fromValue}` : ''}` };
+  }
+  return { headline: 'Survey answers edited', detail: String(item.toValue || '') };
+};

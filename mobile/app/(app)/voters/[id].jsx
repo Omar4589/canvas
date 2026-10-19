@@ -21,7 +21,9 @@ import DirectionsButton from '../../../components/DirectionsButton';
 
 function answerText(a) {
   if (a == null || a === '') return '—';
-  return Array.isArray(a) ? a.join(', ') : String(a);
+  // An empty pick-several is a skipped question (or one an edit emptied), never a blank.
+  if (Array.isArray(a)) return a.length ? a.join(', ') : '—';
+  return String(a);
 }
 
 // Admin screens that push here pass ?from=<key> so back returns to them. dismissTo (not back)

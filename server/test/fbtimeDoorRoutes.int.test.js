@@ -100,6 +100,9 @@ before(async () => {
     FbTimeShift, IntegrationEvent, SupportAccessGrant]) {
     await M.deleteMany({});
   }
+  // The racing-connects test leans on the unique index on organizationId; in a fresh database it
+  // builds in the background, so on a loaded run both racing inserts used to land (a flaky 201/201).
+  await FbTimeConnection.init();
   const org = await Organization.create({ name: 'Routes Org', slug: 'routes-org', isActive: true });
   const org2 = await Organization.create({ name: 'Other Doorline Org', slug: 'routes-other', isActive: true });
   const mk = (first, extra = {}) =>

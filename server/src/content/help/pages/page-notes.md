@@ -15,6 +15,8 @@ The **Notes** page pulls every note left across the campaign into one read-only 
 
 Tap any note to jump to its context — a note about a voter opens that voter's profile, and a door-only note opens the map zoomed to that door. It's view-only here: you edit an admin note on the voter's profile, and door and survey notes are the canvasser's own record. (Door notes also still show on the household's map panel.)
 
+A note marked **edited** was changed after it was written. On a survey note that means the note itself: an admin correcting the survey's answers — on the voter's profile, or with Edit answers on the Door Outcomes page — never marks its note as edited. The **Edited** column in a Notes export follows the same rule.
+
 ## On the phone
 
 Admins and team leads get the same feed in the app, two ways: **More → Notes**, or the **Notes** tile on a campaign's own page. Same three sources, same filters, same tap-through. Because a phone has no address bar to hold the campaign, the screen carries a **campaign chip** at the top — tap it to switch, and your pick carries across your other admin screens. Opening Notes from a campaign's own tile scopes it to that campaign.

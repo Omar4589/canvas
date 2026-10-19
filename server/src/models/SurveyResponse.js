@@ -78,6 +78,20 @@ const surveyResponseSchema = new mongoose.Schema(
     editedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     editedAt: { type: Date, default: null },
 
+    // The NOTE's own edited stamp. editedBy/editedAt used to mean "the note was edited" too (the
+    // Notes hub and the Notes export read them), so an answers-only bulk edit would have marked
+    // every note it touched. ABSENT means "no stamp of its own yet": readers fall back to
+    // editedBy/editedAt, and the answer-edit writer copies those across the first time it stamps
+    // a survey (noteCarry, services/canvass/answerEditWriter.js), so no older mark is lost and no
+    // migration is needed. A phone re-survey resets both to null. docs/PROPOSAL_SURVEY_ANSWER_EDITS.md §G.
+    noteEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: undefined },
+    noteEditedAt: { type: Date, default: undefined },
+    // Landing marks: the archive-row id of every Door Outcomes answer edit whose write is what this
+    // survey holds now, pushed in the SAME atomic write that changes the answers and pulled by its
+    // undo. What makes "did this edit land?" a fact about the survey rather than a guess. A phone
+    // re-survey $unsets it (a new submission is no edit's output). Absent = never edited this way.
+    answerEditMarks: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+
     // DESK-ENTERED: this response was typed by an admin converting a door outcome into Surveyed
     // (services/canvass/surveyConversion.js), NOT submitted from a phone at the door. Every other
     // field above still describes the ORIGINAL KNOCK — userId, coordinatorId, location, submittedAt

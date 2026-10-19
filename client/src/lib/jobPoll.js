@@ -5,10 +5,11 @@
 // terminal status, then stop (false — react-query's "don't refetch").
 //
 // `terminal` is overridable because not every job-shaped thing shares BullMQ's two end states: a
-// survey-conversion run also settles at 'reverted', and rests at 'open' between door-by-door steps
-// (which is terminal for polling purposes — the next step is a user action, not a worker tick).
+// survey-conversion run also settles at 'reverted' or 'revert_failed' (an undo that stopped
+// part-way), and rests at 'open' between door-by-door steps (which is terminal for polling purposes
+// — the next step is a user action, not a worker tick).
 export const JOB_TERMINAL = ['completed', 'failed'];
-export const RUN_TERMINAL = ['completed', 'failed', 'reverted', 'open'];
+export const RUN_TERMINAL = ['completed', 'failed', 'reverted', 'revert_failed', 'open'];
 
 export const jobPollInterval = (status, intervalMs = 1200, terminal = JOB_TERMINAL) =>
   terminal.includes(status) ? false : intervalMs;

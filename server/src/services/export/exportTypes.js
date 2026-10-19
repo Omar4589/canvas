@@ -175,7 +175,7 @@ const buildFullBackup = async (ctx, sink) => {
       '  activity-log.csv        — every door event: who knocked, when, the outcome',
       '  doors-by-round.csv      — one row per door per round, with its round status',
       '  survey-results*.csv     — one row per survey taken, one column per question',
-      '  survey-answers.csv      — one row per recorded answer (the as-recorded snapshot)',
+      '  survey-answers.csv      — one row per answer as it stands now (an admin may have edited some; the file of record)',
       '  notes.csv               — every note on the campaign: door, survey and voter-profile',
       '  voter-notes.csv         — voter-profile notes only (the subset written on a profile)',
       '  knocks-by-round.csv     — the per-round totals, with a TOTAL row',

@@ -14,6 +14,20 @@ import Badge from './ui/Badge.jsx';
 
 const TIME_OPTS = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' };
 
+const fullName = (u, fallback) => (u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() || fallback : fallback);
+
+// Where a preserved response can go back from. The server refuses to restore answers into a visit
+// that no longer reads Surveyed (services/surveys/restoreGuard.js), so the hint names the undo
+// that would bring them back instead of pointing at a Restore that would refuse.
+const restoreHintFor = (r) =>
+  r.restorable === false
+    ? r.restoreBlockedReason === 'unknocked'
+      ? 'Undo the unknock on Door Outcomes to bring them back.'
+      : r.restoreBlockedReason === 'converted'
+        ? 'Undo that change on Door Outcomes to bring them back.'
+        : 'This visit no longer reads Surveyed, so they can’t be put back.'
+    : 'Restore from the voter profile.';
+
 // Tiny non-interactive locator map — just the household's dot, no controls.
 function DotMap({ lng, lat }) {
   const containerRef = useRef(null);
@@ -151,7 +165,7 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                     <div key={i} className="px-3 py-2">
                       <div className="text-xs text-fg-muted">{a.questionLabel || a.questionKey}</div>
                       <div className="text-sm text-fg">
-                        {Array.isArray(a.answer) ? a.answer.join(', ') : String(a.answer ?? '—')}
+                        {Array.isArray(a.answer) ? (a.answer.length ? a.answer.join(', ') : '—') : a.answer == null || a.answer === '' ? '—' : String(a.answer)}
                         {/* The capture flow embeds the Other free text INTO the answer
                             snapshot; only show otherText when it isn't already there. */}
                         {a.otherText &&
@@ -178,6 +192,7 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                 Edited by{' '}
                 {r.editedBy ? `${r.editedBy.firstName || ''} ${r.editedBy.lastName || ''}`.trim() || 'an admin' : 'an admin'}{' '}
                 on {formatInTz(r.editedAt, tz, TIME_OPTS, true)}
+                {r.editedEarlier ? ' — the earlier answers are kept on the voter record.' : ''}
               </div>
             )}
 
@@ -205,17 +220,30 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                  read as an accusation against a canvasser for something they did not do. */
               <div className="rounded border border-border bg-sunken p-2 text-xs text-fg-muted">
                 <span className="font-semibold">Removed</span> — these answers were set aside when{' '}
-                {r.overwrittenBy ? `${r.overwrittenBy.firstName || ''} ${r.overwrittenBy.lastName || ''}`.trim() : 'an admin'}{' '}
-                changed this door&apos;s outcome on {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}.
-                Preserved here; restore from the voter profile.
+                {fullName(r.overwrittenBy, 'an admin')} changed this door&apos;s outcome on{' '}
+                {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}. Preserved here. {restoreHintFor(r)}
+              </div>
+            ) : r.archived && r.overwrittenVia === 'answer_edit' ? (
+              /* This same survey before an admin changed some answers — the profile's Edit, or
+                 Door Outcomes → Edit answers. Not an overwrite by anybody. */
+              <div className="rounded border border-border bg-sunken p-2 text-xs text-fg-muted">
+                <span className="font-semibold">Earlier answers</span> — this survey as it read before{' '}
+                {fullName(r.overwrittenBy, 'an admin')} changed it on{' '}
+                {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}
+                {r.fromDoorOutcomes ? ' on Door Outcomes' : ''}. Kept on the voter record. {restoreHintFor(r)}
+              </div>
+            ) : r.archived && r.overwrittenVia === 'unknock' ? (
+              /* Removed by an ADMIN striking the visit itself (Unknock) — same reason as above. */
+              <div className="rounded border border-border bg-sunken p-2 text-xs text-fg-muted">
+                <span className="font-semibold">Removed</span> — these answers were set aside when{' '}
+                {fullName(r.overwrittenBy, 'an admin')} unknocked this visit on{' '}
+                {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}. Preserved here. {restoreHintFor(r)}
               </div>
             ) : r.archived ? (
               <div className="rounded border border-danger/30 bg-danger-tint p-2 text-xs text-danger-fg">
                 <span className="font-semibold">Overwritten</span> — these answers were replaced at
-                the door by{' '}
-                {r.overwrittenBy ? `${r.overwrittenBy.firstName || ''} ${r.overwrittenBy.lastName || ''}`.trim() : 'another canvasser'}{' '}
-                on {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)} and preserved here. Restore
-                from the voter profile.
+                the door by {fullName(r.overwrittenBy, 'another canvasser')} on{' '}
+                {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)} and preserved here. {restoreHintFor(r)}
               </div>
             ) : null}
 

@@ -6,7 +6,7 @@ import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import Section from '../components/Section.jsx';
 import { Badge } from '../components/ui/index.js';
-import { choicesFor, OTHER_OPTION_ID } from '../lib/surveyChoices.js';
+import PerPersonAnswerEditor, { seedEditor, touchedAnswers } from '../components/surveys/PerPersonAnswerEditor.jsx';
 import { ACTION_LABELS, actionLabel } from '../lib/statusColors.js';
 
 function fmtDate(d, tz, withTime = true) {
@@ -24,7 +24,9 @@ function fmtDate(d, tz, withTime = true) {
 }
 function answerText(a) {
   if (a == null || a === '') return '—';
-  return Array.isArray(a) ? a.join(', ') : String(a);
+  // An empty pick-several (a skipped or cleared question) prints the same dash as a blank.
+  if (Array.isArray(a)) return a.length ? a.join(', ') : '—';
+  return String(a);
 }
 
 const EDIT_FIELDS = [
@@ -310,65 +312,37 @@ function DncSection({ dnc, onFlag, onUnflag, busy, canEdit, tz }) {
 
 function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
   const [edit, setEdit] = useState(false);
-  const [vals, setVals] = useState({});
-  const [otherTexts, setOtherTexts] = useState({});
+  // The survey the editor was seeded from, its editors' version, and the editor state. Held
+  // separately from the prop so a refused save can re-seed from the latest answers in place.
+  const [base, setBase] = useState(null);
+  const [editor, setEditor] = useState(null);
   const [note, setNote] = useState('');
+  const [notice, setNotice] = useState(null);
 
-  function startEdit() {
-    // Seed editor state with option IDS (choice) / text (free-text). Prefer stored
-    // optionIds; fall back to mapping the snapshot text back to ids for legacy rows.
-    const map = {};
-    const others = {};
-    for (const q of survey.questions) {
-      const a = survey.answers.find((x) => x.questionKey === q.key);
-      if (q.type === 'text') {
-        map[q.key] = a?.answer ?? '';
-        continue;
-      }
-      let ids = Array.isArray(a?.optionIds) && a.optionIds.length ? a.optionIds : null;
-      if (!ids && a?.answer != null) {
-        const byText = new Map((q.options || []).map((o) => [o.text, o.id]));
-        const texts = Array.isArray(a.answer) ? a.answer : [a.answer];
-        ids = texts.map((t) => byText.get(t)).filter(Boolean);
-      }
-      ids = ids || [];
-      map[q.key] = q.type === 'multiple_choice' ? ids : ids[0] ?? '';
-      others[q.key] = a?.otherText ?? '';
-    }
-    setVals(map);
-    setOtherTexts(others);
-    setNote(survey.note || '');
+  // The same per-person editor as Door Outcomes' one-person-at-a-time walkthrough: it follows the
+  // survey's logic, keeps off-path and retired answers, and posts only what changed. The earlier
+  // answers are kept as a card below (owner ruling 4) — Save no longer destroys them.
+  const startEdit = (from = survey) => {
+    setBase(from);
+    setEditor(seedEditor(from.questions, from.answers));
+    setNote(from.note || '');
     setEdit(true);
-  }
-  function submit() {
-    const editable = survey.questions.filter((q) => !q.retired);
-    const answers = editable.map((q) => {
-      const v = vals[q.key];
-      if (q.type === 'text') {
-        return { questionKey: q.key, questionLabel: q.label, answer: v ?? null, optionIds: [] };
+  };
+  const submit = () => {
+    onSave(
+      { answers: touchedAnswers(base.questions, editor), note: note.trim() || null, version: base.version },
+      () => {
+        setEdit(false);
+        setNotice(null);
+      },
+      (e) => {
+        // Someone changed this survey while the editor was open: re-seed from the latest, here.
+        const fresh = e.data?.profile?.surveys?.find((x) => x.id === survey.id);
+        if (fresh) startEdit(fresh);
+        setNotice(e.message);
       }
-      const ids = q.type === 'multiple_choice' ? (Array.isArray(v) ? v : []) : v ? [v] : [];
-      const byId = new Map((q.options || []).map((o) => [o.id, o.text]));
-      // Snapshot the write-in exactly as the capture flow does — the sentinel has no option label,
-      // so its snapshot IS the typed text (falling back to 'Other' when nothing was typed).
-      const otherText = ids.includes(OTHER_OPTION_ID) ? (otherTexts[q.key] || '').trim() || null : null;
-      const texts = ids
-        .map((id) => (id === OTHER_OPTION_ID ? otherText || 'Other' : byId.get(id)))
-        .filter((t) => t != null);
-      const answer = q.type === 'multiple_choice' ? texts : texts[0] ?? null;
-      return { questionKey: q.key, questionLabel: q.label, answer, optionIds: ids, otherText };
-    });
-    // Carry through answers to retired/removed questions (not shown in the editor).
-    const editedKeys = new Set(editable.map((q) => q.key));
-    for (const a of survey.answers) if (!editedKeys.has(a.questionKey)) answers.push(a);
-    onSave({ answers, note: note || null }, () => setEdit(false));
-  }
-  function toggleMulti(key, opt) {
-    setVals((v) => {
-      const cur = Array.isArray(v[key]) ? v[key] : [];
-      return { ...v, [key]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt] };
-    });
-  }
+    );
+  };
 
   return (
     <div className="rounded-lg border border-border p-4">
@@ -378,7 +352,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
         </div>
         {!edit && canEdit && (
           <div className="flex gap-3 text-sm">
-            <button onClick={startEdit} className="font-medium text-brand-accent hover:underline">Edit</button>
+            <button onClick={() => startEdit()} className="font-medium text-brand-accent hover:underline">Edit</button>
             <button onClick={() => onDelete()} disabled={busy} className="font-medium text-danger hover:underline disabled:opacity-50">Delete</button>
           </div>
         )}
@@ -403,14 +377,22 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
             ))}
           </dl>
           {survey.note && <p className="mt-2 rounded bg-sunken p-2 text-sm text-fg-muted">📝 {survey.note}</p>}
-          {survey.editedAt && (
-            <p className="mt-2 text-xs text-amber-600">Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''}</p>
+          {survey.edited && (
+            <p className="mt-2 text-xs text-warning-fg">
+              Edited {fmtDate(survey.edited.at, tz)}{survey.edited.by ? ` by ${survey.edited.by.name}` : ''}
+              {survey.editedEarlier ? ' · the earlier answers are kept below.' : ''}
+            </p>
+          )}
+          {survey.noteEdited && (
+            <p className="mt-1 text-xs text-fg-subtle">
+              Note edited {fmtDate(survey.noteEdited.at, tz)}{survey.noteEdited.by ? ` by ${survey.noteEdited.by.name}` : ''}
+            </p>
           )}
           {/* Desk-entered: typed by an admin correcting the door's outcome, not collected at the
               door. It counts in every rate exactly like a field answer — this line is provenance,
               so nobody reads it as a doorstep conversation that never happened. */}
           {survey.deskEntry && (
-            <p className="mt-2 text-xs text-amber-600">
+            <p className="mt-2 text-xs text-warning-fg">
               Entered by {survey.deskEntry.by?.name || 'an admin'} on {fmtDate(survey.deskEntry.at, tz)}
               {survey.deskEntry.fromOutcome
                 ? ` — this door was recorded as ${(ACTION_LABELS[survey.deskEntry.fromOutcome] || survey.deskEntry.fromOutcome).toLowerCase()}`
@@ -427,59 +409,26 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
         </>
       ) : (
         <div className="space-y-3">
-          {survey.questions.filter((q) => !q.retired).map((q) => {
-            // The synthetic "Other (specify)" choice lives here too, or an Other answer can be
-            // neither shown nor kept. keepIds holds whatever this response actually selected, so
-            // a since-retired option stays visible instead of being silently de-selected on save.
-            const selected = Array.isArray(vals[q.key]) ? vals[q.key] : vals[q.key] ? [vals[q.key]] : [];
-            const choices = choicesFor(q, { keepIds: selected });
-            const otherPicked = selected.includes(OTHER_OPTION_ID);
-            return (
-            <div key={q.key}>
-              <div className="mb-1 text-xs font-medium text-fg-muted">{q.label}</div>
-              {q.type === 'single_choice' ? (
-                <select
-                  value={vals[q.key] ?? ''}
-                  onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
-                >
-                  <option value="">—</option>
-                  {choices.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-                </select>
-              ) : q.type === 'multiple_choice' ? (
-                <div className="flex flex-wrap gap-3">
-                  {choices.map((o) => (
-                    <label key={o.id} className="flex items-center gap-1 text-sm">
-                      <input type="checkbox" checked={Array.isArray(vals[q.key]) && vals[q.key].includes(o.id)} onChange={() => toggleMulti(q.key, o.id)} />
-                      {o.text}
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <input
-                  value={vals[q.key] ?? ''}
-                  onChange={(e) => setVals((v) => ({ ...v, [q.key]: e.target.value }))}
-                  className="w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
-                />
-              )}
-              {otherPicked && (
-                <input
-                  value={otherTexts[q.key] ?? ''}
-                  onChange={(e) => setOtherTexts((t) => ({ ...t, [q.key]: e.target.value }))}
-                  placeholder="Please specify"
-                  className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg"
-                />
-              )}
-            </div>
-            );
-          })}
+          {notice && (
+            <p className="rounded border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning-fg">{notice}</p>
+          )}
+          <PerPersonAnswerEditor
+            questions={base.questions}
+            answers={base.answers}
+            editor={editor}
+            onChange={setEditor}
+            idPrefix={`edit-${survey.id}`}
+          />
           <label className="block text-xs font-medium text-fg-muted">
             Note
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="mt-1 w-full rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg" />
           </label>
+          <p className="text-xs text-fg-subtle">
+            Saving keeps the earlier answers on this record, where you can restore them or erase them.
+          </p>
           <div className="flex gap-2">
             <button onClick={submit} disabled={busy} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60">Save</button>
-            <button onClick={() => setEdit(false)} className="rounded-md border border-border-strong px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={() => { setEdit(false); setNotice(null); }} className="rounded-md border border-border-strong px-3 py-1.5 text-sm">Cancel</button>
           </div>
         </div>
       )}
@@ -493,22 +442,49 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
 // A PRESERVED (overwritten) response — read-only, visually muted, restorable. The restore is a
 // lossless swap: these answers become current and the current ones land here the same way, so
 // flipping back and forth destroys nothing.
-function OverwrittenSurveyCard({ survey, onRestore, busy, canRestore, tz }) {
+// Why Restore isn't offered: the server's restore guard (services/surveys/restoreGuard.js) refuses
+// to put answers back into a visit that no longer reads Surveyed, and the card says so up front.
+const restoreBlockedText = (reason) =>
+  reason === 'unknocked'
+    ? 'This visit was unknocked, so there is no survey to put these answers into. Undo the unknock on Door Outcomes to bring them back.'
+    : reason === 'converted'
+      ? 'This door’s outcome was changed from Surveyed. Undo that change on Door Outcomes to bring these answers back.'
+      : 'This visit no longer reads Surveyed, so these answers can’t be put back.';
+
+function OverwrittenSurveyCard({ survey, onRestore, onErase, busy, canRestore, tz }) {
   // An 'outcome_convert' row was REMOVED by an admin converting this door away from Surveyed, not
   // overwritten by another canvasser. The default copy ("was X's · replaced by Y") would read as an
   // accusation against the canvasser for something an admin did, so this direction says so plainly.
+  // An 'unknock' row is the same: an admin struck the visit itself from the record. An 'answer_edit'
+  // row is this same survey before an admin changed some answers (the profile's Edit, or Door
+  // Outcomes → Edit answers) — "Earlier answers", never "Overwritten".
   const removedByConversion = survey.overwrittenVia === 'outcome_convert';
+  const removedByUnknock = survey.overwrittenVia === 'unknock';
+  const earlierAnswers = survey.overwrittenVia === 'answer_edit';
+  const blocked = survey.restorable === false;
+  const recorded = survey.deskEntry ? `entered by ${survey.deskEntry.by?.name || 'an admin'}` : survey.by ? `recorded by ${survey.by.name}` : null;
   return (
     <div className="rounded-lg border border-dashed border-border bg-sunken p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium text-fg-muted">
           {survey.templateName || 'Survey'}{' '}
           <span className="text-xs font-normal text-fg-subtle">
-            {removedByConversion ? (
+            {earlierAnswers ? (
+              <>
+                · Before {survey.overwrittenBy ? `${survey.overwrittenBy.name}'s` : 'an admin’s'} change on {fmtDate(survey.overwrittenAt, tz)}
+                {recorded ? ` · ${recorded}` : ''}
+              </>
+            ) : removedByConversion ? (
               <>
                 · Removed {fmtDate(survey.overwrittenAt, tz)} when this door&rsquo;s outcome was changed
                 {survey.by ? ` · recorded by ${survey.by.name}` : ''}
                 {survey.overwrittenBy ? ` · changed by ${survey.overwrittenBy.name}` : ''}
+              </>
+            ) : removedByUnknock ? (
+              <>
+                · Removed {fmtDate(survey.overwrittenAt, tz)} when this visit was unknocked
+                {survey.by ? ` · recorded by ${survey.by.name}` : ''}
+                {survey.overwrittenBy ? ` · unknocked by ${survey.overwrittenBy.name}` : ''}
               </>
             ) : (
               <>
@@ -520,20 +496,32 @@ function OverwrittenSurveyCard({ survey, onRestore, busy, canRestore, tz }) {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant={removedByConversion ? 'neutral' : 'danger'}>
-            {removedByConversion ? 'Removed' : 'Overwritten'}
+          <Badge variant={removedByConversion || removedByUnknock || earlierAnswers ? 'neutral' : 'danger'}>
+            {earlierAnswers ? 'Earlier answers' : removedByConversion || removedByUnknock ? 'Removed' : 'Overwritten'}
           </Badge>
-          {canRestore && (
+          {canRestore && !blocked && (
             <button
               onClick={onRestore}
               disabled={busy}
               className="text-xs font-semibold text-brand-accent hover:underline disabled:opacity-50"
             >
-              Restore this response…
+              {earlierAnswers ? 'Restore these answers…' : 'Restore this response…'}
+            </button>
+          )}
+          {canRestore && onErase && (
+            <button
+              onClick={onErase}
+              disabled={busy}
+              className="text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+            >
+              Erase…
             </button>
           )}
         </div>
       </div>
+      {canRestore && blocked && (
+        <p className="mb-2 text-xs text-fg-subtle">{restoreBlockedText(survey.restoreBlockedReason)}</p>
+      )}
       <dl className="space-y-1.5 text-sm">
         {survey.answers.map((a) => (
           <div key={a.questionKey} className="flex gap-2">
@@ -664,6 +652,12 @@ export default function VoterDetailPage() {
   });
   const editSurvey = useMutation({
     mutationFn: ({ responseId, body }) => api(`/admin/voters/${voterId}/surveys/${responseId}`, { method: 'PATCH', body }),
+    onSuccess: () => { setErr(''); invalidate(); },
+    // A survey changed under an open editor: the card re-seeds and says so itself.
+    onError: (e) => { if (e.code !== 'RESPONSE_CHANGED') onErr(e); invalidate(); },
+  });
+  const eraseSurvey = useMutation({
+    mutationFn: (archiveId) => api(`/admin/voters/${voterId}/surveys/archive/${archiveId}`, { method: 'DELETE' }),
     onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
   });
   const delSurvey = useMutation({
@@ -822,7 +816,12 @@ export default function VoterDetailPage() {
                 key={s.id}
                 survey={s}
                 busy={editSurvey.isPending || delSurvey.isPending}
-                onSave={(body, done) => editSurvey.mutate({ responseId: s.id, body }, { onSuccess: done })}
+                onSave={(body, done, conflict) =>
+                  editSurvey.mutate(
+                    { responseId: s.id, body },
+                    { onSuccess: done, onError: (e) => { if (e.code === 'RESPONSE_CHANGED') conflict(e); } }
+                  )
+                }
                 onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate(s.id); }}
                 canEdit={canManage}
                 tz={orgTz}
@@ -832,9 +831,21 @@ export default function VoterDetailPage() {
               <OverwrittenSurveyCard
                 key={s.id}
                 survey={s}
-                busy={restoreSurvey.isPending}
+                busy={restoreSurvey.isPending || eraseSurvey.isPending}
                 canRestore={canManage}
                 onRestore={() => {
+                  if (s.overwrittenVia === 'answer_edit') {
+                    const admin = s.overwrittenBy?.name || 'an admin';
+                    if (
+                      window.confirm(
+                        `Put back the answers and the note from before ${admin}'s change on ${fmtDate(s.overwrittenAt, orgTz)}? ` +
+                          'The current ones are kept the same way, so you can swap back.'
+                      )
+                    ) {
+                      restoreSurvey.mutate(s.id);
+                    }
+                    return;
+                  }
                   const loser = s.by?.name || 'the earlier canvasser';
                   const when = fmtDate(s.submittedAt, orgTz);
                   if (
@@ -845,6 +856,21 @@ export default function VoterDetailPage() {
                     )
                   ) {
                     restoreSurvey.mutate(s.id);
+                  }
+                }}
+                onErase={() => {
+                  // Erase is for good. When the card belongs to a Door Outcomes change still in
+                  // effect, say what erasing it means for that change's undo.
+                  const warn =
+                    s.overwrittenVia === 'unknock'
+                      ? ' If that unknock is undone later, this door comes back as Surveyed without these answers.'
+                      : s.overwrittenVia === 'outcome_convert'
+                        ? ' If that change is undone later, this door comes back as Surveyed without these answers.'
+                        : s.overwrittenVia === 'answer_edit' && s.fromDoorOutcomes
+                          ? ' Undo on that Door Outcomes change won’t put this survey back afterwards.'
+                          : '';
+                  if (window.confirm(`Erase these earlier answers for good? This can’t be undone.${warn}`)) {
+                    eraseSurvey.mutate(s.id);
                   }
                 }}
                 tz={orgTz}

@@ -175,7 +175,10 @@ already attaches the Bearer token + `X-Org-Id`, so mobile reuses it **as-is** �
     "actionType": "not_home|survey_submitted|… | null",
     "household": { "id", "address" } | null,   // door may be null (household-scoped voter unknown)
     "voter": { "id", "name" } | null,
-    "edited": { "by": {id,name}|null, "at": "<ISO>"|null } | null  // null for door
+    "edited": { "by": {id,name}|null, "at": "<ISO>"|null } | null  // null for door; a survey's is the
+                                    // NOTE's own stamp (noteEditedBy/At, 2026-10-19), falling back to
+                                    // editedBy/At on surveys no answer edit has touched — an answer
+                                    // edit never marks the note edited (SURVEYS.md §N)
   }],
   "total": 87,                                  // pageable = merged WANTED-source length (post-cap)
   "counts": { "door", "survey", "voter", "total" }, // countDocuments — IGNORE the type filter (chips stay accurate)

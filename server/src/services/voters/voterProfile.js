@@ -12,6 +12,8 @@ import { User } from '../../models/User.js';
 import { Person } from '../../models/Person.js';
 import { Organization } from '../../models/Organization.js';
 import { isAnswerable } from '../surveys/routing.js';
+import { restoreStates } from '../surveys/restoreGuard.js';
+import { editorVersion, fingerprint } from '../canvass/answerEdit.js';
 
 // Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here.
 const KNOCK_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
@@ -116,7 +118,7 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
   add(voter.doorAdded?.byUserId);
   for (const a of activity) add(a.userId);
   for (const n of voterNotesRaw) add(n.userId);
-  for (const s of surveys) { add(s.userId); add(s.editedBy); add(s.deskEntry?.byUserId); }
+  for (const s of surveys) { add(s.userId); add(s.editedBy); add(s.noteEditedBy); add(s.deskEntry?.byUserId); }
   for (const o of overwrites) { add(o.userId); add(o.editedBy); add(o.overwrittenBy); add(o.deskEntry?.byUserId); }
   for (const n of adminNotes) { add(n.authorId); add(n.editedBy); }
   const users = userIds.size
@@ -129,12 +131,33 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
   };
 
   // Latest preserved response per (voter, pass) — `overwrites` is sorted overwrittenAt desc,
-  // so first-seen wins.
+  // so first-seen wins. Only a response that was REPLACED counts: answers an admin took away on
+  // Door Outcomes (a conversion to Not home, or an unknock) were never replaced by the live one, so
+  // "Replaced X's earlier answers" would be false there.
+  //
+  // An 'answer_edit' copy is the same survey before an admin changed some answers — never another
+  // canvasser's replaced work — so it feeds `editedEarlier` ("Edited … the earlier answers are kept
+  // below") instead.
   const overwriteByKey = new Map();
+  const editedEarlierByKey = new Map();
   for (const o of overwrites) {
     const key = `${String(o.voterId)}|${o.passId ? String(o.passId) : ''}`;
+    if (o.overwrittenVia === 'answer_edit') {
+      if (!editedEarlierByKey.has(key)) editedEarlierByKey.set(key, o);
+      continue;
+    }
+    if (o.overwrittenVia === 'outcome_convert' || o.overwrittenVia === 'unknock') continue;
     if (!overwriteByKey.has(key)) overwriteByKey.set(key, o);
   }
+  // A preserved copy identical to the live survey (a restore swapped back and forth, a duplicate a
+  // crash left) says nothing the live card doesn't; it isn't listed.
+  const liveSig = new Map(surveys.map((sv) => [`${String(sv.voterId)}|${sv.passId ? String(sv.passId) : ''}`, `${fingerprint(sv)}|${sv.note ?? ''}`]));
+  const listedOverwrites = overwrites.filter(
+    (o) => liveSig.get(`${String(o.voterId)}|${o.passId ? String(o.passId) : ''}`) !== `${fingerprint(o)}|${o.note ?? ''}`
+  );
+  // Which preserved responses can be restored right now: only into a visit that still reads
+  // Surveyed (services/surveys/restoreGuard.js, the same rule the restore route enforces).
+  const restoreByArchiveId = await restoreStates(listedOverwrites);
 
   // Derived (read-only) voter notes: voter-tagged activity notes + survey notes.
   const fieldNotes = [
@@ -283,6 +306,13 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
       // The latest preserved response this one replaced, if any — keyed by (voter, pass), so
       // the profile UI can say "replaced X's earlier answers" and offer the restore.
       const ow = overwriteByKey.get(`${String(s.voterId)}|${s.passId ? String(s.passId) : ''}`);
+      const earlier = editedEarlierByKey.get(`${String(s.voterId)}|${s.passId ? String(s.passId) : ''}`);
+      // The note's own stamp when it has one (absent on surveys no answer edit has touched: their
+      // note stamp is still editedBy/editedAt, the old meaning).
+      const noteStamp =
+        s.noteEditedAt !== undefined || s.noteEditedBy !== undefined
+          ? { at: s.noteEditedAt || null, by: s.noteEditedBy || null }
+          : { at: s.editedAt || null, by: s.editedBy || null };
       return {
         id: String(s._id),
         campaignId: String(s.campaignId),
@@ -292,6 +322,15 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
         submittedAt: s.submittedAt,
         editedAt: s.editedAt || null,
         editedBy: who(s.editedBy),
+        // The same stamp as one object — the shape every survey payload carries beside deskEntry.
+        edited: s.editedAt ? { by: who(s.editedBy), at: s.editedAt } : null,
+        noteEdited: noteStamp.at ? { by: who(noteStamp.by), at: noteStamp.at } : null,
+        // The latest answer-edit copy of this survey: "the earlier answers are kept below".
+        editedEarlier: earlier
+          ? { overwriteId: String(earlier._id), by: who(earlier.overwrittenBy), at: earlier.overwrittenAt }
+          : null,
+        // The editors' version: Edit sends it back, and a survey that changed since refuses 409.
+        version: editorVersion(s),
         deskEntry: desk,
         by: who(s.userId),
         note: s.note || null,
@@ -330,11 +369,15 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
             options: q.options || [],
             required: !!q.required,
             otherOption: !!q.otherOption,
+            // A retired question is shown read-only (its answer kept), never edited.
+            retired: !!q.retired,
+            // The survey's own logic, so the editor shows what this person's path asks.
+            visibleIf: q.visibleIf || null,
           })),
       };
     }),
     // Preserved (overwritten) responses — read-only; restore/erase act on `id` (the archive id).
-    overwrittenSurveys: overwrites.map((o) => {
+    overwrittenSurveys: listedOverwrites.map((o) => {
       const tpl = tplMap.get(String(o.surveyTemplateId));
       return {
         id: String(o._id),
@@ -353,9 +396,16 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
         // an accusation against the canvasser for something an admin did.
         overwrittenVia: o.overwrittenVia,
         overwrittenBy: who(o.overwrittenBy),
+        // An answer-edit copy a Door Outcomes change made (rather than the profile's Edit): its
+        // Erase warns that the change's Undo can't put this survey back afterwards.
+        fromDoorOutcomes: !!o.answerEditRunId,
         deskEntry: o.deskEntry
           ? { by: who(o.deskEntry.byUserId), at: o.deskEntry.at }
           : null,
+        // false when its visit no longer reads Surveyed; the reason ('unknocked' | 'converted' |
+        // 'not_surveyed') is what the card says instead of offering Restore.
+        restorable: restoreByArchiveId.get(String(o._id))?.restorable ?? true,
+        restoreBlockedReason: restoreByArchiveId.get(String(o._id))?.reason ?? null,
         answers: (o.answers || []).map((a) => ({
           questionKey: a.questionKey,
           questionLabel: a.questionLabel,

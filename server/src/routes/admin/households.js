@@ -762,10 +762,11 @@ router.get('/:householdId/surveys', async (req, res, next) => {
 
     const surveys = await SurveyResponse.find(
       { householdId: hid, organizationId: orgId, ...(passId ? { passId } : {}) },
-      'submittedAt note answers voterId userId deskEntry'
+      'submittedAt note answers voterId userId deskEntry editedBy editedAt'
     )
       .populate('voterId', 'fullName')
       .populate('userId', 'firstName lastName')
+      .populate('editedBy', 'firstName lastName')
       .lean();
 
     res.json({
@@ -779,6 +780,10 @@ router.get('/:householdId/surveys', async (req, res, next) => {
         answers: s.answers || [],
         note: s.note || null,
         deskEntry: s.deskEntry ? { at: s.deskEntry.at, fromOutcome: s.deskEntry.fromOutcome || null } : null,
+        // Survey-level "Edited by ‹admin›" — the door panel's badge beside Desk entered.
+        edited: s.editedAt
+          ? { at: s.editedAt, by: s.editedBy ? { id: String(s.editedBy._id), firstName: s.editedBy.firstName, lastName: s.editedBy.lastName } : null }
+          : null,
       })),
     });
   } catch (err) {

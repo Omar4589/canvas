@@ -25,6 +25,7 @@ import {
   formatValue,
   isNotable,
   teamMoveSummary,
+  answerEditSentence,
   actorLabel,
 } from '../../../lib/campaignHistory';
 import InsetGroup, {
@@ -74,6 +75,20 @@ function historyRow(item, tz, colors) {
         ]
           .filter(Boolean)
           .join(' · ')}
+      />
+    );
+  }
+
+  // An answer edit reads as its own sentence, the web drawer's way.
+  if (item.field === 'answerEdit' || item.field === 'answerEditUndo') {
+    const { headline, detail } = answerEditSentence(item);
+    return (
+      <InsetRow
+        key={item.id}
+        label={headline}
+        labelLines={2}
+        badge={badge}
+        sub={[detail, `${who} · ${when}`].filter(Boolean).join(' · ')}
       />
     );
   }

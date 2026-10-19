@@ -749,7 +749,21 @@ export async function executeConversionRun({ run, campaign, onProgress }) {
   run.progress = { phase: 'recomputing', pct: 99, doorsDone: done, doorsTotal: total };
   await run.save();
 
-  await settle({ campaign, doorIds: ctx.touched.doorIds, voterIds: ctx.touched.voterIds });
+  // Settle EVERYTHING this run has stamped, not just this pass's doors. A resumed or redelivered
+  // job only converts what the dead attempt left (stamped rows are out of convertibleMatch), so
+  // `touched` misses the doors that attempt finished — and they were never settled, because the
+  // settle is here at the end. The stamps are the run's own record; the recompute is idempotent.
+  const [stampedDoors, runVoters] = await Promise.all([
+    CanvassActivity.distinct('householdId', { 'reclassified.runId': run._id }),
+    run.direction === 'to_survey'
+      ? SurveyResponse.distinct('voterId', { 'deskEntry.runId': run._id })
+      : SurveyResponseArchive.distinct('voterId', { conversionRunId: run._id }),
+  ]);
+  await settle({
+    campaign,
+    doorIds: [...ctx.touched.doorIds, ...stampedDoors],
+    voterIds: [...ctx.touched.voterIds, ...runVoters],
+  });
   await bumpPlatformOnce(run, campaign);
   await historyRow(run, campaign);
 
@@ -836,6 +850,31 @@ export async function closeConversionRun({ run, campaign }) {
 // Revert
 // ---------------------------------------------------------------------------
 
+// An undo of a run this size or smaller runs inline, inside its request (the page shows the result
+// at once); anything larger is a job, the same size of work as the run going forward.
+export const INLINE_REVERT_MAX_ENTRIES = 500;
+// An inline undo takes seconds. One still reading `reverting` this long after it started died with
+// its request (a dyno restart, the database dropping out mid-undo), and nothing else will notice:
+// there is no job to finish it and no worker listener to mark it. It read "Undoing" forever and
+// refused every retry as busy.
+const DEAD_INLINE_REVERT_MS = 10 * 60 * 1000;
+export const STOPPED_UNDO_ERROR = 'The undo stopped before it finished.';
+
+/** A `reverting` run whose inline undo died reads `revert_failed`. Takes a doc or a lean row. */
+export const expireDeadInlineRevert = async (run) => {
+  if (run.status !== 'reverting' || (run.counts?.entriesConverted || 0) > INLINE_REVERT_MAX_ENTRIES) return run;
+  if (!run.updatedAt || Date.now() - new Date(run.updatedAt).getTime() < DEAD_INLINE_REVERT_MS) return run;
+  const res = await SurveyConversionRun.updateOne(
+    { _id: run._id, status: 'reverting', updatedAt: run.updatedAt },
+    { $set: { status: 'revert_failed', error: STOPPED_UNDO_ERROR } }
+  );
+  if (res.modifiedCount === 1) {
+    run.status = 'revert_failed';
+    run.error = STOPPED_UNDO_ERROR;
+  }
+  return run;
+};
+
 /**
  * Undo a run — stamp-driven, so it is exact even for a job that only half finished.
  *
@@ -843,9 +882,19 @@ export async function closeConversionRun({ run, campaign }) {
  * that happened to sit at the same door. Reverse runs put their archived responses back — unless
  * the {voterId, passId} slot was refilled by a later field submit, in which case the field wins and
  * the archive row stays put, counted in responsesNotRestored.
+ *
+ * RE-ENTRANT, so an undo that stops part-way is finished by undoing again (`revert_failed` → Retry
+ * undo), never by resuming — resume runs the conversion FORWARD and re-applied it. The stamps are
+ * the undo's only record of what to put back, so the write that consumes them goes LAST: answers
+ * first, then the entries flip back (still stamped), then the doors and voters settle, and only then
+ * do the stamps come off. An attempt that dies anywhere leaves its doors stamped, so the retry finds
+ * and settles every one. Lifting the stamps WITH the flip, as this once did, left a retry nothing to
+ * settle: those doors and voters kept reading the conversion. Stamped-but-flipped rows are out of
+ * every correction's scope (convertibleMatch) until the retry finishes, which is the safe direction.
  */
 export async function revertConversionRun({ run, campaign }) {
   run.status = 'reverting';
+  run.error = null;
   run.progress = { phase: 'reverting', pct: 0, doorsDone: 0, doorsTotal: run.counts.doorsTargeted };
   await run.save();
 
@@ -868,8 +917,10 @@ export async function revertConversionRun({ run, campaign }) {
     // built by a deploy step (autoIndex is off there) — so a data-destroying decision must not
     // depend on it existing. The E11000 catch below stays as belt-and-braces for the race.
     const wanted = archived.map((d) => ({ voterId: d.voterId, passId: d.passId ?? null }));
-    const taken = wanted.length ? await SurveyResponse.find({ $or: wanted }, 'voterId passId').lean() : [];
-    const takenKeys = new Set(taken.map((r) => `${r.voterId}|${r.passId ?? 'null'}`));
+    const taken = wanted.length
+      ? await SurveyResponse.find({ $or: wanted }, 'voterId passId userId submittedAt').lean()
+      : [];
+    const takenByKey = new Map(taken.map((r) => [`${r.voterId}|${r.passId ?? 'null'}`, r]));
 
     const cannotRestore = (doc) => {
       notRestored += 1;
@@ -879,15 +930,33 @@ export async function revertConversionRun({ run, campaign }) {
     };
 
     for (const doc of archived) {
+      const holder = takenByKey.get(`${doc.voterId}|${doc.passId ?? 'null'}`);
+      // The SAME submission (same canvasser, same moment) already holds the slot: an earlier
+      // attempt of this undo put it back and died before clearing the archive copy. It is restored,
+      // not blocked — counting it "not restored" would blame a field answer that doesn't exist.
+      if (
+        holder &&
+        String(holder.userId) === String(doc.userId) &&
+        holder.submittedAt &&
+        doc.submittedAt &&
+        new Date(holder.submittedAt).getTime() === new Date(doc.submittedAt).getTime()
+      ) {
+        promoted.push(doc._id);
+        voterIds.push(doc.voterId);
+        continue;
+      }
       // A canvasser answered this voter again in the field after the conversion. Their answer is
       // newer and real — never clobber it. The archive row stays put, and is listed.
-      if (takenKeys.has(`${doc.voterId}|${doc.passId ?? 'null'}`)) {
+      if (holder) {
         cannotRestore(doc);
         continue;
       }
       const snapshot = snapshotFromArchive(doc);
       try {
-        await SurveyResponse.create(snapshot);
+        // Not re-validated: this puts back a row that was already on file in exactly this shape
+        // (the archive keeps verbatim copies — archiveOverwrite.js), and an old row today's schema
+        // would refuse must not make the undo fail on every retry.
+        await SurveyResponse.create([snapshot], { validateBeforeSave: false });
         promoted.push(doc._id);
         voterIds.push(doc.voterId);
       } catch (e) {
@@ -899,12 +968,19 @@ export async function revertConversionRun({ run, campaign }) {
     run.counts.responsesNotRestored = notRestored;
   }
 
+  // Flip the entries back, KEEPING the stamp — it comes off only after the settle (see above).
   await CanvassActivity.updateMany(stamp, [
     { $set: { actionType: '$reclassified.from', voterId: '$reclassified.voterIdWas' } },
-    { $unset: 'reclassified' },
   ]);
 
-  await settle({ campaign, doorIds, voterIds });
+  // Every voter at these doors, not only the ones this attempt touched: a retry cannot see the
+  // answers an earlier attempt already deleted or put back, and the recompute is idempotent.
+  const votersAtDoors = doorIds.length
+    ? await Voter.distinct('_id', { campaignId: campaign._id, householdId: { $in: doorIds } })
+    : [];
+  await settle({ campaign, doorIds, voterIds: [...voterIds, ...votersAtDoors] });
+
+  await CanvassActivity.updateMany(stamp, { $unset: { reclassified: '' } });
   await historyRow(run, campaign, { swap: true });
 
   run.status = 'reverted';

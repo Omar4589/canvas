@@ -2225,7 +2225,11 @@ export default function AdminMap() {
               <Text style={styles.detailLabel}>Surveys ({selected.surveys?.length || 0})</Text>
               {selected.surveys?.length ? (
                 selected.surveys.map((s) => {
-                  const answers = hhSurveyDetailById.get(s.id)?.answers || [];
+                  const detail = hhSurveyDetailById.get(s.id);
+                  const answers = detail?.answers || [];
+                  // An admin changed these answers after they were recorded — survey-level, the
+                  // web door panel's line (never on per-answer lists).
+                  const edited = detail?.edited;
                   return (
                     <View key={s.id} style={styles.surveyCard}>
                       <View style={styles.surveyCardHead}>
@@ -2237,6 +2241,13 @@ export default function AdminMap() {
                       {s.canvasser ? (
                         <Text style={styles.surveyBy}>
                           by {s.canvasser.firstName} {s.canvasser.lastName}
+                        </Text>
+                      ) : null}
+                      {edited ? (
+                        <Text style={styles.surveyBy}>
+                          Edited by{' '}
+                          {edited.by ? `${edited.by.firstName || ''} ${edited.by.lastName || ''}`.trim() || 'an admin' : 'an admin'} ·{' '}
+                          {formatExact(edited.at, tz)}
                         </Text>
                       ) : null}
                       {hhSurveysQ.isLoading ? (
@@ -2535,6 +2546,16 @@ export default function AdminMap() {
                   {surveyResponse.surveyTemplateVersion ? (
                     <Text style={styles.surveyVersion}>
                       v{surveyResponse.surveyTemplateVersion}
+                    </Text>
+                  ) : null}
+                  {/* An admin changed these answers after they were recorded — the door sheet's line. */}
+                  {surveyResponse.edited ? (
+                    <Text style={styles.surveyBy}>
+                      Edited by{' '}
+                      {surveyResponse.edited.by
+                        ? `${surveyResponse.edited.by.firstName || ''} ${surveyResponse.edited.by.lastName || ''}`.trim() || 'an admin'
+                        : 'an admin'}{' '}
+                      · {formatExact(surveyResponse.edited.at, tz)}
                     </Text>
                   ) : null}
                 </View>

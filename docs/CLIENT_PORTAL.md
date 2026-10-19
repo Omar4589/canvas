@@ -123,6 +123,17 @@ In the builder you:
 - **Recompute** at any time while it's a draft. The header shows an **Unsaved changes / All changes
   saved** indicator, and **Preview** (instant — it's prefetched) shows exactly what the recipient will
   see, including a **Download PDF** button.
+- Read the **internal notes** above the preview. They are never shown to the client — not on the
+  share page, not in the PDF. One says how many of the survey responses behind the figures an admin
+  **entered on Door Outcomes** instead of a canvasser collecting them at a door. The other (since
+  October 2026) says how many an admin **edited after they were recorded**, on a voter's profile or
+  with Door Outcomes → **Edit answers…**: *K of these N responses were edited by an admin after they
+  were recorded (M of them in this report's own week). The figures use the answers as they stand
+  now.* Both kinds count like any other answer; the notes are there so you know before you send it.
+  A draft's figures and notes are as of its last compute, so press **Recompute** after an answer
+  edit; a published report keeps its frozen numbers until you unpublish it and publish again.
+  (Until 2026-10-19 neither note ever appeared — the saved report dropped the counts they read; see
+  Part 2. A draft computed before the fix shows them after its next **Recompute**.)
 - **Publish** — a confirm dialog spells out the freeze (numbers + map snapshot locked, link goes live);
   confirming freezes the report. If **unreviewed mock-location flags** fall inside the report's window,
   the builder shows a red warning with a link to review them in the Audit page, and the confirm dialog
@@ -310,6 +321,31 @@ Survey/support breakdowns use the **per-question** denominator (each option's pe
 question's own answer total), and `ReportBreakdown` rounds them to total exactly 100% — see
 [SURVEYS.md](SURVEYS.md).
 
+**Provenance rides the internal response only.** Each window also freezes `provenance: {
+deskEnteredResponses, editedResponses, totalResponses }` — `countDocuments` over the window's own
+survey scope with `deskEntry: { $exists: true }`, with `editedAt: { $ne: null }` (added 2026-10-19:
+an admin changed the answers after they were recorded — the profile's Edit or Door Outcomes → Edit
+answers…, [SURVEYS.md](SURVEYS.md) §N), and with neither. `GET /:id/preview` ships it as
+`provenance.cumulative` / `provenance.period` beside the shaped report, and it **cannot** reach the
+published page: `shapeReportForClient` → `shapeWindow` are strict field whitelists. The asymmetry is
+deliberate — a desk-entered or edited answer is the answer of record and counts identically, so
+annotating the client's figures would misrepresent them the other way, while the operator signing
+off should not learn afterwards how some of them came to be. `editedAt` is set by any profile edit
+made before 2026-10-19 too (a save then stamped it even for a note-only change), so the count can
+include those.
+
+> **Fixed 2026-10-19 (it had never worked).** `windowStatsSchema` in
+> [ClientReport.js](../server/src/models/ClientReport.js) declared `totals`, `contactBreakdown`,
+> `coverage`, `surveyBreakdowns` and `tagBreakdowns` but not `provenance`, so Mongoose's strict mode
+> dropped it the moment `computeBothWindows` assigned `report.stats`: the stored report never had it,
+> `GET /:id/preview` shipped `provenance: { cumulative: null, period: null }`, and **neither builder
+> note rendered** — the desk-entered one since it shipped, nor the edited one. `computeWindowStats`
+> itself returned the counts (`surveyConversion.int.test.js` calls it directly, which is why no test
+> caught it). `provenance` is now declared (`Mixed`, default `null`), and
+> [answerEdit.int.test.js](../server/test/answerEdit.int.test.js) pins the whole path — create,
+> save, preview, recompute — and that the client-shaped report never carries the counts. No
+> migration: a draft gains them on its next recompute; a published report keeps what it froze.
+
 ## Publish = freeze
 
 `POST /admin/client-reports/:id/publish` ([routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js)):
@@ -415,7 +451,11 @@ active `ReportShareLink` (404 otherwise):
   *current* campaign — the page stays mounted across campaign switches, so a stale selection could
   otherwise leak into the POST — and scoped rows get an `effortName` badge) and
   [ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx) (edit + preview +
-  publish; a scoped report's header line and "What the client sees" recap name the walk list).
+  publish; a scoped report's header line and "What the client sees" recap name the walk list). Its
+  Preview tab renders the two **internal notes** from `provenance` above `ClientReportView`, each only
+  when its cumulative count is above 0: desk-entered responses, and (2026-10-19) edited responses,
+  each with the week's own count in brackets when that is above 0 too (both rendered only since the
+  2026-10-19 fix under *The numbers*).
   The public list/detail pages append *· Walk list: name* under the week range on scoped reports.
 - Public hub (no login): [PublicReportLayout](../client/src/components/PublicReportLayout.jsx) (brand +
   password gate; provides `{token, accessToken}` via Outlet context),
@@ -486,4 +526,5 @@ fields need **no migration** (`$inc` treats a missing field as 0; schema default
 neither do `effortId`/`effortName` (both default `null` = whole campaign, which is what every existing
 report already is; no new index). Nor does the `not_target` row (2026-10-02): a frozen report without
 the key renders exactly as before, and a draft gains the key on its next recompute (its row hidden
-while the count is 0).
+while the count is 0). `provenance.editedResponses` (2026-10-19) needs no migration either — with the
+2026-10-19 schema fix under *The numbers*, a draft gains both provenance counts on its next recompute.

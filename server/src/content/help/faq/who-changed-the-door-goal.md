@@ -6,7 +6,7 @@ kind: faq
 order: 32
 sourceDoc: CAMPAIGNS.md
 summary: Open the campaign's History — it records every settings change with who made it and when, and folds in team reassignments too.
-tags: history, audit, who changed, door goal, changed, log, tracking, accountability, door outcomes, not a target voter, add person
+tags: history, audit, who changed, door goal, changed, log, tracking, accountability, door outcomes, not a target voter, add person, edit answers, unknock
 ---
 
 Open the campaign's **⋮ menu → History**. If it's the door goal you're wondering about, there's also a **History** link on the door-goal line at the top of the campaign's Home page.
@@ -32,6 +32,7 @@ You'll see a list, newest first:
 - **Off-by-default outcomes** — an org admin switching on or off a door button that starts off on every campaign (today only **Not a target voter**)
 - **Adding people at the door** — whether everyone on the campaign, or only team leads and admins, gets the **＋ Add person** button
 - **Team reassignments**, including how many doors moved with the person
+- **Door Outcomes changes** — entries relabelled, surveys recorded or removed, entries unknocked, and survey answers edited, each with its undo. On the web an answer edit reads as one sentence — *Survey answers edited: Could you help us by taking a yard sign?: took out Candidate Follow-Up, Volunteer Request (214 surveys)* — and its undo as *Survey answer edit undone: 214 surveys put back*, followed by the change it undid.
 
 The **timezone** and the **attached survey** aren't recorded. A timezone change already makes itself obvious — every daily number on the campaign shifts, and you're warned before you confirm — and the survey in use is on the campaign's Survey tab.
 

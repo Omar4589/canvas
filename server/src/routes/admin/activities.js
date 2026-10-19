@@ -45,7 +45,8 @@ router.get('/:activityId', async (req, res, next) => {
         passId: activity.passId ?? null,
         organizationId: orgId,
       })
-        .select('answers note submittedAt surveyTemplateVersion deskEntry')
+        .select('answers note submittedAt surveyTemplateVersion deskEntry editedBy editedAt')
+        .populate('editedBy', 'firstName lastName')
         .lean();
     }
 
@@ -95,6 +96,16 @@ router.get('/:activityId', async (req, res, next) => {
             // Absent on every field submission, so nothing that already exists changes shape.
             deskEntry: surveyResponse.deskEntry
               ? { at: surveyResponse.deskEntry.at, fromOutcome: surveyResponse.deskEntry.fromOutcome || null }
+              : null,
+            // An admin changed these answers after they were recorded (the profile's Edit, or Door
+            // Outcomes → Edit answers). Survey-level only, by design: never on per-answer lists.
+            edited: surveyResponse.editedAt
+              ? {
+                  at: surveyResponse.editedAt,
+                  by: surveyResponse.editedBy
+                    ? { id: String(surveyResponse.editedBy._id), firstName: surveyResponse.editedBy.firstName, lastName: surveyResponse.editedBy.lastName }
+                    : null,
+                }
               : null,
           }
         : null,

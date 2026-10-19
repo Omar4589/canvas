@@ -130,18 +130,31 @@ export function markdownToBlocks(md) {
       continue;
     }
 
-    // List (unordered or ordered) — flat only
+    // List (unordered or ordered) — flat only. A wrapped item — an INDENTED line under it that
+    // starts no block of its own — continues that item, as in Markdown; without this the second
+    // line of a long bullet rendered as a stray paragraph after the list. An unindented line
+    // still ends the list (no lazy continuation), so a paragraph written straight after a list
+    // keeps reading as one.
     const isUL = UL.test(line);
     const isOL = OL.test(line);
     if (isUL || isOL) {
       const ordered = isOL;
       const re = ordered ? OL : UL;
-      const items = [];
-      while (i < lines.length && (ordered ? OL : UL).test(lines[i]) && !(ordered ? UL : OL).test(lines[i])) {
-        items.push(parseInline(lines[i].replace(re, '').trim()));
+      const texts = [];
+      while (i < lines.length) {
+        const l = lines[i];
+        if ((ordered ? OL : UL).test(l) && !(ordered ? UL : OL).test(l)) {
+          texts.push(l.replace(re, '').trim());
+          i += 1;
+          continue;
+        }
+        const continues =
+          /^\s+\S/.test(l) && !UL.test(l) && !OL.test(l) && !l.trimStart().startsWith('>') && !l.trim().startsWith('```');
+        if (!continues) break;
+        texts[texts.length - 1] += ` ${l.trim()}`;
         i += 1;
       }
-      blocks.push({ type: 'list', ordered, items });
+      blocks.push({ type: 'list', ordered, items: texts.map(parseInline) });
       continue;
     }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { jobPollInterval, jobPct } from './jobPoll.js';
+import { jobPollInterval, jobPct, RUN_TERMINAL } from './jobPoll.js';
 
 test('jobPollInterval keeps polling until a terminal status, then stops', () => {
   assert.strictEqual(jobPollInterval(undefined), 1200); // no data yet — keep polling
@@ -10,6 +10,15 @@ test('jobPollInterval keeps polling until a terminal status, then stops', () => 
   assert.strictEqual(jobPollInterval('completed'), false);
   assert.strictEqual(jobPollInterval('failed'), false);
   assert.strictEqual(jobPollInterval('active', 500), 500); // interval override
+});
+
+test('a conversion run stops polling once it rests, including an undo that stopped part-way', () => {
+  for (const s of ['completed', 'failed', 'reverted', 'revert_failed', 'open']) {
+    assert.strictEqual(jobPollInterval(s, 1200, RUN_TERMINAL), false, s);
+  }
+  for (const s of ['pending', 'running', 'reverting']) {
+    assert.strictEqual(jobPollInterval(s, 1200, RUN_TERMINAL), 1200, s);
+  }
 });
 
 test('jobPct normalizes both BullMQ progress shapes', () => {

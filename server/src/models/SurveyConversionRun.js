@@ -58,9 +58,14 @@ const surveyConversionRunSchema = new mongoose.Schema(
     // names what the admin SAW, not what the options are called now. Null = no filter.
     scopeSummary: { type: String, default: null },
 
+    // `failed` is a conversion that stopped part-way: Pick up (resume) finishes it, or Undo takes
+    // back what landed. `revert_failed` is an UNDO that stopped part-way, and its only remedy is to
+    // undo again (revertConversionRun is re-entrant). Never resume one: resume runs the conversion
+    // FORWARD, and when a failed undo read plain `failed`, Pick up re-applied the conversion it was
+    // taking back.
     status: {
       type: String,
-      enum: ['open', 'pending', 'running', 'completed', 'failed', 'reverting', 'reverted'],
+      enum: ['open', 'pending', 'running', 'completed', 'failed', 'reverting', 'revert_failed', 'reverted'],
       default: 'pending',
       index: true,
     },

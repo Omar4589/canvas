@@ -61,6 +61,11 @@ const unknockRunSchema = new mongoose.Schema(
     },
 
     revertedAt: { type: Date, default: null },
+    // Set while a revert runs (it runs inline, and this model has no running state), cleared when
+    // it ends. An answer edit reads it to stay out of the way (one change at a time per campaign,
+    // services/canvass/answerEditRuns.js); a revert that died with its request stops counting
+    // after ten minutes.
+    revertingAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

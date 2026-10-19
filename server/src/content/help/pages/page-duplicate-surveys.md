@@ -17,7 +17,7 @@ Each entry shows the voter, their address, how many times they were surveyed, an
 
 Three badges tell you which kind you're looking at, worst first:
 
-- **Same round · overwritten** — two canvassers surveyed the same voter **in the same round**, and the second submit **replaced** the first's answers. Nothing is lost: the earlier response is preserved, listed right here in the entry, and an admin can restore it. A collision like this usually means two books ran into each other (the [Overlaps page](page-overlaps) is where you'd chase that).
+- **Same round · overwritten** — two canvassers surveyed the same voter **in the same round**, and the second submit **replaced** the first's answers. Nothing is lost: the earlier response is preserved, listed right here in the entry, and an admin can restore it. A collision like this usually means two books ran into each other (the [Overlaps page](page-overlaps) is where you'd chase that). Answers an admin **removed** on the Door Outcomes page — an unknocked visit, or surveys changed to Not home — never show here: that's a cleanup, not a voter surveyed twice. Neither does a survey whose answers an admin **edited** (with Edit on the voter's profile, or Edit answers on the Door Outcomes page): its earlier answers are kept on the voter's profile, but it's still one person surveyed once.
 - **Same canvasser · same day** — the same person surveyed the same voter twice within one campaign day. That's almost always a double-submit or a mis-tap.
 - **Different canvassers · later round** — two people surveyed the same voter in different rounds. That's a normal revisit, listed so the history is complete.
 
@@ -49,6 +49,6 @@ Admin → **More → Duplicate surveys** gives you the same report: the same thr
 
 An admin can delete an extra response straight from the expanded card: tap **Delete** on the response you want gone, and confirm. The confirmation names the canvasser, the round, and the time, so you can be sure which one you're removing.
 
-Replaced responses look different: instead of Delete they read **Preserved**. Tap one to open its full detail — that's where an admin finds **Restore**, which makes those earlier answers current again (the answers they displace are preserved in their place, so nothing is lost either way).
+Replaced responses look different: instead of Delete they read **Preserved**. Tap one to open its full detail — that's where an admin finds **Restore**, which makes those earlier answers current again (the answers they displace are preserved in their place, so nothing is lost either way). Restore works only while the visit those answers came from still reads **Surveyed**; if that canvasser later recorded the door as something else, or the visit was unknocked, Restore says why it can't and changes nothing.
 
 On an **archived** campaign the report still opens and every filter still works, but **Delete** and **Restore** are gone — an archived campaign is read-only, and the server refuses the change even if a button were there. An org admin can reactivate it from Campaigns on the web if a response genuinely needs removing or restoring.

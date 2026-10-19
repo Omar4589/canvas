@@ -25,7 +25,7 @@ That's it — and it's **retroactive**: the moment an option carries the tag, ev
 
 Open the campaign Home's survey results (or the Survey Explorer). The **Tags** panel shows, per tag:
 
-- **Voters** (identified) — everyone who **ever** gave a tagged answer, each person once. This number never goes down.
+- **Voters** (identified) — everyone who **ever** gave a tagged answer, each person once. More canvassing never lowers it; it drops only when an admin corrects the record — edits a tagged answer away, or removes the survey.
 - **Current** — how many people's **most recent answer** still carries the tag. Maria says Support in round 1 and Opposed in round 2? She stays identified, but drops out of current. **This is the number for "how many supporters do we have now."** (A later visit that skipped the question doesn't change anything — the last answer they actually gave still stands.)
 
 ## Split it by team

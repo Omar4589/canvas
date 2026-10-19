@@ -561,6 +561,20 @@ export default function ClientReportBuilderPage() {
                   send it.
                 </div>
               )}
+              {/* Same posture for answers an admin edited after they were recorded (the profile's
+                  Edit, or Door Outcomes → Edit answers): the operator should know; the client is
+                  shown the answers as they now stand. */}
+              {previewQ.data.provenance?.cumulative?.editedResponses > 0 && (
+                <div className="rounded-card border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning-fg">
+                  <span className="font-medium">Internal note — not shown to the client.</span>{' '}
+                  {previewQ.data.provenance.cumulative.editedResponses.toLocaleString()} of these{' '}
+                  {previewQ.data.provenance.cumulative.totalResponses.toLocaleString()} responses were
+                  edited by an admin after they were recorded
+                  {previewQ.data.provenance.period?.editedResponses > 0 &&
+                    ` (${previewQ.data.provenance.period.editedResponses.toLocaleString()} of them in this report's own week)`}
+                  . The figures use the answers as they stand now.
+                </div>
+              )}
               <ClientReportView report={previewQ.data.report} />
               {previewQ.data.report.visibility?.showMap && (
                 <section>

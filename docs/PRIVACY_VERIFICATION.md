@@ -570,7 +570,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   admin restore swap), the displaced response is now snapshotted whole into a new
   **`SurveyResponseArchive`** collection before the write, instead of being destroyed
   (`services/surveys/archiveOverwrite.js`; docs [SURVEYS.md](SURVEYS.md) §F). A same-canvasser
-  re-submit still replaces silently — the designed self-heal, nothing archived. This is a new
+  re-submit still replaces silently — the designed self-heal, nothing archived *(2026-10-19: except
+  over answers an admin desk-entered, which are now archived too — item 31)*. This is a new
   place personal data lives, so it is recorded here as a POSITIVE entry.
   **What it holds.** A full former `SurveyResponse`, verbatim: the Art. 9 answer content including
   free text and the note, the canvasser's `userId`, the GPS stamp (including `mocked` /
@@ -2559,6 +2560,108 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     never a message), is deferred to the app-store build after Election Day; its half of this entry, and
     the owner's check of Play's Data safety answers, come with it. Optional at the next policy revision:
     "…and, on phones whose owners allow it, send us crash reports."
+31. **[v6 2026-10-19 — Correction safety: two RETENTION changes (desk-entered answers are kept when a
+    canvasser re-surveys; an archive copy is never silently dropped) and Restore NARROWED. No new
+    recipient, no new export.]** Six fixes found while planning survey answer edits
+    ([PROPOSAL_SURVEY_ANSWER_EDITS.md](PROPOSAL_SURVEY_ANSWER_EDITS.md) §P: F1, F2, F4, F5, F7, F9),
+    shipped ahead of that feature; pinned by
+    [correctionSafety.int.test.js](../server/test/correctionSafety.int.test.js).
+    **(F2) More is kept.** When a canvasser re-surveys a voter whose current answers an admin entered at
+    the desk (Door Outcomes, item 12's admin-entered category), the desk answers are now archived in
+    `SurveyResponseArchive` (`via: 'submit'`), exactly like a teammate's, instead of being overwritten
+    with no copy. Before this, the desk stamp also stayed on the canvasser's field answers — the profile
+    labelled them "Entered by ‹admin›" — and undoing that desk entry deleted them outright. Same data
+    category, same org-admin audience, restorable and individually erasable like every `submit` row, and
+    self-consuming on restore. `SurveyResponse.syncedAt` now follows every receipt (when the server
+    received the submission — a timestamp of a kind already held).
+    **(F9) Nothing silently lost.** The archive helpers (`services/surveys/archiveOverwrite.js`) now write
+    raw verbatim copies. Through Mongoose, `insertMany(…, { ordered: false })` skipped a copy the current
+    schema refused, without throwing, and the caller (unknock; Surveyed → Not home) then deleted the
+    original — survey answers destroyed with no record and no error. Such a row is now kept, and every
+    way back (profile restore, the unknock undo, the conversion undo) puts it back unvalidated. Same data,
+    kept where the record already said it was kept.
+    **(F5, F1) Access narrowed, not widened.** Restore now refuses answers whose visit no longer reads
+    Surveyed (`services/surveys/restoreGuard.js`): an unknocked or converted visit's answers can no
+    longer be put back as a counted survey, or swapped over a real later survey, from the profile. And
+    answers an admin removed (`outcome_convert`, `unknock`) no longer appear on Duplicate Surveys — a
+    lead-readable report — or as "Replaced X's earlier answers": fewer rows in front of leads, not more.
+    **(F4, F7)** An offline replay with the same timestamp as a delivered submission no longer re-applies
+    its answers over an admin's edit; a stopped undo of a conversion has its own status. No data change.
+    **§B6 correction (stale since item 14):** "only `overwrittenVia: 'outcome_convert'` accumulates" —
+    `unknock` rows accumulate the same way (until that unknock is undone or the campaign is deleted). F2's
+    copies are `submit` rows and stay self-consuming.
+    **Assessment: privacy-affecting (retention) under CLAUDE.md, and no published sentence becomes
+    false.** privacy.html `:90` (canvassing activity reviewed by authorized administrators), `:118`
+    (retained while the account is active) and `:122` (deletion covers canvassing records) already cover
+    a kept copy of an answer we held; no sentence promises that an overwritten or desk-entered answer is
+    discarded. Both cascades already reach `SurveyResponseArchive` (§B5). No new subprocessor, no new
+    external flow, no new export (the archive is structurally never exported), DPA §6 untouched, no
+    customer notice. The planned survey answer edits feature takes **item 32** (reserved as 31 in its
+    proposal before these fixes were cut out to ship first; the owner's 2026-10-19 sign-off is on that
+    item's content).
+32. **[v6 2026-10-19 — Edit survey answers: RETENTION grows (every admin edit now keeps the earlier
+    answers), a BATCH REWRITE of field-collected answers, and Erase on screen. No new recipient, no new
+    export destination, no subprocessor.]** Built per
+    [PROPOSAL_SURVEY_ANSWER_EDITS.md](PROPOSAL_SURVEY_ANSWER_EDITS.md) §Q; pinned by
+    [answerEdit.int.test.js](../server/test/answerEdit.int.test.js). An org admin can now change, take
+    out or clear individual answers on surveys that STAY surveyed: one voter at a time on the profile,
+    or many at once from Door Outcomes → **Edit answers…** (`/admin/campaigns/:id/answer-edits`, org
+    admins only, up to 50,000 surveys a run, undoable as one change).
+    **Retention — the material change.** Until now the profile's Edit
+    (`PATCH /admin/voters/:voterId/surveys/:responseId`) destroyed the earlier answers. Now every admin
+    edit, profile or Door Outcomes, first keeps the earlier version in `SurveyResponseArchive`
+    (`overwrittenVia: 'answer_edit'`), kept until it is restored, erased, its edit is undone, or the
+    campaign or organization is deleted. No timer. Each kept version is a FULL copy of the survey, so it
+    also copies the GPS reading, the note and the canvasser's id. Three edges to state rather than
+    discover:
+    (a) the copy outlives the canvasser's own later deletion of that survey — re-recording the door with
+    a different result deletes their surveys with no copy (`routes/mobile/canvass.js`,
+    `SurveyResponse.deleteMany({ userId, householdId, passId })`), but the admin's earlier copy stays;
+    (b) copies travel inside a round's `TurfSnapshot` on a clear-knocks re-cut
+    (`services/turf/snapshot.js` reads `SurveyResponseArchive` by `passId`) until that snapshot is
+    deleted, and restoring the snapshot brings back a version erased after it was taken;
+    (c) the run records: `AnswerEditRun` stores voter names (`samples`, `undo.summary.names`) and answer
+    text (`planSummary`, `scopeSummary`), as item 13 recorded for the other run models;
+    `AnswerEditRunChunk` holds survey and voter ids, rounds and fingerprints only. Both new models ride
+    BOTH tenant-deletion cascades (verified 2026-10-19: `services/campaigns/deleteCampaign.js` and
+    `services/platform/deleteOrganization.js` list `AnswerEditRun` and `AnswerEditRunChunk`).
+    **Source.** A bulk edit is item 12's category (statements an admin enters about a voter) at batch
+    scale, and one of item 12's bounds does NOT hold for this tool: *"a field-collected answer is never
+    overwritten"*. This feature exists to change field-collected answers (the case that started it: a
+    canvasser's fake picks on a yard-sign question). What replaces that bound: the earlier version is
+    always kept (above); every changed survey is stamped `editedBy`/`editedAt` and reads *Edited by
+    ‹admin›* on the voter profile, the response detail on both clients and the web door panel (the
+    phone's map door and ping sheets with its next over-the-air update), and in the Canvassing activity export's
+    "Answers edited" column (when the export includes survey answers); each run is audited in
+    `CampaignChange` (`source: 'answer_edit'`, the plan's own words and the real counts); and the change
+    undoes as one. A bulk edit never marks the NOTE edited — the note keeps its own stamp
+    (`noteEditedBy`/`noteEditedAt`).
+    **Correction and deletion (DPA §7; §H16(d)).** Erase — the existing archive delete route
+    (`DELETE /admin/voters/:voterId/surveys/archive/:archiveId`) — is now on screen on each "Earlier
+    answers" card, with its warnings. The help copy says: when a voter asked for something to be
+    removed, edit the answer, then Erase the earlier version. The editors' `version` covers the note,
+    so a stale editor can't write back a scrubbed note (409 `RESPONSE_CHANGED`).
+    **Exposure.** The kept versions are new stored copies of answers already held. As the owner confirmed
+    (Q1, 2026-10-19), leads — who can be clients — see edits exactly as they see every other correction
+    today: a lead's campaign-scoped profile shows the Edited line and the earlier answers like any other
+    kept copy. Only org admins can edit, restore or erase (`/admin/voters` is `requireOrgRole('admin')`;
+    the answer-edit routes are org-admin only). The one-person-at-a-time step and the run itemization
+    add record-level audit subjects (`addAuditSubjects`). The client report builder's internal note
+    gains a count of edited responses beside its desk-entered count — COUNTS only, shown to whoever
+    builds the report (org admins and the campaign's leads), never on the published page
+    (`shapeWindow` is a field whitelist; `answerEdit.int.test.js` pins both). Neither note had ever
+    rendered: `ClientReport`'s stats schema didn't declare `provenance`, so the saved report dropped it.
+    Fixed in this change, so the desk-entered note appears for the first time too — counts of stamps
+    the same readers already see survey by survey. No new export destination (the column describes
+    data already held), no subprocessor, no new external flow; DPA §6 untouched, no customer notice.
+    **Published text checked:** privacy.html — *"When a canvasser records activity at a door…"*, *"We
+    retain account and campaign information for as long as the related customer account is active, or
+    as otherwise instructed…"* and *"The doors you knocked and the survey answers you recorded stay with
+    the campaign"*; DPA §7 and §9; the ToS. **Assessment: privacy-affecting under CLAUDE.md (retention, a
+    batch rewrite of field-collected answers, an erasure path on screen), and no published sentence
+    becomes false: no Privacy Policy, ToS or DPA edit is needed.** The owner's 2026-10-19 approval
+    (given as "item 21", this plan's privacy item before the numbering settled — proposal §B3) covers
+    this content.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -2944,6 +3047,13 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 > self-consuming (restore deletes the row it promotes); only `overwrittenVia: 'outcome_convert'`
 > accumulates. Tenant deletion reaches it — see §B5 — so nothing here survives an org delete.
 > Full context: gap 12 in the v3 list above.
+> **[v6 2026-10-19 — corrected, item 31.]** `overwrittenVia: 'unknock'` (item 14) accumulates the same
+> way: kept until that unknock is undone or the campaign is deleted. A desk-entered answer a canvasser
+> re-surveys over is now kept as a `submit` row, which stays self-consuming.
+> **[v6 2026-10-19 — item 32.]** A third accumulating producer: `overwrittenVia: 'answer_edit'`, the
+> earlier answers every admin edit keeps (Door Outcomes → Edit answers… and the profile's Edit). Kept
+> until restored, erased, the edit is undone, or the campaign or organization is deleted. No timer;
+> both cascades reach it, as they reach every archive row (§B5).
 
 Two scheduled BullMQ repeatable jobs, both registered on the worker dyno (`server/src/worker.js:46`, `:57`; `server/src/services/retention/scheduler.js:24-31`):
 
@@ -3211,6 +3321,8 @@ Two of your own findings conflict here and I am telling you which is right.
 *[v6 2026-10-05, evening (W1-offEarth; item 27): the before numbers the stamp above promised. The count's first production run, right after the W1 deploy, found no zero, negative or non-finite accuracy and no non-finite, off-Earth or (0, 0) coordinate on any ledger: 0 of 86,672 door results (replaced snapshots included), 0 of 16,251 survey responses, 0 of 51 replaced survey answers, 0 of 396 frozen unknocked rows, 0 of 5 GPS pin fixes. A coordinate off the Earth is now refused like a non-finite one (`400 LOCATION_REQUIRED`, before any write). The `--since` run a few days after the deploy remains the after check.]*
 
 *[v6 2026-10-08 — the after check: `npm run audit:gps-stamps -- --since=2026-10-05` in production found no odd stamp among the 4,000 door results, 1,280 survey responses and 2 replaced survey answers created since 2026-10-05 00:00 UTC; no unknocked entries were frozen and no GPS pin fixes were recorded in that window. The off-Earth refusal shipped in commit d2903dc.]*
+
+*[v6 2026-10-19 — item 32: "surveys persist the coordinate twice" is a floor, not a count. Each kept earlier version of a survey (`SurveyResponseArchive` — an admin's answer edit now keeps one every time, `overwrittenVia: 'answer_edit'`) is a full copy that carries the same raw coordinate, so an edited survey's coordinate is stored once more per kept version, until that version is restored, erased, its edit undone, or the campaign is deleted. A copy of a reading already held: no new precision, no new purpose, no new reader.]*
 
 `distanceFromHouseMeters` is stored **in addition** to the raw coordinate, as `Math.round(haversineMeters(...))` (`canvass.js:83-86`). It does not replace or coarsen the raw lat/lng. It is null when the household has no pin.
 
@@ -3847,7 +3959,7 @@ This is an **employee-monitoring / worker-privacy** exposure, not just a consume
 ### (d) VOTERS HAVE NO RIGHTS MECHANISM AT ALL. **VERIFIED.**
 There is **no voter account, no voter role** (Membership roles are `['admin','lead','canvasser']` only — `models/Membership.js:21`), and **no voter-facing route**. A grep across server, client and mobile for do-not-contact / opt-out / unsubscribe / DSAR / data-subject / right-to-erasure returns **no implementation**. There is no `DELETE /admin/voters/:voterId` and no delete route on the Person router. *[v3 update 2026-07-17: the grep result is now stale in one respect — an admin-operated **do-not-contact** mechanism exists (`Voter.doNotContact`, `routes/admin/dnc.js`, enforcement layers per docs/VOTERS.md §D). The voter-INITIATED absence stands: no account, no self-serve route, DSARs still manual.]*
 
-**What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js`, the identity PATCH), **delete a voter's survey response** (`DELETE /admin/voters/:voterId/surveys/:responseId`), and **delete a voter note**. *[v5 2026-08-02: the old line pins (`:186`, `:371`, `:303`) had rotted — the survey delete now sits at `:648`. Cited by route + method instead, per the 2026-07-29 rule below. That delete is reachable from the web voter profile and, since 2026-08, from the **mobile Duplicate surveys** screen; both are the same admin-only route.]* And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression. *[v6 2026-08-21: an admin can now also mark a **single home** restricted from the desk (`POST …/turfs/restrict-doors`, alongside the whole-book `restrict-bulk`) — still door-level, still framed as access ("one locked gate"), still not a voter-initiated mechanism and not suppression; the voter-rights finding is unchanged.]*
+**What DOES exist:** an org admin can **correct** a voter's identity fields (`routes/admin/voters.js`, the identity PATCH), **delete a voter's survey response** (`DELETE /admin/voters/:voterId/surveys/:responseId`), and **delete a voter note**. *[v5 2026-08-02: the old line pins (`:186`, `:371`, `:303`) had rotted — the survey delete now sits at `:648`. Cited by route + method instead, per the 2026-07-29 rule below. That delete is reachable from the web voter profile and, since 2026-08, from the **mobile Duplicate surveys** screen; both are the same admin-only route.]* And a household can be marked `'restricted'` and excluded from future books via an admin `excludeRestricted` toggle (`models/Household.js:47-52`; `services/turf/generateTurf.js:49`, `:205`) — **door-level, admin-controlled, not voter-initiated,** and framed in the help copy as "couldn't physically reach the door," not as suppression. *[v6 2026-08-21: an admin can now also mark a **single home** restricted from the desk (`POST …/turfs/restrict-doors`, alongside the whole-book `restrict-bulk`) — still door-level, still framed as access ("one locked gate"), still not a voter-initiated mechanism and not suppression; the voter-rights finding is unchanged.]* *[v6 2026-10-19 — item 32: the admin's correction tools now include changing, taking out or clearing single survey answers — one voter on the profile, or many at once from Door Outcomes → Edit answers… — and every such edit keeps the earlier version. **Erase** (`DELETE /admin/voters/:voterId/surveys/archive/:archiveId`) is now on screen on each "Earlier answers" card, so a voter's request to have something removed is: edit the answer, then Erase the earlier version. Still admin-operated, still not voter-initiated; the finding is unchanged.]*
 
 The currently-published policy states *"Voters do not interact with the Services directly."* *[v3: the policy is now `client/public/privacy.html`; the no-rights-mechanism finding is unchanged — it is v3 gap 1, still the largest gap.]* The only channel for a voter to exercise any right is a contact email on the policy page. **Every DSAR from a voter is a manual process with no tooling behind it, and there is no way to mark a person do-not-contact.**
 

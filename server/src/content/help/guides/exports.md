@@ -34,8 +34,7 @@ keep, open in Excel or Google Sheets, or load into another tool.
 - **Doors by round** — one row per door per round with its status. Filter it to *Not home* and you have a re-knock list. Its status filter offers **Not a target voter** under the same rule as the chips — and, like a chip, a status you picked before switching to a campaign that doesn't offer it is dropped when you queue, so the file matches what's on screen.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
   more than one survey, you get one file per survey.
-- **Survey answers (detailed)** — one row per recorded answer, exactly as captured at the door,
-  even if a question's wording changed later.
+- **Survey answers (detailed)** — one row per recorded answer, with the question worded as it was saved with that answer, even if the question was reworded later. An answer an admin has since edited reads as it stands now.
 
 
 Both survey exports — and **Results by voter** below — offer **Include contact & demographic
@@ -110,7 +109,10 @@ The export history says **one row per voter at the door** on any file that carri
 Tick **Include survey answers** in the same dialog and every survey row gains what was actually
 recorded — one column per question, plus which survey it was, its version, when it was submitted,
 who took it, and whether an admin typed it at a desk rather than a canvasser at the door. If more
-than one survey ran in the range, each question column is prefixed with its survey's name.
+than one survey ran in the range, each question column is prefixed with its survey's name. The
+file's last column, **Answers edited**, says *yes* on a survey whose answers an admin changed after
+they were recorded; the question columns show those answers as they stand now. It sits at the very
+end so no column you already rely on moves.
 
 It also adds rows, and that is the point. Surveying three people at one door in one round is
 **one** knock and **three** surveys, so two of those surveys have no knock row to sit on. Each one
@@ -156,7 +158,8 @@ out instead of coded.
 
 **Answers are grouped by round.** Every round that produced surveys gets its own group of columns:
 a **Survey** cell naming the survey (and saying *(desk entered)* when an admin typed the answers
-rather than a canvasser at the door), then one column per question. Somebody surveyed in two
+rather than a canvasser at the door, or *(answers edited)* when an admin changed them afterwards),
+then one column per question. Somebody surveyed in two
 rounds shows both sets side by side, so you can read the change without a second file. When there
 is more than one group, each is labelled with its walk list *and* round, because round numbers
 start again in every walk list.
@@ -178,7 +181,8 @@ Three limits worth knowing before you send it:
 - **You get the survey that stands.** If a *different* canvasser replaced someone's survey in the
   same round, this file carries the replacement; the earlier answers are kept and listed under
   **Same round · overwritten** on the Duplicate Surveys page. A canvasser correcting their own
-  submission simply overwrites it.
+  submission simply overwrites it (unless the answers they replace were typed in by an admin at
+  the desk — those are kept on the voter's profile).
 
 **Filters narrow the work, not the door's outcome.** A "last week, canvasser Ada" file prints
 Ada's visits in that window, not the door's whole history. The **Door outcome** chips in the dialog

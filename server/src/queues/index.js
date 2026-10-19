@@ -30,6 +30,11 @@ export const QUEUE_NAMES = {
   // enforces the 30-day delete-on-request promise). Own lane: an org cascade is every campaign's
   // rows at once and the heaviest thing the worker runs.
   ORG_DELETE: 'org-delete-queue',
+  // Door Outcomes answer edits (services/canvass/answerEditRuns.js): change answers on surveys that
+  // stay surveyed, and every undo of one. Its own lane rather than OUTCOME_CONVERT so a worker
+  // still on the previous deploy never sees these jobs (the old conversion processor would have
+  // "completed" one as a missing run), and so an edit never queues behind a long conversion.
+  ANSWER_EDIT: 'answer-edit-queue',
   // Future: GEOCODE: 'geocode-queue'
 };
 

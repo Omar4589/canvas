@@ -853,6 +853,15 @@ export default function HouseholdDetailPanel({
                   {detail?.deskEntry && (
                     <div className="mt-0.5 text-xs text-amber-600">Entered at a desk, not at the door</div>
                   )}
+                  {/* An admin changed these answers after they were recorded — survey-level, by
+                      design (never on per-answer lists). */}
+                  {detail?.edited && (
+                    <div className="mt-0.5 text-xs text-warning-fg">
+                      Edited by{' '}
+                      {detail.edited.by ? `${detail.edited.by.firstName || ''} ${detail.edited.by.lastName || ''}`.trim() || 'an admin' : 'an admin'}{' '}
+                      on {formatDateTime(detail.edited.at, zone)}
+                    </div>
+                  )}
                   {surveysQ.isLoading && (
                     <div className="mt-2 text-xs text-fg-subtle">Loading answers…</div>
                   )}

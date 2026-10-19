@@ -40,12 +40,14 @@ const campaignChangeSchema = new mongoose.Schema(
     // masquerading as a human field edit in the feed: 'admin_campaigns' is the PATCH,
     // 'outcome_reclassify' is the outcome-reclassification tool (and its revert), and
     // 'survey_conversion' is its Surveyed-direction sibling (services/canvass/surveyConversion.js),
-    // which additionally creates or archives real survey answers. Server-side only — the history
+    // which additionally creates or archives real survey answers; 'unknock' strikes entries; and
+    // 'answer_edit' changes answers on surveys that stay surveyed (field 'answerEdit', its values
+    // frozen English — services/canvass/answerEditRuns.js). Server-side only — the history
     // route deliberately does not ship `source` to the clients, so adding a value here is never a
     // client change.
     source: {
       type: String,
-      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock'],
+      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock', 'answer_edit'],
       required: true,
     },
   },

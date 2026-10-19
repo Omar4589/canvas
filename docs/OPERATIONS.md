@@ -661,6 +661,34 @@ server reads it on every request; saving it restarts the dynos — no deploy.
 server takes it in seconds, and phones as described above). To take the phone code back out entirely, republish the previous update ([mobile/README.md](../mobile/README.md)
 → *Undoing an OTA*).
 
+### Release: Edit survey answers on Door Outcomes (October 2026)
+
+Door Outcomes gains **Edit answers…**: an org admin takes out, changes or clears single survey answers
+while every voter stays surveyed, priced in a review first and undone as one change; every admin edit,
+there or on the voter profile, now keeps the earlier answers ([CAMPAIGNS.md](CAMPAIGNS.md),
+[SURVEYS.md](SURVEYS.md) §N, [VOTERS.md](VOTERS.md)). The six correction-safety fixes ship in the same
+deploy. No config var, no data migration, no client-version bump. In order:
+
+1. **Deploy server and web from `main`**, outside field hours. The worker restarts with the new
+   `answer-edit-queue` and builds the two new collections' indexes itself at boot.
+2. **Run console — the dry run, then the build** (it lists the two new indexes on the earlier-answer
+   copies, which a large undo or a change's Details page reads):
+
+   ```
+   npm run migrate:build-indexes
+   npm run migrate:build-indexes -- --apply
+   ```
+
+3. **Phone, when convenient:** the History sentence, the *Edited by* line on the map's door and ping
+   sheets, "—" for an empty pick-several, and the response detail's *Can't restore here* hint ride the
+   next over-the-air update — on your machine, in `mobile/`: `npm run ota:staging`, check it on a
+   staging build, then `npm run ota:production` from `main`. Released phones already work with this
+   server.
+
+**Client report drafts** show the builder's internal notes (answers entered at a desk, answers edited)
+after their next **Recompute**; the notes had never appeared before this release. Published reports keep
+what they froze.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.

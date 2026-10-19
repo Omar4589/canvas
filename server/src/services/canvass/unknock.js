@@ -293,7 +293,9 @@ export async function revertUnknock({ campaign, run, byUserId }) {
         continue;
       }
       try {
-        await SurveyResponse.create(snapshotFromArchive(doc));
+        // Not re-validated: a verbatim copy of a row that was already on file (archiveOverwrite.js),
+        // so an old row today's schema would refuse can't make the undo fail.
+        await SurveyResponse.create([snapshotFromArchive(doc)], { validateBeforeSave: false });
         promoted.push(doc._id);
         restoredVoterIds.push(doc.voterId);
       } catch (e) {

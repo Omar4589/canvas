@@ -6,7 +6,7 @@ kind: guide
 order: 10
 sourceDoc: CAMPAIGNS.md
 summary: How to create a campaign, work the Campaigns page, edit safely, and archive or delete.
-tags: campaigns, create, edit, archive, delete, key dates, door outcomes, not a target voter, app customization
+tags: campaigns, create, edit, archive, delete, key dates, door outcomes, not a target voter, app customization, edit answers, survey answers
 ---
 
 A campaign is the container for one canvassing project — its voters, walk lists, passes, surveys, and reports all live inside it.
@@ -75,7 +75,7 @@ Filter by outcome, canvasser, walk list, round, date range — or, on a survey c
 - If the change can't move anything, it says so: *"No reported numbers change."* That's true for any mix of **Not home**, **Wrong address** and **No soliciting** — each is one knock and none means you reached a person.
 - If it *can*, you see your campaign's real before-and-after — knocks, billable doors, contact rate, survey rate — with the changed figures in red. **Refused** — and, on a campaign that uses it, **Not a target voter** — moves your contact rate (someone answered) and **Restricted** moves billable doors (those can be invoiced). You can still make the change; you just can't make it by accident.
 - **Lit dropped** entries can never be converted — a lit drop has no answers to move either way.
-- **Surveyed** entries can be converted in both directions, but not as a relabel: you enter the answers going in, and removing them shows you exactly whose answers go. See below.
+- **Surveyed** entries can be converted in both directions, but not as a relabel: you enter the answers going in, and removing them shows you exactly whose answers go. **Edit answers…** changes individual answers while the entries stay Surveyed. See below.
 
 Each entry keeps its time, location, canvasser and round — only the label changes, and door colors follow on canvassers' next sync. Every change is listed with a **Revert** button that undoes it exactly (even a selection that spanned several outcomes), and both the change and the revert appear in the campaign's [History](#history--who-changed-what).
 
@@ -92,13 +92,24 @@ Sometimes the conversation really happened and the app has no record of it — a
 
 You can leave questions blank — record only what you actually know.
 
-Answers are recorded for **every voter at the address, except anyone marked do-not-contact and anyone who already answered that round.** A canvasser's real field answer is never replaced by one you type; the review step names everyone who'll be skipped and why.
+Answers are recorded for **every voter at the address, except anyone marked do-not-contact and anyone who already answered that round.** Recording answers never replaces a canvasser's real field answer; the review step names everyone who'll be skipped and why. To change an answer a canvasser did record, see *Editing survey answers* below.
 
 Every answer you enter is **credited to the canvasser who knocked** — their knock, their time, their round and team — so their numbers reflect the work they did. The answers themselves are stamped **"Entered by ‹you› on ‹date›"** on the voter's record and marked in exports, so nobody mistakes a desk entry for a doorstep conversation. They count in your contact and survey rates just like any other answer.
 
+## Editing survey answers (keeping the survey)
+
+Sometimes the visit and the survey were real and only an answer is wrong — a canvasser picked *Volunteer Request* whenever a voter turned down a yard sign, because they didn't know that question could be skipped. On the same **Door Outcomes** page, select those Surveyed entries and press **Edit answers…**, then choose question by question. A pick-one answer can be cleared (**Clear the answer**) or changed (**Change it to**); on a pick-several question, **Take out picks** removes only the picks you tick and leaves the rest of that person's picks alone, while **Clear every pick** takes them all; a written answer can be cleared. Every question you don't touch stays on **Leave as recorded**. Apply it as the **Same change for everyone**, or **One person at a time** to fix each survey by hand.
+
+- **Nothing else moves.** The knock, the Surveyed status, the note, the time, location, canvasser, round and team stay as recorded, so knocks, billable doors, contact rate and survey rate stay exactly where they are — the review step says so first. Survey results, tag counts and exports follow the edited answers.
+- **Only what you filtered changes.** With an answer filter on, only the surveys that matched it change; anyone else surveyed at that visit is left alone. A blank stays blank — nothing gets filled in that nobody recorded. An answer the survey would no longer have asked after your change goes too, and the review names it.
+- **The earlier answers are kept.** Each changed survey reads *Edited by ‹admin› on ‹date›*, its earlier answers stay on the voter's record, and **Undo** puts them back — except on a survey someone changed afterwards, which keeps the newer answers and is named.
+- **Copies made before don't update:** saved searches, walk lists and rounds already cut, files already exported, and a published client report until it's published again.
+
+As a team lead you see these edits the same way you see every other correction, but only org admins can make them. Each edit and its undo appear in the campaign's [History](#history--who-changed-what).
+
 ## Removing survey answers (cleanup)
 
-The reverse works too, and it's what you want when a canvasser's surveys turn out to be fake: select the surveyed entries and change them to **Not home** so the doors go back into play. The review step lists **exactly whose answers will be removed, by name**, and the answers are **kept, not destroyed** — they stay on each voter's record and can be restored.
+The reverse works too, and it's what you want when a canvasser's surveys turn out to be fake: select the surveyed entries and change them to **Not home** so the doors go back into play. The review step lists **exactly whose answers will be removed, by name**, and the answers are **kept, not destroyed** — they stay on each voter's record, and undoing the change puts them back.
 
 Only that entry's own canvasser is affected. If someone else genuinely surveyed the same door in the same round, their answers are untouched.
 
@@ -125,7 +136,7 @@ See [How many doors a day do we need?](how-many-doors-a-day).
 
 ## History — who changed what
 
-A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, what canvassers can record at the door — the door-outcome toggles, an off-by-default outcome switched on or off, and who may add people at the door — archiving and reactivating, and the campaign's name, type and state. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
+A door goal is a number someone promised a client, and a lead can change it. Every campaign has a **History** view recording who changed what and when: the goal and its date, the key dates and note, the billable-doors setting, what canvassers can record at the door — the door-outcome toggles, an off-by-default outcome switched on or off, and who may add people at the door — archiving and reactivating, the campaign's name, type and state, and every change made on **Door Outcomes** (entries relabelled, surveys recorded or removed, entries unknocked, survey answers edited) along with its undo. Open it from the campaign's **⋮ menu → History**, or from the **History** link on the door-goal line when a number looks off.
 
 On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
 

@@ -534,8 +534,12 @@ this answer, ranked, with what share of their own answers it is), a **canvasser 
 showing the exact campaign-time timestamp plus note/Offline badges, and a **View on map** action that
 opens the admin Map pre-filtered to the same answer, canvasser, and date window. Tapping an entry
 opens the **response detail**, which now shows an *"Edited by …"* line when an admin changed it and a
-*"Synced"* line for offline submissions. Same tool as the web **Survey Explorer** — see
-[SURVEYS.md](SURVEYS.md) (Part 1 → *Auditing answers*).
+*"Synced"* line for offline submissions. With the next app update the *Edited by* line also says *the
+earlier answers are kept on the voter record* when an admin's edit kept them (every edit since
+October 2026 does — on the web profile, or with Door Outcomes → **Edit answers…**, which the phone
+doesn't offer), and a pick-several question left with no picks reads "—" instead of a blank, here
+and on the voter profile. Same tool as the web **Survey Explorer** — see [SURVEYS.md](SURVEYS.md)
+(Part 1 → *Auditing answers*).
 
 ### The Map tab's door detail (now at web parity)
 Tapping a house on the mobile admin **Map** opens a bottom sheet that now matches the web console's
@@ -546,8 +550,9 @@ approximate pins and homes with no exact spot, and skips confirmed doors — [MA
 **Last action**, a **History by pass** list (every round
 the door was worked, so a door knocked in Round 1 *and* Round 2 shows both — the survey line names the
 voter, and it's **de-duped** so a survey never lists twice), its **voters**, and its **surveys** with
-the answers **lazy-loaded** on open (they don't ride the map's live refetch). Two overlap surfaces ride
-along, mirroring the web map:
+the answers **lazy-loaded** on open (they don't ride the map's live refetch) — and, with the next app
+update, an *Edited by ‹admin› · ‹time›* line under a survey an admin changed after it was recorded,
+as the web door panel already shows. Two overlap surfaces ride along, mirroring the web map:
 - **A door's ⚠ Overlap badge.** If **more than one canvasser knocked the door in the same pass**, the
   sheet flags it and **names the others** ("Also worked by …") — a turf collision worth a look. This is
   computed straight from the door's own history (no extra fetch), pass-by-pass.
@@ -588,7 +593,12 @@ and in which round; tap a response for its full detail, or **Open voter** for th
 overwritten (preserved) row shows an **Overwritten** badge and "replaced by {name}"; instead of
 Delete it reads **Preserved**, and its response-detail screen carries an admin-only **Restore** —
 the lossless swap that makes the earlier answers current again while preserving the ones they
-displace ([SURVEYS.md](SURVEYS.md) §F).
+displace ([SURVEYS.md](SURVEYS.md) §F). Restore works only while the visit those answers came from
+still reads Surveyed; otherwise tapping it says why and nothing changes (in this release the button
+still shows and the server refuses, with the reason, until the next app update hides it up front).
+Answers an admin removed on Door Outcomes never appear on this report at all, and neither do the
+earlier versions an admin's answer edit keeps (that is one person surveyed once, edited) — the report
+narrowed on the server, so no app update was needed.
 
 Same three filters as the web page — duplicate type, canvasser (departed canvassers included, since
 their work is still on the report), dates (opens on **All time**; it's a history report) — and
@@ -646,12 +656,18 @@ where relevant a grey line of explanation.
   reactivate. The Add sheet creates a canvasser straight onto the selected campaign with an optional
   **coordinator** picked at birth. Every screen in this group works the campaign named in its **campaign chip** (above).
 **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
-  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)); **Exports** —
+  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)), where a survey's
+note reads *edited* only when someone changed the note itself — since October 2026 an admin's edit
+of the survey's answers never marks it, and a mark from an earlier edit stays (a server change; no
+app update needed); **Exports** —
   queues the everyday CSV types with a live row-count preview, and keeps working on an archived
   campaign ([EXPORTS.md](EXPORTS.md));
   **History** — who changed this campaign's settings (the door goal, the key dates, the invoice
   policy, archiving, the outcome switches and who can add people at the door) plus team
-  reassignments, read-only, campaign chip and all
+  reassignments and the Door Outcomes corrections, read-only, campaign chip and all (with the next
+  app update Surveyed conversions, unknocks and answer edits read in plain words and are highlighted,
+  as on the web — an answer edit as its own sentence, *Survey answers edited: ‹question›: took out …
+  (214 surveys)*; until then they show in the generic *changed from … to …* form)
   ([CAMPAIGNS.md](CAMPAIGNS.md) → *Change history*); it is reached from the campaign screen's
   Quick actions rather than the More hub, since it answers a question you have while looking at a
   campaign's numbers;
@@ -1039,7 +1055,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 | [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen; route [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
-| [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. |
+| [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. Next OTA (2026-10-19): the Edited row's sub-line appends *· the earlier answers are kept on the voter record* when the response carries `editedEarlier` (an additive field of `/admin/reports/responses/:id`), and `answerText` prints "—" for an empty array, as [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) does too — a skipped or emptied pick-several printed blank. |
 
 Every fetch carries `campaignId` (the reports router 403s a lead without a managed one). All of this
 is JS-only — ships via OTA, no native build.
@@ -1055,8 +1071,17 @@ release): the report gained a third kind, `sameRoundOverwritten` — preserved s
 join via `$unionWith` from `SurveyResponseArchive` and sort first — and `admin/voters.js` gained
 the **restore** (`POST …/surveys/:archiveId/restore`) and **archive-erase**
 (`DELETE …/surveys/archive/:archiveId`) routes, both org-admin-only; the mobile response-details
-screen hosts the Restore ([SURVEYS.md](SURVEYS.md) §F). Three things are worth
-knowing before editing it:
+screen hosts the Restore ([SURVEYS.md](SURVEYS.md) §F). The restore refuses a visit that no longer
+reads Surveyed with **409 `RESTORE_VISIT_NOT_SURVEYED`** and a worded `error`, which the screen's
+existing `onError` Alert (*Couldn't restore*, `err.message`) already shows — no app release needed.
+The response detail now also carries `restorable` / `restoreBlockedReason` on an archived row, and
+from the next OTA (2026-10-19) the screen uses them: when `restorable` is false it shows an inert
+*Can't restore here* row naming the undo that would bring the answers back (*Undo the unknock on Door
+Outcomes in the web console…*), the web drawer's wording pointed at the console, instead of offering a
+Restore the server would refuse. Released builds keep the button and the Alert above. The report's `$unionWith` excludes `answer_edit`
+copies beside `outcome_convert` and `unknock` (2026-10-19, [SURVEYS.md](SURVEYS.md) §N), so an answer
+edit's earlier versions never reach this screen — its archived branch never has to word one. Three
+things are worth knowing before editing it:
 
 - **The read/write split.** The report router allows `admin` **and** `lead`, so a team lead reaches
   this screen legitimately. `admin/voters.js` is `requireOrgRole('admin')` router-wide, so the
@@ -1104,7 +1129,11 @@ client-only:
 
 - **Door sheet:** lazy-loads `GET /admin/households/:householdId/activity` (the per-round history,
   de-duped server-side to one entry per survey) and `GET /admin/households/:householdId/surveys` (answers
-  on open only) — the same two endpoints the web `HouseholdDetailPanel` uses. The inline **⚠ Overlap**
+  on open only) — the same two endpoints the web `HouseholdDetailPanel` uses. Each `/surveys` row now
+  carries `edited: { at, by }` (2026-10-19, additive), which the sheet renders as *Edited by ‹name› ·
+  ‹exact time›* under the survey's canvasser line from the next OTA. The ping sheet does the same
+  under a surveyed ping's answers, from `GET /admin/activities/:id`'s `surveyResponse.edited` (its only
+  reader on either client). The inline **⚠ Overlap**
   badge is derived from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in
   a pass), naming the others. The **Mark / Unmark restricted** row above *Move pin* reads the same
   payload — `doorMarkState(rounds, scope.passId || currentPassId)` — and is gated `canWrite &&
@@ -1161,7 +1190,11 @@ renders the *Off until you turn it on* group for a survey campaign in one of thr
   — only the confirm writes. Turning it off writes at once.
 - **History.** The server audits the field; [lib/campaignHistory.js](../mobile/lib/campaignHistory.js)
   (hand-mirrored from the web) labels it *Off-by-default outcomes*, renders an empty value as "none",
-  and `isNotable` always highlights it.
+  and `isNotable` always highlights it. (The same mirror gained the Door Outcomes labels on
+  2026-10-19 — `surveyConversion`, `unknock`, and `answerEdit` / `answerEditUndo` through
+  `answerEditSentence`, which [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) renders as
+  one `InsetRow` sentence — shipping with the next OTA; [CAMPAIGNS.md](CAMPAIGNS.md) Part 2 →
+  *Change history*.)
 
 **The in-use gate.** Every phone admin figure, chip and tab that exists only for this outcome is
 gated on `outcomeInUse(campaign, 'not_target')` ([lib/outcomeToggles.js](../mobile/lib/outcomeToggles.js)):

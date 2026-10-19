@@ -206,8 +206,11 @@ export async function computeWindowStats({
   // way. It is surfaced in the BUILDER so an operator cannot deliver a report without having seen
   // it. That asymmetry is the whole point: the person signing off should know; the client is being
   // shown a number that is honestly what it says it is.
-  const [deskEnteredResponses, totalResponses] = await Promise.all([
+  // Same posture for answers an admin EDITED after they were recorded (the profile's Edit, or Door
+  // Outcomes → Edit answers): counted for the builder, never shown to the client.
+  const [deskEnteredResponses, editedResponses, totalResponses] = await Promise.all([
     SurveyResponse.countDocuments({ ...surveyScopeMatch, deskEntry: { $exists: true } }),
+    SurveyResponse.countDocuments({ ...surveyScopeMatch, editedAt: { $ne: null } }),
     SurveyResponse.countDocuments(surveyScopeMatch),
   ]);
 
@@ -217,7 +220,7 @@ export async function computeWindowStats({
     coverage: {},
     surveyBreakdowns,
     tagBreakdowns,
-    provenance: { deskEnteredResponses, totalResponses },
+    provenance: { deskEnteredResponses, editedResponses, totalResponses },
   };
 }
 

@@ -41,7 +41,7 @@ You can also look at one round on its own. Use the round filter (on the campaign
 
 ## And tags?
 
-**Tags count people, once each** — they're the voter-unit answer. If you tag "Support" as *Supporter*, Maria answering Support in both rounds is **one** identified supporter, not two. Each tag shows two figures: **identified** (ever gave a tagged answer — never goes down) and **still current** (their most recent answer still carries it — this one *can* go down when someone changes their mind in a later round, without anything being deleted). See [How do I count our supporters?](how-do-i-count-supporters).
+**Tags count people, once each** — they're the voter-unit answer. If you tag "Support" as *Supporter*, Maria answering Support in both rounds is **one** identified supporter, not two. Each tag shows two figures: **identified** (ever gave a tagged answer — more rounds never lower it; only an admin correcting the record can) and **still current** (their most recent answer still carries it — this one *can* go down when someone changes their mind in a later round, without anything being deleted). See [How do I count our supporters?](how-do-i-count-supporters).
 
 ## Which one does the connection rate use?
 

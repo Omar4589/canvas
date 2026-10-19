@@ -23,6 +23,7 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { acquireRecutLock, releaseRecutLock, isRecutLocked } from '../../services/turf/recutLock.js';
+import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR } from '../../services/canvass/answerEditRuns.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
@@ -423,6 +424,12 @@ router.post('/discard', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     locked = true;
+    // Clearing knocks takes the round's surveys and their earlier versions with it, in two reads; an
+    // answer edit landing between them would leave the snapshot holding the edit with its original
+    // nowhere. Checked AFTER taking the lock, which the edit side reads too, so neither can slip in.
+    if (clearKnocks && (await answerEditBusy(req.campaign._id))) {
+      return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    }
 
     // Snapshot FIRST (before any deletion) so a failure here aborts the discard
     // and nothing is lost.
@@ -537,6 +544,9 @@ router.post('/restore-snapshot', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     lockPassId = snapshot.passId;
+    // Restoring knocks brings surveys and their earlier versions back; not while an answer edit
+    // runs (the same rule as a clear-knocks discard).
+    if (await answerEditBusy(req.campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
 
     const result = await restoreSnapshot({ campaign: req.campaign, snapshot, userId: req.user._id });
     // ADDITIVE `assignmentsDropped`: snapshot rows the roster re-gate refused (a canvasser who
