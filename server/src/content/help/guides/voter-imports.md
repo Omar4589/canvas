@@ -28,6 +28,8 @@ tags: import, voters, intake
 After you pick a file, the **Map columns** step suggests which of your file's columns holds each field. **Check the suggestions against the values, not the column names.** Under every mapped field you'll see a few values from the top of your file — *e.g. 4055 Northside Dr NW Apt 25 · 900 Club Station Dr NE* — because a column can have the right name and the wrong contents:
 
 - An **L2** file has a column called `City` that holds the city-council district ("ATLANTA CITY"). The city you want is `Residence_Addresses_City` ("Atlanta").
+- A **Data Trust** file has a column called `city` that holds a code like "HARLINGEN_addr". The city you want is `RegistrationAddressCity` ("HARLINGEN"), and the suggestion picks it. City shows a warning when none of its sample values look like city names.
+- **City is part of every door's address too.** If a file already went in with the wrong city, don't import it again with the right column to fix it: every address would come in as a new door beside the old one, and the doors in your books would be emptied. Contact Doorline support — the city can be corrected in place, books and knocks untouched.
 - **State** is part of every door's address. If State pointed at a column of voter IDs, every voter would become their own door — and the import would still finish without a single error. So State and ZIP show a warning when none of their sample values look like states or ZIP codes.
 - A required field whose column is **blank in the first rows** is flagged as well — those rows would be skipped.
 

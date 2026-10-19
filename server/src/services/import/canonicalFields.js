@@ -96,7 +96,10 @@ const FIELD_ALIASES = {
   precinct: ['precinct', 'precinctname', 'precinctid', 'pct'],
   addressLine1: ['residentialaddress', 'residenceaddress', 'streetaddress', 'addressline1', 'address1', 'address'],
   addressLine2: ['addressline2', 'address2', 'unitnumber', 'aptnumber', 'unit', 'apt', 'apartment'],
-  city: ['residentialcity', 'residencecity', 'rescity', 'city', 'town'],
+  // RegistrationAddressCity ahead of a bare `city`: a Data Trust–style export carries both, and its
+  // `city` is the vendor's city-by-address CODE ('HARLINGEN_addr'), which every TX HD 37 door was
+  // imported with before this alias existed (migrations/repairCitySuffix.js puts the real city back).
+  city: ['residentialcity', 'residencecity', 'rescity', 'registrationaddresscity', 'city', 'town'],
   state: ['residentialstate', 'residencestate', 'state', 'registeredstate'],
   zipCode: ['residentialzip', 'residencezipcode', 'residencezip', 'zipcode', 'zip5', 'zip', 'postalcode'],
   county: ['county', 'countyname', 'residentialcounty'],

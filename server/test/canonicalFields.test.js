@@ -154,6 +154,28 @@ test('the more specific name wins over file order', () => {
   assert.equal(m.phone, 'Telephones_Landline');
 });
 
+// The header row of the TX HD 37 GOTV file (2026-10-14): its bare `city` is the vendor's city-by-address
+// code ('HARLINGEN_addr'); the door's city is RegistrationAddressCity. Mailing columns never win.
+const TX_HD37_HEADERS = [
+  'vuid', 'firstname', 'middlename', 'lastname', 'county', 'city', 'precinct', 'citycouncil', 'region', 'ld',
+  'sd', 'cd', 'hhparty', 'party', 'birthdate', 'age', 'agerange', 'sex', 'race', 'education', 'householdincome',
+  'landline', 'cell', 'householdid', 'RegistrationAddress1', 'RegistrationAddress2', 'RegistrationAddressCity',
+  'RegistrationAddressState', 'RegistrationAddressZip5', 'MailingAddress1', 'MailingAddress2', 'MailingAddressCity',
+  'MailingAddressState', 'MailingAddressZip5', 'hhid', 'target', 'latitude', 'longitude', 'checkhd', 'checksd',
+  'checkcd', 'checkcounty', 'checkprecinct', 'checkresaddcity', 'dt_id', 'audience',
+];
+
+test('a registration-address city outranks a bare city column', () => {
+  const m = suggestMapping(TX_HD37_HEADERS);
+  assert.equal(m.city, 'RegistrationAddressCity');
+  assert.equal(m.addressLine1, 'RegistrationAddress1');
+  assert.equal(m.addressLine2, 'RegistrationAddress2');
+  assert.equal(m.state, 'RegistrationAddressState');
+  assert.equal(m.zipCode, 'RegistrationAddressZip5');
+  // Without it, the bare column is still a city.
+  assert.equal(suggestMapping(['city', 'MailingAddressCity']).city, 'city');
+});
+
 test('a registration NUMBER is an ID; a registration date or status is not', () => {
   assert.equal(suggestMapping(['Voter Registration #']).stateVoterId, 'Voter Registration #');
   assert.equal(suggestMapping(['REGISTRATION_NUMBER']).stateVoterId, 'REGISTRATION_NUMBER');

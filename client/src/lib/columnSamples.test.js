@@ -43,7 +43,19 @@ test('sampleWarning: ZIPs — five digits or ZIP+4 pass; a dropped leading zero 
   assert.match(sampleWarning('zipCode', ['3611', '1155']), /don’t look like ZIP codes/); // a ZIP+4 column
 });
 
-test('sampleWarning: only State and ZIP carry a shape; no samples, no warning', () => {
+test('sampleWarning: a City column of vendor codes or numbers is flagged; real names are not', () => {
+  // The TX HD 37 file's bare `city` column.
+  assert.match(sampleWarning('city', ['HARLINGEN_addr', 'SOUTH PADRE ISLAND_addr']), /don’t look like city names/);
+  assert.match(sampleWarning('city', ['58', '80']), /don’t look like city names/);
+  for (const names of [['HARLINGEN', 'SOUTH PADRE ISLAND'], ['St. Louis', "O'Fallon", 'Winston-Salem'], ['Cañon City', 'Coeur d’Alene']]) {
+    assert.equal(sampleWarning('city', names), null, names.join(', '));
+  }
+  // One odd value among real ones is a typo in the file, not the wrong column.
+  assert.equal(sampleWarning('city', ['HARLINGEN', 'HARLINGEN_addr']), null);
+});
+
+test('sampleWarning: only State, ZIP and City carry a shape; no samples, no warning', () => {
+  // A council district reads as a city name — the sample line is the check for it, not a warning.
   assert.equal(sampleWarning('city', ['ATLANTA CITY']), null);
   assert.equal(sampleWarning('stateVoterId', ['GA']), null);
   assert.equal(sampleWarning('state', []), null);

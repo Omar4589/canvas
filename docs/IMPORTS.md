@@ -290,6 +290,15 @@ Station Dr NE*), because a column can be named right and hold the wrong thing:
 
 - An **L2** export has a column called `City` that holds the city-council *district*
   ("ATLANTA CITY"). The city to map is `Residence_Addresses_City` ("Atlanta").
+- A **Data Trust** export (`vuid`, `RegistrationAddress1`, `dt_id` …) has a column called plain `city`
+  that holds the vendor's city-by-address *code* ("HARLINGEN_addr"). The city to map is
+  `RegistrationAddressCity` ("HARLINGEN"); the suggestion picks it, and **City** gets a warning when
+  none of its sample values look like city names. The TX HD 37 GOTV file (2026-10-14) went in with the
+  code before either existed.
+- **City is part of every door's address too.** A file that went in with the wrong city is not fixed by
+  importing it again with the right column: every corrected address reads as a new door, the voters move
+  onto those, and the doors already cut into books, knocked and worked in Pin Fixes are emptied. Doorline
+  corrects the city in place instead (`repair:city-suffix`, Part 2 §A).
 - **State** is part of every door's address. Map State to a column of voter IDs and every voter
   becomes their own door — the import runs green with zero errors, and a building of 40 voters shows
   up as 40 doors. That is why **State** and **ZIP** get a warning when none of the sample values look
@@ -446,6 +455,17 @@ Import pipeline: [services/import/csvImporter.js](../server/src/services/import/
 match only (no fuzzy / "St" vs "Street"). `looseAddressKey` (same file) is a fuzzier key — expands
 ST→STREET, N→NORTH, etc. — used **only** for the preview's near-duplicate detection, never for the upsert.
 
+Because the city is in the key, a corrected city on a re-import creates new doors instead of fixing the
+old ones. [`repairCitySuffix.js`](../server/src/migrations/repairCitySuffix.js)
+(`npm run repair:city-suffix`, OPERATIONS.md) corrects a vendor-code city (`HARLINGEN_addr`) in place,
+one campaign per run: `city`, `cityValue` and `normalizedAddress` rebuilt on the same `_id`, do-not-knock
+records (`{organizationId, normalizedAddress}`) copied to the new key before any door moves and the old
+one removed once no door in the org holds it, `Household.doNotKnock` recomputed, and the city values in
+`Pass.targetFilter` (re-resolved on every re-cut) and `SavedSearch.filter` fixed. Pins, flags, books,
+statuses and knocks are untouched; `updatedAt` moves, so phones pick the city up on their next delta.
+Test: [`repairCitySuffix.int.test.js`](../server/test/repairCitySuffix.int.test.js) (child process over
+the real script).
+
 **Recent-imports table columns** ([ImportPage.jsx](../client/src/pages/ImportPage.jsx), persisted on
 `ImportJob` by [importProcessor.js](../server/src/services/import/importProcessor.js)):
 
@@ -539,10 +559,13 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
 - **The mapping step shows each mapped column's values.** Under every mapped field, `ColumnSample`
   (ImportPage) renders up to three distinct non-blank values from that same 5-row peek, via
   [columnSamples.js](../client/src/lib/columnSamples.js). `sampleWarning` adds a shape check for the
-  two fields whose wrong column breaks doors without an error — **State** (part of `normalizedAddress`)
-  and **ZIP** (a non-5-digit ZIP fails `zipEligible` and the door is dropped at geocoding) — and fires
-  only when *none* of the samples fit (a US state code or name from `US_STATES`; `^\d{5}(-?\d{4})?$`),
-  so one odd value never nags. A required field blank in every peeked row reads in the warning color.
+  fields whose wrong column breaks doors without an error — **State** (part of `normalizedAddress`),
+  **ZIP** (a non-5-digit ZIP fails `zipEligible` and the door is dropped at geocoding) and **City** (part
+  of `normalizedAddress` and of the address the pin lookup sends) — and fires only when *none* of the
+  samples fit (a US state code or name from `US_STATES`; `^\d{5}(-?\d{4})?$`; Unicode letters, spaces,
+  `.`, `'`, `’` and `-`, so an underscore or a digit — `HARLINGEN_addr`, a district number — is a
+  code), so one odd value never nags. A council district such as `ATLANTA CITY` reads as a city name;
+  the sample line is the check for that one. A required field blank in every peeked row reads in the warning color.
   Display only: the `sample` rows were already in the preview-headers response.
 - **On apply**, `importProcessor` captures each incoming voter's prior household, then after `applyImport`
   runs `recomputeHouseholdActive` over the touched (source ∪ destination) households and stamps
@@ -826,7 +849,8 @@ one-voter-per-row may still proceed.
 ([canonicalFields.js](../server/src/services/import/canonicalFields.js)). Three passes per field —
 exact, alias-inside-header, header-fragment-of-alias — and in each the field's names are tried **in
 priority order** (the first name to find a header wins; headers are tried in file order), so the most
-specific name leads: residence before bare (`residentialcity` before `city`), state-issued IDs before a
+specific name leads: residence before bare (`residentialcity` before `city`; `registrationaddresscity`
+before `city` too, because a Data Trust export's bare `city` is a vendor code), state-issued IDs before a
 generic `voterid`, `landline` before `phone` (which also sits inside `Telephones` on a cell column).
 Every guard answers a real wrong suggestion:
 
