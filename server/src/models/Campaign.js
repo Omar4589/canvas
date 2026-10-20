@@ -131,6 +131,11 @@ const campaignSchema = new mongoose.Schema(
       status: { type: String, enum: ['pending', 'running', 'failed'], default: null },
       heartbeatAt: { type: Date, default: null },
       error: { type: String, default: null },
+      // When the cascade itself began — after the processor's last refusal (canvassing started, the
+      // organization being deleted). Door Outcomes writers sweep what they wrote late only from here
+      // (services/platform/lateWriteSweep.js): `running` alone came before those refusals, and a sweep
+      // then removed Door Outcomes work from a campaign whose delete was refused (code review round 4).
+      cascadeAt: { type: Date, default: null },
     },
     // One placing pass per campaign at a time (services/households/placeStackedPins.js): the lease an
     // import holds while it looks up homes on shared map spots and moves their pins, so two imports

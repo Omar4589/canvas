@@ -6,6 +6,7 @@ import {
   summaryFor,
   deletableResponses,
   overwriteLineFor,
+  archivedRowFor,
   buildRestorePrompt,
   buildDeletePrompt,
   deleteErrorMessage,
@@ -115,6 +116,20 @@ test('overwriteLineFor names the replacing canvasser', () => {
     overwriteLineFor({ overwrittenBy: chad }),
     'Overwritten · replaced by Chadwick Kluttz'
   );
+  // Desk-entered answers replaced by the canvasser's own survey: never "Chad replaced Chad".
+  assert.equal(
+    overwriteLineFor({ overwrittenBy: chad, deskEntered: true }),
+    "Entered at the desk · replaced by Chadwick Kluttz's survey"
+  );
+  // Set aside by a Restore: the name is who restored, never the author of a survey.
+  assert.equal(
+    overwriteLineFor({ overwrittenBy: chad, deskEntered: true, overwrittenVia: 'restore' }),
+    'Entered at the desk · set aside when Chadwick Kluttz restored earlier answers'
+  );
+  assert.equal(
+    overwriteLineFor({ overwrittenBy: chad, overwrittenVia: 'restore' }),
+    'Overwritten · set aside when Chadwick Kluttz restored earlier answers'
+  );
 });
 
 test('buildRestorePrompt: a lossless swap, and says so', () => {
@@ -183,3 +198,20 @@ test('KIND_TABS keys are the wire values the server validates — nothing transl
     'differentCanvassers',
   ]);
 });
+
+test('archivedRowFor names who set the answers aside, and how', () => {
+  const ada = { firstName: 'Ada', lastName: 'Admin' };
+  assert.deepStrictEqual(archivedRowFor({ overwrittenVia: 'restore', overwrittenBy: ada }, 'Oct 19, 2:05 PM'), {
+    label: 'Set aside by',
+    value: 'Ada Admin',
+    sub: 'Oct 19, 2:05 PM · earlier answers were restored in their place',
+    badge: 'Set aside',
+  });
+  assert.strictEqual(archivedRowFor({ overwrittenVia: 'unknock' }, 'x').label, 'Removed by');
+  assert.strictEqual(archivedRowFor({ overwrittenVia: 'unknock' }, 'x').value, 'an admin');
+  assert.strictEqual(archivedRowFor({ overwrittenVia: 'answer_edit', overwrittenBy: ada }, 'x').badge, 'Earlier answers');
+  assert.strictEqual(archivedRowFor({ overwrittenVia: 'outcome_convert' }, 'x').sub, "x · the door's outcome was changed");
+  // A canvasser's own newer survey is the one overwrite.
+  assert.deepStrictEqual(archivedRowFor({ overwrittenVia: 'submit' }, 'x'), { label: 'Overwritten by', value: 'another canvasser', sub: 'x', badge: 'Overwritten' });
+});
+

@@ -34,10 +34,10 @@ const UNDO_REASON = {
 
 export const undoReasonText = (n) => `${UNDO_REASON[n.reason] || n.reason}${n.detail ? ` (${n.detail})` : ''}`;
 
-const AnswerEditRunCard = ({ run, onAction, busy, onDismiss }) => {
+const AnswerEditRunCard = ({ run, onAction, busy, onDismiss, stopped = false }) => {
   const state = runState(run);
   if (!state) return null;
-  const running = state.key === 'running' || state.key === 'undoing' || state.key === 'waiting';
+  const running = !stopped && (state.key === 'running' || state.key === 'undoing' || state.key === 'waiting');
   const pct = run.progress?.total ? Math.round(((run.progress.done || 0) / run.progress.total) * 100) : 0;
   const undoNames = run.undo?.summary?.names || [];
 
@@ -53,13 +53,31 @@ const AnswerEditRunCard = ({ run, onAction, busy, onDismiss }) => {
 
       {running && (
         <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
-          <div className="h-full rounded-full bg-brand-accent transition-[width] duration-500" style={{ width: `${Math.max(3, pct)}%` }} />
+          {state.key === 'running' ? (
+            <div className="h-full rounded-full bg-brand-accent transition-[width] duration-500" style={{ width: `${Math.max(3, pct)}%` }} />
+          ) : (
+            // Waiting or undoing: no count to show (the stored progress is the apply phase's).
+            <div className="h-full w-full animate-pulse rounded-full bg-brand-accent/40" />
+          )}
         </div>
+      )}
+
+      {stopped && (
+        <p className="mt-2 rounded border border-border bg-sunken px-3 py-2 text-sm text-fg-muted">
+          This change can&rsquo;t be read any more, so what&rsquo;s shown is the last that loaded. Its row under
+          Survey answer changes shows where it stands.
+        </p>
       )}
 
       {!running && picksLine(run) && <p className="mt-2 text-sm text-fg-muted">{picksLine(run)}</p>}
 
-      {run.status === 'failed' && (
+      {run.status === 'failed' && (state.key === 'notStarted' || state.key === 'stoppedEmpty') && (
+        <p className="mt-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+          {run.error || 'The change stopped before changing any survey.'}{' '}
+          {state.key === 'stoppedEmpty' ? 'No survey has been changed — press Pick up where it stopped to run it.' : ''}
+        </p>
+      )}
+      {run.status === 'failed' && state.key === 'stopped' && (
         <p className="mt-2 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
           {run.error || 'The change stopped part-way.'} Every survey it already changed is correct and
           can be undone — or pick up where it stopped.
@@ -106,7 +124,7 @@ const AnswerEditRunCard = ({ run, onAction, busy, onDismiss }) => {
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {state.actions.map((a) => (
+        {!stopped && state.actions.map((a) => (
           <Button
             key={a}
             size="sm"

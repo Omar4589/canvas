@@ -10,7 +10,9 @@ import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 // Frozen on purpose: a summary rendered later from the raw scope would name an option's or a
 // walk list's CURRENT label, not what the admin saw when they pressed the button — and the run
 // list is the record of what was done, not of what things are called now. The raw scope rides
-// beside it (ReclassifyRun.selection.scope) for machines; this line is for people.
+// beside it (ReclassifyRun.selection.scope) for machines; this line is for people. One part doesn't
+// stay frozen for good: a deleted canvasser's name comes off when their retention window lapses
+// (services/retention/scrubFrozenNames.js, run by the identity purge).
 
 const OUTCOME_LABELS = {
   not_home: 'Not home',
@@ -38,9 +40,12 @@ const day = (ymd) => {
 export async function describeScope(campaign, scope = {}) {
   const parts = [];
 
+  // The canvasser goes FIRST, always: the identity purge takes a deleted account's name off this
+  // line by that position (services/retention/scrubFrozenNames.js). A name only, never an email —
+  // the deletion promise removes contact details at once, and nothing rewrites them here.
   if (scope.userId) {
-    const u = await User.findById(scope.userId, { firstName: 1, lastName: 1, email: 1 }).lean();
-    parts.push(u ? [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email : 'Unknown canvasser');
+    const u = await User.findById(scope.userId, { firstName: 1, lastName: 1 }).lean();
+    parts.push((u && [u.firstName, u.lastName].filter(Boolean).join(' ')) || 'Unknown canvasser');
   }
   if (scope.effortId) {
     const ef = await Effort.findById(scope.effortId, { name: 1 }).lean();

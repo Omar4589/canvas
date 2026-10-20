@@ -21,6 +21,20 @@ const itemSchema = new mongoose.Schema(
     // tells the undo a survey it can no longer find a row for was erased, restored on the profile or
     // cleared with a re-cut — rather than never changed — and what "12 of 30 done" counts.
     a: { type: mongoose.Schema.Types.ObjectId, default: undefined },
+    // The undo PUT THIS SURVEY BACK (the copy id it put back, or whose receipt proved it): recorded
+    // per item so the undo's count only grows, whatever happens to the survey afterwards (round 3).
+    u: { type: mongoose.Schema.Types.ObjectId, default: undefined },
+    // ...and that proof was the first build's (no receipt): its History row was written back then.
+    l: { type: Boolean, default: undefined },
+    // ...settled by the pass that finished the survey (its erased reading done): never read again (round 8).
+    us: { type: Boolean, default: undefined },
+    // A one-person session's survey: the questions its saves have counted, so a survey saved twice is
+    // still one survey changed, and each question one survey (round 5). Question keys only.
+    cq: { type: [String], default: undefined },
+    // ...and every copy its saves made (one per save; `a` is the latest): the undo reads a survey as
+    // erased only for a copy of THIS run that is gone (round 6 — it took any recent mark for this run's,
+    // and a note-only profile edit whose copy was erased read a survey put back as erased).
+    as: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
   },
   { _id: false }
 );
@@ -36,12 +50,29 @@ const answerEditRunChunkSchema = new mongoose.Schema(
     // instead of adding to them.
     done: { type: Boolean, default: false },
     counts: { type: mongoose.Schema.Types.Mixed, default: null },
+    // The bulk done-write's revision: each delivery recounts the chunk from the database and writes
+    // by compare-and-swap on this, re-reading on a miss, so a landed copy (`a`) another delivery
+    // recorded is never written away (answerEditRuns.js runApply).
+    countRev: { type: Number, default: undefined },
+    // A one-person session's chunk is rewritten per step; two admins stepping one session at once
+    // compare-and-swap on this so neither loses the other's step (code review 2026-10-19). Declared,
+    // or strict mode would drop it from the filter and the swap would always win.
+    stepRev: { type: Number, default: 0 },
+    // Set by the undo before it reads this chunk: an apply delivery still running never rewrites
+    // what the undo classified (answerEditRuns.js). Declared, or strict mode drops it from the filter.
+    fenced: { type: Boolean, default: undefined },
   },
   { timestamps: true }
 );
 
 // The processor and the undo read a run's chunks in order; one chunk per (run, seq).
 answerEditRunChunkSchema.index({ runId: 1, seq: 1 }, { unique: true });
+// "Which runs' undos have reached this survey?" — a survey written back from an older copy takes
+// their fences (answerEditWriter.js fencesForSlots). Partial: only fenced chunks are indexed.
+answerEditRunChunkSchema.index(
+  { campaignId: 1, 'items.v': 1 },
+  { partialFilterExpression: { fenced: true } }
+);
 
 export const AnswerEditRunChunk = mongoose.model('AnswerEditRunChunk', answerEditRunChunkSchema);
 export const ANSWER_EDIT_CHUNK_ITEMS = 500;

@@ -2571,8 +2571,17 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `SurveyResponseArchive` (`via: 'submit'`), exactly like a teammate's, instead of being overwritten
     with no copy. Before this, the desk stamp also stayed on the canvasser's field answers — the profile
     labelled them "Entered by ‹admin›" — and undoing that desk entry deleted them outright. Same data
-    category, same org-admin audience, restorable and individually erasable like every `submit` row, and
-    self-consuming on restore. `SurveyResponse.syncedAt` now follows every receipt (when the server
+    category and the same audience as every `submit` row: org admins, and the campaign's leads (who can be
+    clients) on the campaign Voters profile, Duplicate Surveys and the response detail it opens (the web
+    drawer, the phone's response screen — `GET /admin/reports/responses/:id`, which serves an archived
+    copy by its id) — privacy.html `:105` ("according to their role") covers them; `:90` names
+    administrators only. Restore and Erase stay org-admin. Kept like every `submit` row: until restored or
+    erased; until a round's clear-knocks re-cut moves the round's copies into that round's `TurfSnapshot`
+    (put back by Restore snapshot, or removed with the snapshot); until the door-added voter they belong to
+    is deleted; or until the campaign or organization is deleted — no timer *[corrected 2026-10-19, code
+    review round 1: this read "same org-admin audience" and "self-consuming"; round 2 added the response
+    detail and the two other ways out]*.
+    `SurveyResponse.syncedAt` now follows every receipt (when the server
     received the submission — a timestamp of a kind already held).
     **(F9) Nothing silently lost.** The archive helpers (`services/surveys/archiveOverwrite.js`) now write
     raw verbatim copies. Through Mongoose, `insertMany(…, { ordered: false })` skipped a copy the current
@@ -2582,14 +2591,54 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     kept where the record already said it was kept.
     **(F5, F1) Access narrowed, not widened.** Restore now refuses answers whose visit no longer reads
     Surveyed (`services/surveys/restoreGuard.js`): an unknocked or converted visit's answers can no
-    longer be put back as a counted survey, or swapped over a real later survey, from the profile. And
+    longer be put back as a counted survey, or swapped over a real later survey, from the profile. *[2026-10-19, code review round 1: as first shipped this sentence was false — only the
+    removal's OWN copy took that rule; every other copy of a struck visit's answers (an answer edit's earlier
+    version, a teammate's overwrite copy) took the plain rule, which the canvasser's next survey at that
+    door satisfied. Round 1's fix (a stamp on the copies) missed strikes made before it and outlived an
+    undo; round 2 replaced it. As built: a strike is read from the removal RUN's own record of the visits
+    it struck — `UnknockRunChunk.visitKeys`, and for a Surveyed → door-outcome conversion the new
+    `ConversionStrike` rows (run, tenant, visit keys, entry ids, two times — pseudonymous bookkeeping: a
+    visit key is door, round and canvasser ids, the canvasser's user id as every ledger row carries; no
+    answers, no names) — and holds every kept
+    copy of the visit's answers made before the strike finished, whatever its kind, while the run stands.
+    An undo lifts it wherever it put the visit back, and — once it has finished — where an older entry was
+    put back at the visit since, by another undo or a snapshot restore: its own entry stays off there, and
+    its answers stay earlier answers the profile's Restore offers (code review round 8). It records where
+    newer work held the visit (`notRestoredKeys`).
+    Conversions made before `ConversionStrike` existed are read from what they left (their own copy at the
+    visit, the converted entry), and `npm run migrate:removal-strikes -- --apply` records them durably
+    once after the deploy, visit by visit (it also records, for an unknock undone before
+    `notRestoredKeys`, the visits that undo could not put back). **Residual:** an older conversion whose converted entry was since re-recorded by
+    the canvasser AND whose own copy is gone before that command runs has nothing left that says it struck
+    the visit; such a copy follows the plain rule. Pinned in `answerEditRound2.int.test.js`,
+    `answerEditRound3.int.test.js` and `correctionSafety.int.test.js`. Round 3: a strike still held after
+    its removal was undone refuses with its own reason (`kept_after_undo` — the earlier words told the
+    admin to undo a removal already undone); both undos put an answer back only where its visit's entry
+    came back, and read the visits they couldn't put back from what is on file; an unknock that crashed
+    after it began removing is held like a completed one and can be undone. Round 4: ...once it has
+    STOPPED. The strike beats a heartbeat between every step; a pending run that beat within ten minutes
+    reads Removing… with no Undo, and an Undo of it is refused — round 3 let an Undo land while a large
+    unknock was still removing (it ran for minutes), and the strike then finished over the undo: struck
+    answers live again, or the removal never undoable and a Restore swapping struck answers over the
+    canvasser's real later survey (reproduced). Also: a copy two removals hold stays held while EITHER
+    does (round 3 judged only the latest, and a later conversion's undo that stopped after flipping its
+    entry back freed an earlier unknock's struck answers — reproduced); a strike that stopped part-way
+    holds the copies made while it removed (its window ends at its last beat, not at its freeze); and a
+    conversion undo puts answers back only under an entry still its own — never one a later conversion
+    converted since (reproduced: a counted survey under a door reading Not home).]* And
     answers an admin removed (`outcome_convert`, `unknock`) no longer appear on Duplicate Surveys — a
     lead-readable report — or as "Replaced X's earlier answers": fewer rows in front of leads, not more.
     **(F4, F7)** An offline replay with the same timestamp as a delivered submission no longer re-applies
     its answers over an admin's edit; a stopped undo of a conversion has its own status. No data change.
     **§B6 correction (stale since item 14):** "only `overwrittenVia: 'outcome_convert'` accumulates" —
-    `unknock` rows accumulate the same way (until that unknock is undone or the campaign is deleted). F2's
-    copies are `submit` rows and stay self-consuming.
+    `unknock` rows accumulate the same way — kept until restored or erased, or the campaign or organization
+    is deleted; an unknock's undo removes the copies it puts back and keeps the rest (a slot a newer survey
+    holds, or — since round 3 — a visit whose entry didn't come back). Two more ways any archive row leaves: a clear-knocks re-cut moves its round's rows into that
+    round's `TurfSnapshot` (`routes/admin/turfs.js`), and deleting a voter a canvasser added at the door
+    removes that voter's rows with it (`routes/admin/voters.js`). F2's copies are `submit` rows: consumed
+    only if someone restores them, otherwise kept with no timer like the rest *[corrected 2026-10-19, code
+    review round 1: this read "until that unknock is undone" and "stay self-consuming"; round 3 added the
+    re-cut and the door-added voter]*.
     **Assessment: privacy-affecting (retention) under CLAUDE.md, and no published sentence becomes
     false.** privacy.html `:90` (canvassing activity reviewed by authorized administrators), `:118`
     (retained while the account is active) and `:122` (deletion covers canvassing records) already cover
@@ -2610,8 +2659,13 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     **Retention — the material change.** Until now the profile's Edit
     (`PATCH /admin/voters/:voterId/surveys/:responseId`) destroyed the earlier answers. Now every admin
     edit, profile or Door Outcomes, first keeps the earlier version in `SurveyResponseArchive`
-    (`overwrittenVia: 'answer_edit'`), kept until it is restored, erased, its edit is undone, or the
-    campaign or organization is deleted. No timer. Each kept version is a FULL copy of the survey, so it
+    (`overwrittenVia: 'answer_edit'`), kept until it is restored or erased, or the campaign or
+    organization is deleted; an Undo removes the copies it puts back and keeps the rest (a survey changed
+    since keeps its copy as history; only a copy holding nothing the survey doesn't — an edit that never
+    landed — is removed as redundant) *[round 2: the undo had called a copy redundant on its answers
+    alone, and deleted one whose note and position a later re-survey had replaced]*; and, like every
+    archive row, a clear-knocks re-cut moves it into its round's snapshot and deleting a voter added at
+    the door removes it (item 31) *[round 3]*. No timer. Each kept version is a FULL copy of the survey, so it
     also copies the GPS reading, the note and the canvasser's id. Three edges to state rather than
     discover:
     (a) the copy outlives the canvasser's own later deletion of that survey — re-recording the door with
@@ -2619,10 +2673,53 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `SurveyResponse.deleteMany({ userId, householdId, passId })`), but the admin's earlier copy stays;
     (b) copies travel inside a round's `TurfSnapshot` on a clear-knocks re-cut
     (`services/turf/snapshot.js` reads `SurveyResponseArchive` by `passId`) until that snapshot is
-    deleted, and restoring the snapshot brings back a version erased after it was taken;
+    deleted — on Turf Cutting, with its round (since 2026-10-20), or with the campaign — and restoring the
+    snapshot brings back a version erased after it was taken;
     (c) the run records: `AnswerEditRun` stores voter names (`samples`, `undo.summary.names`) and answer
-    text (`planSummary`, `scopeSummary`), as item 13 recorded for the other run models;
-    `AnswerEditRunChunk` holds survey and voter ids, rounds and fingerprints only. Both new models ride
+    text (`planSummary`, `scopeSummary`), as item 13 recorded for the other run models. Who changed a
+    survey since an edit ("re-surveyed by ‹name›") is stored as a user id and written as words only when
+    the run is read, so a deleted account reads there as on every report — the name its deletion snapshot
+    keeps for the 180-day window, then "Deleted user" *[corrected 2026-10-19: the first build froze those
+    names as text (round 1), and this sentence said they read "a removed user" (round 2). A run undone by
+    the first build kept its words as text, names included; `npm run repair:answer-edit-words -- --apply`
+    rewrites them without the name, once, after the deploy]*. A plan that takes out an old answer by its
+    words (`removeTexts` — an old text no option matches) freezes those words into the run's `plan`, its
+    `planSummary` and the History line; an Erase of the survey's copies doesn't reach them — they go with
+    the campaign or organization, like every run record *[stated in round 3]*. **Owner decision, flagged:** `scopeSummary` (every run
+    type since item 13) still freezes a canvasser's name as text ("Canvasser: Cara Canvasser"), and the
+    account-deletion purge (`purgeDeletedIdentities.js`) writes only `DeletedUserRecord`, so that name
+    outlives the 180-day window privacy.html `:128` describes ("we aim to remove your name"). "Aim" is
+    soft, but the sentence and the record now disagree. *[closed 2026-10-20: the purge now rewrites that
+    name — the line's first part, where `describeScope` always puts the filter's canvasser — to "Deleted
+    user" on every run of the four types whose `selection.scope.userId` is the purged account, per record
+    before its stamp, and once more each night over every record purged earlier and every account deleted
+    longer ago than the window that no unpurged record holds — an organization's deletion drops a record
+    once no organization is left on it, and the person's work can sit in another organization's run lines
+    (found by the follow-up review) (`scrubFrozenNames.js`, called by `purgeDeletedIdentities.js`; pinned in
+    `retention.int.test.js`). `describeScope` no longer falls back
+    to the account's email when it has no name, so a contact detail can't be frozen there. The sentence
+    and the record agree again; the name stays for the window, as the policy says.]* `AnswerEditRunChunk` holds survey, voter and round
+    ids, fingerprints, the landed copy's id (`a`), and per-chunk counts (question labels, and option ids
+    and labels with tallies, and up to 200 voter ids with skip reasons). A voter's own words are never a
+    count's key: a written answer is counted per question, and an old answer no option matches counts as
+    one *unlisted* pick *[round 2: the first build keyed an unmatched or written answer by its text, so
+    clearing a written answer stored what the voter said, word for word, on the run and every chunk — sent
+    with every poll of the run and kept after an Erase of the survey's copies. `repair:answer-edit-words`
+    folds those rows away, once, after the deploy]*. Bookkeeping added in rounds 2 and 3:
+    `answerEditFence` (run ids) on surveys, `writerToken` on copies, a chunk item's proven put-back (`u`,
+    a copy id) and `countRev`, `stepping` counters and `revertClaimedAt` on runs — and from round 4
+    `heartbeatAt` on unknock runs, `deletion.cascadeAt` on campaigns and `undo.legacy` on answer-edit runs —
+    and from rounds 5–7 a chunk item's counted questions (`cq`, question keys), its first-build flag (`l`)
+    and every copy a one-person session made of a survey (`as`, copy ids), `undo.receipts` and
+    `undo.writesReceipts` on answer-edit runs, `stoppedAt`, `undoBegunAt` and `counts.responsesHanded` on
+    unknock runs — and from round 8 `coEntryIds` on unknock chunks (entry ids, the class of `rows`), a
+    chunk item's settled put-back flag (`us`) and `recutLock.knocks` on rounds —
+    none of it personal data; `historyPending` on runs is the History line being written, the plan's own words (answer text,
+    as (c) says, already stored). **Pseudonymous, not "no personal data":** the strike records' visit keys
+    (door, round and canvasser ids) and an undo's stored `undo.summary.names[].detail.by` hold canvasser
+    user ids, which account deletion leaves in place — they join the pseudonymity list of §A3 like every
+    ledger row that carries a `userId` *[corrected in round 3: this read "none of it personal data"]*.
+    Both new models ride
     BOTH tenant-deletion cascades (verified 2026-10-19: `services/campaigns/deleteCampaign.js` and
     `services/platform/deleteOrganization.js` list `AnswerEditRun` and `AnswerEditRunChunk`).
     **Source.** A bulk edit is item 12's category (statements an admin enters about a voter) at batch
@@ -2631,8 +2728,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     canvasser's fake picks on a yard-sign question). What replaces that bound: the earlier version is
     always kept (above); every changed survey is stamped `editedBy`/`editedAt` and reads *Edited by
     ‹admin›* on the voter profile, the response detail on both clients and the web door panel (the
-    phone's map door and ping sheets with its next over-the-air update), and in the Canvassing activity export's
-    "Answers edited" column (when the export includes survey answers); each run is audited in
+    phone's map door and ping sheets with its next over-the-air update); the Canvassing activity export's
+    "Answers edited" column (when the export includes survey answers) prints `yes`, with no admin identity;
+    each run is audited in
     `CampaignChange` (`source: 'answer_edit'`, the plan's own words and the real counts); and the change
     undoes as one. A bulk edit never marks the NOTE edited — the note keeps its own stamp
     (`noteEditedBy`/`noteEditedAt`).
@@ -2645,8 +2743,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     (Q1, 2026-10-19), leads — who can be clients — see edits exactly as they see every other correction
     today: a lead's campaign-scoped profile shows the Edited line and the earlier answers like any other
     kept copy. Only org admins can edit, restore or erase (`/admin/voters` is `requireOrgRole('admin')`;
-    the answer-edit routes are org-admin only). The one-person-at-a-time step and the run itemization
-    add record-level audit subjects (`addAuditSubjects`). The client report builder's internal note
+    the answer-edit routes are org-admin only). The one-person-at-a-time step, the run itemization (its
+    after-undo names too), the run's own read (its samples and undo names), the run list (the same, per
+    row) and a priced review (the voters its manifest names) add record-level audit subjects
+    (`addAuditSubjects`) *[round 3: the after-undo branch and the run read added none; round 4: the list
+    and the review added none]*. The client report builder's internal note
     gains a count of edited responses beside its desk-entered count — COUNTS only, shown to whoever
     builds the report (org admins and the campaign's leads), never on the published page
     (`shapeWindow` is a field whitelist; `answerEdit.int.test.js` pins both). Neither note had ever
@@ -2662,6 +2763,221 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     becomes false: no Privacy Policy, ToS or DPA edit is needed.** The owner's 2026-10-19 approval
     (given as "item 21", this plan's privacy item before the numbering settled — proposal §B3) covers
     this content.
+    **Code review round 1 (2026-10-19, after the push of `589c1c0`).** Five reviewers found three race
+    windows in which "the earlier version is always kept" was NOT true, each closed and pinned by a test in
+    `answerEdit.int.test.js`: the bulk writer deleted a copy that had landed when a re-survey or a profile
+    Delete removed the edit's mark before it looked (it now trusts each write's own result); an Undo
+    whose put-back missed left a stamp that Undo again read as "put back", deleting the original (the
+    put-back now writes its own receipt on the survey, and a miss clears the stamp); and a phone re-survey
+    could overwrite answers an Undo had just put back without keeping them (it now writes over the version
+    it copied, re-reading up to five times; past that it keeps the latest version it read, then writes) *[round 2:
+    this read "writes only over the version it copied", which the fifth miss doesn't]*. The corrections
+    above (F2's audience, retention wording, item 32(c), the export column) came from the same review.
+    **Code review round 2 (2026-10-19, on round 1's fixes).** Five reviewers again found windows in
+    which the earlier version was NOT kept, each closed and pinned in `answerEditRound2.int.test.js`:
+    a delivery of a chunk deleted its own copy after another delivery had adopted it and landed the edit
+    through it (every copy now carries the `writerToken` of the delivery holding it; a delete names its
+    own token); a delivery still running when its change was undone wrote the edit back over the
+    put-back (the undo now raises `answerEditFence` on each survey before reading it, and no write of
+    that run lands past it); an Erase during an undo was honoured on screen and then written back (the
+    undo puts back only a copy it could stamp); and the undo's "redundant copy" rule (above). Also
+    corrected from this review: item 31's F2 audience and retention and its F5 mechanism, item 32(c)'s
+    deleted-account wording and its pick labels, and the re-survey sentence above.
+    **Code review round 3 (2026-10-19, on rounds 1 and 2's fixes).** Five reviewers again; each finding
+    closed and pinned in `answerEditRound3.int.test.js`. Where the earlier version was NOT kept, or an
+    undo didn't reach it: an Erase of the change's copy between its insert and its write left an edited
+    survey with its original nowhere (Erase now refuses while the change can still write); a survey
+    written back from a copy after its change's undo — an unknock or conversion undo, a re-cut round's
+    snapshot restore, a profile Restore — came back without the undo's fence, and a delivery still running
+    wrote the edit over it (every such path now carries the fence); and the undo missed an edit on a
+    survey re-created under a new id (it now reads copies by slot). **Deletion — a completeness fix:** an
+    organization deleted while a Door Outcomes conversion batch was in flight kept that batch's surveys
+    (reproduced: three surveys of a deleted organization left behind). Both cascades now wait (bounded)
+    for every Door Outcomes writer before their first sweep and sweep once more at the end, conversions
+    stop at their next batch, and every such writer sweeps after itself while its tenant's cascade is
+    running (`services/platform/lateWriteSweep.js`) — so "deleting an organization removes its canvassing
+    records" holds for a batch that stalls past the wait too. A deletion only requested, which the route
+    undoes when its job can't be queued, sweeps nothing. **Also from this review:** the one-time strike
+    backfill (`npm run migrate:removal-strikes`) records each visit missing from a conversion's records
+    with its own time, and the visits an older unknock undo couldn't put back; `repair:answer-edit-words`
+    maps an option's text to the option first. Corrected here: the GPS retention line, item 31's and 32's
+    retention lists, the bookkeeping's pseudonymity, and the audit-subjects sentence. No new data
+    collected, no new recipient, no subprocessor, no export; DPA §6 untouched, no customer notice; no
+    published sentence becomes false, and the deletion sentences (`:122`, DPA §9) are now true in a case
+    they weren't.
+    **Code review round 4 (2026-10-19/20, on rounds 1–3's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound4.int.test.js` (33 tests; each fix undone in turn is caught by its test).
+    **Deletion — two more completeness fixes and one in the other direction:** (1) a Door Outcomes change
+    CREATED while its organization was being deleted outlived the deletion — a conversion's run (its
+    selection of entry ids), and a one-person answer edit's run and chunk, whose scope line names a
+    canvasser (reproduced: all three create paths). Each create now checks once its run is on file and
+    goes with the tenant's rows; a conversion job whose campaign is gone takes its run with it. (2) A
+    relabel (Door Outcomes → Change to) that stalled past the cascade left its run (`ReclassifyRun`, with
+    its scope line) and its History row: relabels now sweep after themselves too, and `ReclassifyRun`
+    joins both cascades' last sweep — so "every Door Outcomes writer sweeps after itself" above now holds
+    for relabels (the cascades don't WAIT for a relabel, which is one inline write; its sweep-after is
+    what reaches it).
+    (3) A campaign delete the worker claims and then REFUSES (canvassing started first) let a writer's
+    sweep remove that campaign's Door Outcomes records, though the campaign stayed: writers now sweep a
+    campaign only once its cascade has begun (`deletion.cascadeAt`, stamped after the processor's last
+    refusal) — retention in the safe direction, nothing kept longer. **Restore** — item 31 above (the
+    unknock's heartbeat, every holding strike, a stopped strike's window, an undo's own entries).
+    **Audit:** the answer-edit run list names in the access log the voters its rows show (their sample
+    and the surveys an undo left), as the single run's poll does — the Details screen reads them from the
+    list — and so does a priced review, for the voters its manifest names. **The one-time console step** (`npm run migrate:removal-strikes`) now holds only the visits an
+    older unknock undo couldn't put back when the undo's own count settles which they were (it over-held
+    a visit the undo did put back that the canvasser re-recorded later; when the counts can't tell, it
+    holds them all, the safe direction), skips a conversion's visit whose entry came back, and marks an
+    unknock from before round 3 that stopped part-way as one, so Restore holds it and its Undo is offered. **Reviews** are now time-limited on the database's side too — no data change. No
+    new data collected, no new recipient, no subprocessor, no export; DPA §6 untouched, no customer
+    notice; no published sentence becomes false, and the deletion sentences (`:122`, DPA §9) now hold for
+    a change created during the deletion and for relabels.
+    **Code review round 5 (2026-10-20, on rounds 1–4's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound5.int.test.js`. **Erasure honoured (pre-existing, both removal undos):** an
+    Erase of a Removed card while that unknock's or Surveyed → Not home change's Undo was running
+    succeeded — and then the undo wrote the erased answers back from what it had read (reproduced, both
+    paths). That defeated item 32's "edit, then Erase" for a voter who asked to be removed. Both undos now
+    claim each copy before writing it back (the same stamp the answer-edit undo has always set, which
+    Erase and now Restore wait on, `409 COPY_IN_USE`) and write back only what they hold: a copy erased
+    first stays erased. **Restore mid-removal (pre-existing):** while an unknock was still removing, or a
+    conversion's batch or door still saving, a Restore of that visit's answers passed the guard — the
+    visit's own entry read Surveyed only because the removal hadn't reached it yet — and the struck
+    answers came back counted under a door the removal then cleared (reproduced). That made item 31's
+    "can no longer be put back as a counted survey from the profile" false inside that window; a removal
+    still writing now holds every copy of its visits outright. **The removal undos' own record:** an
+    unknock's Undo now leaves alone entries a LATER unknock still standing has struck (putting them back
+    undid that strike — fake knocks billed again, reproduced) and puts answers back only under the
+    visit's own unconverted entry; the strike settles and logs as it goes, so one that stops part-way is
+    in History. **The backfill** gives a door-by-door session's visits their own time again (round 4's
+    finish-time rule had stretched them to the session's close and held a real later survey's copy —
+    reproduced; never run in production), and marks an older unknock as stopped part-way only on evidence
+    it removed something. **History** counts the first build's undo correctly when it died inside its
+    first pass, and a survey saved twice in a one-person session as one. No new data collected, no new
+    recipient, no subprocessor, no export; DPA §6 untouched, no customer notice; item 31's sentence and
+    item 32's erasure path are true again in the windows that broke them.
+    **Code review round 6 (2026-10-20, on rounds 1–5's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound6.int.test.js`. **Kept copies are never deleted for answers that weren't
+    written back (a round-5 regression):** an unknock Undo whose write-back failed as a whole — a dropped
+    connection, a failover — read the driver's empty error list as "nothing clashed" and deleted every
+    claimed copy with no survey written: the answers were gone from everywhere while the Undo reported
+    success (reproduced). Had it fired, that would have made item 31's F9 ("nothing silently lost"), §B6
+    and item 32's "the earlier version is always kept" false, and been an accidental loss under the DPA's
+    breach clause; it never ran in production (rounds 1–5 are undeployed). Such a failure now stops the
+    Undo with every copy kept (Retry undo finishes it), and a copy is deleted only once its survey is
+    read back on file. The same mistake in the forward conversion (Not home → Surveyed, since `80acabe`)
+    stamped entries Surveyed over desk answers never written; it throws now. **A failed strike's hold (a
+    round-5 regression):** an unknock that failed in process ended its hold on the struck visits in 1970
+    (its heartbeat was set to the epoch), so a teammate's earlier copy of the struck answers read
+    restorable and a Restore swapped them over the canvasser's real later survey (reproduced) — item 31's
+    F5 and its stopped-strike window false for any such strike. The stop moment is recorded on its own
+    now (`stoppedAt`) and the hold ends there. **Removals wait for each other:** an unknock, its Undo, and
+    every conversion start, door step, Pick up and Undo refuse while another removal is still writing on
+    the campaign (an Undo beside a later unknock or a conversion step had put answers back under a door
+    the other was clearing — reproduced); a later unknock keeps what it struck, the earlier run's copies
+    there included, so two overlapping unknocks undo cleanly in either order. **Erasure:** a failed undo
+    no longer leaves its copies claimed for ten minutes (Erase and Restore said an undo was writing them);
+    an Erase pressed after an undo used the copy says the answers are back on the survey, to be edited
+    there. **The backfill** judges older unknocks newest first and no longer reads a later conversion's
+    removal, or a teammate's re-survey, as the older run's. **Reviews** stop their leftover database work
+    once they have answered, and at most two different ones run at once on a server. No new data
+    collected, no new recipient, no subprocessor, no export; DPA §6 untouched, no customer notice; the
+    sentences the round-5 regressions made false (item 31 F5 and F9, §B6, item 32) are true again.
+
+    **Code review round 7 (2026-10-20, on rounds 1–6's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound7.int.test.js`. **Struck answers swapped over a real survey (in every round's
+    guard, never deployed):** Restore lifted a removal's hold on a visit whenever an entry recorded before
+    the removal read Surveyed there — one an unknock that stopped part-way never deleted, one a Surveyed →
+    Not home step that died before its flip left, or an older entry an earlier unknock's Undo brought back
+    under a later unknock of the same visit — and a Restore made the struck answers the voter's current
+    survey over a teammate's real one (reproduced three ways). Item 31's F5 (an unknocked or converted
+    visit's answers "can no longer be put back as a counted survey, or swapped over a real later survey,
+    from the profile") was false in those cases; a hold now lifts only through the removal's own undo —
+    its undo begun, and one of its own entries back at the visit (or, since round 8, that undo finished
+    and an older entry put back at the visit since) — except where nothing on record names
+    the removal's entries, read the old way, by an entry recorded before it began: no run on file, an
+    unknock that never reached its delete, a conversion from before its records whose undo took its
+    stamps off, and a first-build unknock that stopped part-way until `npm run migrate:removal-strikes
+    -- --apply` marks it (that build stamped no `deletingAt`; run the step right after the deploy — until
+    then such a visit's answers can still be swapped over a teammate's later survey). **Claims on kept
+    copies:** round 6's sentence above, "a failed undo no longer leaves its copies claimed for ten
+    minutes", was false on two paths — the claim's own read failing, and the delete of copies already
+    written back failing. Every batch lets go of its claim however it ends now; only a database that
+    can't take the release, or a process that dies mid-batch, leaves it to lapse in ten minutes (Erase and
+    Restore say an undo is writing the copy meanwhile, and nothing is lost). **Erase on a person's other
+    campaign rows:** the profile lists a person's surveys and earlier answers from every campaign of the
+    organization, but each card's Edit, Delete, Restore and Erase went to the open row and answered "not
+    found" for a card from another campaign — so item 32's "Erase on screen", and the way VOTERS.md gives
+    to honour a removal request (edit the survey, then erase every earlier card that still holds it),
+    failed for a person on more than one campaign's list. Each card names its own row
+    and acts on it; who can act is unchanged (org admins of that organization, every route org-scoped),
+    and the access log now names the row acted on. **An undo lost during a clear-knocks discard:** an
+    unknock or conversion Undo landing between a discard's snapshot and its deletes left the visit's
+    answers held as unknocked with the run reading Undone — recoverable only by hand; removals now wait
+    for a re-cut (narrowed in round 8 to a lock that clears or restores knocks) and the discard waits for
+    removals. **Bookkeeping:** the field lists above add `cq`, `l`,
+    `as`, `undo.receipts`, `undo.writesReceipts` and `counts.responsesHanded` — ids, keys and flags, no
+    personal data. No new data collected, no new recipient, no subprocessor, no export; DPA §6
+    untouched, no customer notice; item 31 F5 and item 32 are true again, and round 6's claims sentence
+    is true as narrowed here.
+
+    **Code review round 8 (2026-10-20, on rounds 1–7's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound8.int.test.js`. **Corrected above:** round 7's paragraph quoted item 31's F5
+    in words F5 doesn't use, and left out the old reading for a removal with nothing on record to read its
+    entries by — among them a first-build unknock that stopped part-way, until `migrate:removal-strikes`
+    marks it. **A window in round 7's hold:** Restore read a Surveyed → Not home conversion's undo as begun
+    at its claim, before the checks and the enqueue that can give the run back, so a Restore in that window
+    (five seconds for an enqueue in a Redis outage) swapped removed answers over a teammate's real survey
+    (reproduced): F5 was false there. A claim holds now; the undo begins once it has stopped part-way or
+    finished. **Bookkeeping:** the field lists above add `coEntryIds`, `us` and `recutLock.knocks` — ids
+    and flags, no personal data. **What is kept at a lifted visit:** where an older entry was put back at
+    a struck visit since, an unknock's undo now leaves its own entry off and lifts the visit (item 31's
+    lift sentence above) — so where no survey holds the slot, the struck answers stay an earlier-answers
+    card Restore offers, where round 7 had written them back beside a second entry (described here only
+    since round 9). Otherwise round 8 changes nothing collected, kept, shown or shared: an Undo between a
+    clear-knocks discard and its restore now waits (it had left a removal's copy held, still erasable), the
+    undos and reviews read fewer rows, and every count and claim fix keeps the copies item 32 describes. No
+    new data collected, no new recipient, no subprocessor, no export; DPA §6 untouched, no customer notice;
+    item 31 F5 is true again in the claim window.
+
+    **Code review round 9 (2026-10-20, on rounds 1–8's fixes).** Five reviewers; each finding closed and
+    pinned in `answerEditRound9.int.test.js`. **Corrected above:** round 8's lift was described nowhere —
+    item 31's lift sentence and round 7's paragraph said a hold lifts only where the removal's own entry is
+    back, and round 8's paragraph that nothing else in it changed what is kept. **An earlier version
+    lost:** a profile Restore that swapped a teammate's card into a voter's slot while an unknock or a
+    Surveyed → Not home step was removing the survey there was deleted with it — the removal read, copied
+    and then deleted the slot's survey by id, and the restored answers, whose card the Restore had consumed,
+    were on file nowhere (reproduced; since before `589c1c0`). Item 31's F9 ("nothing silently lost") and
+    item 32's "the earlier version is always kept" were false in that race. A removal now deletes a survey
+    only while it still holds the submission it read. **A cleared round's snapshot:** an Undo waits for a
+    clear-knocks snapshot only while its round can still take it back — on file, not archived, knocked
+    nowhere since — and the restore refuses to put old knocks over new ones, or to bring back the work of a
+    change undone after the round was cleared. A snapshot that can't be restored stays on file, as item
+    32(b) says, until it is deleted on Turf Cutting or with the campaign; **owner flag:** one whose round
+    was deleted is shown nowhere, so only the campaign's deletion removes it (since before `589c1c0` —
+    deleting a draft round leaves its snapshots). No new data collected, no new recipient, no subprocessor,
+    no export; DPA §6 untouched, no customer notice; item 31 F9 and item 32 are true again in the race.
+    *[the owner flag closed 2026-10-20 — next paragraph.]*
+
+    **After round 9 (2026-10-20): the leftovers closed at the owner's call.** Two of them change what is
+    kept, both by keeping less. **(1) A deleted round's snapshots go with it.** Deleting a draft round
+    (`DELETE /passes/:id`) or a walk list whose rounds are all drafts now deletes the round's
+    `TurfSnapshot`s too — books-only and knock-clearing alike, the cleared entries, surveys, notes and
+    earlier answers in them included — after the round itself; a nightly maintenance job,
+    `sweep-orphan-snapshots` (05:37, MAINTENANCE_JOBS, not the retention banner), deletes every snapshot
+    whose round is gone: the ones deleted rounds left before this, and any a stopped delete leaves
+    (`snapshotRetention.js`). Nothing can restore such a snapshot (the restore needs its round), and no
+    Undo waits on one (`roundClearedSince` holds only while the round is on file). Item 32(b)'s "until that
+    snapshot is deleted" now includes the round's deletion. **(2) The frozen canvasser name** — item 32(c),
+    closed above. Otherwise nothing collected, shown, shared or exported changes: a survey conversion left
+    busy with nobody working on it (two database failures in a row) is now settled after ten minutes, its
+    run gaining `revertFrom` — the status and message it had when an Undo claimed it (bookkeeping, no
+    personal data); an identical priced review pressed twice at once answers both presses from one
+    reading, each press's access-log line written as before; a draft round that still holds door history
+    can no longer be deleted (it was, leaving its entries, surveys and copies under no round — nothing was
+    erased then either). No new recipient, no
+    subprocessor, no export; DPA §6 untouched, no customer notice. **Policy text:** no privacy.html, Terms
+    or DPA sentence becomes false — privacy.html `:128` ("we aim to remove your name") is now true of the
+    run lines too; nothing published promises that a deleted round's snapshots are kept.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -2897,7 +3213,7 @@ After the purge, **all field records persist in full and remain linked to the de
 - `CanvassActivity.location {lat, lng, accuracy}` — **`required`** (`:39`)
 - `CanvassActivity.timestamp` — **`required`** (`:42`); `actionType`, free-text `note` (`:37`), `distanceFromHouseMeters` (`:40`), `coordinatorId` (`:69`)
 - `SurveyResponse.userId` (required), with its own required `location` and `submittedAt` and the answer payload (`models/SurveyResponse.js:44`, `:52`, `:55`, `:49`)
-- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId` *[v6 2026-08-28: also `Household.correctedBy` (pin correction) and the new `Household.locationConfirmedBy` (Pin Fixes confirm — item 15). Same class, same posture: staff attribution on customer records, untouched by account deletion.]* *[v6 2026-08-29: also `Voter.doorAdded.byUserId` (who added a walk-up voter — item 16). Same class, same posture.]*
+- `FlagReview.reviewedBy` (required); `HouseholdLocationChange.userId` (required); `VoterNote.authorId` *[v6 2026-08-28: also `Household.correctedBy` (pin correction) and the new `Household.locationConfirmedBy` (Pin Fixes confirm — item 15). Same class, same posture: staff attribution on customer records, untouched by account deletion.]* *[v6 2026-08-29: also `Voter.doorAdded.byUserId` (who added a walk-up voter — item 16). Same class, same posture.]* *[v6 2026-10-19: also the Door Outcomes removal records' visit keys — `UnknockRunChunk.visitKeys` and `.notRestoredKeys`, `ConversionStrike.visitKeys` and `.notRestoredKeys` (door, round and canvasser ids) — and an answer-edit undo's stored `undo.summary.names[].detail.by` (who changed a survey since the edit) (item 32). Same class, same posture. Item 32(c)'s `scopeSummary` holds a canvasser's NAME, not an id — a separate owner flag, closed 2026-10-20: the identity purge now takes that name off when the window lapses.]*
 - The tombstoned `User` document itself still exists, carrying `_id`, `createdAt`, `lastLoginAt`, `deletedAt` — and an email that **embeds the user id**: `deleted+<userId>@deleted.doorline.invalid` *[v4 2026-07-22: `lastLoginAt` is no longer among them, nor is the new `lastSeenAt` — both are scrubbed. **The pseudonymity finding is unchanged and never depended on that field**: the tombstone still carries `_id`, `createdAt` and `deletedAt` plus an id-embedding email, and every field record still points at that id. Removing an activity clock removes a re-identification hint, not the identifier.]*
 
 Nothing in the deletion path or the purge path ever nulls, removes, or re-keys `CanvassActivity.userId`. `deleteAccount.js:170-173` states the omission is deliberate. `purgeDeletedIdentities.js:34-37` writes to `DeletedUserRecord` and nothing else.
@@ -3048,11 +3364,15 @@ What the cache does **not** contain: any name, voter ID, party, or canvass resul
 > accumulates. Tenant deletion reaches it — see §B5 — so nothing here survives an org delete.
 > Full context: gap 12 in the v3 list above.
 > **[v6 2026-10-19 — corrected, item 31.]** `overwrittenVia: 'unknock'` (item 14) accumulates the same
-> way: kept until that unknock is undone or the campaign is deleted. A desk-entered answer a canvasser
-> re-surveys over is now kept as a `submit` row, which stays self-consuming.
+> way: kept until restored or erased, or the campaign or organization is deleted (an unknock's undo removes
+> the copies it puts back and keeps the rest). A desk-entered answer a canvasser re-surveys over is now
+> kept as a `submit` row: consumed only if someone restores it, otherwise kept with no timer.
+> *[Corrected 2026-10-19, code review round 1.]*
 > **[v6 2026-10-19 — item 32.]** A third accumulating producer: `overwrittenVia: 'answer_edit'`, the
 > earlier answers every admin edit keeps (Door Outcomes → Edit answers… and the profile's Edit). Kept
-> until restored, erased, the edit is undone, or the campaign or organization is deleted. No timer;
+> until restored or erased, or the campaign or organization is deleted; an Undo removes the copies it
+> puts back and keeps the rest; a clear-knocks re-cut moves a round's rows into its snapshot, and
+> deleting a voter added at the door removes that voter's rows (every archive row, item 31). No timer;
 > both cascades reach it, as they reach every archive row (§B5).
 
 Two scheduled BullMQ repeatable jobs, both registered on the worker dyno (`server/src/worker.js:46`, `:57`; `server/src/services/retention/scheduler.js:24-31`):
@@ -3322,7 +3642,7 @@ Two of your own findings conflict here and I am telling you which is right.
 
 *[v6 2026-10-08 — the after check: `npm run audit:gps-stamps -- --since=2026-10-05` in production found no odd stamp among the 4,000 door results, 1,280 survey responses and 2 replaced survey answers created since 2026-10-05 00:00 UTC; no unknocked entries were frozen and no GPS pin fixes were recorded in that window. The off-Earth refusal shipped in commit d2903dc.]*
 
-*[v6 2026-10-19 — item 32: "surveys persist the coordinate twice" is a floor, not a count. Each kept earlier version of a survey (`SurveyResponseArchive` — an admin's answer edit now keeps one every time, `overwrittenVia: 'answer_edit'`) is a full copy that carries the same raw coordinate, so an edited survey's coordinate is stored once more per kept version, until that version is restored, erased, its edit undone, or the campaign is deleted. A copy of a reading already held: no new precision, no new purpose, no new reader.]*
+*[v6 2026-10-19 — item 32: "surveys persist the coordinate twice" is a floor, not a count. Each kept earlier version of a survey (`SurveyResponseArchive` — an admin's answer edit now keeps one every time, `overwrittenVia: 'answer_edit'`) is a full copy that carries the same raw coordinate, so an edited survey's coordinate is stored once more per kept version, until that version is restored or erased, put back by its change's Undo (an Undo keeps the copy of a survey changed since), moved into a re-cut round's snapshot, removed with a voter added at the door, or the campaign or organization is deleted. A copy of a reading already held: no new precision, no new purpose, no new reader. *Corrected in code review round 3: this read "its edit undone, or the campaign is deleted".*]*
 
 `distanceFromHouseMeters` is stored **in addition** to the raw coordinate, as `Math.round(haversineMeters(...))` (`canvass.js:83-86`). It does not replace or coarsen the raw lat/lng. It is null when the household has no pin.
 

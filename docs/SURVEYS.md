@@ -877,11 +877,12 @@ preview's Try it both walk, and the `survey-results` handler in
 | `SurveyTemplate.questions[]` | same (`questionSchema`, `{ _id: false }`) | Every **block** — questions and statements in one ordered array, so ordering, reconcile, duplicate, the bootstrap and the evaluator need no second plumbing. `key` (stable per-survey slug, **the join handle** — never reused once retired; no two blocks may share one, retired ones included; a client-sent key may not start with `__`), `label` (a question's wording, ≤1000 — or, on a **statement, the read-aloud body itself**, ≤5000: chosen over a separate `body` field so a phone on an older bundle, which prints only `label`, still reads the whole closing), `type` (`single_choice`/`multiple_choice`/`text`/**`statement`**), **`role`** (`'statement'` \| `'closing'`, statements only, **no schema default** — see below), **`title`** (≤80, default `null`; a statement's short name, "Close 2", for the phone header, the builder, the "then go to" lists, paper and every message that names it), **`note`** (≤2000, default `null`; canvasser-only, on any block; never exported, reported, printed or shown in the desk tools), **`links[]`** (`{ label, url }`, ≤5, default `[]`; on any block; `url` ≤2000 and must match `^https?://`, case-insensitive; label ≤120, optional), **`goTo`** (default `null`; a statement's or text question's route — `null` = the following live block, a later block's key, or `'__end__'`; refused on a choice question, which routes through its options), **`otherGoTo`** (default `null`; the `'__other__'` pick's route, kept only on a choice question while `otherOption` is on), `options[]`, `required`, `order`, **`retired`** (soft-retire a whole block), **`visibleIf`** (conditional display, default `null`; compiled output in Script flow), **`otherOption`** (boolean — adds an "Other: ___" choice), **`refusalOption`** (boolean — **dormant, not a feature**: the API accepts it on a question and the walk packet prints it as a muted "Refused" bubble, but no builder control sets it and the app never renders or records it; by owner ruling 2026-10-02 a refusal is the door screen's Refused button, never a survey answer). |
 | `SurveyTemplate…options[]` | same (`optionSchema`, `{ _id: false }`) | **`id`** (stable per-question id — reports/conditions join on this, so `text` is freely editable), `text`, **`tag`** (cross-question group label, default `null`; canonicalized to the palette's casing on save — see §I), **`script`** (per-option read-aloud line), **`retired`** (soft-hide from the field, keep in reports), `order`, **`goTo`** (default `null`; the answer's "then go to" — `null` = the following live block, a later block's key, or `'__end__'`; on a multiple-choice question every picked answer's route is followed; read only by the compiler, §L). A client-sent `id` may not start with `__`; `text` ≤500 and, on a live answer, may hold no `{{`; a question holds at most 200 answers, retired ones included (§B). |
 | `SurveyTemplate…visibleIf` | same (`visibleIfSchema`) | `logic` (`all`/`any`, default `all`) + `rules[]`. Each rule (`ruleSchema`): `questionKey` (an **earlier** question — never a statement), `op` (`is`/`is_not`/`any_of`/`answered`/`not_answered`), `optionIds[]`. In Script flow the stored value is the compiler's output and only ever `{ logic: 'any', rules: [ any_of … ] }` (§L). |
-| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt` (an admin changed the **answers** — since 2026-10-19 stamped only when answers change; before, any profile save stamped them, a note-only one included), **`noteEditedBy`/`noteEditedAt`** (the **note's** own stamp, `default: undefined`: ABSENT means "no stamp of its own yet", and every reader then falls back to `editedBy`/`editedAt`, the old meaning; a phone submit sets both to `null`; §N's `noteCarry`), **`answerEditMarks`** (`[ObjectId]`, `default: undefined` — the landing marks: the archive-row id of every answer edit whose write is what this survey holds now, pushed in the same atomic write that changes the answers, pulled by its undo, `$unset` by a phone submit; §N), **`deskEntry`** (`{runId, byUserId, at, source:'converted_outcome', fromOutcome}` — set ONLY by an admin outcome→Surveyed conversion; **absence is the field-submission marker**, so every pre-existing reader is unaffected and `{deskEntry:{$exists:true}}` is the exact query — see §K). Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`; partial index `{'deskEntry.runId'}` (revert sweep). |
+| `SurveyResponse` | [models/SurveyResponse.js](../server/src/models/SurveyResponse.js) | `surveyTemplateId`, **`surveyTemplateVersion`** (snapshot at submit), `answers[]`, `voterId`, `householdId`, `userId`, `campaignId`, `organizationId`, `passId`/`turfId`/`effortId` (metadata, nullable), `location`, `submittedAt`, `wasOfflineSubmission`, `editedBy`/`editedAt` (an admin changed the **answers** — since 2026-10-19 stamped only when answers change; before, any profile save stamped them, a note-only one included), **`noteEditedBy`/`noteEditedAt`** (the **note's** own stamp, `default: undefined`: ABSENT means "no stamp of its own yet", and every reader then falls back to `editedBy`/`editedAt`, the old meaning; a phone submit sets both to `null`; §N's `noteCarry`), **`answerEditMarks`** (`[ObjectId]`, `default: undefined` — the landing marks: the archive-row id of every answer edit whose write is what this survey holds now, pushed in the same atomic write that changes the answers, pulled by its undo, `$unset` by a phone submit; §N), **`answerEditUndone`** (the undo's receipts: the copy id of every answer edit an Undo put back, written by the put-back's own write — the only proof one landed; kept across re-surveys), **`answerEditFence`** (the id of every answer-edit run whose undo has reached this survey; no write of that run lands while it's there), **`deskEntry`** (`{runId, byUserId, at, source:'converted_outcome', fromOutcome}` — set ONLY by an admin outcome→Surveyed conversion; **absence is the field-submission marker**, so every pre-existing reader is unaffected and `{deskEntry:{$exists:true}}` is the exact query — see §K). Unique index `{voterId, passId}` (within-pass dedup, DB-enforced); index `{householdId, passId}`; partial index `{'deskEntry.runId'}` (revert sweep). |
 | `SurveyResponse.answers[]` | same (`answerSchema`, `{ _id: false }`) | `questionKey` (matches a template question's `key`), `questionLabel` (**snapshot** at submit), **`optionIds[]`** (stable id(s) chosen — the id-native tracking key; single → 1, multi → N, empty for free-text), **`otherText`** (free text typed into the `__other__` option), `answer` (Mixed — string \| string[] \| free text; **kept as a human-readable snapshot AND the legacy reporting fallback** for rows recorded before stable ids existed). |
-| `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, `noteEditedBy`/`noteEditedAt` and `answerEditMarks` (all three `default: undefined`, so a row copied before they existed stays without them), the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (**five producers**: `'submit'` = a different canvasser's field submission, or the same canvasser's over answers an admin desk-entered; `'restore'` = an admin restore displaced it; **`'outcome_convert'`** = an admin converted the door away from Surveyed, §K; **`'unknock'`** = an admin unknocked the visit itself; **`'answer_edit'`** = an admin changed some answers on a survey that stays surveyed, §N) and **`conversionRunId`** / **`unknockRunId`** (set by those two producers only; their reverts read them). The `answer_edit` producer adds **`answerEditRunId`** (a Door Outcomes run's copy only — the profile's Edit has no run; **no default**, unlike the two run ids above, so its indexes are truly partial), **`responseId`** (the live survey it came from — the run's own Details join back by it, while the writer and the undo find the live survey by slot), **`appliedHash`** (the `fingerprint` of what the edit wrote) and **`undoStartedAt`** (stamped by the undo just before its put-back). All provenance is never accepted from a request body. Written by **raw driver inserts** (verbatim, never re-validated — §F). **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. Partial indexes `{conversionRunId}`, `{unknockRunId}`, and for answer edits `{answerEditRunId, responseId}` (undo, redelivery) and `{answerEditRunId, overwrittenAt: -1}` (Details) — built by `migrate:build-indexes -- --apply`. **Growth is bounded for `submit`/`restore` only:** an `outcome_convert`, `unknock` or `answer_edit` copy nobody undoes, restores or erases stays indefinitely — that IS the recoverability promise, not a leak; each row is erasable from the profile, and tenant deletion still reaches them. See §F, §K, §N. |
-| `AnswerEditRun` | [models/AnswerEditRun.js](../server/src/models/AnswerEditRun.js) | One Door Outcomes answer edit (§N): `mode` (`'bulk'` \| `'queue'` — one person at a time), the **frozen** `template` (`{ surveyTemplateId, version, name, flow, questions }`, which the applier and the evaluator use instead of the live survey), `plan` (bulk), `planSummary` (frozen English), `selection` (`{ scope, byIds, digest, asOf, total }`), `scopeSummary`, `editedAt` (set once; every survey a bulk run edits carries it), `status` (`open` \| `pending` \| `running` \| `completed` \| `failed` — the apply phase), `queueJobId`, `cursor`, `progress`, a separate **`undo`** block (`status` `pending` \| `running` \| `done` \| `failed`, `jobId`, `requestedAt`, `requestedBy` (who pressed Undo — the History row names them), `passes`, and the last pass's **stored** `summary`: `putBack`, `changedSince`, `restoredOnProfile`, `waiting`, `cleared`, `erased`, `gone`, `names[]` ≤200, `namesTotal`), `counts` (`surveysTargeted`, `surveysChanged`, `changedSinceReview`, `notFound`, `skipped`, `droppedFollowUps`, `endsScript`, `byQuestion`, `byOption`), `samples` (≤200 names) and `historyCount` (how many changed surveys History has reported). Its own model, not a third direction on `SurveyConversionRun`, whose callers read every `else` as from_survey. Indexes `{campaignId, createdAt: -1}`, `{organizationId, status}`. In both delete cascades. |
-| `AnswerEditRunChunk` | [models/AnswerEditRunChunk.js](../server/src/models/AnswerEditRunChunk.js) | The run's **frozen selection**, 500 surveys a chunk (`ANSWER_EDIT_CHUNK_ITEMS`): `{ runId, campaignId, organizationId (both REQUIRED — the cascades filter every model by them under strictQuery), seq, items[{ r: responseId as reviewed, h: its fingerprint, v: voterId, p: passId, a: the landed archive row }], done, counts }`, `done` and `counts` written in one update. Unique `{runId, seq}`; `campaignId` and `organizationId` indexed. In both delete cascades. |
+| `SurveyResponseArchive` | [models/SurveyResponseArchive.js](../server/src/models/SurveyResponseArchive.js) | A **verbatim snapshot** of a `SurveyResponse` that a later write replaced — answers, note, `userId`, GPS, `submittedAt`/`syncedAt`, pass/turf/effort, `editedBy`/`editedAt`, `noteEditedBy`/`noteEditedAt` and `answerEditMarks` (all three `default: undefined`, so a row copied before they existed stays without them), the whole row — plus **server-stamped provenance**: `overwrittenBy`, `overwrittenVia` (**five producers**: `'submit'` = a different canvasser's field submission, or the same canvasser's over answers an admin desk-entered; `'restore'` = an admin restore displaced it; **`'outcome_convert'`** = an admin converted the door away from Surveyed, §K; **`'unknock'`** = an admin unknocked the visit itself; **`'answer_edit'`** = an admin changed some answers on a survey that stays surveyed, §N) and **`conversionRunId`** / **`unknockRunId`** (set by those two producers only; their reverts read them). The `answer_edit` producer adds **`answerEditRunId`** (a Door Outcomes run's copy only — the profile's Edit has no run; **no default**, unlike the two run ids above, so its indexes are truly partial), **`responseId`** (the live survey it came from — the run's own Details join back by it, while the writer and the undo find the live survey by slot), **`appliedHash`** (the `fingerprint` of what the edit wrote) **`undoStartedAt`** (stamped by the undo just before its put-back) and **`writerToken`** (which delivery of the run holds the copy — a delivery deletes only a copy it still holds, §N). A snapshot also carries the survey's `answerEditUndone` / `answerEditFence` as they were. All provenance is never accepted from a request body. Written by **raw driver inserts** (verbatim, never re-validated — §F). **Deliberately a separate collection** so no aggregation, status recompute, or export can mistake a preserved response for a current one — by construction, not by auditing every reader. Restore **consumes** the row it promotes, so every row here is currently-archived (a second restore of the same row is an honest 404). Not unique on `{voterId, passId}` — restore flip-flops legitimately leave several. Partial indexes `{conversionRunId}`, `{unknockRunId}`, and for answer edits `{answerEditRunId, responseId}` (undo, redelivery) and `{answerEditRunId, overwrittenAt: -1}` (Details) — built by `migrate:build-indexes -- --apply`. **Growth is bounded for `submit`/`restore` only:** an `outcome_convert`, `unknock` or `answer_edit` copy nobody undoes, restores or erases stays indefinitely — that IS the recoverability promise, not a leak; each row is erasable from the profile, and tenant deletion still reaches them. See §F, §K, §N. |
+| `AnswerEditRun` | [models/AnswerEditRun.js](../server/src/models/AnswerEditRun.js) | One Door Outcomes answer edit (§N): `mode` (`'bulk'` \| `'queue'` — one person at a time), the **frozen** `template` (`{ surveyTemplateId, version, name, flow, questions }`, which the applier and the evaluator use instead of the live survey), `plan` (bulk), `planSummary` (frozen English), `selection` (`{ scope, byIds, digest, asOf, total }`), `scopeSummary`, `editedAt` (set once; every survey a bulk run edits carries it), `status` (`open` \| `pending` \| `running` \| `completed` \| `failed` — the apply phase), `queueJobId`, `cursor`, `progress`, a separate **`undo`** block (`status` `pending` \| `running` \| `done` \| `failed`, `jobId`, `requestedAt`, `requestedBy` (who pressed Undo — the History row names them), `passes`, and the last pass's **stored** `summary`: `putBack`, `changedSince`, `restoredOnProfile`, `waiting`, `cleared`, `erased`, `gone`, `names[]` ≤200, `namesTotal`), `counts` (`surveysTargeted`, `surveysChanged`, `changedSinceReview`, `notFound`, `skipped`, `droppedFollowUps`, `endsScript`, `byQuestion`, `byOption`), `samples` (≤200 names), `historyCount` (how many changed surveys History has reported) and `historyPending` (the row being written — the History ledger, §N; the undo has its own `undo.historyLogged` / `undo.historyPending`), `startedAt` (the first job's claim; null on a change the worker never took), `stepping` / `steppingAt` (a one-person step in flight counts itself in and out, round 3) and `undo.receipts` (set once an undo pass writes receipts — the first build's put-back rule applies only before it). Its own model, not a third direction on `SurveyConversionRun`, whose callers read every `else` as from_survey. Indexes `{campaignId, createdAt: -1}`, `{organizationId, status}`. In both delete cascades. |
+| `AnswerEditRunChunk` | [models/AnswerEditRunChunk.js](../server/src/models/AnswerEditRunChunk.js) | The run's **frozen selection**, 500 surveys a chunk (`ANSWER_EDIT_CHUNK_ITEMS`): `{ runId, campaignId, organizationId (both REQUIRED — the cascades filter every model by them under strictQuery), seq, items[{ r: responseId as reviewed, h: its fingerprint, v: voterId, p: passId, a: the landed archive row }], done, counts }`, `done` and `counts` written in one update, by compare-and-swap on `countRev` and recounted from the database (§N, round 3). Each item also records the undo's put-back (`u`, the copy's id — written with its copy's delete, and provisional until the pass that made it finishes the survey and settles it, `us`, round 8; `l` when the first build's rule credited it, sent with `u`), and for a one-person session the questions its saves have counted (`cq`, so a survey saved twice is one survey changed and each question one survey — round 5; a save from before `cq` is read from what each of this run's copies of the survey differs by from the survey just after it — the next copy of the survey, else the survey as the step read it — round 6, round 7: read against the survey now, a teammate's edit in between counted as the session's) and every copy its saves made (`as` — the undo's erased reading counts only this run's copies, round 6). Unique `{runId, seq}`; `campaignId` and `organizationId` indexed; a partial `{campaignId, 'items.v'}` over fenced chunks only (the fences a survey written back from a copy must carry). In both delete cascades. `fenced` is set by the undo before it reads the chunk; an apply delivery never rewrites a fenced chunk. |
+| `ConversionStrike` | [models/ConversionStrike.js](../server/src/models/ConversionStrike.js) | The visits a Surveyed → door-outcome conversion took answers from, one row per chunk: `{ runId, campaignId, organizationId, visitKeys[] (door \| round \| canvasser — the doorKey format), at, doneAt, source ('run' \| 'backfill'), notRestoredKeys[] (written by the conversion's undo: the visits whose entries it couldn't flip back) }`. Restore's guard reads it (§F) — the conversion's own durable record, since the converted entry and the conversion's copy can both disappear. Also `entryIds[]` (the converted entries — the undo reads which came back from what is on file, round 3). Pseudonymous bookkeeping, no answers or names: a visit key is door, round and canvasser ids, the canvasser's user id as every ledger row carries. Indexes `campaignId`, `organizationId`, `{campaignId, visitKeys}`, `{runId}` (`migrate:build-indexes -- --apply`). In both delete cascades. |
 
 The `key` is derived in the builder by slugifying the label, with collision suffixes
 (`top_issue`, `top_issue_2`, …); option `id`s are derived the same way within a question. Both are
@@ -1313,7 +1314,11 @@ can fix that without guessing, and none is attempted.
   [services/surveys/archiveOverwrite.js](../server/src/services/surveys/archiveOverwrite.js) —
   snapshot-BEFORE-write, built from the pre-read doc, provenance stamped server-side:
   `overwrittenBy`/`overwrittenVia: 'submit'`/`overwrittenAt`) and only then `$set`s the seen row
-  (no upsert on that path). A **same-canvasser re-submit archives nothing** — that replacement is
+  (no upsert on that path) — **as a compare-and-swap on the row as read** (`_id` + its `updatedAt`,
+  which every writer of a survey stamps). Between the read and the write another writer can change the
+  survey — an answer edit's Undo putting the original back — and a blind `$set` replaced a version this
+  submission never copied; on a miss the copy made of the stale read is deleted and the route re-reads
+  and goes again (five tries, then the old archive-and-replace) (code review 2026-10-19, round 1). A **same-canvasser re-submit archives nothing** — that replacement is
   the designed self-heal — **unless the row it replaces was desk-entered** (`deskEntry`: an admin
   typed those answers on Door Outcomes, §K), which is archived exactly like a teammate's. Both write
   paths `$unset` `deskEntry` (a field submission is never desk-entered; left in place, the profile
@@ -1371,12 +1376,70 @@ org-admin-only routes live in [routes/admin/voters.js](../server/src/routes/admi
   the archived response's own `{householdId, passId, userId}`. For a `submit`/`restore` row any
   `survey_submitted` entry there counts — at a two-voter door the second survey replaces the visit's
   entry with a newer one, so matching the entry's time to the response's would wrongly block it. For
-  a row an admin **removed** (`unknock`, `outcome_convert`) only an entry recorded **before** the
-  removal counts: that is the visit's own entry, back because the removal was undone; one recorded
-  after is a new survey, and the struck answers must never replace it. Before this, Restore gave an
+  a row an admin **removed** (`unknock`, `outcome_convert`) — and **every other copy of that visit's
+  answers made before the removal finished** (an answer edit's earlier version, a teammate's overwrite
+  copy: they hold the struck answers too; code review 2026-10-19, round 1) — only the removal's **own
+  undo** lifts the hold: once that undo has begun, one of the removal's own entries at the visit back on
+  file — an unknock's frozen entries (`UnknockRunChunk.rows`), which its undo re-inserts; a conversion's
+  converted entries (`ConversionStrike.entryIds`, its stamps), which its undo flips back to Surveyed —
+  or, an unknock's undo finished, an older entry put back at the visit since by another undo or a
+  snapshot restore: the undo leaves its own entry off there and lifts the visit, and the struck answers
+  are offered as earlier answers, a swap where another survey holds the slot (round 8; described here
+  since round 9). An entry merely on file proves nothing, and one recorded after the removal is a new survey the struck
+  answers must never replace (round 7: rounds 1–6 accepted any entry recorded before the removal, so an
+  unknock that stopped before deleting its entry, a conversion step that died before flipping it, or an
+  earlier unknock's Undo putting back an older entry at the visit each let a Restore swap the struck
+  answers over a real later survey). A removal with nothing on record to read its own entries by — no
+  run on file, an unknock that never reached its delete, a conversion from before its records whose undo
+  took its stamps off, and a first-build unknock that stopped part-way until `npm run
+  migrate:removal-strikes -- --apply` marks it (that build stamped no `deletingAt`, so it reads as one
+  that never reached its delete) — is read the old way, by an entry recorded before it began. A
+  conversion whose undo has only claimed — `reverting`, with its checks and its enqueue still ahead,
+  either of which can give the run back — holds like one still writing: its undo has begun once it has
+  stopped part-way or finished, or once its queued job — or, inline, its own request — has claimed it (`revertClaimedAt` — round 9: a Retry
+  undo held again, for its whole run, what its first attempt had freed) (round 8: in that window, five seconds for an enqueue in a Redis outage, a
+  Restore swapped removed answers over a real survey). Once every hold is
+  lifted the visit must still read Surveyed, as for any copy. **A strike is a fact
+  about the removal RUN** (code review round 2), read from the run's own record of the visits it
+  struck: `UnknockRunChunk.visitKeys` (an unknock past its first removal — completed, or stopped
+  part-way; held up to `UnknockRun.completedAt`, for one that stopped up to when it stopped —
+  `stoppedAt` for one that failed in process, else its last heartbeat — whether undone since or not,
+  for one still removing with no end yet, and for an older run the chunk's `frozenAt`; round 6: a
+  failed strike's epoch heartbeat ended its hold in 1970) and **`ConversionStrike`** ([models/ConversionStrike.js](../server/src/models/ConversionStrike.js)
+  — written by each Surveyed → door-outcome chunk before it changes anything; held up to its `doneAt`)
+  — plus, for a strike made before that record existed, what the removal left: its own copy at the
+  visit, and the converted entry. It holds while its run stands. Once the run is undone it holds only
+  at the visits the undo could NOT put back — newer work held them — which both undos now record
+  (`notRestoredKeys` on the chunk / strike record; an undo from before that field is read from the
+  copies it couldn't put back). A copy made after the strike finished holds later work and follows the
+  plain rule. **Every** strike holding a copy must be lifted before it can be restored — each one by its
+  own undo — never only the latest (code review round 4: a later conversion whose undo
+  stopped after flipping its entry back freed an earlier unknock's struck answers, and a Restore swapped
+  them over the canvasser's real survey); the refusal is worded by the latest one still standing, unless
+  one still holds after its own undo — nothing will lift it, so `kept_after_undo` (round 5). A visit an
+  undo left to a LATER unknock that struck it since is that run's to hold, not the undone one's — its
+  copies are handed to it, and the refusal names it, since undoing it lifts the hold (round 6). A removal
+  still WRITING — an unknock removing (its heartbeat fresh), a conversion batch or door saving (its
+  record with no `doneAt` and its run running or a step in flight) — holds every copy of its visits
+  whatever the entries say: its own entry reads Surveyed only because the removal hasn't reached it yet,
+  and a Restore in that moment put struck answers back counted, under a door the removal then cleared
+  (round 5). A copy an undo has claimed (`undoStartedAt` under ten minutes old) is refused too
+  (`409 COPY_IN_USE`), as Erase refuses it. Round 1 stamped the copies instead (`visitStruckAt`): that missed every strike made
+  before it, and outlived an undo, refusing a legitimate Restore forever once the canvasser came back
+  to the door. Conversions made before `ConversionStrike` are recorded once after the deploy, visit by
+  visit with each visit's own time, and so are the visits an unknock undone before `notRestoredKeys`
+  could not put back — only those newer work held when it ran, not one it put back that the canvasser
+  re-recorded later (round 4) — and the unknocks from before round 3 that stopped part-way with copies
+  of their own on file and something removed — an entry gone with its visit empty, or the answers gone
+  from a visit whose entry it never reached, and not by a later unknock still standing (round 5) —
+  marked as such and listed in History at that moment, so Restore holds them and their Undo is offered:
+  `npm run migrate:removal-strikes` (dry run), then `-- --apply`. One residual: an
+  older conversion whose converted entry the canvasser has since re-recorded AND whose own copy is gone
+  before that runs leaves nothing that says it struck the visit. Before this, Restore gave an
   unknocked or converted visit a counted survey back under a door that said it wasn't surveyed, and
   after an unknock swapped the struck answers over a real later survey. Reasons: `unknocked`,
-  `converted`, `not_surveyed` (the canvasser re-recorded the visit as another result). An
+  `converted`, `kept_after_undo` (one of those, undone, but the undo couldn't put this visit back),
+  `not_surveyed` (the canvasser re-recorded the visit as another result). An
   `answer_edit` copy follows the `submit`/`restore` rule: any `survey_submitted` entry at its visit.
 - `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` — erases a preserved response
   outright (overwritten answer content must never be undeletable). **On screen since 2026-10-19**:
@@ -1870,8 +1933,41 @@ the removed content **is the evidence**. (Whether the field path's delete is als
 question, out of scope.) Recovery is **the run's own Undo**, which re-flips the entry and puts the
 answers back together. The profile's Restore refuses these rows while the door reads Not home
 (§F's restore guard): it promoted the answers *without* re-flipping the activity row, which left a
-counted survey under a `not_home` door. Once the run is undone, a row it could not put back (a
-newer field answer holds the slot) is restorable from the profile as an admin's explicit swap.
+counted survey under a `not_home` door. Once the run is undone, a row it could not put back is
+restorable from the profile as an admin's explicit swap only where the visit's own entry came back and
+a newer answer — a teammate's — holds the slot; where the canvasser re-recorded the door herself, her
+converted entry can't come back, so the answers stay held (`kept_after_undo`). The undo puts an answer
+back only where its visit's entry is back (round 3: put back where she had since recorded Not home, it
+counted a survey under a door that read Not home) — the run's own entry: one still stamped by it, or
+one its strike records name that carries no stamp and reads Surveyed, never one a later conversion has
+stamped since (round 4: the answers went back under a door that later change says was Not home). It
+settles every door its strike records name, not only those its stamps lead to (a step that stopped
+after taking a door's answers left that door and its voters stale), and it writes back only copies it
+has claimed — an Erase that landed since its read stays erased (round 5). The write-back is batched,
+500 surveys to one raw insert, under the RUN's claim (a retry takes back what an attempt that failed
+left); the batch's claim is let go however it ends — the claim's own read, the insert, the read-back or
+the delete failing — by the run's token, so only a database that can't take the release, or a process
+that dies, leaves it to lapse in ten minutes (round 7: a claim whose own read failed, and a landed copy
+whose delete failed, stayed held), and a copy is deleted only once its survey is read back on file
+(round 6: a claim, a read and a create per survey made a 50,000-survey undo three times slower, and a
+claim a failed attempt left was counted "not restored" by its retry). The slots it writes into are read
+by voter, 500 at a time (round 7: one `$or` clause per slot spent 87 s planning the query at 50,000,
+past the worker's socket timeout, so the undo could never finish), in the copies' own rounds, keeping
+only the slots asked for (round 8: every round's surveys of every voter, answers and all, ran the worker
+out of memory at the cap where voters were surveyed in other rounds too), and a second copy of a slot — a
+redelivered batch archived the answers twice — is judged once the first has landed: the same
+submission then is a duplicate and goes, anything else stays on the profile (round 7: both went into
+one insert, and the second was listed as a voter whose answers couldn't be put back). A
+Not home → Surveyed conversion whose desk answers fail to insert as a whole — the driver reports that
+with no write errors — throws, rather than reading as "nothing refused" and stamping the entries
+Surveyed over answers never written (round 6). **Each
+chunk records the visits it strikes** in a `ConversionStrike` row before it archives or flips anything
+(`at`, then `doneAt` when the chunk finishes), and the undo records the visits whose entries it could
+not flip back — the canvasser re-recorded the door since — in that row's `notRestoredKeys`: Restore
+reads both (§F), so the struck answers stay held there even after the converted entry is gone and the
+conversion's own copy is erased (code review round 2). Conversions made before that record existed
+are recorded once by `npm run migrate:removal-strikes -- --apply` — per visit, so a conversion that ran
+across the deploy gets its earlier visits beside the records its later batches wrote (round 3).
 
 **Revert refuses to clobber.** Before restoring, it READS whether the `{voterId, passId}` slot is
 free; a slot refilled by a later field submit is left alone and counted in `responsesNotRestored`.
@@ -1902,16 +1998,58 @@ do the stamps come off. An attempt that dies anywhere leaves its doors stamped �
 correction's scope until the retry finishes — so undoing again finds and settles every one. Lifting
 the stamps with the flip, as it once did, left a retry nothing to settle. A reverse undo's retry
 also recognises its own earlier put-back: a slot held by the **same submission** (same `userId`,
-same `submittedAt`) is restored, not counted in `responsesNotRestored`. A stopped undo reads
+same `submittedAt`) **with the same content** (same answer `fingerprint`, same note) is restored,
+not counted in `responsesNotRestored`. Same submission alone is not proof — a profile Restore of a
+different copy can put the same submission back with different answers, and deleting the archive
+copy then lost the only record of its version (code review 2026-10-19); a holder whose content
+differs is a field answer and stays, counted not restored. A stopped undo reads
 **`revert_failed`** (`SurveyConversionRun.status`): the worker's failed listener sets it for a
 `revert` job (`reconcileFailedConversionJob` in conversionProcessor.js — a stopped conversion still
 reads `failed`), the inline path (≤ `INLINE_REVERT_MAX_ENTRIES`, 500) sets it in a catch and answers
-**500 `REVERT_FAILED`** with the run, and `expireDeadInlineRevert` (on every run read and the list)
-turns an inline undo still `reverting` 10 minutes after it started — one that died with its request —
-into `revert_failed`. Its only remedy is **Retry undo** (the revert route); **resume refuses it**
+**500 `REVERT_FAILED`** with the run, and an inline undo still `reverting` 10 minutes after its last
+write — one that died with its request — is settled into `revert_failed` (below). Its only remedy is
+**Retry undo** (the revert route); **resume refuses it**
 (409 `NOT_RESUMABLE`), because resume runs the conversion forward — when a stopped undo read
 `failed`, *Pick up where it stopped* re-applied the change it was taking back. A large undo that
-can't reach the queue goes back to the status it had (a stopped undo stays one), not `completed`.
+can't reach the queue goes back to the status it had (a stopped undo stays one), not `completed`. The
+create, Pick up and the undo each give their claim back however the checks after it end — a refusal or a
+database error: the create deletes its run (nothing has run), Pick up and the undo park the run back
+where it was (round 8: a database error there left the run *Working…* or *Undoing…* with no job and no
+button, and every removal, answer edit, snapshot restore and clear-knocks discard on the campaign
+waiting behind it for good). A give-back is a database write too, so when it failed along with the check
+before it (two failures in a row, as in a failover) the run was left busy anyway (round 9). Such a run —
+`pending`, `running` or `reverting` 10 minutes after its last write, with no live job (`getJob` /
+`getState`: not waiting, active, delayed, prioritized or waiting-children; a queue that can't be asked
+counts as alive) — is **settled** (`settleStalledConversion`, [surveyConversion.js](../server/src/services/canvass/surveyConversion.js)),
+on every run read, the list, and `removalBusy` / `otherChangeRunning` before they refuse as busy: going
+forward it reads `failed` (*The conversion stopped before it finished.* — Pick up or Undo); an undo that
+began reads `revert_failed`; one claimed and never begun goes back to **`revertFrom`** — the status and
+message the revert route's claim records (follow-up to round 9) — so a change the admin kept never reads
+as an undo begun, which would lift its strikes (restoreGuard.js). "Began" is `revertClaimedAt`: a queued
+undo's job stamps it on its claim, and the inline undo stamps it just before its first write. A claim made
+before `revertFrom` existed reads a stopped undo, as the old 10-minute rule did; an inline-sized undo has no
+job to ask about. The settle is a compare-and-swap on the run's status and `updatedAt`, and clears
+`queueJobId`, so a job that turns up late can't claim the run. The undo also refuses **409 `ROUND_CLEARED_SINCE`**, before its claim and
+again after, while a clear-knocks snapshot made after the run, still unrestored, holds the run's own work
+— entries it stamped, its desk answers, its copies (`roundClearedSince`,
+[answerEditRuns.js](../server/src/services/canvass/answerEditRuns.js)): undone in between, it found
+nothing of that round to take back and read *undone*, and the restore then brought back a door stamped by
+an undone run with its copy kept after the undo, out of every tool's reach (round 8). Only a snapshot its
+round can still take back holds the undo — the round on file, not archived, and knocked nowhere since;
+past any other the round's cleared work went with its snapshot, and the undo goes ahead (round 9: the
+refusal held an undo for good once the round was deleted or archived, and sent the admin to a restore that
+put old knocks beside a re-worked round's new ones and failed part-way). The refusal names the round and
+the day it was cleared; restoring that snapshot on Turf Cutting lets the undo through, and the restore
+itself now refuses old knocks over new ones (`SNAPSHOT_ROUND_KNOCKED`) and a snapshot holding the work of
+a change undone after it (`SNAPSHOT_HOLDS_UNDONE_CHANGE`) — [PASSES_AND_TURF.md](PASSES_AND_TURF.md). A
+relabel's Undo refuses the same way: it stamps its entries as a conversion does (round 9: undone between a
+discard and its restore, the restore brought its entries back still relabelled). The undo reads its
+copies a page of 1,000 voters at a time — a voter's copies, the surveys holding their slots and their
+fences together, so a slot's copies are judged as one (round 9: every copy at once, 50,000 copies of a
+twelve-question survey ran the worker out of memory at its 384 MB cap before it wrote a thing). And the
+step that removes a survey deletes it only while it still holds the submission it read
+(`deleteUnlessReplaced`, archiveOverwrite.js — round 9: a profile Restore that swapped a teammate's card
+into the slot in between was deleted with it, and its answers were on file nowhere).
 
 ### Performance
 
@@ -2269,7 +2407,10 @@ database).
 4. **Follow-ups (ruling 2).** `visibleQuestionKeys` before and after, over cells built exactly as
    `normalizeAndFilterAnswers` builds them; every answered row visible before and hidden after is
    removed and reported `dropped`. An answer already hidden before the edit is kept. `endsScript` is
-   set whenever a Script-flow survey (`flow === 'script'`) drops one.
+   set when a Script-flow survey (`flow === 'script'`) drops an answer **that the blanks cause** — one
+   that would still be reached with the blanked answers put back. The review's red line says "a blank
+   answer ends the script", so a change that only routes elsewhere doesn't claim it, nor does a re-route
+   beside an unrelated blank (round 2); every drop is listed either way.
 5. **Person mode** (`'person'` — a walkthrough step and the profile): `set` writes the posted answer,
    may fill a blank and may carry a written answer or an "Other" text (trimmed); the **ghost guard**
    discards a fill on a question the after-path hides (`hidden_on_path`).
@@ -2300,13 +2441,18 @@ stale note (409 `RESPONSE_CHANGED`).
 
 `resolveEditEntries` resolves the page's selection (the refusals are in CAMPAIGNS.md Part 2); from
 there the unit is the **survey at a selected visit**. `scanEditTargets` folds the selected visit
-triples with `tripleClause`, 2,000 at a time, and reads each survey once, counting what it leaves out:
+visits 2,000 at a time — one clause for a batch's doors and rounds (`visitsClause`), its own visits kept
+by `doorKey` (round 8: one branch per round and canvasser, as `tripleClause` builds, was planned afresh on
+every read, and a crew of 300 made the read pass 9–14 s) — and reads each survey once, counting what it
+leaves out:
 `otherSurvey` (another template), `outsideDates` (`submittedAt` outside the window — the date range
 applies to the surveys too), `afterReview` (`createdAt` after `asOf`: excluded, never refused), and,
 under an answer filter, `notMatched` — `q.answerMatch` re-applied as a query under `$and`, never a
 JavaScript copy of it. `matchedNotSelected` (matched surveys at visits whose latest entry falls
 outside the dates, so the table can't show them) is the answer scope's count minus those found, only
-for a whole-filter, untruncated selection with no walk-list scope. The survey edited is the one asked
+for a whole-filter, untruncated selection with no walk-list scope, and only when the survey edited is
+the answer filter's own (its matches are counted in that survey; set against another survey's they
+named surveys "left out" that were never there — round 2). The survey edited is the one asked
 for, else the answer filter's template, else the one most of the visits' surveys were recorded under;
 with several present the form asks. Caps: `ANSWER_EDIT_MAX_RESPONSES` 50,000 (`answerEditCap()`) and
 500 one person at a time. Memory is bounded: counters, per-key deltas, the frozen items and the first
@@ -2320,24 +2466,114 @@ the left-out counts, `heldByRuns`, `responses`, the template version, `asOf`, `d
 With a plan it adds `price`:
 
 - `surveysChanged`, `unchanged` by first reason, `skippedByQuestion`, and per question `removed` /
-  `added` / `kept` / `setTo` by pick, `multi` (surveys that lost more than one) and `leftBlank` — what
-  the review's sentences are built from (`reviewSentences`,
-  [lib/answerEditPlan.js](../client/src/lib/answerEditPlan.js));
+  `added` / `kept` / `setTo` by pick — each pick once per survey, so an id stored twice, or a pick beside
+  an "Other" typed as its name, is one survey that had it (round 4: the review said 2 where the run card
+  said 1) — `multi` (surveys that lost more than one) and `leftBlank` — what the review's sentences are
+  built from (`reviewSentences`, [lib/answerEditPlan.js](../client/src/lib/answerEditPlan.js));
 - **`results`** — every changed choice question campaign-wide, before → after. `before` IS the
-  `/survey-results` aggregation (`choiceKeyStages` + `$group` + `mergeOptionRows`) over `{
-  organizationId, campaignId, surveyTemplateId }`; `after` is `before` plus the in-memory delta keyed
-  by `keysOf`, compared as keyed maps with a missing key as 0;
-- **`tags`** — for each tag an option in the actual diffs carries, *identified* and *current* before →
-  after, for the **affected voters only** (no other voter can move). Their template responses are
-  read, the edits substituted in memory, and both versions run through the REAL stages
-  (`answerTagClause` + a voter `$group`; `latestAnswerKeyStages` + `currentTagVoterSet`) in one
-  `$documents` + `$facet` call per 1,000-voter batch, split by voter while over 8 MB, the answers in
-  `$literal` — `$documents` evaluates its documents as expressions, so an answer text starting with
-  `$` would otherwise read as a field path. After = before − the affected voters' before + their
-  after. Needs MongoDB 5.1+; on any failure it **fails soft** (`tagsUnavailable: true`, and the review
-  says tag counts can't be previewed);
-- `textCleared` (written questions, over the selection only — the results card shows a top ten),
-  `dropped` follow-ups per question, `endsScript`, `recordedBy`, and the manifest: the first 50
+  `/survey-results` stages (`choiceKeyStages` + `$group` + `mergeOptionRows`) over `{
+  organizationId, campaignId, surveyTemplateId }` — several questions in ONE pass
+  (`choiceKeyStagesForMany`, the same stages matching several questions, grouped by question and key;
+  the plan's own while the scan starts, a dropped follow-up's after the scan's first batch, or every
+  fourth one after, that saw it dropped — round 5);
+  `after` is `before` plus the in-memory delta keyed by `keysOf` — every pick of every row of the
+  question, before and after, as the stages count them (round 4: one row's picks under-priced a
+  question an old survey held twice) — compared as keyed maps with a missing key as 0;
+- **`tags`** — for **every tag with an option on a question the change touched** (changed, cleared or
+  dropped), *identified* and *current* before → after, for the **affected voters only** (no other voter
+  can move); tags that don't move are left out. Not just the tags of the picks that moved: *current*
+  is the latest ANSWER, so clearing a voter's latest answer brings an older one back into force, tags
+  and all; a two-entry change can net a pick to zero while moving it between voters; an "Other"
+  write-in that reads like an option is caught by that option's tag (code review 2026-10-19, round 1 —
+  each of these moved unpriced). After = before − the affected voters' share before + their share
+  after, every number through the REAL stages:
+  - **before, campaign-wide** — *current* as voter sets (`currentVoterSetsByTag`, the results card's
+    own pass, folded for every tag in one walk of its rows by `currentTagVoterSets`) and *identified* as
+    counts (each tag's `answerTagClause` + a voter `$group`, two at a time — side by side they fought
+    over the database's cores). They are read **while the scan runs**, not after it: the plan's OWN
+    questions' results and tags from the start, and a follow-up's once the scan has seen the change drop
+    its answers — after the first batch and every fourth one after (round 5: a pass per batch that found
+    a new one ran a dozen campaign-wide passes), one pass for each kind. Once the review has its answer —
+    or has failed — nothing it began starts after it: one stop (an `AbortController` in
+    `buildEditPreview`) reaches these counts and the pricing's own reads — the tag pass's batches,
+    `identifiedAmong`, `$documents`, the late counts — every launch checks it and the aggregates carry
+    its signal (round 6: a review whose change moved nothing answered at once while these counts ran on,
+    and pressed again they stacked; round 7: one that answered 500 went on starting its tag pass's reads,
+    146 of them). Reads already in flight end on their own time limit. Pricing every question
+    the plan could reach up front made a gate question — a Script flow's first, whose routes every
+    follow-up's `visibleIf` names — price the whole survey at once, 35 tags for a change that moved 2
+    (code review round 4: 9.8 s at 50,000 surveys, over the scale gate; now 4.8 s);
+  - **the affected voters' share before** — *current* read off those sets; *identified* by the tag
+    clauses over their stored surveys (one `$facet` per 1,000-voter batch, nothing shipped);
+  - **their share after** — their surveys with the edits substituted (taken from the scan, which keeps
+    each changed survey's edited answers to the questions of the tags the plan can reach — and after its
+    first batch, only those of the plan's own tags and of the tags on what that batch dropped (round 5:
+    a change that re-routed past tagged follow-ups kept every reachable question and overflowed) — up to
+    250,000 rows, past which, or for a tag reading a question it didn't keep, the batches read and
+    re-edit them) through one `$documents` + `$facet` call per batch:
+    each tag's clause, and ONE `latestAnswerKeyStages` pass over every touched tag's questions. Split
+    by voter while over 8 MB, the answers in `$literal` — `$documents` evaluates its documents as
+    expressions, so an answer text starting with `$` would otherwise read as a field path. Four
+    batches run at a time.
+
+  Measured on a laptop (round 4): the scale test's at-the-caps review in 2.7 s, a heavy shape — a
+  Clear that drops eight tagged follow-ups, 16 tags across 9 questions, 50,000 surveys — in 7.4 s with
+  every tag priced (28 s before round 3, near the router's 30 s cut), and a Script flow's gate question
+  changed to an answer that routes on, 35 tags on the survey, in 4.8 s. These swing with load (a
+  reviewer measured 7.9–13.8 s for the heavy shape on a busy machine), and the production database has
+  two cores, so it is slower there. Needs MongoDB 5.1+. **Bounded by time, on both sides** (round 4:
+  the budget only stopped the waiting — a slow database's reviews ran on past their answer, three
+  presses deep, or answered past the router's cut): a dry run's budget runs from the start of its
+  request — 20 s for the tags, 25 s in all — and **every read of its scan and its pricing carries the
+  time it has left** (`maxTimeMS`; the held-by-earlier-changes count too). The selection's own reads
+  (resolving the filter, the ticked rows) are capped and indexed and carry none. The tags' counts carry
+  the TAG deadline, nothing new starts past it, and the current-tag pass is aborted at it (its cursor
+  closed, read in the driver's own batches — pulled a row at a time, the heavy review took 1.5 s longer),
+  so the database's work ends within a batch of the review giving up, and rows an abort cut short are
+  never counted (round 5: the counts carried the review's deadline and kept running, a cursor kept being
+  fed, seconds after the answer). Identified
+  counts share one cap of two at a time across every pass a review starts, and follow-ups the scan
+  finds dropped start their counts after the first batch and every fourth one after. Tags or results
+  that can't finish in time **fail soft** (`tagsUnavailable` / `resultsUnavailable: true`, and the
+  review says they can't be previewed right now); a scan that can't refuses **503 `REVIEW_TOO_SLOW`**
+  ("the database is busy — try again in a minute, or narrow the selection"), never a partial price.
+  **The same priced review pressed again** on a server (a double click, a retry after the router cut
+  the first; the same rows ticked in any order) joins the one running and answers with its result and
+  its `asOf`; a different review runs at once, never waiting behind another inside its own budget
+  (round 5: waiting, a review that succeeded alone was refused) — two places for reviews per server: a
+  priced review takes one, a heavy one both — over 10,000 surveys, or priced on a campaign whose numbers
+  hold over 25,000 surveys (`Campaign.stats.surveyCount`), since its campaign-wide pricing is
+  campaign-sized (round 8: two one-entry reviews of a 50,000-survey campaign took as much memory as one
+  heavy review, and lost their tag prices together) — and the form's own dry run (opening *Edit answers…*,
+  *Check again*, another survey) one too: it reads every survey just the same. A press takes its place as
+  it arrives, before it reads anything — a priced review of a big campaign both, since its weight is known
+  then (round 9: it took its second only after reading its selection) — and a heavy one its second as soon
+  as its surveys are counted, or, if the same review it would have joined finished meanwhile, as it starts
+  (round 9: it ran on one place, beside a light review); with
+  no place free it is refused, **503 `REVIEW_BUSY`** (*Another review is being worked out on this server
+  right now*), a press joining the same review already running excepted (it gives its place back) — round
+  6: three at once lost their tag prices together, and two heavy ones took a web dyno near its memory;
+  round 7: two heavy ones still took 1 GB and held other requests waiting for a connection, and a refusal
+  came only after the refused press had read its whole selection, up to 13 s; round 8: places were taken
+  only after that read, so the form's first open, and a heavy press beside one other review, were still
+  refused late, and a lighter press made later could take the place a heavy one was about to need. **The
+  same review pressed twice at the same moment** joins too: a priced review names its survey, so its key
+  is known on arrival, and from then on the first press answers for it (`reviewsAnswering`) — a second
+  press with that key takes no place, reads nothing, and answers with the first's status and body (its
+  own access-log subjects added), or its error (follow-up to round 9: known as running only once it
+  started pricing, the twin found nothing to join and was refused). A heavy press can still find its
+  second place taken by a *different* review that arrived while it counted — it is refused then, and its
+  retry runs once that review is done. One person at a time's dry run reads no plan, so the
+  join key carries the mode: a priced review never joins it (round 8: it answered with no price). The
+  budgets, the places and both heavy lines are env-overridable for a test (`ANSWER_EDIT_TAG_BUDGET_MS`,
+  `ANSWER_EDIT_REVIEW_BUDGET_MS`, `ANSWER_EDIT_REVIEWS_AT_ONCE`, `ANSWER_EDIT_HEAVY_REVIEW`,
+  `ANSWER_EDIT_HEAVY_CAMPAIGN`);
+- per question, `keptAny` — the changed surveys that kept at least one ORIGINAL pick, which the review's
+  "N keep …" reads (with *Replace them with*, "not left blank" also counts surveys that only got the
+  replacement);
+- `textCleared` (written questions, over the selection only — the results card shows a top ten; a
+  dropped written follow-up is listed once, under `dropped`), `dropped` follow-ups per question,
+  `endsScript`, `recordedBy`, and the manifest: the first 50
   changed surveys, newest first, each changed question before → after through `formatAnswerCell`.
 
 **The digest** is the XOR of `sha1(responseId:fingerprint)` over the targeted surveys, plus their
@@ -2358,24 +2594,57 @@ One writer serves a bulk chunk, a walkthrough step, the profile's Edit and an ow
 2. **One compare-and-swap per survey**, raw, filtered on the bytes as read (`_id`, `answers`, `userId`,
    `editedBy`, `editedAt`; `writeOneSurvey` adds `note` and `noteEditedAt`), that `$set`s the answers
    and `editedBy` / `editedAt` and **`$push`es the copy's id onto `answerEditMarks` in the same atomic
-   write**. So "did this edit land?" is a fact on the survey, not a guess. Raw throughout, because a
-   Mongoose cast changes the bytes the filter compares (an old row gains `optionIds` / `otherText`).
-3. **A miss** deletes only a copy **this delivery inserted**, and counts the survey
-   `changedSinceReview` (named, untouched). A copy found already there — another delivery's, or a
-   dead attempt's — is **adopted**: written through, never deleted. Only the undo deletes copies it
-   didn't write. That is what keeps the only copy of an original alive when two deliveries of one
-   chunk race (the plan's review round 3 blocker).
-4. **By slot, never by id.** The writer and the undo find the live survey by `{ voterId, passId }`:
+   write**. Whether the edit LANDED is that write's own result (`matchedCount`), never a later read of
+   the mark: a re-survey `$unset`s marks and a profile Delete removes the survey, and either one in
+   between made a landed write read as a miss — whose copy, the only one of the original, was then
+   deleted (code review 2026-10-19, round 1). Raw throughout, because a Mongoose cast changes the bytes
+   the filter compares (an old row gains `optionIds` / `otherText`).
+3. **A miss** (by its own result) deletes only a copy **this delivery inserted and still holds**, and
+   counts the survey `changedSinceReview` (named, untouched). A copy found already there — another
+   delivery's, or a dead attempt's — is **adopted**: written through, never deleted. Only the undo
+   deletes copies it didn't write. That is what keeps the only copy of an original alive when two
+   deliveries of one chunk race (the plan's review round 3 blocker). Both rules are enforced on the
+   copy (code review round 2): every copy carries the **`writerToken`** of the delivery holding it; an
+   adopter first claims it by compare-and-swap on the token as read (a claim that misses leaves the
+   item to the delivery that has it), and a delivery's delete names its own token — so a copy another
+   delivery adopted and landed the edit through is never deleted by the one that inserted it, which
+   before this lost the original (and found the landed copy "erased" on Undo).
+4. **The undo's fence.** Every write of a run requires **`answerEditFence`** on the survey not to hold
+   the run's id, and the undo raises it on each chunk's surveys (by slot, one `updateMany`) before it
+   reads them, with the chunk's own `fenced` flag (an apply delivery never rewrites a fenced chunk's
+   counts or items). So a delivery still running when its change is undone — a stalled job beside
+   *Start again* — can never land afterwards: it wrote the edit back over the put-back, whose bytes
+   matched what it had read, or over a survey whose never-landed copy the undo had just removed
+   (round 2). A delivery also re-reads its chunk's `fenced` flag after it inserts its copies and before
+   its compare-and-swaps, and steps back (deleting only its own fresh copies) once an undo has fenced
+   it. The fence follows the survey wherever it is written back from a copy (round 3: it lived only on
+   surveys on file when it was raised): the unknock undo, the conversion undo, a re-cut round's
+   snapshot restore, a profile Restore into a gap and a profile full-swap Restore each give the survey
+   the fences of every run whose undo has reached that slot (`fencesForSlots` / `withFences`, read from
+   the fenced chunks through a partial index), so a delivery still running can't land on it either.
+5. **By slot, never by id.** The writer and the undo find the live survey by `{ voterId, passId }`:
    the unknock undo, the conversion undo and a profile restore into the gap re-create a survey under a
    new `_id`, and Pick up after one of those must still find it.
 
 A bulk run works through chunks of 500 frozen items: one raw read by slot, one read of this run's
 copies, a classification per survey (already landed → re-counted from its copy's snapshot, so the
-per-pick totals stay exact after a resume; an adoptable copy → written through; changed since the
-review → named), one ordered `insertMany` of the new copies, one unordered `bulkWrite` of the
-compare-and-swaps, a raw re-read, then the chunk's `counts` and `done` in one update — a re-processed
-chunk replaces its counts instead of adding to them. A miss on bytes alone (the canonical fingerprint
-still equal) is retried once.
+per-pick totals stay exact after a resume; an adoptable copy → claimed, then written through; changed
+since the review → named, and so is a survey re-recorded under **another survey** since — this run's
+questions aren't its questions, round 3), one ordered `insertMany` of the new copies, the
+compare-and-swaps 25 at a time (each judged by its own result), and a raw re-read of the misses only.
+**The chunk's counts are then recounted from the database** (`countChunk`: a survey carrying this run's
+mark and landed fingerprint is changed; so is one whose recorded landing `a` still has its copy on
+file) and written by compare-and-swap on the chunk's `countRev`, re-read and recounted on a miss, with
+`done` in the same update — never from what this delivery alone did, and never removing a landing
+another delivery recorded (round 3: a delivery that lost a claim wrote its chunk last and dropped an
+edit another delivery had landed, so the run read *0 changed* and Undo said nothing was on file). A miss
+on bytes alone (the canonical fingerprint still equal) is retried once. The per-pick counts
+(`counts.byOption`) are keyed by **option id only**, one key per pick: an id stored twice in one answer
+is one pick, and each distinct old text no option matches is one `__unlisted__` pick (round 3: a
+doubled id counted twice, two unmatched texts once). A written answer is counted per question
+(`byQuestion`) — the first build keyed unmatched texts by their words, so clearing a written answer
+stored the voter's words on the run and its chunks (round 2; `npm run repair:answer-edit-words` folds
+those rows away once after the deploy, mapping a text that IS an option's text to that option first).
 
 **`noteCarry` — the note keeps a stamp of its own.** `editedBy` / `editedAt` used to mean "the note was
 edited" too (the Notes hub and the Notes export read them), so an answers-only bulk edit would have
@@ -2411,21 +2680,70 @@ in [queues/connection.js](../server/src/queues/connection.js) goes from 8 to 9).
 **fresh job id**, `answer-edit-<runId>-<phase>-<ms>`, written to the run **before** the `add`; BullMQ's
 own retries (3 attempts, exponential backoff) and stall redeliveries reuse it and are welcome, since
 the writer is idempotent. The processor claims by that id and re-checks — before every chunk of an
-apply, once before an undo pass — that the run is still its own (a job **Start again** superseded
+apply and of an undo pass — that the run is still its own (a job **Start again** superseded
 stops), that no undo has started (an apply), and that neither the campaign nor the organization is
-being deleted (an in-flight job never re-inserts copies into a tenant on its way out). A chunk whose
-round holds a re-cut lock throws, so the retry backoff waits it out. The `failed` listener acts only
-after the last attempt, and only on the failing job's own id: an apply → `status: 'failed'`, an undo →
-`undo.status: 'failed'`. At boot the worker runs `syncIndexes` for both run models, so the chunk's
-unique `{runId, seq}` exists even where `migrate:build-indexes` was skipped.
+being deleted (an in-flight job never re-inserts copies into a tenant on its way out; one stopped that
+way reads `failed` — Stopped — never "running" with no button). Both delete cascades wait (bounded,
+60 s) for every Door Outcomes writer of the tenant before their first sweep, and sweep the surveys,
+entries, copies, History and run collections once more at the end; and every writer — an answer
+edit's apply and undo, a conversion and its undo, a door step, a session close, an unknock and its
+undo — sweeps after itself, however it ends, while its tenant's cascade is running
+([lateWriteSweep.js](../server/src/services/platform/lateWriteSweep.js), round 3: a conversion batch
+that stalled past the wait wrote three surveys into an organization already deleted). Only a running
+cascade counts, or a tenant already gone: a deletion still `pending` is undone when its job can't be
+queued, and sweeping then would destroy a tenant nobody deleted. A chunk whose
+round holds a re-cut lock throws, so the retry backoff waits it out (past it, the run stops and says to
+press Pick up). The `failed` listener acts only after the last attempt, and only on the failing job's own
+id: an apply → `status: 'failed'` plus the History row for what landed so far, an undo → `undo.status:
+'failed'`. History is written before `completed` (a redelivery can't claim a completed run) and reports
+only what it hasn't yet (`historyCount`, through the ledger in *History* below): a stopped run is
+logged when it stops, then *N more surveys* after Pick up; a session's line is its frozen summary as
+is. An undo pass stamps `undo.lastRunAt` at its claim and every chunk: a run `running` with no
+`updatedAt` for 10 minutes, or an undo `running` with no heartbeat for 10 minutes, reads **stalled** and
+offers *Start again* — its job is gone. An undo the first build left running has no heartbeat at all;
+it is judged by its `undo.startedAt` (else `updatedAt`), the same way the card judges it, so its Start
+again is claimable (round 2: it was offered and refused forever, holding the campaign). `startedAt` /
+`undo.startedAt` are set the first time a job claims the phase (the wire's `startedAt` is null on a
+change the worker never took). At boot the
+worker runs `syncIndexes` for both run models, so the chunk's unique `{runId, seq}` exists even where
+`migrate:build-indexes` was skipped.
+
+**One change at a time is a claim, not just a check — on every start.** Each start writes its claim
+first and then checks again, stepping back (409, its claim rolled back by compare-and-swap) when the
+other side is on file: the edit's create (its run and chunks deleted), *Pick up* / *Start again* and
+*Undo* / *Undo again* (claimed, then `otherChangeRunning(…, { exceptRunId })`); the conversion's create,
+resume and undo (claimed, then `answerEditBusy`); the unknock's create and its undo (the undo claims
+`revertingAt` by compare-and-swap — a second press reads 409 `RUN_BUSY`, round 3); and a door-by-door
+conversion step or a one-person step, each of which counts itself in on its session for its own
+duration (`stepping` +1 / −1, with `steppingAt`) — an open session holds nothing between steps, but
+`otherChangeRunning` counts a step in flight whose `steppingAt` is under two minutes old, and two admins
+stepping one session can't clear each other's (round 3: it was one stamp per run). Whichever of two
+racing starts checks second sees the other — before
+this, a conversion started during an edit's seconds-long create ran alongside it and undid the edit
+silently (round 1), and an Undo pressed while an unknock or a door step was mid-write lost the original
+(round 2). A conversion's queued job runs only under the run's own job id, written before the `add`:
+a job that arrives after its enqueue timed out (the admin was told nothing changed) is skipped, never
+run beside an edit that started meanwhile — with one exception for the deploy window: the previous
+build gave its jobs BullMQ's own ids and saved them only after the add, so a previous-build job (an id
+without this build's `outcome-convert-` prefix) is its run's own on a forward run still pending with no
+id, and on an undo no undo of this build has claimed (`revertClaimedAt`). The undo's claim stamps
+`revertClaimedAt`, and a timed-out enqueue can't park an undo already claimed (round 3).
 
 **Phase rules.** *Pick up* (`resume`): bulk only, `undo.status: null`, from `failed` — or *Start again*
 from `pending` untouched for 10 minutes; once an undo has started the change can never be applied again
 (`NOT_RESUMABLE`). *Undo* (`revert`): from `completed` or `failed`, never while a phase runs
 (`RUN_BUSY`) or a session is open (`RUN_OPEN`); again after `done` (*Undo again*) or `failed` (*Retry
-undo*), and *Start again* on an undo `pending` for 10 minutes. A create whose enqueue fails answers 503
-`QUEUE_UNAVAILABLE` with the run `failed`, so its card offers Pick up; a revert whose enqueue fails puts
-the undo's status back.
+undo*), and *Start again* on an undo `pending` or stalled for 10 minutes. A change with **none of its
+edits on file** has nothing to undo (409 `NOTHING_TO_UNDO`) — read from its copies on file, never from
+its counts, since a batch cut off mid-way can land surveys its counts never reached (round 3). The wire
+says so (`nothingOnFile`), and a stopped one reads *Didn't start* when the worker never took it, or
+*Stopped before changing any survey* when it did — Pick up only; any other stopped one keeps *Undo what
+landed*. A create (or Pick up) whose enqueue
+times out answers 503 `QUEUE_UNAVAILABLE` and parks the run `failed` with its **job id forgotten** —
+compare-and-swapped on the run still pending under that id, so a job that started after all is reported
+running instead — and a late delivery of the timed-out job can never claim a change the admin was told
+didn't happen; a revert whose enqueue times out puts the undo's status, requester and job id back the
+same way.
 
 **One person at a time** (`mode: 'queue'`). The create freezes up to 500 surveys and opens the run
 (`status: 'open'`, `cursor: 0`). `GET …/response/:responseId` returns one survey as the editor needs it
@@ -2436,8 +2754,13 @@ runs `planFromAnswers` → `applyEditPlan(…, 'person')` → `writeOneSurvey`, 
 version rather than the frozen fingerprint (so a voter re-surveyed since can still be edited after a
 reload); the step's counts then fold onto its chunk and its landed copy onto the frozen item (`a`),
 which the undo reads. A double-submitted step is a no-op 200 (`already`), nothing changed is a skip, a
-stale version is 409 `RESPONSE_CHANGED` with the latest survey, and a survey no longer on file is
-skipped (`not_found`). `skip` advances the cursor; `close` (*Stop here*) completes the run, freezes its
+stale version is 409 `RESPONSE_CHANGED` with the latest survey, a survey no longer on file is skipped
+(`not_found`), and so is one re-surveyed under a different survey since (`other_survey` — this session's
+questions don't apply to it) — the walkthrough says the change wasn't saved and names the voter. Two
+admins stepping one session at once compare-and-swap on the chunk's `stepRev`, so neither loses the
+other's step (re-read and retried up to 30 times; a step that outlasts them is logged, its survey
+change already landed); a step still saving when someone presses *Stop here* is reported to History as
+one more survey; each save adds the voter it writes as the access log's subject. `skip` advances the cursor; `close` (*Stop here*) completes the run, freezes its
 `planSummary` from what its steps changed (*One at a time: ‹question› (N surveys), …*) and writes its
 history row. The poll returns the survey at the cursor, so a session survives a cold page load, and an
 open session counts as running for one change at a time.
@@ -2453,6 +2776,8 @@ changes* row and the live card:
 | `pending`, 10 minutes or more | *Waiting for the worker* | Start again |
 | `running` | *Working · D of T surveys* (progress bar) | — |
 | `completed` | *N surveys changed* | Details · Undo |
+| `failed`, nothing on file, never taken by the worker | *Didn't start* | Pick up where it stopped |
+| `failed`, nothing on file, taken | *Stopped before changing any survey* | Pick up where it stopped |
 | `failed` | *Stopped · N of T changed* | Details · Pick up where it stopped · Undo what landed |
 | undo `pending` / `running` | *Undoing…* (pending 10 minutes: *Undo waiting for the worker*) | (Start again) |
 | undo `failed` | *Undo stopped* | Retry undo |
@@ -2460,19 +2785,25 @@ changes* row and the live card:
 | undo `done`, some kept newer answers | *Undone · N put back · K kept newer answers* | Details · Undo again |
 | undo `done`, some waiting or cleared with a re-cut | *Partly undone · N put back · W waiting on a later change* | Details · Undo again |
 
-The list (`GET /`) hides finished runs that changed nothing and were never undone, the conversions
-list's rule.
+The list (`GET /`) hides finished runs with none of their edits on file that were never undone — read
+from copies, not counts (round 3) — the conversions list's rule.
 
 ### Undo
 
-`undoRunPass` walks the run's copies (`{ answerEditRunId }`) and its frozen items, and classifies each
-copy against the live survey, found by slot:
+`undoRunPass` walks the run's chunks. For each it first raises the fence (the writer's step 4), then
+reads the chunk's frozen items again (an apply delivery may have finished after the pass read it), then
+the run's copies for those slots — **by slot** (voter and round), never by the frozen survey ids alone,
+so it finds an edit on a survey re-created under a new id whose landing was never recorded (round 3),
+and **newest first**, so one Undo of a session that saved one survey twice ends at the original — and
+only then the live surveys — in that order, so a copy another pass of this undo put back and deleted
+between the reads shows its receipt on the survey instead of reading "erased" (round 2) — and
+classifies each copy against the live survey, found by slot:
 
 | Live survey | Reading | The undo |
 |---|---|---|
-| carries this copy's mark, fingerprint = `appliedHash` | this edit is what's on file | **puts it back**: stamps `undoStartedAt` on the copy, then one compare-and-swap that writes the snapshot's `answers`, `editedBy` and `editedAt` only (a later team re-stamp or note edit stays) and `$pull`s the mark, then deletes the copy |
-| fingerprint = the copy's own snapshot | never landed, or already put back | deletes the copy |
-| mark gone, copy carries `undoStartedAt` | a put-back whose pass died before deleting the copy | deletes it; counted put back |
+| carries this copy's mark, fingerprint = `appliedHash` | this edit is what's on file | **puts it back**: stamps `undoStartedAt` on the copy — a stamp that matches nothing means the copy left since the read, and nothing is written from it (round 2: an Erase before the stamp was honoured and then written back): put back by another pass when the survey holds its receipt, **restored on the profile** when the survey no longer carries its mark, else **erased** (round 3) — then one compare-and-swap that writes the snapshot's `answers`, `editedBy` and `editedAt` only (a later team re-stamp or note edit stays), `$pull`s the mark and `$addToSet`s the copy's id onto the survey's **`answerEditUndone`** (the undo's receipt), then deletes the copy. A put-back that misses re-reads the survey: another pass's receipt counts it put back; otherwise the stamp comes off |
+| `answerEditUndone` holds this copy's id | a put-back whose pass died before deleting the copy | deletes it; counted put back. Only the receipt proves it: a stamp alone, without one, was a put-back that missed (or a pass that died before it) — the stamp comes off and the copy is classified like any other. Reading a bare stamp plus a missing mark as "put back" deleted originals, because a re-survey removes marks too (code review 2026-10-19, round 1) |
+| equal to the copy's own snapshot in **every** field but bookkeeping (ids, timestamps, marks, receipts, fences, the team re-stamp's `coordinatorId`; a field set to null reads as absent) | the edit never landed, and nothing changed since | deletes the copy (the fence keeps a delivery still holding it from landing after). Equal answers are not enough: a canvasser who re-surveyed with the same picks wrote a new note and position, and the copy holding the old ones is history (round 2) |
 | anything else | **changed since** — re-surveyed, or edited by someone | leaves the copy (it stays an earlier-answers card) and names who; re-checked on every later undo, so **Undo again** finishes it once the newer change is undone |
 | missing | **waiting**, if a later change holds it; else **gone** | waits, or reports it |
 
@@ -2483,11 +2814,68 @@ revert brings the survey back, mark and all, and Undo again finishes it. A froze
 copy is gone reports **cleared with a re-cut** when a `TurfSnapshot` of its round holds the copy (after
 a snapshot restore, Undo again finishes it), **erased** when the live survey still carries its mark
 (the copy was erased on the profile), **restored on the profile** when it doesn't, and **gone** when
-no survey is on file (a profile Delete, a later door result, a desk entry undone). Each pass
-**stores** `undo.summary` — `putBack`, `changedSince`, `restoredOnProfile`, `waiting`, `cleared`,
-`erased`, `gone`, and up to 200 names with plain-words detail (*re-surveyed by …*, *edited by …*,
-*Unknock, Oct 20*) — and the run card and Details read the stored summary, never the presence of
-copies, because a re-cut or an Erase removes copies without undoing anything.
+no survey is on file (a profile Delete, a later door result, a desk entry undone); an item whose
+survey's `answerEditUndone` holds its copy's id counts **put back** (an earlier pass did it). A survey
+put back that still carries a mark of one of THIS run's copies whose copy is gone — erased on the
+profile, with the original in it (a one-person session that saved it twice) — reads **erased**, not put
+back (round 5) — and so does one whose copy is erased while the pass works, once its stamp finds it
+gone (round 7: the pass's one read of what was on file said the copy was there, and the survey read
+put back at the session's first save) — and one where nothing could go back, rather than "kept newer
+answers" by the session's own admin (round 7: erasing a session's later copy read that way). This run's
+copies are the item's `a` for a Same change for everyone run (one per survey) and every save's, `as`,
+for a one-person session — a survey the first build saved and this build saves again seeds `as` from
+every copy of it this run has on file, not only `a` (round 7), and from the marks on the survey made
+while the session was open whose copies are gone, as a session with no `as` reads them (round 8: a copy
+erased before this build's first save was left out, and the undo read put back while the survey held
+the session's first save); a survey left at exactly the answers
+that were reviewed reads put back whatever else it carries (round 6: any recent mark counted, and a
+note-only profile edit whose copy was erased read a survey put back as erased); a session from before
+`as` reads the marks made while it was open — since the run began, up to its Close (round 7: a profile
+edit's copy erased after the Close read as the session's). The first build's undo wrote no receipts, so for a run
+whose undo began under it — no `undo.receipts`, and it finished a pass (`undo.passes` > 0) or died
+inside its first (`running` or `failed` with no `undo.lastRunAt`, and never pressed on this build —
+`undo.writesReceipts`, round 6: this build's own undo whose job died before its first claim looked the
+same; the revert route keeps that reading as `undo.legacy`, since Retry undo overwrites the status —
+round 5) — an item whose survey holds exactly the answers that were reviewed (`fingerprint` =
+the item's `h`) with no copy, mark or receipt also counts put back, and so does a copy the first build
+stamped and left on file whose survey holds it with the mark pulled (a pass that died before deleting
+it; round 4) — only for such a run, since anywhere else that shape is a same-picks re-survey or a
+full-swap Restore (round 3: it credited put-backs never made). What History already holds for it: after
+one finished pass, that pass's own `summary.putBack` — what it logged — but no more than its put-backs
+this pass can still prove (round 6: one put back and changed since dropped out of the total and took a
+new put-back's History row with it) — a survey that pass put back by its latest copy, whose earlier
+copy this build then puts back, among them (round 7: History logged that survey a second time) — but
+not where a profile Restore has swapped answers in since that copy was made, since then the Restore took
+it away, not the first build (round 8: credited as logged, a real put-back went unlogged); after
+more, every
+put-back credited to the first build except one proven by a copy it left on file — so a put-back a pass
+made before dying is reported, never taken as logged (round 5). Every put-back a pass proves is
+**recorded on its frozen item** (`u`, the copy's id; `l` for the first build's), so `putBack` never
+drops between passes and History never misses one — together with its copy's delete, the two at once
+in no set order, not at the end of its batch (round 7: a pass that died in between, then a Delete of the
+survey on the profile, left a put-back nothing proved, and History counted one fewer; the record costs
+an undo of 37,500 surveys 43 s against 36 s), with `l` in the same write (round 8: sent after, a pass
+that died between them logged the survey a second time). That record is **provisional** until the pass
+finishes the survey and settles it (`us`, in the batch's last write): a later pass takes a survey with a
+`u` as done only when no copy of this run is still landed on it — otherwise it goes through the copies
+again, the put-back already counted (round 8: a pass that died after putting back the later of a
+session's two saves left the survey at its first save, and every Retry and Undo again took it as done)
+— and reads a provisional one erased when the original's copy is gone, a settled one never (round 8: a
+settled put-back that flipped to erased after a later Erase dropped another survey's put-back from
+History). A survey that then reads erased takes the record off. Each pass
+**stores** `undo.summary` — `putBack` (every survey this undo has put back, in any pass, so Undo again
+shows the total), `changedSince`, `restoredOnProfile`, `waiting`, `cleared`, `erased`, `gone`, and up to
+200 names whose detail is stored as ids and dates (`{ kind, by, at }`) and written as words when read
+(*re-surveyed by …* through the shared identity hydration, so a deleted account reads as on every
+report — its deletion snapshot's name for the retention window, then "Deleted user"; *Unknock, Oct
+20*) — and the run card and Details read the stored summary, never the presence of copies, because a
+re-cut or an Erase removes copies without undoing anything. History is written before the summary,
+through the ledger below. An Erase refuses a copy an undo has stamped in the
+last ten minutes (409 `COPY_IN_USE`) — erasing it mid-put-back would let the put-back write the erased
+answers back — and a copy of a change that can still write: a Same change for everyone run pending or
+running, or a one-person step in flight (round 3: an Erase between the copy's insert and its write left
+an edited survey with its original nowhere). Restoring a run's copy on its own visit takes that copy's mark off in the same write
+(`writeOneSurvey`'s `consumedMark`), so the run reads it *restored on the profile*, not *erased*.
 
 What happens to an edited survey afterwards: a re-survey by the canvasser or a teammate in the round
 gives it a new fingerprint and no mark, so the run skips it if it hasn't written it yet and the undo
@@ -2503,11 +2891,19 @@ overlap (one change at a time).
 `CampaignChange` rows with `source: 'answer_edit'`: `field: 'answerEdit'`, `toValue` *‹planSummary› (N
 surveys)*, written when a bulk run completes, when a session closes, and when a run **stops part-way**
 having changed something (the failed listener) — each write reports only the surveys History hasn't
-reported yet (`writeRunHistory`, a CAS on `historyCount`), so a stopped run reads *(120 surveys)* and,
-once **Pick up** finishes it, a second row *(94 more surveys)*; never a survey twice. And `field:
-'answerEditUndo'`, `fromValue` the plan summary, `toValue` what the pass put back (*212 surveys put
-back, 2 kept newer answers*), on the first undo pass always and on later passes only when they put
-something back; its `byUserId` is whoever pressed Undo (`undo.requestedBy`), not the change's author. Frozen English, like `scopeSummary`; both clients
+reported yet, so a stopped run reads *(120 surveys)* and, once **Pick up** finishes it, a second row
+*(94 more surveys)*; never a survey twice. And `field: 'answerEditUndo'`, `fromValue` the plan
+summary, `toValue` what the undo put back (*212 surveys put back, 2 kept newer answers*): one row for
+its first pass whatever it put back, and later rows only for what a later pass adds; its `byUserId` is
+whoever pressed Undo (`undo.requestedBy`), not the change's author.
+**The ledger** (round 2: the count moved before the insert, so a failed insert lost its row; and a pass
+cut off part-way logged only what it put back itself). Each row is claimed on the run first —
+`historyPending` / `undo.historyPending` = `{ from, to, line, by }`, by compare-and-swap on the count
+(`historyCount` / `undo.historyLogged`) — then written with an id derived from the run, the phase and
+`from` (an upsert, so writing it again is a no-op), and only then counted. Any later call finishes a
+pending row first; only the pass that owns the undo claims a new one. The undo counts from its
+cumulative summary, so a cut-off pass, a redelivery and two deliveries at once each log every put-back
+once. The feed orders by `createdAt`, so the derived ids change nothing it shows. Frozen English, like `scopeSummary`; both clients
 render them as one sentence (CAMPAIGNS.md Part 2 → *Change history*).
 
 ### Who reads what
@@ -2519,29 +2915,37 @@ render them as one sentence (CAMPAIGNS.md Part 2 → *Change history*).
 | [activities.js](../server/src/routes/admin/activities.js), [households.js](../server/src/routes/admin/households.js) | `edited: { at, by }` beside `deskEntry` on the activity detail's survey and on `/:householdId/surveys` (the door panels). |
 | [exportBuilders.js](../server/src/services/export/exportBuilders.js), [exportTypes.js](../server/src/services/export/exportTypes.js) | canvass-activity's appended `Answers edited`, results-by-voter's *(answers edited)*, the Notes export's note stamp with the fallback, and the backup README's survey-answers line ([EXPORTS.md](EXPORTS.md)). |
 | [computeReport.js](../server/src/services/reports/computeReport.js) | `provenance.editedResponses`, for the builder's internal note (§K, [CLIENT_PORTAL.md](CLIENT_PORTAL.md)), beside the desk-entered one; [ClientReport.js](../server/src/models/ClientReport.js) now declares `provenance` on `windowStatsSchema` — strict mode used to drop it, so neither note had ever rendered. |
-| Unchanged | Overlaps (`via: 'submit'` only); the turf snapshot and clear-knocks (raw copies by round carry the new fields); the voter delete; import undo; the conversion and unknock reverts; current tags; FbTime; and every count in [METRICS.md](METRICS.md) — an edit moves no knock, rate, billable door, survey count, surveyed voter or `Campaign.stats` key; only survey results, tag counts and the answer lists move. |
+| Unchanged | Overlaps (`via: 'submit'` only — never a canvasser's own replacement of answers desk-entered on her visit, F2's copies); the turf snapshot and clear-knocks (raw copies by round carry the new fields); the voter delete; import undo; the conversion and unknock reverts' put-backs (they now also record the visits they couldn't put back, for Restore — §F); current tags; FbTime; and every count in [METRICS.md](METRICS.md) — an edit moves no knock, rate, billable door, survey count, surveyed voter or `Campaign.stats` key; only survey results, tag counts and the answer lists move. |
 
 Every server payload change is additive, so released phones are safe and there is no client-version
 bump. The phone has no Edit answers action; its door sheet *Edited* line, History sentences and "—"
 for an empty pick-several ride its next over-the-air update ([ADMIN_APP.md](ADMIN_APP.md)).
 
-**Deploy:** a server and web deploy — no data migration, no config var. The worker builds the two run
-collections' indexes at boot; the archive's two partial indexes need `npm run migrate:build-indexes`
-(dry run), then `npm run migrate:build-indexes -- --apply`, from the Run console before large undos or
-Details pages ([OPERATIONS.md](OPERATIONS.md)). Privacy: [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
-item 32 — retention grows, because every admin edit now keeps the earlier answers until they are
-restored, erased or undone, or the campaign or organization is deleted.
+**Deploy:** a server and web deploy, the worker restarting with the web — no config var. The worker
+builds the two run collections' indexes at boot (the chunk's partial fence index too); the archive's
+two partial indexes and the four on `ConversionStrike` need `npm run migrate:build-indexes` (dry run),
+then `npm run migrate:build-indexes -- --apply`, from the Run console before large undos or Details
+pages; and two one-time steps follow, each a dry run then `-- --apply`: `npm run migrate:removal-strikes`
+(the strike records of removals made before them) and `npm run repair:answer-edit-words` (the first
+build's stored words) ([OPERATIONS.md](OPERATIONS.md)). Privacy:
+[PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 32 — retention grows, because every admin edit
+now keeps the earlier answers until they are restored or erased, put back by the change's Undo (an Undo
+leaves the copy of a survey changed since — it stays an earlier-answers card), or the campaign or
+organization is deleted.
 
 **Tests:** [answerEdit.test.js](../server/src/services/canvass/answerEdit.test.js) (20: every applier
 rule and refusal code, the per-person diff, the fingerprint's stability);
-[answerEdit.int.test.js](../server/test/answerEdit.int.test.js) (29, the real app over a throwaway
+[answerEdit.int.test.js](../server/test/answerEdit.int.test.js) (44, the real app over a throwaway
 mongod: the yard-sign cleanup end to end with every other byte as recorded, money untouched and the
 landed results equal to the previewed after, the rulings, `REVIEW_STALE`, held entries, two deliveries
 of one chunk, the undo orders, an unknock in between, the interrupted put-back, the note races, the
 failed listener, Start again, one change at a time, one person at a time, the profile's Edit and
-Restore, the readers, an answer text starting with `$` in the tag preview); the opt-in scale gate
-[answerEditScale.int.test.js](../server/test/answerEditScale.int.test.js) (`ANSWER_EDIT_SCALE=1`: 79k
-surveys, the dry run and the create under 10 s at the caps); and on the web
+Restore, the readers, an answer text starting with `$` in the tag preview); the three code reviews'
+findings, each pinned — [answerEditRound2.int.test.js](../server/test/answerEditRound2.int.test.js) (25)
+and [answerEditRound3.int.test.js](../server/test/answerEditRound3.int.test.js) (25); the opt-in scale
+gate [answerEditScale.int.test.js](../server/test/answerEditScale.int.test.js) (`ANSWER_EDIT_SCALE=1`:
+79k surveys, the dry run and the create under 10 s at the caps, and a heavy review — 16 tags on 9
+questions over 50,000 surveys — under 10 s with every tag priced and landing as reviewed); and on the web
 [answerEditPlan.test.js](../client/src/lib/answerEditPlan.test.js) and
 [answerEditRender.smoke.test.js](../client/src/lib/answerEditRender.smoke.test.js).
 

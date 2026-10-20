@@ -128,14 +128,16 @@ const a11yLabel = (...parts) => parts.filter(Boolean).join(', ');
 // number and "people" under the next is the entire door-unit vs voter-unit distinction, in two
 // words. `subAccent` is a trailing fragment of the sub-line that carries `accentColor` while
 // the rest stays neutral, so a tier color lands on the rate and not on the name beside it.
-export function InsetRow({ label, labelLines, unit, value, sub, subAccent, accentColor, chipColors, badge, leading }) {
+// `accessibilityLabel` replaces the spoken label, as on InsetNavRow — the default reads the text
+// only, so a row whose badge carries meaning (By pass's Active) passes its own.
+export function InsetRow({ label, labelLines, unit, value, sub, subAccent, accentColor, chipColors, badge, leading, accessibilityLabel }) {
   const styles = useThemedStyles(makeStyles);
   return (
     <View
       style={styles.row}
       accessible
       accessibilityRole="text"
-      accessibilityLabel={a11yLabel(label, value, unit, sub, subAccent)}
+      accessibilityLabel={accessibilityLabel || a11yLabel(label, value, unit, sub, subAccent)}
     >
       {leading}
       <RowBody {...{ label, labelLines, unit, sub, subAccent, accentColor, badge, styles }} />

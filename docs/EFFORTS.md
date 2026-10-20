@@ -256,7 +256,11 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   incident). A **desk mark** is such a row too: a single home marked restricted from the Turf Cutting
   map, the Map page or the mobile admin app on a **draft** round ([PASSES_AND_TURF.md](PASSES_AND_TURF.md))
   blocks deleting the walk list until it is unmarked. Archive instead — it keeps the name resolvable
-  in reports forever. Orphans created
+  in reports forever. Kept copies of earlier answers (`SurveyResponseArchive`) count as history too, and
+  the delete takes each round's re-cut lock first (**409 `recut-locked`** while a discard or a restore holds
+  one), since 2026-10-20. A delete takes its draft rounds' saved snapshots with them, knocks cleared into
+  them included (since 2026-10-20 — only their own round could restore them; [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
+  Part 2, `DELETE /passes/:id`). Orphans created
   before this guard are repaired with **`npm run repair:orphan-attribution`** (dashboard Run console;
   dry-run by default, `-- --apply` to write): it re-stamps rows whose walk list/round was deleted to
   the door's *current* list + round, and lists ambiguous rows (door back in Intake, several rounds

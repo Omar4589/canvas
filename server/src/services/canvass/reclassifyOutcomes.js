@@ -8,6 +8,7 @@ import { hydrateSurveyEvidence } from './answerScope.js';
 import { knocksPipeline, billableDoorsOf, contactRate, connectionRate } from '../reports/aggregations.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { isOutcomeEnabled } from './outcomeToggles.js';
+import { sweptAfter } from '../platform/lateWriteSweep.js';
 
 // Rewriting what a door entry SAYS happened — the Door Outcomes page.
 //
@@ -299,7 +300,10 @@ export async function listEntries(campaignId, q = {}, { skip = 0, limit = 50, ou
  */
 export async function resolveSelection(campaignId, q = {}, actionIds = null, outcomes = RECLASSIFIABLE_OUTCOMES) {
   const filter = buildEntryFilter(campaignId, q, outcomes);
-  if (actionIds?.length) {
+  // An explicit list narrows — an EMPTY one selects nothing. "The whole filter" is sent with no list at
+  // all (the page's "select all N"); an empty list was read as the whole filter, so a confirm that
+  // landed after the admin cleared the rows wrote every entry the filter matched (code review round 3).
+  if (Array.isArray(actionIds)) {
     filter._id = { $in: actionIds.map((id) => new mongoose.Types.ObjectId(String(id))) };
   }
   // userId/passId ride along for the survey-conversion caller, whose preview joins each row to
@@ -378,9 +382,12 @@ export async function computeImpact({ campaign, ids, to, billRestricted }) {
   const campaignId = campaign._id;
   const opts = { includeRestricted: true };
   const [beforeRow] = await CanvassActivity.aggregate(knocksPipeline({ campaignId }, opts));
+  // The selected rows are told apart in a `$match` — the rest as they are, the selection (by its _id
+  // index) rewritten — never by an `$in` test on every row of the ledger: that one scanned the whole id
+  // list per row, 10 s at 25,000 ids over 100,000 entries (round 7).
   const [afterRow] = await CanvassActivity.aggregate([
-    { $match: { campaignId } },
-    { $set: { actionType: { $cond: [{ $in: ['$_id', ids] }, to, '$actionType'] } } },
+    { $match: { campaignId, _id: { $nin: ids } } },
+    { $unionWith: { coll: CanvassActivity.collection.name, pipeline: [{ $match: { campaignId, _id: { $in: ids } } }, { $set: { actionType: to } }] } },
     ...knocksPipeline({ campaignId }, opts),
   ]);
   const before = totalsOf(beforeRow, billRestricted);
@@ -427,7 +434,7 @@ async function householdsOfRun(runId) {
  * rows that simply aren't listed (and still carry `from`, so nothing is lost), whereas writing
  * the run first would offer a Revert for a conversion that never happened.
  */
-export async function runReclassify({ campaign, from, to, ids = null, byUserId, selection = null, scopeSummary = null }) {
+async function reclassify({ campaign, from, to, ids = null, byUserId, selection = null, scopeSummary = null }) {
   const runId = new mongoose.Types.ObjectId();
   const scoped = Array.isArray(ids);
   const match = scoped
@@ -501,7 +508,7 @@ export async function runReclassify({ campaign, from, to, ids = null, byUserId, 
  * outcome IT had, so a mixed selection reverts correctly. Household ids are collected BEFORE
  * the unset, because the stamp is what identifies them.
  */
-export async function revertReclassify({ campaign, run, byUserId }) {
+async function revertRun({ campaign, run, byUserId }) {
   const householdIds = await householdsOfRun(run._id);
 
   await CanvassActivity.updateMany(OUTCOME_RUN_MATCH(run._id), [
@@ -527,3 +534,10 @@ export async function revertReclassify({ campaign, run, byUserId }) {
   if (!isRateNeutralPair(run.from, run.to)) await recomputeCampaignStats(campaign._id);
   return run;
 }
+
+// Both writers, swept after on a campaign or organization being deleted, however they end: a relabel
+// that stalled past the delete cascade wrote its run and its History row after the last sweep, and
+// they outlived the deletion (lateWriteSweep.js; code review round 4).
+const tenantOf = (campaign) => ({ campaignId: campaign._id, organizationId: campaign.organizationId });
+export const runReclassify = (args) => sweptAfter(tenantOf(args.campaign), () => reclassify(args));
+export const revertReclassify = (args) => sweptAfter(tenantOf(args.campaign), () => revertRun(args));

@@ -327,12 +327,14 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
                           onActivate={() => action.mutate({ id: p._id, op: 'activate' })}
                         />
                       )}
-                      {p.status === 'active' && (
+                      {/* A draft can hold knocks (a discard that kept them, a restored snapshot): the server
+                          refuses to delete it — its history stays — so it offers Archive instead. */}
+                      {(p.status === 'active' || (p.status === 'draft' && p.knockCount > 0)) && (
                         <button onClick={() => { setArchiveText(''); setArchiveTarget(p); }} className="text-xs text-fg-muted hover:underline">
                           Archive
                         </button>
                       )}
-                      {p.status === 'draft' && (
+                      {p.status === 'draft' && !(p.knockCount > 0) && (
                         <button onClick={() => del.mutate(p._id)} className="text-xs text-danger hover:underline">
                           Delete
                         </button>
@@ -358,6 +360,7 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
         </table>
       </Card>
       {action.error && <div className="mt-2 text-sm text-danger">{action.error.message}</div>}
+      {del.error && <div className="mt-2 text-sm text-danger">{del.error.message}</div>}
 
       {archiveTarget && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={() => setArchiveTarget(null)}>

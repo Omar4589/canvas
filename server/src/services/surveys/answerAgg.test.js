@@ -4,9 +4,11 @@ import {
   mergeOptionRows,
   voterAnswerClause,
   choiceKeyStages,
+  choiceKeyStagesForMany,
   latestAnswerKeyStages,
   tagMemberKeySets,
   currentTagVoterSet,
+  currentTagVoterSets,
 } from './answerAgg.js';
 import { OTHER_OPTION_ID, otherBucketLabel } from './otherOption.js';
 
@@ -195,4 +197,37 @@ test('latestAnswerKeyStages: the sort immediately precedes the $first group — 
   const group = stages[sortIdx + 1];
   assert.ok(group?.$group, 'the group must directly follow the sort');
   assert.deepEqual(group.$group.latestKeys, { $first: '$_validKeys' });
+});
+
+test('choiceKeyStagesForMany is choiceKeyStages with the question match widened, stage for stage', () => {
+  const one = choiceKeyStages('support');
+  const many = choiceKeyStagesForMany(['support', 'yard']);
+  assert.equal(many.length, one.length);
+  assert.deepEqual(many[1], { $match: { 'answers.questionKey': { $in: ['support', 'yard'] } } });
+  for (const i of [0, 2, 3, 4]) assert.deepEqual(many[i], one[i]);
+});
+
+test('currentTagVoterSets folds several tags in one pass, each exactly as currentTagVoterSet does', () => {
+  const volunteerEntry = {
+    display: 'Volunteer',
+    members: [
+      { questionKey: 'yard', optionId: 'opt_v', text: 'Volunteer' },
+      { questionKey: 'support', optionId: 'opt_s', text: 'Support' },
+    ],
+  };
+  const rowsIn = [
+    latestRow('v1', 'support', ['opt_s']),
+    latestRow('v2', 'support', ['Likely Support']),
+    latestRow('v3', 'yard', ['opt_v', 'opt_y']),
+    latestRow('v4', 'yard', ['Volunteer']),
+    latestRow('v5', 'followup', ['opt_s']),
+    latestRow('v6', 'support', []),
+    latestRow('v7', 'yard', ['opt_o']),
+  ];
+  const entries = [supporterEntry, volunteerEntry, { display: 'Nobody', members: [] }];
+  const together = currentTagVoterSets(rowsIn, entries);
+  entries.forEach((entry, t) => assert.deepEqual([...together[t]].sort(), [...currentTagVoterSet(rowsIn, entry)].sort(), entry.display));
+  assert.deepEqual([...together[0]].sort(), ['v1', 'v2', 'v3']);
+  assert.deepEqual([...together[1]].sort(), ['v1', 'v3', 'v4']);
+  assert.equal(together[2].size, 0);
 });

@@ -52,6 +52,8 @@
     "audit:orphaned-reviews": "node src/migrations/auditOrphanedReviews.js",
     "repair:import-pins": "node src/migrations/repairImportPins.js",
     "repair:city-suffix": "node src/migrations/repairCitySuffix.js",
+    "migrate:removal-strikes": "node src/migrations/backfillRemovalStrikes.js",
+    "repair:answer-edit-words": "node src/migrations/scrubAnswerEditWords.js",
     "pins:measure-estimates": "node src/migrations/measureEstimates.js",
     "repair:orphaned-assignments": "node src/migrations/repairOrphanedAssignments.js",
     "repair:orphan-attribution": "node src/migrations/repairOrphanAttribution.js",

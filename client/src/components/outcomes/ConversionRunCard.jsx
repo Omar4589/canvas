@@ -26,9 +26,10 @@ const Line = ({ n, children }) =>
     </li>
   ) : null;
 
-export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, busy }) {
+export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, busy, stopped = false }) {
   const c = run.counts || {};
-  const running = run.status === 'running' || run.status === 'pending' || run.status === 'reverting';
+  // `stopped`: the poll ended on a refusal — the last state that loaded, with only Dismiss.
+  const running = !stopped && (run.status === 'running' || run.status === 'pending' || run.status === 'reverting');
 
   return (
     <Card className="mt-4 p-4">
@@ -43,6 +44,7 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
         {run.status === 'reverted' && <Badge variant="neutral">Undone</Badge>}
         {run.status === 'failed' && <Badge variant="danger">Stopped</Badge>}
         {run.status === 'revert_failed' && <Badge variant="danger">Undo stopped</Badge>}
+        {run.status === 'open' && <Badge variant="neutral">Unfinished</Badge>}
         {running && <Badge variant="neutral">{run.progress?.phase === 'reverting' ? 'Undoing' : 'Working'}</Badge>}
       </div>
 
@@ -60,6 +62,13 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
               : `${(run.progress?.doorsDone || 0).toLocaleString()} of ${(run.progress?.doorsTotal || 0).toLocaleString()} doors`}
           </div>
         </div>
+      )}
+
+      {stopped && (
+        <p className="mt-2 rounded border border-border bg-sunken px-3 py-2 text-sm text-fg-muted">
+          This change can&rsquo;t be read any more, so what&rsquo;s shown is the last that loaded. Its row under
+          Survey answer changes shows where it stands.
+        </p>
       )}
 
       {run.status === 'failed' && run.error && (
@@ -115,10 +124,11 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {run.status === 'failed' && (
+        {!stopped && run.status === 'failed' && (
           <Button size="sm" onClick={onResume} disabled={busy}>Pick up where it stopped</Button>
         )}
-        {!run.revertedAt && !running && (
+        {/* An open door-by-door session is undone once it's closed (the server refuses before). */}
+        {!stopped && !run.revertedAt && !running && run.status !== 'open' && (
           <Button variant="secondary" size="sm" onClick={onRevert} disabled={busy}>
             {run.status === 'revert_failed' ? 'Retry undo' : 'Undo this change'}
           </Button>

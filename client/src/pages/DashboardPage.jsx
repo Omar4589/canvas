@@ -7,6 +7,7 @@ import StatCard from '../components/StatCard.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
 import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
+import ByPassTable from '../components/ByPassTable.jsx';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import InfoHint from '../components/InfoHint.jsx';
@@ -35,6 +36,10 @@ function buildQuery(params) {
   const s = sp.toString();
   return s ? `?${s}` : '';
 }
+
+// The By pass table's view before the admin touches it: Walk list order (ByPassTable's default for a
+// null sort), folded.
+const freshPassView = (campaignId) => ({ campaignId, sort: null, expanded: false });
 
 function SectionHeading({ title, right }) {
   return (
@@ -90,6 +95,7 @@ export default function DashboardPage() {
     setCoordinatorId('');
     setSurveyPassId('');
     setSelectedCanvasser(null);
+    setByPassView(freshPassView(campaignId));
     deepLinkedRef.current = false;
   }, [campaignId, surveyParam]);
 
@@ -194,6 +200,16 @@ export default function DashboardPage() {
     enabled: !!campaignId && !!dateRange,
     ...HOME_POLL,
   });
+
+  // The By pass table's sort and Show all. Held here rather than in ByPassTable: the section renders
+  // only once rows arrive, so it unmounts while a new range or filter loads, and the admin's sort and
+  // Show all should survive that. Reset on every campaign switch by the effect at the top, like the
+  // page's other per-campaign selections; the campaign stamp covers the one render before that effect
+  // runs, so the next campaign never paints with the last one's view.
+  const [byPassView, setByPassView] = useState(() => freshPassView(campaignId));
+  const passView = byPassView.campaignId === campaignId ? byPassView : freshPassView(campaignId);
+  const onPassViewChange = (patch) =>
+    setByPassView((v) => ({ ...(v.campaignId === campaignId ? v : freshPassView(campaignId)), ...patch }));
 
   // The invoice-ready per-round CSV — an attachment, not JSON, so the shared api()
   // helper can't carry it; lib/downloadFile.js owns the fetch + save.
@@ -679,7 +695,9 @@ export default function DashboardPage() {
       </section>
 
       {/* By pass — walk list × pass over the same billing pipeline and window as Activity.
-          Hidden until the campaign has at least one round (or legacy knocks) to show. */}
+          Hidden until the campaign has at least one round (or legacy knocks) to show. The table
+          folds passes with nothing in the range and caps the rest (ByPassTable, lib/byPassFold.js);
+          TOTAL and Export CSV are always every pass. Its sort and Show all are `passView` above. */}
       {(byRoundQ.data?.rounds || []).length > 0 && (
         <section className="mb-6">
           <SectionHeading
@@ -699,97 +717,17 @@ export default function DashboardPage() {
               </span>
             }
           />
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <table className="min-w-full text-sm">
-              <thead className="bg-sunken text-xs uppercase tracking-wide text-fg-muted">
-                <tr>
-                  <th className="px-4 py-2 text-left">Walk list</th>
-                  <th className="px-4 py-2 text-left">Pass</th>
-                  <th className="px-4 py-2 text-right">Knocks</th>
-                  <th className="px-4 py-2 text-right">{isLitDrop ? 'Lit drops' : 'Survey doors'}</th>
-                  {!isLitDrop && (
-                    <th className="px-4 py-2 text-right">
-                      <span className="inline-flex items-center gap-1">
-                        Surveys taken
-                        <InfoHint label="About surveys taken">{metricHelp.surveysTaken}</InfoHint>
-                      </span>
-                    </th>
-                  )}
-                  {notTargetInUse && (
-                    <th className="px-4 py-2 text-right">
-                      <span className="inline-flex items-center gap-1">
-                        Not a target
-                        <InfoHint label="About not a target">{metricHelp.notTarget}</InfoHint>
-                      </span>
-                    </th>
-                  )}
-                  <th className="px-4 py-2 text-right">Conn %</th>
-                  <th className="px-4 py-2 text-right">
-                    <span className="inline-flex items-center gap-1">
-                      New homes reached
-                      <InfoHint label="About new homes reached">
-                        Homes reached for the <strong>first</strong> time (in the selected range,
-                        when one is set) — a re-knocked door adds a knock but not a new home.
-                        {coordinatorId ? (
-                          <>
-                            {' '}With a crew selected, "first" is still judged campaign-wide: a
-                            door counts here only if this crew made its first-ever knock.
-                          </>
-                        ) : null}
-                      </InfoHint>
-                    </span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {(byRoundQ.data?.rounds || []).map((r) => (
-                  <tr key={r.passId || 'legacy'} className="border-t border-border">
-                    <td className="px-4 py-2 text-fg">{r.effortName || '—'}</td>
-                    <td className="px-4 py-2 text-fg-muted">{r.roundLabel}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.knocks || 0).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">
-                      {((isLitDrop ? r.litKnocks : r.surveyedKnocks) || 0).toLocaleString()}
-                    </td>
-                    {!isLitDrop && (
-                      <td className="px-4 py-2 text-right tabular-nums text-fg">
-                        {(r.surveysTaken || 0).toLocaleString()}
-                      </td>
-                    )}
-                    {notTargetInUse && (
-                      <td className="px-4 py-2 text-right tabular-nums text-fg">
-                        {(r.notTargetKnocks || 0).toLocaleString()}
-                      </td>
-                    )}
-                    <td className="px-4 py-2 text-right tabular-nums text-fg-muted">{ratePct(r.connectionRate)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-fg">{(r.coverageGained || 0).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-              {byRoundQ.data?.totals && (
-                <tfoot>
-                  <tr className="border-t border-border bg-sunken/50 font-semibold text-fg">
-                    <td className="px-4 py-2" colSpan={2}>TOTAL</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{(byRoundQ.data.totals.knocks || 0).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">
-                      {((isLitDrop ? byRoundQ.data.totals.litKnocks : byRoundQ.data.totals.surveyedKnocks) || 0).toLocaleString()}
-                    </td>
-                    {!isLitDrop && (
-                      <td className="px-4 py-2 text-right tabular-nums">
-                        {(byRoundQ.data.totals.surveysTaken || 0).toLocaleString()}
-                      </td>
-                    )}
-                    {notTargetInUse && (
-                      <td className="px-4 py-2 text-right tabular-nums">
-                        {(byRoundQ.data.totals.notTargetKnocks || 0).toLocaleString()}
-                      </td>
-                    )}
-                    <td className="px-4 py-2 text-right tabular-nums">{ratePct(byRoundQ.data.totals.connectionRate)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{(byRoundQ.data.totals.coverageGained || 0).toLocaleString()}</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
+          <ByPassTable
+            rounds={byRoundQ.data.rounds}
+            totals={byRoundQ.data.totals}
+            isLitDrop={isLitDrop}
+            notTargetInUse={notTargetInUse}
+            coordinatorId={coordinatorId}
+            rangePreset={dateRange?.preset}
+            archived={current?.isActive === false}
+            view={passView}
+            onViewChange={onPassViewChange}
+          />
         </section>
       )}
 

@@ -1337,9 +1337,15 @@ the survey route that re-applied its answers over an admin's edit made in betwee
 row of this canvasser's with the **same timestamp and the same action** answers the replay as
 superseded too (`{ row, sameDelivery: true }`), after `healDuplicateDelivery` re-derives the door's
 status (and, on the survey route, the voter's) and never moves `lastActionAt` backwards — the
-re-send changes nothing that the first delivery already wrote. A different action at the same
-instant is still a new write. A replay with an *older* timestamp than one of this canvasser's rows
-is rejected exactly as before.
+re-send changes nothing that the first delivery already wrote. *The same action* includes a row an
+admin has since converted **away** from it on Door Outcomes (its `reclassified.from`) — a duplicate
+arriving after that conversion re-applied the original outcome over the correction — and a survey is
+the same delivery only **for the same voter** (`supersededByNewer(…, voterId)`: two voters at one
+door are two submissions even in one millisecond) — a row converted away carries no voter, so the
+voter it had (`reclassified.voterIdWas`) is the one compared; read as "no voter", it matched every
+housemate (code review 2026-10-19, rounds 1 and 2). A different action at
+the same instant is still a new write. A replay with an *older* timestamp than one of this
+canvasser's rows is rejected exactly as before.
 
 **Scoped to replays on purpose.** A live write is never rejected, so online last-arrival-wins is
 untouched and no clock-skewed phone can lock itself out. The comparison is also always against *this

@@ -24,12 +24,14 @@ const MODELS_DIR = path.resolve(__dirname, '../models');
 
 async function main() {
   // Register every model without letting registration auto-build anything — we build
-  // deliberately below.
+  // deliberately below. On the connection too: connectDb turns autoIndex back on outside
+  // production, and a dry run there built the indexes while it listed them, so it listed only
+  // those it got to first (2026-10-20). The connection's own option outranks that global.
   mongoose.set('autoIndex', false);
   for (const f of fs.readdirSync(MODELS_DIR).filter((n) => n.endsWith('.js'))) {
     await import(path.join(MODELS_DIR, f));
   }
-  await connectDb(process.env.MONGODB_URI);
+  await connectDb(process.env.MONGODB_URI, { autoIndex: false });
 
   const names = Object.keys(mongoose.models).sort();
   const mode = APPLY ? (SYNC ? 'APPLY + SYNC (build missing, drop extraneous)' : 'APPLY (build missing)') : 'DRY RUN';

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { jobPollInterval, jobPct, RUN_TERMINAL } from './jobPoll.js';
+import { gaveUp } from './useAnswerEditRunPoll.js';
 
 // Poll a survey-conversion run until it settles. Same idiom as useJobPoll, but it reads the RUN
 // DOC rather than the BullMQ job — which is what makes a foreign run id a structural 404 (the
@@ -14,11 +15,16 @@ export const useConversionRunPoll = ({ campaignId, runId, intervalMs = 1200 }) =
     queryKey: ['survey-conversion', campaignId, runId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}`),
     enabled: !!campaignId && !!runId,
-    refetchInterval: (query) => jobPollInterval(query.state.data?.run?.status, intervalMs, RUN_TERMINAL),
+    // Stops on a refusal (a run that's gone — a 404 — would otherwise be polled forever), never on a
+    // blip: a dyno restart or a dropped connection polls on (code review round 2).
+    refetchInterval: (query) =>
+      gaveUp(query) ? false : jobPollInterval(query.state.data?.run?.status, intervalMs, RUN_TERMINAL),
   });
   const run = q.data?.run || null;
   return {
     run,
+    // The poll ended on a refusal (useAnswerEditRunPoll's `stopped`).
+    stopped: q.status === 'error' && q.error?.status >= 400 && q.error?.status < 500,
     status: run?.status || null,
     pct: jobPct(run?.progress),
     phase: run?.progress?.phase || null,

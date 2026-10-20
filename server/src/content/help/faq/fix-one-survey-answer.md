@@ -9,7 +9,7 @@ summary: Yes — filter Door Outcomes to that canvasser and the wrong answer, th
 tags: survey, answers, edit answers, take out, wrong answer, skip, skipped question, yard sign, volunteer, door outcomes, corrections, undo, earlier answers
 ---
 
-Yes. **Edit answers…** on the **[Door Outcomes page](page-door-outcomes)** (org admins only) changes just the answers you pick. The knock, the Surveyed status, the note and every other answer stay as recorded, so no door, knock or billing number moves and every voter stays surveyed.
+Yes. **Edit answers…** on the **[Door Outcomes page](page-door-outcomes)** (org admins only) changes just the answers you pick. The knock, the Surveyed status, the note and every other answer stay as recorded — except a later answer your change would leave no longer asked, which goes too and is listed in the review — so no door, knock or billing number moves and every voter stays surveyed.
 
 The usual case: question 3 of your survey is *Could you help us by taking a yard sign?*, asked only after a Support answer, and canvassers can pick several answers — *Yard Sign Delivered*, *Candidate Follow-Up*, *Volunteer Request*. One canvasser didn't know a question can be skipped, so when voters said no to a sign they picked *Volunteer Request* or *Candidate Follow-Up* instead. Those picks are wrong; their *Yard Sign Delivered* picks, and every other answer on those surveys, are real.
 

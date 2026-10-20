@@ -25,7 +25,7 @@ export async function processCampaignDeleteJob(job) {
   // never delete a campaign nobody asked to delete.
   const claimed = await Campaign.findOneAndUpdate(
     { _id: campaign._id, 'deletion.requestedAt': { $ne: null } },
-    { $set: { 'deletion.status': 'running', 'deletion.heartbeatAt': new Date(), 'deletion.error': null } },
+    { $set: { 'deletion.status': 'running', 'deletion.heartbeatAt': new Date(), 'deletion.error': null, 'deletion.cascadeAt': null } },
     { new: true }
   );
   if (!claimed) return;
@@ -86,6 +86,8 @@ export async function processCampaignDeleteJob(job) {
   };
 
   try {
+    // Past every refusal: the cascade begins (lateWriteSweep.js reads this).
+    await Campaign.updateOne({ _id: campaign._id, 'deletion.status': 'running' }, { $set: { 'deletion.cascadeAt': new Date() } });
     const counts = await deleteCampaignCascade(claimed, { heartbeat });
     console.log(`[campaign-delete] ${campaign._id} deleted`, counts);
   } catch (err) {

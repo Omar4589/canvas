@@ -60,6 +60,27 @@ export function tripleClause(triples) {
 }
 
 /**
+ * One clause for a batch of visits a loop reads: their doors and their rounds, never a branch per round
+ * and canvasser — a crew of hundreds put hundreds of branches in every batch, and each read was planned
+ * afresh (MongoDB keeps a plan per query shape, and no two batches shared one): a review read 25,000
+ * entries' surveys in 0.7 s for one canvasser and 9–14 s for three hundred (code review round 8). It reads
+ * a superset — another canvasser's rows at the same doors in the same rounds — so the CALLER keeps only the
+ * batch's own visits, by doorKey. Served by the `{householdId, passId}` survey index and the
+ * `{passId, householdId}` ledger ones. `passId: null` matches explicit-null and absent; empty in →
+ * `{ _id: null }`, matching nothing.
+ */
+export const visitsClause = (visits) => {
+  if (!visits.length) return { _id: null };
+  const doors = new Map();
+  const rounds = new Map();
+  for (const v of visits) {
+    doors.set(String(v.householdId), v.householdId);
+    rounds.set(String(v.passId ?? null), v.passId ?? null);
+  }
+  return { householdId: { $in: [...doors.values()] }, passId: { $in: [...rounds.values()] } };
+};
+
+/**
  * Resolve an answer filter into { clause, responses, doors, truncated }.
  *
  * `template` arrives already loaded and org-verified (entryScope.js): the match scopes on the

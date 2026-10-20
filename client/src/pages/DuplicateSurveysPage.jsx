@@ -215,6 +215,9 @@ export default function DuplicateSurveysPage() {
                     >
                       <span className={r.overwritten ? 'font-medium text-fg-muted' : 'font-medium text-fg'}>
                         {r.canvasser.firstName} {r.canvasser.lastName}
+                        {/* Answers typed at the desk, replaced by the canvasser's own survey: the same
+                            name can be on both sides, so the row says where these came from. */}
+                        {r.deskEntered && <span className="ml-1 font-normal text-fg-subtle">(entered at the desk)</span>}
                       </span>
                       <span className="text-fg-muted">{fmt(r.submittedAt, reportTz)}</span>
                       <span className="text-fg-subtle">{r.roundLabel}</span>
@@ -222,7 +225,10 @@ export default function DuplicateSurveysPage() {
                         <span className="flex items-center gap-1.5">
                           <Badge variant="danger">Overwritten</Badge>
                           <span className="text-fg-subtle">
-                            replaced by {r.overwrittenBy?.firstName} {r.overwrittenBy?.lastName}
+                            {/* A Restore set it aside: the name is who restored, not a survey's author. */}
+                            {r.overwrittenVia === 'restore' ? 'set aside when ' : 'replaced by '}
+                            {r.overwrittenBy?.firstName} {r.overwrittenBy?.lastName}
+                            {r.overwrittenVia === 'restore' ? ' restored earlier answers' : ''}
                           </span>
                         </span>
                       )}

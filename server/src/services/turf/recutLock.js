@@ -15,7 +15,7 @@ import { Pass } from '../../models/Pass.js';
 // supplemental jobs, and the published-books 409 guard covers the web side.
 const STALE_MS = 5 * 60 * 1000;
 
-export async function acquireRecutLock(passId, userId, token = null) {
+export async function acquireRecutLock(passId, userId, token = null, { knocks = false } = {}) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_MS);
   const res = await Pass.findOneAndUpdate(
@@ -27,7 +27,7 @@ export async function acquireRecutLock(passId, userId, token = null) {
         { 'recutLock.lockedAt': { $lt: staleBefore } },
       ],
     },
-    { $set: { recutLock: { lockedAt: now, lockedBy: userId || null, token } } },
+    { $set: { recutLock: { lockedAt: now, lockedBy: userId || null, token, knocks } } },
     { new: true }
   ).lean();
   return !!res;

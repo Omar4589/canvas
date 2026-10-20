@@ -36,22 +36,27 @@ const AnswerEditReviewModal = ({ preview, tz, busy, onBack, onConfirm }) => {
   const changed = price.surveysChanged || 0;
   const sentences = reviewSentences(price);
   const left = leftAsTheyAre(preview);
+  const blocked = preview.blocked?.error || null;
 
   return (
     <Modal
-      onClose={onBack}
+      // No closing while the change is being made: its answer must land on a screen that can show it.
+      onClose={busy ? undefined : onBack}
       title={`Change answers on ${changed.toLocaleString()} ${changed === 1 ? 'survey' : 'surveys'}`}
       subtitle={`Survey answers only · ${preview.template?.name || 'Survey'}`}
       size="2xl"
       footer={
         <>
           <Button variant="secondary" onClick={onBack} disabled={busy}>Back</Button>
-          <Button variant="danger" onClick={onConfirm} disabled={busy || !changed}>
+          <Button variant="danger" onClick={onConfirm} disabled={busy || !changed || !!blocked}>
             {busy ? 'Changing…' : `Change ${changed.toLocaleString()} ${changed === 1 ? 'survey' : 'surveys'}`}
           </Button>
         </>
       }
     >
+      {blocked && (
+        <p className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{blocked}</p>
+      )}
       <p className="text-sm text-fg">
         <span className="font-medium">No door, knock or billing number changes.</span> Knocks, billable doors,
         contact rate and survey rate stay exactly where they are, and every one of these voters stays surveyed.
@@ -84,6 +89,12 @@ const AnswerEditReviewModal = ({ preview, tz, busy, onBack, onConfirm }) => {
             </div>
           ))}
         </>
+      )}
+
+      {price.resultsUnavailable && (
+        <p className="mb-2 text-xs text-fg-muted">
+          The campaign&rsquo;s survey results can&rsquo;t be previewed right now (the database is busy); they move with the answers.
+        </p>
       )}
 
       {(price.tags || []).length > 0 && (

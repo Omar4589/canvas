@@ -126,6 +126,10 @@ a data row that navigates, and with no kind for it, it was forced into a hand-ro
 label truncated. Add a fourth kind only if it is genuinely a fourth *answer* to "what does a tap
 here do"; a new visual treatment is not one.
 
+`InsetRow` and `InsetNavRow` both take an optional `accessibilityLabel` that replaces the spoken
+label. The default reads the row's text only — never its `badge` — so a row whose badge carries
+meaning passes its own (the campaign screen's By pass rows add "Active").
+
 Supporting members that are **not** kinds: `InsetHeroRow` (the group's headline number),
 `InsetTitleRow` (an h3 inside the card, for a group that owns its heading — a survey question),
 `InsetBlockRow` (a padded slot for a child that isn't a label/value pair, e.g. `CoverageBar`),
@@ -203,7 +207,9 @@ up to the N above"; the door goal vs Coverage): on return to the screen or to th
 one timer, so they can't drift apart). Pull-to-refresh covers everything. **Today** rolls to the new day
 at midnight (`useTodayInTz` + `effectiveRange`, also on the Overview totals). If a refresh fails, the
 sections keep their last numbers; **By pass** says *Couldn't refresh just now, so these may be behind
-the numbers above* instead of "add up", and shows its error row only when it has nothing to show. An
+the numbers above* instead of "add up", and shows its error row only when it has nothing to show.
+**Activity** never shows a zero it didn't load: until its first numbers arrive its rows read "—", and
+if that first load fails it adds a *Couldn't load activity* row instead of printing 0 knocks. An
 archived campaign reads, on every admin screen, *An org admin can reactivate it from Campaigns on the
 web.*
 
@@ -307,6 +313,26 @@ counted exactly like the web dashboard's **By pass** table, so they always sum t
 headline — a footer under the group now says so — and knocks recorded before passes existed show as
 a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
+
+A long card folds, much as the web table does. Passes with nothing in the range collapse into the
+card's last row ("Show 44 passes with no knocks today (14 active)" — the bracket counts the live passes
+among them, left out at zero and on an archived campaign), and the card never folds away just one row.
+The first **six** passes with numbers show; the rest become one "34 more passes" row carrying their
+combined knocks and rate (plus "N not target" where the campaign uses it), with **Show all** /
+**Show fewer** under it — but because that summed row takes a row of its own, the card folds the
+passes with numbers only when it still saves room (eight passes with numbers and nothing else simply
+list all eight). A pass with surveys but no knocks in the range stays listed and says "N surveys
+taken". The footer first says what a row is, naming the summed row while it shows, then that the card
+adds up to the Knocks headline — only once the headline has loaded, and "Couldn't refresh just now"
+instead after a failed refresh. **Show fewer** scrolls back to the By pass header when you're below
+it, so folding a long list doesn't leave you further down the screen. With a crew picked, the fold
+says "no knocks from this crew". The walk list's active pass carries an **Active** badge, which
+VoiceOver and TalkBack read out too — except on an archived campaign. The card doesn't sort: its
+passes keep walk-list order, with the empty ones after the rest once opened. The fold logic is
+[mobile/lib/byPassFold.js](../mobile/lib/byPassFold.js), the hand-mirrored twin of the web module, and
+it reads the range rather than which passes are active — a finished precinct's pass stays active
+until someone archives it or the walk list's next pass goes live ([METRICS.md](METRICS.md) → *By
+pass*).
 
 ### Not a target voter on the phone — the switch and its numbers
 
@@ -1052,7 +1078,7 @@ in [SURVEYS.md](SURVEYS.md) §J; the map seed-param spec in [MAPS.md](MAPS.md).
 
 | Screen | What changed |
 |---|---|
-| [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen; route [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
+| [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen; route [admin/campaign/[campaignId].jsx](../mobile/app/(app)/admin/campaign/[campaignId].jsx)) | `goVoters` passes `surveyTemplateId` (from `survey-results`' `surveyTemplate.id`) so the drill stays template-scoped when a campaign has answers under more than one survey — plus `coordinatorId` when a crew is picked, so the drill's total matches the count tapped. Also hosts the **By pass** card (`GET /admin/reports/knocks-by-pass` via the screen's shared `rangeParams()` — carries `campaignId`, satisfying the lead gate; folded client-side by `lib/byPassFold.js` at `PASS_CAP` 6 with `{ sumOwnRow: true }`, with `passesOpen` state, an **Active** badge (not on an archived campaign) and a scroll back to the header on Show fewer from below it), the **walk-list chip** (a `FilterBar` filter, rendered with 2+ efforts from `GET /admin/campaigns/:id/efforts`): it threads `effortId` server-side into the overview / campaign-rollup / canvassers / knocks-by-pass queries and clears `surveyPassId` on change (the pass chips draw from the now-filtered By-pass rows) — and the **crew chip** (Timeline's options verbatim: options = ledger rows ∪ roster, gate `coordinatorOptions.length > 0 \|\| coordinatorId` with no `rows` term; threads `coordinatorId` server-side into campaign-rollup / canvassers / knocks-by-pass / survey-results, **never** `/overview` — Coverage is campaign-wide and its subtitle says so when a crew is picked). |
 | [admin/answer-voters.jsx](../mobile/app/(app)/admin/answer-voters.jsx) | **Voters \| By canvasser** `TabSwitcher` (`GET /admin/reports/answer-canvassers` — rank, count, "% of their answers on this question", last entry; tap a row → sets the filter, flips to Voters), a canvasser `FilterChip` dropdown (only canvassers with entries, plus All), enriched `VoterRow`s (campaign-tz exact time, note/Offline badges from `wasOfflineSubmission`), and **View on map** (saves the active campaign, then pushes the map with the one-shot seed params `{ questionKey, optionId, alabel, surveyTemplateId, userId, from, to, scid, seedAt }`). |
 | [admin/map.jsx](../mobile/app/(app)/admin/map.jsx) | Consumes the seed one-shot (nonce + wait-for-`scid`), applies answer + canvasser + range, clears status/scope narrowing, re-frames the camera, then strips the params. The answer filter is dual-read (option text alongside `optionId`) and **template-scoped** — it carries `templateId` (seeded, or stamped from the current survey's `surveyTemplate.id` when an option is picked) and sends it as `surveyTemplateId` on the households query ([MAPS.md](MAPS.md) §D). |
 | [admin/response-details.jsx](../mobile/app/(app)/admin/response-details.jsx) | *"Edited by X · <time>"* (from `editedBy`/`editedAt`), a **Synced** row (`syncedAt`) for offline submissions, exact times in the campaign tz, distance in ft/mi. Next OTA (2026-10-19): the Edited row's sub-line appends *· the earlier answers are kept on the voter record* when the response carries `editedEarlier` (an additive field of `/admin/reports/responses/:id`), and `answerText` prints "—" for an empty array, as [voters/[id].jsx](../mobile/app/(app)/voters/[id].jsx) does too — a skipped or emptied pick-several printed blank. |
@@ -1078,7 +1104,12 @@ The response detail now also carries `restorable` / `restoreBlockedReason` on an
 from the next OTA (2026-10-19) the screen uses them: when `restorable` is false it shows an inert
 *Can't restore here* row naming the undo that would bring the answers back (*Undo the unknock on Door
 Outcomes in the web console…*), the web drawer's wording pointed at the console, instead of offering a
-Restore the server would refuse. Released builds keep the button and the Alert above. The report's `$unionWith` excludes `answer_edit`
+Restore the server would refuse. Released builds keep the button and the Alert above. Its archived row
+says who set the answers aside and how through one helper, `archivedRowFor`
+([lib/duplicateSurveys.js](../mobile/lib/duplicateSurveys.js), pinned by its test): *Removed by* for an
+outcome change or an unknock, *Changed by* for an answer edit, *Set aside by* — *earlier answers were
+restored in their place* — for a Restore, and *Overwritten by* only for a canvasser's own newer survey
+(round 4: every one of them read *Overwritten by … another canvasser*); next OTA. The report's `$unionWith` excludes `answer_edit`
 copies beside `outcome_convert` and `unknock` (2026-10-19, [SURVEYS.md](SURVEYS.md) §N), so an answer
 edit's earlier versions never reach this screen — its archived branch never has to word one. Three
 things are worth knowing before editing it:
@@ -1215,7 +1246,7 @@ shaped copies or the persisted active-campaign blob to carry the fields instead
 | Screen | Shown when in use | Source |
 |---|---|---|
 | [components/CampaignHome.jsx](../mobile/components/CampaignHome.jsx) (the campaign screen) — Activity | a "Not a target" row after the rate: value = the count, unit "doors", sub-line "N% of knocks"; `metricHelp.notTarget` in the shared `MetricSheet` | `/admin/reports/campaign-rollup` row `notTargetKnocks`, over its `knocks` |
-| — By pass | "N not target · " ahead of each row's Conn accent | `/admin/reports/knocks-by-pass` rows' `notTargetKnocks` |
+| — By pass | "N not target · " ahead of each row's Conn accent; the folded "N more passes" row shows the hidden passes' sum | `/admin/reports/knocks-by-pass` rows' `notTargetKnocks` |
 | — Top canvassers | `topCanvasserRows` maps `dayNotTarget: c.notTarget ?? 0` and passes `notTargetInUse` to `CanvasserCard`; the group's *How these are counted* key explains Contact % with `metricHelp.contactRateNotTargetInUse` (names the outcome) instead of `metricHelp.contactRate` (never does) | `/admin/reports/canvassers` row `notTarget` |
 | [admin/timeline.jsx](../mobile/app/(app)/admin/timeline.jsx) | `notTargetInUse` on its `CanvasserCard`s | `/admin/reports/canvasser-timeline` rows' `dayNotTarget` |
 | [components/CanvasserCard.jsx](../mobile/components/CanvasserCard.jsx) | "· N not target" after the contact rate when `notTargetInUse` and `dayNotTarget > 0`, never in lit mode | `row.dayNotTarget` |

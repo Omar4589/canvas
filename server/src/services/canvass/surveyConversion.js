@@ -13,14 +13,22 @@ import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { KNOCK_ACTIONS } from '../reports/aggregations.js';
 import { normalizeAndFilterAnswers } from '../surveys/normalizeAnswers.js';
 import { effectiveSurveyTemplatesForDoors } from '../surveys/effectiveTemplate.js';
-import { archiveOverwrittenResponses, snapshotFromArchive } from '../surveys/archiveOverwrite.js';
+import { archiveOverwrittenResponses, snapshotFromArchive, claimCopiesForWriteBack, releaseCopies, deleteUnlessReplaced } from '../surveys/archiveOverwrite.js';
+import { insertAllowingDuplicates, idsOnFile } from './rawInsert.js';
 import { bumpLive } from '../platform/platformStats.js';
 import { isOutcomeEnabled } from './outcomeToggles.js';
+import { ConversionStrike } from '../../models/ConversionStrike.js';
+import { deletionRequested, sweptAfter } from '../platform/lateWriteSweep.js';
+import { NO_FRESH_STEP } from './stepCount.js';
+import { fingerprint } from './answerEdit.js';
+import { fencesForSlots, withFences } from './answerEditWriter.js';
 import {
   RECLASSIFIABLE_OUTCOMES,
   CONVERTIBLE_SOURCES,
   convertibleMatch,
 } from './reclassifyOutcomes.js';
+import { visitsClause } from './answerScope.js';
+import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
 
 // Converting a door outcome INTO Surveyed, and back out again — the Door Outcomes page's
 // Surveyed direction.
@@ -54,6 +62,10 @@ import {
 // The invariant is the same one runReclassify states (a stamp must mean the whole unit landed);
 // only which write is last differs. Do not "align" the two.
 
+// This build's conversion job ids (routes/admin/campaigns.js conversionJobId), which the processor
+// tells from the previous build's — BullMQ's own (conversionProcessor.js, the deploy window).
+export const CONVERSION_JOB_PREFIX = 'outcome-convert-';
+
 // One conversion may create at most this many SurveyResponse rows. Separate from the reclassify
 // entry cap because the cost here scales with VOTERS, not entries: 25k doors at ~2 voters each is
 // already 50k document writes plus a counter recompute.
@@ -69,9 +81,17 @@ export const MAX_VOTERS_PER_DOOR_SYNC = 50;
 // Activity rows per chunk. Smaller than status.js's 500 because each row here fans out to a voter
 // read and a response insert rather than a single field write.
 const CHUNK = 200;
+// Visits per read in the review's survey count (computeSurveyImpact).
+const IMPACT_VISITS_PER_READ = 500;
 
 // Named examples behind the skip counts. An admin acts on names; the totals alone are unusable.
 const SAMPLE_CAP = 200;
+
+// Surveys an undo writes back in one insert (round 6: one per survey made a big undo three times slower).
+const WRITE_BACK_BATCH = 500;
+// Voters per page of an undo's copies: their copies, holders and fences in memory at once (round 9). Read
+// at call time, so a test can make the pages small.
+const UNDO_VOTER_PAGE = () => Number(process.env.UNDO_VOTER_PAGE) || 1000;
 
 /** Rows convertible in each direction. Surveyed is the only legal source going backwards. */
 export const SOURCES_FOR = (direction) => (direction === 'to_survey' ? RECLASSIFIABLE_OUTCOMES : ['survey_submitted']);
@@ -190,19 +210,22 @@ export async function computeSurveyImpact({ campaign, rows, direction, answerMat
   );
 
   if (direction === 'from_survey') {
-    const or = rows.map((r) => ({
-      householdId: r.householdId,
-      passId: r.passId ?? null,
-      userId: r.userId,
-    }));
-    const existing = or.length
-      ? await SurveyResponse.find({ $or: or }, 'voterId householdId passId userId submittedAt answers')
-          // The +1 is the truncation probe: past the cap, responsesToArchive reads cap+1 and the
-          // route's TOO_MANY_RESPONSES guard refuses BEFORE the preview renders — which is what
-          // keeps entriesNoResponses (computed off this read) from over-counting at the cap.
-          .limit(surveyConvertCap() + 1)
-          .lean()
-      : [];
+    // A batch of visits per read, one clause for its doors and rounds (visitsClause, the unknock's own
+    // read), the batch's visits kept below: one `$or` clause per entry spent the review's time planning the
+    // query — 31 s at 5,000 entries, past the router's 30 s (round 7) — and one per round and canvasser grew
+    // the same way with the crew (round 8). Each survey once: two Surveyed entries at one visit (an older
+    // shape) can fall in two batches.
+    // The +1 is the truncation probe: past the cap, responsesToArchive reads cap+1 and the
+    // route's TOO_MANY_RESPONSES guard refuses BEFORE the preview renders — which is what
+    // keeps entriesNoResponses (computed off this read) from over-counting at the cap.
+    const cap = surveyConvertCap();
+    const keys = new Set(rows.map((r) => doorKey(r)));
+    const seen = new Map();
+    for (let i = 0; i < rows.length && seen.size <= cap; i += IMPACT_VISITS_PER_READ) {
+      const found = await SurveyResponse.find(visitsClause(rows.slice(i, i + IMPACT_VISITS_PER_READ)), 'voterId householdId passId userId submittedAt answers').lean();
+      for (const s of found) if (keys.has(doorKey(s)) && !seen.has(String(s._id))) seen.set(String(s._id), s);
+    }
+    const existing = [...seen.values()].slice(0, cap + 1);
     const byRow = new Set(existing.map((s) => doorKey(s)));
     const entriesNoResponses = rows.filter(
       (r) => !byRow.has(doorKey(r))
@@ -492,11 +515,14 @@ async function convertChunkToSurvey(ctx, rows, answersFor) {
       const inserted = await SurveyResponse.insertMany(docs, { ordered: false });
       acc.responsesCreated += inserted.length;
     } catch (e) {
-      // ordered:false keeps going past a duplicate; Mongoose hands back what landed.
-      const landed = e?.insertedDocs?.length ?? 0;
-      acc.responsesCreated += landed;
-      const dupes = (e?.writeErrors || []).filter((w) => (w?.err?.code ?? w?.code) === 11000);
-      if (dupes.length !== (e?.writeErrors || []).length) throw e; // a real failure, not a race
+      // ordered:false keeps going past a duplicate; Mongoose hands back what landed. Only a race —
+      // every refused document a duplicate — is skipped: anything else throws, including a failure of
+      // the whole command, which the driver reports with NO write errors at all — counting that as
+      // "nothing refused" stamped the entries Surveyed over answers never written (round 6).
+      const errs = Array.isArray(e?.writeErrors) ? e.writeErrors : e?.writeErrors ? [e.writeErrors] : [];
+      const dupes = errs.filter((w) => (w?.err?.code ?? w?.code) === 11000);
+      if (!errs.length || dupes.length !== errs.length || e?.result?.getWriteConcernError?.()) throw e; // a real failure, not a race
+      acc.responsesCreated += e?.insertedDocs?.length ?? 0;
       acc.votersSkippedAlreadyAnswered += dupes.length;
     }
   }
@@ -560,17 +586,29 @@ async function convertChunkToSurvey(ctx, rows, answersFor) {
 async function convertChunkFromSurvey(ctx, rows, to) {
   const { runId, byUserId, at, acc, touched } = ctx;
 
-  const or = rows.map((r) => ({
-    householdId: r.householdId,
-    passId: r.passId ?? null,
-    userId: r.userId,
-  }));
-  const responses = or.length ? await SurveyResponse.find({ $or: or }).lean() : [];
+  // One clause for the chunk's doors and rounds, its own visits kept by doorKey — the review's own read
+  // (round 9: one $or branch per row was slow on a big crew, and the shape a MongoDB 7.0 query-engine bug
+  // answers short — a survey missed here stayed live under the entry the chunk turned Not home).
+  const keys = new Set(rows.map((r) => doorKey(r)));
+  const responses = rows.length ? (await SurveyResponse.find(visitsClause(rows)).lean()).filter((s) => keys.has(doorKey(s))) : [];
 
+  // The visits this chunk strikes, on record before anything changes: Restore holds every kept copy
+  // of their answers to the strike while this conversion stands (restoreGuard.js).
+  const strike = rows.length
+    ? await ConversionStrike.create({
+        runId,
+        campaignId: ctx.campaign._id,
+        organizationId: ctx.campaign.organizationId,
+        visitKeys: [...new Set(rows.map((r) => doorKey(r)))],
+        entryIds: rows.map((r) => r._id),
+        at: new Date(),
+      })
+    : null;
   if (responses.length) {
     await archiveOverwrittenResponses(responses, { byUserId, via: 'outcome_convert', conversionRunId: runId });
-    const res = await SurveyResponse.deleteMany({ _id: { $in: responses.map((r) => r._id) } });
-    acc.responsesArchived += res.deletedCount || 0;
+    // ...each only while it still holds the submission read (round 9: a profile Restore swapped in between
+    // was deleted with it — archiveOverwrite.js deleteUnlessReplaced).
+    acc.responsesArchived += await deleteUnlessReplaced(responses);
     touched.voterIds.push(...responses.map((r) => r.voterId));
   }
 
@@ -607,6 +645,7 @@ async function convertChunkFromSurvey(ctx, rows, to) {
     const res = await CanvassActivity.bulkWrite(ops, { ordered: false });
     acc.entriesConverted += res.modifiedCount || 0;
   }
+  if (strike) await ConversionStrike.updateOne({ _id: strike._id }, { $set: { doneAt: new Date() } });
   touched.doorIds.push(...rows.map((r) => r.householdId));
 }
 
@@ -700,12 +739,19 @@ const historyRow = (run, campaign, { swap = false } = {}) =>
     source: 'survey_conversion',
   });
 
+// A campaign or organization being deleted stops a conversion for good, before each batch: it reads
+// Stopped, and its delete cascade waits out the batch in flight before it sweeps. Whatever a writer
+// here wrote after that is swept with the tenant's however it ends (sweptAfter on each export below;
+// lateWriteSweep.js, round 3).
+const tenantOf = (run) => ({ campaignId: run.campaignId, organizationId: run.organizationId });
+export const TENANT_DELETING_ERROR = 'The campaign or organization is being deleted, so this change stopped.';
+
 /**
  * Execute a run to completion. Called by the worker for `mode: 'bulk'`, and re-entrant: it
  * re-reads its own work set each pass, and convertibleMatch already excludes stamped rows, so a
  * redelivered or resumed job naturally skips everything it finished.
  */
-export async function executeConversionRun({ run, campaign, onProgress }) {
+async function executeRun({ run, campaign, onProgress }) {
   const template =
     run.direction === 'to_survey'
       ? await SurveyTemplate.findById(run.surveyTemplateId).lean()
@@ -728,6 +774,12 @@ export async function executeConversionRun({ run, campaign, onProgress }) {
   let done = run.progress?.doorsDone || 0;
 
   for (let i = 0; i < pending.length; i += CHUNK) {
+    if (await deletionRequested(tenantOf(run))) {
+      run.status = 'failed';
+      run.error = TENANT_DELETING_ERROR;
+      await run.save();
+      return run;
+    }
     const chunk = pending.slice(i, i + CHUNK);
     if (run.direction === 'to_survey') await convertChunkToSurvey(ctx, chunk, answersFor);
     else await convertChunkFromSurvey(ctx, chunk, run.to);
@@ -780,7 +832,7 @@ export async function executeConversionRun({ run, campaign, onProgress }) {
  * `voterPlans` is { [voterId]: { answers, note } | null }; a voter absent from it, or mapped to
  * null, is left alone. That is how per-voter tabs and per-voter skip checkboxes both work.
  */
-export async function applyDoorToRun({ run, campaign, actionId, voterPlans = {} }) {
+async function applyDoor({ run, campaign, actionId, voterPlans = {} }) {
   const row = await CanvassActivity.findOne(
     {
       ...convertibleMatch(campaign._id, null, CONVERTIBLE_SOURCES),
@@ -822,28 +874,32 @@ export async function applyDoorToRun({ run, campaign, actionId, voterPlans = {} 
   return { applied: true, counts: run.counts };
 }
 
-/** Close a queue session: settle the platform counter and write the one history row. */
-export async function closeConversionRun({ run, campaign }) {
-  if (run.status === 'open') {
-    // A session that recorded nothing gets no history row and no counter bump — "opened a
-    // walkthrough and changed your mind" is not a campaign event.
-    const didAnything =
-      run.counts.entriesConverted || run.counts.responsesCreated || run.counts.responsesArchived;
-    if (didAnything) {
-      await bumpPlatformOnce(run, campaign);
-      await historyRow(run, campaign);
-    }
-    run.status = 'completed';
-    run.completedAt = new Date();
-    run.progress = {
-      phase: null,
-      pct: 100,
-      doorsDone: run.progress?.doorsDone || 0,
-      doorsTotal: run.progress?.doorsTotal || 0,
-    };
-    await run.save();
+/**
+ * Close a queue session: settle the platform counter and write the one history row. `{ run, busy }`:
+ * busy while one of its doors is still saving.
+ *
+ * CLAIMED, never saved from a read: two Closes at once each wrote a History row, and a Close landing
+ * while a step saved let an Undo read the stamps before the step wrote its own (round 4). Only the
+ * Close that claims the session writes its row.
+ */
+async function closeRun({ run, campaign }) {
+  const closed = await SurveyConversionRun.findOneAndUpdate(
+    { _id: run._id, status: 'open', ...NO_FRESH_STEP() },
+    [{ $set: { status: 'completed', completedAt: '$$NOW', 'progress.phase': null, 'progress.pct': 100 } }],
+    { new: true }
+  );
+  if (!closed) {
+    const now = await SurveyConversionRun.findById(run._id);
+    return { run: now || run, busy: !!now && now.status === 'open' };
   }
-  return run;
+  // A session that recorded nothing gets no history row and no counter bump — "opened a walkthrough
+  // and changed your mind" is not a campaign event.
+  const didAnything = closed.counts.entriesConverted || closed.counts.responsesCreated || closed.counts.responsesArchived;
+  if (didAnything) {
+    await bumpPlatformOnce(closed, campaign);
+    await historyRow(closed, campaign);
+  }
+  return { run: closed, busy: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -853,26 +909,119 @@ export async function closeConversionRun({ run, campaign }) {
 // An undo of a run this size or smaller runs inline, inside its request (the page shows the result
 // at once); anything larger is a job, the same size of work as the run going forward.
 export const INLINE_REVERT_MAX_ENTRIES = 500;
-// An inline undo takes seconds. One still reading `reverting` this long after it started died with
-// its request (a dyno restart, the database dropping out mid-undo), and nothing else will notice:
-// there is no job to finish it and no worker listener to mark it. It read "Undoing" forever and
-// refused every retry as busy.
-const DEAD_INLINE_REVERT_MS = 10 * 60 * 1000;
 export const STOPPED_UNDO_ERROR = 'The undo stopped before it finished.';
+export const STOPPED_CONVERSION_ERROR = 'The conversion stopped before it finished.';
 
-/** A `reverting` run whose inline undo died reads `revert_failed`. Takes a doc or a lean row. */
-export const expireDeadInlineRevert = async (run) => {
-  if (run.status !== 'reverting' || (run.counts?.entriesConverted || 0) > INLINE_REVERT_MAX_ENTRIES) return run;
-  if (!run.updatedAt || Date.now() - new Date(run.updatedAt).getTime() < DEAD_INLINE_REVERT_MS) return run;
+// A conversion reading busy — pending, running or reverting — that nothing is working on any more.
+// Every step that moves a run into one of those leaves it to someone: its request (a create, a Pick
+// up, an Undo that claims the run and checks again; an inline undo), or its job. Each gives the run
+// back if it fails — but those give-backs are database writes too, and when one failed with the step
+// before it (two database failures in a row, as in a failover), the run stayed busy with nobody on it:
+// Working or Undoing for good, and every change on the campaign refused behind it, since one change
+// runs at a time (code review round 9). Likewise an inline undo that died with its request (a dyno
+// restart), and a job Redis lost. Read this long after its last write with no live job, it is settled:
+// back to where it can be picked up or undone again. Ten minutes is far past any request, and a job
+// still queued or running is alive however long it has waited.
+const STALLED_MS = 10 * 60 * 1000;
+const LIVE_JOB_STATES = new Set(['waiting', 'active', 'delayed', 'prioritized', 'waiting-children']);
+const BUSY = ['pending', 'running', 'reverting'];
+
+const jobAlive = async (jobId) => {
+  if (!jobId) return false;
+  try {
+    const job = await queueOp(getQueue(QUEUE_NAMES.OUTCOME_CONVERT).getJob(jobId), 2000);
+    if (!job) return false;
+    return LIVE_JOB_STATES.has(await queueOp(job.getState(), 2000));
+  } catch {
+    return true; // the queue can't be asked: still busy, the safe direction
+  }
+};
+
+/**
+ * A busy run nobody is working on, settled. A conversion going forward reads `failed` (Pick up or
+ * Undo — what it changed is correct either way). An undo that began — its job or its inline request
+ * claimed it (`revertClaimedAt`) — reads `revert_failed` (Retry undo; the undo is re-entrant). One
+ * claimed but never begun goes back to what it was before the claim (`revertFrom`), so a change the
+ * admin kept stands as it did, never reading as an undo begun (restoreGuard.js lifts a strike once its
+ * undo begins). An inline-sized undo has no job to ask about. Takes a doc or a lean row.
+ */
+export const settleStalledConversion = async (run) => {
+  if (!BUSY.includes(run.status)) return run;
+  if (!run.updatedAt || Date.now() - new Date(run.updatedAt).getTime() < STALLED_MS) return run;
+  const inline = run.status === 'reverting' && (run.counts?.entriesConverted || 0) <= INLINE_REVERT_MAX_ENTRIES;
+  if (!inline && (await jobAlive(run.queueJobId))) return run;
+  let to;
+  if (run.status !== 'reverting') to = { status: 'failed', error: STOPPED_CONVERSION_ERROR };
+  // A claim from before `revertFrom` existed (2026-10-20) can't say what it was: as before, a stopped undo.
+  else if (run.revertClaimedAt || !run.revertFrom?.status) to = { status: 'revert_failed', error: STOPPED_UNDO_ERROR };
+  else to = { status: run.revertFrom.status, error: run.revertFrom.error ?? null };
   const res = await SurveyConversionRun.updateOne(
-    { _id: run._id, status: 'reverting', updatedAt: run.updatedAt },
-    { $set: { status: 'revert_failed', error: STOPPED_UNDO_ERROR } }
+    { _id: run._id, status: run.status, updatedAt: run.updatedAt },
+    { $set: { status: to.status, error: to.error, queueJobId: null } }
   );
   if (res.modifiedCount === 1) {
-    run.status = 'revert_failed';
-    run.error = STOPPED_UNDO_ERROR;
+    run.status = to.status;
+    run.error = to.error;
+    run.queueJobId = null;
   }
   return run;
+};
+
+/** Settle a campaign's busy conversions nobody is working on; true when it found one to look at (read again). */
+export const settleStalledConversions = async (campaignId, { exceptConversionId = null } = {}) => {
+  const runs = await SurveyConversionRun.find(
+    {
+      campaignId,
+      ...(exceptConversionId ? { _id: { $ne: exceptConversionId } } : {}),
+      status: { $in: BUSY },
+      updatedAt: { $lt: new Date(Date.now() - STALLED_MS) },
+    },
+    { status: 1, updatedAt: 1, queueJobId: 1, revertClaimedAt: 1, revertFrom: 1, counts: 1 }
+  ).lean();
+  for (const run of runs) await settleStalledConversion(run);
+  return runs.length > 0;
+};
+
+// The surveys holding these copies' {voterId, passId} slots, keyed `voterId|passId` — read by voter, a
+// batch at a time, as the unknock undo reads them: one `$or` clause per slot spent 87 s planning the
+// query at 50,000, past the worker's socket timeout, so the undo could never finish (round 7). Only the
+// copies' own rounds, and only the slots asked for, are kept: every round's surveys of every voter, answers
+// and all, ran the worker out of memory at the cap (round 8).
+const HOLDERS_PER_READ = 500;
+const HOLDER_FIELDS = 'voterId passId userId submittedAt answers editedBy editedAt note';
+const holdersBySlot = async (docs) => {
+  const wanted = new Set(docs.map((d) => `${d.voterId}|${d.passId ?? 'null'}`));
+  const passIds = [...new Map(docs.map((d) => [String(d.passId ?? null), d.passId ?? null])).values()];
+  const voterIds = [...new Set(docs.map((d) => String(d.voterId)))].map((id) => new mongoose.Types.ObjectId(id));
+  const out = new Map();
+  for (let i = 0; i < voterIds.length; i += HOLDERS_PER_READ) {
+    for (const r of await SurveyResponse.find({ voterId: { $in: voterIds.slice(i, i + HOLDERS_PER_READ) }, passId: { $in: passIds } }, HOLDER_FIELDS).lean()) {
+      const key = `${r.voterId}|${r.passId ?? 'null'}`;
+      if (wanted.has(key)) out.set(key, r);
+    }
+  }
+  return out;
+};
+
+// The visits (doorKey) of a conversion's own entries still on file: any still stamped with the run,
+// and those its strike records name by id that carry no stamp and read Surveyed — flipped back by an
+// earlier attempt of this undo, or never flipped (a step that stopped after taking the answers). One
+// another change has stamped since is that change's, not this one's: counting it put this undo's
+// answers back under a door the later conversion says was Not home (round 4). `surveyed` keeps only
+// entries that read Surveyed again — back after the undo flipped them.
+const entriesOnFile = async (run, { surveyed = false } = {}) => {
+  const entryIds = (await ConversionStrike.find({ runId: run._id }, { entryIds: 1 }).lean()).flatMap((r) => r.entryIds || []);
+  const rows = await CanvassActivity.find(
+    {
+      $or: [
+        { 'reclassified.runId': run._id },
+        ...(entryIds.length ? [{ _id: { $in: entryIds }, reclassified: { $exists: false }, actionType: 'survey_submitted' }] : []),
+      ],
+      ...(surveyed ? { actionType: 'survey_submitted' } : {}),
+    },
+    { householdId: 1, passId: 1, userId: 1 }
+  ).lean();
+  return new Set(rows.map((r) => doorKey(r)));
 };
 
 /**
@@ -892,7 +1041,13 @@ export const expireDeadInlineRevert = async (run) => {
  * settle: those doors and voters kept reading the conversion. Stamped-but-flipped rows are out of
  * every correction's scope (convertibleMatch) until the retry finishes, which is the safe direction.
  */
-export async function revertConversionRun({ run, campaign }) {
+async function revertRun({ run, campaign }) {
+  if (await deletionRequested(tenantOf(run))) {
+    run.status = 'revert_failed';
+    run.error = TENANT_DELETING_ERROR;
+    await run.save();
+    return run;
+  }
   run.status = 'reverting';
   run.error = null;
   run.progress = { phase: 'reverting', pct: 0, doorsDone: 0, doorsTotal: run.counts.doorsTargeted };
@@ -900,7 +1055,11 @@ export async function revertConversionRun({ run, campaign }) {
 
   const stamp = { 'reclassified.runId': run._id };
   const doorRows = await CanvassActivity.aggregate([{ $match: stamp }, { $group: { _id: '$householdId' } }]);
-  const doorIds = doorRows.map((r) => r._id);
+  // ...and every door its strike records name: a step that stopped after taking a door's answers and
+  // before flipping its entry left a door (and its voters) no stamp leads back to, still reading the
+  // answers it no longer had (round 4).
+  const struckDoors = (await ConversionStrike.find({ runId: run._id }, { visitKeys: 1 }).lean()).flatMap((r) => (r.visitKeys || []).map((k) => k.split('|')[0]));
+  const doorIds = [...new Set([...doorRows.map((r) => String(r._id)), ...struckDoors])].map((id) => new mongoose.Types.ObjectId(id));
 
   const voterIds = [];
 
@@ -909,18 +1068,12 @@ export async function revertConversionRun({ run, campaign }) {
     voterIds.push(...created.map((r) => r.voterId));
     await SurveyResponse.deleteMany({ 'deskEntry.runId': run._id });
   } else {
-    const archived = await SurveyResponseArchive.find({ conversionRunId: run._id }).lean();
     let notRestored = 0;
-    const promoted = [];
-    // Whether the slot is free is decided by an explicit READ, not by whether the unique index
-    // happens to fire. The {voterId, passId} index is the real guarantee in production, but it is
-    // built by a deploy step (autoIndex is off there) — so a data-destroying decision must not
-    // depend on it existing. The E11000 catch below stays as belt-and-braces for the race.
-    const wanted = archived.map((d) => ({ voterId: d.voterId, passId: d.passId ?? null }));
-    const taken = wanted.length
-      ? await SurveyResponse.find({ $or: wanted }, 'voterId passId userId submittedAt').lean()
-      : [];
-    const takenByKey = new Map(taken.map((r) => [`${r.voterId}|${r.passId ?? 'null'}`, r]));
+    // Answers go back only into a visit whose entry this undo brings back — one of the run's
+    // converted entries still on file (stamped, or flipped back by an earlier attempt). The canvasser
+    // re-recording the door since deleted it, and putting the answers back there counted a survey
+    // under a door that says otherwise (round 3).
+    const comingBack = await entriesOnFile(run);
 
     const cannotRestore = (doc) => {
       notRestored += 1;
@@ -929,42 +1082,107 @@ export async function revertConversionRun({ run, campaign }) {
       }
     };
 
-    for (const doc of archived) {
-      const holder = takenByKey.get(`${doc.voterId}|${doc.passId ?? 'null'}`);
-      // The SAME submission (same canvasser, same moment) already holds the slot: an earlier
-      // attempt of this undo put it back and died before clearing the archive copy. It is restored,
-      // not blocked — counting it "not restored" would blame a field answer that doesn't exist.
-      if (
-        holder &&
+    // The SAME submission (same canvasser, same moment) already holds the slot: an earlier
+    // attempt of this undo put it back and died before clearing the archive copy. It is restored,
+    // not blocked — counting it "not restored" would blame a field answer that doesn't exist.
+    // Same content too, never just the same submission: another path (a profile Restore of a
+    // different copy, a replayed submit) can put the same submission back with DIFFERENT answers, and
+    // deleting this copy then lost the only record of its version (code review 2026-10-19).
+    const sameSubmission = (holder, doc) => {
+      const snap = snapshotFromArchive(doc);
+      return (
+        !!holder &&
         String(holder.userId) === String(doc.userId) &&
-        holder.submittedAt &&
-        doc.submittedAt &&
-        new Date(holder.submittedAt).getTime() === new Date(doc.submittedAt).getTime()
-      ) {
-        promoted.push(doc._id);
-        voterIds.push(doc.voterId);
-        continue;
+        !!holder.submittedAt &&
+        !!doc.submittedAt &&
+        new Date(holder.submittedAt).getTime() === new Date(doc.submittedAt).getTime() &&
+        fingerprint(holder) === fingerprint(snap) &&
+        (holder.note ?? null) === (snap.note ?? null)
+      );
+    };
+    // A page of voters at a time — their copies, the surveys holding their slots, their fences — never every
+    // copy of the run at once: a voter's copies are all on one page, so a slot's copies are judged together
+    // (round 9: 50,000 copies of a twelve-question survey ran the worker out of memory before it wrote a
+    // thing, and every retry died the same way).
+    const copyVoters = await SurveyResponseArchive.distinct('voterId', { conversionRunId: run._id });
+    for (let page = 0; page < copyVoters.length; page += UNDO_VOTER_PAGE()) {
+      const archived = await SurveyResponseArchive.find({ conversionRunId: run._id, voterId: { $in: copyVoters.slice(page, page + UNDO_VOTER_PAGE()) } }).lean();
+      const promoted = [];
+      // Whether the slot is free is decided by an explicit READ, not by whether the unique index
+      // happens to fire. The {voterId, passId} index is the real guarantee in production, but it is
+      // built by a deploy step (autoIndex is off there) — so a data-destroying decision must not
+      // depend on it existing. The E11000 catch below stays as belt-and-braces for the race.
+      const wanted = archived.map((d) => ({ voterId: d.voterId, passId: d.passId ?? null }));
+      const takenByKey = await holdersBySlot(archived);
+      // A survey written back keeps the fences of answer-edit runs whose undo reached it meanwhile.
+      const fences = await fencesForSlots(campaign._id, wanted);
+      const toWrite = [];
+      // A second copy of a slot this undo also writes back — a redelivered batch archived the answers
+      // twice — judged once the first has landed: the same submission then is a duplicate and goes, and
+      // anything else stays on the profile, not put back (round 7: both went into one insert, the second
+      // hit the slot's unique index and was listed as a voter whose answers couldn't be put back).
+      const twins = [];
+      const chosen = new Set();
+      const newestFirst = [...archived].sort((x, y) => new Date(y.overwrittenAt || 0) - new Date(x.overwrittenAt || 0));
+      for (const doc of newestFirst) {
+        const slot = `${doc.voterId}|${doc.passId ?? 'null'}`;
+        const holder = takenByKey.get(slot);
+        if (sameSubmission(holder, doc)) {
+          promoted.push(doc._id);
+          voterIds.push(doc.voterId);
+          continue;
+        }
+        // A canvasser answered this voter again in the field after the conversion. Their answer is
+        // newer and real — never clobber it. The archive row stays put, and is listed. Likewise a
+        // visit whose entry isn't coming back.
+        if (holder || !comingBack.has(doorKey(doc))) {
+          cannotRestore(doc);
+          continue;
+        }
+        if (chosen.has(slot)) {
+          twins.push(doc);
+          continue;
+        }
+        chosen.add(slot);
+        toWrite.push(doc);
       }
-      // A canvasser answered this voter again in the field after the conversion. Their answer is
-      // newer and real — never clobber it. The archive row stays put, and is listed.
-      if (holder) {
-        cannotRestore(doc);
-        continue;
+      // Written back a batch at a time, only from copies this undo holds (claimCopiesForWriteBack — the
+      // run's own claim, so a retry takes back what an attempt that failed left): an Erase that landed
+      // since the read stays erased (round 5). One raw insert per batch — a claim, a read and a create per
+      // survey made a 50,000-survey undo three times slower (round 6) — not re-validated: this puts back
+      // rows that were already on file in exactly this shape (the archive keeps verbatim copies —
+      // archiveOverwrite.js), and an old row today's schema would refuse must not make the undo fail on
+      // every retry. A copy goes only once its survey is read back on file, and the batch's claim is let
+      // go however it ends, by this run's token (round 7: a claim whose own read failed, and a landed copy
+      // whose delete failed, stayed held ten minutes) — the unknock undo's rule.
+      for (let i = 0; i < toWrite.length; i += WRITE_BACK_BATCH) {
+        const batch = toWrite.slice(i, i + WRITE_BACK_BATCH);
+        const ids = batch.map((d) => d._id);
+        const landed = [];
+        try {
+          const held = await claimCopiesForWriteBack(ids, run._id);
+          const heldIds = new Set(held.map((d) => String(d._id)));
+          for (const doc of batch) if (!heldIds.has(String(doc._id))) cannotRestore(doc);
+          const now = new Date();
+          const docs = held.map((d) => ({ ...withFences(snapshotFromArchive(d), fences), _id: new mongoose.Types.ObjectId(), createdAt: now, updatedAt: now }));
+          await insertAllowingDuplicates(SurveyResponse.collection, docs);
+          const written = await idsOnFile(SurveyResponse.collection, docs.map((x) => x._id));
+          held.forEach((d, k) => (written.has(String(docs[k]._id)) ? landed.push(d) : cannotRestore(d)));
+          if (landed.length) await SurveyResponseArchive.deleteMany({ _id: { $in: landed.map((d) => d._id) } });
+        } finally {
+          await releaseCopies(ids, run._id);
+        }
+        voterIds.push(...landed.map((d) => d.voterId));
       }
-      const snapshot = snapshotFromArchive(doc);
-      try {
-        // Not re-validated: this puts back a row that was already on file in exactly this shape
-        // (the archive keeps verbatim copies — archiveOverwrite.js), and an old row today's schema
-        // would refuse must not make the undo fail on every retry.
-        await SurveyResponse.create([snapshot], { validateBeforeSave: false });
-        promoted.push(doc._id);
-        voterIds.push(doc.voterId);
-      } catch (e) {
-        if (e?.code !== 11000) throw e;
-        cannotRestore(doc);
+      if (twins.length) {
+        const now = await holdersBySlot(twins);
+        for (const doc of twins) {
+          if (sameSubmission(now.get(`${doc.voterId}|${doc.passId ?? 'null'}`), doc)) promoted.push(doc._id);
+          else cannotRestore(doc);
+        }
       }
+      if (promoted.length) await SurveyResponseArchive.deleteMany({ _id: { $in: promoted } });
     }
-    if (promoted.length) await SurveyResponseArchive.deleteMany({ _id: { $in: promoted } });
     run.counts.responsesNotRestored = notRestored;
   }
 
@@ -980,6 +1198,15 @@ export async function revertConversionRun({ run, campaign }) {
     : [];
   await settle({ campaign, doorIds, voterIds: [...voterIds, ...votersAtDoors] });
 
+  // The visits whose entries this undo could NOT put back — the canvasser re-recorded the door
+  // since: the strike stands at those visits (restoreGuard.js). Read from what is on file now — the
+  // run's own entries back as Surveyed — so a retry after the stamps came off records the same
+  // truth. Every strike record gets the field, empty or not.
+  const flippedBack = await entriesOnFile(run, { surveyed: true });
+  for (const rec of await ConversionStrike.find({ runId: run._id }, { visitKeys: 1 }).lean()) {
+    await ConversionStrike.updateOne({ _id: rec._id }, { $set: { notRestoredKeys: rec.visitKeys.filter((k) => !flippedBack.has(k)) } });
+  }
+
   await CanvassActivity.updateMany(stamp, { $unset: { reclassified: '' } });
   await historyRow(run, campaign, { swap: true });
 
@@ -989,3 +1216,9 @@ export async function revertConversionRun({ run, campaign }) {
   await run.save();
   return run;
 }
+
+// The writers, each swept after on a tenant being deleted (see tenantOf above).
+export const executeConversionRun = (args) => sweptAfter(tenantOf(args.run), () => executeRun(args));
+export const applyDoorToRun = (args) => sweptAfter(tenantOf(args.run), () => applyDoor(args));
+export const closeConversionRun = (args) => sweptAfter(tenantOf(args.run), () => closeRun(args));
+export const revertConversionRun = (args) => sweptAfter(tenantOf(args.run), () => revertRun(args));

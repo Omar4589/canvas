@@ -24,7 +24,9 @@ import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
 // {householdId, passId} and never joins User, so a scrub cannot move a bill). Deletion is
 // therefore a scrub-in-place: the row survives, every trace of the person does not.
 
-const RETENTION_DAYS = Number(process.env.DELETED_IDENTITY_RETENTION_DAYS || 180);
+// How long a deleted account's name is kept (DeletedUserRecord.retentionUntil); the identity purge reads it
+// too, for an account whose record an organization's deletion dropped (purgeDeletedIdentities.js).
+export const RETENTION_DAYS = Number(process.env.DELETED_IDENTITY_RETENTION_DAYS || 180);
 
 export class AccountDeletionError extends Error {
   constructor(code, message, details = {}) {

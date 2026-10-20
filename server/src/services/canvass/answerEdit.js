@@ -164,7 +164,7 @@ const textToId = (q) => new Map((q.options || []).map((o) => [o.text, o.id]));
  * seed rule (client/src/lib/surveyAnswerForm.js seedFromAnswers). `unmapped` lists old texts that
  * match no option at all.
  */
-const idsOfRow = (q, row) => {
+export const idsOfRow = (q, row) => {
   const stored = Array.isArray(row?.optionIds) ? row.optionIds.filter((id) => !isBlankText(id)) : [];
   if (stored.length) return { ids: stored.slice(), unmapped: [] };
   const byText = textToId(q);
@@ -264,9 +264,13 @@ const applyOne = (q, row, entry, mode) => {
   // An old text that still matches nothing would have to be thrown away to write the row back
   // id-native — skip the survey rather than lose part of its answer.
   if (unmapped.some((t) => !removeTexts.has(t))) return { skip: 'legacy_answer' };
-  const removedIds = ids.filter((id) => removeSet.has(id));
+  // A stored option id the survey no longer has reads as an old answer on the form, which sends it
+  // as an old text — take it out too (it can never collide with an option the survey still has).
+  const known = new Set((q.options || []).map((o) => o.id));
+  const ghost = (id) => id !== OTHER_OPTION_ID && !known.has(id) && removeTexts.has(id);
+  const removedIds = ids.filter((id) => removeSet.has(id) || ghost(id));
   if (!removedIds.length && !removedTexts.length) return { skip: 'no_matching_picks' };
-  const kept = ids.filter((id) => !removeSet.has(id));
+  const kept = ids.filter((id) => !removeSet.has(id) && !ghost(id));
   const addedIds = (entry.replaceWith || []).filter((id) => !kept.includes(id));
   const nextIds = [...kept, ...addedIds];
   if (!nextIds.length) return { next: skipLiteral(q), kind: 'cleared', removedIds, addedIds: [], removedTexts };
@@ -358,6 +362,23 @@ export const applyEditPlan = (questions, answers, plan, { mode = 'bulk', flow = 
     if (discarded) visibleAfter = visibleQuestionKeys(qs, cellsOf(qByKey, out));
   }
 
+  // Whether a BLANK cuts a Script-flow survey short (D7): an answer this edit drops that would still
+  // be reached with the blanked answers put back. A drop a re-route causes is listed all the same,
+  // but it isn't the blank's doing (code review round 2: a re-route plus an unrelated clear read
+  // "ends the script").
+  let endsScript = false;
+  if (flow === 'script' && [...changes.values()].some((c) => c.kind === 'cleared')) {
+    const withBlanksBack = out.map((r) => {
+      const c = r && changes.get(r.questionKey);
+      return c?.kind === 'cleared' && c.before ? c.before : r;
+    });
+    const reachedWithBlanksBack = visibleQuestionKeys(qs, cellsOf(qByKey, withBlanksBack));
+    endsScript = out.some((r) => {
+      const q = r && qByKey.get(r.questionKey);
+      return !!q && !isStatement(q) && visibleBefore.has(q.key) && !visibleAfter.has(q.key) && isAnsweredRow(q, r) && reachedWithBlanksBack.has(q.key);
+    });
+  }
+
   const dropped = [];
   for (let i = out.length - 1; i >= 0; i -= 1) {
     const r = out[i];
@@ -389,9 +410,9 @@ export const applyEditPlan = (questions, answers, plan, { mode = 'bulk', flow = 
     changed: rows.length > 0,
     rows,
     skipped,
-    // A blank or changed answer that cuts a Script-flow survey short drops the rest of that path
-    // (D7) — the review names it in red.
-    endsScript: flow === 'script' && dropped.length > 0,
+    // A BLANK answer that cuts a Script-flow survey short drops the rest of that path (D7) — the
+    // review names it in red, in those words (every dropped answer is listed either way).
+    endsScript,
   };
 };
 

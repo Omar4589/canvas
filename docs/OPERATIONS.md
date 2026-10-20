@@ -667,27 +667,63 @@ Door Outcomes gains **Edit answers…**: an org admin takes out, changes or clea
 while every voter stays surveyed, priced in a review first and undone as one change; every admin edit,
 there or on the voter profile, now keeps the earlier answers ([CAMPAIGNS.md](CAMPAIGNS.md),
 [SURVEYS.md](SURVEYS.md) §N, [VOTERS.md](VOTERS.md)). The six correction-safety fixes ship in the same
-deploy. No config var, no data migration, no client-version bump. In order:
+deploy, and so do the fixes from the code reviews that followed it (the follow-up to `589c1c0`). No
+config var, no client-version bump. In order:
 
 1. **Deploy server and web from `main`**, outside field hours. The worker restarts with the new
-   `answer-edit-queue` and builds the two new collections' indexes itself at boot.
+   `answer-edit-queue` and builds the two answer-edit collections' indexes itself at boot.
 2. **Run console — the dry run, then the build** (it lists the two new indexes on the earlier-answer
-   copies, which a large undo or a change's Details page reads):
+   copies, which a large undo or a change's Details page reads, and the four on the new conversion
+   records Restore reads):
 
    ```
    npm run migrate:build-indexes
    npm run migrate:build-indexes -- --apply
    ```
 
-3. **Phone, when convenient:** the History sentence, the *Edited by* line on the map's door and ping
-   sheets, "—" for an empty pick-several, and the response detail's *Can't restore here* hint ride the
-   next over-the-air update — on your machine, in `mobile/`: `npm run ota:staging`, check it on a
-   staging build, then `npm run ota:production` from `main`. Released phones already work with this
-   server.
+3. **Run console — record older removals, once.** Restore now reads which visits a Surveyed → Not
+   home change took answers from out of the change's own record, and which visits an undone unknock
+   could not put back; removals made before this deploy get theirs from what they left behind. It also
+   marks an older unknock that stopped part-way (one that took entries or answers off the record before
+   it stopped, where no later unknock or survey conversion took them) as stopped part-way, so its
+   **Undo** is offered, and lists it in Campaign History at the moment it began. Dry run first (it says
+   how many of each it would record or mark — the same number the real run marks), then for real —
+   harmless to run again (a second run also writes any History line a first run was cut off before
+   writing):
+
+   ```
+   npm run migrate:removal-strikes
+   npm run migrate:removal-strikes -- --apply
+   ```
+
+4. **Run console — tidy what the first build stored, once.** If `589c1c0` ran in production, its
+   answer-edit runs may hold a voter's own written words in their pick counts and canvassers' names in
+   their undo notes; this rewrites both (it changes nothing a screen relies on). Dry run, then for real
+   — harmless when there is nothing to tidy:
+
+   ```
+   npm run repair:answer-edit-words
+   npm run repair:answer-edit-words -- --apply
+   ```
+
+5. **Phone, when convenient:** the History sentence, the *Edited by* line on the map's door and ping
+   sheets, "—" for an empty pick-several, the response detail's *Can't restore here* hint, that screen
+   refreshing after a refused Restore, and that screen saying who set earlier answers aside and how
+   (*Removed by*, *Changed by*, *Set aside by* — not *Overwritten by another canvasser*) ride the next
+   over-the-air update — on your machine, in
+   `mobile/`: `npm run ota:staging`, check it on a staging build, then `npm run ota:production` from
+   `main`. Released phones already work with this server.
 
 **Client report drafts** show the builder's internal notes (answers entered at a desk, answers edited)
 after their next **Recompute**; the notes had never appeared before this release. Published reports keep
 what they froze.
+
+**Nothing to run for the rest — the worker does it.** The same deploy adds a nightly cleanup at 05:37,
+*the nightly deleted-round snapshot sweep*: snapshots of rounds already deleted are removed (deleting a
+round now removes its snapshots itself). And the nightly identity purge now also takes a deleted
+canvasser's name off Door Outcomes change lines once their 180 days are up — including for accounts
+purged before this release, on its first run. Both log what they did on the worker
+(`[maintenance] sweep-orphan-snapshots: …`, `[maintenance] purge-deleted-identities: … names off run lines N`).
 
 ### Build database indexes (after a deploy that added one)
 

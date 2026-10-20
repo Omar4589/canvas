@@ -30,6 +30,14 @@ const unknockRunChunkSchema = new mongoose.Schema(
     // The instant the run froze these rows. A replay recorded BEFORE this is the struck visit
     // arriving late; one recorded after is new work and is always let through.
     frozenAt: { type: Date, required: true },
+    // The other entries at these visits when they were frozen (ids) — the second entry of an older visit
+    // that held two. The undo reads them as the visit as it stood, and any other older entry there as one put
+    // back since (round 8). Absent on a run frozen before 2026-10-20.
+    coEntryIds: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    // Written by the undo: the visits it could NOT put back, because newer work held them. The strike
+    // stands there after the undo, so Restore keeps holding their struck answers (restoreGuard.js).
+    // Absent on a run undone before 2026-10-19.
+    notRestoredKeys: { type: [String], default: undefined },
   },
   { timestamps: true }
 );

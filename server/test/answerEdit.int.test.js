@@ -209,9 +209,19 @@ const resultsFor = async (questionKey) => {
   return Object.fromEntries((q?.options || []).map((o) => [o.id || o.option, o.count]));
 };
 
-// Drive the real processor with the job id the route wrote onto the run.
+// Drive the real processor with the run's job id. The queue is down in this suite, so a create (or a
+// Pick up) answers 503 and PARKS the run with its job id forgotten — a late delivery must never claim a
+// change the admin was told didn't happen. Here a fresh id stands in for a Pick up that reached the queue.
 const runApply = async (runId) => {
-  const run = await AnswerEditRun.findById(runId).lean();
+  let run = await AnswerEditRun.findById(runId).lean();
+  if (!run.queueJobId) {
+    const jobId = `test-apply-${runId}-${Date.now()}`;
+    await AnswerEditRun.updateOne(
+      { _id: runId, queueJobId: null },
+      { $set: { queueJobId: jobId, status: run.status === 'failed' ? 'pending' : run.status, error: null } }
+    );
+    run = await AnswerEditRun.findById(runId).lean();
+  }
   return processAnswerEditJob({ id: run.queueJobId, name: 'apply', data: { runId: String(runId) }, opts: { attempts: 3 }, attemptsMade: 0 });
 };
 const runUndo = async (runId, requestedBy = null) => {
@@ -559,7 +569,10 @@ test('a survey changed after the edit is never overwritten by the undo; it is na
   assert.strictEqual(res.summary.changedSince, 1);
   const run = await AnswerEditRun.findById(runId).lean();
   assert.strictEqual(run.undo.summary.names[0].reason, 'changed_since');
-  assert.match(run.undo.summary.names[0].detail, /edited by Ada Admin/);
+  // Stored as ids (a deleted account must read as a removed user); the words are written on read.
+  assert.strictEqual(String(run.undo.summary.names[0].detail.by), String(ctx.admin._id));
+  const polled = await call('GET', edits(`/${runId}`), asAdmin());
+  assert.match(polled.json.run.undo.summary.names[0].detail, /edited by Ada Admin/);
   assert.deepStrictEqual((await liveOf(v[84])).answers[0].optionIds, ['undecided'], 'the newer edit is kept');
   assert.strictEqual(await SurveyResponseArchive.countDocuments({ answerEditRunId: runId }), 1, 'its copy stays as history');
   // Undo again after the newer change is undone on the profile finishes it.
@@ -595,8 +608,8 @@ test('M2: an unknock in between holds the survey; its revert re-creates it under
   assert.strictEqual(struck.status, 201, JSON.stringify(struck.json));
   const waiting = await runUndo(runId);
   assert.strictEqual(waiting.summary.waiting, 1, 'held by the unknock, not gone');
-  const run = await AnswerEditRun.findById(runId).lean();
-  assert.match(run.undo.summary.names[0].detail, /^Unknock, /);
+  const polled = await call('GET', edits(`/${runId}`), asAdmin());
+  assert.match(polled.json.run.undo.summary.names[0].detail, /^Unknock, /);
   const reverted = await call('POST', `/admin/campaigns/${ctx.campaign._id}/unknock-entries/revert`, asAdmin({ runId: struck.json.run.id }));
   assert.strictEqual(reverted.status, 200, JSON.stringify(reverted.json));
   const recreated = await liveOf(v[90]);
@@ -629,7 +642,11 @@ test('C6: a put-back that landed in a pass that died before deleting its copy is
   const copy = await SurveyResponseArchive.findOne({ answerEditRunId: runId }).lean();
   // The dead pass: stamped, put back, then died before deleting the row.
   await SurveyResponseArchive.collection.updateOne({ _id: copy._id }, { $set: { undoStartedAt: new Date() } });
-  await SurveyResponse.collection.updateOne({ _id: original._id }, { $set: { answers: original.answers, editedBy: null, editedAt: null }, $pull: { answerEditMarks: copy._id } });
+  await SurveyResponse.collection.updateOne(
+    { _id: original._id },
+    // Exactly the put-back's own write: the answers back, the mark off, the undo receipt on.
+    { $set: { answers: original.answers, editedBy: null, editedAt: null }, $pull: { answerEditMarks: copy._id }, $addToSet: { answerEditUndone: copy._id } }
+  );
   // Then a re-survey, so the snapshot no longer matches what's on file either.
   assert.strictEqual((await survey(ctx.caraTok, v[85], 85, [supportRow(), signRow('yard_sign_delivered')])).status, 201);
   const res = await runUndo(runId);
@@ -645,17 +662,18 @@ test('N1: a note-only profile save landing between the read and the write keeps 
   await SurveyResponse.collection.updateOne({ voterId: v[86]._id }, { $unset: { noteEditedBy: '', noteEditedAt: '' } });
   const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[86], ctx.cara._id))._id)], plan: TAKE_OUT });
   const coll = SurveyResponse.collection;
-  const real = coll.bulkWrite.bind(coll);
+  const real = coll.updateOne.bind(coll);
   const stampAt = new Date('2026-10-01T12:00:00Z');
-  coll.bulkWrite = async (...args) => {
-    coll.bulkWrite = real;
-    await coll.updateOne({ voterId: v[86]._id }, { $set: { note: 'fixed note', noteEditedBy: ctx.admin._id, noteEditedAt: stampAt } });
+  // The writer's first per-survey compare-and-swap: the note save lands just before it.
+  coll.updateOne = async (...args) => {
+    coll.updateOne = real;
+    await real({ voterId: v[86]._id }, { $set: { note: 'fixed note', noteEditedBy: ctx.admin._id, noteEditedAt: stampAt } });
     return real(...args);
   };
   try {
     await runApply(created.json.run.id);
   } finally {
-    coll.bulkWrite = real;
+    coll.updateOne = real;
   }
   const live = await liveOf(v[86]);
   assert.deepStrictEqual(live.answers.find((a) => a.questionKey === 'yard_sign').optionIds, [], 'the edit still landed (retried)');
@@ -686,7 +704,8 @@ test('the failed listener marks the right phase, and only for the run\'s own job
   const ids = [String((await entryOf(v[110], ctx.cara._id))._id)];
   const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, plan: TAKE_OUT });
   const runId = created.json.run.id;
-  await AnswerEditRun.updateOne({ _id: runId }, { $set: { status: 'running' } });
+  // Running under its own job (the 503 above forgot the queued one, so give it the id a real enqueue would).
+  await AnswerEditRun.updateOne({ _id: runId }, { $set: { status: 'running', queueJobId: `test-job-${runId}` } });
   const run = await AnswerEditRun.findById(runId).lean();
   await reconcileFailedAnswerEditJob({ id: 'someone-else', name: 'apply', data: { runId }, opts: { attempts: 1 }, attemptsMade: 1, finishedOn: 1 }, new Error('x'));
   assert.strictEqual((await AnswerEditRun.findById(runId).lean()).status, 'running', 'a superseded job changes nothing');
@@ -716,10 +735,10 @@ test('History logs a run that stops part-way when it stops, and the rest when Pi
   for (const i of [135, 136]) ids.push(String((await entryOf(v[i], ctx.cara._id))._id));
   const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, plan: TAKE_OUT });
   const runId = created.json.run.id;
-  const rows = () => CampaignChange.find({ campaignId: ctx.campaign._id, field: 'answerEdit' }).sort({ _id: 1 }).lean();
+  const rows = () => CampaignChange.find({ campaignId: ctx.campaign._id, field: 'answerEdit' }).sort({ createdAt: 1 }).lean();
   const before = (await rows()).length;
   // The worker dies after one survey landed (its chunk rolled up): the stop is logged with that one.
-  await AnswerEditRun.updateOne({ _id: runId }, { $set: { status: 'running', 'counts.surveysChanged': 1 } });
+  await AnswerEditRun.updateOne({ _id: runId }, { $set: { status: 'running', queueJobId: `test-job-${runId}`, 'counts.surveysChanged': 1 } });
   const run = await AnswerEditRun.findById(runId).lean();
   await reconcileFailedAnswerEditJob({ id: run.queueJobId, name: 'apply', data: { runId }, opts: { attempts: 1 }, attemptsMade: 1, finishedOn: 1 }, new Error('worker died'));
   assert.strictEqual((await AnswerEditRun.findById(runId).lean()).status, 'failed');
@@ -1078,4 +1097,318 @@ test('the client report builder counts edited answers for the operator, and the 
   assert.strictEqual((await call('GET', `/admin/client-reports/${id}/preview`, asAdmin())).json.provenance.cumulative.editedResponses, edited);
   assert.ok(!JSON.stringify(preview.json.report).includes('editedResponses'), 'never in the client view');
   assert.ok(!JSON.stringify(preview.json.report).includes('deskEnteredResponses'), 'never in the client view');
+});
+
+// ── code review 2026-10-19, round 1: each finding pinned ─────────────────────────────────────────
+
+// Replace one method of a collection/model for ONE call, with the real one in hand.
+const hookOnce = (obj, method, around) => {
+  const real = obj[method].bind(obj);
+  obj[method] = async (...args) => {
+    obj[method] = real;
+    return around(real, args);
+  };
+  return () => {
+    obj[method] = real;
+  };
+};
+const editRunsOf = (voter) => SurveyResponseArchive.find({ voterId: voter._id, overwrittenVia: 'answer_edit' }).lean();
+
+test('R1-B1: a write that landed is kept, even when a re-survey or a Delete strips its mark before the writer looks', { skip }, async () => {
+  const v = ctx.voters;
+  for (const i of [121, 122]) assert.strictEqual((await survey(ctx.caraTok, v[i], i, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const coll = SurveyResponse.collection;
+
+  // A teammate re-surveys between the edit's compare-and-swap and anything else (the phone $unsets marks).
+  const a = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[121], ctx.cara._id))._id)], plan: TAKE_OUT });
+  let restore = hookOnce(coll, 'updateOne', async (real, args) => {
+    const r = await real(...args);
+    assert.strictEqual((await survey(ctx.ottoTok, v[121], 121, [supportRow(), signRow('yard_sign_delivered')])).status, 201);
+    return r;
+  });
+  try { await runApply(a.created.json.run.id); } finally { restore(); }
+  let run = await AnswerEditRun.findById(a.created.json.run.id).lean();
+  assert.strictEqual(run.counts.surveysChanged, 1, 'it landed, so it counts');
+  assert.strictEqual(run.counts.changedSinceReview, 0);
+  let copies = await editRunsOf(v[121]);
+  assert.strictEqual(copies.length, 1, "the edit's copy of the original survives");
+  assert.deepStrictEqual(copies[0].answers.find((x) => x.questionKey === 'yard_sign').optionIds, ['volunteer_request']);
+
+  // An admin deletes the survey on the profile in the same window: earlier copies are kept on purpose.
+  const b = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[122], ctx.cara._id))._id)], plan: TAKE_OUT });
+  restore = hookOnce(coll, 'updateOne', async (real, args) => {
+    const r = await real(...args);
+    const live = await liveOf(v[122]);
+    assert.strictEqual((await call('DELETE', `/admin/voters/${v[122]._id}/surveys/${live._id}`, asAdmin())).status, 200);
+    return r;
+  });
+  try { await runApply(b.created.json.run.id); } finally { restore(); }
+  run = await AnswerEditRun.findById(b.created.json.run.id).lean();
+  assert.strictEqual(run.counts.surveysChanged, 1);
+  copies = await editRunsOf(v[122]);
+  assert.strictEqual(copies.length, 1, 'the original is still kept after the Delete');
+});
+
+test('R1-B2: a put-back that misses leaves no stamp, so Undo again never deletes the original as "put back"', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[123], 123, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const { runId } = await editAndApply({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[123], ctx.cara._id))._id)], plan: TAKE_OUT });
+  const copy = (await editRunsOf(v[123]))[0];
+  // The undo read the survey; a teammate re-surveys before its put-back lands.
+  const restore = hookOnce(SurveyResponse.collection, 'updateOne', async (real, args) => {
+    assert.strictEqual((await survey(ctx.ottoTok, v[123], 123, [supportRow(), signRow('yard_sign_delivered')])).status, 201);
+    return real(...args);
+  });
+  let first;
+  try { first = await runUndo(runId); } finally { restore(); }
+  assert.strictEqual(first.summary.putBack, 0);
+  assert.strictEqual(first.summary.changedSince, 1);
+  assert.ok(!(await SurveyResponseArchive.findById(copy._id).lean()).undoStartedAt, 'the stamp came off the missed put-back');
+  const second = await runUndo(runId);
+  assert.strictEqual(second.summary.putBack, 0, 'never counted as put back');
+  assert.strictEqual(second.summary.changedSince, 1);
+  assert.ok(await SurveyResponseArchive.exists({ _id: copy._id }), 'the original is still kept');
+});
+
+test('R1-M3: Undo again keeps the running total — never "0 put back", never "restored on the profile"', { skip }, async () => {
+  const v = ctx.voters;
+  const ids = [];
+  for (const i of [124, 125]) {
+    assert.strictEqual((await survey(ctx.caraTok, v[i], i, [supportRow(), signRow('volunteer_request')])).status, 201);
+    ids.push(String((await entryOf(v[i], ctx.cara._id))._id));
+  }
+  const { runId } = await editAndApply({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, plan: TAKE_OUT });
+  const historyRows = () => CampaignChange.countDocuments({ campaignId: ctx.campaign._id, field: 'answerEditUndo' });
+  const first = await runUndo(runId);
+  assert.strictEqual(first.summary.putBack, 2);
+  const rowsAfterFirst = await historyRows();
+  const again = await runUndo(runId);
+  assert.strictEqual(again.summary.putBack, 2, 'the total, not this pass');
+  assert.strictEqual(again.summary.restoredOnProfile, 0);
+  assert.strictEqual(await historyRows(), rowsAfterFirst, 'a pass that put nothing new back logs nothing');
+});
+
+test('R1-M4: restoring a run\'s copy on its own visit reads "restored on the profile" to that run\'s Undo, never "erased"', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[126], 126, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const { runId } = await editAndApply({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[126], ctx.cara._id))._id)], plan: TAKE_OUT });
+  const copy = (await editRunsOf(v[126]))[0];
+  const restored = await call('POST', `/admin/voters/${v[126]._id}/surveys/${copy._id}/restore`, asAdmin());
+  assert.strictEqual(restored.status, 200, JSON.stringify(restored.json));
+  assert.ok(!((await liveOf(v[126])).answerEditMarks || []).some((m) => String(m) === String(copy._id)), 'the used-up copy\'s mark came off');
+  const res = await runUndo(runId);
+  assert.strictEqual(res.summary.restoredOnProfile, 1);
+  assert.strictEqual(res.summary.erased, 0);
+});
+
+test('R1-M5: a change stopped by a deletion reads Stopped, and a run silent for ten minutes can be started again', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[127], 127, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[127], ctx.cara._id))._id)], plan: TAKE_OUT });
+  const runId = created.json.run.id;
+  await Campaign.updateOne({ _id: ctx.campaign._id }, { $set: { 'deletion.requestedAt': new Date() } });
+  let out;
+  try { out = await runApply(runId); } finally { await Campaign.updateOne({ _id: ctx.campaign._id }, { $unset: { deletion: '' } }); }
+  assert.strictEqual(out.stopped, 'tenant-deleting');
+  const stopped = await AnswerEditRun.findById(runId).lean();
+  assert.strictEqual(stopped.status, 'failed', 'never left "running" with no button');
+  // A run "running" whose job is gone: no heartbeat for ten minutes → stalled, and Start again works.
+  await AnswerEditRun.collection.updateOne({ _id: stopped._id }, { $set: { status: 'running', updatedAt: new Date(Date.now() - 11 * 60_000) } });
+  const polled = await call('GET', edits(`/${runId}`), asAdmin());
+  assert.strictEqual(polled.json.run.stalled, true);
+  const again = await call('POST', edits(`/${runId}/resume`), asAdmin());
+  assert.notStrictEqual(again.json.code, 'NOT_RESUMABLE', JSON.stringify(again.json));
+  assert.strictEqual((await runApply(runId)).completed, true);
+});
+
+test('R1-M6: a phone re-survey over a survey that changed after it read it archives the version it actually replaces', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[128], 128, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const before = await liveOf(v[128]);
+  // Just after the phone copies what it read, another writer changes the survey (an undo putting the
+  // original back, say).
+  const restore = hookOnce(SurveyResponseArchive.collection, 'insertOne', async (real, args) => {
+    const r = await real(...args);
+    await SurveyResponse.collection.updateOne(
+      { _id: before._id },
+      { $set: { answers: [supportRow(), signRow('candidate_follow_up')], updatedAt: new Date(Date.now() + 1000) } }
+    );
+    return r;
+  });
+  try {
+    assert.strictEqual((await survey(ctx.ottoTok, v[128], 128, [supportRow(), signRow('yard_sign_delivered')])).status, 201);
+  } finally {
+    restore();
+  }
+  const copies = await SurveyResponseArchive.find({ voterId: v[128]._id, overwrittenVia: 'submit' }).lean();
+  assert.strictEqual(copies.length, 1, 'one copy: the stale read\'s copy was removed');
+  assert.deepStrictEqual(copies[0].answers.find((x) => x.questionKey === 'yard_sign').optionIds, ['candidate_follow_up'], 'the version actually replaced');
+  assert.deepStrictEqual((await liveOf(v[128])).answers.find((x) => x.questionKey === 'yard_sign').optionIds, ['yard_sign_delivered']);
+});
+
+test('R3-B1: one change at a time holds against a racing create, both ways', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[129], 129, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const ids = [String((await entryOf(v[129], ctx.cara._id))._id)];
+  // A conversion that passed its own check lands while the edit's create is between check and insert.
+  const restore = hookOnce(AnswerEditRunChunk, 'insertMany', async (real, args) => {
+    await SurveyConversionRun.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, direction: 'from_survey', mode: 'bulk', to: 'not_home', status: 'pending' });
+    return real(...args);
+  });
+  let raced;
+  try { raced = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, plan: TAKE_OUT }); } finally { restore(); }
+  assert.strictEqual(raced.created.status, 409);
+  assert.strictEqual(raced.created.json.code, 'ANOTHER_CHANGE_RUNNING');
+  assert.strictEqual(await AnswerEditRun.countDocuments({ campaignId: ctx.campaign._id, status: { $in: ['pending', 'running', 'open'] } }), 0, 'the edit stepped back, leaving nothing');
+  await SurveyConversionRun.deleteMany({ campaignId: ctx.campaign._id, status: 'pending' });
+  // The other way: an edit lands while a conversion's create is between check and insert.
+  const back = hookOnce(SurveyConversionRun, 'create', async (real, args) => {
+    const doc = await real(...args);
+    await AnswerEditRun.collection.insertOne({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, mode: 'bulk', status: 'pending', createdAt: new Date(), updatedAt: new Date() });
+    return doc;
+  });
+  let conv;
+  try {
+    conv = await call('POST', `/admin/campaigns/${ctx.campaign._id}/survey-conversions`, asAdmin({ direction: 'from_survey', to: 'not_home', mode: 'bulk', actionIds: ids }));
+  } finally {
+    back();
+  }
+  assert.strictEqual(conv.status, 409, JSON.stringify(conv.json));
+  assert.strictEqual(await SurveyConversionRun.countDocuments({ campaignId: ctx.campaign._id, status: 'pending' }), 0, 'the conversion stepped back');
+  await AnswerEditRun.deleteMany({ campaignId: ctx.campaign._id, status: 'pending', plan: { $exists: false } });
+});
+
+test('R3-M2: a change parked after a queue timeout can never be applied by its late job', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[130], 130, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[130], ctx.cara._id))._id)], plan: TAKE_OUT });
+  assert.strictEqual(created.status, 503);
+  const parked = await AnswerEditRun.findById(created.json.run.id).lean();
+  assert.strictEqual(parked.status, 'failed');
+  assert.strictEqual(parked.queueJobId, null, 'the job id is forgotten');
+  const late = await processAnswerEditJob({ id: `answer-edit-${parked._id}-apply-late`, name: 'apply', data: { runId: String(parked._id) }, opts: { attempts: 3 }, attemptsMade: 0 });
+  assert.strictEqual(late.skipped, 'not-claimable');
+  assert.deepStrictEqual((await signOf(v[130])).optionIds, ['volunteer_request'], 'nothing changed, as the admin was told');
+});
+
+test('R3-M3: a session never writes one survey\'s answers over a voter re-surveyed with another survey', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[131], 131, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const ids = [String((await entryOf(v[131], ctx.cara._id))._id)];
+  const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, mode: 'queue' });
+  assert.strictEqual(created.status, 201, JSON.stringify(created.json));
+  const runId = created.json.run.id;
+  // Re-surveyed since, under a different survey.
+  const other = await SurveyTemplate.create({ organizationId: ctx.org._id, name: 'Other Survey', version: 1, isActive: true, questions: [{ key: 'q', label: 'Q?', type: 'text', order: 0 }] });
+  const live = await liveOf(v[131]);
+  await SurveyResponse.collection.updateOne({ _id: live._id }, { $set: { surveyTemplateId: other._id, answers: [{ questionKey: 'q', questionLabel: 'Q?', answer: 'kept', optionIds: [], otherText: null }] } });
+  const step = await call('GET', edits(`/${runId}/response/${created.json.current.responseId}`), asAdmin());
+  assert.strictEqual(step.json.current.missing, true);
+  assert.strictEqual(step.json.current.reason, 'other_survey');
+  const saved = await call('POST', edits(`/${runId}/response`), asAdmin({ responseId: created.json.current.responseId, version: created.json.current.version, answers: [signRow()] }));
+  assert.strictEqual(saved.json.reason, 'other_survey');
+  assert.deepStrictEqual((await liveOf(v[131])).answers.map((x) => x.questionKey), ['q'], 'untouched');
+  assert.strictEqual((await call('POST', edits(`/${runId}/close`), asAdmin())).status, 200);
+});
+
+test('R2-B1: an older answer the change brings back into force moves its tag, and the review prices it', { skip }, async () => {
+  const v = ctx.voters;
+  // Round 0, recorded earlier: a genuine Volunteer Request. Round 1 (Cara): a fake Candidate Follow-Up.
+  const round0 = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.pass.effortId, roundNumber: 0, name: 'Round 0', status: 'archived' });
+  const home = ctx.homes[132];
+  const at = new Date(Date.now() - 5 * 86400_000);
+  await SurveyResponse.collection.insertOne({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, voterId: v[132]._id, householdId: home._id, userId: ctx.otto._id,
+    surveyTemplateId: ctx.template._id, surveyTemplateVersion: 1, answers: [supportRow(), signRow('volunteer_request')], note: null,
+    location: { lat: 28.2, lng: -82.1 }, submittedAt: at, syncedAt: at, wasOfflineSubmission: false, passId: round0._id,
+    turfId: null, effortId: ctx.pass.effortId, coordinatorId: null, editedBy: null, editedAt: null, createdAt: at, updatedAt: at,
+  });
+  assert.strictEqual((await survey(ctx.caraTok, v[132], 132, [supportRow(), signRow('candidate_follow_up')])).status, 201);
+  const plan = [{ questionKey: 'yard_sign', op: 'adjust', remove: ['candidate_follow_up'] }];
+  const { dry, created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: [String((await entryOf(v[132], ctx.cara._id))._id)], plan });
+  const vol = dry.json.price.tags.find((t) => t.tag === 'Volunteer');
+  assert.ok(vol, 'Volunteer is priced though no Volunteer pick moved');
+  assert.strictEqual(vol.current.after, vol.current.before + 1, 'round 0\'s answer is the latest again');
+  await runApply(created.json.run.id);
+  const r = await call('GET', `/admin/reports/survey-results?campaignId=${ctx.campaign._id}&surveyTemplateId=${ctx.template._id}`, asAdmin());
+  const landed = r.json.tags.find((t) => t.tag === 'Volunteer');
+  assert.strictEqual(landed.currentVoterCount, vol.current.after, 'current: preview == landed');
+  assert.strictEqual(landed.voterCount, vol.identified.after, 'identified: preview == landed');
+  await runUndo(created.json.run.id);
+});
+
+test('R2-M2: with Replace them with, only surveys that kept an original pick "keep" it', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[133], 133, [supportRow(), signRow('candidate_follow_up')])).status, 201);
+  assert.strictEqual((await survey(ctx.caraTok, v[134], 134, [supportRow(), signRow('yard_sign_delivered', 'candidate_follow_up')])).status, 201);
+  const ids = [];
+  for (const i of [133, 134]) ids.push(String((await entryOf(v[i], ctx.cara._id))._id));
+  const dry = await call('POST', edits(), asAdmin({
+    dryRun: true, scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids,
+    plan: [{ questionKey: 'yard_sign', op: 'adjust', remove: ['candidate_follow_up'], replaceWith: ['volunteer_request'] }],
+  }));
+  assert.strictEqual(dry.status, 200, JSON.stringify(dry.json));
+  const q = dry.json.price.byQuestion.find((x) => x.questionKey === 'yard_sign');
+  assert.strictEqual(q.surveys, 2);
+  assert.strictEqual(q.keptAny, 1, 'only the one that had Yard Sign Delivered keeps a pick of its own');
+});
+
+test('R5-M1: every copy of a struck visit\'s answers stays blocked after the canvasser surveys someone else at the door', { skip }, async () => {
+  const v = ctx.voters;
+  const home = ctx.homes[137];
+  const mate = await Voter.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: home._id, stateVoterId: 'OAK-137-MATE', firstName: 'H', lastName: 'Mate', fullName: 'House Mate' });
+  assert.strictEqual((await survey(ctx.caraTok, v[137], 137, [supportRow(), signRow('volunteer_request')])).status, 201);
+  // An admin edits it on the profile: an earlier-answers copy of the struck visit's answers.
+  const prof = await profileOf(v[137]);
+  const s0 = prof.json.surveys[0];
+  assert.strictEqual((await call('PATCH', `/admin/voters/${v[137]._id}/surveys/${s0.id}`, asAdmin({ version: s0.version, answers: [signRow()] }))).status, 200);
+  const entry = await entryOf(v[137], ctx.cara._id);
+  const struck = await call('POST', `/admin/campaigns/${ctx.campaign._id}/unknock-entries`, asAdmin({ scope: { userId: String(ctx.cara._id) }, actionIds: [String(entry._id)] }));
+  assert.strictEqual(struck.status, 201, JSON.stringify(struck.json));
+  // Cara surveys the housemate: a new Surveyed entry at the same visit.
+  assert.strictEqual((await survey(ctx.caraTok, mate, 137, [supportRow(), signRow('yard_sign_delivered')])).status, 201);
+  const after = await profileOf(v[137]);
+  const editCard = after.json.overwrittenSurveys.find((o) => o.overwrittenVia === 'answer_edit');
+  assert.ok(editCard);
+  assert.strictEqual(editCard.restorable, false, 'the earlier answers of a struck visit stay blocked');
+  const tried = await call('POST', `/admin/voters/${v[137]._id}/surveys/${editCard.id}/restore`, asAdmin());
+  assert.strictEqual(tried.status, 409);
+  assert.strictEqual(await SurveyResponse.countDocuments({ voterId: v[137]._id }), 0, 'never brought back as a counted survey');
+});
+
+test('round 1 server minors: blocked up front, nothing to undo, no template, the note stamp, Erase during an undo, Details paging', { skip }, async () => {
+  const v = ctx.voters;
+  assert.strictEqual((await survey(ctx.caraTok, v[138], 138, [supportRow(), signRow('volunteer_request')])).status, 201);
+  const ids = [String((await entryOf(v[138], ctx.cara._id))._id)];
+  // An open session blocks: the form hears it from the dry run.
+  const { created } = await reviewAndCreate({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, mode: 'queue' });
+  const blocked = await call('POST', edits(), asAdmin({ dryRun: true, scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids }));
+  assert.strictEqual(blocked.json.blocked?.code, 'ANOTHER_CHANGE_RUNNING');
+  // Closed having changed nothing: nothing to undo.
+  assert.strictEqual((await call('POST', edits(`/${created.json.run.id}/close`), asAdmin())).status, 200);
+  const nothing = await call('POST', edits(`/${created.json.run.id}/revert`), asAdmin());
+  assert.strictEqual(nothing.json.code, 'NOTHING_TO_UNDO');
+  // A survey whose questions are gone: its answers can't be edited (its note still can).
+  const live = await liveOf(v[138]);
+  await SurveyResponse.collection.updateOne({ _id: live._id }, { $set: { surveyTemplateId: new mongoose.Types.ObjectId() } });
+  const noTpl = await call('PATCH', `/admin/voters/${v[138]._id}/surveys/${live._id}`, asAdmin({ answers: [signRow()] }));
+  assert.strictEqual(noTpl.json.code, 'TEMPLATE_MISSING');
+  await SurveyResponse.collection.updateOne({ _id: live._id }, { $set: { surveyTemplateId: ctx.template._id } });
+  // An edit from before note stamps, on a survey with no note: no "Note edited" line.
+  await SurveyResponse.collection.updateOne({ _id: live._id }, { $set: { note: null, editedBy: ctx.admin._id, editedAt: new Date() }, $unset: { noteEditedBy: '', noteEditedAt: '' } });
+  const prof = await profileOf(v[138]);
+  assert.strictEqual(prof.json.surveys[0].noteEdited, null);
+  // Erase waits for an undo that is putting this copy back.
+  const copy = await SurveyResponseArchive.collection.insertOne({ ...live, _id: new mongoose.Types.ObjectId(), overwrittenVia: 'answer_edit', overwrittenAt: new Date(), undoStartedAt: new Date() });
+  const erase = await call('DELETE', `/admin/voters/${v[138]._id}/surveys/archive/${copy.insertedId}`, asAdmin());
+  assert.strictEqual(erase.json.code, 'COPY_IN_USE');
+  await SurveyResponseArchive.collection.deleteOne({ _id: copy.insertedId });
+  // Details after an undo pages over the names it stored, and says how many weren't put back in all.
+  const { runId } = await editAndApply({ scope: scopeFor(ctx.cara._id, { search: 'Oak St' }), actionIds: ids, plan: TAKE_OUT });
+  await runUndo(runId);
+  await AnswerEditRun.updateOne({ _id: runId }, { $set: { 'undo.summary.names': [{ voterId: v[138]._id, voterName: 'X', reason: 'changed_since', detail: null }], 'undo.summary.namesTotal': 250 } });
+  const page = await call('GET', edits(`/${runId}/entries?skip=0&limit=50`), asAdmin());
+  assert.strictEqual(page.json.total, 1);
+  assert.strictEqual(page.json.namesTotal, 250);
+  assert.strictEqual(page.json.truncated, true);
 });

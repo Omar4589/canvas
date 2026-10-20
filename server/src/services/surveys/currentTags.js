@@ -14,7 +14,7 @@
 
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { tagOptionMap, normalizeTag } from './tags.js';
-import { latestAnswerKeyStages, currentTagVoterSet } from './answerAgg.js';
+import { latestAnswerKeyStages, currentTagVoterSets } from './answerAgg.js';
 
 // ONE aggregation serves every tag: the per-(voter, question) latest-keys table is
 // tag-independent, so we run it once over the union of all member questionKeys and fold
@@ -23,7 +23,11 @@ import { latestAnswerKeyStages, currentTagVoterSet } from './answerAgg.js';
 // $or). `onlyTags` restricts the fold (array of tag strings, any casing), null = all.
 // Returns Map<normalizedTag, Set<voterIdString>>. SurveyResponseArchive never counts —
 // separate collection, never aggregated here.
-export async function currentVoterSetsByTag(match, template, onlyTags = null) {
+// `options`: aggregate options (an answer-edit review's `maxTimeMS`), plus `deadline` (epoch ms) — past
+// it the rows stop being pulled and the read is abandoned (a cursor the server would otherwise keep
+// feeding after the review had answered; code review round 5) — and `signal`, which abandons it the
+// same way (the review answered; round 6).
+export async function currentVoterSetsByTag(match, template, onlyTags = null, options = {}) {
   const wanted = onlyTags ? new Set(onlyTags.map(normalizeTag)) : null;
   const entries = [...tagOptionMap(template).entries()].filter(
     ([key]) => !wanted || wanted.has(key)
@@ -31,14 +35,38 @@ export async function currentVoterSetsByTag(match, template, onlyTags = null) {
   if (!entries.length) return new Map();
 
   const qKeys = [...new Set(entries.flatMap(([, e]) => e.members.map((m) => m.questionKey)))];
-  const rows = await SurveyResponse.aggregate([
+  const { deadline = null, signal = null, ...aggOptions } = options;
+  const pipeline = [
     // The answers.questionKey pre-filter skips responses with no member-question answer at
     // all before the unwind; latestAnswerKeyStages re-matches per entry after it.
     { $match: { ...match, 'answers.questionKey': { $in: qKeys } } },
     ...latestAnswerKeyStages(qKeys),
-  ]);
+  ];
+  let rows;
+  if (!deadline && !signal) {
+    rows = await SurveyResponse.aggregate(pipeline).option(aggOptions);
+  } else {
+    // Read whole, in the driver's own batches, and aborted at the deadline or on `signal` — the abort
+    // closes the cursor, so no batch is pulled after it. Pulled a row at a time instead (round 5's first
+    // cut), the heavy review took 1.5 s longer.
+    const pastDeadline = () => Object.assign(new Error('past its deadline'), { code: 'DEADLINE' });
+    if ((deadline && Date.now() > deadline) || signal?.aborted) throw pastDeadline();
+    const stop = new AbortController();
+    const timer = deadline ? setTimeout(() => stop.abort(), deadline - Date.now()) : null;
+    const onStop = () => stop.abort();
+    signal?.addEventListener('abort', onStop, { once: true });
+    try {
+      rows = await SurveyResponse.collection.aggregate(pipeline, { ...aggOptions, signal: stop.signal }).toArray();
+    } catch (err) {
+      throw stop.signal.aborted ? pastDeadline() : err;
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onStop);
+    }
+    // An abort can end the read early without an error: rows cut short are never counted.
+    if (stop.signal.aborted) throw pastDeadline();
+  }
 
-  const out = new Map();
-  for (const [key, entry] of entries) out.set(key, currentTagVoterSet(rows, entry));
-  return out;
+  const sets = currentTagVoterSets(rows, entries.map(([, entry]) => entry));
+  return new Map(entries.map(([key], i) => [key, sets[i]]));
 }

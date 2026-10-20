@@ -64,7 +64,7 @@ const passLabeler = async (passes, campaignId) => {
 // always already in the overlap set — this only annotates, never adds doors.
 async function overwritesForDoors(organizationId, householdIds) {
   if (!householdIds.length) return new Map();
-  const rows = await SurveyResponseArchive.find(
+  let rows = await SurveyResponseArchive.find(
     {
       ...(organizationId ? { organizationId } : {}),
       householdId: { $in: householdIds },
@@ -72,6 +72,11 @@ async function overwritesForDoors(organizationId, householdIds) {
     },
     'voterId householdId passId userId overwrittenBy overwrittenAt'
   ).lean();
+  // Only a collision between two canvassers: since 2026-10-19 a canvasser's re-survey over answers an
+  // admin entered at the desk on HER OWN visit keeps those answers as a 'submit' copy too, and it read
+  // "Cara replaced Cara's survey answers". Another canvasser replacing desk answers on Cara's visit
+  // is still a collision, as it always was (code review round 2).
+  rows = rows.filter((r) => String(r.userId) !== String(r.overwrittenBy));
   if (!rows.length) return new Map();
   const voterIds = [...new Set(rows.map((r) => String(r.voterId)))];
   const userIds = [...new Set(rows.flatMap((r) => [String(r.userId), String(r.overwrittenBy)]))];

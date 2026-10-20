@@ -33,7 +33,14 @@ const answerLine = (answers) =>
   answers.length
     ? answers
         .map((a) => {
-          const text = Array.isArray(a.answer) ? a.answer.join(', ') : a.answer ?? '—';
+          // An emptied pick-several (or a blank) reads "—", never a blank.
+          const text = Array.isArray(a.answer)
+            ? a.answer.length
+              ? a.answer.join(', ')
+              : '—'
+            : a.answer == null || a.answer === ''
+              ? '—'
+              : a.answer;
           const other =
             a.otherText && !(Array.isArray(a.answer) ? a.answer.includes(a.otherText) : a.answer === a.otherText)
               ? ` — ${a.otherText}`
@@ -60,6 +67,28 @@ const Pager = ({ page, setPage, total }) =>
     </div>
   ) : null;
 
+// A failed read says so — never an empty list's sentence ("No survey was changed…") about a change
+// that changed hundreds (code review round 2).
+const LoadFailed = ({ q }) => (
+  <div className="rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+    Couldn’t load this list{q.error?.message ? ` — ${q.error.message}` : ''}.{' '}
+    <Button variant="secondary" size="sm" className="ml-1" disabled={q.isFetching} onClick={() => q.refetch()}>
+      Try again
+    </Button>
+  </div>
+);
+// A refresh that failed over a list already shown: the list stays, and says it may be out of date
+// (round 3: it read as current with nothing to say otherwise).
+const RefreshFailed = ({ q }) =>
+  q.isError && q.data ? (
+    <div className="mb-2 rounded border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning-fg">
+      Couldn’t refresh this list — it may be out of date.{' '}
+      <Button variant="secondary" size="sm" className="ml-1" disabled={q.isFetching} onClick={() => q.refetch()}>
+        Try again
+      </Button>
+    </div>
+  ) : null;
+
 // An answer edit's itemization: every survey it changed, question by question, in the survey's own
 // words — or, once undone, what the undo couldn't put back and why (read from the undo's STORED
 // summary, never from rows a re-cut or an Erase may have removed).
@@ -73,26 +102,45 @@ const AnswerEditDetail = ({ campaignId, run, tz }) => {
   const data = q.data;
   const entries = data?.entries || [];
   if (q.isLoading) return <Skeleton className="h-40 w-full" />;
+  if (q.isError && !data) return <LoadFailed q={q} />;
+  const stale = <RefreshFailed q={q} />;
   if (data?.kind === 'undo') {
-    return entries.length ? (
+    // Decided by the count of surveys NOT put back — never by an empty page: the undo stores the first
+    // 200 names, so a page past them is empty while hundreds were kept with newer answers.
+    const notBack = data?.namesTotal ?? data?.total ?? 0;
+    if (!notBack) {
+      return (
+        <>
+          {stale}
+          <p className="text-sm text-fg-muted">Undone — every survey this change touched was put back exactly.</p>
+        </>
+      );
+    }
+    const listed = data?.total || 0;
+    return (
       <>
-        <p className="mb-2 text-sm text-fg-muted">Undone. These surveys weren&rsquo;t put back:</p>
-        <ul className="max-h-80 overflow-y-auto rounded-card border border-border">
-          {entries.map((e, i) => (
-            <li key={`${e.voterId}-${i}`} className="border-b border-border px-3 py-2 text-sm last:border-0">
-              <span className="font-medium text-fg">{e.voterName}</span>
-              <span className="text-fg-muted"> · {undoReasonText(e)}</span>
-            </li>
-          ))}
-        </ul>
-        <Pager page={page} setPage={setPage} total={data?.total || 0} />
+        {stale}
+        <p className="mb-2 text-sm text-fg-muted">
+          Undone. {notBack.toLocaleString()} {notBack === 1 ? 'survey wasn’t' : 'surveys weren’t'} put back
+          {listed < notBack ? ` — the first ${listed.toLocaleString()} are named here` : ''}:
+        </p>
+        {entries.length > 0 && (
+          <ul className="max-h-80 overflow-y-auto rounded-card border border-border">
+            {entries.map((e, i) => (
+              <li key={`${e.voterId}-${i}`} className="border-b border-border px-3 py-2 text-sm last:border-0">
+                <span className="font-medium text-fg">{e.voterName}</span>
+                <span className="text-fg-muted"> · {undoReasonText(e)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Pager page={page} setPage={setPage} total={listed} />
       </>
-    ) : (
-      <p className="text-sm text-fg-muted">Undone — every survey this change touched was put back exactly.</p>
     );
   }
   return (
     <>
+      {stale}
       {!entries.length ? (
         <p className="text-sm text-fg-muted">No survey was changed by this edit.</p>
       ) : (
@@ -192,8 +240,11 @@ export default function RunDetailModal({ campaignId, run, onClose, tz }) {
         </div>
       )}
 
+      <RefreshFailed q={q} />
       {q.isLoading ? (
         <Skeleton className="h-40 w-full" />
+      ) : q.isError && !data ? (
+        <LoadFailed q={q} />
       ) : data?.reverted && !entries.length ? (
         <p className="rounded border border-border bg-sunken px-3 py-2 text-sm text-fg-muted">
           This change was undone. Undoing restores every entry exactly and removes the change

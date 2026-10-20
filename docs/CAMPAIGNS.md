@@ -576,8 +576,12 @@ where it stopped. **An undo can stop part-way too** (the server restarts, or the
 mid-undo): the run then reads **Undo stopped**, everything it already put back is correct, and its
 only button is **Retry undo**, which finishes putting the rest back. It never offers *Pick up where it
 stopped* — that would make the change again. An undo that dies along with its page request shows
-**Undo stopped** within about ten minutes instead of reading *Undoing* forever. Technical:
-[SURVEYS.md](SURVEYS.md) §K.
+**Undo stopped** within about ten minutes instead of reading *Undoing* forever. The same goes for any
+change left *Working* or *Undoing* with nothing behind it any more (two database failures in a row, a
+job the queue lost): about ten minutes on, it reads **Stopped** — pick up where it stopped, or undo —
+or, for an undo that never got going, goes back to how it was before you pressed **Undo**, so the
+campaign takes changes again. A change still waiting its turn in the queue keeps waiting, however
+long. Technical: [SURVEYS.md](SURVEYS.md) §K.
 
 ### Unknock — striking entries from the record (added 2026-08)
 
@@ -1088,8 +1092,11 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   exported while withdrawn, the Offline mark, priced with preview == landed, the three
   `TARGET_DISABLED` cases).
 - **`computeImpact` is a simulation, not a formula.** The "after" figures come from the SAME
-  `knocksPipeline` that produces "before", with a `$set` ahead of it rewriting `actionType` for
-  exactly the selected ids — so a preview cannot drift from what the run actually does. The int
+  `knocksPipeline` that produces "before", over the ledger with exactly the selected ids' `actionType`
+  rewritten — the rest by `$match` (`_id: { $nin }`), the selection `$unionWith` its own `_id` read and
+  a `$set` (round 7 of the answer-edit review: an `$in` test on every ledger row scanned the whole id
+  list per row, 10 s at 25,000 ids over 100,000 entries) — so a preview cannot drift from what the run
+  actually does. The int
   test asserts previewed-after equals the real totals once the run lands. It is skipped entirely
   for a rate-neutral pair (provably nothing moves) which is also what keeps the whole-outcome fold
   unbounded; a money-moving selection is capped at `RECLASSIFY_MAX_IMPACT_ENTRIES` (25k,
@@ -1186,10 +1193,44 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   `pending → completed → reverted`, counts, frozen `scopeSummary`) plus
   [`UnknockRunChunk`](../server/src/models/UnknockRunChunk.js) (verbatim `.lean()` rows in
   500-row chunks — a 25k-row manifest on one doc would cross the 16MB BSON cap — with
-  `visitKeys` + `frozenAt` for the tombstone probe below). **Ordering is freeze-first**: run
-  (pending) → chunks → archive responses (`SurveyResponseArchive` `via: 'unknock'` +
-  `unknockRunId`) → `deleteMany` → completed → settle; a crash mid-run leaves a `pending` run
-  whose revert is refused (`409 RUN_NOT_COMPLETED` — its entries were never removed). **Pricing**
+  `visitKeys` + `frozenAt` for the tombstone probe below, and `coEntryIds`, the other entries at its
+  visits as the freeze found them, which the undo reads — round 8). **Ordering is freeze-first**: run
+  (pending) → chunks → `deletingAt` → archive responses (`SurveyResponseArchive` `via: 'unknock'` +
+  `unknockRunId`) → `deleteMany` → completed → settle, the reads and deletes 500 visits at a time — one
+  clause for a batch's doors and rounds (`visitsClause`, answerScope.js), its own visits kept by
+  `doorKey`; never one `$or` clause per visit, which took 28 s at 5,000 entries and 440 s at 25,000 (code
+  review round 4), nor one per round and canvasser (`tripleClause`), which a big crew grew the same way:
+  each batch held a branch for nearly every canvasser knocking at the time, and every read was planned
+  afresh (round 8: the reads ran several times slower with a crew of hundreds). The whole request at
+  25,000 takes about 7.4 s and its undo 8.5 s on a laptop (round 6, with each batch settled as it goes),
+  and the preview's answer read 0.2 s at 10,000. **A pending run is either still
+  removing or stopped**, told apart by its heartbeat (`heartbeatAt`,
+  [unknockLease.js](../server/src/services/canvass/unknockLease.js)): the strike beats between every
+  step, each beat a compare-and-swap on no undo having begun, and completes the same way. One that
+  beat within ten minutes reads *Removing…* on the list (the wire's `removing`, polled until it
+  finishes) and its Undo is refused (`409 RUN_BUSY`); one silent longer stopped. Stopped before
+  `deletingAt`, its revert is refused (`409 RUN_NOT_COMPLETED` — nothing was removed); stopped after
+  it began removing, it reads *Stopped part-way* (the wire's `stoppedPartWay`), is held as a strike by
+  Restore and the replay tombstone like a completed run, and can be undone — an entry it never got
+  to remove isn't counted *not restored* (round 3: it read "nothing was removed" and refused its
+  Undo). Round 4: Undo was offered while a large unknock was still removing — the strike then finished
+  over the undo, leaving struck answers live or the removal never undoable — so the undo's claim now
+  requires the silence too, and a strike that comes back to life after an undo began stops before its
+  next removal (its beat misses — on the claim's `revertingAt`, then on `undoBegunAt`, which the undo
+  stamps once its checks after the claim pass and nothing clears; round 5: a failed undo cleared
+  `revertingAt`, and a strike that woke after it completed over the partial undo),
+  and there is a beat between archiving a batch's answers and deleting them. A strike that fails in
+  process (a database error) reads stopped at once: it stamps `stoppedAt`, and its heartbeat stays its
+  last real beat, so Restore's hold on its visits ends when it stopped (round 6 — round 5 set the
+  heartbeat to the epoch instead, the hold ended in 1970, and a Restore put struck answers over a real
+  later survey). It writes its History row when it begins removing (one row, its id derived from the
+  run — `unknockHistoryRowId`), and settles each batch's voters and doors as it goes, so one that stops
+  part-way is in History and leaves no door reading surveyed with nothing on file (round 5); at its end
+  only the campaign's own numbers are recomputed (round 6: settling every door and voter again took half
+  of a 25,000-entry strike). The undo writes its History row and settles BEFORE the run
+  reads reverted, so an undo that dies in between is retried rather than left unsettled. Every writer here sweeps after itself once its organization's or
+  campaign's delete cascade has begun (`lateWriteSweep.js` — what it wrote then would outlive the
+  deletion). **Pricing**
   is the same simulation posture as `computeImpact` but by exclusion:
   `[{$match: {_id: {$nin: ids}}}, ...knocksPipeline]` — and it ALWAYS runs; a deletion is never
   rate-neutral, so `recomputeCampaignStats` always follows. **Settle** re-resolves door status in
@@ -1198,15 +1239,112 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   on the door), recomputes voter `surveyStatus`, and bumps the platform counters negative
   (best-effort; nightly `recomputeLive` is the true healer). **Revert** refuses to clobber on BOTH
   ledgers by explicit reads, never by an index firing: a frozen activity row is re-inserted (raw
-  `collection.insertMany`, `ordered: false`, only-E11000 swallowed — original `_id`s preserved)
-  only when its visit triple is free of **outcome** rows — a surviving `note_added` at the triple
+  `collection.insertMany`, `ordered: false`, original `_id`s preserved — only a list of write errors
+  that are ALL duplicate keys is swallowed; a failure of the whole insert, which the driver reports as a
+  bulk error with no write errors at all, throws, so the undo stops and Retry undo finishes it instead
+  of reading undone with its entries off the record — round 6, [rawInsert.js](../server/src/services/canvass/rawInsert.js))
+  only when its visit triple holds no other outcome row but the visit as it stood. One recorded since
+  the run froze is **newer** work, and the strike stands there (the moment is taken before the frozen
+  read — round 8: taken after, an entry recorded in between read as the visit as it stood). The other
+  entry of an older visit that held two (the strike records them beside its own,
+  `UnknockRunChunk.coEntryIds`) and one the strike never got to delete don't block (round 7: with any
+  row counted, the undo of one of a visit's two entries could never put it back). Any other older row
+  was put back there since — by another unknock's undo, a snapshot restore — and blocks the insert too
+  (round 8: put back beside it, one visit held two Surveyed entries, and the canvasser counted twice on
+  the timeline, the reports and the activity export), but the visit reads as it did, so it is left out
+  of `notRestoredKeys` and its answers stay restorable on the profile — a swap where another survey holds
+  the slot, else the survey itself. A run frozen before
+  `coEntryIds` reads every older row that way, so its undo of one of a visit's two entries leaves that
+  entry off, counted not restored — on purpose: nothing on file proves an older row stood there when it
+  froze (the follow-up to round 9 tried reading it from the records of another unknock's undo and of a
+  restored snapshot, and its review found both can go — a restored snapshot deleted, a restore or an undo
+  that stopped — so an undo put its entry back beside one put back since, doubling the visit) — and a surviving `note_added` at the triple
   does not block its own door's outcome from coming back (the field path never replaces a note) —
   and archived responses restore per-voter via promote-and-delete unless a newer real response
-  took the slot; both skips are counted (`rowsNotRestored`/`responsesNotRestored`). The promote is
-  unvalidated (`validateBeforeSave: false`): the archive copy is a verbatim, raw-inserted row that
-  was already on file, and an old row today's schema would refuse must not fail the undo. A
-  response it could not put back stays archived and is **not** restorable from the profile while
-  its visit holds no entry from before the unknock ([restoreGuard.js](../server/src/services/surveys/restoreGuard.js),
+  took the slot (the slots' holders are read in the copies' own rounds, and only the slots asked for
+  are kept — round 8: every round's surveys of every voter, answers and all, grew the web dyno's heap
+  by half a gigabyte at the cap) — written back from copies the undo has CLAIMED (`claimCopiesForWriteBack`,
+  [archiveOverwrite.js](../server/src/services/surveys/archiveOverwrite.js): `undoStartedAt` + a token,
+  the stamp the profile's Erase and Restore wait on), 500 at a time in one insert (round 5: an Erase
+  during the undo was honoured and then written back; a 25,000-entry undo took 24 s one survey at a
+  time). The claim is the RUN's (its id is the token), so a retry takes back what an attempt that
+  failed left; the batch's claim is let go however it ends — its own read, the insert, the read-back
+  or the delete failing — so only a database that can't take the release, or a process that dies,
+  leaves it to lapse in ten minutes (round 7: a claim whose own read failed, and a landed copy whose
+  delete failed, stayed held); a copy is deleted only once its
+  survey is read back on file; and a slot already holding the same submission (same canvasser, moment,
+  answers and note — a strike that stopped before deleting what it copied) counts as back and drops the
+  copy (round 6: a failed insert deleted every claimed copy with nothing written, and a retry counted
+  its own claimed copies "not restored" and closed the run without them). Never an entry a LATER
+  unknock still standing has struck since (this one stopped before removing it, and an admin unknocked
+  it again: putting it back undid that strike, round 5) — nor that visit's answers: this run's copies
+  there are handed to the later run (`unknockRunId`, its `responsesArchived` counted up), whose Undo
+  writes them back, and the visit is left out of this run's `notRestoredKeys` — the later run holds it
+  (round 6: the answers went back under an entry the later run then deleted, or the two undos done
+  earlier-first left every survey off the record). Not where one of this run's own entries is back
+  that the later run never struck: that visit is this run's, answers and all (round 7: an older visit
+  holding two entries, one struck later, came back Surveyed with its answers handed away, and the later
+  run's Undo could never put them back). Both skips are
+  counted (`rowsNotRestored`/`responsesNotRestored`; the answers handed on are kept on the run as
+  `counts.responsesHanded`, so Retry undo still counts them — round 7), and every chunk
+  records the visits it could not put back (`UnknockRunChunk.notRestoredKeys`, empty or not), read from
+  what is on file once the inserts are done — each frozen entry back by its own id or not — so a retry,
+  or two presses at once, record the same truth: Restore keeps holding those visits' answers to the
+  strike after the undo (reason `kept_after_undo`), and lets every other visit's go
+  ([restoreGuard.js](../server/src/services/surveys/restoreGuard.js); code review rounds 2 and 3). An
+  answer is put back only into a visit whose own entry is back and still reads Surveyed, with no stamp
+  of a later change (round 3: put back where newer work held the visit, it counted a survey under a
+  door that said otherwise; round 5: so did one put back under an entry another admin had converted
+  since), and *not restored* counts the frozen entries not on file. The undo claims `revertingAt` by compare-and-swap, so a second press reads
+  `409 RUN_BUSY`, and stamps `undoBegunAt` — once and for good — only once its checks after the claim
+  pass (round 7: a refusal there left the row reading *Undo stopped part-way* with nothing undone); a
+  database error in those checks, or in the stamp, lets the claim go (round 8: it held the row at
+  *Undoing…*, and every removal on the campaign, for ten minutes). An
+  unknock, its Undo, and every conversion start, door step, Pick up and Undo also
+  refuse `409 ANOTHER_CHANGE_RUNNING` while ANOTHER removal on the campaign is still writing — a
+  conversion pending, running or being undone or with a step in flight, an unknock removing or being
+  undone — or a round of it is having its knocks cleared or restored (a fresh `Pass.recutLock` taken
+  with `knocks`: a clear-knocks discard, or the restore of a snapshot that cleared them — round 8: any
+  re-cut lock counted, and a big campaign's claim re-carve held every removal back for minutes)
+  (`removalBusy`, [answerEditRuns.js](../server/src/services/canvass/answerEditRuns.js)) — checked
+  before and again once each has claimed (round 6: an undo beside a later unknock or a conversion step
+  put answers back under a door the other was clearing). A clear-knocks discard, and the restore of a
+  snapshot that cleared knocks, check the same after taking their lock (round 7: an undo landing
+  between a discard's snapshot and its deletes was lost from every tool — its entry gone, its answers
+  held as unknocked, the run reading Undone); a books-only restore touches no entry or answer, and
+  doesn't wait (round 8). An Undo also refuses **409 `ROUND_CLEARED_SINCE`** while a round it struck
+  had its knocks cleared after it and that snapshot is still unrestored and can still be taken back — the
+  round on file, not archived, knocked nowhere since (`roundClearedSince`, the same file — by round, and
+  only snapshots made after the run; the refusal names the round and the day): undone in between, its
+  entries went back into the cleared round without their answers, which the snapshot held (round 8). Past
+  a snapshot its round can no longer take back, the undo goes ahead and leaves that round alone: its
+  entries stay off there, held, counted not put back — as for a round no longer on file (round 9: the
+  refusal held such an undo for good, or sent the admin to a restore that doubled a re-worked round's
+  entries). The strike deletes a visit's survey only while it still holds the submission it read
+  (`deleteUnlessReplaced` — round 9: a profile Restore swapped into the slot in between was deleted with
+  it), and the undo reads its copies a page of 1,000 voters at a time (round 9: every copy at once took
+  the web dyno's heap 833 MB up with twelve-question surveys at the cap). A strike whose check fails outright once its run is on file takes the run with it — nothing
+  is touched yet (round 7: left, it read *Removing…* for ten minutes and held every removal back), and
+  answers **503 `UNKNOCK_NOT_STARTED`**, so the page says nothing was removed and keeps the selection
+  (round 8: it pointed at the run's row, with no row to read) — and if even that delete fails, the run is
+  stamped stopped, so it reads *Did not finish* at once rather than *Removing…* for ten minutes (round 9);
+  one
+  that stops part-way answers **500 `UNKNOCK_STOPPED`** with the run, and an Undo that does, **500
+  `UNDO_STOPPED`** with the run — read once its claim is let go, so it carries the moment it stopped
+  (round 9: read before, it carried the undo's start, and a review priced while the undo ran stayed open) —
+  so the page words only those as stopped (round 7: every JSON 5xx read that way). A completed unknock also stamps `completedAt`,
+  when its strike finished; its campaign numbers then refresh as on every request path — a failure there
+  is logged and the nightly reconcile heals it, never "stopped before it finished" for a run that reads
+  completed (round 7). The write-back is a raw insert, unvalidated: the archive copy is a verbatim
+  row that was already on file, and an old row today's schema would refuse must not fail the undo. The
+  list's wire adds `undoStopped` (an undo began and stopped before it finished — *Undo stopped
+  part-way*, with **Retry undo**), `completedAt` (null on one that never finished, whose row counts what
+  it selected) and `updatedAt` (round 6), and `strikeFinished` — `completedAt`, or, for an undone run
+  from before it, the first build's shape: no `deletingAt` and no heartbeat, since that build undid only
+  finished runs (round 7: undone, they all read "N entries selected"). A
+  response it could not put back stays archived: where its visit's entry couldn't come back either,
+  Restore keeps refusing it; where the entry came back but a newer survey holds the answer slot,
+  Restore offers it as an admin's explicit swap ([restoreGuard.js](../server/src/services/surveys/restoreGuard.js),
   [SURVEYS.md](SURVEYS.md) §F). **The
   offline-replay tombstone** ([mobile/canvass.js](../server/src/routes/mobile/canvass.js), both
   write paths): a replay (`wasOfflineSubmission` only) whose tap-time predates a standing run's
@@ -1257,15 +1395,49 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   ([answerEditRuns.js](../server/src/services/canvass/answerEditRuns.js)): another answer edit
   `pending`/`running`/`open` or with its undo `pending`/`running`, a conversion
   `pending`/`running`/`reverting` (an `open` door-by-door desk-entry session does not block an edit;
-  its next door step waits instead), an unknock `pending` and created in the last 10 minutes, an
-  unknock revert in flight (`UnknockRun.revertingAt`, stamped by the inline revert route for its
+  its next door step waits instead), an unknock still removing (pending, its heartbeat under 10 minutes
+  old — however long it has run; round 4), an unknock revert in flight (`UnknockRun.revertingAt`, stamped by the inline revert route for its
   duration and cleared in a `finally`; a stamp older than 10 minutes no longer counts), or any round's
   `Pass.recutLock` taken in the last 5 minutes — each `409 ANOTHER_CHANGE_RUNNING` with a worded
   `error`. The other way, `answerEditBusy` (an edit's apply or undo `pending`/`running`, or a session
   `open`) refuses with the same code the unknock create and revert, the conversion create, door step,
   resume and revert in this file, and the clear-knocks discard and the restore-snapshot in
   [turfs.js](../server/src/routes/admin/turfs.js) — checked after those two take the recut lock, which
-  the edit side reads, so neither can slip in between. The reason is the write model: conversions and
+  the edit side reads, so neither can slip in between. **Every start claims, not just peeks:** a check
+  before the write can race another admin's start (an edit's create takes seconds at scale), so each
+  start writes its claim and then checks AGAIN, stepping back with the same 409 (its claim undone by
+  compare-and-swap) when the other side is on file — the edit's create (its run and chunks deleted),
+  Pick up / Start again and Undo (`otherChangeRunning(…, { exceptRunId })`); the conversion's create,
+  resume and undo, and the unknock's create (inside `runUnknock`, before a row is touched) and undo,
+  which claims `revertingAt` first (`answerEditBusy`). A door-by-door session's step counts itself in
+  on `SurveyConversionRun.stepping` (+1, with `steppingAt`) for its own duration and checks again, then
+  out (−1); `otherChangeRunning` counts a step in flight whose `steppingAt` is under two minutes old (an
+  open session between steps holds nothing), and two admins stepping one session can't clear each
+  other's (round 3: it was one stamp). **The count-in is a claim on the session still being open, and
+  Close and Undo wait out a step still counted in** (`409 RUN_BUSY`, "a door in this session is still
+  saving") — [stepCount.js](../server/src/services/canvass/stepCount.js); round 4: a Close and an Undo
+  landing while a door saved left that door converted under the reverted run, stamped by it, so no
+  tool could reach it again. A count a crash left behind is re-based by the next step, never added to
+  (it held the campaign busy for two minutes after every later step); Close claims the session in one
+  write, so two Closes at once log one History row; and a one-person answer edit's step records its
+  copy on its item by position, never over a chunk an undo has reached, and writes its History line
+  before it counts out. Whichever start
+  checks second sees the other; both may step back, never both proceed (code review 2026-10-19: two
+  changes at once undid an edit silently in round 1; in round 2 an Undo pressed while an unknock or a
+  door step was mid-write lost the original). **A conversion's queued job runs only under the run's own
+  job id**, written before the `add` (`conversionJobId`): the processor claims `{ status: pending |
+  running, queueJobId: job.id }` (a revert, `reverting` under its id, stamping `revertClaimedAt`), and an
+  enqueue that times out parks the run only while it still reads its claim under that id and no job has
+  claimed the undo, forgetting the id (`parkConversion`), so a late delivery of the job the admin was
+  told never ran is skipped — and an undo already running is never told "Nothing has been changed"
+  (round 3). For the deploy window, a previous-build job (BullMQ's own id) is its run's own on a forward
+  run still pending under no id of this build's — none, or the stopped job's that a previous-build Pick
+  up hadn't replaced yet (round 4) — and on an undo nothing of this build has claimed. A create that
+  lands while its campaign's or organization's delete cascade runs goes with the tenant's rows (each
+  create sweeps once its run is on file, `409 campaign-deleting`), and so does a conversion job whose
+  campaign is gone (round 4). Conversion chunks stop
+  at the next batch once the campaign or organization is being deleted, and an undo is refused on an
+  open door-by-door session (`409 RUN_OPEN`, close it first). The reason is the write model: conversions and
   unknock read, archive, then delete by id (no compare-and-swap), and a clear-knocks re-cut snapshots
   a round's surveys and archive rows in two reads, so an edit landing between them would leave the
   snapshot holding the edited survey with its original nowhere. The plain reclassify path touches no

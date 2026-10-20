@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 
 // Snapshot a SurveyResponse doc that is ABOUT to be replaced or removed.
@@ -44,11 +45,13 @@ const archiveRow = (doc, { byUserId, via, conversionRunId, unknockRunId, at }) =
   };
 };
 
+// Returns the copy's id, so a caller whose own write then misses can remove the copy it just made.
 export async function archiveOverwrittenResponse(doc, { byUserId, via = 'submit', conversionRunId = null, unknockRunId = null }) {
   const at = new Date();
-  await SurveyResponseArchive.collection.insertOne(
+  const r = await SurveyResponseArchive.collection.insertOne(
     archiveRow(doc, { byUserId, via, conversionRunId, unknockRunId, at })
   );
+  return r.insertedId;
 }
 
 // Bulk form — same contract, one insertMany. Used by a conversion run, which archives a whole
@@ -61,6 +64,23 @@ export async function archiveOverwrittenResponses(docs, { byUserId, via, convers
     docs.map((doc) => archiveRow(doc, { byUserId, via, conversionRunId, unknockRunId, at })),
     { ordered: true }
   );
+}
+
+/**
+ * Delete the surveys a removal has just copied — each only while it still holds the submission the removal
+ * read (same canvasser, same moment). One replaced since, by a profile Restore swapping another survey into
+ * the slot or by a re-survey, stays as it now is, and the removal's copy of what it held stays beside the
+ * one that writer kept (code review round 9: deleted by id, the answers a Restore had just swapped in went
+ * nowhere). An edit or a re-stamp of the same submission doesn't spare it: it is the struck visit's survey
+ * still. Returns how many went.
+ */
+export async function deleteUnlessReplaced(docs) {
+  if (!docs.length) return 0;
+  const res = await SurveyResponse.collection.bulkWrite(
+    docs.map((d) => ({ deleteOne: { filter: { _id: d._id, userId: d.userId ?? null, submittedAt: d.submittedAt ?? null } } })),
+    { ordered: false }
+  );
+  return res.deletedCount || 0;
 }
 
 // The inverse strip for restore: an archive doc minus its own identity + provenance is exactly
@@ -81,7 +101,43 @@ export function snapshotFromArchive(archiveDoc) {
     responseId,
     appliedHash,
     undoStartedAt,
+    undoToken,
+    writerToken,
     ...snapshot
   } = archiveDoc;
   return snapshot;
+}
+
+// An undo that writes surveys back from copies CLAIMS each copy first — the stamp the profile's Erase
+// and Restore wait on (routes/admin/voters.js) — and writes back only a copy it holds: an Erase that
+// landed between the undo's read and its write-back was honoured, and then the undo wrote the erased
+// answers back from what it had read (code review round 5; the answer-edit undo stamped its copies
+// since round 1, the removal undos never did). A stamp older than ten minutes belongs to an undo that
+// died, and is taken over. The claim is the RUN's (`owner`, its id): a retry of that run's undo takes
+// back what an earlier attempt of it claimed and left — round 6: an attempt that failed after its claim
+// left the copies stamped, and the retry counted them "not restored" and closed the run without them.
+// Each run's undo is exclusive already (its own run-level claim), so the same owner twice is the same
+// undo, retried.
+const COPY_CLAIM_STALE_MS = 10 * 60 * 1000;
+/** Claim these copies for `owner`'s write-back; returns the ones it now holds, as they are on file. */
+export async function claimCopiesForWriteBack(ids, owner) {
+  if (!ids.length) return [];
+  const token = new mongoose.Types.ObjectId(String(owner));
+  const now = new Date();
+  await SurveyResponseArchive.collection.updateMany(
+    {
+      _id: { $in: ids },
+      $or: [{ undoStartedAt: null }, { undoStartedAt: { $lt: new Date(now.getTime() - COPY_CLAIM_STALE_MS) } }, { undoToken: token }],
+    },
+    { $set: { undoStartedAt: now, undoToken: token } }
+  );
+  return SurveyResponseArchive.collection.find({ _id: { $in: ids }, undoToken: token }).toArray();
+}
+/** Let go of claimed copies that were not written back (removed with $unset — a null stamp would block an Erase for good). */
+export async function releaseCopies(ids, owner) {
+  if (!ids.length) return;
+  await SurveyResponseArchive.collection.updateMany(
+    { _id: { $in: ids }, undoToken: new mongoose.Types.ObjectId(String(owner)) },
+    { $unset: { undoStartedAt: '', undoToken: '' } }
+  );
 }

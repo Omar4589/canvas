@@ -18,6 +18,9 @@ import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
+import { ConversionStrike } from '../../models/ConversionStrike.js';
+import { waitForDoorOutcomesToStop } from '../canvass/answerEditRuns.js';
+import { LATE_WRITE_MODELS } from './lateWriteSweep.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { AnswerEditRun } from '../../models/AnswerEditRun.js';
 import { AnswerEditRunChunk } from '../../models/AnswerEditRunChunk.js';
@@ -71,7 +74,7 @@ export const ORG_SCOPED = [
   ExportJob, FbTimeConnection, FbTimePersonLink, FbTimeShift,
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
   Membership, Pass,
-  ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun, UnknockRun, UnknockRunChunk,
+  ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk,
   AnswerEditRun, AnswerEditRunChunk,
   SurveyResponse, SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
   VotedUpload, VotedVoter, Voter, VoterNote,
@@ -114,6 +117,12 @@ export async function deleteOrganization(orgId, { heartbeat = () => {} } = {}) {
   // services/platform/platformStats.js.
   await captureOrgBeforeDelete(org._id);
   heartbeat();
+
+  // A Door Outcomes change already mid-batch when the deletion began stops at its next batch; wait
+  // out the batch in flight (bounded) BEFORE anything is swept, so no sweep below runs ahead of its
+  // last write. The late sweep after ORG_SCOPED catches a write that outlasts the wait (code review
+  // 2026-10-19, rounds 2 and 3).
+  await waitForDoorOutcomesToStop({ organizationId: org._id }, { heartbeat });
 
   // The raw uploaded spreadsheets, BEFORE the ImportJob rows that name them are swept away.
   //
@@ -215,6 +224,13 @@ export async function deleteOrganization(orgId, { heartbeat = () => {} } = {}) {
     const r = await M.deleteMany({ organizationId: org._id });
     if (r.deletedCount) counts[M.modelName] = r.deletedCount;
     heartbeat();
+  }
+  // Late writers, swept once more: whatever a Door Outcomes write outlasting the wait above put down
+  // after the sweep passed its collection — a survey, an entry, a kept copy, a History row. A write
+  // later still is swept by its own writer (lateWriteSweep.js).
+  for (const M of LATE_WRITE_MODELS) {
+    const r = await M.deleteMany({ organizationId: org._id });
+    if (r.deletedCount) counts[M.modelName] = (counts[M.modelName] || 0) + r.deletedCount;
   }
   // Person edit proposals are keyed by orgId (the proposing org), not organizationId.
   const proposals = await PersonEditProposal.deleteMany({ orgId: org._id });

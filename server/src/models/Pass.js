@@ -54,6 +54,9 @@ const passSchema = new mongoose.Schema(
       lockedAt: { type: Date, default: null },
       lockedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       token: { type: String, default: null },
+      // The holder clears or restores the round's knocks (a clear-knocks discard, a snapshot restore that
+      // brings knocks back): only then do unknocks and conversions wait for it (removalBusy).
+      knocks: { type: Boolean, default: false },
     },
   },
   { timestamps: true }

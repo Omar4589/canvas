@@ -17,7 +17,9 @@ import { isAnswerable } from '../../lib/surveyRunner.js';
 // Answers CARRY OVER from the previous door on purpose: consecutive corrections are usually the
 // same fix, and re-picking an identical answer 40 times is how people start rubber-stamping. The
 // carry is visible and every door is still confirmed individually.
-export default function QueueWalkthrough({ campaignId, run, template, onDone, onCancel }) {
+// `onClosedElsewhere(message)`: the session was closed from another tab or by another admin — the
+// walkthrough leaves and the page says so, instead of refusing every Save on the same door (round 5).
+export default function QueueWalkthrough({ campaignId, run, template, onDone, onCancel, onClosedElsewhere = onCancel }) {
   // null = NOT LOADED YET, [] = genuinely nothing left. Collapsing the two is what made a fresh
   // session close itself on first render: the creating call returned doorsRemaining: null, the
   // walkthrough read that as an empty queue, and the "all done" effect below fired immediately.
@@ -132,13 +134,14 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
       setCarried(true); // answers persist into the next door, visibly
       setError(null);
     },
-    onError: (e) => setError(e.message),
+    // Closed elsewhere: leave — and say the open door's answers weren't recorded (round 6).
+    onError: (e) => (e.code === 'RUN_NOT_OPEN' ? onClosedElsewhere(`${e.message} The answers for the open door weren’t recorded.`) : setError(e.message)),
   });
 
   const finish = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/survey-conversions/${run.id}/close`, { method: 'POST' }),
     onSuccess: onDone,
-    onError: (e) => setError(e.message),
+    onError: (e) => (e.code === 'RUN_NOT_OPEN' ? onClosedElsewhere(e.message) : setError(e.message)),
   });
 
   useEffect(() => {
@@ -170,8 +173,30 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
   }
 
   if (!remaining.length) {
+    // Finished only once the session's Close has landed: one refused (another tab's door still saving)
+    // says why and offers Try again, never "finished" over a session still open (round 5).
+    if (finish.isError) {
+      return (
+        <Modal
+          onClose={onCancel}
+          title="Couldn’t finish the session yet"
+          size="md"
+          footer={
+            <>
+              <Button variant="secondary" onClick={onCancel}>Close</Button>
+              <Button onClick={() => finish.mutate()}>Try again</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-danger">{error}</p>
+          <p className="mt-2 text-sm text-fg-muted">
+            Every door is saved. Closing leaves the session open on its run card, where Stop here finishes it.
+          </p>
+        </Modal>
+      );
+    }
     return (
-      <Modal onClose={onDone} title="Desk entry finished" size="md" footer={<Button onClick={onDone}>Close</Button>}>
+      <Modal onClose={onDone} title={finish.isPending ? 'Finishing…' : 'Desk entry finished'} size="md" footer={<Button onClick={onDone} disabled={finish.isPending}>Close</Button>}>
         <p className="text-sm text-fg">
           All {total.toLocaleString()} doors done. You can undo the whole session from the run card.
         </p>

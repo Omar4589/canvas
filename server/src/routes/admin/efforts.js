@@ -20,6 +20,9 @@ import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
 import { createNextPass } from '../../services/passes/createPass.js';
 import { partitionAssignable } from '../../services/campaignRoster.js';
+import { deleteRoundSnapshots } from '../../services/turf/snapshotRetention.js';
+import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -491,12 +494,21 @@ router.post('/:id/archive', loadEffort, async (req, res, next) => {
 // Delete a draft effort: release its doors back to Intake first; refuse if it has
 // any non-draft rounds (history would dangle).
 router.delete('/:id', loadEffort, async (req, res, next) => {
+  const locked = [];
   try {
     const liveRounds = await Pass.countDocuments({ effortId: req.effort._id, status: { $ne: 'draft' } });
     if (liveRounds) {
       return res.status(400).json({ error: 'Walk list has active/archived passes; archive it instead of deleting.' });
     }
     const passIds = (await Pass.find({ effortId: req.effort._id }, { _id: 1 }).lean()).map((p) => p._id);
+    // Each round under its re-cut lock, as a round's own delete is (passes.js): a snapshot restore landing
+    // mid-delete put knocks back under a round that was gone (code review after round 9).
+    for (const id of passIds) {
+      if (!(await acquireRecutLock(id, req.user?._id))) {
+        return res.status(409).json({ error: 'A round of this walk list is being re-cut, discarded or restored right now. Try again in a minute.', code: 'recut-locked' });
+      }
+      locked.push(id);
+    }
     // Draft-rounds-only is NOT proof of no history — the ledger is the authority
     // (2026-08 incident): knocks recorded while doors sat in this list carry its
     // effortId (resolveAttribution stamps the owner at write time, mobile/canvass.js),
@@ -508,13 +520,16 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
         ...(passIds.length ? [{ passId: { $in: passIds } }] : []),
       ],
     };
-    const [hasKnocks, hasResponses] = await Promise.all([
+    // ...and kept copies of earlier answers too: deleted, they named a walk list and a round that no longer
+    // existed (code review after round 9 — the round delete's rule).
+    const [hasKnocks, hasResponses, hasCopies] = await Promise.all([
       CanvassActivity.exists(ledgerRef),
       SurveyResponse.exists(ledgerRef),
+      SurveyResponseArchive.exists(ledgerRef),
     ]);
-    if (hasKnocks || hasResponses) {
+    if (hasKnocks || hasResponses || hasCopies) {
       return res.status(400).json({
-        error: 'Walk list has recorded door history (knocks or survey answers reference it); archive it instead of deleting.',
+        error: 'Walk list has recorded door history (knocks, survey answers or their kept copies reference it); archive it instead of deleting.',
         code: 'has-history',
       });
     }
@@ -525,11 +540,17 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
       await TurfAssignment.deleteMany({ passId: { $in: passIds } });
     }
     await Pass.deleteMany({ effortId: req.effort._id }); // draft rounds only
+    // ...and their snapshots, cleared knocks included — nothing can restore them once their round is
+    // gone (services/turf/snapshotRetention.js; the nightly sweep takes any a stopped delete left).
+    await deleteRoundSnapshots(req.campaign._id, passIds);
     await EffortMember.deleteMany({ effortId: req.effort._id });
     await Effort.deleteOne({ _id: req.effort._id });
     res.json({ deleted: 1 });
   } catch (err) {
     next(err);
+  } finally {
+    // A no-op for the rounds now gone; a delete that stopped short lets the rest go again.
+    for (const id of locked) await releaseRecutLock(id).catch(() => {});
   }
 });
 

@@ -42,8 +42,13 @@ const nameSchema = new mongoose.Schema(
     // The reason list (§H2): 'changed_since' | 'restored_on_profile' | 'waiting' | 'cleared' |
     // 'erased' | 'gone' on an undo; 'changed_since_review' | 'not_found' on the apply.
     reason: String,
-    // Plain words naming who changed it since, or which change holds it ("Unknock, Oct 20").
-    detail: { type: String, default: null },
+    // WHO changed it since, or WHICH change holds it — stored as ids and dates
+    // ({ kind: 'resurveyed' | 'edited' | 'unknock' | 'conversion', by, at }), never as names: the
+    // words ("re-surveyed by Otto Other", "Unknock, Oct 20") are written when the run is read, so a
+    // deleted account reads here as on every report: its deletion snapshot's name for the retention
+    // window, then "Deleted user" (code review, rounds 1 and 2). Runs undone before 2026-10-19 held
+    // the words as a string; repair:answer-edit-words rewrites those to the stored shape, nameless.
+    detail: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { _id: false }
 );
@@ -99,6 +104,10 @@ const answerEditRunSchema = new mongoose.Schema(
     error: { type: String, default: null },
     // Queue mode: the position of the next frozen survey to show.
     cursor: { type: Number, default: 0 },
+    // One-person steps in flight (the SurveyConversionRun pattern): counted as running while fresh,
+    // whatever the session's status, and an Erase of this run's copies waits for them.
+    stepping: { type: Number, default: undefined },
+    steppingAt: { type: Date, default: null },
     progress: {
       done: { type: Number, default: 0 },
       total: { type: Number, default: 0 },
@@ -118,6 +127,20 @@ const answerEditRunSchema = new mongoose.Schema(
       lastRunAt: { type: Date, default: null },
       error: { type: String, default: null },
       passes: { type: Number, default: 0 },
+      // The undo's History ledger (answerEditRuns.js writeUndoHistory): how many put-backs History
+      // has reported (null until its first row), and the row being written — { from, to, line, by }.
+      historyLogged: { type: Number, default: null },
+      // Set by this build's first finished pass: every put-back from then on is proven by a receipt
+      // or its item's `u`; before it (the first build) put-backs left no receipt.
+      receipts: { type: Boolean, default: undefined },
+      // An undo the first build began, read the first build's way until this build's pass finishes
+      // (answerEditRuns.js runUndo): set when this build first takes it over.
+      legacy: { type: Boolean, default: undefined },
+      // Pressed on a build that writes receipts: an undo of this build whose job died before its first
+      // claim looks like the first build's from what it left, and was read that way (round 6). The
+      // first build never set it.
+      writesReceipts: { type: Boolean, default: undefined },
+      historyPending: { type: mongoose.Schema.Types.Mixed, default: null },
       // The last pass's outcome, STORED (§H2): the run card and Details read this, never the mere
       // presence of archive rows — a re-cut or an Erase removes rows without undoing anything.
       summary: {
@@ -149,7 +172,9 @@ const answerEditRunSchema = new mongoose.Schema(
       // { questionKey: { label, surveys } } — surveys changed per question (a queue session's
       // summary is built from it).
       byQuestion: { type: mongoose.Schema.Types.Mixed, default: {} },
-      // Picks taken out and put in, per question and pick (an option id, or an old answer's text).
+      // Picks taken out and put in, per question and option id — never a voter's own words: a written
+      // answer counts per question only (byQuestion), and an old text no option matches counts in its
+      // question's one `__unlisted__` row (answerEditWriter.js pickKeys).
       byOption: {
         type: [
           {
@@ -172,8 +197,11 @@ const answerEditRunSchema = new mongoose.Schema(
 
     // How many changed surveys Campaign History has reported. Each History write reports the rest
     // (CAS'd on this), so a run that stops part-way is logged when it stops, and again for what it
-    // changes after Pick up — never twice for one survey.
+    // changes after Pick up — never twice for one survey. `historyPending` is the row being written,
+    // { from, to, line, by }: claimed first, written, and only then counted, so a crash between the
+    // two can neither lose the row nor log it twice (writeRunHistory).
     historyCount: { type: Number, default: 0 },
+    historyPending: { type: mongoose.Schema.Types.Mixed, default: null },
 
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },

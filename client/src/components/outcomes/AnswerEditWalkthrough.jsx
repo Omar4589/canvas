@@ -13,7 +13,19 @@ import PerPersonAnswerEditor, { seedEditor, touchedAnswers } from '../surveys/Pe
 // changed while it was open refuses (409 RESPONSE_CHANGED) and comes back with the latest answers,
 // so a stale screen can never write over a re-survey. Save & next with nothing changed is a skip;
 // a double tap is a no-op.
-const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, onStopped }) => {
+// Did the admin change anything on this survey — a touched question whose answer now differs from
+// the stored one? A pick ticked and unticked again is touched but unchanged, and the notice below
+// called it a lost change (code review round 4).
+const changedFromStored = (questions, editor, stored) => {
+  const byQuestion = (rows) => new Map(rows.map((a) => [a.questionKey, JSON.stringify(a)]));
+  const now = byQuestion(touchedAnswers(questions, editor));
+  const before = byQuestion(touchedAnswers(questions, { ...seedEditor(questions, stored), touched: editor.touched }));
+  return [...new Set([...now.keys(), ...before.keys()])].some((k) => now.get(k) !== before.get(k));
+};
+
+// `onClosedElsewhere(message)`: the session was stopped from another tab or by another admin — the
+// walkthrough leaves and the page says so, instead of refusing every Save on the same survey (round 5).
+const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, onStopped, onClosedElsewhere = onFinishLater }) => {
   const [current, setCurrent] = useState(initial || null);
   const [editor, setEditor] = useState(() => (initial ? seedEditor(initial.questions, initial.answers) : null));
   const [notice, setNotice] = useState(null);
@@ -33,21 +45,35 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
   };
 
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ answers }) =>
       api(`${base}/response`, {
         method: 'POST',
-        body: { responseId: current.responseId, version: current.version, answers: touchedAnswers(current.questions, editor) },
+        body: { responseId: current.responseId, version: current.version, answers },
       }),
-    onSuccess: (d) => {
-      setNotice(null);
+    onSuccess: (d, { changed, who }) => {
+      // The survey left the session between showing it and saving (deleted, or surveyed again with
+      // another survey): the server moved on without saving, and says so here — never silently
+      // (code review round 2) — when there was a change to lose (round 3).
+      setNotice(
+        d.skipped && d.reason && changed
+          ? d.reason === 'other_survey'
+            ? `${who} was surveyed again with a different survey while you were editing, so your change wasn’t saved.`
+            : `${who}’s survey was deleted while you were editing, so your change wasn’t saved.`
+          : null
+      );
       setError(null);
       setRunWire(d.run);
       show(d.current);
     },
-    onError: (e) => {
+    onError: (e, v) => {
       if (e.code === 'RESPONSE_CHANGED' && e.data?.current) {
         setNotice(e.message);
         show(e.data.current);
+        return;
+      }
+      if (e.code === 'RUN_NOT_OPEN') {
+        // ...and the change on this screen is gone with it — say so (round 6).
+        onClosedElsewhere(v?.changed ? `${e.message} Your change to ${v.who}’s survey wasn’t saved.` : e.message);
         return;
       }
       setError(e.message);
@@ -61,22 +87,34 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
       setRunWire(d.run);
       show(d.current);
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => (e.code === 'RUN_NOT_OPEN' ? onClosedElsewhere(e.message) : setError(e.message)),
   });
   const stop = useMutation({
     mutationFn: () => api(`${base}/close`, { method: 'POST' }),
     onSuccess: (d) => onStopped(d.run),
-    onError: (e) => setError(e.message),
+    // Stopped elsewhere already: leave, as a refused save does — Stop here was refused every time
+    // (round 6).
+    onError: (e) => (e.code === 'RUN_NOT_OPEN' ? onClosedElsewhere(e.message) : setError(e.message)),
   });
 
   const busy = save.isPending || skip.isPending || stop.isPending;
+  const saveStep = () =>
+    save.mutate({
+      answers: touchedAnswers(current.questions, editor),
+      changed: changedFromStored(current.questions, editor, current.answers),
+      who: current?.voter?.name || 'This voter',
+    });
+  // No closing mid-save (Escape, the backdrop): the reply would land on a closed session.
+  const finishLater = () => {
+    if (!busy) onFinishLater();
+  };
   const total = current?.total || runWire?.progress?.total || 0;
   const changed = runWire?.counts?.surveysChanged || 0;
 
   if (!current) {
     return (
       <Modal
-        onClose={onFinishLater}
+        onClose={finishLater}
         title="That’s every survey in this session"
         subtitle={`${changed.toLocaleString()} ${changed === 1 ? 'survey' : 'surveys'} changed`}
         size="md"
@@ -87,6 +125,8 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
           </>
         }
       >
+        {/* The last survey's notice too: saving it is what brought this screen up (round 3). */}
+        {notice && <p className="mb-3 rounded border border-warning/40 bg-warning-tint px-3 py-2 text-sm text-warning-fg">{notice}</p>}
         <p className="text-sm text-fg">
           Stop here finishes the session: it&rsquo;s listed under Survey answer changes, and its Undo puts
           every survey you changed back as one change.
@@ -98,9 +138,15 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
 
   return (
     <Modal
-      onClose={onFinishLater}
+      onClose={finishLater}
       bodyRef={bodyRef}
-      title={current.missing ? 'This survey is no longer on file' : current.voter?.name || 'Survey'}
+      title={
+        current.missing
+          ? current.reason === 'other_survey'
+            ? 'Surveyed again with a different survey'
+            : 'This survey is no longer on file'
+          : current.voter?.name || 'Survey'
+      }
       subtitle={
         current.missing
           ? undefined
@@ -115,7 +161,7 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
           <span className="flex-1" />
           <Button variant="secondary" onClick={() => skip.mutate()} disabled={busy}>Skip</Button>
           {!current.missing && (
-            <Button onClick={() => save.mutate()} disabled={busy}>{save.isPending ? 'Saving…' : 'Save & next'}</Button>
+            <Button onClick={saveStep} disabled={busy}>{save.isPending ? 'Saving…' : 'Save & next'}</Button>
           )}
         </>
       }
@@ -138,8 +184,9 @@ const AnswerEditWalkthrough = ({ campaignId, run, initial, tz, onFinishLater, on
 
       {current.missing ? (
         <p className="text-sm text-fg-muted">
-          Someone deleted this survey or recorded a different result at the door since the session
-          started. There is nothing to edit here — skip it.
+          {current.reason === 'other_survey'
+            ? 'This voter was surveyed again since the session started, with a different survey, so this session’s questions don’t apply. Nothing here can be edited — skip it.'
+            : 'Someone deleted this survey or recorded a different result at the door since the session started. There is nothing to edit here — skip it.'}
         </p>
       ) : (
         <>

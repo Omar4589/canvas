@@ -91,6 +91,14 @@ const surveyResponseSchema = new mongoose.Schema(
     // undo. What makes "did this edit land?" a fact about the survey rather than a guess. A phone
     // re-survey $unsets it (a new submission is no edit's output). Absent = never edited this way.
     answerEditMarks: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    // Undo receipts: the archive-row id of every answer edit an Undo put back, written by the
+    // put-back's own atomic write. The ONLY proof an undo pass accepts that a put-back landed — a
+    // missing mark isn't one (a re-survey or a Restore removes marks too). Kept across re-surveys.
+    answerEditUndone: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    // Undo fences: the id of every answer-edit run whose undo has reached this survey, raised before
+    // the undo reads it. Every write of that run requires its id absent, so a delivery still running
+    // when its change was undone can never land afterwards (answerEditWriter.js).
+    answerEditFence: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
 
     // DESK-ENTERED: this response was typed by an admin converting a door outcome into Surveyed
     // (services/canvass/surveyConversion.js), NOT submitted from a phone at the door. Every other

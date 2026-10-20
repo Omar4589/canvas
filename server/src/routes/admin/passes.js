@@ -16,6 +16,10 @@ import { knocksPipeline, connectionRate, contactRate } from '../../services/repo
 import { activePassIds } from '../../services/passes/activePasses.js';
 import { createNextPass } from '../../services/passes/createPass.js';
 import { removeDeskRestrict } from '../../services/canvass/deskRestrict.js';
+import { deleteRoundSnapshots } from '../../services/turf/snapshotRetention.js';
+import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
+import { DESK_RESTRICT_MATCH } from '../../services/canvass/deskRestrict.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -192,10 +196,34 @@ router.post('/:id/archive', async (req, res, next) => {
 });
 
 router.delete('/:id', async (req, res, next) => {
+  let lockedId = null;
   try {
     const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status !== 'draft') return res.status(400).json({ error: 'Only draft passes can be deleted' });
+    // Under the round's re-cut lock, as a discard and a snapshot restore are: a restore landing mid-delete
+    // put knocks back under a round that was gone, then failed on its deleted snapshot (code review after
+    // round 9).
+    if (!(await acquireRecutLock(pass._id, req.user?._id))) {
+      return res.status(409).json({ error: 'This round is being re-cut, discarded or restored right now. Try again in a minute.', code: 'recut-locked' });
+    }
+    lockedId = pass._id;
+    // Draft is not proof of no history: a discard that keeps the knocks turns a live round back to draft,
+    // and so does a restored snapshot. Deleted, its entries and surveys belonged to no round — the round
+    // list and the per-round numbers stopped adding up to the campaign's — and its kept copies of earlier
+    // answers named a round that no longer existed. The ledger is the authority, as for a walk list
+    // (efforts.js): archive it instead. Desk marks don't count — they go with the round (below).
+    const [entries, surveys, copies] = await Promise.all([
+      CanvassActivity.exists({ passId: pass._id, $nor: [DESK_RESTRICT_MATCH] }),
+      SurveyResponse.exists({ passId: pass._id }),
+      SurveyResponseArchive.exists({ passId: pass._id }),
+    ]);
+    if (entries || surveys || copies) {
+      return res.status(400).json({
+        error: 'This pass has recorded door history (knocks, survey answers or their kept copies); archive it instead of deleting.',
+        code: 'has-history',
+      });
+    }
     const books = await Turf.find({ passId: pass._id }, { _id: 1 }).lean();
     const turfIds = books.map((b) => b._id);
     if (turfIds.length) {
@@ -205,12 +233,20 @@ router.delete('/:id', async (req, res, next) => {
     await Turf.deleteMany({ passId: pass._id });
     // Single-home desk marks are allowed on a DRAFT round (restrict-doors); with the round
     // gone they would orphan — global status stuck at restricted, no book-level undo left —
-    // so sweep them with the round (field rows on a draft can't exist; drafts never ship).
+    // so sweep them with the round (field rows refused it above).
     await removeDeskRestrict({ campaign: req.campaign, filter: { passId: pass._id } });
     await Pass.deleteOne({ _id: pass._id });
+    // Its snapshots go with it, cleared knocks and all: only this round could take them back, so
+    // left behind they were answers and notes no screen reached (services/turf/snapshotRetention.js).
+    // After the round, so a delete that stops in between leaves the round its undo — and the nightly
+    // sweep takes what a stopped delete left.
+    await deleteRoundSnapshots(req.campaign._id, [pass._id]);
     res.json({ deleted: 1 });
   } catch (err) {
     next(err);
+  } finally {
+    // A no-op once the round is gone; a delete that stopped short lets the round go again.
+    if (lockedId) await releaseRecutLock(lockedId).catch(() => {});
   }
 });
 

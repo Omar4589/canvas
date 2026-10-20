@@ -257,8 +257,12 @@ async function moneyShot() {
 // Drive the REAL processor, exactly as the worker would. (With Redis dead the route hands back a
 // 503 carrying the created run — the run doc exists either way, which is the whole point of
 // creating it BEFORE enqueueing.)
-const runJob = (runId, name = 'convert') =>
-  processConversionJob({ id: `t-${runId}-${name}`, name, data: { runId: String(runId) }, updateProgress: async () => {} });
+// The job is the run's own (the routes write its id before the add; with Redis dead they parked it).
+const runJob = async (runId, name = 'convert') => {
+  const id = `t-${runId}-${name}-${Date.now()}`;
+  await SurveyConversionRun.updateOne({ _id: runId }, { $set: { queueJobId: id } });
+  return processConversionJob({ id, name, data: { runId: String(runId) }, updateProgress: async () => {} });
+};
 
 // Create a bulk run and execute it, asserting the run doc came back whichever status the enqueue
 // produced. Returns the run id.

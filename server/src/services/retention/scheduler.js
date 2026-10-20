@@ -7,6 +7,7 @@ import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformSt
 import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
 import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExports.js';
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
+import { sweepOrphanSnapshots, SNAPSHOT_SWEEP_JOB } from '../turf/snapshotRetention.js';
 import {
   runFbtimeSync,
   syncOneConnection,
@@ -63,6 +64,12 @@ export const EXPORT_SWEEP_CRON = process.env.EXPORT_SWEEP_CRON || '23 5 * * *';
 // rest of the overnight ladder.
 export const IMPORT_SWEEP_CRON = process.env.IMPORT_SWEEP_CRON || '53 5 * * *';
 
+// Nightly snapshot sweep: a deleted round's snapshots (cleared knocks, surveys, notes) — which no
+// screen can reach or restore once the round is gone — deleted. The round's delete takes them
+// itself; this takes the ones left before it did, and any a stopped delete left. 05:37 sits between
+// the export sweep (05:23) and the import sweep (05:53).
+export const SNAPSHOT_SWEEP_CRON = process.env.SNAPSHOT_SWEEP_CRON || '37 5 * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -92,6 +99,8 @@ export const MAINTENANCE_JOBS = [
   { name: EXPORT_SWEEP_JOB, cron: EXPORT_SWEEP_CRON, label: 'The nightly export-artifact sweep' },
   // Same reasoning — hygiene, not the retention promise.
   { name: IMPORT_SWEEP_JOB, cron: IMPORT_SWEEP_CRON, label: 'The nightly stale-import sweep' },
+  // Hygiene too: what it deletes nothing could reach any more.
+  { name: SNAPSHOT_SWEEP_JOB, cron: SNAPSHOT_SWEEP_CRON, label: 'The nightly deleted-round snapshot sweep' },
   // FbTime measured-hours sync (opt-in per org; a no-op sweep when nobody has
   // connected, and fully dormant without CREDENTIAL_SEAL_KEY). Off the
   // quarter-hour on purpose — :00/:15/:30/:45 is where the world's crons pile
@@ -129,7 +138,7 @@ export async function registerMaintenanceJobs() {
 export async function processMaintenanceJob(job) {
   if (job.name === JOB_NAME) {
     const res = await purgeDeletedIdentities({ apply: true });
-    console.log(`[maintenance] ${JOB_NAME}: scanned ${res.scanned}, purged ${res.purged}, failed ${res.failed}`);
+    console.log(`[maintenance] ${JOB_NAME}: scanned ${res.scanned}, purged ${res.purged}, failed ${res.failed}, names off run lines ${res.namesScrubbed}`);
     return res;
   }
   if (job.name === TRIGGER_JOB) {
@@ -180,6 +189,11 @@ export async function processMaintenanceJob(job) {
     console.log(
       `[maintenance] ${EXPORT_SWEEP_JOB}: expired ${res.expired}, failed-job leftovers ${res.failedCleaned}, orphan file(s) ${res.orphans}`
     );
+    return res;
+  }
+  if (job.name === SNAPSHOT_SWEEP_JOB) {
+    const res = await sweepOrphanSnapshots();
+    console.log(`[maintenance] ${SNAPSHOT_SWEEP_JOB}: deleted ${res.deleted} snapshot(s) of ${res.rounds} deleted round(s)`);
     return res;
   }
   if (job.name === IMPORT_SWEEP_JOB) {

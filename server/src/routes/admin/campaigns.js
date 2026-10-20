@@ -27,6 +27,8 @@ import {
   runUnknock,
   revertUnknock,
 } from '../../services/canvass/unknock.js';
+import { unknockRemoving, UNKNOCK_STALE_MS } from '../../services/canvass/unknockLease.js';
+import { stepIn, STEP_OUT, STEPPING, NO_FRESH_STEP, stepStillSaving } from '../../services/canvass/stepCount.js';
 import { resolveBillRestricted } from '../../services/reports/billRestricted.js';
 import { goalProgressFor } from '../../services/reports/goalProgress.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
@@ -61,7 +63,8 @@ import {
   revertReclassify,
 } from '../../services/canvass/reclassifyOutcomes.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
-import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR } from '../../services/canvass/answerEditRuns.js';
+import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR, removalBusy, roundClearedSince, roundClearedRefusal } from '../../services/canvass/answerEditRuns.js';
+import { sweepIfDeleting } from '../../services/platform/lateWriteSweep.js';
 import {
   surveyConvertCap,
   MAX_VOTERS_PER_DOOR_SYNC,
@@ -70,10 +73,11 @@ import {
   resolveSelectionTemplate,
   computeSurveyImpact,
   executeConversionRun,
+  CONVERSION_JOB_PREFIX,
   applyDoorToRun,
   closeConversionRun,
   revertConversionRun,
-  expireDeadInlineRevert,
+  settleStalledConversion,
   INLINE_REVERT_MAX_ENTRIES,
   STOPPED_UNDO_ERROR,
 } from '../../services/canvass/surveyConversion.js';
@@ -906,6 +910,26 @@ const unknockSchema = z.object({
 const unknockWire = (r) => ({
   id: String(r._id),
   status: r.status,
+  // Still removing: its strike beat within ten minutes (unknockLease.js) — no Undo yet (round 4).
+  removing: unknockRemoving(r),
+  // Being undone right now (the inline undo's claim, under ten minutes old): the list reads Undoing…
+  // and keeps polling until it lands — an undo can outlast its request (round 5).
+  undoing: !r.revertedAt && !!r.revertingAt && Date.now() - new Date(r.revertingAt).getTime() < UNKNOCK_STALE_MS,
+  // An undo began and stopped before it finished (it failed, or its request died): what it put back so
+  // far stays, and Retry undo finishes it (round 6 — the row read as if it had never been undone).
+  undoStopped: !r.revertedAt && !!r.undoBegunAt && !(!!r.revertingAt && Date.now() - new Date(r.revertingAt).getTime() < UNKNOCK_STALE_MS),
+  // A pending run that began removing and then stopped: something WAS removed, and Undo is offered.
+  stoppedPartWay: r.status === 'pending' && !!r.deletingAt && !unknockRemoving(r),
+  // How many entries it set out to remove — what an unfinished run's row counts (round 5).
+  frozenRows: r.frozenRows ?? null,
+  // Null on one that never finished — stopped part-way, undone or not (its row counts what it selected).
+  completedAt: r.completedAt || null,
+  // Did its strike finish? `completedAt` says so from 2026-10-19; an undone run from before then that
+  // never beat nor stamped its delete is one the first build undid, and that build undid only finished
+  // runs (round 7: undone, they all read "N entries selected").
+  strikeFinished: r.status === 'completed' || !!r.completedAt || (r.status === 'reverted' && !r.deletingAt && !r.heartbeatAt),
+  // When it last changed (server time): when it landed, for the page's open reviews (round 6).
+  updatedAt: r.updatedAt || null,
   counts: r.counts,
   scopeSummary: r.scopeSummary || null,
   byIds: !!r.selection?.byIds,
@@ -1199,6 +1223,10 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
   try {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
+    // When this request began: a review is priced as of then, so a change that finishes while it is being
+    // worked out still closes it on the page (round 7: stamped as it answered, one that began before a
+    // finish and answered after was never closed).
+    const asOf = new Date().toISOString();
     const { from, to, dryRun, scope, actionIds } = reclassifySchema.parse(req.body);
     const scoped = !!(scope || actionIds);
 
@@ -1269,6 +1297,9 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
       if (dryRun) {
         return res.json({
           dryRun: true,
+          // When it was priced (server time): the page closes a review a change finishing after it
+          // made stale (round 6).
+          asOf,
           to,
           sources: sel.sources,
           entries: sel.entries,
@@ -1306,7 +1337,7 @@ router.post('/:campaignId/reclassify-outcomes', async (req, res, next) => {
     const invalid = validatePair(campaign, from, to);
     if (invalid) return res.status(invalid.status).json(invalid.body);
 
-    if (dryRun) return res.json({ dryRun: true, from, to, ...(await countConvertible(campaign._id, from)) });
+    if (dryRun) return res.json({ dryRun: true, asOf, from, to, ...(await countConvertible(campaign._id, from)) });
 
     const run = await runReclassify({ campaign, from, to, byUserId: req.user._id });
     res.status(201).json({
@@ -1344,6 +1375,11 @@ router.post('/:campaignId/reclassify-outcomes/revert', async (req, res, next) =>
     if (run.revertedAt) {
       return res.status(409).json({ error: 'That reclassification was already reverted.', code: 'ALREADY_REVERTED' });
     }
+    // Nor while a round holding its relabelled entries sits cleared with a snapshot it can still take back:
+    // undone in between, it found no stamps and read undone, and the restore brought the entries back still
+    // relabelled, out of every tool's reach (round 9). A relabel stamps its entries as a conversion does.
+    const cleared = await roundClearedSince(campaign._id, { conversion: run });
+    if (cleared) return res.status(409).json(roundClearedRefusal(cleared, campaign));
 
     await revertReclassify({ campaign, run, byUserId: req.user._id });
     res.json({ reverted: true, runId: String(run._id), revertedAt: run.revertedAt });
@@ -1361,6 +1397,10 @@ router.post('/:campaignId/unknock-entries', async (req, res, next) => {
   try {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
+    // When this request began: a review is priced as of then, so a change that finishes while it is being
+    // worked out still closes it on the page (round 7: stamped as it answered, one that began before a
+    // finish and answered after was never closed).
+    const asOf = new Date().toISOString();
     const { dryRun, scope, actionIds } = unknockSchema.parse(req.body);
 
     const q = await resolveEntryScope(campaign, scope || {});
@@ -1434,6 +1474,7 @@ router.post('/:campaignId/unknock-entries', async (req, res, next) => {
       });
       return res.json({
         dryRun: true,
+        asOf,
         entries: sel.entries,
         doors: sel.doors,
         sources: sel.sources,
@@ -1445,8 +1486,12 @@ router.post('/:campaignId/unknock-entries', async (req, res, next) => {
     }
 
     // One change at a time (services/canvass/answerEditRuns.js): an answer edit writes through
-    // compare-and-swaps this read-archive-delete would race.
+    // compare-and-swaps this read-archive-delete would race — and so do the other removals: a second
+    // unknock of rows one is still removing, or a conversion writing the same visits (round 6). The
+    // strike checks both again once its run is on file.
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    const busy = await removalBusy(campaign._id);
+    if (busy) return res.status(409).json(busy);
     const run = await runUnknock({
       campaign,
       rows: sel.rows,
@@ -1457,6 +1502,22 @@ router.post('/:campaignId/unknock-entries', async (req, res, next) => {
     });
     return res.status(201).json({ run: unknockWire(run) });
   } catch (err) {
+    // Its checks failed before it touched anything: nothing was removed, and the page keeps the selection
+    // (round 8: it said "the row shows where it stands" with no row).
+    if (err.notStarted) {
+      return res.status(503).json({ error: 'The unknock could not start, so nothing was removed. Try again in a moment.', code: 'UNKNOCK_NOT_STARTED' });
+    }
+    // The strike began and stopped: say so, with the run as it stands — the page then words it as stopped
+    // part-way, never as a request that failed before anything happened (round 7).
+    if (err.unknockRunId && !err.raced) {
+      const stopped = await UnknockRun.findById(err.unknockRunId).lean().catch(() => null);
+      if (stopped) {
+        const error = err.code === 'UNKNOCK_UNDONE' ? err.message : 'The unknock stopped before it finished.';
+        return res.status(500).json({ error, code: 'UNKNOCK_STOPPED', run: unknockWire(stopped) });
+      }
+    }
+    if (err.raced && err.refusal) return res.status(409).json(err.refusal);
+    if (err.code === ANSWER_EDIT_BUSY_ERROR.code && err.raced) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     if (sendScopeError(res, err)) return;
     next(err);
@@ -1501,24 +1562,109 @@ router.post('/:campaignId/unknock-entries/revert', async (req, res, next) => {
       return res.status(409).json({ error: 'That unknock was already undone.', code: 'ALREADY_REVERTED' });
     }
     // A `pending` run crashed between freezing and deleting: its rows may still be live, so
-    // "restoring" them would raw-insert duplicates of rows that never left. Undo is for a run
-    // that actually landed. (This inverts runReclassify's stamp-first ordering out of necessity —
-    // you cannot freeze a deleted row — so the status field carries the guarantee instead.)
-    if (run.status !== 'completed') {
+    // "restoring" them would raw-insert duplicates of rows that never left. Undo is for a run that
+    // landed — completed, or one that crashed after it began deleting (`deletingAt`, round 3: those
+    // rows WERE removed, and its undo was refused for good). Re-inserting an untouched row is a
+    // harmless duplicate-key skip.
+    // ...and only once it has STOPPED: a pending run still beating is still removing, and an undo
+    // then put back half of it before the strike finished over the undo (round 4).
+    if (unknockRemoving(run)) {
+      return res.status(409).json({ error: 'That unknock is still removing entries. Wait for it to finish, then undo it.', code: 'RUN_BUSY' });
+    }
+    if (run.status !== 'completed' && !(run.status === 'pending' && run.deletingAt)) {
       return res.status(409).json({
         error: 'That unknock did not finish, so there is nothing to undo — its entries were never removed.',
         code: 'RUN_NOT_COMPLETED',
       });
     }
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
-    // The revert runs inline and UnknockRun has no running state, so it stamps one for its
-    // duration: an answer edit reads it to stay out of the way.
-    await UnknockRun.updateOne({ _id: run._id }, { $set: { revertingAt: new Date() } });
+    // ...nor beside another removal writing on the campaign: an undo while a later unknock removed or a
+    // conversion step converted the same visits put answers back under a door the other was clearing
+    // (round 6).
+    const busyBefore = await removalBusy(campaign._id, { exceptUnknockId: run._id });
+    if (busyBefore) return res.status(409).json(busyBefore);
+    // Nor while a round it struck sits cleared with a snapshot it can still take back (rounds 8 and 9).
+    const clearedBefore = await roundClearedSince(campaign._id, { unknock: run });
+    if (clearedBefore) return res.status(409).json(roundClearedRefusal(clearedBefore, campaign));
+    // The revert runs inline and UnknockRun has no running state, so it CLAIMS one for its duration
+    // (round 3: two presses ran it twice — two History rows, and visits it had put back recorded as
+    // not put back): `revertingAt`, set only when unset or older than ten minutes (an undo that died).
+    // An answer edit reads it to stay out of the way; claimed, THEN checked again (round 2).
+    // A pending run is claimed only while its strike is still silent: each beat is a compare-and-swap
+    // on no claim, so the strike can't beat past this, and one that comes back to life stops before its
+    // next removal (unknock.js).
+    const revertingAt = new Date();
+    const silentSince = new Date(revertingAt.getTime() - UNKNOCK_STALE_MS);
+    const claim = await UnknockRun.updateOne(
+      {
+        _id: run._id,
+        revertedAt: null,
+        $and: [
+          { $or: [{ revertingAt: null }, { revertingAt: { $lt: new Date(Date.now() - 10 * 60 * 1000) } }] },
+          {
+            $or: [
+              { status: 'completed' },
+              { status: 'pending', deletingAt: { $ne: null }, heartbeatAt: { $lt: silentSince } },
+              { status: 'pending', deletingAt: { $lt: silentSince }, heartbeatAt: null },
+              // A strike that failed in process stopped at once (round 6).
+              { status: 'pending', deletingAt: { $ne: null }, stoppedAt: { $ne: null } },
+            ],
+          },
+        ],
+      },
+      // The strike's beats and completion wait on this claim (each is a compare-and-swap on no undo).
+      { $set: { revertingAt } }
+    );
+    if (claim.matchedCount !== 1) {
+      const now = await UnknockRun.findById(run._id, { status: 1, heartbeatAt: 1, deletingAt: 1, createdAt: 1, stoppedAt: 1 }).lean();
+      if (now && unknockRemoving(now)) {
+        return res.status(409).json({ error: 'That unknock is still removing entries. Wait for it to finish, then undo it.', code: 'RUN_BUSY' });
+      }
+      return res.status(409).json({ error: 'That unknock is already being undone.', code: 'RUN_BUSY' });
+    }
+    const clearStamp = () => UnknockRun.updateOne({ _id: run._id, revertingAt }, { $set: { revertingAt: null } }).catch(() => {});
+    // The checks after the claim let it go however they end — a refusal, or a database error (round 8: an
+    // error here left the claim on file, the row read Undoing… and every removal on the campaign waited ten
+    // minutes).
+    try {
+      if (await answerEditBusy(campaign._id)) {
+        await clearStamp();
+        return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+      }
+      const busyAfter = await removalBusy(campaign._id, { exceptUnknockId: run._id });
+      if (busyAfter) {
+        await clearStamp();
+        return res.status(409).json(busyAfter);
+      }
+      // ...a round cleared since included: a discard that finished between the check above and the claim.
+      const clearedAfter = await roundClearedSince(campaign._id, { unknock: run });
+      if (clearedAfter) {
+        await clearStamp();
+        return res.status(409).json(roundClearedRefusal(clearedAfter, campaign));
+      }
+      // Begun, once and for good: from here a strike that comes back to life stops before its next removal
+      // (round 5), and Restore reads the undo as the run's own (round 7). Set only once the rechecks pass — a
+      // refusal above left the row reading "Undo stopped part-way" with nothing undone (round 7).
+      await UnknockRun.updateOne({ _id: run._id, revertingAt, undoBegunAt: null }, { $set: { undoBegunAt: revertingAt } });
+    } catch (err) {
+      await clearStamp();
+      throw err;
+    }
     let reverted;
     try {
       reverted = await revertUnknock({ campaign, run, byUserId: req.user._id });
+    } catch (err) {
+      // Stopped part-way: what it put back stays, and Retry undo finishes it — the page says so with the
+      // run as it stands (round 7), read once its claim is let go, so it carries the moment it stopped: read
+      // before, it carried the undo's start, and a review priced while the undo ran stayed open (round 9).
+      await clearStamp();
+      const stopped = await UnknockRun.findById(run._id).lean().catch(() => null);
+      if (stopped) {
+        return res.status(500).json({ error: 'The undo stopped part-way. Press Retry undo on its row under Removed entries to finish it.', code: 'UNDO_STOPPED', run: unknockWire({ ...stopped, revertingAt: null }) });
+      }
+      throw err;
     } finally {
-      await UnknockRun.updateOne({ _id: run._id }, { $set: { revertingAt: null } }).catch(() => {});
+      await clearStamp();
     }
     res.json({ run: unknockWire(reverted) });
   } catch (err) {
@@ -1633,11 +1779,14 @@ async function loadRun(req, res, campaign) {
     res.status(404).json({ error: 'Conversion not found' });
     return null;
   }
-  return expireDeadInlineRevert(run);
+  return settleStalledConversion(run);
 }
 
 const runWire = (r, by = null) => ({
   id: String(r._id),
+  // The page checks it before showing a run an action answered with: a reply that lands after the
+  // admin switched campaigns belongs to the campaign they left.
+  campaignId: r.campaignId ? String(r.campaignId) : null,
   direction: r.direction,
   mode: r.mode,
   sources: r.sources,
@@ -1658,6 +1807,8 @@ const runWire = (r, by = null) => ({
   createdAt: r.createdAt,
   completedAt: r.completedAt,
   revertedAt: r.revertedAt,
+  // When it last changed (server time) — when a watched run that failed finished (round 6).
+  updatedAt: r.updatedAt,
   by,
 });
 
@@ -1717,6 +1868,10 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
   try {
     const campaign = await loadForReclassify(req, res);
     if (!campaign) return;
+    // When this request began: a review is priced as of then, so a change that finishes while it is being
+    // worked out still closes it on the page (round 7: stamped as it answered, one that began before a
+    // finish and answered after was never closed).
+    const asOf = new Date().toISOString();
     const body = conversionSchema.parse(req.body);
 
     const invalid = validateConversion(campaign, body);
@@ -1799,6 +1954,7 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     if (body.dryRun) {
       return res.json({
         dryRun: true,
+        asOf,
         direction: body.direction,
         to: body.to,
         sources: sel.sources,
@@ -1816,6 +1972,10 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     }
 
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    // ...and beside another removal (an unknock removing or being undone, another conversion writing):
+    // neither side writes through a compare-and-swap (round 6).
+    const busy = await removalBusy(campaign._id);
+    if (busy) return res.status(409).json(busy);
     const run = await SurveyConversionRun.create({
       organizationId: campaign.organizationId,
       campaignId: campaign._id,
@@ -1835,6 +1995,36 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       progress: { phase: null, pct: 0, doorsDone: 0, doorsTotal: sel.doors },
       counts: { entriesTargeted: sel.entries, doorsTargeted: sel.doors },
     });
+    // One change at a time, made atomic: the check above can race an answer edit's create, so with
+    // this run on file it runs again — whichever create checks second sees the other and steps back
+    // (code review 2026-10-19: two changes on one campaign at once undid an edit silently). Every step
+    // here takes the run with it if it fails outright — nothing has run yet (round 8: a database error
+    // left it pending with no job, Working for good, every change on the campaign waiting behind it).
+    const jobId = body.mode === 'bulk' ? conversionJobId(run._id, 'convert') : null;
+    try {
+      if (await answerEditBusy(campaign._id)) {
+        await SurveyConversionRun.deleteOne({ _id: run._id });
+        return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+      }
+      const busyAfter = await removalBusy(campaign._id, { exceptConversionId: run._id });
+      if (busyAfter) {
+        await SurveyConversionRun.deleteOne({ _id: run._id });
+        return res.status(409).json(busyAfter);
+      }
+      // A deletion of the campaign or its organization whose cascade passed this collection while this
+      // create was in flight: the run goes with the tenant's rows (round 4: an open session, with no job
+      // to sweep after it, outlived its organization).
+      if (await sweepIfDeleting({ campaignId: campaign._id, organizationId: campaign.organizationId })) {
+        return res.status(409).json({ error: 'This campaign is being deleted.', code: 'campaign-deleting' });
+      }
+      // The job id goes on the run BEFORE the add: the processor runs only the run's own job, so a job
+      // that arrives after the enqueue's timeout below — when the admin was told nothing changed — can't
+      // run beside whatever they did next (code review 2026-10-19, round 2).
+      if (jobId) await SurveyConversionRun.updateOne({ _id: run._id }, { $set: { queueJobId: jobId } });
+    } catch (err) {
+      await SurveyConversionRun.deleteOne({ _id: run._id }).catch(() => {});
+      throw err;
+    }
 
     // ...and with the survey attached, for the same reason.
     // A queue session must come back USABLE from the call that creates it. At creation nothing is
@@ -1854,21 +2044,18 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
       // doc already exists and is stamped `pending`, so a failed enqueue is recoverable — Resume
       // re-enqueues it — rather than a lost request.
       try {
-        const job = await queueOp(
-          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }),
+        await queueOp(
+          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }, { jobId }),
           Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
         );
-        run.queueJobId = String(job.id);
-        await run.save();
       } catch {
-        run.status = 'failed';
-        run.error = 'Could not start the conversion. Nothing has been changed — press Resume to try again.';
-        await run.save();
-        return res.status(503).json({
-          error: run.error,
-          code: 'QUEUE_UNAVAILABLE',
-          run: created,
+        const parked = await parkConversion(run._id, {
+          jobId,
+          from: 'pending',
+          to: 'failed',
+          error: 'Could not start the conversion. Nothing has been changed — press Pick up where it stopped to try again.',
         });
+        if (parked) return res.status(503).json({ error: parked.error, code: 'QUEUE_UNAVAILABLE', run: runWire(parked) });
       }
     }
 
@@ -1879,6 +2066,20 @@ router.post('/:campaignId/survey-conversions', async (req, res, next) => {
     next(err);
   }
 });
+
+// Queued conversion jobs get their id from the run, written before the add (see the create).
+const conversionJobId = (runId, phase) => `${CONVERSION_JOB_PREFIX}${runId}-${phase}-${Date.now()}`;
+
+// A conversion back to `to` — only while it still reads `from` under the job id this request gave
+// it (a job that started after all is left to run), with that id replaced, so a late delivery of
+// the job the admin was told never ran can't claim the run.
+const parkConversion = (runId, { jobId, from, to, error, jobIdAfter = null }) =>
+  SurveyConversionRun.findOneAndUpdate(
+    // An undo its job already claimed is running, whatever the timeout said (round 3).
+    { _id: runId, status: from, queueJobId: jobId ?? null, ...(from === 'reverting' ? { revertClaimedAt: null } : {}) },
+    { $set: { status: to, error, queueJobId: jobIdAfter } },
+    { new: true }
+  ).lean();
 
 // The next door's people, as the RUN sees them — not a generic voter list. It applies the same
 // eligibility rule the write applies (every voter at the door minus do-not-contact) and flags who
@@ -1944,6 +2145,8 @@ router.post('/:campaignId/survey-conversions/:runId/door', async (req, res, next
       return res.status(409).json({ error: 'That desk-entry session is already finished.', code: 'RUN_NOT_OPEN' });
     }
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    const busy = await removalBusy(campaign._id, { exceptConversionId: run._id });
+    if (busy) return res.status(409).json(busy);
     const body = doorApplySchema.parse(req.body);
     if (!run.selection.actionIds.some((id) => String(id) === String(body.actionId))) {
       return res.status(400).json({ error: 'That door is not part of this session.', code: 'NOT_IN_SELECTION' });
@@ -1957,12 +2160,37 @@ router.post('/:campaignId/survey-conversions/:runId/door', async (req, res, next
       });
     }
 
-    const result = await applyDoorToRun({
-      run,
-      campaign,
-      actionId: body.actionId,
-      voterPlans: body.voterPlans || {},
-    });
+    // An open session doesn't hold the campaign, but its step does, for the step's duration: stamped,
+    // then checked again, so an answer edit starting at the same moment either sees the stamp or is
+    // seen here (code review round 2: a step already past its check wrote beside an undo).
+    // Counted in and out (stepCount.js) — and counted in only while the session is still open, which
+    // Close and Undo wait on: a step counted in beside a Close and an Undo converted its door under the
+    // reverted run, where no tool could reach it again (round 4).
+    const counted = await SurveyConversionRun.updateOne({ _id: run._id, status: 'open' }, stepIn());
+    if (counted.matchedCount !== 1) {
+      return res.status(409).json({ error: 'That desk-entry session is already finished.', code: 'RUN_NOT_OPEN' });
+    }
+    const clearStep = () => SurveyConversionRun.updateOne({ _id: run._id, ...STEPPING }, STEP_OUT).catch(() => {});
+    if (await answerEditBusy(campaign._id)) {
+      await clearStep();
+      return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    }
+    const busyAfter = await removalBusy(campaign._id, { exceptConversionId: run._id });
+    if (busyAfter) {
+      await clearStep();
+      return res.status(409).json(busyAfter);
+    }
+    let result;
+    try {
+      result = await applyDoorToRun({
+        run,
+        campaign,
+        actionId: body.actionId,
+        voterPlans: body.voterPlans || {},
+      });
+    } finally {
+      await clearStep();
+    }
     res.json({ ...result, run: runWire(run) });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -1976,8 +2204,9 @@ router.post('/:campaignId/survey-conversions/:runId/close', async (req, res, nex
     if (!campaign) return;
     const run = await loadRun(req, res, campaign);
     if (!run) return;
-    await closeConversionRun({ run, campaign });
-    res.json({ run: runWire(run) });
+    const { run: after, busy } = await closeConversionRun({ run, campaign });
+    if (busy) return res.status(409).json({ error: 'A door in this session is still saving. Try again in a moment.', code: 'RUN_BUSY' });
+    res.json({ run: runWire(after) });
   } catch (err) {
     next(err);
   }
@@ -2003,23 +2232,49 @@ router.post('/:campaignId/survey-conversions/:runId/resume', async (req, res, ne
       return res.status(409).json({ error: 'Only a failed conversion can be resumed.', code: 'NOT_RESUMABLE' });
     }
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
-    run.status = 'pending';
-    run.error = null;
-    await run.save();
+    const busy = await removalBusy(campaign._id, { exceptConversionId: run._id });
+    if (busy) return res.status(409).json(busy);
+    // Claimed (with its own job id), then checked again: one change at a time, made atomic like
+    // the creates (round 2) — an answer edit starting in between is on file now, and this steps back.
+    const jobId = conversionJobId(run._id, 'convert');
+    const claimed = await SurveyConversionRun.findOneAndUpdate(
+      { _id: run._id, status: 'failed' },
+      { $set: { status: 'pending', error: null, queueJobId: jobId } },
+      { new: true }
+    ).lean();
+    if (!claimed) return res.status(409).json({ error: 'Only a failed conversion can be resumed.', code: 'NOT_RESUMABLE' });
+    // The checks after the claim give it back however they end (round 8: a database error here left the
+    // run pending under a job never queued, for good).
+    const parkBack = () => parkConversion(run._id, { jobId, from: 'pending', to: 'failed', error: run.error ?? null, jobIdAfter: run.queueJobId ?? null });
     try {
-      const job = await queueOp(
-        getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }),
+      if (await answerEditBusy(campaign._id)) {
+        await parkBack();
+        return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+      }
+      const busyAfter = await removalBusy(campaign._id, { exceptConversionId: run._id });
+      if (busyAfter) {
+        await parkBack();
+        return res.status(409).json(busyAfter);
+      }
+    } catch (err) {
+      await parkBack().catch(() => {});
+      throw err;
+    }
+    try {
+      await queueOp(
+        getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('convert', { runId: String(run._id) }, { jobId }),
         Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
       );
-      run.queueJobId = String(job.id);
-      await run.save();
     } catch {
-      run.status = 'failed';
-      run.error = 'Could not restart the conversion. Nothing has been changed — try again shortly.';
-      await run.save();
-      return res.status(503).json({ error: run.error, code: 'QUEUE_UNAVAILABLE', run: runWire(run) });
+      const parked = await parkConversion(run._id, {
+        jobId,
+        from: 'pending',
+        to: 'failed',
+        error: 'Could not restart the conversion. Nothing has been changed — try again shortly.',
+      });
+      if (parked) return res.status(503).json({ error: parked.error, code: 'QUEUE_UNAVAILABLE', run: runWire(parked) });
     }
-    res.json({ run: runWire(run) });
+    res.json({ run: runWire(await SurveyConversionRun.findById(run._id).lean()) });
   } catch (err) {
     next(err);
   }
@@ -2037,36 +2292,87 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
     if (run.status === 'running' || run.status === 'reverting') {
       return res.status(409).json({ error: 'That conversion is still running.', code: 'RUN_BUSY' });
     }
+    // An open door-by-door session's own step may still be writing: close it first (round 3 — the
+    // undo read its stamps while a step converted more, which stayed converted under a reverted run).
+    if (run.status === 'open') {
+      return res.status(409).json({ error: 'Finish or close the door-by-door session first, then undo it.', code: 'RUN_OPEN' });
+    }
     if (await answerEditBusy(campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    const busy = await removalBusy(campaign._id, { exceptConversionId: run._id });
+    if (busy) return res.status(409).json(busy);
+    // Nor while a round holding its work sits cleared with a snapshot it can still take back (rounds 8, 9).
+    const clearedBefore = await roundClearedSince(campaign._id, { conversion: run });
+    if (clearedBefore) return res.status(409).json(roundClearedRefusal(clearedBefore, campaign));
+
+    // Claimed as `reverting` first (with the job id a queued undo will run under), then checked
+    // again — the same atomic step as the creates (round 2). Back to what it WAS on a refusal, so a
+    // stopped undo stays a stopped undo (Retry undo), never `completed`.
+    const statusWas = run.status;
+    const queued = run.counts.entriesConverted > INLINE_REVERT_MAX_ENTRIES;
+    const jobId = queued ? conversionJobId(run._id, 'revert') : run.queueJobId ?? null;
+    // ...and never while a door-by-door step is still saving (its session closed under it): the undo
+    // read the run's stamps before the step wrote its own (round 4).
+    const claimedRevert = await SurveyConversionRun.findOneAndUpdate(
+      { _id: run._id, status: statusWas, revertedAt: null, ...NO_FRESH_STEP() },
+      { $set: { status: 'reverting', queueJobId: jobId, revertClaimedAt: null, revertFrom: { status: statusWas, error: run.error ?? null } } },
+      { new: true }
+    );
+    if (!claimedRevert) {
+      const now = await SurveyConversionRun.findById(run._id, { stepping: 1, steppingAt: 1 }).lean();
+      if (stepStillSaving(now)) return res.status(409).json({ error: 'A door in this session is still saving. Try again in a moment.', code: 'RUN_BUSY' });
+      return res.status(409).json({ error: 'That conversion is still running.', code: 'RUN_BUSY' });
+    }
+    // The checks after the claim give it back however they end (round 8: a database error here left the
+    // run `reverting` with no job — for a queued run, for good).
+    const parkBack = () => parkConversion(run._id, { jobId, from: 'reverting', to: statusWas, error: run.error ?? null, jobIdAfter: run.queueJobId ?? null });
+    try {
+      if (await answerEditBusy(campaign._id)) {
+        await parkBack();
+        return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+      }
+      const busyAfter = await removalBusy(campaign._id, { exceptConversionId: run._id });
+      if (busyAfter) {
+        await parkBack();
+        return res.status(409).json(busyAfter);
+      }
+      // ...a round cleared since included: a discard that finished between the check above and the claim.
+      const clearedAfter = await roundClearedSince(campaign._id, { conversion: run });
+      if (clearedAfter) {
+        await parkBack();
+        return res.status(409).json(roundClearedRefusal(clearedAfter, campaign));
+      }
+    } catch (err) {
+      await parkBack().catch(() => {});
+      throw err;
+    }
 
     // A small run is undone inline so the page can show the result immediately; anything large
     // enough to have been a job going forward is a job coming back.
-    if (run.counts.entriesConverted > INLINE_REVERT_MAX_ENTRIES) {
-      const statusWas = run.status;
-      run.status = 'reverting';
-      await run.save();
+    if (queued) {
       try {
-        const job = await queueOp(
-          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('revert', { runId: String(run._id) }),
+        await queueOp(
+          getQueue(QUEUE_NAMES.OUTCOME_CONVERT).add('revert', { runId: String(run._id) }, { jobId }),
           Number(process.env.OUTCOME_CONVERT_ENQUEUE_TIMEOUT_MS || 5000)
         );
-        run.queueJobId = String(job.id);
-        await run.save();
       } catch {
-        // Put the status back: `reverting` with no job would offer neither Revert nor Resume. Back
-        // to what it WAS, so a stopped undo stays a stopped undo (Retry undo), never `completed`.
-        run.status = statusWas;
-        await run.save();
-        return res.status(503).json({
-          error: 'Could not start the undo. Nothing has been changed — try again shortly.',
-          code: 'QUEUE_UNAVAILABLE',
-        });
+        // Back to what it was, the job forgotten: `reverting` with no job would offer neither Revert
+        // nor Resume, and a late delivery must not undo a change the admin was told stays.
+        const parked = await parkConversion(run._id, { jobId, from: 'reverting', to: statusWas, error: run.error ?? null });
+        if (parked) {
+          return res.status(503).json({
+            error: 'Could not start the undo. Nothing has been changed — try again shortly.',
+            code: 'QUEUE_UNAVAILABLE',
+          });
+        }
       }
-      return res.status(202).json({ run: runWire(run) });
+      return res.status(202).json({ run: runWire(claimedRevert) });
     }
 
     try {
-      await revertConversionRun({ run, campaign });
+      // Begun from here, as a queued undo is once its job claims the run: settled after a crash, it reads
+      // a stopped undo (Retry undo), never the change it was before (settleStalledConversion).
+      await SurveyConversionRun.updateOne({ _id: run._id, status: 'reverting', revertClaimedAt: null }, { $set: { revertClaimedAt: new Date() } }, { timestamps: false });
+      await revertConversionRun({ run: claimedRevert, campaign });
     } catch (err) {
       // Never leave an inline undo reading `reverting`: there is no job to finish it, and every
       // retry would be refused as busy. What it already put back stays put back, and Retry undo
@@ -2083,7 +2389,7 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
         run: stopped ? runWire(stopped) : null,
       });
     }
-    res.json({ run: runWire(run) });
+    res.json({ run: runWire(claimedRevert) });
   } catch (err) {
     next(err);
   }
@@ -2111,7 +2417,7 @@ router.get('/:campaignId/survey-conversions', async (req, res, next) => {
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
-    await Promise.all(runs.map(expireDeadInlineRevert));
+    await Promise.all(runs.map(settleStalledConversion));
     const people = await hydrateCanvassers(runs.map((r) => r.byUserId).filter(Boolean), activeOrgId(req));
     res.json({
       runs: runs.map((r) => {

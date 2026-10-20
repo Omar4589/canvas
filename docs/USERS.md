@@ -544,7 +544,9 @@ so the organization can still check *who* did which field work — canvassing re
 each door was logged at, and a GPS audit is worthless if you can't attach it to a person. This is stated
 plainly to the user before they delete, and it means **nobody can delete their way out of a quality audit**.
 After 180 days the name is removed for good; the old records stay with the campaign but no longer
-directly identify the person.
+directly identify the person. That includes the one place the name was saved as words rather than read
+from the account: a Door Outcomes change filtered by that canvasser ("Cara Canvasser · Riverside · Pass 2")
+reads "Deleted user · Riverside · Pass 2" from then on (since 2026-10-20 — before that the name stayed).
 
 **Four things will stop a deletion**, and the app says which:
 
@@ -1210,6 +1212,20 @@ dies.** So we snapshot identity **before** scrubbing, org-scoped, with a bounded
 window (`DELETED_IDENTITY_RETENTION_DAYS`, default 180). Both stores permit this — Play names *"security,
 fraud prevention or regulatory compliance"* outright; Apple requires retained data be disclosed — and the
 deletion sheet, the public page and the privacy policy all say so in the same words.
+
+**The one name frozen as text.** Every surface names a person from their account id at read time, so the
+window ends everywhere at once — except a Door Outcomes run's `scopeSummary` (ReclassifyRun,
+SurveyConversionRun, UnknockRun, AnswerEditRun), a line frozen at creation that puts the filter's canvasser
+first ([scopeSummary.js](../server/src/services/canvass/scopeSummary.js) — a name only, never an email,
+since 2026-10-20). The purge rewrites that first part to "Deleted user" on every run whose
+`selection.scope.userId` is the purged account, per record before its stamp, and once more, each night,
+over every record purged before this step existed and every account deleted longer ago than the window
+(`User.deletedAt`, the account deletion's own `RETENTION_DAYS`) that no unpurged record holds — an
+organization's deletion drops a record once no organization is left on it, though the person's work can
+sit in the run lines of another organization that had removed them before they deleted — idempotent,
+without touching the runs' `updatedAt`
+([scrubFrozenNames.js](../server/src/services/retention/scrubFrozenNames.js); privacy item 32(c), closed
+2026-10-20). The job's log line and the console script report the count (`names off run lines`).
 
 **Guards** (all in [deleteAccount.js](../server/src/services/users/deleteAccount.js), all enforced on the
 *write*, not just the pre-check): `DELETION_LOCKED`, `LAST_SUPER_ADMIN`, `LAST_ADMIN`, `LAST_BILLING_ADMIN`.

@@ -114,7 +114,26 @@ const surveyConversionRunSchema = new mongoose.Schema(
     liveBumped: { type: Boolean, default: false },
 
     error: { type: String, default: null },
+    // The queued job that may run this conversion (or its undo): written BEFORE the add, so the
+    // processor claims only its own job and a late job after "Nothing has been changed" never runs.
     queueJobId: { type: String, default: null },
+    // When the undo began: its queued job claimed the run, or its inline request took it just before
+    // writing. A timed-out enqueue parks the undo only while this is unset (routes/admin/campaigns.js
+    // parkConversion).
+    revertClaimedAt: { type: Date, default: null },
+    // What the run was when an Undo claimed it, and its message then — written with the claim, so an
+    // undo claimed and never begun (its give-back failed with its checks) goes back to exactly that
+    // when it is settled (surveyConversion.js settleStalledConversion). Absent on a claim before 2026-10-20.
+    revertFrom: {
+      status: { type: String, default: null },
+      error: { type: String, default: null },
+    },
+    // Door-by-door steps in flight: how many, and when the latest began — an answer edit reads them
+    // to stay out of the way (answerEditRuns.js otherChangeRunning), whatever the session's status (a
+    // step still saving when the session is closed counts). A count, so two admins' steps can't clear
+    // each other's; a stamp older than two minutes belongs to a step that died.
+    stepping: { type: Number, default: undefined },
+    steppingAt: { type: Date, default: null },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     // null = still in effect. A reverted run is kept, not deleted (the ReclassifyRun rule).

@@ -1,6 +1,7 @@
 # Proposal: Edit survey answers on Door Outcomes — change or clear an answer, keep the survey
 
-> **Status: BUILT 2026-10-19, uncommitted** — server, web, the phone's history labels (next
+> **Status: BUILT 2026-10-19, committed in `589c1c0`; code review rounds 1–9's fixes, and the leftovers closed after round 9, uncommitted**
+> ([§V](#v-review-log)) — server, web, the phone's history labels (next
 > over-the-air update), docs, Help Center and PRIVACY_VERIFICATION item 32. Pinned by
 > `answerEdit.test.js`, `answerEdit.int.test.js`, `answerEditRender.smoke.test.js` and the opt-in
 > `answerEditScale.int.test.js`, whose 10 s gate failed first (an 18 s review) and passed after the tag
@@ -24,7 +25,9 @@
 > [§B3](#b3-the-owners-answers-2026-10-19). The six live bugs found along the way are **fixed, tested and
 > uncommitted**, ahead of this feature ([§P](#p-found-along-the-way)). Line references are to HEAD
 > `bbdaa4b`, before those fixes. The feature itself: a server deploy plus the web build and an index
-> build; no data migration; nothing ships to phones.
+> build; no data migration; nothing ships to phones. *[As built: the review fixes add two one-time
+> console steps — `migrate:removal-strikes` and `repair:answer-edit-words` — and the phone's history
+> labels and response wording ride the next over-the-air update; OPERATIONS.md.]*
 
 Related: [CAMPAIGNS.md](CAMPAIGNS.md) (*Door Outcomes*, *Converting to and from Surveyed*, *Unknock*),
 [SURVEYS.md](SURVEYS.md) (§E answer normalization, §F submission invariants, §K desk-entered
@@ -684,7 +687,9 @@ re-ticked in another order) is no change; a pick-several cleared in the editor i
 3. **Responses at the selected visits**, 2,000 rows at a time:
    - The rows are folded with `tripleClause` (answerScope.js:46) into `{ passId, userId, householdId:
      { $in } }` groups. Measured in round 1: 25k visits in 1.9 s folded, against 61–77 s for a
-     per-visit `$or`.
+     per-visit `$or`. *Built differently since code review round 8:* one clause per batch, its doors
+     and rounds (`visitsClause`), each batch's own visits kept by `doorKey` — the groups were one per
+     round and canvasser, and a crew of hundreds made every read a fresh plan (§V, round 8).
    - Constrained further by `surveyTemplateId` (the chosen survey), the scope's date window on
      `submittedAt`, `createdAt ≤ asOf` (from the dry run), and `$and: q.answerMatch` under an answer
      filter.
@@ -1243,7 +1248,9 @@ profile card, the response drawer, the run card and list).**
 - **F6. The removal and unknock previews time out on large selections** (reproduced: 77 s for 25k
   visits). `computeSurveyImpact` (surveyConversion.js:193-205) and unknock (unknock.js:87-88, :198-199)
   send one `$or` branch per visit. Fix: the §D fold. Not on today's cleanup path; a conversion of that
-  size is rare.
+  size is rare. *[Done: the unknock's in round 4; the conversion review's in round 7 (§V) — it was sized
+  wrong here: 14 s at 2,500 entries and 47 s at 5,000, past the router's 30 s well short of the cap, and
+  its undo's slot read 87 s at 50,000.]*
 - **F8. The archive's run-id indexes index every row**, because the schema defaults the run ids to
   `null` (SurveyResponseArchive.js:71-84). Fix: drop the defaults and unset existing nulls. No user
   effect.
@@ -1515,3 +1522,664 @@ v3 against round 2, the code and the owner's answers.
   the plan); the canonical fingerprint is stable across every round trip tried, and every difference
   it reports is a real one; the happy-path crash points and both undo orders finish correctly.
 - **Result:** v4. The model is not re-reviewed after these fixes; §S16 reproduces each finding.
+
+**Code review round 1 (2026-10-19, on the build as committed in `589c1c0`): five reviewers.** Their
+lenses were the writer and the undo under races (reproduced on a throwaway mongod), pricing and the
+plan engine, the run lifecycle and one change at a time, the screens as the owner, and privacy and
+the documents. Every finding was checked against the code; the blockers were reproduced first.
+
+- **Blockers.**
+  - The bulk writer decided a survey had landed by re-reading its mark. A profile Restore or another
+    undo lifting the mark in between made it delete a landed copy, the only record of the original.
+    Each survey's own write (`matchedCount`) now decides (SURVEYS.md §N).
+  - An undo's put-back that missed left `undoStartedAt` on the copy, so *Undo again* read it as put
+    back and deleted it. A put-back now writes its own receipt (`answerEditUndone`) in the same atomic
+    write, a miss lifts the stamp, and only a receipt counts as proof.
+  - Tag pricing skipped tags whose current answer moved when an older answer was re-exposed (net-zero
+    keys, the *Other* text). Every tag with a member on a touched question is priced now.
+  - One change at a time was a peek: two admins' creates seconds apart could both start, and a
+    conversion then undid an edit silently. The edit, conversion and unknock creates insert their
+    run, then check again.
+  - Restore let a struck visit's answers back through an edit's earlier version or a teammate's
+    overwrite copy once anyone was surveyed at the door. A removal now stamps the visit's copies, and
+    the guard reads the stamp or the removal's own copy.
+  - The live card froze after an action on one's own run, and the conversion card did too.
+  - Four sentences of the privacy record were false: item 31 F2's audience, *kept until undone*,
+    item 32(c)'s stored names, and the chunk and export wording.
+- **Majors.** The undo was not re-entrant (labels and counts on *Undo again*). An own-visit Restore
+  left a stale mark. Runs stuck *running* after a tenant stop or a lost job; they get *Start again*
+  after 10 minutes now. The phone's re-survey and the profile's full swap archived, then wrote blind;
+  both compare-and-swap now. A late job after a queue timeout still applied; a parked run forgets its
+  job. A one-person step crossed templates. The conversion undo's own-put-back check could delete a
+  different copy. Duplicate Surveys still said *two canvassers* after F2. *Identified* could drop on
+  a same-round re-survey, unsaid. Create errors hid behind the modal, Details after an undo misread
+  past 200 names, *N keep* was wrong with Replace, and the queue's stale review stuck.
+- **Minors**, all fixed: the dry run says up front when another change blocks it; Undo on a run that
+  changed nothing is refused; a PATCH with no template is refused; Erase waits for an undo in
+  flight; History survives a crash and a redelivery; a tenant delete sweeps late writes; the replay
+  rule matches `reclassified.from` and the voter; the walkthrough's save is audited; ghost option ids
+  can be taken out; the dash for an empty pick-several; the bar during an undo; a typed note kept on
+  conflict.
+- **Owner flag, not a code fix:** `scopeSummary` keeps canvasser names that account deletion does
+  not remove, against privacy.html's *aim to remove your name*. It predates this feature (item 13)
+  and is recorded in item 32(c).
+- **Result:** fixed as a follow-up to `589c1c0`, each blocker and major pinned by a test in
+  `answerEdit.int.test.js`. Round 2 reviews the fixes.
+
+**Code review round 2 (2026-10-19, on round 1's fixes): five reviewers, same lenses**, told what round
+1 fixed and asked to break it. Every finding was re-run on a separate database before it was fixed;
+each fix is pinned in `answerEditRound2.int.test.js`, and twenty of the fixes were checked by taking
+each back out in turn: its test failed every time.
+
+- **Blockers.**
+  - Round 1's own writer fix let two deliveries of one chunk lose originals: a delivery deleted the
+    copy another delivery had adopted and landed the edit through. Copies now carry the `writerToken`
+    of the delivery holding them; an adopter claims one first, and a delete names its own token.
+  - A delivery still running when its change was undone wrote the edit back over the put-back, whose
+    bytes matched what it had read. The undo now raises `answerEditFence` on each survey before reading
+    it, and no write of that run lands past it.
+  - One change at a time was a claim only on the creates. Pick up, Undo, a door-by-door step, the
+    unknock undo and the conversion resume and undo still peeked then wrote; an Undo pressed while an
+    unknock was mid-write lost the original. Every start now claims, then checks. A conversion's late
+    job after "Nothing has been changed" still ran; it now runs only under the run's own job id.
+  - Restore's strike rule missed every strike made before round 1's stamps, and the stamps outlived an
+    undo. A strike is now read from the removal run's own record of the visits it struck
+    (`UnknockRunChunk`, the new `ConversionStrike`), held while the run stands and, after an undo, only
+    where the undo couldn't put the visit back.
+  - A cleared written answer was stored word for word in the run's pick counts.
+  - The undo deleted a copy whose answers matched the survey although its note didn't.
+  - Two sentences of the privacy record were false (deleted-account names; the phone's re-survey).
+- **Majors.** History lost a row whose insert failed, and logged a cut-off undo wrong (now a ledger:
+  claim, write under a derived id, then count). An Erase just before the undo reached a copy was
+  honoured on screen and then written back. An undo the first build left running could never be
+  started again, and its put-backs (no receipts) read *restored on the profile* on Undo again. One
+  failed poll froze both live cards. A skipped walkthrough save was silent. The conversion card went
+  stale after a door-by-door session. Details said *No survey was changed* when its request failed.
+  Help omitted a canvasser re-recording a door as a way *identified* drops.
+- **Minors**, all fixed: a campaign switch mid-action showed the old campaign's card; the blocked
+  notice could only be cleared by reopening (now *Check again*); a note-only save on a survey whose
+  questions are gone was refused; a never-started run offered Undo (now *Didn't start*); the phone's
+  refused Restore didn't refresh; overlaps dropped a real collision over desk answers; the org
+  cascade's last sweep missed three collections, and both cascades now wait (bounded) for an
+  answer-edit batch in flight; tag pricing grew about a second per tag on the edited question (now one
+  pass); *matched but not selected* counted another survey's matches; the script-ending warning fired
+  on a re-route beside an unrelated blank; the scale gate couldn't run its job after round 1.
+- **New one-time steps** (OPERATIONS.md): `migrate:conversion-strikes` and `repair:answer-edit-words`,
+  each a dry run, then `-- --apply`. (Round 3 renamed the first `migrate:removal-strikes`.)
+- **Result:** fixed and pinned. Round 3 reviews these fixes.
+
+**Code review round 3 (2026-10-19, on rounds 1 and 2's fixes): five reviewers** — the writer and undo,
+selection and pricing, clients, guards and lifecycle, and Restore with the privacy record — each told
+what the earlier rounds fixed and asked to break it, with about 450 randomized runs among them. Every
+finding was re-run on a separate database first. Each fix is pinned in `answerEditRound3.int.test.js`
+(25 tests, most of them the reviewers' own reproductions), and 23 of the fixes were checked by taking
+each back out in turn: its test failed every time. The reviewers' reproductions, re-run against the
+fixed code, all hold, and their three randomized stress runs (36 rounds) found nothing.
+
+- **Blockers.**
+  - Undo missed an edit on a survey re-created under a new id when the delivery's landing was never
+    recorded: copies were read by the frozen ids only. The undo now reads the run's copies by slot
+    (voter and round), newest first.
+  - A fence lived only on surveys on file when the undo raised it, so a survey written back later — an
+    unknock or conversion undo, a re-cut round's snapshot restore, a profile Restore into a gap — came
+    back without it, and a delivery still running landed the edit after the undo. Every path that
+    writes a survey back from a copy now carries the fences of the runs whose undo reached that slot.
+  - An Erase of the change's copy between its insert and its write left an edited survey with its
+    original nowhere. Erase now refuses (`COPY_IN_USE`) while the change can still write.
+  - Review priced one plan and Confirm wrote another (the plan was rebuilt from the form at the click,
+    and the form stayed editable while Review loaded). The review's digest now covers the plan, the
+    page sends exactly the plan it priced, and the form is disabled while a review is on its way.
+  - Unknock, re-label and the Surveyed conversion wrote the selection as it stood at Confirm, and an
+    empty list of ticked rows read as *the whole filter*: a cleared selection unknocked everything that
+    matched. An explicit empty list now selects nothing everywhere, and every confirm sends the body its
+    review priced, to the campaign it was priced on; a reply after a campaign switch is dropped.
+  - The one-time strike backfill skipped a conversion that already had any record (one that ran across
+    the deploy lost its earlier visits) and gave a door-by-door session one time window for all its
+    visits. It now works per visit, each with its own time.
+  - An unknock undone before this build left no record of the visits it couldn't put back, so a struck
+    visit with no copy came free. The same script now records them.
+  - Two privacy sentences were false: the GPS retention line (an undo keeps copies of surveys changed
+    since, and org deletion was missing), and *the itemization adds audit subjects*, which two reads
+    did not.
+- **Majors.**
+  - A delivery that lost a claim wrote its chunk last and dropped an edit another delivery had landed:
+    the run read *0 changed* and Undo said nothing was on file. A chunk's counts are now recounted from
+    the database and written by compare-and-swap, and a recorded landing is never written away;
+    *nothing to undo* and the list's empty rows are decided by copies on file, never by counts.
+  - Put-backs were recounted each pass, so History could miss one and the card's count could drop.
+    Each proven put-back is now recorded on its frozen item.
+  - A one-person session that saved one survey twice left the first step's edit after one Undo.
+  - The first build's put-back rule credited put-backs never made (a same-picks re-survey, a full-swap
+    Restore); it now applies only to runs whose undo began under that build, and those runs' earlier
+    put-backs count as already logged.
+  - Tag pricing was still over the 10 s gate in heavy shapes — 16 tags on 9 questions at the cap took
+    28 s, close to the router's 30 s cut. The campaign-wide counts are now read while the scan runs,
+    the questions in one pass, the changed voters' share before from those counts, and only their edited
+    surveys are shipped, four batches at a time, from the scan's own edits. That shape now reviews in
+    7.4 s on a laptop, every tag priced, and lands as reviewed (a new case in the scale test); the
+    plan's own shape in 2.7 s. Past 20 s the review goes out without tag counts and says they can't be
+    previewed — measured on a laptop, not on the two-core production database, so this guard is what
+    keeps a heavy review on a slow day inside the router's limit.
+  - Conversion jobs never checked for a deletion, and both cascades waited for answer edits only after
+    their first sweep: an organization deleted while a conversion batch was in flight kept its surveys.
+    Conversions now stop at their next batch, both cascades wait for every Door Outcomes writer before
+    they sweep, and every writer sweeps after itself however it ends when its tenant's cascade is
+    running (`lateWriteSweep.js`) — a batch that stalls past the wait included. A deletion only asked
+    for, which the route undoes when its job can't be queued, sweeps nothing.
+  - A door step's stamp was one value per run; two admins stepping one session cleared each other's.
+    It is now a counter.
+  - Two Undo presses on one unknock both ran; the second now reads *already being undone*.
+  - Both undos put answers back into a free slot even where the visit's entry couldn't come back,
+    counting a survey under a door that read Not home. They now put an answer back only where its
+    visit's entry is back, and the visits they couldn't put back are read from what is on file, so a
+    retry records the same truth.
+  - An unknock that crashed after it began removing read *nothing was removed* and refused its Undo.
+    It is marked before its first removal, reads *Stopped part-way*, is held by Restore and the replay
+    guard, and can be undone; *not restored* counts only entries not on file.
+  - The refusal for a strike that holds after its removal was undone told the admin to undo it again
+    (now `kept_after_undo`, worded as what happened).
+  - A first-build run that landed surveys read *Didn't start* with no Undo; *nothing on file* is now
+    read from copies, not counts.
+  - The deploy window: the previous build saved a conversion undo's job id only after queueing it, so
+    a job taken before that save was skipped and the run read *Undoing* forever. A previous-build job
+    is now its run's own while no undo of this build has claimed the run.
+- **Minors**, all fixed: the walkthrough's notice was lost on the last survey, said *deleted or
+  replaced* for a deletion and fired with nothing changed, and the walkthrough could close mid-save;
+  Details showed a stale list with no word when its refresh failed; a poll answering after an action
+  repainted the card's older state; a campaign switch left the walkthroughs open and let late replies
+  clear the next campaign's selection; the conversion card said *press Resume* (its button reads *Pick
+  up where it stopped*) and offered Undo on an open session; a card frozen on a refused poll had no
+  Dismiss; the undo's *waiting* line always said *Not home*; a survey re-recorded under another survey
+  was written; a pick stored twice counted twice and two unmatched old texts counted once; the words
+  repair folded option texts into *unlisted*; the phone and the Duplicate Surveys report named a
+  Restore's admin as a survey's author.
+- **New one-time steps** (OPERATIONS.md): `migrate:removal-strikes` (the renamed strike backfill, now
+  also for older unknock undos) and `repair:answer-edit-words`, each a dry run, then `-- --apply`.
+- **Result:** fixed and pinned. Round 4 reviews these fixes.
+
+**Code review round 4 (2026-10-19/20, on rounds 1–3's fixes): five reviewers** — the writer and undo,
+selection and pricing, lifecycle and deletion, clients, and Restore with the privacy record. Every finding
+was re-run first. Each fix is pinned in `answerEditRound4.int.test.js` (33 tests), and 35 of the fixes
+were checked by taking each back out in turn: its test failed every time (two tests were tightened until
+they did). The reviewers' reproductions, re-run against the fixed code, all hold — one, written to show
+an Undo pressed mid-step going ahead, now reads the refusal that replaced it.
+
+- **Blockers.**
+  - Undo was offered while a large unknock was still removing. Round 3 treated every pending unknock past
+    its first removal as stopped, and a 25,000-entry strike ran for minutes on one slow read; the strike
+    then finished over the undo — struck answers live under unknocked doors, or the removal never
+    undoable and a Restore swapping struck answers over a real later survey. An unknock now beats a
+    heartbeat between every step: one heard from in the last ten minutes reads *Removing…* with no Undo,
+    and its Undo is refused; it beats and completes only while no undo has begun, so one that comes back
+    to life stops before its next removal. Its reads go by round and canvasser instead of one clause per
+    visit: a whole 5,000-entry unknock takes 1.2 s (it took 24–28 s), 25,000 take 5.4 s (410–452 s), and
+    the preview's answer read 0.2 s at 10,000.
+  - A door-by-door step still saving when another admin pressed Close and then Undo converted its door
+    under the reverted run — stamped by it, so neither another undo nor any other tool could reach that
+    door again. A step now counts in only while its session is open, and Close and Undo wait out a step
+    still counted in (*a door in this session is still saving — try again in a moment*).
+  - A Door Outcomes change created while its organization was being deleted outlived the deletion — a
+    conversion's run, and a one-person answer edit's run and chunk, whose scope line names a canvasser.
+    Each create now checks once its run is on file and goes with the tenant's rows; a conversion job
+    whose campaign is gone takes its run with it; and relabels sweep after themselves too.
+  - A privacy-record sentence was false: item 32 said its pseudonymous ids join §A3's list, which didn't
+    name them (it does now).
+- **Majors.**
+  - The early before-counts priced every question the plan could reach — for a gate question, a Script
+    flow's first, which every follow-up's condition names, that is the whole survey: 35 tags at once for a
+    change that moved 2, 9.8 s at 50,000 surveys (over the 10 s gate) with the connection pool full. Only
+    the plan's own questions are priced up front now, and a follow-up's the moment the scan sees its
+    answers dropped: that review takes 4.8 s, and the heavy Clear still 7.4 s.
+  - The time budget stopped the waiting, not the work: on a slow database a review's counts ran on past
+    its answer, three presses deep, or it answered past the router's 30 s cut. Every read a review sends
+    now carries the time it has left; results or tags that can't finish are said to be unavailable, a scan
+    that can't is refused (*Working out this review is taking too long*); the same review pressed again
+    joins the one running; the identified counts run two at a time.
+  - An Undo pressed while a one-person session's own step was saving went ahead: the step then wrote its
+    chunk over the undo's record of what it had put back, and logged its survey after the undo. The undo
+    now waits for the step; the step records its copy by position, never over a chunk an undo reached,
+    and writes its History line before it counts out.
+  - Two copies of one original made at one moment — a delivery that died beside the one that landed: the
+    dead one was read first, the survey put back read *kept newer*, and History *0 put back*. The landed
+    copy is read first now, the dead twin goes, and a note stamp equal to the survey's own reads as none.
+  - Erase of a change's copy was refused for good once the change stopped responding; it follows the
+    card's ten-minute rule now.
+- **Minors**, all fixed:
+  - Undo: one the first build began and that stopped inside its first pass counted its put-backs as
+    restored on the profile (and one whose copy it never deleted, not at all); a survey a stopped-part-way
+    unknock held read *gone*, with no Undo again; a survey put back read *kept newer* when an older copy
+    of the same change held; a put-back whose copy and survey both left read *restored on the profile*.
+  - Clients: the walkthrough warned of a lost change after a pick ticked and unticked again; a review that
+    arrived after its form was reset opened over the reset page, and a refusal then said nothing; the
+    profile, the response drawer and the phone named the admin whose Restore set answers aside as a
+    canvasser who overwrote them; a finishing conversion closed another change's preview and cleared the
+    selection; a first-build run that went through surveys and stopped empty read *Didn't start*.
+  - Lifecycle: a campaign delete the worker claimed and then refused let a writer's sweep remove that
+    campaign's Door Outcomes records (writers now sweep only once its cascade has begun); a previous
+    build's Pick up was skipped in the deploy window; a step count a crash left behind held the campaign
+    busy after every later step; two Closes at once logged two History rows.
+  - Restore and the backfill: Restore judged only the latest strike holding a copy (now every one must be
+    lifted); a conversion undo put answers back under an entry another conversion owned; a stopped
+    strike's window ended at its freeze; older crashed unknocks read *nothing was removed*, and the
+    backfill marks them; the backfill over-held a visit an older undo did put back; the answer-edit run
+    list was missing from the access log.
+  - Pricing: a pick stored twice in one row counted as two surveys, and a question an old survey held
+    twice was priced from one row.
+- **Not changed, stated:** a strike or a step that stalls longer than its lease (ten minutes for an
+  unknock, two for a step) and is undone meanwhile can still write once when it wakes — each lease is long
+  against any real stall; when the counts can't tell an older unknock undo's put-back visit (re-recorded
+  since) from a held one, the backfill holds both, the safe direction; joining identical reviews works
+  within one web server.
+- **Result:** fixed and pinned. Round 5 reviews these fixes.
+
+**Code review round 5 (2026-10-20, on rounds 1–4's fixes): five reviewers**, the same five lenses. Every
+finding was re-run first. Each fix is pinned in `answerEditRound5.int.test.js` (31 tests; two more in
+`correctionSafety.int.test.js` and round 4's W4), and 41 of the fixes were checked by taking each back
+out in turn: its test failed every time (two missed at first — the Restore tests only tried the removal's
+own copy — until a teammate's earlier copy of the same visit was tried too). The reviewers' own
+reproductions, re-run against the fixes, all read fixed; two that hooked the old one-at-a-time write-back
+were covered on the new path instead. No reviewer rated a finding a blocker; one major is
+counted as one here, because it made a privacy-record sentence false while it lasted.
+
+- **Blocker (by that rule).** Restore passed while a removal was still writing. The test was "the
+  visit's own entry is back", and the entry was simply not deleted yet — an unknock between its answers
+  and its entries, a Surveyed → Not home step between taking the answers and flipping the entry — so
+  struck answers came back counted under a door that then read Unknocked or Not home, or the strike then
+  deleted what Restore had put back and its Undo reported nothing missing. A removal still writing (an
+  unknock still beating, a conversion record with no finish whose run is running or has a step in flight)
+  now holds every copy of its visits, whatever the entries read.
+- **Majors.**
+  - An Erase pressed during an unknock's or a Surveyed → Not home Undo was honoured, and the undo then
+    wrote the erased answers back from what it had read — the voter-erasure path (item 32). Both undos
+    now claim each copy before writing it back, the stamp Erase and Restore already wait on: pressed
+    meanwhile, they wait (*An undo is putting these answers back right now*); a copy erased before the
+    claim stays erased and is counted not put back.
+  - An unknock or its Undo could outlast its request (the router cuts at 30 s; a 25,000-entry undo took
+    24 s on a laptop, one write per survey) and never resolve on screen. The undo writes surveys back
+    500 at a time; the list reads *Undoing…* and keeps polling while one runs, refreshes the table when a
+    row lands, and a 5xx or network failure says the server may still be working on it.
+  - The console step stretched every door-by-door session's visits to the session's Close (round 4), so
+    a copy of the canvasser's real later survey read struck. Each visit ends at its own moment again;
+    only a bulk run's visit known by its entry alone ends when the run finished.
+  - The Undo of an unknock that stopped part-way put back what a later unknock had removed since — fake
+    knocks billed again under a run that still read completed. It leaves those entries and their answers
+    to the later one, and the console step marks no older unknock whose removals a later one made.
+  - An undo the first build began and that died inside its first pass wasn't recognised (round 4 looked
+    for a start time the first build never managed to write), so its put-backs read restored on the
+    profile. It is recognised by what the first build left (running or failed, no heartbeat, no
+    receipts), kept on the run when Retry undo overwrites that status; and a put-back a dying
+    first-build pass made is logged, never assumed logged — after one finished pass, that pass's own
+    summary is exactly what History holds.
+  - A different review waited behind one still working, inside its own time budget, and could be refused
+    for it. Only the same review joins now; the same rows ticked in another order are the same review.
+- **Minors**, all fixed:
+  - Removals: a failed undo cleared the mark a strike that woke after its lease checked, so it completed
+    over the partial undo (the undo's claim now marks the run for good, and the strike beats between
+    archiving answers and deleting them); a strike that failed read *Removing…* for ten minutes (it reads
+    stopped at once); an unknock's Undo put answers back under an entry another admin had converted since;
+    a refusal named the later of two removals when the earlier could never lift; a strike that stopped
+    after its deletes was never settled or listed in History (it settles each batch as it goes and is
+    listed when it begins removing), and an undo that died just before reading undone left its doors
+    unsettled for good (History and the settle now come first); the preview counted a survey twice when
+    two entries of its visit fell in different batches.
+  - The console step marked an older unknock that had died before removing anything. It now needs a
+    removal: an entry gone with its visit empty, or — found writing this round's tests — the answers gone
+    from a visit whose entry it never reached (one that died between its two deletes, which the first cut
+    of this fix missed). A run it marks is listed in History at the moment it began.
+  - Answer-edit undo: a survey saved twice whose original's copy was erased read put back (it reads
+    erased); a survey with no note, edited before notes had their own stamp, read *Note edited* after an
+    undo; an undo a re-cut outlasted said to press *Pick up*, which refuses it (*Retry undo*); a survey
+    saved twice in one session counted as two surveys changed.
+  - Pricing: a review's tag counts kept starting after it had answered (they stop at the tag deadline,
+    and the current-tag read is aborted there — the first cut of this pulled that read a row at a time,
+    which made the heavy review 9.3 s; reading in the driver's batches put it back at 7.9 s); a change
+    that re-routed every survey kept every reachable question in the scan's stash (8 s now, was 10–12 s);
+    counts found while scanning ran beside the up-front ones (one limit covers both). The Help Center said a review names everyone it changes (the
+    first 50).
+  - Clients: the unknock list polled a refused list forever; the door-by-door walkthrough read finished
+    when its own Close was refused, and a step refused because the session had closed kept offering the
+    same door; a refusal on a run's card landed in the page banner far above it (it scrolls into view); a
+    preview priced while a watched change ran outlived its finish (it closes, with a notice); unfinished
+    unknock rows counted every frozen entry as unknocked; a queued conversion undo ending in *revert
+    failed* didn't refresh the table.
+  - Lifecycle: the conversion queue's failure listener marked a run another job was executing as failed.
+  - Docs: four sentences overstated a fix (the strike's stop, the backfill's certainty, which writers a
+    delete waits for, the review count) and the conversion undo's round-4 rules were missing.
+- **Not changed, stated:** with an answer or tag filter, the shared selection reads carry no time limit
+  (the review's own reads do); after two or more finished first-build passes, a put-back a dying later
+  pass made and whose copy it deleted is back but missing from History (the first build kept only its
+  last pass's summary); a first-build unknock that removed only entries with no answers before it crashed
+  still reads *Did not finish*; an older unknock the console step marks keeps the door statuses it left
+  until its Undo; a pick changed back and forth in one session counts each change in the pick counts
+  (the survey counts once).
+- **Result:** fixed and pinned. Round 6 reviews these fixes.
+
+**Code review round 6 (2026-10-20, on rounds 1–5's fixes): five reviewers**, the same five lenses. Every
+blocker and major was reproduced by the reviewer and re-run here first. Each fix is pinned in
+`answerEditRound6.int.test.js` (25 tests), and 35 of the fixes were checked by taking each back out in
+turn: 33 tests failed as they should; the other two are equivalent changes (a retry's read already
+selects its copies by the run's own claim; a later unknock's copies have already left the write-back by
+the time the answers check runs) and stay as backstops. Two of the blockers were regressions of round 5's
+own fixes.
+
+- **Blockers.**
+  - An unknock's Undo whose write-back failed as a whole — a dropped connection, a failover — deleted
+    every copy it had claimed with no survey written, and reported success. The driver reports such a
+    failure as a bulk error with no write errors at all, and an empty list read as "nothing clashed"
+    (round 5 batched the write-back through that reading). A failure now stops the Undo with every copy
+    kept and let go, Retry undo finishes it, and a copy is deleted only once its survey is read back on
+    file. The same reading in the Not home → Surveyed conversion (since `80acabe`) stamped entries
+    Surveyed over desk answers never written; it throws now too.
+  - An unknock that failed in process ended its hold on the struck visits in 1970: round 5 marked it
+    stopped by setting its heartbeat to the epoch, which the restore guard read as the end of its
+    strike. A teammate's earlier copy of the struck answers read restorable, and Restore swapped them
+    over the canvasser's real later survey. The stop is recorded on its own now (`stoppedAt`), the
+    heartbeat stays the last real beat, and the hold ends when the strike stopped — also for one undone
+    after it stopped, which ended at its freeze.
+- **Majors.**
+  - An Undo that failed after claiming its copies left them claimed for ten minutes, and the Undo
+    offered again at once counted them "not restored" and closed the run without them — for that window
+    the profile's Restore and Erase said an undo was writing them. The claim is the run's own now (a
+    retry takes back what an attempt left), and whatever didn't land is let go however the batch ends.
+  - Two overlapping unknocks undone earlier-first left every survey off the record, and an Undo beside a
+    later unknock or a conversion step still writing put answers back under a door the other was
+    clearing. A later unknock now keeps what it struck — its entries, and the earlier run's copies there,
+    which its own Undo writes back — and unknocks and conversions wait for each other: none starts, takes
+    its next door, or is undone while another is still writing on the campaign.
+  - An unknock Undo that stopped part-way looked like one never pressed. Its row reads *Undo stopped
+    part-way* with **Retry undo**, and a request the server answered with an error says the undo
+    stopped, rather than that it may still be working.
+  - An answer-edit Undo read a survey it had put back as erased when a note-only profile edit's copy had
+    been erased since (the documented erasure flow). It counts only this run's own copies now, and a
+    survey left at its reviewed answers reads put back.
+  - On a run the first build undid in one pass, a put-back of this build went unlogged when one of the
+    first build's had changed since. History now credits that pass with no more than it can still prove.
+- **Minors**, all fixed:
+  - The removal undos: a slot already holding the same submission (a strike that stopped before
+    deleting what it copied) counted "not restored" and left a duplicate copy; the refusal words named an
+    undone unknock when a later one held the visit; the strike re-settled every door and voter at its end
+    (a 25,000-entry strike takes 7.4 s now, its undo 8.5 s); the conversion undo made three round trips a
+    survey (it writes back 500 at a time).
+  - Answer edits: this build's own undo whose job died before its first claim was read the first build's
+    way; a one-person session open across the deploy counted a re-saved survey's questions twice.
+  - Reviews: one whose change moved nothing left its campaign-wide counts running after it answered (it
+    stops them now); any number of different reviews could work at once on a server (two now — the next
+    is refused at once, *Another review is being worked out*).
+  - Clients: a finished change closed reviews priced after it, and the one whose own Confirm was
+    writing, and missed one still being priced (each review now carries the server's `asOf`); an unknock
+    landing closed another review with no word and cleared the selection; Stop here and a door step
+    refused because the session had closed elsewhere kept offering themselves; profile refusals landed
+    far above the card, and a copy an undo had used read *Preserved response not found*; a reverted
+    unknock that never finished counted every frozen entry as unknocked.
+  - The console step judged older unknocks oldest first (so its dry run and its apply disagreed), read a
+    later conversion's removal or an emptied slot from a profile change as the run's own, missed a
+    removal a teammate's re-survey hid, and could leave a marked run without its History line.
+  - Docs: the late-write sweep's comment said the unknock stops on tenant deletion at its next batch;
+    two sentences still described the pricing of round 4.
+- **Not changed, stated:** a removal undo running past its ten-minute claim can be pressed again and run
+  twice at once (the second's inserts collide and are counted, unlikely at the measured speeds); the
+  console step can't tell answers an admin deleted on the profile from answers the run removed (nothing
+  records that delete); the shared selection reads with an answer or tag filter, and the current-tag and
+  results passes, sit outside the two-at-a-time limit; a stuck conversion (a lost job) now holds unknocks
+  and other conversions as well as answer edits — the safe direction, as before; a survey the first
+  build put back and someone changed since reads *restored on the profile* on this build's Undo again
+  (nothing on file tells the two apart). The reviewers' own reproductions, re-run against the fixes,
+  read fixed — the real first build's undo hand-over included — and the stress runs that hit the false
+  *erased* in 15 of 50 rounds hit it in none.
+- **Result:** fixed and pinned. Round 7 reviews these fixes.
+
+**Code review round 7 (2026-10-20, on rounds 1–6's fixes): five reviewers**, the same five lenses. Every
+finding was reproduced or traced in the real code, fixed, and pinned in `answerEditRound7.int.test.js`
+(30 tests, 29 of them failing on round 6's code — the other guards the old reading kept for removals
+with no record).
+- **Blocker — Restore swapped struck answers over a real later survey (every round's guard).** A
+  removal's hold on a visit lifted whenever an entry recorded before the removal read Surveyed there:
+  one an unknock that stopped part-way never deleted, one a Surveyed → Not home step that died before
+  its flip left, or an older entry an earlier unknock's Undo brought back under a later unknock of the
+  same visit. A teammate's real survey was then swapped out for the struck answers (reproduced, three
+  ways). A hold now lifts only through the removal's own undo: its undo begun, and one of its own
+  entries back at the visit (an unknock's frozen entries; a conversion's converted entries, back
+  Surveyed). A removal with nothing on record to read its own entries by is read the old way.
+- **Majors:**
+  - The removal undos left copies claimed for ten minutes when the claim's own read failed, or the
+    delete of copies already written back failed. Every batch lets go of its claim however it ends now;
+    only a database that can't take the release, or a process that dies, leaves it to lapse.
+  - The Surveyed → Not home Undo read the slots it writes into with one query clause per copy: 87 s of
+    planning at 50,000, past the worker's socket timeout, so a large undo could never finish. It reads
+    them by voter now.
+  - An unknock or conversion Undo landing while a clear-knocks discard ran was lost from every tool.
+    Removals wait while a round is being re-cut, and the discard and a snapshot restore wait for removals.
+  - The Surveyed → Not home review read its surveys with one query clause per entry: 14 s at 2,500
+    entries, 47 s at 5,000, nothing at the 25,000 cap — F6, sized wrong. It reads a batch of visits at a
+    time now, and a relabel's pricing tells its selection apart in a `$match`, not an `$in` test on every
+    ledger row (10 s at 25,000 ids over 100,000 entries).
+  - Undo again on a first-build one-person session whose one undo pass had put back a survey's later
+    copy logged that survey put back a second time.
+  - The voter profile lists a person's surveys and earlier answers from every campaign of the
+    organization, but its Edit, Delete, Restore and Erase went to the open row and answered *not found*
+    for a card from another campaign's row — Erase among them. Each card names its row now.
+  - An unknock's own request that ended before its Undo did skipped that Undo's landing for good: no
+    refresh, a review left open over moved numbers, and *may still be working* left up.
+- **Minors**, all fixed:
+  - Removal undos: a refused Undo read *Undo stopped part-way*; Retry undo after a hand-off stopped
+    counting the answers it had handed on; an older visit with two entries, one struck later, came back
+    with its answers handed away for good, and the undo of one of a visit's two entries could never put
+    it back (only an entry recorded since the unknock counts as newer work now); a busy check that failed once the strike's run was on file
+    left it reading *Removing…* for ten minutes; a campaign-numbers refresh failing after a strike
+    finished answered "stopped"; a conversion batch archived twice listed a voter whose answers couldn't
+    go back; every JSON 5xx read as stopped part-way (the routes answer `UNKNOCK_STOPPED` /
+    `UNDO_STOPPED` with the run now); undone first-build unknocks read "N entries selected".
+  - Answer-edit undo: an Erase landing while a pass worked, or of a session's later copy, read "put back"
+    or "kept newer answers" instead of erased; a put-back recorded only at its batch's end went uncounted
+    after a pass died and the survey was deleted (each is recorded as its copy goes now — an undo of 37,500
+    surveys takes 43 s, against 36 s); a first-build save's earlier copies, and its counted
+    questions read against the survey now, misread sessions open across the deploy.
+  - Reviews: each dry run stamped `asOf` as it answered, not as it began; a refused review read the whole
+    selection first (up to 13 s); a heavy review shared the server with another; the review's stop
+    covered only the up-front counts (one that answered 500 started 146 more reads); a Node memory-leak
+    warning on heavy reviews.
+  - The console step: a profile edit's copy from before the run hid a real removal; a run whose entries a
+    later unknock struck again was never marked; one was marked for an entry a later run removed.
+  - Clients: a refusal in the edit form showed at the end of its scrolling body; "answers not put back"
+    counted surveys and said "kept" of erased copies; own Undo, Revert and Stop here closed a review
+    opened meanwhile with no word.
+- **Not changed, stated:** a first-build save whose copy was erased before this build saved the survey
+  again counts its questions again; a same-picks re-survey the first build deleted as redundant reads
+  put back on this build's Undo again; the console step reads a later unknock whose copy was erased as
+  the older run's removal. The reviewers' reproductions, re-run against the fixes, read fixed.
+- **Result:** fixed and pinned. Round 8 reviews these fixes.
+
+**Code review round 8 (2026-10-20, on rounds 1–7's fixes): five reviewers**, the same five lenses. Every
+finding was reproduced or traced in the real code, fixed, and pinned in `answerEditRound8.int.test.js`
+(24 tests, 21 of them failing on round 7's code — the other three guard the undo order round 7 already got
+right and two of round 8's own mechanisms, a redelivered pass's count and a joining press's place; 36
+mutants of round 8's fixes, all caught); three of round 7's tests changed with the fixes, and one of round
+3's hooks.
+- **Blocker — an answer-edit undo left a survey at a session's first save for good (round 7's
+  regression).** A one-person session that saved a survey twice keeps two copies of it. Round 7 recorded
+  the put-back on the item at the first copy it put back, so a pass that died before the second treated
+  the survey as done on every retry and every Undo again: it kept the session's first save, its original
+  only an earlier-answers card. A put-back is provisional until its pass finishes the survey (`us`), and
+  a survey with a copy of this run still landed on it goes through its copies again.
+- **Majors:**
+  - A settled put-back read erased once the original's copy was erased later, and another survey's
+    put-back on Undo again lost its History row. Only a provisional put-back is read for erased now.
+  - Two unknocks of one visit undone oldest first put two Surveyed entries at one visit: the canvasser
+    counted twice on the timeline, the reports, the activity export and the campaign's numbers. An entry
+    put back there since now blocks the insert too. The strike records the visit's other entries at its
+    freeze (`coEntryIds`), to tell that apart from a visit that held two, and takes its moment before its
+    read.
+  - A database error in a conversion's checks after its claim (its create, Pick up or Undo) left it
+    *Working…* or *Undoing…* with no job and no button. Every removal, answer edit, snapshot restore and
+    clear-knocks discard on the campaign then waited behind it for good. Each gives its claim back now.
+  - Both undos read every round's surveys of each voter, answers and all, to find who holds the slots
+    they write into. The conversion undo ran the worker out of memory at the cap where voters were
+    surveyed in two other rounds too; the unknock undo, on the web dyno, peaked 850 MB above its start
+    with three. They read the copies' own rounds now: +251 MB under the worker's 384 MB cap, and +502 MB,
+    as with no other rounds.
+  - A removal's Undo pressed between a clear-knocks discard and the restore of its snapshot found
+    nothing and read undone. The restore then brought back a door stamped by an undone conversion, its
+    copy kept after the undo, out of every tool's reach; an unknock's entries went back into the cleared
+    round without their answers. An Undo now waits until that snapshot is restored (`ROUND_CLEARED_SINCE`).
+  - A conversion Undo that failed together with its own stop write recorded no finish time, and the page
+    then refused every later review on the campaign until a reload.
+  - Reviews built one query branch per round and canvasser in every batch, and each read was planned
+    afresh. At the 25,000-entry cap, the Surveyed → Not home review took 2.3 s for one canvasser and 22 s
+    for 400; the priced answer-edit review lost its tag prices, or was refused on a slowed database. They
+    read one clause per batch now (`visitsClause`): with 200 canvassers, the form opens in 1.9 s (8.8 s
+    before), the priced review answers in 3.4 s (10.3 s) and the Surveyed → Not home review in 1.1 s
+    (6.2 s), the same as for one canvasser (laptop, 25,000 entries).
+- **Minors**, all fixed:
+  - Removals: Restore read a conversion's undo as begun at its claim, before the checks and the enqueue
+    that can give the run back. A Restore in that window (five seconds for an enqueue in a Redis outage)
+    swapped removed answers over a real survey: round 7's blocker class, narrowed. An unknock Undo's
+    checks after its claim left the claim on file for ten minutes on a database error. A strike whose
+    check failed before it touched anything pointed at a row that wasn't there (`UNKNOCK_NOT_STARTED`
+    now). Any re-cut lock held every removal back, a big campaign's claim re-carve for minutes, and a
+    books-only snapshot restore waited for removals; only a lock that clears or restores knocks counts now.
+  - Answer-edit undo: a first-build credit written after its put-back logged a survey twice when a pass
+    died between them; a first-build copy erased before this build's first save left the undo reading
+    put back; a profile Restore's full swap read as the first build's put-back, so a real put-back went
+    unlogged; the comment on the put-back's record claimed an order the driver doesn't keep.
+  - Reviews: places were taken only after a press had read its selection, so the form's first open, or a
+    heavy press beside one other review, was refused after all its reads; a review of a big campaign
+    counted as light whatever its campaign-wide pricing cost (two one-entry reviews of a 50,000-survey
+    campaign took as much memory as one heavy one); a priced review could join One person at a time's dry
+    run of the same selection and answer with no price.
+  - The console step missed an older first-build unknock that took the answers when a later one, which
+    never stood, froze and removed its entries.
+  - Clients: an own unknock Undo or strike that stopped part-way left a review priced mid-undo open; a
+    second identical refusal on the edit form or the profile didn't scroll into view; a landing watched
+    on one campaign could carry to the next; the Help page overstated when a review is turned away.
+  - Docs: the privacy record misquoted item 31's F5 and left out the first-build window; VOTERS.md's
+    restore refusals missed `kept_after_undo`; Help said removed answers can never go over a real survey
+    taken since, though Restore offers that swap after the undo.
+- **Not changed, stated:**
+  - An unknock made before this build, undone after it, can't put back one of a visit's two entries: it
+    reads the other as put back since, counts its entry not put back, and leaves its answers on the
+    profile. Where a visit held two entries and another unknock's undo put one back, a later run's undo
+    reads it as put back since, and does the same.
+  - After a later run's Undo puts back answers an earlier run handed it, the earlier run's row still
+    counts them not put back, and the later run's counts them archived.
+  - A first-build unknock with no copy that removed only entries still reads *Did not finish*.
+  - A heavy review can be turned away when a lighter one takes the second place while it counts its
+    surveys.
+  - At the 25,000 cap, an unknock Undo still peaks about 500 MB above its start on the web dyno, as it
+    has since before round 6.
+
+  The reviewers' reproductions, re-run against the fixes, read fixed.
+- **Result:** fixed and pinned. Round 9 reviews these fixes.
+
+**Code review round 9 (2026-10-20, on rounds 1–8's fixes): five reviewers**, the same five lenses — the last
+round: the owner asked to finish once its fixes landed, since the remaining finds were mostly older bugs in
+neighbouring Door Outcomes tools. Every finding was reproduced or traced in the real code, fixed or stated
+below, and pinned in `answerEditRound9.int.test.js` (17 tests, 16 of them failing on round 8's code — the
+other guards round 9's paging; 21 mutants of round 9's fixes, all caught). Round 8's two cleared-round tests
+now use a round its discard really emptied, and five older tests hold the strike at its new delete.
+- **The privacy record (a blocker by the brief's rule):** round 8's lift — an older entry put back at a struck
+  visit since lifts the hold, the removal's own entry staying off — was described nowhere; item 31 and round
+  7's paragraph said a hold lifts only where the removal's own entry is back. Corrected.
+- **An earlier version lost (since before `589c1c0`; a blocker by the letter):** a profile Restore that
+  swapped a teammate's card into a voter's slot while an unknock or a Surveyed → Not home step was removing
+  the survey there was deleted with it — read, copied, then deleted by id — and the restored answers were
+  on file nowhere. A removal now deletes a survey only while it still holds the submission it read.
+- **Majors:**
+  - Round 8's cleared-round wait held an Undo for good once the round was deleted or archived, and sent the
+    admin to a restore that, on a round knocked again since, put the old entries beside the new and failed
+    part-way, on every try. Only a snapshot its round can still take back — on file, not archived, knocked
+    nowhere since — holds an Undo now; past any other, the undo goes ahead and leaves that round alone.
+    The restore refuses old knocks over new ones, and a snapshot holding the work of a change undone after
+    it. The refusal names the round and the day, and Turf Cutting always lists such a snapshot.
+  - A relabel's Undo had the same hole as round 8's removals (since before `589c1c0`); it waits the same way.
+  - An answer-edit undo pass that died, its survey then taken by an unknock, a conversion or a re-cut before
+    Retry undo, was counted put back and settled — round 8's blocker again, by another road. The counting
+    path now needs the survey on file; off file, a later change holding a copy of the run reads waiting,
+    and a snapshot holding the session's copies reads cleared.
+  - Both undos loaded every copy of the run at once: the conversion undo ran the worker out of memory with
+    twelve-question surveys at the cap, and the unknock undo took the web dyno's heap 833 MB up. They read
+    1,000 voters a page now: the conversion undo of 50,000 twelve-question copies finished in 14 s at
+    +85 MB under the 384 MB cap.
+- **Minors**, all fixed:
+  - Answer-edit undo: a put-back proven only by its receipt went uncounted while another copy remained.
+  - Removals: the stopped unknock Undo's reply carried its start time, so round 8's close-the-review fix
+    missed the review priced while the undo ran; a strike whose busy check and own run delete both failed
+    read *Removing…* for ten minutes; a books-only snapshot restore waited for an answer edit, an open
+    one-person session included; a conversion's Retry undo held again, for its whole run, what its first
+    attempt had freed (it has begun once its job has claimed it now); the conversion job's chunk read built
+    one `$or` branch per row — slow on a big crew, and the shape a MongoDB 7.0.0–7.0.5 query-engine bug
+    answers short — and reads like the review now.
+  - Reviews: a priced review of a big campaign took its second place only after reading its selection; a
+    heavy review that found its twin finished ran on one place, beside a light one.
+  - Docs and Help: the re-cut wait as round 8 narrowed it, what Restore offers after an unknock undo, the
+    reasons behind `kept_after_undo`, and round 8's own residual wording.
+- **Not changed, stated:**
+  - Two identical heavy reviews pressed at the same moment: one can be refused instead of joining, and its
+    retry joins. A heavy review pressed first can be refused by any review pressed while it counts.
+  - Round 8's restore-copy exclusion logs a first-build deploy-window shape twice (a full-swap Restore after
+    the first build's logged put-back) that leaves the same state as the one it fixes; the gone-mark seed
+    reads a teammate's erased profile card as a first-build session's own.
+  - A conversion whose claim's give-back fails along with its checks (two database failures in a row) stays
+    pending or reverting with no job: the known stuck-conversion class. A `589c1c0` server's discard during
+    the deploy takes its lock without `knocks`.
+  - A deleted round's knock-clearing snapshot is shown nowhere and goes only with the campaign (an owner
+    flag in PRIVACY_VERIFICATION).
+  - The local test database (MongoDB 7.0.2 on its newer query engine) answers some `$or` reads short
+    (SERVER-84338, fixed in 7.0.6), and rounds 4–9's crew timings are that engine's; on the classic engine the
+    old reads' crew cliff is 3–7 times smaller, and the one-clause reads faster on both. The production
+    cluster's version is recorded nowhere — the owner checks it on the Atlas cluster card.
+
+  The reviewers' reproductions, re-run against the fixes, read fixed.
+- **Result:** fixed and pinned; the review loop ends here at the owner's call.
+
+**After round 9 (2026-10-20): the leftovers, closed at the owner's call.** The owner asked for the gaps the
+hand-off named to be closed before the deploy; two reviewers then tried to break the fixes (privacy, and
+races and state), and their findings were fixed or, in one case, the fix taken back. Pinned in
+`answerEditFollowup.int.test.js` (14 tests; 11 fail on round 9's code — the other 3 guard what round 9
+already got right: a queued job keeps a conversion busy, a twin gets its first press's failure, and an older
+unknock never doubles a visit) and `retention.int.test.js` (two more).
+- **Privacy (both flagged to the owner in round 9):** a deleted round's snapshots are deleted with it — on
+  `DELETE /passes/:id` and the walk-list delete, after the round — and a nightly maintenance job
+  (`sweep-orphan-snapshots`) deletes every snapshot whose round is gone; the identity purge rewrites a
+  purged canvasser's name off every run's `scopeSummary` (the line's first part), per record, and each
+  night over every record purged before and every account deleted past the window that no record holds
+  (the review: an organization's deletion drops a record, and the person's work can sit in another
+  organization's run lines); `describeScope` never freezes an email (PRIVACY_VERIFICATION item 32 and the
+  round-9 paragraph).
+- **The round delete (found by the review, older than this feature):** `DELETE /passes/:id` deleted any
+  draft round, though a discard that keeps the knocks and a snapshot restore both leave a draft holding
+  them — its entries, surveys and copies then belonged to no round — and it took no re-cut lock, so a
+  restore landing mid-delete put knocks back under a deleted round and, with the snapshot now deleted
+  beside it, failed. It refuses `has-history` (field entries, surveys or copies; desk marks still go with
+  the round) and runs under the round's lock (`recut-locked`); the walk-list delete counts copies too and
+  locks each round; the Passes page offers Archive for a draft with knocks.
+- **L9-m5, a stuck conversion:** a run `pending`, `running` or `reverting` ten minutes after its last write
+  with no live job is settled on every read and before every busy refusal — forward to `failed`, a begun
+  undo to `revert_failed`, an undo claimed but never begun back to `revertFrom` (written by the claim), so
+  a kept change never reads as an undo begun; the inline undo stamps `revertClaimedAt` before it writes.
+  It replaces round 7's inline-only `expireDeadInlineRevert`, whose rule it keeps.
+- **P9-m2, the same review pressed twice at once:** a named dry run registers its key on arrival
+  (`reviewsAnswering`); a second press with that key takes no place, reads nothing and answers with the
+  first press's answer or error. Round 9's P9-m3 test now presses its first review unnamed — the one path
+  where a press of the same review can still find it running and then finished.
+- **Taken back — round 8's older-unknock residual:** a first try read an older entry at a visit as
+  standing there all along unless a record of another unknock's undo or of a restored snapshot named it.
+  The review found the records can go — a restored snapshot deleted on Turf Cutting, a restore that
+  stopped before its stamp, an undo that stopped twice — and then the Undo put its entry back beside one
+  put back since: two Surveyed entries at one visit, the canvasser counted twice. Nothing on file proves
+  an older entry stood there when a run from before `coEntryIds` froze, so such a run keeps reading every
+  older entry as put back since (the follow-up file pins the review's case).
+- Also: `migrate:build-indexes`' dry run no longer builds indexes as it lists them on a non-production
+  database (`connectDb`'s autoIndex outranked by the connection's own option), so it lists all of them.
+- **Not changed, stated:**
+  - An unknock made before this build, undone after it, still can't put back one of a visit's two
+    entries: counted not put back, its answers restorable (above).
+  - A heavy review can still find its second place taken by a *different* review pressed while it counted:
+    it is refused, and its retry runs. Reserving two places on arrival for every review that might turn out
+    heavy would refuse ordinary reviews on mid-sized campaigns instead.
+  - The first-build shapes (round 9's double-logged deploy-window put-back and the gone-mark seed, and the
+    first-build items of rounds 5–7): nothing on file tells them apart, and they exist only for runs
+    `589c1c0` made in production — `repair:answer-edit-words`' dry run reading 0 runs means there are none.
+  - A `589c1c0` server's discard during the deploy takes its lock without `knocks`: deploy outside field
+    hours. The production cluster's MongoDB version stays the owner's check (Atlas applies patch releases;
+    SERVER-84338 was fixed in 7.0.6).
+- **Result:** fixed and pinned.

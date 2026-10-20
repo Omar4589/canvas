@@ -31,6 +31,9 @@ import { CampaignChange } from '../../models/CampaignChange.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
+import { ConversionStrike } from '../../models/ConversionStrike.js';
+import { waitForDoorOutcomesToStop } from '../canvass/answerEditRuns.js';
+import { LATE_WRITE_MODELS } from '../platform/lateWriteSweep.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { AnswerEditRun } from '../../models/AnswerEditRun.js';
 import { AnswerEditRunChunk } from '../../models/AnswerEditRunChunk.js';
@@ -66,6 +69,12 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   // its campaign count and never-walked voters — but capturing keeps the numbers whole either way.
   await captureCampaignBeforeDelete(campaign);
   heartbeat();
+
+  // A Door Outcomes change already mid-batch when the deletion began stops at its next batch; wait
+  // out the batch in flight (bounded) BEFORE anything is swept, so no sweep below runs ahead of its
+  // last write. The late sweep at the end catches a write that outlasts the wait (code review
+  // 2026-10-19, rounds 2 and 3).
+  await waitForDoorOutcomesToStop({ campaignId }, { heartbeat });
 
   // Address-level DO-NOT-KNOCK needs NO parking block here, and its absence is deliberate —
   // do not "fix" it by adding one. DoNotKnockAddress is keyed {organizationId, normalizedAddress}
@@ -164,7 +173,7 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
-    CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, SurveyConversionRun, UnknockRun, UnknockRunChunk, AnswerEditRun, AnswerEditRunChunk, ClientReport, ClientReportMapPoint, ReportShareLink,
+    CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk, AnswerEditRun, AnswerEditRunChunk, ClientReport, ClientReportMapPoint, ReportShareLink,
     CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
     ExportJob,
   ];
@@ -192,6 +201,13 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
     const res = await Model.deleteMany({ campaignId });
     counts[Model.modelName] = res.deletedCount || 0;
     heartbeat();
+  }
+  // Late writers, swept once more: whatever a Door Outcomes write outlasting the wait above put down
+  // after the sweep passed its collection — a survey, an entry, a kept copy, a History row. A write
+  // later still is swept by its own writer (lateWriteSweep.js).
+  for (const Model of LATE_WRITE_MODELS) {
+    const res = await Model.deleteMany({ campaignId });
+    if (res.deletedCount) counts[Model.modelName] = (counts[Model.modelName] || 0) + res.deletedCount;
   }
 
   await Campaign.deleteOne({ _id: campaignId });

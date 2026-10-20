@@ -363,10 +363,11 @@ test('F7. a failed conversion undo parks as revert_failed: retry works, pick-up 
   await call('POST', conv(`/${runId}/close`), asAdmin());
   assert.ok((await liveOf(3))?.deskEntry, 'desk answers recorded');
 
-  // A revert job that dies on its last attempt, as the worker's failed listener sees it.
-  await SurveyConversionRun.updateOne({ _id: runId }, { $set: { status: 'reverting' } });
+  // A revert job that dies on its last attempt, as the worker's failed listener sees it — the run's
+  // own job (the listener parks only that one).
+  await SurveyConversionRun.updateOne({ _id: runId }, { $set: { status: 'reverting', queueJobId: 'f7-revert-job' } });
   await reconcileFailedConversionJob(
-    { name: 'revert', data: { runId }, opts: { attempts: 1 }, attemptsMade: 1, finishedOn: Date.now() },
+    { id: 'f7-revert-job', name: 'revert', data: { runId }, opts: { attempts: 1 }, attemptsMade: 1, finishedOn: Date.now() },
     new Error('worker died mid-undo')
   );
   const parked = await SurveyConversionRun.findById(runId).lean();
@@ -386,20 +387,28 @@ test('F7. a failed conversion undo parks as revert_failed: retry works, pick-up 
 test('F7. a failed FORWARD job still reads failed (Pick up stays the remedy there)', { skip }, async () => {
   const run = await SurveyConversionRun.create({
     organizationId: ctx.org._id, campaignId: ctx.campaign._id, byUserId: ctx.admin._id,
-    direction: 'to_survey', mode: 'bulk', to: 'survey_submitted', status: 'running',
+    direction: 'to_survey', mode: 'bulk', to: 'survey_submitted', status: 'running', queueJobId: 'outcome-convert-f7-own',
   });
+  // Only the run's own job marks it (round 5): a job a Pick up replaced leaves the one running alone.
   await reconcileFailedConversionJob(
-    { name: 'convert', data: { runId: String(run._id) }, opts: { attempts: 3 }, attemptsMade: 3, finishedOn: Date.now() },
+    { id: 'outcome-convert-f7-stale', name: 'convert', data: { runId: String(run._id) }, opts: { attempts: 3 }, attemptsMade: 3, finishedOn: Date.now() },
+    new Error('boom')
+  );
+  assert.strictEqual((await SurveyConversionRun.findById(run._id).lean()).status, 'running');
+  await reconcileFailedConversionJob(
+    { id: 'outcome-convert-f7-own', name: 'convert', data: { runId: String(run._id) }, opts: { attempts: 3 }, attemptsMade: 3, finishedOn: Date.now() },
     new Error('boom')
   );
   assert.strictEqual((await SurveyConversionRun.findById(run._id).lean()).status, 'failed');
   // A retry still coming is not a failure yet.
   await SurveyConversionRun.updateOne({ _id: run._id }, { $set: { status: 'running' } });
   await reconcileFailedConversionJob(
-    { name: 'convert', data: { runId: String(run._id) }, opts: { attempts: 3 }, attemptsMade: 1 },
+    { id: 'outcome-convert-f7-own', name: 'convert', data: { runId: String(run._id) }, opts: { attempts: 3 }, attemptsMade: 1 },
     new Error('transient')
   );
   assert.strictEqual((await SurveyConversionRun.findById(run._id).lean()).status, 'running');
+  // A run left reading `running` holds the campaign for every other removal (round 6): put it down.
+  await SurveyConversionRun.deleteOne({ _id: run._id });
 });
 
 // The undo is RE-ENTRANT: wherever an attempt dies, undoing again finishes it and settles every door

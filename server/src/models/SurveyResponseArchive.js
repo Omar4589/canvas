@@ -74,6 +74,11 @@ const surveyResponseArchiveSchema = new mongoose.Schema(
     noteEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: undefined },
     noteEditedAt: { type: Date, default: undefined },
     answerEditMarks: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    answerEditUndone: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    answerEditFence: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+    // An answer edit's copy: which delivery of the run holds it (answerEditWriter.js) — a delivery
+    // deletes only a copy it still holds, so one another delivery adopted and landed survives.
+    writerToken: { type: String, default: undefined },
 
     // The desk-entry stamp travels with the snapshot: an archived row must still say whether the
     // response it holds was collected in the field or typed at a desk.
@@ -113,8 +118,11 @@ const surveyResponseArchiveSchema = new mongoose.Schema(
     // fingerprint() of the survey as this edit wrote it (services/canvass/answerEdit.js).
     appliedHash: { type: String },
     // Stamped by the undo just before its put-back, so a pass that died between the put-back and
-    // deleting this row can tell "put back already" from "changed since" on the next pass.
+    // deleting this row can tell "put back already" from "changed since" on the next pass. An unknock
+    // or conversion undo stamps the copies it writes back too, with its `undoToken` (claimCopiesForWriteBack,
+    // services/surveys/archiveOverwrite.js); either stamp holds the profile's Erase and Restore off.
     undoStartedAt: { type: Date },
+    undoToken: { type: mongoose.Schema.Types.ObjectId },
   },
   { timestamps: true }
 );

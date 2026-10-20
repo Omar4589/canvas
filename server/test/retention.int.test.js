@@ -72,6 +72,103 @@ test('a lapsed identity is purged; one still inside its window is not', { skip }
   assert.strictEqual(f.purgedAt, null);
 });
 
+// privacy.html: after the window "we aim to remove your name". A Door Outcomes run's scope line froze
+// the canvasser's name as text ("Gone User · Riverside · Pass 2"), so the purge has to rewrite it — on
+// every run type, whichever way the wire scope stored the id, and for records purged before it did.
+test('the purge takes a lapsed canvasser\'s name off every run\'s frozen scope line', { skip }, async () => {
+  const { ReclassifyRun } = await import('../src/models/ReclassifyRun.js');
+  const { SurveyConversionRun } = await import('../src/models/SurveyConversionRun.js');
+  const { UnknockRun } = await import('../src/models/UnknockRun.js');
+  const { AnswerEditRun } = await import('../src/models/AnswerEditRun.js');
+  const models = [ReclassifyRun, SurveyConversionRun, UnknockRun, AnswerEditRun];
+  for (const M of models) await M.collection.deleteMany({});
+
+  const lapsed = await makeDeleted('lapsed@t.co', new Date(Date.now() - 1 * DAY));
+  const earlier = await makeDeleted('earlier@t.co', new Date(Date.now() - 9 * DAY));
+  await DeletedUserRecord.updateOne({ _id: earlier._id }, { $set: { firstName: '', lastName: '', purgedAt: new Date(Date.now() - 8 * DAY) } });
+  const fresh = await makeDeleted('fresh@t.co', new Date(Date.now() + 30 * DAY));
+  const someoneElse = new mongoose.Types.ObjectId();
+  const stamp = new Date(Date.now() - 3 * DAY);
+  const runOf = (userId, scopeSummary, asString) => ({
+    _id: new mongoose.Types.ObjectId(),
+    selection: { scope: userId ? { userId: asString ? String(userId) : userId, passId: String(new mongoose.Types.ObjectId()) } : {} },
+    scopeSummary,
+    createdAt: stamp,
+    updatedAt: stamp,
+  });
+  const ids = {};
+  for (const [i, M] of models.entries()) {
+    const rows = {
+      lapsed: runOf(lapsed.userId, 'Gone User · Riverside · Pass 2', i % 2 === 0),
+      earlier: runOf(earlier.userId, 'Old Name · answered Opposed · Aug 1 – Aug 7', i % 2 === 1),
+      fresh: runOf(fresh.userId, 'Fresh User · Pass 1', true),
+      other: runOf(someoneElse, 'Cara Canvasser · Pass 1', true),
+      unscoped: runOf(null, 'Riverside · Pass 2', true),
+    };
+    await M.collection.insertMany(Object.values(rows));
+    ids[M.modelName] = Object.fromEntries(Object.entries(rows).map(([k, r]) => [k, r._id]));
+  }
+  const lineOf = async (M, key) => (await M.collection.findOne({ _id: ids[M.modelName][key] })).scopeSummary;
+
+  const dry = await purgeDeletedIdentities({ apply: false });
+  assert.strictEqual(dry.namesScrubbed, 8, 'the dry run counts the lapsed and the earlier-purged canvasser on all four run types');
+  assert.strictEqual(await lineOf(UnknockRun, 'lapsed'), 'Gone User · Riverside · Pass 2', 'and changes nothing');
+
+  const res = await purgeDeletedIdentities({ apply: true });
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.namesScrubbed, 8);
+  for (const M of models) {
+    assert.strictEqual(await lineOf(M, 'lapsed'), 'Deleted user · Riverside · Pass 2', `${M.modelName}: the lapsed name is off, the rest of the line stays`);
+    assert.strictEqual(await lineOf(M, 'earlier'), 'Deleted user · answered Opposed · Aug 1 – Aug 7', `${M.modelName}: a record purged before this step is caught up`);
+    assert.strictEqual(await lineOf(M, 'fresh'), 'Fresh User · Pass 1', `${M.modelName}: a name still inside its window stays`);
+    assert.strictEqual(await lineOf(M, 'other'), 'Cara Canvasser · Pass 1', `${M.modelName}: another canvasser's run is untouched`);
+    assert.strictEqual(await lineOf(M, 'unscoped'), 'Riverside · Pass 2', `${M.modelName}: a line naming no canvasser is untouched`);
+    const touched = await M.collection.findOne({ _id: ids[M.modelName].lapsed });
+    assert.strictEqual(touched.updatedAt.getTime(), stamp.getTime(), `${M.modelName}: the run's last sign of life is not moved`);
+  }
+
+  const again = await purgeDeletedIdentities({ apply: true });
+  assert.strictEqual(again.namesScrubbed, 0, 'once caught up it rewrites nothing');
+  for (const M of models) await M.collection.deleteMany({});
+});
+
+// An organization's deletion drops a deletion record once no organization is left on it — but the person
+// may have worked for another organization that had removed them before they deleted, whose run lines
+// still name them. The account row itself is never deleted, so its own deletion date carries the window.
+test('the purge takes the name off for an account deleted past the window whose record is gone — never sooner', { skip }, async () => {
+  const { User } = await import('../src/models/User.js');
+  const { UnknockRun } = await import('../src/models/UnknockRun.js');
+  await UnknockRun.collection.deleteMany({});
+  const account = async (daysAgo) => {
+    const _id = new mongoose.Types.ObjectId();
+    await User.collection.insertOne({ _id, firstName: 'Deleted', lastName: 'user', email: `deleted-${_id}@t.co`, passwordHash: 'x', isActive: false, deletedAt: new Date(Date.now() - daysAgo * DAY) });
+    return _id;
+  };
+  const lapsedNoRecord = await account(200);
+  const recentNoRecord = await account(10);
+  const lapsedButHeld = await account(200);
+  await DeletedUserRecord.create({
+    userId: lapsedButHeld, firstName: 'Held', lastName: 'Longer', organizationIds: [new mongoose.Types.ObjectId()],
+    deletedAt: new Date(Date.now() - 200 * DAY), retentionUntil: new Date(Date.now() + 30 * DAY),
+  });
+  const lineFor = async (userId, name) => {
+    const _id = new mongoose.Types.ObjectId();
+    await UnknockRun.collection.insertOne({ _id, selection: { scope: { userId: String(userId) } }, scopeSummary: `${name} · Pass 1`, createdAt: new Date(), updatedAt: new Date() });
+    return _id;
+  };
+  const a = await lineFor(lapsedNoRecord, 'Xavier Gone');
+  const b = await lineFor(recentNoRecord, 'Recent Gone');
+  const c = await lineFor(lapsedButHeld, 'Held Longer');
+  const res = await purgeDeletedIdentities({ apply: true });
+  assert.strictEqual(res.ok, true);
+  const line = async (id) => (await UnknockRun.collection.findOne({ _id: id })).scopeSummary;
+  assert.strictEqual(await line(a), 'Deleted user · Pass 1', 'past the window with no record: off');
+  assert.strictEqual(await line(b), 'Recent Gone · Pass 1', 'still inside its window: kept');
+  assert.strictEqual(await line(c), 'Held Longer · Pass 1', 'a record not yet purged governs its own window');
+  await UnknockRun.collection.deleteMany({});
+  await User.collection.deleteMany({ _id: { $in: [lapsedNoRecord, recentNoRecord, lapsedButHeld] } });
+});
+
 test('every run is recorded — a purge that does nothing still leaves a receipt', { skip }, async () => {
   await purgeDeletedIdentities({ apply: true });
   const run = await RetentionRun.findOne({ job: JOB_NAME }).lean();

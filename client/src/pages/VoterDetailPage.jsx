@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -322,10 +322,10 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
   // The same per-person editor as Door Outcomes' one-person-at-a-time walkthrough: it follows the
   // survey's logic, keeps off-path and retired answers, and posts only what changed. The earlier
   // answers are kept as a card below (owner ruling 4) — Save no longer destroys them.
-  const startEdit = (from = survey) => {
+  const startEdit = (from = survey, typedNote = null) => {
     setBase(from);
     setEditor(seedEditor(from.questions, from.answers));
-    setNote(from.note || '');
+    setNote(typedNote ?? from.note ?? '');
     setEdit(true);
   };
   const submit = () => {
@@ -337,9 +337,11 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
       },
       (e) => {
         // Someone changed this survey while the editor was open: re-seed from the latest, here.
+        // The answers are the latest (the admin makes their change again); a note they typed is kept.
         const fresh = e.data?.profile?.surveys?.find((x) => x.id === survey.id);
-        if (fresh) startEdit(fresh);
-        setNotice(e.message);
+        const typed = note.trim() !== (base?.note || '').trim() ? note : null;
+        if (fresh) startEdit(fresh, typed);
+        setNotice(fresh && typed != null ? `${e.message} The note you typed is kept.` : e.message);
       }
     );
   };
@@ -445,7 +447,9 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
 // Why Restore isn't offered: the server's restore guard (services/surveys/restoreGuard.js) refuses
 // to put answers back into a visit that no longer reads Surveyed, and the card says so up front.
 const restoreBlockedText = (reason) =>
-  reason === 'unknocked'
+  reason === 'kept_after_undo'
+    ? 'These answers were removed on Door Outcomes. That change was undone, but by then this visit had been recorded again, so they can’t go back.'
+    : reason === 'unknocked'
     ? 'This visit was unknocked, so there is no survey to put these answers into. Undo the unknock on Door Outcomes to bring them back.'
     : reason === 'converted'
       ? 'This door’s outcome was changed from Surveyed. Undo that change on Door Outcomes to bring these answers back.'
@@ -457,10 +461,13 @@ function OverwrittenSurveyCard({ survey, onRestore, onErase, busy, canRestore, t
   // accusation against the canvasser for something an admin did, so this direction says so plainly.
   // An 'unknock' row is the same: an admin struck the visit itself from the record. An 'answer_edit'
   // row is this same survey before an admin changed some answers (the profile's Edit, or Door
-  // Outcomes → Edit answers) — "Earlier answers", never "Overwritten".
+  // Outcomes → Edit answers) — "Earlier answers", never "Overwritten". A 'restore' row was set aside
+  // when an admin restored earlier answers in its place: the name is the admin's, never a canvasser
+  // who "replaced" it (code review round 4; Duplicate Surveys has said so since round 3).
   const removedByConversion = survey.overwrittenVia === 'outcome_convert';
   const removedByUnknock = survey.overwrittenVia === 'unknock';
   const earlierAnswers = survey.overwrittenVia === 'answer_edit';
+  const setAside = survey.overwrittenVia === 'restore';
   const blocked = survey.restorable === false;
   const recorded = survey.deskEntry ? `entered by ${survey.deskEntry.by?.name || 'an admin'}` : survey.by ? `recorded by ${survey.by.name}` : null;
   return (
@@ -486,6 +493,12 @@ function OverwrittenSurveyCard({ survey, onRestore, onErase, busy, canRestore, t
                 {survey.by ? ` · recorded by ${survey.by.name}` : ''}
                 {survey.overwrittenBy ? ` · unknocked by ${survey.overwrittenBy.name}` : ''}
               </>
+            ) : setAside ? (
+              <>
+                · Set aside {fmtDate(survey.overwrittenAt, tz)} when {survey.overwrittenBy ? survey.overwrittenBy.name : 'an admin'} restored
+                earlier answers
+                {recorded ? ` · ${recorded}` : ''}
+              </>
             ) : (
               <>
                 · Overwritten {fmtDate(survey.overwrittenAt, tz)}
@@ -496,8 +509,8 @@ function OverwrittenSurveyCard({ survey, onRestore, onErase, busy, canRestore, t
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant={removedByConversion || removedByUnknock || earlierAnswers ? 'neutral' : 'danger'}>
-            {earlierAnswers ? 'Earlier answers' : removedByConversion || removedByUnknock ? 'Removed' : 'Overwritten'}
+          <Badge variant={removedByConversion || removedByUnknock || earlierAnswers || setAside ? 'neutral' : 'danger'}>
+            {earlierAnswers ? 'Earlier answers' : removedByConversion || removedByUnknock ? 'Removed' : setAside ? 'Set aside' : 'Overwritten'}
           </Badge>
           {canRestore && !blocked && (
             <button
@@ -609,6 +622,14 @@ export default function VoterDetailPage() {
   const qc = useQueryClient();
   const [newNote, setNewNote] = useState('');
   const [err, setErr] = useState('');
+  // A refusal lands in the banner at the top, often far above the card pressed: bring it into view
+  // (round 6; Door Outcomes does the same).
+  const errRef = useRef(null);
+  useEffect(() => {
+    if (!err) return undefined;
+    const frame = requestAnimationFrame(() => errRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(frame);
+  }, [err]);
 
   // Org mode sits behind the orgAdmin RoleGate, so this is only ever false for a lead in campaign mode.
   const canManage = isOrgAdmin;
@@ -650,23 +671,42 @@ export default function VoterDetailPage() {
     mutationFn: (noteId) => api(`/admin/voters/${voterId}/notes/${noteId}`, { method: 'DELETE' }),
     onSuccess: invalidate, onError: onErr,
   });
+  // Each press clears the banner first, so the same refusal twice is brought into view twice (round 8).
+  // Each survey and earlier-answers card acts on its OWN voter row: the profile lists the person's rows in
+  // every campaign of the organization, and one sent to this row's address answered 404 (round 7).
   const editSurvey = useMutation({
-    mutationFn: ({ responseId, body }) => api(`/admin/voters/${voterId}/surveys/${responseId}`, { method: 'PATCH', body }),
+    onMutate: () => setErr(''),
+    mutationFn: ({ responseId, rowId, body }) => api(`/admin/voters/${rowId || voterId}/surveys/${responseId}`, { method: 'PATCH', body }),
     onSuccess: () => { setErr(''); invalidate(); },
     // A survey changed under an open editor: the card re-seeds and says so itself.
     onError: (e) => { if (e.code !== 'RESPONSE_CHANGED') onErr(e); invalidate(); },
   });
+  // A copy gone between the profile's read and the press: said plainly, with no guess at why — the page
+  // reloads to show what is kept now (round 6: "Preserved response not found"; round 7: the guess, "an
+  // undo put them back", was said of a card that was still on file).
+  const goneWords = (act) =>
+    act === 'erase'
+      ? 'Those earlier answers aren’t on file any more, so there was nothing to erase. The page has reloaded to show what’s kept now.'
+      : 'Those earlier answers aren’t on file any more, so there was nothing to restore. The page has reloaded to show what’s kept now.';
   const eraseSurvey = useMutation({
-    mutationFn: (archiveId) => api(`/admin/voters/${voterId}/surveys/archive/${archiveId}`, { method: 'DELETE' }),
-    onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
+    onMutate: () => setErr(''),
+    mutationFn: ({ archiveId, rowId }) => api(`/admin/voters/${rowId || voterId}/surveys/archive/${archiveId}`, { method: 'DELETE' }),
+    onSuccess: () => { setErr(''); invalidate(); },
+    // A refusal (an undo putting the copy back) or a copy already gone: the card is out of date.
+    onError: (e) => { if (e.status === 404) setErr(goneWords('erase')); else onErr(e); invalidate(); },
   });
   const delSurvey = useMutation({
-    mutationFn: (responseId) => api(`/admin/voters/${voterId}/surveys/${responseId}`, { method: 'DELETE' }),
+    onMutate: () => setErr(''),
+    mutationFn: ({ responseId, rowId }) => api(`/admin/voters/${rowId || voterId}/surveys/${responseId}`, { method: 'DELETE' }),
     onSuccess: invalidate, onError: onErr,
   });
   const restoreSurvey = useMutation({
-    mutationFn: (archiveId) => api(`/admin/voters/${voterId}/surveys/${archiveId}/restore`, { method: 'POST' }),
-    onSuccess: () => { setErr(''); invalidate(); }, onError: onErr,
+    onMutate: () => setErr(''),
+    mutationFn: ({ archiveId, rowId }) => api(`/admin/voters/${rowId || voterId}/surveys/${archiveId}/restore`, { method: 'POST' }),
+    onSuccess: () => { setErr(''); invalidate(); },
+    // A refusal means the profile is out of date (the survey changed, or its visit no longer reads
+    // Surveyed): reload it so the cards say what is true now.
+    onError: (e) => { if (e.status === 404) setErr(goneWords('restore')); else onErr(e); invalidate(); },
   });
   const flagDnc = useMutation({
     mutationFn: (reason) => api(`/admin/voters/${voterId}/dnc`, { method: 'POST', body: { reason } }),
@@ -734,7 +774,7 @@ export default function VoterDetailPage() {
         {v.doNotContact?.flagged && <span className="rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger">⛔ Do not contact</span>}
       </div>
 
-      {err && <div className="mb-4 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{err}</div>}
+      {err && <div ref={errRef} className="mb-4 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{err}</div>}
 
       <VoterFields
         voter={v}
@@ -818,11 +858,11 @@ export default function VoterDetailPage() {
                 busy={editSurvey.isPending || delSurvey.isPending}
                 onSave={(body, done, conflict) =>
                   editSurvey.mutate(
-                    { responseId: s.id, body },
+                    { responseId: s.id, rowId: s.voterId, body },
                     { onSuccess: done, onError: (e) => { if (e.code === 'RESPONSE_CHANGED') conflict(e); } }
                   )
                 }
-                onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate(s.id); }}
+                onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate({ responseId: s.id, rowId: s.voterId }); }}
                 canEdit={canManage}
                 tz={orgTz}
               />
@@ -842,7 +882,7 @@ export default function VoterDetailPage() {
                           'The current ones are kept the same way, so you can swap back.'
                       )
                     ) {
-                      restoreSurvey.mutate(s.id);
+                      restoreSurvey.mutate({ archiveId: s.id, rowId: s.voterId });
                     }
                     return;
                   }
@@ -855,7 +895,7 @@ export default function VoterDetailPage() {
                         `answers are preserved the same way. Nothing is deleted — you can swap back.`
                     )
                   ) {
-                    restoreSurvey.mutate(s.id);
+                    restoreSurvey.mutate({ archiveId: s.id, rowId: s.voterId });
                   }
                 }}
                 onErase={() => {
@@ -870,7 +910,7 @@ export default function VoterDetailPage() {
                           ? ' Undo on that Door Outcomes change won’t put this survey back afterwards.'
                           : '';
                   if (window.confirm(`Erase these earlier answers for good? This can’t be undone.${warn}`)) {
-                    eraseSurvey.mutate(s.id);
+                    eraseSurvey.mutate({ archiveId: s.id, rowId: s.voterId });
                   }
                 }}
                 tz={orgTz}

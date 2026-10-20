@@ -15,6 +15,9 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
+import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
+import { ReclassifyRun } from '../../models/ReclassifyRun.js';
+import { UnknockRun } from '../../models/UnknockRun.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Voter } from '../../models/Voter.js';
 import { recomputeTurf, recomputePassTerritories, wipeDraftBooks, cutExclusionParts, offLimitsDoorIds, CUTTABLE_PIN } from '../../services/turf/generateTurf.js';
@@ -23,7 +26,7 @@ import { snapshotPass, restoreSnapshot } from '../../services/turf/snapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { acquireRecutLock, releaseRecutLock, isRecutLocked } from '../../services/turf/recutLock.js';
-import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR } from '../../services/canvass/answerEditRuns.js';
+import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR, removalBusy } from '../../services/canvass/answerEditRuns.js';
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
@@ -420,7 +423,8 @@ router.post('/discard', async (req, res, next) => {
       }
     }
 
-    if (!(await acquireRecutLock(passId, req.user._id))) {
+    // A lock taken to clear the round's knocks says so: unknocks and conversions wait for it (removalBusy).
+    if (!(await acquireRecutLock(passId, req.user._id, null, { knocks: !!clearKnocks }))) {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     locked = true;
@@ -429,6 +433,12 @@ router.post('/discard', async (req, res, next) => {
     // nowhere. Checked AFTER taking the lock, which the edit side reads too, so neither can slip in.
     if (clearKnocks && (await answerEditBusy(req.campaign._id))) {
       return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    }
+    // ...nor while an unknock or a survey conversion — or its undo — is writing: an undo landing between
+    // the snapshot and the deletes was lost from every tool (round 7). The removals read the lock too.
+    if (clearKnocks) {
+      const busy = await removalBusy(req.campaign._id, { exceptRecut: true });
+      if (busy) return res.status(409).json(busy);
     }
 
     // Snapshot FIRST (before any deletion) so a failure here aborts the discard
@@ -511,11 +521,15 @@ router.get('/snapshots', async (req, res, next) => {
   try {
     const { passId } = req.query;
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
-    const snapshots = await TurfSnapshot.find({ campaignId: req.campaign._id, passId })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .select('reason bookCount knockCount clearedKnocks restoredAt createdAt createdBy')
-      .lean();
+    const fields = 'reason bookCount knockCount clearedKnocks restoredAt createdAt createdBy';
+    const [recent, clearing] = await Promise.all([
+      TurfSnapshot.find({ campaignId: req.campaign._id, passId }).sort({ createdAt: -1 }).limit(10).select(fields).lean(),
+      // ...and every snapshot that cleared knocks and isn't restored, however many re-cuts came after: a Door
+      // Outcomes Undo may be waiting on it (round 9: ten newer ones pushed it off the list for good).
+      TurfSnapshot.find({ campaignId: req.campaign._id, passId, clearedKnocks: true, restoredAt: null }).sort({ createdAt: -1 }).select(fields).lean(),
+    ]);
+    const listed = new Set(recent.map((x) => String(x._id)));
+    const snapshots = [...recent, ...clearing.filter((x) => !listed.has(String(x._id)))].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     res.json({ snapshots });
   } catch (err) {
     next(err);
@@ -540,13 +554,47 @@ router.post('/restore-snapshot', async (req, res, next) => {
       return res.status(409).json({ error: 'This pass already has books. Discard them before restoring a snapshot.' });
     }
 
-    if (!(await acquireRecutLock(snapshot.passId, req.user._id))) {
+    if (!(await acquireRecutLock(snapshot.passId, req.user._id, null, { knocks: !!snapshot.clearedKnocks }))) {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     lockPassId = snapshot.passId;
-    // Restoring knocks brings surveys and their earlier versions back; not while an answer edit
-    // runs (the same rule as a clear-knocks discard).
-    if (await answerEditBusy(req.campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+    if (snapshot.clearedKnocks) {
+      // Restoring knocks brings surveys and their earlier versions back; not while an answer edit runs (the
+      // same rule as a clear-knocks discard), nor beside a removal or its undo — a books-only snapshot touches
+      // neither, and waits for nothing (rounds 8 and 9: it waited on a one-person session left open).
+      if (await answerEditBusy(req.campaign._id)) return res.status(409).json(ANSWER_EDIT_BUSY_ERROR);
+      const busy = await removalBusy(req.campaign._id, { exceptRecut: true });
+      if (busy) return res.status(409).json(busy);
+      // Never over knocks recorded since: the old entries would sit beside the new, and a re-surveyed voter's
+      // slot stopped the restore part-way, again on every try (round 9).
+      if (await CanvassActivity.exists({ passId: snapshot.passId })) {
+        return res.status(409).json({
+          error: "This round has knocks recorded since these were cleared, so this snapshot can't be restored over them.",
+          code: 'SNAPSHOT_ROUND_KNOCKED',
+        });
+      }
+      // ...nor once a Door Outcomes change whose work it holds was undone after it: the restore would bring that
+      // change's work back under a change already undone (round 9).
+      const runIds = new Set();
+      const unknockIds = new Set();
+      for (const a of snapshot.activities || []) if (a?.reclassified?.runId) runIds.add(String(a.reclassified.runId));
+      for (const r of snapshot.responses || []) if (r?.deskEntry?.runId) runIds.add(String(r.deskEntry.runId));
+      for (const c of snapshot.responseArchives || []) {
+        if (c?.conversionRunId) runIds.add(String(c.conversionRunId));
+        if (c?.unknockRunId) unknockIds.add(String(c.unknockRunId));
+      }
+      const undoneSince = { revertedAt: { $gt: snapshot.createdAt } };
+      const ids = [...runIds].map((id) => new mongoose.Types.ObjectId(id));
+      const undone =
+        (ids.length && ((await SurveyConversionRun.exists({ _id: { $in: ids }, ...undoneSince })) || (await ReclassifyRun.exists({ _id: { $in: ids }, ...undoneSince })))) ||
+        (unknockIds.size && (await UnknockRun.exists({ _id: { $in: [...unknockIds].map((id) => new mongoose.Types.ObjectId(id)) }, ...undoneSince })));
+      if (undone) {
+        return res.status(409).json({
+          error: "A Door Outcomes change in this round was undone after these knocks were cleared, so restoring this snapshot would bring that change's work back. It can't be restored.",
+          code: 'SNAPSHOT_HOLDS_UNDONE_CHANGE',
+        });
+      }
+    }
 
     const result = await restoreSnapshot({ campaign: req.campaign, snapshot, userId: req.user._id });
     // ADDITIVE `assignmentsDropped`: snapshot rows the roster re-gate refused (a canvasser who

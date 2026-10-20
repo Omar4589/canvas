@@ -30,6 +30,15 @@ export function choiceKeyStages(questionKey) {
   ];
 }
 
+// choiceKeyStages over several questions in ONE pass — the very same stages, matching any of
+// `questionKeys`, so each row keeps its question (`answers.questionKey`) and a caller groups every
+// question's picks at once ({ _id: { qk: '$answers.questionKey', key: '$_answerKeys' } }). One pass per
+// question unwound every survey's answers once per question (code review 2026-10-19, round 3).
+export function choiceKeyStagesForMany(questionKeys) {
+  const [unwind, , addKeys, unwindKeys, notNull] = choiceKeyStages(null);
+  return [unwind, { $match: { 'answers.questionKey': { $in: questionKeys } } }, addKeys, unwindKeys, notNull];
+}
+
 // Merge raw aggregation rows ({ _id: <option id | legacy text>, count, responseIds? })
 // onto the question's CURRENT options (matched by id, then by text). Leftover texts with
 // no current option become retired orphan buckets (id:null). Returns
@@ -191,6 +200,38 @@ export function currentTagVoterSet(rows, entry) {
     const set = byQ.get(row._id.questionKey);
     if (!set) continue;
     if ((row.latestKeys || []).some((k) => set.has(k))) out.add(String(row._id.voterId));
+  }
+  return out;
+}
+
+// currentTagVoterSet for several tags in ONE pass over the rows — the same sets, each tag's exactly
+// what currentTagVoterSet returns for it. Folding tag by tag walked every row once per tag: 16 tags
+// over 450,000 rows was close to a second (code review 2026-10-19, round 3). Returns one Set per entry,
+// in order.
+export function currentTagVoterSets(rows, entries) {
+  // questionKey -> key -> the entries (by position) whose member keys include it
+  const index = new Map();
+  entries.forEach((entry, t) => {
+    for (const [qk, keys] of tagMemberKeySets(entry)) {
+      if (!index.has(qk)) index.set(qk, new Map());
+      const byKey = index.get(qk);
+      for (const k of keys) {
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k).push(t);
+      }
+    }
+  });
+  const out = entries.map(() => new Set());
+  for (const row of rows || []) {
+    const byKey = index.get(row._id.questionKey);
+    if (!byKey) continue;
+    let voter = null;
+    for (const k of row.latestKeys || []) {
+      const hits = byKey.get(k);
+      if (!hits) continue;
+      voter ??= String(row._id.voterId);
+      for (const t of hits) out[t].add(voter);
+    }
   }
   return out;
 }

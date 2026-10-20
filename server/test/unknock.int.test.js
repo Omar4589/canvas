@@ -338,12 +338,23 @@ test('revert after a real re-knock: newer work is never clobbered, and it says s
 });
 
 test('a pending run refuses to revert — its entries were never removed', { skip }, async () => {
+  // One that stopped before removing anything (its request died over ten minutes ago).
   const pending = await UnknockRun.create({
     organizationId: ctx.org._id, campaignId: ctx.campaign._id, status: 'pending', frozenRows: 1,
   });
+  const longAgo = new Date(Date.now() - 11 * 60 * 1000);
+  await UnknockRun.collection.updateOne({ _id: pending._id }, { $set: { createdAt: longAgo, heartbeatAt: longAgo } });
   const r = await call('POST', url('/revert'), { ...asAdmin(), body: { runId: String(pending._id) } });
   assert.equal(r.status, 409);
   assert.equal(r.json.code, 'RUN_NOT_COMPLETED');
+  // One still freezing or removing is busy, never "nothing was removed" (round 4).
+  const fresh = await UnknockRun.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, status: 'pending', frozenRows: 1, heartbeatAt: new Date(),
+  });
+  const busy = await call('POST', url('/revert'), { ...asAdmin(), body: { runId: String(fresh._id) } });
+  assert.equal(busy.status, 409);
+  assert.equal(busy.json.code, 'RUN_BUSY');
+  await UnknockRun.deleteMany({ _id: { $in: [pending._id, fresh._id] } });
 });
 
 test('rows held by an earlier correction run are counted, not silently missing', { skip }, async () => {

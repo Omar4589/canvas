@@ -11,6 +11,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
@@ -279,13 +280,24 @@ const buildReplacedSnapshot = (mineRows) => {
 // until an admin could edit what it wrote — a duplicate delivery after that edit silently put the
 // canvasser's original answers back. So it counts as delivered (`sameDelivery`), and the caller
 // heals the door's derived state in case the first attempt was cut off mid-write.
-function supersededByNewer(data, mineRows, ts, actionType) {
+//
+// "The same action" includes the row an admin has since converted AWAY from it on Door Outcomes (its
+// `reclassified.from`): a duplicate arriving after that conversion re-applied the original outcome
+// over the admin's correction. And a survey is the same delivery only for the same voter — two voters
+// at one door are two submissions even at one millisecond (code review 2026-10-19).
+function supersededByNewer(data, mineRows, ts, actionType, voterId = null) {
   if (!data.wasOfflineSubmission) return null;
   const at = ts.getTime();
   const newer = mineRows.find((r) => r.timestamp && new Date(r.timestamp).getTime() > at);
   if (newer) return { row: newer, sameDelivery: false };
   const same = mineRows.find(
-    (r) => r.timestamp && new Date(r.timestamp).getTime() === at && r.actionType === actionType
+    (r) =>
+      r.timestamp &&
+      new Date(r.timestamp).getTime() === at &&
+      (r.actionType === actionType || r.reclassified?.from === actionType) &&
+      // A row converted away from Surveyed carries no voter; the one it had is voterIdWas (round 2:
+      // its null voter matched every housemate surveyed in the same millisecond).
+      (voterId == null || (r.voterId ?? r.reclassified?.voterIdWas) == null || String(r.voterId ?? r.reclassified?.voterIdWas) === String(voterId))
   );
   return same ? { row: same, sameDelivery: true } : null;
 }
@@ -406,7 +418,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // look like field work.
   const pairRows = await CanvassActivity.find(
     { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-    'actionType via userId timestamp location distanceFromHouseMeters replaced'
+    'actionType via userId voterId timestamp location distanceFromHouseMeters replaced reclassified'
   ).lean();
   const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
 
@@ -837,7 +849,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // there): the pair's replaceable rows give before/after knock state + deleted counts.
     const pairRows = await CanvassActivity.find(
       { householdId: household._id, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-      'actionType via userId timestamp location distanceFromHouseMeters replaced'
+      'actionType via userId voterId timestamp location distanceFromHouseMeters replaced reclassified'
     ).lean();
     const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
 
@@ -845,7 +857,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // below — that upsert runs ahead of this route's deleteMany and is keyed on (voterId, passId)
     // alone, not on user or time, so a stale replay would blindly overwrite a newer submission's
     // answers and clear its editedBy/editedAt audit trail before we ever reached the delete.
-    const superseding = supersededByNewer(data, mineRows, ts, 'survey_submitted');
+    const superseding = supersededByNewer(data, mineRows, ts, 'survey_submitted', voter._id);
     if (superseding) {
       if (superseding.sameDelivery) {
         await healDuplicateDelivery(household, campaign.type, ts, req.user._id);
@@ -941,14 +953,31 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // someone else.
     let surveyInserted = false;
     let surveyResponse = null;
+    const mustArchive = (row) => String(row.userId) !== String(req.user._id) || row.deskEntry;
     const replaceSeenRow = async (seen) => {
-      if (String(seen.userId) !== String(req.user._id) || seen.deskEntry) {
-        // Snapshot-before-write: answers, note, authorship, GPS and any admin edit survive
-        // for the admin surfaces + restore.
-        await archiveOverwrittenResponse(seen, { byUserId: req.user._id });
+      // A compare-and-swap on the row as READ — its updatedAt, which every writer of a survey
+      // stamps. Between the read and this write another writer can change the survey (an answer
+      // edit's Undo putting the original answers back, say), and a blind write replaced a version
+      // this submission never archived (code review 2026-10-19). On a miss: drop the copy made of
+      // the stale read, re-read, go again. No upsert: a row deleted in between falls through to the
+      // insert path below.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        // Snapshot-before-write: answers, note, authorship, GPS and any admin edit survive for the
+        // admin surfaces + restore.
+        const copyId = mustArchive(seen) ? await archiveOverwrittenResponse(seen, { byUserId: req.user._id }) : null;
+        const won = await SurveyResponse.findOneAndUpdate(
+          { ...surveyFilter, _id: seen._id, updatedAt: seen.updatedAt ?? { $exists: false } },
+          surveyUpdate,
+          { new: true }
+        );
+        if (won) return won;
+        if (copyId) await SurveyResponseArchive.deleteOne({ _id: copyId });
+        const fresh = await SurveyResponse.findOne(surveyFilter).lean();
+        if (!fresh) return null;
+        seen = fresh;
       }
-      // No upsert: this must only ever hit the row we just read (deleted-in-between falls
-      // through to the insert path below).
+      // Still racing after five reads: archive the latest and replace it (the old behaviour).
+      if (mustArchive(seen)) await archiveOverwrittenResponse(seen, { byUserId: req.user._id });
       return SurveyResponse.findOneAndUpdate(surveyFilter, surveyUpdate, { new: true });
     };
     const existing = await SurveyResponse.findOne(surveyFilter).lean();

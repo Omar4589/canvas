@@ -321,6 +321,29 @@ test('rule 5 / D7: a blank answer that ends a Script-flow survey drops the rest 
   assert.deepEqual(res.rows.map((r) => [r.questionKey, r.kind]), [['sign', 'cleared'], ['size', 'dropped']]);
 });
 
+test('D7: a re-route plus an unrelated blank does not read as the blank ending the script (code review round 2)', () => {
+  const { questions, errors } = compileRouting([
+    { key: 'support', label: 'Support?', type: 'single_choice', options: [{ id: 'yes', text: 'Yes' }, { id: 'no', text: 'No', goTo: '__end__' }] },
+    { key: 'note', label: 'Anything else?', type: 'text' },
+    { key: 'sign', label: 'Yard sign?', type: 'multiple_choice', options: [{ id: 'sd', text: 'Sign delivered', goTo: 'size' }, { id: 'vr', text: 'Volunteer', goTo: '__end__' }] },
+    { key: 'size', label: 'How big?', type: 'single_choice', options: [{ id: 'big', text: 'Big' }] },
+  ]);
+  assert.deepEqual(errors, []);
+  const stored = [
+    row('support', 'Support?', 'Yes', ['yes']),
+    row('note', 'Anything else?', 'call after 6'),
+    row('sign', 'Yard sign?', ['Sign delivered'], ['sd']),
+    row('size', 'How big?', 'Big', ['big']),
+  ];
+  const plan = validatePlan(questions, [
+    { questionKey: 'note', op: 'clear' },
+    { questionKey: 'sign', op: 'adjust', remove: ['sd'], replaceWith: ['vr'] },
+  ]);
+  const res = applyEditPlan(questions, stored, plan, { flow: 'script' });
+  assert.deepEqual(res.rows.filter((r) => r.kind === 'dropped').map((r) => r.questionKey), ['size'], 'the re-route drops the follow-up');
+  assert.equal(res.endsScript, false, 'the blank on a plain question is not what cut the survey short');
+});
+
 test('rule 6: one person at a time may fill a blank, but never on a question their path hides', () => {
   const qs = yardQuestions();
   const opposed = [support('opposed', 'Opposed')];

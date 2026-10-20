@@ -1954,6 +1954,13 @@ router.get('/responses/:responseId', async (req, res, next) => {
           householdId: idOf(archived.householdId),
           passId: idOf(archived.passId),
           userId: idOf(archived.userId),
+          // The guard's strike rule reads these: without them a removed survey read restorable here
+          // while the restore route refused it (code review 2026-10-19).
+          overwrittenVia: archived.overwrittenVia,
+          overwrittenAt: archived.overwrittenAt,
+          unknockRunId: archived.unknockRunId,
+          conversionRunId: archived.conversionRunId,
+          campaignId: idOf(archived.campaignId),
         },
       ]);
       restore = states.get(String(archived._id));
@@ -2915,6 +2922,12 @@ router.get('/duplicate-surveys', async (req, res, next) => {
               overwritten: '$overwritten',
               overwrittenAt: '$overwrittenAt',
               overwrittenById: '$overwrittenBy',
+              // How it was set aside: a Restore of earlier answers names the admin who restored, never
+              // as the author of a survey (round 3).
+              overwrittenVia: '$overwrittenVia',
+              // Answers an admin typed at the desk, replaced by a canvasser's real survey (kept since
+              // 2026-10-19): the same canvasser can be on both sides, so the screens say "desk".
+              deskEntered: { $cond: [{ $ifNull: ['$deskEntry', false] }, true, false] },
             },
           },
           // LIVE rows only (archived rows contribute null, stripped below), so the two existing
@@ -3017,12 +3030,14 @@ router.get('/duplicate-surveys', async (req, res, next) => {
             },
             passId: r.passId ? String(r.passId) : null,
             roundLabel: pass ? `Pass ${pass.roundNumber} · ${pass.name}` : 'Legacy / no pass',
+            ...(r.deskEntered ? { deskEntered: true } : {}),
             // Archived rows only: responseId is the ARCHIVE id (response-details serves it via
             // the archived fallback; a stale mobile Delete 404s into "Already deleted").
             ...(r.overwritten
               ? {
                   overwritten: true,
                   overwrittenAt: r.overwrittenAt,
+                  overwrittenVia: r.overwrittenVia || null,
                   overwrittenBy: {
                     userId: String(r.overwrittenById),
                     firstName: ow?.firstName || '',

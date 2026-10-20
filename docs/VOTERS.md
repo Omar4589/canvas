@@ -85,7 +85,10 @@ One page with everything about a voter:
 Admins reach a profile from either Voters page, and the two show the same person with one
 difference: opened from the **org-wide** page — or by an admin from the campaign tab — the profile
 lists **every campaign** the person is in, with links, and unions their survey answers and notes
-across those campaigns. Opened from the **campaign Voters tab**, the page is campaign-relative:
+across those campaigns — each survey and earlier-answers card acts on its own campaign's row of the
+person, so its Edit, Delete, Restore and Erase work wherever it came from (code review round 7: they went
+to the open row and answered *not found* for a card from another campaign). Opened from the **campaign
+Voters tab**, the page is campaign-relative:
 household members and "Also in" links stay inside the campaign.
 
 **Team leads** get the campaign profile **read-only**. Everything above is shown — contact details
@@ -226,15 +229,26 @@ statuses above it isn't about what happened; it's a standing request:
   the survey on file is still that same visit's — the usual case — it counts as an edit of its own:
   the survey reads *Edited* by you, and the version it replaces becomes the newest Earlier answers
   card. If a teammate has since re-surveyed the voter, it is the full swap described above instead,
-  so one canvasser's answers never land inside another's survey.
+  so one canvasser's answers never land inside another's survey. The answers a swap puts aside get
+  their own card, badged **Set aside** — *Set aside ‹date› when ‹admin› restored earlier answers* — on
+  the profile, in the response drawer and on the phone's response screen (which also says *Removed
+  by*, *Changed by* or *Set aside by* for an admin's change, never *Overwritten by another
+  canvasser*); never *Overwritten*, which names a canvasser who replaced them.
 - **Erase a preserved response for good** — **Erase…** on any preserved card (Earlier answers,
-  Overwritten or Removed) asks *Erase these earlier answers for good? This can't be undone.* When the
+  Overwritten, Set aside or Removed) asks *Erase these earlier answers for good? This can't be undone.* When the
   card belongs to a Door Outcomes change still in effect, the confirm says what that means: *If that
   unknock is undone later, this door comes back as Surveyed without these answers* (the same for a
   change from Surveyed), or *Undo on that Door Outcomes change won't put this survey back
   afterwards.* **When a voter asks you to remove something** they told a canvasser: edit the survey,
   then erase every earlier card that still holds it — each kept version is a full copy, so the same
-  note can sit on several. (Deleting a *current* response never touches its preserved siblings.)
+  note can sit on several. (Deleting a *current* response never touches its preserved siblings.) While
+  a Door Outcomes undo is putting a card's answers back, **Restore** and **Erase** on it wait (*An undo
+  is putting these answers back right now. Try again in a moment.*, `409 COPY_IN_USE`) — an Erase that
+  lands first stays erased; the undo writes back only copies it has claimed (code review round 5).
+  A refusal on a card scrolls the profile's banner into view, and a card gone by the time you press
+  says plainly that those earlier answers aren't on file any more and reloads the page to show what's
+  kept now (round 6: it read *Preserved response not found*; round 7: the guess it then made — an undo
+  put them back — was said of cards still on file).
 - **Add notes** — free-form notes about the voter (with your name + timestamp), editable/deletable.
 
 ## On mobile (admins and team leads)
@@ -397,7 +411,7 @@ guarded by `requireAuth, orgContext, requireOrgRole('admin')`:
 | `POST/PATCH/DELETE /admin/voters/:voterId/notes[/:noteId]` | Admin voter-note CRUD (the create goes through `createVoterNote`, §B). |
 | `PATCH /admin/voters/:voterId/surveys/:responseId` | Edit `answers`/`note`, optionally with the `version` the editor opened at. Since 2026-10-19 it goes through the answer-edit engine and writer ([SURVEYS.md](SURVEYS.md) §N), no longer `normalizeAndFilterAnswers`: a raw read of the survey; a `version` that no longer matches `editorVersion(live)` → **409 `RESPONSE_CHANGED`** with the fresh `profile` (a request without `version` isn't checked); `planFromAnswers` diffs the posted answers against the stored ones and `applyEditPlan(…, { mode: 'person' })` applies only what changed — untouched rows byte-for-byte, so answers a later condition would hide are kept (recorded history), while an answer **the edit** hides is dropped (owner ruling 2); unknown keys and statement rows are never written (a missing template stores the posted answers as sent). Then `writeOneSurvey` archives the earlier version (`overwrittenVia: 'answer_edit'`, no run id — owner ruling 4; this used to destroy it) and writes by compare-and-swap: changed answers stamp `editedBy/At`, a changed note stamps `noteEditedBy/At`, and an answers-only save carries an older note stamp across (`noteCarry`). A miss is the same 409. A save that changes nothing writes nothing — no copy, no stamp. Then `recomputeSurveyStatus` (only when something was written). |
 | `DELETE /admin/voters/:voterId/surveys/:responseId` | Delete a response; then `recomputeSurveyStatus`. Never touches archived (preserved) siblings. |
-| `POST /admin/voters/:voterId/surveys/:archiveId/restore` | **Lossless swap**: archive the displaced current response (`via:'restore'`), promote the preserved one verbatim (unvalidated; `deskEntry`, `noteEditedBy`, `noteEditedAt` and `answerEditMarks` the displaced row carried are unset when the snapshot has none), consume the archive row (re-restore = 404); resurrects (+1 `surveyCount`) if the current response was deleted meanwhile; then `recomputeSurveyStatus`. **An `answer_edit` copy onto its own survey** (the live row has the copy's `userId` and `submittedAt`) is instead an answer edit through `writeOneSurvey`: the current version is archived as another `answer_edit` copy, the answers are stamped `editedBy` the restoring admin, the note moves only if it differs, the copy is consumed, and a compare-and-swap miss answers **409 `RESPONSE_CHANGED`** with the fresh `profile`. Onto a teammate's re-survey it stays the full swap. **409 `RESTORE_VISIT_NOT_SURVEYED`** (`reason`: `unknocked` \| `converted` \| `not_surveyed`, and a worded `error`) when the archived response's visit no longer reads Surveyed — the `restoreStates` rule in [services/surveys/restoreGuard.js](../server/src/services/surveys/restoreGuard.js), which the profile's `overwrittenSurveys[].restorable` / `restoreBlockedReason` share (an `answer_edit` copy follows the `submit`/`restore` rule). See [SURVEYS.md](SURVEYS.md) §F. |
+| `POST /admin/voters/:voterId/surveys/:archiveId/restore` | **Lossless swap**: archive the displaced current response (`via:'restore'`), promote the preserved one verbatim (unvalidated; `deskEntry`, `noteEditedBy`, `noteEditedAt` and `answerEditMarks` the displaced row carried are unset when the snapshot has none), consume the archive row (re-restore = 404); resurrects (+1 `surveyCount`) if the current response was deleted meanwhile; then `recomputeSurveyStatus`. **An `answer_edit` copy onto its own survey** (the live row has the copy's `userId` and `submittedAt`) is instead an answer edit through `writeOneSurvey`: the current version is archived as another `answer_edit` copy, the answers are stamped `editedBy` the restoring admin, the note moves only if it differs, the copy is consumed, and a compare-and-swap miss answers **409 `RESPONSE_CHANGED`** with the fresh `profile`. Onto a teammate's re-survey it stays the full swap. **409 `RESTORE_VISIT_NOT_SURVEYED`** (`reason`: `unknocked` \| `converted` \| `kept_after_undo` \| `not_surveyed`, and a worded `error`) when the archived response's visit no longer reads Surveyed, or a Door Outcomes removal still holds it (`kept_after_undo`: the removal was undone but its undo couldn't put this visit back — the canvasser recorded it again since, or its round's knocks were cleared since) — the `restoreStates` rule in [services/surveys/restoreGuard.js](../server/src/services/surveys/restoreGuard.js), which the profile's `overwrittenSurveys[].restorable` / `restoreBlockedReason` share (an `answer_edit` copy follows the `submit`/`restore` rule). See [SURVEYS.md](SURVEYS.md) §F. |
 | `DELETE /admin/voters/:voterId/surveys/archive/:archiveId` | Erase a preserved response outright — any producer, the Earlier answers copies included. On screen since 2026-10-19: the web profile's **Erase…**. No counters move — archives were never counted. Erasing a Door Outcomes run's copy ends that survey's undo (the run's next undo reports it erased). |
 
 **Campaign-scoped** (`/admin/campaigns/:campaignId/voters`,
@@ -451,8 +465,10 @@ filter so undo attribution stays clean), `POST /undo` (reverts only rows carryin
   before writing (`overwrittenVia: 'answer_edit'`), and write by compare-and-swap; the web editor
   sends the `version` it opened at, so a stale editor can never overwrite a re-survey or another
   admin's edit — it gets 409 `RESPONSE_CHANGED`. The copies
-  stay until restored, erased, undone, or the campaign or organization is deleted
-  ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 32).
+  stay until restored or erased, put back by their change's Undo (an Undo keeps the copy of a survey
+  changed since), moved into a re-cut round's snapshot, removed with a voter added at the door, or the
+  campaign or organization is deleted ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 32). An
+  Erase is refused while the change that kept the copy can still write (409 `COPY_IN_USE`).
 - **Locked fields:** `stateVoterId`, `householdId`, `organizationId` are never editable here
   (identity/source integrity). Changing a household = a re-import concern, not a profile edit.
 - **Scoping:** the org directory is org-wide (admins only); the campaign tab is one campaign (admins

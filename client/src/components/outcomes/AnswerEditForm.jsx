@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Modal, Select } from '../ui/index.js';
 import { LEAVE, pickKey, pickLabel, canReview, suggestedTakeOut, suggestionLabel, OTHER_OPTION_ID } from '../../lib/answerEditPlan.js';
 
@@ -150,7 +150,7 @@ const QuestionBlock = ({ q, number, total, form, setChoice, questions, suggestio
   );
 };
 
-const AnswerEditForm = ({ dry, answerFilters, form, setForm, mode, setMode, busy, error, onCancel, onReview, onStart, onChooseSurvey }) => {
+const AnswerEditForm = ({ dry, answerFilters, form, setForm, mode, setMode, busy, error, onCancel, onReview, onStart, onChooseSurvey, onCheckAgain }) => {
   const [retiredOpen, setRetiredOpen] = useState(false);
   const questions = dry.questions || [];
   const live = questions.filter((q) => !q.retired);
@@ -160,10 +160,21 @@ const AnswerEditForm = ({ dry, answerFilters, form, setForm, mode, setMode, busy
   const filtered = (answerFilters || []).length > 0;
   const total = dry.responses || 0;
   const reviewable = canReview(questions, form);
+  // Another change already running on this campaign: say so now, not after Review and Confirm.
+  const blocked = dry.blocked?.error || null;
+  // A refusal is shown where it can be seen: the buttons stay pinned while the form scrolls, and words at
+  // the end of a long form read as the button doing nothing (round 7).
+  const errorRef = useRef(null);
+  useEffect(() => {
+    if (!error) return undefined;
+    const frame = requestAnimationFrame(() => errorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(frame);
+  }, [error]);
 
   return (
     <Modal
-      onClose={onCancel}
+      // No closing mid-request: a review or session answering after the form closed would open over nothing.
+      onClose={busy ? undefined : onCancel}
       title="Edit survey answers"
       subtitle={`${total.toLocaleString()} ${total === 1 ? 'survey' : 'surveys'} ${filtered ? 'matched your filter' : ''} at the ${dry.entries.toLocaleString()} ${dry.entries === 1 ? 'entry' : 'entries'} you selected`}
       size="2xl"
@@ -171,13 +182,27 @@ const AnswerEditForm = ({ dry, answerFilters, form, setForm, mode, setMode, busy
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>Cancel</Button>
           {mode === 'queue' ? (
-            <Button onClick={onStart} disabled={busy || !total || dry.limits?.tooManyForQueue}>{busy ? 'Starting…' : 'Start'}</Button>
+            <Button onClick={onStart} disabled={busy || !!blocked || !total || dry.limits?.tooManyForQueue}>{busy ? 'Starting…' : 'Start'}</Button>
           ) : (
-            <Button onClick={onReview} disabled={busy || !reviewable || dry.limits?.tooMany}>{busy ? 'Checking…' : 'Review changes'}</Button>
+            <Button onClick={onReview} disabled={busy || !!blocked || !reviewable || dry.limits?.tooMany}>{busy ? 'Checking…' : 'Review changes'}</Button>
           )}
         </>
       }
     >
+      {blocked && (
+        // Taken when the form opened, so it's asked again on request — the other change may be done.
+        <p className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+          {blocked}{' '}
+          {onCheckAgain && (
+            <Button variant="secondary" size="sm" className="ml-1" disabled={busy} onClick={onCheckAgain}>
+              Check again
+            </Button>
+          )}
+        </p>
+      )}
+      {/* Nothing here changes while a review or a session is on its way: the review prices the form
+          as it was sent, and Confirm writes exactly that (round 3). */}
+      <fieldset disabled={busy} className="min-w-0">
       <div className="mb-3 text-sm text-fg">
         <div className="text-fg-muted">
           {dry.template?.name || 'Survey'}
@@ -259,8 +284,9 @@ const AnswerEditForm = ({ dry, answerFilters, form, setForm, mode, setMode, busy
           )}
         </>
       )}
+      </fieldset>
 
-      {error && <p className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p ref={errorRef} className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>}
     </Modal>
   );
 };

@@ -314,10 +314,13 @@ test('at the caps — 25,000 entries, 50,000 surveys: dry run and create under 1
     assert.ok(timings[label] < GATE_MS, `${label}: ${timings[label]} ms — over the ${GATE_MS} ms gate`);
   }
 
-  // The job, reported: every frozen survey, on the worker.
-  const run0 = await AnswerEditRun.findById(runId).lean();
+  // The job, reported: every frozen survey, on the worker. The dead queue parked the run with its job
+  // id forgotten (a late delivery must never claim it), so a fresh id stands in for a Pick up that
+  // reached the queue — the answerEdit.int.test.js pattern.
+  const jobId = `scale-apply-${runId}`;
+  await AnswerEditRun.updateOne({ _id: runId }, { $set: { queueJobId: jobId, status: 'pending', error: null } });
   const out = await timed('apply job, 50,000 surveys', () =>
-    processAnswerEditJob({ id: run0.queueJobId, name: 'apply', data: { runId }, opts: { attempts: 3 }, attemptsMade: 0 })
+    processAnswerEditJob({ id: jobId, name: 'apply', data: { runId }, opts: { attempts: 3 }, attemptsMade: 0 })
   );
   report(t, 'apply job, 50,000 surveys');
   assert.strictEqual(out.completed, true);
@@ -347,4 +350,106 @@ test('at the caps — 25,000 entries, 50,000 surveys: dry run and create under 1
   assert.strictEqual(undone.undo.status, 'done');
   assert.strictEqual(undone.undo.summary.putBack, 37_500);
   assert.deepStrictEqual(await resultsFor('yard_sign'), before, 'every pick back where it was');
+});
+
+// The heavy shape (code review round 3): a branching first answer whose Clear drops eight tagged
+// follow-ups on every survey, 16 tags across them, at the 50,000-survey cap — so the review prices 9
+// questions and every tag. It took 28 s before round 3 (the router cuts a request at 30 s); the gate
+// is the same 10 s, with every tag priced, and what lands is what the review said.
+test('heavy review — a Clear that drops 8 tagged follow-ups, 16 tags, 50,000 surveys: priced under 10 s with every tag; preview == landed', { skip }, async (t) => {
+  const FOLLOW = 8;
+  const TAGS = 16;
+  const rule = { logic: 'any', rules: [{ questionKey: 'q0', op: 'any_of', optionIds: ['yes'] }] };
+  const questions = [
+    { key: 'q0', label: 'Support?', type: 'single_choice', order: 0, options: [{ id: 'yes', text: 'Yes', tag: 'Tag0', order: 0 }, { id: 'no', text: 'No', order: 1 }] },
+    ...Array.from({ length: FOLLOW }, (_, f) => ({
+      key: `f${f}`, label: `Follow ${f}?`, type: 'multiple_choice', order: f + 1, visibleIf: rule,
+      options: Array.from({ length: 4 }, (_, k) => ({ id: `f${f}o${k}`, text: `F${f} option ${k}`, tag: `Tag${(f * 4 + k) % TAGS}`, order: k })),
+    })),
+  ];
+  const { org, cara } = ctx;
+  const template = await SurveyTemplate.create({ organizationId: org._id, name: 'Deep Survey', version: 1, isActive: true, questions });
+  const campaign = await Campaign.create({
+    organizationId: org._id, name: 'Deep C', type: 'survey', state: 'FL', isActive: true, timeZone: 'America/New_York', surveyTemplateId: template._id,
+  });
+  await CampaignAssignment.create({ organizationId: org._id, campaignId: campaign._id, userId: cara._id });
+  const effort = await Effort.create({ organizationId: org._id, campaignId: campaign._id, name: 'Main' });
+  const pass = await Pass.create({ organizationId: org._id, campaignId: campaign._id, effortId: effort._id, roundNumber: 1, name: 'Round 1', status: 'active' });
+  const at0 = Date.now() - 2 * 24 * 3600_000;
+  for (let s0 = 0; s0 < 50_000; s0 += BATCH) {
+    const homes = [];
+    const voters = [];
+    const surveys = [];
+    const acts = [];
+    for (let i = s0; i < s0 + BATCH; i += 1) {
+      if (i % 2 === 0) {
+        homes.push({
+          _id: new mongoose.Types.ObjectId(), organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
+          addressLine1: `${i + 1} Elm St`, city: 'Town', state: 'FL', zipCode: '33540', normalizedAddress: `ELM${i + 1}`,
+          location: { type: 'Point', coordinates: [-82, 28] }, isActive: true, status: 'surveyed', createdAt: new Date(), updatedAt: new Date(),
+        });
+      }
+      const householdId = homes[homes.length - 1]._id;
+      const voterId = new mongoose.Types.ObjectId();
+      const at = new Date(at0 + i * 1000);
+      voters.push({ _id: voterId, organizationId: org._id, campaignId: campaign._id, householdId, stateVoterId: `ELM-${i}`, firstName: 'V', lastName: `${i}`, fullName: `Elm Voter ${i}`, createdAt: at, updatedAt: at });
+      const answers = [{ questionKey: 'q0', questionLabel: 'Support?', answer: 'Yes', optionIds: ['yes'], otherText: null }];
+      for (let f = 0; f < FOLLOW; f += 1) {
+        const ids = [`f${f}o${i % 4}`, `f${f}o${(i + 1) % 4}`];
+        answers.push({ questionKey: `f${f}`, questionLabel: `Follow ${f}?`, answer: ids.map((id) => `F${f} option ${id.slice(-1)}`), optionIds: ids, otherText: null });
+      }
+      surveys.push({
+        organizationId: org._id, campaignId: campaign._id, voterId, householdId, userId: cara._id, surveyTemplateId: template._id, surveyTemplateVersion: 1,
+        answers, note: null, location: { lat: 28, lng: -82, accuracy: 6 }, distanceFromHouseMeters: 3, submittedAt: at, syncedAt: at, wasOfflineSubmission: false,
+        passId: pass._id, turfId: null, effortId: effort._id, coordinatorId: null, editedBy: null, editedAt: null, createdAt: at, updatedAt: at,
+      });
+      if (i % 2 === 1) {
+        acts.push({
+          organizationId: org._id, campaignId: campaign._id, householdId, voterId, userId: cara._id, actionType: 'survey_submitted', note: null,
+          location: { lat: 28, lng: -82, accuracy: 6 }, distanceFromHouseMeters: 3, replaced: null, timestamp: at, wasOfflineSubmission: false, via: null,
+          passId: pass._id, effortId: effort._id, createdAt: at, updatedAt: at,
+        });
+      }
+    }
+    await Household.collection.insertMany(homes, { ordered: false });
+    await Voter.collection.insertMany(voters, { ordered: false });
+    await SurveyResponse.collection.insertMany(surveys, { ordered: false });
+    await CanvassActivity.collection.insertMany(acts, { ordered: false });
+  }
+
+  const deepEdits = `/admin/campaigns/${campaign._id}/answer-edits`;
+  const scope = { userId: String(cara._id), outcomes: ['survey_submitted'] };
+  const plan = [{ questionKey: 'q0', op: 'clear' }];
+  const dry = await timed('heavy priced dry run', () => call('POST', deepEdits, { dryRun: true, scope, plan }));
+  assert.strictEqual(dry.status, 200, JSON.stringify(dry.json).slice(0, 500));
+  const price = dry.json.price;
+  assert.strictEqual(price.surveysChanged, 50_000);
+  assert.strictEqual(price.tagsUnavailable, false, 'every tag priced, inside the time budget');
+  assert.strictEqual(price.tags.length, TAGS);
+  assert.strictEqual(price.results.length, 1 + FOLLOW);
+  report(t, 'heavy priced dry run');
+  assert.ok(timings['heavy priced dry run'] < GATE_MS, `heavy priced dry run ${timings['heavy priced dry run']} ms — over the ${GATE_MS} ms gate`);
+
+  const created = await call('POST', deepEdits, { scope, plan, dryRun: false, digest: dry.json.digest, asOf: dry.json.asOf, templateVersion: dry.json.template.version });
+  assert.strictEqual(created.status, 503, JSON.stringify(created.json));
+  const runId = created.json.run.id;
+  const jobId = `scale-heavy-${runId}`;
+  await AnswerEditRun.updateOne({ _id: runId }, { $set: { queueJobId: jobId, status: 'pending', error: null } });
+  await timed('heavy apply job, 50,000 surveys', () =>
+    processAnswerEditJob({ id: jobId, name: 'apply', data: { runId }, opts: { attempts: 3 }, attemptsMade: 0 })
+  );
+  report(t, 'heavy apply job, 50,000 surveys');
+
+  const landed = await call('GET', `/admin/reports/survey-results?campaignId=${campaign._id}&surveyTemplateId=${template._id}`);
+  assert.strictEqual(landed.status, 200, JSON.stringify(landed.json));
+  for (const tag of price.tags) {
+    const row = landed.json.tags.find((x) => x.tag === tag.tag);
+    assert.strictEqual(row?.voterCount || 0, tag.identified.after, `${tag.tag} identified: preview == landed`);
+    assert.strictEqual(row?.currentVoterCount || 0, tag.current.after, `${tag.tag} current: preview == landed`);
+  }
+  for (const r of price.results) {
+    const q = landed.json.questions.find((x) => x.key === r.questionKey);
+    const counts = Object.fromEntries((q?.options || []).map((o) => [o.id || o.option, o.count]));
+    for (const o of r.options) assert.strictEqual(counts[o.id] || 0, o.after, `${r.questionKey}/${o.id}: preview == landed`);
+  }
 });

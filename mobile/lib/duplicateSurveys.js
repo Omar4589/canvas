@@ -61,7 +61,36 @@ export const deletableResponses = (dupe) => (dupe?.responses || []).filter((r) =
 // The meta line an archived response row shows under who/when/round.
 export const overwriteLineFor = (r) => {
   const w = `${r?.overwrittenBy?.firstName || ''} ${r?.overwrittenBy?.lastName || ''}`.trim();
+  // Set aside by a Restore of earlier answers: the name is the admin who restored, not the author of
+  // a survey (round 3: a desk entry read "replaced by Ada's survey").
+  if (r?.overwrittenVia === 'restore') {
+    return `${r?.deskEntered ? 'Entered at the desk' : 'Overwritten'} · set aside when ${w || 'an admin'} restored earlier answers`;
+  }
+  // Answers an admin typed at the desk, replaced by the canvasser's own survey: the same name can
+  // be on both sides, so the line says where the replaced answers came from.
+  if (r?.deskEntered) return `Entered at the desk · replaced by ${w || 'the canvasser'}'s survey`;
   return `Overwritten · replaced by ${w || 'another canvasser'}`;
+};
+
+// The archived row on a response's detail screen: who set these answers aside, and how. Only a
+// canvasser's own newer survey is an overwrite — an admin changing the door's outcome, unknocking the
+// visit, editing the answers or restoring earlier ones in their place each say so (code review round
+// 4: all of them read "Overwritten by … another canvasser").
+export const archivedRowFor = (r, when = '') => {
+  const name = `${r?.overwrittenBy?.firstName || ''} ${r?.overwrittenBy?.lastName || ''}`.trim();
+  const sub = (why) => [when, why].filter(Boolean).join(' · ');
+  switch (r?.overwrittenVia) {
+    case 'outcome_convert':
+      return { label: 'Removed by', value: name || 'an admin', sub: sub("the door's outcome was changed"), badge: 'Removed' };
+    case 'unknock':
+      return { label: 'Removed by', value: name || 'an admin', sub: sub('the visit was unknocked'), badge: 'Removed' };
+    case 'answer_edit':
+      return { label: 'Changed by', value: name || 'an admin', sub: sub('the answers from before the change'), badge: 'Earlier answers' };
+    case 'restore':
+      return { label: 'Set aside by', value: name || 'an admin', sub: sub('earlier answers were restored in their place'), badge: 'Set aside' };
+    default:
+      return { label: 'Overwritten by', value: name || 'another canvasser', sub: sub(null), badge: 'Overwritten' };
+  }
 };
 
 // The restore confirm. NOT destructive: the swap is lossless in both directions, and the copy

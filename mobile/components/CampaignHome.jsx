@@ -40,6 +40,7 @@ import { rateFromPct, makeRateColors, tierWord } from '../lib/rates';
 import { metricHelp } from '../lib/metricHelp';
 import { outcomeInUse } from '../lib/outcomeToggles';
 import { daysLeftLabel } from '../lib/goalPace';
+import { foldPasses, foldLabel, morePasses, quietCount } from '../lib/byPassFold';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -48,6 +49,10 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 // with a RowBar accessory. Two things it got wrong are fixed by the move — its label was
 // numberOfLines={1} so long answers truncated, and its bar had a 2% minimum width, which
 // painted a visible sliver on a genuine 0% (reading as "a few" when the truth is "none").
+
+// By pass rows shown before the rest fold into a "more passes" row. The web table shows ten; a phone
+// row is two lines tall, so six keeps the card about a screen high (lib/byPassFold.js has the rule).
+const PASS_CAP = 6;
 
 // One campaign's admin screen. Two hosts:
 //   - pushed: the hidden admin tab app/(app)/admin/campaign/[campaignId].jsx, opened from a campaign
@@ -229,7 +234,12 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
   // Activity and Top canvassers both feed the single <MetricSheet> at the bottom.
   const [sheet, setSheet] = useState(null);
   const rateColors = makeRateColors(colors);
-  const loadingActivity = rollupQ.isLoading;
+  // Dashes, never zeros, whenever there are no numbers to show — while the first request is in
+  // flight AND after it fails: isLoading turns false on a failure, which used to print a
+  // real-looking "0" under Knocks above real By pass rows. A refresh that fails with numbers already
+  // on screen keeps them (the By pass footer then says they may be behind).
+  const loadingActivity = !rollupQ.data;
+  const activityFailed = !rollupQ.data && !!rollupQ.error;
 
   // Door goal. ALL-TIME and campaign-wide even though it rides the same rollup row as the
   // range-scoped numbers above (server/src/services/reports/goalProgress.js) — which is why it
@@ -368,6 +378,51 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
     }
     return opts;
   }, [rounds]);
+  // The By pass card's fold (lib/byPassFold.js — the web table's rule, mirrored): passes with nothing
+  // in the range fold into the card's last row, and past PASS_CAP the passes with numbers fold into a
+  // "more passes" row carrying their sum. That row is its own InsetRow (an action row can't carry a
+  // number), so the rule is told the sum costs a row. Starts folded and stays as left while this
+  // screen stays mounted, like the range and filters; each campaign gets a fresh screen.
+  const [passesOpen, setPassesOpen] = useState(false);
+  const passFold = useMemo(() => foldPasses(rounds, PASS_CAP, { sumOwnRow: true }), [rounds]);
+  // The fold's words: with a crew picked, a quiet pass may have been worked by another crew; an
+  // archived campaign's all-time view doesn't say "yet".
+  const passWords = { preset: range?.preset, crew: !!coordinatorId, archived: !!isArchived };
+  // Show fewer removes every row the admin scrolled past to reach it, and a ScrollView keeps its
+  // offset, which would leave them looking at a section further down. So folding back from below the
+  // By pass header scrolls to it — the y of the section wrapper in the scroll content plus the
+  // header's y inside it — and folding back with the header still on screen doesn't move the page.
+  const scrollRef = useRef(null);
+  const scrollY = useRef(0);
+  const byPassY = useRef({ wrapper: 0, header: 0 });
+  const togglePasses = () => {
+    const headerY = byPassY.current.wrapper + byPassY.current.header;
+    if (passesOpen && scrollY.current > headerY) {
+      scrollRef.current?.scrollTo({ y: headerY, animated: false });
+    }
+    setPassesOpen((v) => !v);
+  };
+  // The card's footer, a sentence at a time. The first says what a row is: it names the summed row
+  // while that shows, and is left out when the fold row is all the card holds. The second is the
+  // "adds up" claim, a claim about two queries (these rows and the rollup's knocks above): it waits
+  // for the headline to load, and after a failed refresh of either it says they may be from different
+  // moments instead of a sum that might not hold.
+  const onlyFoldRow = passFold.foldable && !passesOpen && !passFold.open.length;
+  const summedRow = !!passFold.hiddenSum && !passesOpen;
+  const passFooter = [
+    onlyFoldRow
+      ? null
+      : summedRow
+        ? `Each row is one walk-list pass, except “${morePasses(passFold)}”, which sums the rest.`
+        : 'Each row is one walk-list pass.',
+    roundsQ.error || rollupQ.error
+      ? "Couldn't refresh just now, so these may be behind the numbers above."
+      : !rollupQ.data || onlyFoldRow
+        ? null
+        : `${summedRow ? 'Together they add' : 'Passes add'} up to the ${rangeKnocks.toLocaleString()} above — a home knocked again in a later pass counts again.`,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   // Top-5 canvassers normalized to the shared CanvasserCard shape: rename Doors/
   // Surveys/Lit, compute doors-per-hour from first→last, join the coordinator.
@@ -576,6 +631,11 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
       </View>
 
       <ScrollView
+        ref={scrollRef}
+        onScroll={(e) => {
+          scrollY.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
         refreshControl={
           <RefreshControl
@@ -713,7 +773,12 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
           ]}
         />
 
-        <View style={{ paddingHorizontal: spacing.lg }}>
+        <View
+          style={{ paddingHorizontal: spacing.lg }}
+          onLayout={(e) => {
+            byPassY.current.wrapper = e.nativeEvent.layout.y;
+          }}
+        >
           {/* Activity in range. The hero is Knocks: the rate's own operands are the survey-door
               count and the knock count, so leading with the denominator lets the fraction read
               straight down the group. Loading renders the group with em-dashes rather than
@@ -734,6 +799,9 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
                 />
               )
             )}
+            {activityFailed ? (
+              <InsetNoteRow key="activity-error">Couldn't load activity — {rollupQ.error.message}</InsetNoteRow>
+            ) : null}
             <InsetActionRow
               label="How these are counted"
               onPress={() => setSheet({ title: 'How these are counted', items: activityMetrics })}
@@ -746,7 +814,16 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
             20% or better is on target.
           </GroupFooter>
 
-          {/* By pass (range) — one row per walk list × pass from the billing pipeline */}
+          {/* By pass (range) — one row per walk list × pass from the billing pipeline. Passes with
+              nothing in the range fold into the card's last row, and past the first PASS_CAP the
+              passes with numbers fold into one summed row (passFold above); what is on the card
+              still adds up to the Knocks headline. The zero-height marker gives Show fewer its
+              scroll target without changing the layout. */}
+          <View
+            onLayout={(e) => {
+              byPassY.current.header = e.nativeEvent.layout.y;
+            }}
+          />
           <SectionHeader title="By pass" subtitle="Knocks per walk-list pass in range" />
           {/* Every state is a one-row group, so the section keeps its silhouette instead of
               becoming a differently-shaped card the moment the network hiccups. */}
@@ -773,37 +850,67 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
                   tabular number per row — a stacked percentage there broke the digit column
                   and put a rate where the eye is scanning door counts. */}
               <InsetGroup>
-                {rounds.map((r, i) => {
-                  const rate = rateFromPct(r.connectionRate);
-                  return (
-                    <InsetRow
-                      key={r.passId || `legacy-${i}`}
-                      label={r.effortName || r.roundLabel}
-                      sub={
-                        (r.effortName ? `${r.roundLabel} · ` : '') +
-                        (notTargetInUse ? `${(r.notTargetKnocks || 0).toLocaleString()} not target · ` : '')
-                      }
-                      subAccent={`${isLitDrop ? 'Lit' : 'Conn'} ${r.connectionRate ?? 0}%`}
-                      accentColor={rate ? rateColors[rate.level].deep : null}
-                      value={(r.knocks || 0).toLocaleString()}
-                    />
-                  );
-                })}
+                {(passFold.foldable && passesOpen ? [...passFold.worked, ...passFold.quiet] : passFold.open).map(
+                  (r, i) => {
+                    const rate = rateFromPct(r.connectionRate);
+                    const label = r.effortName || r.roundLabel;
+                    const sub =
+                      (r.effortName ? `${r.roundLabel} · ` : '') +
+                      // Forms in range but no knocks (the response ledger runs on submittedAt): the
+                      // shared rule keeps the row open, and without this it would read 0 with
+                      // nothing to say why.
+                      (!r.knocks && r.surveysTaken > 0
+                        ? `${r.surveysTaken.toLocaleString()} ${r.surveysTaken === 1 ? 'survey' : 'surveys'} taken · `
+                        : '') +
+                      (notTargetInUse ? `${(r.notTargetKnocks || 0).toLocaleString()} not target · ` : '');
+                    const subAccent = `${isLitDrop ? 'Lit' : 'Conn'} ${r.connectionRate ?? 0}%`;
+                    const value = (r.knocks || 0).toLocaleString();
+                    // Archiving a campaign leaves its passes as they were, but none of them is live.
+                    const active = !isArchived && r.status === 'active';
+                    return (
+                      <InsetRow
+                        key={r.passId || `legacy-${i}`}
+                        label={label}
+                        // The walk list's active pass — the web table's green dot.
+                        badge={active ? { text: 'Active', bg: colors.successBg, fg: colors.successFg } : null}
+                        sub={sub}
+                        subAccent={subAccent}
+                        accentColor={rate ? rateColors[rate.level].deep : null}
+                        value={value}
+                        accessibilityLabel={[label, active ? 'Active' : null, value, sub.replace(/ · $/, ''), subAccent]
+                          .filter(Boolean)
+                          .join(', ')}
+                      />
+                    );
+                  }
+                )}
+                {/* The passes past the cap as one row carrying their sum — a number you read, so an
+                    inert InsetRow; revealing them is the action row's job. Its rate is rebuilt from
+                    the summed counts, never averaged (byPassFold.sumPasses). */}
+                {passFold.hiddenSum && !passesOpen ? (
+                  <InsetRow
+                    key="more-passes"
+                    label={morePasses(passFold)}
+                    sub={[
+                      notTargetInUse ? `${passFold.hiddenSum.notTargetKnocks.toLocaleString()} not target` : null,
+                      `${isLitDrop ? 'Lit' : 'Conn'} ${passFold.hiddenSum.connectionRate}%`,
+                      passFold.quiet.length ? `plus ${quietCount(passFold, passWords)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    value={passFold.hiddenSum.knocks.toLocaleString()}
+                  />
+                ) : null}
+                {passFold.foldable ? (
+                  <InsetActionRow
+                    key="fold-passes"
+                    label={passesOpen ? 'Show fewer' : foldLabel(passFold, passWords)}
+                    onPress={togglePasses}
+                  />
+                ) : null}
               </InsetGroup>
-              {/* "Adds up" is a claim about two queries (these rows and the rollup's knocks above);
-                  if either refresh just failed, they may be from different moments, so say that
-                  instead of a sum that might not hold. */}
-              {roundsQ.error || rollupQ.error ? (
-                <GroupFooter>
-                  Each row is one walk-list pass. Couldn't refresh just now, so these may be behind the
-                  numbers above.
-                </GroupFooter>
-              ) : (
-                <GroupFooter>
-                  Each row is one walk-list pass. Passes add up to the {rangeKnocks.toLocaleString()} above
-                  — a home knocked again in a later pass counts again.
-                </GroupFooter>
-              )}
+              {/* passFooter (above): what a row is, then the "adds up" claim only when it holds. */}
+              {passFooter ? <GroupFooter>{passFooter}</GroupFooter> : null}
             </>
           )}
 

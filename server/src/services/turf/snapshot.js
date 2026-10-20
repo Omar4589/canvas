@@ -9,6 +9,7 @@ import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../canvass/status.js';
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { departedMemberIdSet } from '../campaignRoster.js';
+import { fencesForSlots, withFences } from '../canvass/answerEditWriter.js';
 
 // Capture a pass's current book set (+ assignments, + optionally the knock
 // history about to be cleared) into a TurfSnapshot for undo. Call this BEFORE
@@ -156,7 +157,12 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
   if (snap.clearedKnocks) {
     // Raw inserts preserve the original _ids and every field exactly.
     if (snap.activities?.length) await CanvassActivity.collection.insertMany(snap.activities);
-    if (snap.responses?.length) await SurveyResponse.collection.insertMany(snap.responses);
+    if (snap.responses?.length) {
+      // Each survey keeps the fences of answer-edit runs whose undo reached it since the snapshot
+      // was taken: a delivery of such a run still running must not land on the survey restored here.
+      const fences = await fencesForSlots(snap.campaignId, snap.responses);
+      await SurveyResponse.collection.insertMany(snap.responses.map((r) => withFences(r, fences)));
+    }
     if (snap.responseArchives?.length)
       await SurveyResponseArchive.collection.insertMany(snap.responseArchives);
     const hhIds = [...new Set((snap.activities || []).map((a) => String(a.householdId)))];

@@ -6,7 +6,7 @@ kind: page
 order: 100
 sourceDoc: CAMPAIGNS.md
 summary: What the campaign dashboard shows and when to use it.
-tags: dashboard, home, metrics, not a target voter
+tags: dashboard, home, metrics, not a target voter, by pass, passes
 ---
 
 The campaign **Home** is your dashboard — the first screen when you open a campaign. If you're a team lead who runs just one active campaign, it's also where you land when you sign in. It does two jobs depending on where the campaign is in its life.
@@ -43,9 +43,11 @@ Three of the numbers also carry a small grey word telling you the unit: **Survey
 
 Below the activity numbers, the **By pass** section lists one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range — knocks, survey doors (or lit drops), surveys taken, the connection rate, and **New homes reached** — with a TOTAL row that always matches the Knocks number above it. On a survey campaign that has had **Not a target voter** turned on, it also has a **Not a target** column (and so does its CSV).
 
+**A long list folds.** If your campaign has lots of walk lists — one per precinct, say — the passes with nothing in the selected range fold into one line just above the TOTAL row, like *Show 44 passes with no knocks today (14 active)*. The number in brackets is how many of those are their walk list's active pass — on Election Day, how many live precincts nobody has knocked yet. The first ten passes with numbers show, and the rest are summed into that same line, so what you see still adds up to TOTAL. Folding never drops a number: a pass is tucked away by itself only when every number on its row is 0, a single pass left over simply shows, and the table never folds away just one row. Click **Show …** in that line to list every pass — the ones with numbers first — and **Show fewer** to fold them back. With a crew picked, the line says *no knocks from this crew*: every pass is still listed, and another crew may have worked it. A green dot marks each walk list's active pass (an archived campaign shows none). Click **Walk list** or any number column's heading to sort, and the passes you see follow the sort; numbers sort biggest first, so click **Conn %** twice to bring your weakest passes to the top. In the mobile app the By pass card folds the same way, with six in place of ten (and only when folding saves room on the screen) and an **Active** badge instead of the dot. It doesn't sort, so its six are the first by walk-list name, and its rows add up to the Knocks number above it.
+
 **New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. With a crew selected, "first-ever" is still judged campaign-wide — a home counts for the crew only if that crew made its very first knock, so a door another crew reached first is never a "new home" here. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
 
-**Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. See [Understanding the numbers](metrics) for how each column is counted.
+**Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. It always has every pass, including any folded away on screen. See [Understanding the numbers](metrics) for how each column is counted.
 
 ## Reading the survey results
 

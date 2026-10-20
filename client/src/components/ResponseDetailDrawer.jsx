@@ -21,7 +21,9 @@ const fullName = (u, fallback) => (u ? `${u.firstName || ''} ${u.lastName || ''}
 // that would bring them back instead of pointing at a Restore that would refuse.
 const restoreHintFor = (r) =>
   r.restorable === false
-    ? r.restoreBlockedReason === 'unknocked'
+    ? r.restoreBlockedReason === 'kept_after_undo'
+      ? 'Removed on Door Outcomes; that change was undone, but this visit had been recorded again first, so they can’t go back.'
+      : r.restoreBlockedReason === 'unknocked'
       ? 'Undo the unknock on Door Outcomes to bring them back.'
       : r.restoreBlockedReason === 'converted'
         ? 'Undo that change on Door Outcomes to bring them back.'
@@ -231,6 +233,14 @@ export default function ResponseDetailDrawer({ responseId, campaignId, tz, onClo
                 {fullName(r.overwrittenBy, 'an admin')} changed it on{' '}
                 {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}
                 {r.fromDoorOutcomes ? ' on Door Outcomes' : ''}. Kept on the voter record. {restoreHintFor(r)}
+              </div>
+            ) : r.archived && r.overwrittenVia === 'restore' ? (
+              /* Set aside when an ADMIN restored earlier answers in its place (round 4) — not an
+                 overwrite by a canvasser. */
+              <div className="rounded border border-border bg-sunken p-2 text-xs text-fg-muted">
+                <span className="font-semibold">Set aside</span> — these answers were set aside when{' '}
+                {fullName(r.overwrittenBy, 'an admin')} restored earlier answers on{' '}
+                {formatInTz(r.overwrittenAt, tz, TIME_OPTS, true)}. Preserved here. {restoreHintFor(r)}
               </div>
             ) : r.archived && r.overwrittenVia === 'unknock' ? (
               /* Removed by an ADMIN striking the visit itself (Unknock) — same reason as above. */

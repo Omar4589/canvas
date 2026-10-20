@@ -58,14 +58,39 @@ const unknockRunSchema = new mongoose.Schema(
       // Same idea on the answer side: a later field submission refilled the {voterId, passId}
       // slot, so the archived answer stays archived.
       responsesNotRestored: { type: Number, default: 0 },
+      // Of those, the ones its undo handed to a later unknock that struck the same visits since (that
+      // run's Undo writes them back) — kept here so a retry of the undo still counts them (round 7).
+      responsesHanded: { type: Number, default: 0 },
     },
 
+    // When the strike finished (null on a run from before 2026-10-19 — Restore then reads the
+    // chunks' frozenAt).
+    completedAt: { type: Date, default: null },
     revertedAt: { type: Date, default: null },
     // Set while a revert runs (it runs inline, and this model has no running state), cleared when
     // it ends. An answer edit reads it to stay out of the way (one change at a time per campaign,
     // services/canvass/answerEditRuns.js); a revert that died with its request stops counting
     // after ten minutes.
     revertingAt: { type: Date, default: null },
+    // Stamped just before the run removes anything (its answers first, then its entries): a run that
+    // stopped after that point removed some or all of them though it still reads `pending` — Restore
+    // treats its strike as standing, and its undo is allowed once the strike has stopped
+    // (restoreGuard.js; routes/admin/campaigns.js).
+    deletingAt: { type: Date, default: null },
+    // The strike's heartbeat, beaten between every step it takes: a pending run that beat within ten
+    // minutes is still removing (no Undo yet), one silent longer stopped part-way (unknockLease.js,
+    // code review round 4). Each beat is a compare-and-swap on no undo having begun, so an undo of a
+    // stopped strike that comes back to life stops it before its next removal.
+    heartbeatAt: { type: Date, default: null },
+    // When an undo of this run first began — set by the undo's claim and never cleared (a failed undo
+    // clears `revertingAt`, so a strike that woke after its lease then completed over the partial
+    // undo; code review round 5). The strike's beats and its completion require it absent.
+    undoBegunAt: { type: Date, default: null },
+    // When a strike that FAILED in process (a database error, not a dyno restart) stopped: it reads
+    // stopped at once, and Restore's hold on its visits ends here — `heartbeatAt` stays its last real
+    // beat (code review round 6: round 5 set the heartbeat to the epoch instead, and the hold ended in
+    // 1970, so struck answers came free and a Restore put them over a real later survey).
+    stoppedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

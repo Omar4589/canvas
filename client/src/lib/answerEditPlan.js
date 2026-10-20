@@ -110,7 +110,9 @@ export const reviewSentences = (price) => {
           : ` ${n(q.multi)} had more than one.`
         : '';
       if (q.removed.length > 1 || q.multi) parts.push(`That's ${surveys(q.surveys)}:${shared}`);
-      const keep = q.surveys - q.leftBlank;
+      // Surveys that kept at least one of their ORIGINAL picks (the server counts them): with Replace
+      // them with, "not left blank" includes surveys that only got the replacement.
+      const keep = q.keptAny ?? q.surveys - q.leftBlank;
       const kept = (q.kept || []).map((k) => k.label);
       const blankLine = q.leftBlank ? `${n(q.leftBlank)} ${q.leftBlank === 1 ? 'is' : 'are'} left with no answer, as if skipped` : '';
       const keepLine = keep > 0 ? `${n(keep)} keep${keep === 1 ? 's' : ''} ${kept.length ? andList(kept) : 'their other picks'}` : '';
@@ -157,7 +159,9 @@ export const leftAsTheyAre = (dry) => {
   if (dry?.matchedNotSelected) {
     out.push({
       count: dry.matchedNotSelected,
-      text: 'more surveys matched at visits whose latest survey falls after your dates — widen the dates to include them',
+      // Two causes share this count: a visit whose latest survey falls after your dates (widen them),
+      // and one an earlier change holds (see that line) — so the words name both.
+      text: 'more matching surveys at visits this selection doesn’t include — their latest survey falls after your dates, or an earlier change holds them',
     });
   }
   if (dry?.heldByRuns) {
@@ -179,15 +183,13 @@ export const picksLine = (run) => {
   return parts.join(' · ');
 };
 
-const WAIT_MS = 10 * 60 * 1000;
-
 /**
  * The run row's state and its buttons — Part 1's table (Design §4). One owner, so the list row and
  * the live card can't disagree. Returns { key, label, tone, actions } with actions from
  * 'startAgain' | 'details' | 'undo' | 'undoAgain' | 'retryUndo' | 'pickUp' | 'undoLanded' |
  * 'resume' | 'stopHere'.
  */
-export const runState = (run, now = Date.now()) => {
+export const runState = (run) => {
   if (!run) return null;
   const c = run.counts || {};
   const undo = run.undo || {};
@@ -197,6 +199,8 @@ export const runState = (run, now = Date.now()) => {
   }
   if (undo.status === 'pending' || undo.status === 'running') {
     if (undo.status === 'pending' && undo.waitingForWorker) return { key: 'undoWaiting', label: 'Undo waiting for the worker', tone: 'neutral', actions: ['startAgainUndo'] };
+    // Running with no heartbeat for ten minutes: its job is gone. The server's flag.
+    if (undo.status === 'running' && undo.stalled) return { key: 'undoStalled', label: 'Undo stopped responding', tone: 'danger', actions: ['startAgainUndo'] };
     return { key: 'undoing', label: 'Undoing…', tone: 'neutral', actions: [] };
   }
   if (undo.status === 'failed') return { key: 'undoStopped', label: 'Undo stopped', tone: 'danger', actions: ['retryUndo'] };
@@ -212,18 +216,39 @@ export const runState = (run, now = Date.now()) => {
     return { key: 'undone', label: `Undone · ${n(s.putBack)} put back`, tone: 'neutral', actions: ['details'] };
   }
   if (run.status === 'pending') {
-    return run.waitingForWorker || now - new Date(run.createdAt).getTime() > WAIT_MS
+    // The server's flag, measured from the last time the run was queued — never createdAt, which
+    // would offer Start again right after Pick up on an older run, and the server would refuse it.
+    return run.waitingForWorker
       ? { key: 'waitingWorker', label: 'Waiting for the worker', tone: 'neutral', actions: ['startAgain'] }
       : { key: 'waiting', label: 'Waiting to start', tone: 'neutral', actions: [] };
   }
   if (run.status === 'running') {
+    if (run.stalled) return { key: 'stalled', label: 'Stopped responding', tone: 'danger', actions: ['startAgain'] };
     return { key: 'running', label: `Working · ${n(run.progress?.done)} of ${n(run.progress?.total)} surveys`, tone: 'neutral', actions: [] };
   }
   if (run.status === 'failed') {
+    // Nothing of this change is on file (the server read its copies — never the counts, which a
+    // batch cut off part-way can leave short, round 3): nothing to undo, and Pick up is what runs it.
+    // Never taken by the worker (its queue timed out) reads Didn't start; a start that stopped before
+    // changing any survey says so. A run the first build stopped may land copies with no start
+    // time, so only the server's flag decides — absent, Undo what landed stays offered.
+    // Started: its start time, or — the first build never set one — surveys it went through (round 4).
+    if (run.nothingOnFile) {
+      return run.startedAt || (run.progress?.done || 0) > 0
+        ? { key: 'stoppedEmpty', label: 'Stopped before changing any survey', tone: 'danger', actions: ['pickUp'] }
+        : { key: 'notStarted', label: 'Didn’t start', tone: 'danger', actions: ['pickUp'] };
+    }
     return { key: 'stopped', label: `Stopped · ${n(c.surveysChanged)} of ${n(c.surveysTargeted)} changed`, tone: 'danger', actions: ['details', 'pickUp', 'undoLanded'] };
   }
+  // A finished change's counts are final, so one that changed nothing has nothing to undo (a
+  // stopped one keeps Undo what landed above: a batch cut off mid-way can land surveys it never counted).
+  if (!c.surveysChanged) return { key: 'nothing', label: 'No survey changed', tone: 'neutral', actions: ['details'] };
   return { key: 'done', label: `${surveys(c.surveysChanged)} changed`, tone: 'success', actions: ['details', 'undo'] };
 };
+
+/** The list row's short badge for a run that needs attention (the card shows runState's label). */
+export const attentionBadge = (state) =>
+  ({ undoStopped: 'Undo stopped', undoStalled: 'Undo stopped', notStarted: 'Didn’t start', stalled: 'Stopped responding' })[state?.key] || 'Stopped';
 
 /** An empty pick-several reads "—" wherever an answer is printed, never as a blank. */
 export const answerText = (a) => {

@@ -49,6 +49,7 @@ async function main() {
       `  FbTime: ${dry.fbtime.links} link(s), ${dry.fbtime.shiftsKept} shift(s) to de-pair, ` +
         `${dry.fbtime.shiftsReassigned} to re-resolve, ${dry.fbtime.events} event(s)`
     );
+    console.log(`  Door Outcomes run lines naming a purged canvasser: ${dry.namesScrubbed} to rewrite`);
     console.log('');
     console.log('Dry run — re-run with --apply. (The worker dyno does this on a schedule regardless.)');
     await mongoose.disconnect();
@@ -58,6 +59,7 @@ async function main() {
   const res = await purgeDeletedIdentities({ apply: true });
   console.log('');
   console.log(`Purged ${res.purged} identit${res.purged === 1 ? 'y' : 'ies'}. Their past field work no longer directly identifies them.`);
+  if (res.namesScrubbed) console.log(`Took a purged canvasser's name off ${res.namesScrubbed} Door Outcomes run line(s).`);
   if (res.failed) {
     console.log(`*** ${res.failed} record(s) failed and stay due — see the errors above. The health check shows the failure, and goes red if no clean run follows within 48 hours. ***`);
   }

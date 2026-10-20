@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -25,8 +25,8 @@ import AnswerEditForm from '../components/outcomes/AnswerEditForm.jsx';
 import AnswerEditReviewModal from '../components/outcomes/AnswerEditReviewModal.jsx';
 import AnswerEditWalkthrough from '../components/outcomes/AnswerEditWalkthrough.jsx';
 import AnswerEditRunCard, { ACTION_LABEL as EDIT_ACTION_LABEL } from '../components/outcomes/AnswerEditRunCard.jsx';
-import { useAnswerEditRunPoll } from '../lib/useAnswerEditRunPoll.js';
-import { planFromForm, runState, picksLine } from '../lib/answerEditPlan.js';
+import { useAnswerEditRunPoll, gaveUp } from '../lib/useAnswerEditRunPoll.js';
+import { planFromForm, runState, picksLine, attentionBadge, isAnswerEditSettled } from '../lib/answerEditPlan.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { isOutcomeEnabled, outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
@@ -138,7 +138,15 @@ export default function DoorOutcomesPage() {
   const [target, setTarget] = useState('not_home');
   const [preview, setPreview] = useState(null);
   const [unknockPreview, setUnknockPreview] = useState(null);
+  // The page banner, brought into view when it says something new: a refusal of a button far down the
+  // page (a run's Undo, Stop here) landed thousands of pixels above it and looked like nothing (round 5).
+  const errorRef = useRef(null);
   const [error, setError] = useState(null);
+  useEffect(() => {
+    if (!error) return undefined;
+    const frame = requestAnimationFrame(() => errorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(frame);
+  }, [error]);
   // Surveyed direction state. `composing` holds the resolved template while the admin picks
   // answers; `activeRun` is the run being watched (bulk) or walked (queue).
   const [composing, setComposing] = useState(null);
@@ -159,6 +167,15 @@ export default function DoorOutcomesPage() {
   const [editWalk, setEditWalk] = useState(null);
 
   const { campaign: current, campaignsQ, resolving, notFound } = useCurrentCampaign(campaignId);
+  // One mounted page serves every campaign (the switcher re-renders it with a new id), and a
+  // mutation's callbacks are the LATEST render's — an onSuccess reading `campaignId` gets the campaign
+  // switched TO. So every write carries the campaign it was started on (`vars.campaignId`) and the
+  // body it priced, its mutationFn reads only those, and a reply touches this page's state only while
+  // the page is still on that campaign (`stillOn`; the CampaignSurveyBuilderPage idiom — round 3: a
+  // late reply cleared the next campaign's selection, and a confirm wrote whatever was selected by then).
+  const campaignRef = useRef(campaignId);
+  campaignRef.current = campaignId;
+  const stillOn = (id) => String(campaignRef.current) === String(id);
   const tz = current?.timeZone || orgTz;
   // Which off-by-default outcomes Doorline has released — the server's rule for a "Change to"
   // target needs it, and only the campaigns response carries it.
@@ -355,15 +372,39 @@ export default function DoorOutcomesPage() {
     setComposing(null);
     setError(null);
     setEditDry(null);
+    setEditForm({});
+    setEditError(null);
     setEditPreview(null);
     setEditWalk(null);
     setActiveEditRunId(null);
+    // The other cards, the walkthroughs and the Details modal belong to the campaign we're leaving too.
+    setActiveRunId(null);
+    setWalking(null);
+    setQueueTemplate(null);
+    setDetailRun(null);
   }
-  const afterWrite = () => {
-    setPreview(null);
-    resetSelection();
-    qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', campaignId] });
-    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'reclassify'] });
+  // After a write lands: this page's state resets only if it is still on the campaign the write was
+  // for; that campaign's lists are refetched either way.
+  const afterWrite = (cid = campaignId) => {
+    if (stillOn(cid)) {
+      setPreview(null);
+      resetSelection();
+    }
+    refetchAfterWrite(cid);
+  };
+  // After this page's own Undo, Revert or Stop here lands: what it moved is refetched, and a review priced
+  // before it finished closes with a word — the selection stays (round 7: afterWrite closed a review opened
+  // while the request ran, with no word, and cleared the selection). `at` is the server's finish time.
+  // With no server time (a failure whose reply carries no run) every open review closes, and nothing is
+  // remembered as the finish — remembered, it refused every review after it until a reload (round 8).
+  const afterOwnUndo = (cid, at) => {
+    refetchAfterWrite(cid);
+    if (stillOn(cid)) closeStaleReviews(at || Infinity, { remember: !!at });
+  };
+  // The lists and numbers a write moved, refetched — and nothing on the page touched.
+  const refetchAfterWrite = (cid = campaignId) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', cid] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', cid, 'reclassify'] });
     // Door statuses and every derived number moved — let the rest of the console refetch.
     qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
     qc.invalidateQueries({ queryKey: ['reports'] });
@@ -399,13 +440,17 @@ export default function DoorOutcomesPage() {
     enabled: !!campaignId && isOrgAdmin,
   });
   const convRuns = convRunsQ.data?.runs || [];
-  const { run: liveRun } = useConversionRunPoll({ campaignId, runId: activeRunId });
+  const { run: liveRun, stopped: convPollStopped } = useConversionRunPoll({ campaignId, runId: activeRunId });
 
-  // A finished (or failed) run invalidates the same things a reclassify does.
+  // A finished (or failed) run refetches the same things a reclassify does — and only that: the admin
+  // may be in the middle of their next change by now, and resetting the page closed its preview and
+  // cleared its selection (code review round 4).
   const prevStatus = liveRun?.status;
   useEffect(() => {
-    if (prevStatus === 'completed' || prevStatus === 'failed' || prevStatus === 'reverted') afterWrite();
-    // afterWrite only invalidates caches; re-running it on an unchanged status is the bug to avoid.
+    if (!['completed', 'failed', 'reverted', 'revert_failed'].includes(prevStatus)) return;
+    refetchAfterWrite();
+    closeStaleReviews(finishedAt(liveRun));
+    // Re-running it on an unchanged status is the bug to avoid.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevStatus]);
 
@@ -419,50 +464,53 @@ export default function DoorOutcomesPage() {
   // Step 1 of the Surveyed direction: resolve the ONE template these doors use. A selection
   // spanning two surveys is refused here rather than written under whichever came first.
   const loadTemplate = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions/template`, {
+    mutationFn: ({ campaignId: cid, body: b }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions/template`, {
         method: 'POST',
-        body: selectionBody(),
+        body: b,
       }),
-    onSuccess: (d) => {
+    onSuccess: (d, v) => {
+      if (!stillOn(v.campaignId)) return;
       // Carry the resolved DOOR count with the template: the modal's subtitle says "doors", and
       // selectionCount is an ENTRY count — 12 entries can be 9 doors (two rounds at one address),
       // and the dry-run modal that follows uses the server's real doors, so the two disagreed.
-      setComposing({ ...d.template, doorCount: d.doors });
+      // `sent` is the selection the answers are composed for; the review and the write use it.
+      setComposing({ ...d.template, doorCount: d.doors, sent: v });
       setVals({});
       setOtherTexts({});
     },
-    onError: (e) => setError(e.message),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
+  // The review prices a body; its Confirm sends that same body (`preview.sent`), never the selection
+  // as it stands at the click.
   const convDryRun = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
-        method: 'POST',
-        body: convBody({ dryRun: true, ...(composing ? { answers: composedAnswers() } : {}) }),
-      }),
-    onSuccess: setPreview,
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, body: b }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions`, { method: 'POST', body: { ...b, dryRun: true } }),
+    onSuccess: (d, v) => stillOn(v.campaignId) && openReview(d, () => setPreview({ ...d, sent: v })),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
+  // The forward review's body: the selection the answers were composed for, with those answers.
+  const composedConvBody = () => ({ ...composing.sent.body, direction: 'to_survey', to: SURVEYED, answers: composedAnswers() });
 
   const convRun = useMutation({
-    mutationFn: (mode) =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
-        method: 'POST',
-        body: convBody({ mode, ...(composing && mode === 'bulk' ? { answers: composedAnswers() } : {}) }),
-      }),
-    onSuccess: (d, mode) => {
+    mutationFn: ({ campaignId: cid, body: b, mode }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions`, { method: 'POST', body: { ...b, mode } }),
+    onSuccess: (d, v) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
+      if (!stillOn(v.campaignId)) return;
       setPreview(null);
       setComposing(null);
       resetSelection();
-      if (mode === 'queue') setWalking(d.run);
-      else setActiveRunId(d.run.id);
-      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+      setActiveRunId(d.run.id);
     },
-    onError: (e) => {
-      // A 503 still created the run — surface the message and let them Resume from the card.
+    onError: (e, v) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
+      if (!stillOn(v.campaignId)) return;
+      // A 503 still created the run — surface the message, and show its card to pick it up from.
       setError(e.message);
       setPreview(null);
+      if (e.data?.run?.id) followConvRun(e.data.run);
     },
   });
 
@@ -471,72 +519,93 @@ export default function DoorOutcomesPage() {
   // /template call here would also be subtly wrong: it resolves from the SELECTION, while the run
   // freezes its own, and the two must never diverge mid-session.
   const startQueue = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions`, {
-        method: 'POST',
-        body: convBody({ mode: 'queue' }),
-      }),
-    onSuccess: (d) => {
+    mutationFn: ({ campaignId: cid, body: b }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions`, { method: 'POST', body: b }),
+    onSuccess: (d, v) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
+      // Opened after a campaign switch: it waits in that campaign's list as Unfinished.
+      if (!stillOn(v.campaignId)) return;
       setQueueTemplate(d.run.template || null);
       setWalking(d.run);
       resetSelection();
-      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
     },
-    onError: (e) => setError(e.message),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
   const closeQueue = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/close`, { method: 'POST' }),
-    onSuccess: (d) => {
-      setActiveRunId(d.run.id);
-      afterWrite();
-      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    mutationFn: ({ campaignId: cid, runId }) => api(`/admin/campaigns/${cid}/survey-conversions/${runId}/close`, { method: 'POST' }),
+    onSuccess: (d, v) => {
+      followConvRun(d.run);
+      afterOwnUndo(v.campaignId, finishedAt(d.run));
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
     },
-    onError: (e) => setError(e.message),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
   // Re-enter an unfinished door-by-door session. The GET carries both halves — the remaining doors
   // (derived from what's already saved, so it is right no matter how the session ended) and the
   // survey the run froze at creation.
   const resumeQueue = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}`),
-    onSuccess: ({ run }) => {
+    mutationFn: ({ campaignId: cid, runId }) => api(`/admin/campaigns/${cid}/survey-conversions/${runId}`),
+    onSuccess: ({ run }, v) => {
+      if (!stillOn(v.campaignId)) return;
       if (!run.doorsRemaining?.length) {
         // Nothing left — it was finished but never closed. Close it rather than opening an empty
         // walkthrough the admin would have to dismiss.
-        return closeQueue.mutate(run.id);
+        return closeQueue.mutate({ campaignId: v.campaignId, runId: run.id });
       }
       setQueueTemplate(run.template || null);
       setWalking(run);
     },
-    onError: (e) => setError(e.message),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
+  // A card watching a run must see what an action on THAT run just did: setting the same id again
+  // changes no query key, and its cached copy is settled, so polling would never restart. Seeding
+  // the cache with the response's run (pending, reverting…) restarts it.
+  // A reply that lands after the admin switched campaigns is the other campaign's: never shown here.
+  // A poll already in flight is cancelled first: answering after the seed, it painted the run as it
+  // was BEFORE the action — settled, so the card stopped polling on a stale state (round 3).
+  const followConvRun = async (run) => {
+    if (!run?.id || (run.campaignId && run.campaignId !== String(campaignId))) return;
+    const key = ['survey-conversion', campaignId, run.id];
+    await qc.cancelQueries({ queryKey: key });
+    qc.setQueryData(key, { run });
+    setActiveRunId(run.id);
+  };
+  // Watch a run whose latest state only the server has (a door-by-door session just closed or left):
+  // its cached copy is the settled `open` one, so it is asked for again.
+  const watchConvRun = (runId) => {
+    if (!runId) return;
+    qc.invalidateQueries({ queryKey: ['survey-conversion', campaignId, runId] });
+    setActiveRunId(runId);
+  };
   const convRevert = useMutation({
-    mutationFn: (runId) =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/revert`, { method: 'POST' }),
-    onSuccess: (d) => {
-      setActiveRunId(d.run?.id || null);
-      afterWrite();
-      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+    mutationFn: ({ campaignId: cid, runId }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions/${runId}/revert`, { method: 'POST' }),
+    onSuccess: (d, v) => {
+      if (d.run) followConvRun(d.run);
+      else if (stillOn(v.campaignId)) setActiveRunId(null);
+      afterOwnUndo(v.campaignId, finishedAt(d.run));
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
     },
-    onError: (e) => {
-      setError(e.message);
+    onError: (e, v) => {
+      if (stillOn(v.campaignId)) setError(e.message);
       // An undo that stopped part-way changed some doors: show its card (Retry undo) and the
       // fresh list rather than the state from before the click.
-      if (e.data?.run?.id) setActiveRunId(e.data.run.id);
+      if (e.data?.run?.id) followConvRun(e.data.run);
       if (e.code === 'REVERT_FAILED') {
-        afterWrite();
-        qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'] });
+        afterOwnUndo(v.campaignId, finishedAt(e.data?.run));
+        qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
       }
     },
   });
 
   const convResume = useMutation({
-    mutationFn: (runId) =>
-      api(`/admin/campaigns/${campaignId}/survey-conversions/${runId}/resume`, { method: 'POST' }),
-    onSuccess: (d) => setActiveRunId(d.run.id),
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, runId }) =>
+      api(`/admin/campaigns/${cid}/survey-conversions/${runId}/resume`, { method: 'POST' }),
+    onSuccess: (d) => followConvRun(d.run),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
   // ---- Edit answers… -------------------------------------------------------------------------
@@ -548,11 +617,26 @@ export default function DoorOutcomesPage() {
     enabled: !!campaignId && isOrgAdmin,
   });
   const editRuns = editRunsQ.data?.runs || [];
-  const { run: liveEditRun, settled: editSettled } = useAnswerEditRunPoll({ campaignId, runId: activeEditRunId });
-  const afterEdit = () => {
-    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'answer-edits'] });
-    qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', campaignId] });
+  const { run: liveEditRun, settled: editSettled, stopped: editPollStopped } = useAnswerEditRunPoll({ campaignId, runId: activeEditRunId });
+  const afterEdit = (cid = campaignId) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', cid, 'answer-edits'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', cid] });
     qc.invalidateQueries({ queryKey: ['reports'] });
+  };
+  // The live card watching a run must see what an action on THAT run just did: setting the same id
+  // again changes no query key, and its cached copy is settled, so polling would never restart.
+  // Seeding the cache with the response's run (pending, undoing…) restarts it.
+  // A reply that lands after a campaign switch is the other campaign's, never shown here. A reply
+  // that is already settled is asked for once more: its undo names come with their words only on
+  // a read, never on an action's reply.
+  // A poll already in flight is cancelled first (followConvRun).
+  const followEditRun = async (run) => {
+    if (!run?.id || (run.campaignId && run.campaignId !== String(campaignId))) return;
+    const key = ['answer-edit', campaignId, run.id];
+    await qc.cancelQueries({ queryKey: key });
+    qc.setQueryData(key, { run });
+    if (isAnswerEditSettled(run)) qc.invalidateQueries({ queryKey: key });
+    setActiveEditRunId(run.id);
   };
   const editSettledKey = liveEditRun ? `${liveEditRun.id}:${liveEditRun.status}:${liveEditRun.undo?.status}:${editSettled}` : null;
   useEffect(() => {
@@ -561,110 +645,156 @@ export default function DoorOutcomesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editSettledKey]);
 
-  const editBody = (extra = {}) => ({ ...selectionBody(), ...extra });
+  // The form's selection is the one it opened on (`editDry.sent`): switching its survey, Check again,
+  // the review, the write and Start all send that, never the selection as it stands at the click —
+  // and the write sends the plan its review priced (`editPreview.sent.plan`), never the form re-read
+  // (round 3: a plan changed while Review was loading was priced as one thing and written as another).
+  const editsUrl = (cid) => `/admin/campaigns/${cid}/answer-edits`;
+  // Opens the form, switches its survey, or (keepForm) refreshes its counts after a stale review.
   const editOpen = useMutation({
-    mutationFn: (surveyTemplateId) =>
-      api(`/admin/campaigns/${campaignId}/answer-edits`, {
+    mutationFn: ({ campaignId: cid, selection, surveyTemplateId = null }) =>
+      api(editsUrl(cid), {
         method: 'POST',
-        body: editBody({ dryRun: true, ...(surveyTemplateId ? { surveyTemplateId } : {}) }),
+        body: { ...selection, dryRun: true, ...(surveyTemplateId ? { surveyTemplateId } : {}) },
       }),
-    onSuccess: (d) => {
-      setEditDry(d);
-      setEditForm({});
-      setEditError(null);
+    // The form's words go first, so the same refusal pressed again is brought into view again (round 8).
+    onMutate: (v) => {
+      if (stillOn(v.campaignId) && editDry) setEditError(null);
     },
-    onError: (e) => setError(e.message),
+    onSuccess: (d, { campaignId: cid, selection, keepForm = false, notice = null }) => {
+      if (!stillOn(cid)) return;
+      setEditDry({ ...d, sent: { campaignId: cid, selection } });
+      if (!keepForm) setEditForm({});
+      setEditError(notice);
+    },
+    // With the form already open the page banner is behind it — the form shows the error.
+    onError: (e, v) => stillOn(v.campaignId) && (editDry ? setEditError(e.message) : setError(e.message)),
   });
+  const openEdit = () => editOpen.mutate({ campaignId, selection: selectionBody() });
+  const reopenEdit = (extra = {}) => editOpen.mutate({ ...editDry.sent, surveyTemplateId: editDry.template?.id, ...extra });
   const editReview = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/answer-edits`, {
-        method: 'POST',
-        body: editBody({ dryRun: true, surveyTemplateId: editDry.template.id, plan: planFromForm(editDry.questions, editForm) }),
-      }),
-    onSuccess: (d) => {
-      setEditError(null);
-      setEditPreview(d);
+    mutationFn: ({ campaignId: cid, selection, surveyTemplateId, plan }) =>
+      api(editsUrl(cid), { method: 'POST', body: { ...selection, dryRun: true, surveyTemplateId, plan } }),
+    onMutate: (v) => {
+      if (stillOn(v.campaignId)) setEditError(null);
     },
-    onError: (e) => setEditError(e.message),
+    // Only onto the form it was priced from: away and back to this campaign while it loaded, the
+    // form is gone (or a new one is open), and the review opened over a reset page (round 4).
+    onSuccess: (d, v) => {
+      if (!stillOn(v.campaignId) || editDry?.sent?.selection !== v.selection) return;
+      setEditError(null);
+      setEditPreview({ ...d, sent: v });
+    },
+    onError: (e, v) => stillOn(v.campaignId) && editDry?.sent?.selection === v.selection && setEditError(e.message),
   });
   const editCreate = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/answer-edits`, {
-        method: 'POST',
-        body: editBody({
-          surveyTemplateId: editPreview.template.id,
-          plan: planFromForm(editDry.questions, editForm),
-          digest: editPreview.digest,
-          asOf: editPreview.asOf,
-          templateVersion: editPreview.template.version,
-        }),
-      }),
-    onSuccess: (d) => {
+    mutationFn: ({ campaignId: cid, selection, surveyTemplateId, plan, digest, asOf, templateVersion }) =>
+      api(editsUrl(cid), { method: 'POST', body: { ...selection, surveyTemplateId, plan, digest, asOf, templateVersion } }),
+    onSuccess: (d, v) => {
+      afterEdit(v.campaignId);
+      if (!stillOn(v.campaignId)) return;
       setEditPreview(null);
       setEditDry(null);
       resetSelection();
-      setActiveEditRunId(d.run.id);
-      afterEdit();
+      followEditRun(d.run);
     },
-    onError: (e) => {
-      // A 503 still created the run: its card offers Pick up. A stale review writes nothing.
+    onError: (e, v) => {
+      afterEdit(v.campaignId);
+      if (!stillOn(v.campaignId)) return;
       setEditPreview(null);
       if (e.data?.run?.id) {
+        // A 503 still created the run: its card offers Pick up, and the page banner says why.
         setEditDry(null);
-        setActiveEditRunId(e.data.run.id);
-        afterEdit();
+        followEditRun(e.data.run);
+        setError(e.message);
+        return;
       }
-      setError(e.message);
+      // Nothing was written (a stale review, another change running, a plan error): back on the
+      // form with the server's words — the page banner would sit behind it. With the form gone, the
+      // banner (round 4: a refusal there said nothing at all).
+      if (editDry) setEditError(e.message);
+      else setError(e.message);
     },
   });
+  const confirmEdit = () =>
+    editCreate.mutate({
+      ...editPreview.sent,
+      surveyTemplateId: editPreview.template.id,
+      digest: editPreview.digest,
+      asOf: editPreview.asOf,
+      templateVersion: editPreview.template.version,
+    });
   const editStartQueue = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/answer-edits`, {
-        method: 'POST',
-        body: editBody({ mode: 'queue', surveyTemplateId: editDry.template.id, digest: editDry.digest, asOf: editDry.asOf, templateVersion: editDry.template.version }),
-      }),
-    onSuccess: (d) => {
+    mutationFn: ({ campaignId: cid, selection, surveyTemplateId, digest, asOf, templateVersion }) =>
+      api(editsUrl(cid), { method: 'POST', body: { ...selection, mode: 'queue', surveyTemplateId, digest, asOf, templateVersion } }),
+    onSuccess: (d, v) => {
+      afterEdit(v.campaignId);
+      // Opened after a campaign switch: it waits in that campaign's list as Unfinished.
+      if (!stillOn(v.campaignId)) return;
       setEditDry(null);
       resetSelection();
       setEditWalk({ run: d.run, current: d.current });
-      afterEdit();
     },
-    onError: (e) => setEditError(e.message),
+    onError: (e, v) => {
+      if (!stillOn(v.campaignId)) return;
+      // A session has no review step to go back to, so a stale count is refreshed in place.
+      if (e.code === 'REVIEW_STALE' && editDry) {
+        reopenEdit({ keepForm: true, notice: 'Something changed since you opened this — the counts are refreshed. Press Start again.' });
+        return;
+      }
+      setEditError(e.message);
+    },
   });
+  const startEditQueue = () =>
+    editStartQueue.mutate({
+      ...editDry.sent,
+      surveyTemplateId: editDry.template.id,
+      digest: editDry.digest,
+      asOf: editDry.asOf,
+      templateVersion: editDry.template.version,
+    });
   const editResumeQueue = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}`),
-    onSuccess: ({ run: r }) => setEditWalk({ run: r, current: r.current || null }),
-    onError: (e) => setError(e.message),
-  });
-  const editClose = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/close`, { method: 'POST' }),
-    onSuccess: (d) => {
-      setActiveEditRunId(d.run.id);
-      afterEdit();
+    mutationFn: ({ campaignId: cid, runId }) => api(`${editsUrl(cid)}/${runId}`),
+    onSuccess: ({ run: r }, v) => {
+      if (!stillOn(v.campaignId)) return;
+      // Stopped meanwhile (another tab, another admin): show it as it is, never an empty session.
+      if (r.status !== 'open') {
+        followEditRun(r);
+        afterEdit();
+        setError('That session was already stopped.');
+        return;
+      }
+      setEditWalk({ run: r, current: r.current || null });
     },
-    onError: (e) => setError(e.message),
+    onError: (e, v) => {
+      afterEdit(v.campaignId);
+      if (stillOn(v.campaignId)) setError(e.message);
+    },
+  });
+  // Close, Pick up and Undo answer with the run they changed.
+  const editRunActionDone = (d, v) => {
+    followEditRun(d.run);
+    afterEdit(v.campaignId);
+  };
+  const editRunActionFailed = (e, v) => {
+    if (e.data?.run?.id) followEditRun(e.data.run);
+    if (stillOn(v.campaignId)) setError(e.message);
+    afterEdit(v.campaignId);
+  };
+  const editClose = useMutation({
+    mutationFn: ({ campaignId: cid, runId }) => api(`${editsUrl(cid)}/${runId}/close`, { method: 'POST' }),
+    onSuccess: editRunActionDone,
+    onError: editRunActionFailed,
   });
   const editPickUp = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/resume`, { method: 'POST' }),
-    onSuccess: (d) => {
-      setActiveEditRunId(d.run.id);
-      afterEdit();
-    },
-    onError: (e) => {
-      if (e.data?.run?.id) setActiveEditRunId(e.data.run.id);
-      setError(e.message);
-    },
+    mutationFn: ({ campaignId: cid, runId }) => api(`${editsUrl(cid)}/${runId}/resume`, { method: 'POST' }),
+    onSuccess: editRunActionDone,
+    onError: editRunActionFailed,
   });
   const editUndo = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/answer-edits/${runId}/revert`, { method: 'POST' }),
-    onSuccess: (d) => {
-      setActiveEditRunId(d.run.id);
-      afterEdit();
-    },
-    onError: (e) => {
-      if (e.data?.run?.id) setActiveEditRunId(e.data.run.id);
-      setError(e.message);
-    },
+    mutationFn: ({ campaignId: cid, runId }) => api(`${editsUrl(cid)}/${runId}/revert`, { method: 'POST' }),
+    onSuccess: editRunActionDone,
+    onError: editRunActionFailed,
   });
   const editBusy =
     editOpen.isPending || editReview.isPending || editCreate.isPending || editStartQueue.isPending || editResumeQueue.isPending ||
@@ -675,30 +805,35 @@ export default function DoorOutcomesPage() {
     if (action === 'details') {
       setDetailRun({ type: 'answerEdit', id: r.id, title: `Answers edited · ${r.planSummary || ''}`, by: r.by, createdAt: r.createdAt, samples: r.samples, samplesTotal: r.samplesTotal });
     } else if (action === 'undo' || action === 'undoAgain' || action === 'retryUndo' || action === 'undoLanded' || action === 'startAgainUndo') {
-      editUndo.mutate(r.id);
+      editUndo.mutate({ campaignId, runId: r.id });
     } else if (action === 'pickUp' || action === 'startAgain') {
-      editPickUp.mutate(r.id);
+      editPickUp.mutate({ campaignId, runId: r.id });
     } else if (action === 'resume') {
-      editResumeQueue.mutate(r.id);
+      editResumeQueue.mutate({ campaignId, runId: r.id });
     } else if (action === 'stopHere') {
-      editClose.mutate(r.id);
+      editClose.mutate({ campaignId, runId: r.id });
     }
   };
 
+  // Priced, then written with the body that was priced (`preview.sent`).
   const dryRun = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/reclassify-outcomes`, { method: 'POST', body: body({ dryRun: true }) }),
-    onSuccess: setPreview,
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, body: b }) => api(`/admin/campaigns/${cid}/reclassify-outcomes`, { method: 'POST', body: { ...b, dryRun: true } }),
+    onSuccess: (d, v) => stillOn(v.campaignId) && openReview(d, () => setPreview({ ...d, sent: v })),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
   const run = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/reclassify-outcomes`, { method: 'POST', body: body() }),
-    onSuccess: afterWrite,
-    onError: (e) => { setError(e.message); setPreview(null); },
+    mutationFn: ({ campaignId: cid, body: b }) => api(`/admin/campaigns/${cid}/reclassify-outcomes`, { method: 'POST', body: b }),
+    onSuccess: (d, v) => afterWrite(v.campaignId),
+    onError: (e, v) => {
+      if (!stillOn(v.campaignId)) return;
+      setError(e.message);
+      setPreview(null);
+    },
   });
   const revert = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/reclassify-outcomes/revert`, { method: 'POST', body: { runId } }),
-    onSuccess: afterWrite,
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, runId }) => api(`/admin/campaigns/${cid}/reclassify-outcomes/revert`, { method: 'POST', body: { runId } }),
+    onSuccess: (d, v) => afterOwnUndo(v.campaignId, Date.parse(d?.revertedAt || '') || 0),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
   // UNKNOCK — the fourth act, and the only one that REMOVES entries. No target outcome, its own
@@ -707,29 +842,141 @@ export default function DoorOutcomesPage() {
     queryKey: ['admin', 'campaigns', campaignId, 'unknock'],
     queryFn: () => api(`/admin/campaigns/${campaignId}/unknock-entries`),
     enabled: !!campaignId && isOrgAdmin,
+    // An unknock still removing or being undone (a large one runs for a while, can outlast its request,
+    // and another admin's shows here too) is watched until it lands, so its Undo — or Undone — appears
+    // without a reload; a refused read (the campaign gone, the admin demoted) stops the watch (round 5).
+    refetchInterval: (q) => (!gaveUp(q) && (q.state.data?.runs || []).some((r) => r.removing || r.undoing) ? 3000 : false),
   });
   const unknockRuns = unknockRunsQ.data?.runs || [];
-  const afterUnknock = () => {
-    setUnknockPreview(null);
-    afterWrite();
-    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', campaignId, 'unknock'] });
+  // When one lands — removing or undoing no more, this admin's or another's — what it moved is
+  // refetched and a review priced before it closes, as when a watched conversion finishes; the
+  // selection stays (round 6: resetting the page here closed another review with no word and cleared
+  // the selection, the round-4 conversion bug). One this page's own request already handled is skipped,
+  // and a campaign switch lands nothing.
+  const busyUnknocks = useRef({ cid: null, ids: new Set() });
+  const landedHere = useRef(new Set());
+  useEffect(() => {
+    const now = new Set(unknockRuns.filter((r) => r.removing || r.undoing).map((r) => r.id));
+    const was = busyUnknocks.current;
+    busyUnknocks.current = { cid: campaignId, ids: now };
+    if (was.cid !== campaignId) {
+      // Another campaign's landings handled here are that campaign's: kept, one could skip a run's later
+      // landing when the page came back (round 8).
+      landedHere.current.clear();
+      return;
+    }
+    const landed = [];
+    for (const r of unknockRuns) {
+      if (!was.ids.has(r.id) || now.has(r.id)) continue;
+      // One this page's own request handled lands once, then is forgotten — the same run's next landing
+      // (its Undo outliving its request) is the watch's to handle (round 7: kept for good, it was skipped,
+      // and the page stayed as it was with "may still be working" up).
+      if (landedHere.current.delete(r.id)) continue;
+      landed.push(r);
+    }
+    if (!landed.length) return;
+    setError((m) => (m === STILL_WORKING ? null : m));
+    refetchAfterWrite(campaignId);
+    closeStaleReviews(Math.max(...landed.map(finishedAt)));
+    // Reads this render's campaign and reviews; re-running on every runs change is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unknockRunsQ.data, campaignId]);
+  // A request that ended before the change did (the connection dropped, the router's 30 s cut) may
+  // still be working on the server — say so, and where to look, instead of "Request failed: 503". One
+  // the server answered with its own error stopped there: say that, and what finishes it (round 6).
+  // Only the server's own word that the change stopped part-way says so; any other answer from it came
+  // before the change began, or isn't about it (round 7: every JSON 5xx read "stopped part-way").
+  const unknockFailedWords = (e, act) => {
+    if (e?.status && e.status < 500) return e.message;
+    if (e?.code === 'UNDO_STOPPED') return 'The undo stopped part-way. Press Retry undo on its row under Removed entries to finish it.';
+    if (e?.code === 'UNKNOCK_STOPPED') return 'The unknock stopped before it finished. Its row under Removed entries shows what it did.';
+    if (e?.code === 'UNKNOCK_NOT_STARTED') return e.message;
+    if (typeof e?.data?.error === 'string') {
+      return `The server couldn't finish that (${e.message}). If any of it ran, its row under Removed entries says where it stands.`;
+    }
+    return STILL_WORKING;
   };
+  // A landing this request handles is skipped by the watch above — only when the watch saw the run busy,
+  // so it lands there once (round 7).
+  const afterUnknock = (cid, d, { own = false } = {}) => {
+    if (d?.run?.id && busyUnknocks.current.ids.has(d.run.id)) landedHere.current.add(d.run.id);
+    if (stillOn(cid)) setUnknockPreview(null);
+    if (own) afterOwnUndo(cid, finishedAt(d?.run));
+    else afterWrite(cid);
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns', cid, 'unknock'] });
+  };
+  // Priced, then written with the body that was priced (`unknockPreview.sent`): an unknock written
+  // from the selection at the click removed whatever was selected by then (round 3).
   const unknockDryRun = useMutation({
-    mutationFn: () =>
-      api(`/admin/campaigns/${campaignId}/unknock-entries`, { method: 'POST', body: { ...selectionBody(), dryRun: true } }),
-    onSuccess: setUnknockPreview,
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, body: b }) =>
+      api(`/admin/campaigns/${cid}/unknock-entries`, { method: 'POST', body: { ...b, dryRun: true } }),
+    onSuccess: (d, v) => stillOn(v.campaignId) && openReview(d, () => setUnknockPreview({ ...d, sent: v })),
+    onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
   const unknockRun = useMutation({
-    mutationFn: () => api(`/admin/campaigns/${campaignId}/unknock-entries`, { method: 'POST', body: selectionBody() }),
-    onSuccess: afterUnknock,
-    onError: (e) => { setError(e.message); setUnknockPreview(null); },
+    mutationFn: ({ campaignId: cid, body: b }) => api(`/admin/campaigns/${cid}/unknock-entries`, { method: 'POST', body: b }),
+    onSuccess: (d, v) => afterUnknock(v.campaignId, d),
+    onError: (e, v) => {
+      // The request can end before the removal does (a connection drop, the router's time limit): the
+      // run list shows it as Removing… until it finishes, and its Undo after (round 4). The ticked rows
+      // go — pressed again, they started a second strike on the rows the first was removing (round 6).
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'unknock'] });
+      const notStarted = e?.code === 'UNKNOCK_NOT_STARTED';
+      if (stillOn(v.campaignId)) {
+        setError(unknockFailedWords(e, 'unknock'));
+        setUnknockPreview(null);
+        if ((!e?.status || e.status >= 500) && !notStarted) resetSelection();
+      }
+      // What it removed before it stopped (or may still be removing) moved the table and the numbers too —
+      // and a review priced while it ran closes, as on a landing (round 8).
+      if (e?.code === 'UNKNOCK_STOPPED') afterOwnUndo(v.campaignId, finishedAt(e.data?.run));
+      else if ((!e?.status || e.status >= 500) && !notStarted) refetchAfterWrite(v.campaignId);
+    },
   });
   const unknockRevert = useMutation({
-    mutationFn: (runId) => api(`/admin/campaigns/${campaignId}/unknock-entries/revert`, { method: 'POST', body: { runId } }),
-    onSuccess: afterUnknock,
-    onError: (e) => setError(e.message),
+    mutationFn: ({ campaignId: cid, runId }) => api(`/admin/campaigns/${cid}/unknock-entries/revert`, { method: 'POST', body: { runId } }),
+    onSuccess: (d, v) => afterUnknock(v.campaignId, d, { own: true }),
+    onError: (e, v) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'unknock'] });
+      if (stillOn(v.campaignId)) setError(unknockFailedWords(e, 'undo'));
+      if (e?.code === 'UNDO_STOPPED') afterOwnUndo(v.campaignId, finishedAt(e.data?.run));
+      else if (!e?.status || e.status >= 500) refetchAfterWrite(v.campaignId);
+    },
   });
+
+  // A review priced before a change on this campaign finished showed numbers that change has since
+  // moved, and those writes check nothing stale: it closes, the selection stays, so pressing the button
+  // again prices it fresh (round 5) — only one priced BEFORE the finish, by the server's clock on both
+  // sides, and never one whose own Confirm is still writing; one still being priced closes as it
+  // arrives (round 6: it closed reviews priced after the finish and the one writing, and missed the
+  // one in flight).
+  const STALE_REVIEW = 'A change just finished on this campaign, so the review closed — press the button again to see the new numbers.';
+  const lastFinish = useRef({ cid: null, at: 0 });
+  // The run's last write — an undo that stopped part-way never touches its forward `completedAt` (round 7).
+  const finishedAt = (r) => Date.parse(r?.updatedAt || r?.revertedAt || r?.completedAt || '') || 0;
+  const STILL_WORKING = 'The server may still be working on it — the row under Removed entries shows where it stands.';
+  // A review from a server that didn't stamp it (before this build) closes as before.
+  const pricedBefore = (p, at) => !!p && (!p.asOf || Date.parse(p.asOf) < at);
+  const closeStaleReviews = (at, { remember = true } = {}) => {
+    if (!at) return;
+    if (remember && (lastFinish.current.cid !== campaignId || at > lastFinish.current.at)) lastFinish.current = { cid: campaignId, at };
+    let closed = false;
+    if (pricedBefore(preview, at) && !run.isPending && !convRun.isPending) {
+      setPreview(null);
+      closed = true;
+    }
+    if (pricedBefore(unknockPreview, at) && !unknockRun.isPending) {
+      setUnknockPreview(null);
+      closed = true;
+    }
+    // Beside whatever the banner already says (a failed undo's words stay — round 7).
+    if (closed) setError((m) => (m && m !== STALE_REVIEW ? `${m} ${STALE_REVIEW}` : STALE_REVIEW));
+  };
+  const openReview = (d, open) => {
+    const seen = lastFinish.current;
+    if (seen.cid === campaignId && seen.at && d?.asOf && Date.parse(d.asOf) < seen.at) setError(STALE_REVIEW);
+    else open();
+  };
 
   // The "Survey answer changes" card lists conversions and answer edits together, newest first.
   const changeRows = [
@@ -756,7 +1003,7 @@ export default function DoorOutcomesPage() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {st.tone === 'danger' && <Badge variant="danger">{st.key === 'undoStopped' ? 'Undo stopped' : 'Stopped'}</Badge>}
+          {st.tone === 'danger' && <Badge variant="danger">{attentionBadge(st)}</Badge>}
           {st.actions.map((a) => (
             <Button key={a} variant="secondary" size="sm" disabled={editBusy} onClick={() => onEditAction(a, r)}>
               {EDIT_ACTION_LABEL[a] || a}
@@ -1080,7 +1327,7 @@ export default function DoorOutcomesPage() {
       </Card>
 
       {error && (
-        <div className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>
+        <div ref={errorRef} className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>
       )}
 
       {/* Entries */}
@@ -1286,7 +1533,7 @@ export default function DoorOutcomesPage() {
                     <Button
                       size="sm"
                       disabled={convRevert.isPending}
-                      onClick={() => { setError(null); convRevert.mutate(r.id); }}
+                      onClick={() => { setError(null); convRevert.mutate({ campaignId, runId: r.id }); }}
                     >
                       Retry undo
                     </Button>
@@ -1300,7 +1547,7 @@ export default function DoorOutcomesPage() {
                     <Button
                       size="sm"
                       disabled={resumeQueue.isPending}
-                      onClick={() => { setError(null); resumeQueue.mutate(r.id); }}
+                      onClick={() => { setError(null); resumeQueue.mutate({ campaignId, runId: r.id }); }}
                     >
                       {resumeQueue.isPending ? 'Opening…' : 'Resume'}
                     </Button>
@@ -1308,7 +1555,7 @@ export default function DoorOutcomesPage() {
                       variant="secondary"
                       size="sm"
                       disabled={closeQueue.isPending}
-                      onClick={() => { setError(null); closeQueue.mutate(r.id); }}
+                      onClick={() => { setError(null); closeQueue.mutate({ campaignId, runId: r.id }); }}
                     >
                       Stop here
                     </Button>
@@ -1318,7 +1565,7 @@ export default function DoorOutcomesPage() {
                     variant="secondary"
                     size="sm"
                     disabled={convRevert.isPending}
-                    onClick={() => { setError(null); convRevert.mutate(r.id); }}
+                    onClick={() => { setError(null); convRevert.mutate({ campaignId, runId: r.id }); }}
                   >
                     Undo
                   </Button>
@@ -1340,8 +1587,19 @@ export default function DoorOutcomesPage() {
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 last:border-0">
                 <div className="min-w-0 text-sm text-fg">
                   <span className="font-medium">
-                    {(r.counts?.entriesRemoved || 0).toLocaleString()}{' '}
-                    {(r.counts?.entriesRemoved || 0) === 1 ? 'entry' : 'entries'} unknocked
+                    {r.status === 'pending' || (r.status === 'reverted' && !(r.strikeFinished ?? !!r.completedAt)) ? (
+                      // Until it finishes — or if it never did, undone or not — the count is what was
+                      // selected, not what came off (rounds 5 and 6).
+                      <>
+                        {(r.frozenRows ?? r.counts?.entriesRemoved ?? 0).toLocaleString()}{' '}
+                        {(r.frozenRows ?? r.counts?.entriesRemoved ?? 0) === 1 ? 'entry' : 'entries'} selected
+                      </>
+                    ) : (
+                      <>
+                        {(r.counts?.entriesRemoved || 0).toLocaleString()}{' '}
+                        {(r.counts?.entriesRemoved || 0) === 1 ? 'entry' : 'entries'} unknocked
+                      </>
+                    )}
                   </span>
                   <div className="mt-0.5 text-xs text-fg-muted">
                     {(r.counts?.doorsAffected || 0).toLocaleString()} {(r.counts?.doorsAffected || 0) === 1 ? 'door' : 'doors'}
@@ -1350,7 +1608,11 @@ export default function DoorOutcomesPage() {
                       : ''}
                     {r.by ? ` · ${r.by}` : ''} · {formatInTz(r.createdAt, tz)}
                     {r.status === 'reverted' && (r.counts?.rowsNotRestored || 0) > 0
-                      ? ` · ${r.counts.rowsNotRestored.toLocaleString()} not restored (re-knocked since)`
+                      ? ` · ${r.counts.rowsNotRestored.toLocaleString()} ${r.counts.rowsNotRestored === 1 ? 'entry' : 'entries'} not put back`
+                      : ''}
+                    {/* The answers too — an undo that put back no answers said nothing (round 6). */}
+                    {r.status === 'reverted' && (r.counts?.responsesNotRestored || 0) > 0
+                      ? ` · ${r.counts.responsesNotRestored.toLocaleString()} ${r.counts.responsesNotRestored === 1 ? 'survey' : 'surveys'} not put back`
                       : ''}
                   </div>
                   {r.scopeSummary && (
@@ -1363,17 +1625,30 @@ export default function DoorOutcomesPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {r.status === 'reverted' ? (
                     <Badge variant="neutral">Undone</Badge>
-                  ) : r.status === 'pending' ? (
+                  ) : r.undoing ? (
+                    <Badge variant="info">Undoing…</Badge>
+                  ) : r.removing ? (
+                    <Badge variant="info">Removing…</Badge>
+                  ) : r.status === 'pending' && !r.stoppedPartWay ? (
                     <Badge variant="neutral">Did not finish — nothing was removed</Badge>
                   ) : (
+                    <>
+                    {r.undoStopped ? (
+                      // An undo that began and stopped: what it put back so far stays, and this finishes
+                      // it (round 6 — the row read as if it had never been undone).
+                      <Badge variant="danger">Undo stopped part-way</Badge>
+                    ) : (
+                      r.stoppedPartWay && <Badge variant="danger">Stopped part-way</Badge>
+                    )}
                     <Button
                       variant="secondary"
                       size="sm"
                       disabled={unknockRevert.isPending}
-                      onClick={() => { setError(null); unknockRevert.mutate(r.id); }}
+                      onClick={() => { setError(null); unknockRevert.mutate({ campaignId, runId: r.id }); }}
                     >
-                      {unknockRevert.isPending ? 'Undoing…' : 'Undo'}
+                      {unknockRevert.isPending ? 'Undoing…' : r.undoStopped ? 'Retry undo' : 'Undo'}
                     </Button>
+                    </>
                   )}
                 </div>
               </li>
@@ -1424,7 +1699,7 @@ export default function DoorOutcomesPage() {
                   {r.revertedAt ? (
                     <Badge variant="neutral">Reverted</Badge>
                   ) : (
-                    <Button variant="secondary" size="sm" disabled={revert.isPending} onClick={() => { setError(null); revert.mutate(r.id); }}>
+                    <Button variant="secondary" size="sm" disabled={revert.isPending} onClick={() => { setError(null); revert.mutate({ campaignId, runId: r.id }); }}>
                       {revert.isPending ? 'Reverting…' : 'Revert'}
                     </Button>
                   )}
@@ -1463,7 +1738,7 @@ export default function DoorOutcomesPage() {
                   variant="danger"
                   disabled={unknockDryRun.isPending}
                   title="Remove these entries from the record entirely — the doors read unknocked again and the knocks leave every total"
-                  onClick={() => { setError(null); unknockDryRun.mutate(); }}
+                  onClick={() => { setError(null); unknockDryRun.mutate({ campaignId, body: selectionBody() }); }}
                 >
                   {unknockDryRun.isPending ? 'Checking…' : 'Unknock…'}
                 </Button>
@@ -1478,7 +1753,7 @@ export default function DoorOutcomesPage() {
                     variant="secondary"
                     disabled={editOpen.isPending}
                     title="Change, clear or take out answers on these surveys — the knocks and the Surveyed status stay"
-                    onClick={() => { setError(null); editOpen.mutate(); }}
+                    onClick={() => { setError(null); openEdit(); }}
                   >
                     {editOpen.isPending ? 'Loading…' : 'Edit answers…'}
                   </Button>
@@ -1501,14 +1776,14 @@ export default function DoorOutcomesPage() {
                   <Button
                     variant="secondary"
                     disabled={loadTemplate.isPending}
-                    onClick={() => { setError(null); loadTemplate.mutate(); }}
+                    onClick={() => { setError(null); loadTemplate.mutate({ campaignId, body: selectionBody() }); }}
                   >
                     {loadTemplate.isPending ? 'Loading survey…' : 'Enter answers'}
                   </Button>
                   <Button
                     variant="secondary"
                     disabled={startQueue.isPending}
-                    onClick={() => { setError(null); startQueue.mutate(); }}
+                    onClick={() => { setError(null); startQueue.mutate({ campaignId, body: convBody({ mode: 'queue' }) }); }}
                   >
                     {startQueue.isPending ? 'Starting…' : 'Door by door'}
                   </Button>
@@ -1517,12 +1792,12 @@ export default function DoorOutcomesPage() {
                 <Button
                   variant="danger"
                   disabled={convDryRun.isPending}
-                  onClick={() => { setError(null); convDryRun.mutate(); }}
+                  onClick={() => { setError(null); convDryRun.mutate({ campaignId, body: convBody() }); }}
                 >
                   {convDryRun.isPending ? 'Checking…' : 'Review removal'}
                 </Button>
               ) : (
-                <Button disabled={dryRun.isPending} onClick={() => { setError(null); dryRun.mutate(); }}>
+                <Button disabled={dryRun.isPending} onClick={() => { setError(null); dryRun.mutate({ campaignId, body: body() }); }}>
                   {dryRun.isPending ? 'Checking…' : 'Review changes'}
                 </Button>
               )}
@@ -1533,7 +1808,7 @@ export default function DoorOutcomesPage() {
                 variant="danger"
                 disabled={unknockDryRun.isPending}
                 title="Remove these entries from the record entirely — the doors read unknocked again and the knocks leave every total"
-                onClick={() => { setError(null); unknockDryRun.mutate(); }}
+                onClick={() => { setError(null); unknockDryRun.mutate({ campaignId, body: selectionBody() }); }}
               >
                 {unknockDryRun.isPending ? 'Checking…' : 'Unknock…'}
               </Button>
@@ -1559,7 +1834,7 @@ export default function DoorOutcomesPage() {
           footer={
             <>
               <Button variant="secondary" onClick={() => setUnknockPreview(null)} disabled={unknockRun.isPending}>Cancel</Button>
-              <Button variant="danger" onClick={() => unknockRun.mutate()} disabled={unknockRun.isPending}>
+              <Button variant="danger" onClick={() => unknockRun.mutate(unknockPreview.sent)} disabled={unknockRun.isPending}>
                 {unknockRun.isPending ? 'Removing…' : 'Unknock entries'}
               </Button>
             </>
@@ -1629,7 +1904,7 @@ export default function DoorOutcomesPage() {
 
       {/* An answer edit in flight, or the result of the last one. */}
       {liveEditRun && !editWalk && (
-        <AnswerEditRunCard run={liveEditRun} busy={editBusy} onAction={onEditAction} onDismiss={() => setActiveEditRunId(null)} />
+        <AnswerEditRunCard run={liveEditRun} busy={editBusy} stopped={editPollStopped} onAction={onEditAction} onDismiss={() => setActiveEditRunId(null)} />
       )}
 
       {editDry && !editPreview && (
@@ -1643,9 +1918,12 @@ export default function DoorOutcomesPage() {
           busy={editReview.isPending || editStartQueue.isPending || editOpen.isPending}
           error={editError}
           onCancel={() => { setEditDry(null); setEditError(null); }}
-          onReview={() => editReview.mutate()}
-          onStart={() => editStartQueue.mutate()}
-          onChooseSurvey={(id) => editOpen.mutate(id)}
+          onReview={() =>
+            editReview.mutate({ ...editDry.sent, surveyTemplateId: editDry.template.id, plan: planFromForm(editDry.questions, editForm) })
+          }
+          onStart={startEditQueue}
+          onChooseSurvey={(id) => reopenEdit({ surveyTemplateId: id })}
+          onCheckAgain={() => reopenEdit({ keepForm: true })}
         />
       )}
       {editPreview && (
@@ -1654,7 +1932,7 @@ export default function DoorOutcomesPage() {
           tz={tz}
           busy={editCreate.isPending}
           onBack={() => setEditPreview(null)}
-          onConfirm={() => editCreate.mutate()}
+          onConfirm={confirmEdit}
         />
       )}
       {editWalk && (
@@ -1664,7 +1942,8 @@ export default function DoorOutcomesPage() {
           initial={editWalk.current}
           tz={tz}
           onFinishLater={() => { setEditWalk(null); afterEdit(); }}
-          onStopped={(r) => { setEditWalk(null); setActiveEditRunId(r.id); afterEdit(); }}
+          onStopped={(r) => { setEditWalk(null); followEditRun(r); afterEdit(); }}
+          onClosedElsewhere={(message) => { setEditWalk(null); afterEdit(); setError(message); }}
         />
       )}
 
@@ -1672,9 +1951,10 @@ export default function DoorOutcomesPage() {
       {liveRun && !walking && (
         <ConversionRunCard
           run={liveRun}
+          stopped={convPollStopped}
           busy={convRevert.isPending || convResume.isPending}
-          onRevert={() => { setError(null); convRevert.mutate(liveRun.id); }}
-          onResume={() => { setError(null); convResume.mutate(liveRun.id); }}
+          onRevert={() => { setError(null); convRevert.mutate({ campaignId, runId: liveRun.id }); }}
+          onResume={() => { setError(null); convResume.mutate({ campaignId, runId: liveRun.id }); }}
           onDismiss={() => setActiveRunId(null)}
         />
       )}
@@ -1691,13 +1971,15 @@ export default function DoorOutcomesPage() {
               <Button variant="secondary" onClick={() => setComposing(null)}>Cancel</Button>
               <Button
                 disabled={convDryRun.isPending}
-                onClick={() => { setError(null); convDryRun.mutate(); }}
+                onClick={() => { setError(null); convDryRun.mutate({ campaignId, body: composedConvBody() }); }}
               >
                 {convDryRun.isPending ? 'Checking…' : 'Review changes'}
               </Button>
             </>
           }
         >
+          {/* The page's banner sits behind this modal: a refusal of Review changes shows here too (round 6). */}
+          {error && <div className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>}
           <p className="mb-3 text-sm text-fg-muted">
             Every voter at these doors gets the same answers, except anyone marked do-not-contact
             and anyone who already answered this round. If the answers differ door to door, use
@@ -1721,7 +2003,7 @@ export default function DoorOutcomesPage() {
           answeredCount={answeredCount()}
           busy={convRun.isPending}
           onCancel={() => setPreview(null)}
-          onConfirm={() => convRun.mutate('bulk')}
+          onConfirm={() => convRun.mutate({ ...preview.sent, mode: 'bulk' })}
         />
       )}
 
@@ -1733,7 +2015,7 @@ export default function DoorOutcomesPage() {
           tz={tz}
           busy={convRun.isPending}
           onCancel={() => setPreview(null)}
-          onConfirm={() => convRun.mutate('bulk')}
+          onConfirm={() => convRun.mutate({ ...preview.sent, mode: 'bulk' })}
         />
       )}
 
@@ -1743,8 +2025,9 @@ export default function DoorOutcomesPage() {
           campaignId={campaignId}
           run={walking}
           template={queueTemplate}
-          onDone={() => { setWalking(null); setQueueTemplate(null); setActiveRunId(walking.id); afterWrite(); }}
-          onCancel={() => { setWalking(null); setQueueTemplate(null); setActiveRunId(walking.id); afterWrite(); }}
+          onDone={() => { setWalking(null); setQueueTemplate(null); watchConvRun(walking.id); afterWrite(); }}
+          onCancel={() => { setWalking(null); setQueueTemplate(null); watchConvRun(walking.id); afterWrite(); }}
+          onClosedElsewhere={(message) => { setWalking(null); setQueueTemplate(null); watchConvRun(walking.id); afterWrite(); setError(message); }}
         />
       )}
 
@@ -1758,7 +2041,7 @@ export default function DoorOutcomesPage() {
           footer={
             <>
               <Button variant="secondary" onClick={() => setPreview(null)} disabled={run.isPending}>Cancel</Button>
-              <Button variant={preview.rateNeutral ? 'primary' : 'danger'} onClick={() => run.mutate()} disabled={run.isPending}>
+              <Button variant={preview.rateNeutral ? 'primary' : 'danger'} onClick={() => run.mutate(preview.sent)} disabled={run.isPending}>
                 {run.isPending ? 'Changing…' : preview.rateNeutral ? 'Change entries' : 'Change entries anyway'}
               </Button>
             </>

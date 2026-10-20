@@ -19,4 +19,6 @@ Yes, but there are three different situations.
 
 > Heads up: Knocked doors stay knocked after a recut — knocks are tied to the door and pass, never to a book — so coverage and billing are unaffected.
 
+> Heads up: A Discard's snapshot can only be restored onto its own pass. If you delete the pass (a draft one, or a walk list whose passes are all drafts), its snapshots are deleted with it — including any knocks you cleared into them. Want cleared knocks back? Restore the snapshot first (Turf Cutting → **Undo / snapshots**).
+
 More in [Cutting and recutting books](turf-and-books).

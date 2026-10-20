@@ -248,7 +248,8 @@ answers and the note from that survey that come out blank.
 Two downloads live on the pages whose numbers they carry rather than here.
 
 **The By pass table's Export CSV**, on the campaign's Home, is the per-round summary — one row per
-walk list and round, with a TOTAL row that matches the Knocks number on screen (an admin's full
+walk list and round, including any the table folds away on screen, with a TOTAL row that matches the
+Knocks number on screen (an admin's full
 backup carries the same per-round table, for the whole campaign to date). It's the invoice-grade
 file — see [The campaign Home (dashboard)](page-campaign-home). Two things about it:
 

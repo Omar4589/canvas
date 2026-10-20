@@ -17,7 +17,7 @@ import { recomputeHouseholdActive } from '../../services/import/recomputeHouseho
 import { archiveOverwrittenResponse, snapshotFromArchive } from '../../services/surveys/archiveOverwrite.js';
 import { restoreStates, RESTORE_BLOCKED_MESSAGES } from '../../services/surveys/restoreGuard.js';
 import { planFromAnswers, applyEditPlan, editorVersion } from '../../services/canvass/answerEdit.js';
-import { writeOneSurvey } from '../../services/canvass/answerEditWriter.js';
+import { writeOneSurvey, fencesForSlots, withFences } from '../../services/canvass/answerEditWriter.js';
 import { buildVoterProfile } from '../../services/voters/voterProfile.js';
 import { listVoters, pageParams, isDirectoryTimeout, DIRECTORY_TIMEOUT_MESSAGE } from '../../services/voters/voterDirectory.js';
 import { createVoterNote } from '../../services/voters/voterNotes.js';
@@ -27,6 +27,7 @@ import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { propagateIdentity, identityEq } from '../../services/person/propagateIdentity.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { followMerged } from '../../services/person/resolvePerson.js';
+import { runStillWriting } from '../../services/canvass/answerEditRuns.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
@@ -573,9 +574,14 @@ router.patch('/:voterId/surveys/:responseId', async (req, res, next) => {
           ? applyEditPlan(template.questions, live.answers || [], plan, { mode: 'person', flow: template.flow })
           : null;
         if (applied?.changed) nextAnswers = applied.answers;
-      } else {
-        // No template to diff against (deleted): normalize nothing, store what was sent.
-        nextAnswers = data.answers;
+      } else if (data.answers.length) {
+        // No template to diff against: the editor posts only the questions it touched, so storing
+        // what was sent would wipe every other answer. Refuse; the note can still be changed (the
+        // editor sends an empty list when no answer was touched — that is a note-only save).
+        return res.status(409).json({
+          error: 'This survey’s questions are no longer on file, so its answers can’t be edited here. Its note can still be changed.',
+          code: 'TEMPLATE_MISSING',
+        });
       }
     }
     const note = data.note === undefined ? undefined : data.note || null;
@@ -642,6 +648,11 @@ router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
       organizationId: activeOrgId(req),
     }).lean();
     if (!archived) return res.status(404).json({ error: 'Preserved response not found' });
+    // Not while an undo is writing this copy back (it claims the copy first): both would write the
+    // survey (code review round 5). A claim older than ten minutes belongs to an undo that died.
+    if (archived.undoStartedAt && Date.now() - new Date(archived.undoStartedAt).getTime() < 10 * 60 * 1000) {
+      return res.status(409).json({ error: 'An undo is putting these answers back right now. Try again in a moment.', code: 'COPY_IN_USE' });
+    }
 
     const state = (await restoreStates([archived])).get(String(archived._id));
     if (!state.restorable) {
@@ -676,16 +687,19 @@ router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
         nextNote: (archived.note ?? null) !== (current.note ?? null) ? archived.note ?? null : undefined,
         byUserId: req.user._id,
         at: new Date(),
+        // The copy is used up: its mark comes off in the same write, so the run that made it reads
+        // the survey as restored on the profile, not erased.
+        consumedMark: archived._id,
       });
       if (w.conflict) {
         return res.status(409).json({
-          error: 'Someone changed this survey a moment ago. The latest answers are shown — try the restore again.',
+          error: 'Someone changed this survey a moment ago, so nothing was restored. Check its latest answers, then try again.',
           code: 'RESPONSE_CHANGED',
           profile: await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) }),
         });
       }
     } else if (current) {
-      await archiveOverwrittenResponse(current, { byUserId: req.user._id, via: 'restore' });
+      const copyId = await archiveOverwrittenResponse(current, { byUserId: req.user._id, via: 'restore' });
       // The live row becomes the snapshot. Fields the snapshot doesn't carry must go too: a field
       // snapshot has no deskEntry (left behind, undoing that desk entry would delete the restored
       // field answers), and one copied before note stamps and landing marks existed has none —
@@ -694,14 +708,32 @@ router.post('/:voterId/surveys/:archiveId/restore', async (req, res, next) => {
       for (const f of ['deskEntry', 'noteEditedBy', 'noteEditedAt', 'answerEditMarks']) {
         if (snapshot[f] === undefined) unset[f] = '';
       }
-      await SurveyResponse.updateOne(
-        { _id: current._id },
-        { $set: snapshot, ...(Object.keys(unset).length ? { $unset: unset } : {}) }
+      // A compare-and-swap on the survey as read (its updatedAt): one that changed in between (a
+      // phone re-survey, an undo) would be replaced without the copy above holding it.
+      // Fences and undo receipts are this SLOT's history, not the copy's: kept from the survey being
+      // replaced, plus every answer-edit run whose undo has reached it (round 3: the copy's older
+      // list replaced them, and a delivery still running could land on the restored survey).
+      const fences = await fencesForSlots(archived.campaignId, [snapshot]);
+      const kept = withFences(snapshot, fences, current.answerEditFence || []);
+      const receipts = [...new Map([...(snapshot.answerEditUndone || []), ...(current.answerEditUndone || [])].map((id) => [String(id), id])).values()];
+      if (receipts.length) kept.answerEditUndone = receipts;
+      const swapped = await SurveyResponse.updateOne(
+        { _id: current._id, updatedAt: current.updatedAt ?? { $exists: false } },
+        { $set: kept, ...(Object.keys(unset).length ? { $unset: unset } : {}) }
       );
+      if (swapped.matchedCount !== 1) {
+        await SurveyResponseArchive.deleteOne({ _id: copyId });
+        return res.status(409).json({
+          error: 'Someone changed this survey a moment ago, so nothing was restored. Check its latest answers, then try again.',
+          code: 'RESPONSE_CHANGED',
+          profile: await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) }),
+        });
+      }
       // No stats change: one current row before and after the swap.
     } else {
       // Not re-validated: a verbatim copy of a row that was already on file (archiveOverwrite.js).
-      await SurveyResponse.create([snapshot], { validateBeforeSave: false });
+      const fences = await fencesForSlots(archived.campaignId, [snapshot]);
+      await SurveyResponse.create([withFences(snapshot, fences)], { validateBeforeSave: false });
       await bumpCampaignStats(archived.campaignId, { surveys: 1 });
     }
     await SurveyResponseArchive.deleteOne({ _id: archived._id });
@@ -722,12 +754,34 @@ router.delete('/:voterId/surveys/archive/:archiveId', async (req, res, next) => 
     if (!mongoose.isValidObjectId(req.params.archiveId)) {
       return res.status(400).json({ error: 'Invalid archiveId' });
     }
+    // Not while an undo is putting this copy back — an answer edit's, an unknock's or a conversion's
+    // (each stamps the copy first): erasing it mid-way would let the put-back write the erased answers
+    // onto the survey (round 5 for the removal undos). A stamp older than ten minutes belongs to an undo
+    // that died; it never blocks.
+    const ERASE_WAIT_MS = 10 * 60 * 1000;
+    // Nor while the change that made an answer-edit copy is still applying: its delivery writes the
+    // survey right after making the copy, and erasing in between left the survey edited with no copy
+    // of what it said before (round 3).
+    const target = await SurveyResponseArchive.findOne(
+      { _id: req.params.archiveId, voterId: req.params.voterId, organizationId: activeOrgId(req) },
+      { answerEditRunId: 1 }
+    ).lean();
+    if (target?.answerEditRunId && (await runStillWriting(target.answerEditRunId))) {
+      return res.status(409).json({ error: 'The change that kept these answers is still being applied. Try again once it finishes.', code: 'COPY_IN_USE' });
+    }
     const { deletedCount } = await SurveyResponseArchive.deleteOne({
       _id: req.params.archiveId,
       voterId: req.params.voterId,
       organizationId: activeOrgId(req),
+      $or: [{ undoStartedAt: { $exists: false } }, { undoStartedAt: { $lt: new Date(Date.now() - ERASE_WAIT_MS) } }],
     });
-    if (!deletedCount) return res.status(404).json({ error: 'Preserved response not found' });
+    if (!deletedCount) {
+      const busy = await SurveyResponseArchive.exists({ _id: req.params.archiveId, voterId: req.params.voterId, organizationId: activeOrgId(req) });
+      if (busy) {
+        return res.status(409).json({ error: 'An undo is putting these answers back right now. Try again in a moment.', code: 'COPY_IN_USE' });
+      }
+      return res.status(404).json({ error: 'Preserved response not found' });
+    }
     const profile = await buildVoterProfile(req.params.voterId, { orgId: activeOrgId(req) });
     res.json(profile);
   } catch (err) {

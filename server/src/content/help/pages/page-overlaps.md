@@ -23,7 +23,7 @@ A door whose knocks **all** fall outside the dates you picked isn't hidden from 
 
 ## When both canvassers surveyed the same voter
 
-If a collision includes **two surveys of the same voter in the same round**, the door says so — naming the voter, who surveyed them first, and who replaced those answers. The earlier answers aren't gone: they're preserved, listed on the [Duplicate Surveys page](page-duplicate-surveys) under **Same round · overwritten**, and an admin can restore them from there.
+If a collision includes **two surveys of the same voter in the same round** by two different canvassers, the door says so — naming the voter, who surveyed them first, and who replaced those answers. (A canvasser who surveys a voter for real after an admin entered that voter's answers at the desk on her own visit isn't a collision, so it isn't listed here — the desk answers are still kept on [Duplicate Surveys](page-duplicate-surveys).) The earlier answers aren't gone: they're preserved, listed on the [Duplicate Surveys page](page-duplicate-surveys) under **Same round · overwritten**, and an admin can restore them from there.
 
 ## Where else overlaps show up
 

@@ -21,7 +21,7 @@ import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { Alert } from 'react-native';
 import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import { useConsoleRole } from '../../../lib/useConsoleRole';
-import { buildRestorePrompt } from '../../../lib/duplicateSurveys';
+import { buildRestorePrompt, archivedRowFor } from '../../../lib/duplicateSurveys';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -37,7 +37,9 @@ function one(p) {
 // (services/surveys/restoreGuard.js), so the screen says which undo brings them back instead of
 // offering a Restore that would refuse.
 const restoreBlockedHint = (reason) =>
-  reason === 'unknocked'
+  reason === 'kept_after_undo'
+    ? "These answers were removed on Door Outcomes. That change was undone, but by then this visit had been recorded again, so they can't go back."
+    : reason === 'unknocked'
     ? 'This visit was unknocked. Undo the unknock on Door Outcomes in the web console to bring these answers back.'
     : reason === 'converted'
       ? "This door's outcome was changed from Surveyed. Undo that change on Door Outcomes in the web console to bring these answers back."
@@ -101,13 +103,17 @@ export default function ResponseDetails() {
       Alert.alert('Restored', 'These answers are the current response again.');
       router.back();
     },
-    onError: (err) =>
+    onError: (err) => {
+      // A refusal means this screen is out of date (the survey changed, or its visit no longer
+      // reads Surveyed): it reads the copy again, so Restore isn't offered on a stale answer.
+      if (err?.status === 409) qc.invalidateQueries({ queryKey: ['admin', 'response-details', d.response.id] });
       Alert.alert(
         err?.status === 404 ? 'Already restored' : "Couldn't restore",
         err?.status === 404
           ? 'Someone else restored or removed this response. Pull to refresh the report.'
           : err?.message || 'Try again in a moment.'
-      ),
+      );
+    },
   });
   const confirmRestore = () => {
     const prompt = buildRestorePrompt({
@@ -238,27 +244,14 @@ export default function ResponseDetails() {
                   sub={`earlier answers from ${formatExact(d.response.replacedEarlier.submittedAt, tz)} — preserved`}
                 />
               ) : null}
-              {d.response.archived ? (
-                <InsetRow
-                  /* An 'outcome_convert' row was removed by an ADMIN changing this door's outcome,
-                     not overwritten by another canvasser — the default wording would read as an
-                     accusation against the canvasser for something they did not do. */
-                  label={d.response.overwrittenVia === 'outcome_convert' ? 'Removed by' : 'Overwritten by'}
-                  value={
-                    d.response.overwrittenBy
-                      ? `${d.response.overwrittenBy.firstName} ${d.response.overwrittenBy.lastName || ''}`.trim()
-                      : d.response.overwrittenVia === 'outcome_convert'
-                        ? 'an admin'
-                        : 'another canvasser'
-                  }
-                  sub={
-                    d.response.overwrittenVia === 'outcome_convert'
-                      ? `${formatExact(d.response.overwrittenAt, tz)} · the door's outcome was changed`
-                      : formatExact(d.response.overwrittenAt, tz)
-                  }
-                  badge={{ text: d.response.overwrittenVia === 'outcome_convert' ? 'Removed' : 'Overwritten' }}
-                />
-              ) : null}
+              {d.response.archived
+                ? (() => {
+                    /* Only a canvasser's own newer survey is an overwrite: an admin's change reads
+                       as one, never as an accusation against the canvasser (archivedRowFor). */
+                    const row = archivedRowFor(d.response, formatExact(d.response.overwrittenAt, tz));
+                    return <InsetRow label={row.label} value={row.value} sub={row.sub} badge={{ text: row.badge }} />;
+                  })()
+                : null}
               {d.response.deskEntry ? (
                 <InsetRow
                   label="Entered at a desk"

@@ -1,6 +1,9 @@
 import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
 import { depairFbtimeAccount } from '../fbtime/purgePairing.js';
+import { scrubFrozenNames } from './scrubFrozenNames.js';
+import { User } from '../../models/User.js';
+import { RETENTION_DAYS } from '../users/deleteAccount.js';
 
 // The 180-day identity purge, as a function the app can call — not a script a human must remember.
 //
@@ -15,10 +18,16 @@ import { depairFbtimeAccount } from '../fbtime/purgePairing.js';
 // honoured the window.
 //
 // RECORD BY RECORD, because the purge also de-pairs the account from FbTime
-// (services/fbtime/purgePairing.js) — before the stamp, so a record whose FbTime step throws stays
+// (services/fbtime/purgePairing.js) and takes the name off the Door Outcomes runs that froze it into
+// their scope line (scrubFrozenNames.js) — both before the stamp, so a record whose step throws stays
 // due for the next night while the rest are purged; a run with any failure is recorded ok:false
 // (with `failed`) — the health surface shows the error at once and goes red once 48 hours pass
-// without a clean run, rather than one record silently stalling everyone's purge.
+// without a clean run, rather than one record silently stalling everyone's purge. The run-line step
+// also goes, each night, over every record purged before it existed (2026-10-20), and over every account
+// deleted longer ago than the window that no record holds any more — an organization's deletion drops a
+// record once no organization is left on it, though the person's work can sit in another organization's
+// run lines (one that had removed them before they deleted). It rewrites only lines still carrying a
+// name, so once caught up it changes nothing.
 //
 // Called by the repeatable worker job (services/retention/scheduler.js) and by the CLI
 // (migrations/purgeDeletedIdentities.js), which is now just a manual escape hatch.
@@ -42,11 +51,13 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
 
     let purged = 0;
     let failed = 0;
+    let namesScrubbed = 0;
     const fbtime = { links: 0, shiftsKept: 0, shiftsReassigned: 0, events: 0 };
     for (const rec of due) {
       try {
         const c = await depairFbtimeAccount({ userId: rec.userId, deletedAt: rec.deletedAt, apply });
         for (const k of Object.keys(fbtime)) fbtime[k] += c[k] || 0;
+        namesScrubbed += await scrubFrozenNames([rec.userId], { apply });
         if (!apply) continue;
         // New snapshots are name-only; the $unset still sweeps email/phone off any legacy row
         // that predates migrate:deletion-snapshots, so the purge is complete either way.
@@ -60,9 +71,24 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
         console.error(`[retention] identity purge failed for record ${rec._id}: ${err?.message || err}`);
       }
     }
+    // ...and the records purged before the run-line step existed, and the lapsed accounts no record holds
+    // (see above). A record not yet purged governs its own window: its account waits for it.
+    try {
+      const lapsedBefore = new Date(startedAt.getTime() - RETENTION_DAYS * 86_400_000);
+      const [purgedEarlier, lapsedAccounts, stillHeld] = await Promise.all([
+        DeletedUserRecord.distinct('userId', { purgedAt: { $ne: null } }),
+        User.distinct('_id', { deletedAt: { $ne: null, $lte: lapsedBefore } }),
+        DeletedUserRecord.distinct('userId', { purgedAt: null }),
+      ]);
+      const held = new Set(stillHeld.map(String));
+      namesScrubbed += await scrubFrozenNames([...purgedEarlier, ...lapsedAccounts.filter((id) => !held.has(String(id)))], { apply });
+    } catch (err) {
+      failed += 1;
+      console.error(`[retention] identity purge could not take purged names off run lines: ${err?.message || err}`);
+    }
 
     const ok = failed === 0;
-    if (!run) return { ok, scanned, purged, failed, fbtime };
+    if (!run) return { ok, scanned, purged, failed, fbtime, namesScrubbed };
     await RetentionRun.updateOne(
       { _id: run._id },
       {
@@ -76,7 +102,7 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
         },
       }
     );
-    return { ok, scanned, purged, failed, fbtime };
+    return { ok, scanned, purged, failed, fbtime, namesScrubbed };
   } catch (err) {
     // Record the failure. A job that throws and leaves no trace is the thing we are fixing.
     if (!run) throw err;

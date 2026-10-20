@@ -309,12 +309,26 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
       const earlier = editedEarlierByKey.get(`${String(s.voterId)}|${s.passId ? String(s.passId) : ''}`);
       // The note's own stamp when it has one (absent on surveys no answer edit has touched: their
       // note stamp is still editedBy/editedAt, the old meaning).
-      const noteStamp =
-        s.noteEditedAt !== undefined || s.noteEditedBy !== undefined
-          ? { at: s.noteEditedAt || null, by: s.noteEditedBy || null }
-          : { at: s.editedAt || null, by: s.editedBy || null };
+      // The fallback is the old meaning ("this survey was edited"), so it only speaks about a note
+      // that's there — a survey edited before note stamps existed, with no note, read "Note edited".
+      // A note stamp equal to the survey's own is the same as none: the first answer edit of a survey
+      // copies the survey's stamp onto the note (noteCarry, answerEditWriter.js), and its undo leaves it
+      // there — read as its own, a survey with no note showed "Note edited" after an edit and its undo
+      // (code review round 5).
+      const ms = (d) => (d ? new Date(d).getTime() : null);
+      const ownNoteStamp =
+        (s.noteEditedAt !== undefined || s.noteEditedBy !== undefined) &&
+        !(ms(s.noteEditedAt) === ms(s.editedAt) && String(s.noteEditedBy ?? '') === String(s.editedBy ?? ''));
+      const noteStamp = ownNoteStamp
+        ? { at: s.noteEditedAt || null, by: s.noteEditedBy || null }
+        : s.note
+          ? { at: s.editedAt || null, by: s.editedBy || null }
+          : { at: null, by: null };
       return {
         id: String(s._id),
+        // The voter row it belongs to — this one, or the same person's row in another campaign (the list
+        // unions them): the card's Edit, Delete, Restore and Erase go to that row (round 7).
+        voterId: String(s.voterId),
         campaignId: String(s.campaignId),
         passId: s.passId ? String(s.passId) : null,
         surveyTemplateId: String(s.surveyTemplateId),
@@ -381,6 +395,7 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
       const tpl = tplMap.get(String(o.surveyTemplateId));
       return {
         id: String(o._id),
+        voterId: String(o.voterId),
         campaignId: String(o.campaignId),
         passId: o.passId ? String(o.passId) : null,
         surveyTemplateId: String(o.surveyTemplateId),

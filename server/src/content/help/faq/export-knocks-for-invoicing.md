@@ -9,7 +9,7 @@ summary: Download the per-pass knock breakdown from the campaign Home's By pass 
 tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter
 ---
 
-Open the campaign's **Home** and find the **By pass** section — one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range. Click **Export CSV** to download the same table as a spreadsheet.
+Open the campaign's **Home** and find the **By pass** section — one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range. Click **Export CSV** to download the same table as a spreadsheet. On screen a long table folds — passes with nothing in the range, and the overflow of a long list, collapse into one line — but the CSV always has every pass.
 
 Each row carries that pass's knocks, survey doors (or lit drops), connection rate, and **New homes reached** — homes whose first-ever knock landed in that pass, so a revisit adds a knock but not a new home.
 
