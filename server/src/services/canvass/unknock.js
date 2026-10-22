@@ -320,8 +320,9 @@ async function strikeFrozen({ campaign, run, frozen, frozenAt, ids, doorIds, byU
   // batch's voters settled as it goes, so a strike that stops part-way leaves nothing stale behind it
   // (round 5: their doors and voters read surveyed until an Undo).
   const surveyed = frozen.filter((r) => r.actionType === 'survey_submitted');
-  // Where it has got to, with each beat: the answers' batches, then the entries' (the campaign's own
-  // numbers take the last few percent).
+  // Where it has got to, with each beat: the answers' batches, then the entries' — it reads completed as soon
+  // as its last removal is done, so the row goes from its last batch's share to Undo (the 95% cap only keeps
+  // it from reading done before it is).
   const steps = surveyed.length + ids.length || 1;
   const at = (n) => ({ progress: { phase: 'removing', pct: Math.min(95, Math.floor((n / steps) * 95)) } });
   let responsesArchived = 0;
@@ -477,6 +478,9 @@ const undoProgress = (run, pct) =>
   UnknockRun.updateOne({ _id: run._id }, { $set: { progress: { phase: 'undoing', pct } } }, { timestamps: false });
 
 async function revertStrike({ campaign, run, byUserId }) {
+  // From the start: a Retry undo showed the stopped attempt's percentage until its first page (code review
+  // of 12b56fa).
+  await undoProgress(run, 0);
   const chunks = await UnknockRunChunk.find({ runId: run._id }).sort({ seq: 1 }).lean();
   const frozen = chunks.flatMap((c) => c.rows || []);
   const struckLater = await entriesStruckLater(campaign, run, chunks);

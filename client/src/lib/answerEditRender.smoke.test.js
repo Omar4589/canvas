@@ -552,3 +552,69 @@ test('DoorOutcomesPage: answer edits and conversions share Survey answer changes
   assert.match(t, /5 surveys recorded · 5 entries · Omar Admin/, 'a conversion counts whole surveys');
   assert.match(t, /Stopped · 5 of 216 changed/);
 });
+
+// The Surveyed → Not home door-by-door walkthrough beside it counts its steps — the session's entries, a door
+// two canvassers recorded being two — never doors (code review of 12b56fa: "Door 1 of 2" with three to go).
+test('QueueWalkthrough: Entry 1 of 3 for three entries at two doors', async () => {
+  const { render } = await build(`
+    import React from 'react';
+    import { renderToString } from 'react-dom/server';
+    import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+    import QueueWalkthrough from '${src('components/outcomes/QueueWalkthrough.jsx')}';
+    globalThis.fetch = () => new Promise(() => {});
+    export const render = () => renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueWalkthrough campaignId="c1"
+          run={{ id: 'q1', status: 'open', counts: { entriesTargeted: 3, doorsTargeted: 2 }, progress: { doorsDone: 0, doorsTotal: 2 }, doorsRemaining: ['e1', 'e2', 'e3'] }}
+          template={{ id: 't1', name: 'Support Survey', version: 1, questions: [] }} onDone={() => {}} onCancel={() => {}} />
+      </QueryClientProvider>
+    );`);
+  const t = text(render());
+  assert.match(t, /Entry 1 of 3/);
+  assert.doesNotMatch(t, /of 2\b/);
+});
+
+test('QueueWalkthrough: its finish says the doors, never the entries counted as doors', async () => {
+  const { render } = await build(`
+    import React from 'react';
+    import { renderToString } from 'react-dom/server';
+    import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+    import QueueWalkthrough from '${src('components/outcomes/QueueWalkthrough.jsx')}';
+    globalThis.fetch = () => new Promise(() => {});
+    export const render = () => renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueWalkthrough campaignId="c1"
+          run={{ id: 'q1', status: 'open', counts: { entriesTargeted: 3, doorsTargeted: 2 }, progress: { doorsDone: 3, doorsTotal: 2 }, doorsRemaining: [] }}
+          template={{ id: 't1', name: 'Support Survey', version: 1, questions: [] }} onDone={() => {}} onCancel={() => {}} />
+      </QueryClientProvider>
+    );`);
+  const t = text(render());
+  assert.match(t, /All 2 doors done/);
+});
+
+// The Surveyed → Not home run card says what its run is doing by its status: waiting, at work, or being
+// undone — and a large undo, how many people it has gone through (code review of 12b56fa).
+test('ConversionRunCard: Waiting with its Undo, Working by doors, Undoing by people', async () => {
+  const { render } = await build(`
+    import React from 'react';
+    import { renderToString } from 'react-dom/server';
+    import ConversionRunCard from '${src('components/outcomes/ConversionRunCard.jsx')}';
+    const base = { id: 'c1', direction: 'from_survey', to: 'not_home', counts: {}, samples: [] };
+    export const render = (run) => renderToString(<ConversionRunCard run={{ ...base, ...run }} onRevert={() => {}} onResume={() => {}} onDismiss={() => {}} />);
+  `);
+  // Queued again after it stopped in its settle: it says it waits, never the older phase.
+  const queued = text(render({ status: 'pending', progress: { phase: 'recomputing', pct: 99, doorsDone: 4, doorsTotal: 4 } }));
+  assert.match(queued, /Waiting/);
+  assert.match(queued, /Waiting to start…/);
+  assert.doesNotMatch(queued, /Updating campaign totals|Working/);
+  assert.match(queued, /Undo this change/, 'one still queued can be undone — that cancels it');
+  const working = text(render({ status: 'running', progress: { phase: 'converting', pct: 40, doorsDone: 2, doorsTotal: 5 } }));
+  assert.match(working, /Working/);
+  assert.match(working, /2 of 5 doors/);
+  assert.doesNotMatch(working, /Undo this change/, 'no Undo while it runs');
+  const undoing = text(render({ status: 'reverting', progress: { phase: 'reverting', pct: 0, doorsDone: 0, doorsTotal: 5, peopleDone: 0, peopleTotal: 900 } }));
+  assert.match(undoing, /Undoing/);
+  assert.match(undoing, /Undoing · 0 of 900 people/);
+  const settling = text(render({ status: 'reverting', progress: { phase: 'recomputing', pct: 95 } }));
+  assert.match(settling, /Updating campaign totals…/);
+});

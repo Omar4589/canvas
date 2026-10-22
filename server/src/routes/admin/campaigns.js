@@ -2319,7 +2319,14 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
     // read the run's stamps before the step wrote its own (round 4).
     const claimedRevert = await SurveyConversionRun.findOneAndUpdate(
       { _id: run._id, status: statusWas, revertedAt: null, ...NO_FRESH_STEP() },
-      { $set: { status: 'reverting', queueJobId: jobId, revertClaimedAt: null, revertFrom: { status: statusWas, error: run.error ?? null } } },
+      // ...its progress from the start too: the reply to a queued Undo carried the change's own 100%, and its
+      // card read a full bar until the worker began (code review of 12b56fa).
+      {
+        $set: {
+          status: 'reverting', queueJobId: jobId, revertClaimedAt: null, revertFrom: { status: statusWas, error: run.error ?? null },
+          progress: { phase: 'reverting', pct: 0, doorsDone: 0, doorsTotal: run.counts?.doorsTargeted || 0 },
+        },
+      },
       { new: true }
     );
     if (!claimedRevert) {
@@ -2361,8 +2368,11 @@ router.post('/:campaignId/survey-conversions/:runId/revert', async (req, res, ne
         );
       } catch {
         // Back to what it was, the job forgotten: `reverting` with no job would offer neither Revert
-        // nor Resume, and a late delivery must not undo a change the admin was told stays.
-        const parked = await parkConversion(run._id, { jobId, from: 'reverting', to: statusWas, error: run.error ?? null });
+        // nor Resume, and a late delivery must not undo a change the admin was told stays. Its forward job
+        // kept, as every give-back keeps it (parkBack): an Undo of a change still queued that couldn't reach
+        // the queue left that change waiting on a job it no longer recognised — skipped when it came, the
+        // campaign held until the ten-minute settle (code review of 12b56fa).
+        const parked = await parkBack();
         if (parked) {
           return res.status(503).json({
             error: 'Could not start the undo. Nothing has been changed — try again shortly.',
@@ -2419,6 +2429,9 @@ router.get('/:campaignId/survey-conversions', async (req, res, next) => {
         },
       ],
     })
+      // Never the frozen selection: up to 25,000 ids a run, read 50 runs at a time, made the list — now read every
+      // 3 s while a change runs — hundreds of milliseconds (code review of 12b56fa). Nothing on the list needs it.
+      .select('-selection.actionIds')
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();

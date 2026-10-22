@@ -27,6 +27,12 @@ import AnswerEditWalkthrough from '../components/outcomes/AnswerEditWalkthrough.
 import AnswerEditRunCard, { ACTION_LABEL as EDIT_ACTION_LABEL } from '../components/outcomes/AnswerEditRunCard.jsx';
 import { useAnswerEditRunPoll, gaveUp } from '../lib/useAnswerEditRunPoll.js';
 import { planFromForm, runState, picksLine, attentionBadge, isAnswerEditSettled } from '../lib/answerEditPlan.js';
+// `editAtWork`, never `editBusy`: this page's own `editBusy` (a request in flight) shadowed the import across the
+// whole component, and the watch called a boolean — the page threw on every mount (code review of 12b56fa).
+import {
+  conversionBusy, editBusy as editAtWork, conversionListInterval, editListInterval, landedSince, nextToFollow, cardLandsIt,
+  sameConversionState, sameEditState, refusedAsBusy,
+} from '../lib/changeWatch.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { isOutcomeEnabled, outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
@@ -59,8 +65,6 @@ const OUTCOMES = ['not_home', 'wrong_address', 'refused', 'not_target', 'no_soli
 const SOURCES = [...OUTCOMES, 'survey_submitted'];
 const SURVEYED = 'survey_submitted';
 const PAGE = 50;
-// A conversion still at work: queued, converting, or being undone (a door-by-door session is `open`).
-const convBusy = (r) => ['pending', 'running', 'reverting'].includes(r?.status);
 
 const Dot = ({ k }) => (
   <span className="mr-1.5 inline-block h-2 w-2 shrink-0 rounded-full align-middle" style={{ backgroundColor: STATUS_COLORS[k] }} aria-hidden />
@@ -403,6 +407,23 @@ export default function DoorOutcomesPage() {
     refetchAfterWrite(cid);
     if (stillOn(cid)) closeStaleReviews(at || Infinity, { remember: !!at });
   };
+  // Another change holding the campaign that this page never saw — another admin's, another tab's, or one
+  // started while no list was being read — is read whenever the page hears of it: the Edit answers form
+  // saying one is running (editOpen), or any change refused for one (below). The lists' watch then shows it
+  // (code review of 12b56fa: the lists were read only while they already held a moving run, so a change
+  // started elsewhere never showed, and Check again changed nothing).
+  const readChangeListsAgain = (cid = campaignId) => {
+    for (const k of ['survey-conversions', 'answer-edits', 'unknock']) qc.invalidateQueries({ queryKey: ['admin', 'campaigns', cid, k] });
+  };
+  useEffect(
+    () =>
+      qc.getMutationCache().subscribe((event) => {
+        if (event?.type !== 'updated' || event.action?.type !== 'error' || !refusedAsBusy(event.action.error)) return;
+        readChangeListsAgain(event.mutation?.state?.variables?.campaignId || campaignId);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [qc, campaignId]
+  );
   // The lists and numbers a write moved, refetched — and nothing on the page touched.
   const refetchAfterWrite = (cid = campaignId) => {
     qc.invalidateQueries({ queryKey: ['admin', 'outcome-entries', cid] });
@@ -442,7 +463,7 @@ export default function DoorOutcomesPage() {
     queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'],
     queryFn: () => api(`/admin/campaigns/${campaignId}/survey-conversions`),
     enabled: !!campaignId && isOrgAdmin,
-    refetchInterval: (q) => (!gaveUp(q) && (q.state.data?.runs || []).some(convBusy) ? 3000 : false),
+    refetchInterval: (q) => (gaveUp(q) ? false : conversionListInterval(q.state.data?.runs)),
   });
   const convRuns = convRunsQ.data?.runs || [];
   const { run: liveRun, stopped: convPollStopped } = useConversionRunPoll({ campaignId, runId: activeRunId });
@@ -462,26 +483,34 @@ export default function DoorOutcomesPage() {
   // and closes reviews priced before it, as the card's landing does; and one still at work with no card up
   // gets its card back — a change left running when the page was closed, or another admin's (2026-10-21:
   // neither came back, and the row kept the state the page loaded with). A card dismissed stays dismissed.
+  // Both halves are plain functions (lib/changeWatch.js). A run the live card lands itself — its copy still at
+  // work, or already showing that landing — is left to the card's own effect above, never handled twice (code
+  // review of 12b56fa: both refetched; then a card showing its run settled earlier skipped that run's next
+  // landing, and nothing refetched).
   const busyConvs = useRef({ cid: null, ids: new Set() });
   const dismissedConvs = useRef(new Set());
   useEffect(() => {
-    const now = new Set(convRuns.filter(convBusy).map((r) => r.id));
     const was = busyConvs.current;
-    busyConvs.current = { cid: campaignId, ids: now };
-    if (was.cid === campaignId) {
-      const landed = convRuns.filter((r) => was.ids.has(r.id) && !now.has(r.id));
-      if (landed.length) {
-        refetchAfterWrite(campaignId);
-        closeStaleReviews(Math.max(...landed.map(finishedAt)));
-      }
-    }
-    if (!activeRunId && !walking) {
-      const atWork = convRuns.find((r) => convBusy(r) && !dismissedConvs.current.has(r.id));
-      if (atWork) followConvRun(atWork);
-    }
+    busyConvs.current = { cid: campaignId, ids: new Set(convRuns.filter(conversionBusy).map((r) => r.id)) };
+    if (was.cid !== campaignId) return;
+    const card = convPollStopped ? null : liveRun;
+    const landed = landedSince(was.ids, convRuns, conversionBusy, { skip: (r) => cardLandsIt(card, r, { busy: conversionBusy, same: sameConversionState }) });
+    if (!landed.length) return;
+    refetchAfterWrite(campaignId);
+    closeStaleReviews(Math.max(...landed.map(finishedAt)));
     // Reads this render's campaign, card and reviews; re-running on every list change is the point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convRunsQ.data, campaignId]);
+  // ...and the follow, on its own: also when a card closes or its run settles — a settled card gives way to a
+  // run at work, or follows its own run again when the list shows it at work (nextToFollow).
+  useEffect(() => {
+    if (walking) return;
+    const next = nextToFollow({ runs: convRuns, busy: conversionBusy, dismissed: dismissedConvs.current, cardId: activeRunId, card: liveRun });
+    // Its own run: the card reads it again — never the list's copy, which can be older than its own.
+    if (next?.refresh) qc.invalidateQueries({ queryKey: ['survey-conversion', campaignId, next.run.id] });
+    else if (next) followConvRun(next.run);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convRunsQ.data, campaignId, activeRunId, walking, liveRun?.status, liveRun?.updatedAt]);
 
   const convBody = (extra = {}) => ({
     direction,
@@ -648,8 +677,9 @@ export default function DoorOutcomesPage() {
     queryKey: ['admin', 'campaigns', campaignId, 'answer-edits'],
     queryFn: () => api(`/admin/campaigns/${campaignId}/answer-edits`),
     enabled: !!campaignId && isOrgAdmin,
-    // Watched while one is still moving, as the conversions are (above).
-    refetchInterval: (q) => (!gaveUp(q) && (q.state.data?.runs || []).some((r) => !isAnswerEditSettled(r)) ? 3000 : false),
+    // Watched while one is still moving, as the conversions are (above) — slowly while the only ones at work
+    // wait on the worker or stopped responding (lib/changeWatch.js).
+    refetchInterval: (q) => (gaveUp(q) ? false : editListInterval(q.state.data?.runs)),
   });
   const editRuns = editRunsQ.data?.runs || [];
   const { run: liveEditRun, settled: editSettled, stopped: editPollStopped } = useAnswerEditRunPoll({ campaignId, runId: activeEditRunId });
@@ -678,16 +708,22 @@ export default function DoorOutcomesPage() {
   const busyEdits = useRef({ cid: null, ids: new Set() });
   const dismissedEdits = useRef(new Set());
   useEffect(() => {
-    const now = new Set(editRuns.filter((r) => !isAnswerEditSettled(r)).map((r) => r.id));
     const was = busyEdits.current;
-    busyEdits.current = { cid: campaignId, ids: now };
-    if (was.cid === campaignId && [...was.ids].some((id) => !now.has(id))) afterEdit(campaignId);
-    if (!activeEditRunId && !editWalk) {
-      const atWork = editRuns.find((r) => !isAnswerEditSettled(r) && !dismissedEdits.current.has(r.id));
-      if (atWork) followEditRun(atWork);
+    busyEdits.current = { cid: campaignId, ids: new Set(editRuns.filter(editAtWork).map((r) => r.id)) };
+    if (was.cid !== campaignId) return;
+    const card = editPollStopped ? null : liveEditRun;
+    if (landedSince(was.ids, editRuns, editAtWork, { skip: (r) => cardLandsIt(card, r, { busy: editAtWork, same: sameEditState }) }).length) {
+      afterEdit(campaignId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRunsQ.data, campaignId]);
+  useEffect(() => {
+    if (editWalk) return;
+    const next = nextToFollow({ runs: editRuns, busy: editAtWork, dismissed: dismissedEdits.current, cardId: activeEditRunId, card: liveEditRun });
+    if (next?.refresh) qc.invalidateQueries({ queryKey: ['answer-edit', campaignId, next.run.id] });
+    else if (next) followEditRun(next.run);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRunsQ.data, campaignId, activeEditRunId, editWalk, liveEditRun?.status, liveEditRun?.undo?.status]);
   const editSettledKey = liveEditRun ? `${liveEditRun.id}:${liveEditRun.status}:${liveEditRun.undo?.status}:${editSettled}` : null;
   useEffect(() => {
     if (editSettledKey && editSettled) afterEdit();
@@ -712,6 +748,9 @@ export default function DoorOutcomesPage() {
       if (stillOn(v.campaignId) && editDry) setEditError(null);
     },
     onSuccess: (d, { campaignId: cid, selection, keepForm = false, notice = null }) => {
+      // The form says another change is running — Check again included: read the lists, so that change
+      // shows (its card, or its row) even when this page never saw it start.
+      if (d.blocked) readChangeListsAgain(cid);
       if (!stillOn(cid)) return;
       setEditDry({ ...d, sent: { campaignId: cid, selection } });
       if (!keepForm) setEditForm({});
@@ -731,6 +770,8 @@ export default function DoorOutcomesPage() {
     // Only onto the form it was priced from: away and back to this campaign while it loaded, the
     // form is gone (or a new one is open), and the review opened over a reset page (round 4).
     onSuccess: (d, v) => {
+      // A review told another change is running reads the lists too, as the form does (code review of 12b56fa).
+      if (d.blocked) readChangeListsAgain(v.campaignId);
       if (!stillOn(v.campaignId) || editDry?.sent?.selection !== v.selection) return;
       setEditError(null);
       setEditPreview({ ...d, sent: v });
@@ -1605,23 +1646,36 @@ export default function DoorOutcomesPage() {
                   <Badge variant="neutral">Undone</Badge>
                 ) : r.status === 'reverting' ? (
                   <Badge variant="neutral">Undoing…</Badge>
-                ) : r.status === 'pending' || r.status === 'running' ? (
-                  // Still at work: where it has got to, and no Undo the server would refuse while it runs
-                  // (2026-10-21). The list watches it until it lands.
+                ) : r.status === 'running' ? (
+                  // At work: where it has got to, and no Undo — the server refuses one while it runs (2026-10-21).
+                  // The list watches it until it lands.
                   <Badge variant="info">
-                    {r.status === 'pending'
-                      ? 'Waiting to start'
-                      : r.progress?.phase === 'recomputing'
-                        ? 'Updating totals…'
-                        : `Working · ${(r.progress?.doorsDone || 0).toLocaleString()} of ${(r.progress?.doorsTotal || 0).toLocaleString()} doors`}
+                    {r.progress?.phase === 'recomputing'
+                      ? 'Updating totals…'
+                      : `Working · ${(r.progress?.doorsDone || 0).toLocaleString()} of ${(r.progress?.doorsTotal || 0).toLocaleString()} doors`}
                   </Badge>
+                ) : r.status === 'pending' ? (
+                  // Queued, not begun: its Undo still cancels it — the job then finds nothing to claim (code
+                  // review of 12b56fa: the row had lost it).
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="info">Waiting to start</Badge>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={convRevert.isPending}
+                      onClick={() => { setError(null); convRevert.mutate({ campaignId, runId: r.id }); }}
+                    >
+                      Undo
+                    </Button>
+                  </div>
                 ) : r.status === 'failed' ? (
-                  // Stopped part-way: what landed is correct — pick up where it stopped, or undo it, as its card offers.
+                  // Stopped part-way: what landed is correct — pick up where it stopped, or undo it, as its card
+                  // offers; one at a time, as on the card.
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="danger">Stopped</Badge>
                     <Button
                       size="sm"
-                      disabled={convResume.isPending}
+                      disabled={convResume.isPending || convRevert.isPending}
                       onClick={() => { setError(null); convResume.mutate({ campaignId, runId: r.id }); }}
                     >
                       Pick up where it stopped
@@ -1629,7 +1683,7 @@ export default function DoorOutcomesPage() {
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={convRevert.isPending}
+                      disabled={convResume.isPending || convRevert.isPending}
                       onClick={() => { setError(null); convRevert.mutate({ campaignId, runId: r.id }); }}
                     >
                       Undo
@@ -1648,9 +1702,9 @@ export default function DoorOutcomesPage() {
                   </div>
                 ) : r.status === 'open' ? (
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Steps of the session's entries — a door two canvassers recorded is two (code review of 12b56fa). */}
                     <Badge variant="neutral">
-                      Unfinished — {(r.progress?.doorsDone || 0).toLocaleString()} of{' '}
-                      {(r.progress?.doorsTotal || 0).toLocaleString()} done
+                      {`Unfinished — ${(r.progress?.doorsDone || 0).toLocaleString()} of ${(r.counts?.entriesTargeted || r.progress?.doorsTotal || 0).toLocaleString()} done`}
                     </Badge>
                     <Button
                       size="sm"
@@ -1734,10 +1788,11 @@ export default function DoorOutcomesPage() {
                   {r.status === 'reverted' ? (
                     <Badge variant="neutral">Undone</Badge>
                   ) : r.undoing ? (
-                    <Badge variant="info">{`Undoing…${r.progress?.phase === 'undoing' ? ` ${r.progress.pct}%` : ''}`}</Badge>
+                    <Badge variant="info">{`Undoing…${r.progress?.phase === 'undoing' && r.progress.pct > 0 ? ` ${r.progress.pct}%` : ''}`}</Badge>
                   ) : r.removing ? (
-                    // How far it has got (2026-10-21): a large one runs for minutes.
-                    <Badge variant="info">{`Removing…${r.progress?.phase === 'removing' ? ` ${r.progress.pct}%` : ''}`}</Badge>
+                    // How far it has got (2026-10-21) — once there is anything to say: a small one is done before
+                    // it would read more than 0%.
+                    <Badge variant="info">{`Removing…${r.progress?.phase === 'removing' && r.progress.pct > 0 ? ` ${r.progress.pct}%` : ''}`}</Badge>
                   ) : r.status === 'pending' && !r.stoppedPartWay ? (
                     <Badge variant="neutral">Did not finish — nothing was removed</Badge>
                   ) : (

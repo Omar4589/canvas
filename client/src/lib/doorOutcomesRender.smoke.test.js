@@ -215,12 +215,16 @@ test('DoorOutcomesPage: changes at work say where they are, and the live cards s
      qc.setQueryData(['admin', 'campaigns', CID, 'survey-conversions'], { runs: [
        { id: 'c1', campaignId: CID, direction: 'from_survey', to: 'not_home', status: 'running', counts: {}, progress: { phase: 'converting', pct: 66, doorsDone: 2, doorsTotal: 3 }, createdAt: at },
        { id: 'c2', campaignId: CID, direction: 'from_survey', to: 'not_home', status: 'failed', counts: { entriesConverted: 4 }, progress: {}, createdAt: at },
+       { id: 'c3', campaignId: CID, direction: 'from_survey', to: 'not_home', mode: 'queue', status: 'open', counts: { entriesTargeted: 3 }, progress: { doorsDone: 3, doorsTotal: 2 }, createdAt: at },
+       { id: 'c4', campaignId: CID, direction: 'to_survey', sources: ['not_home'], status: 'pending', counts: {}, progress: { phase: 'recomputing', pct: 99 }, createdAt: at },
      ] });
      qc.setQueryData(['admin', 'campaigns', CID, 'answer-edits'], { runs: [
        { id: 'a1', campaignId: CID, mode: 'bulk', status: 'running', progress: { done: 120, total: 500 }, counts: {}, createdAt: at },
      ] });
      qc.setQueryData(['admin', 'campaigns', CID, 'unknock'], { runs: [
        { id: 'u1', status: 'pending', removing: true, undoing: false, progress: { phase: 'removing', pct: 47 }, frozenRows: 10, counts: { doorsAffected: 4 }, createdAt: at },
+       { id: 'u2', status: 'completed', removing: false, undoing: true, progress: { phase: 'undoing', pct: 0 }, counts: { entriesRemoved: 3, doorsAffected: 3 }, createdAt: at },
+       { id: 'u3', status: 'pending', removing: true, undoing: false, progress: { phase: 'removing', pct: 0 }, frozenRows: 2, counts: { doorsAffected: 2 }, createdAt: at },
      ] });
      export const html = renderToString(
        <QueryClientProvider client={qc}>
@@ -253,9 +257,21 @@ test('DoorOutcomesPage: changes at work say where they are, and the live cards s
     assert.match(html, /Pick up where it stopped/, 'a stopped conversion can be picked up from its row');
     assert.match(html, /Working · 120 of 500 surveys/, 'an answer edit at work says where it is');
     assert.match(html, /Removing… 47%/, 'an unknock still removing says how far it has got');
-    // The running conversion's row offers no Undo: between its title and the next row there is none.
-    const row = html.slice(html.indexOf('Working · 2 of 3 doors') - 1500, html.indexOf('Working · 2 of 3 doors') + 300);
-    assert.ok(!/>Undo</.test(row.slice(row.lastIndexOf('<li'))), 'no Undo while it runs');
+    assert.match(html, /Unfinished — 3 of 3 done/, 'a door-by-door session counts its steps, never 3 of 2 doors');
+    // One row's own markup: from its <li> to its </li>.
+    const rowOf = (marker) => {
+      const at = html.indexOf(marker);
+      assert.ok(at > 0, marker);
+      return html.slice(html.lastIndexOf('<li', at), html.indexOf('</li>', at));
+    };
+    assert.ok(!/>Undo</.test(rowOf('Working · 2 of 3 doors')), 'no Undo while it runs');
+    const queued = rowOf('Waiting to start');
+    assert.match(queued, />Undo</, 'one still queued keeps its Undo — it cancels it');
+    assert.ok(!/Updating totals/.test(queued), 'queued again, an older phase is not what it says');
+    assert.match(html, /Undoing…<\/span>/, 'an undo at 0% says Undoing…');
+    assert.ok(!/Undoing… 0%/.test(html), 'never "Undoing… 0%"');
+    assert.match(html, /Removing…<\/span>/, 'a strike at 0% says Removing…');
+    assert.ok(!/Removing… 0%/.test(html), 'never "Removing… 0%"');
   } finally {
     rmSync(dir3, { recursive: true, force: true });
   }

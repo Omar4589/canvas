@@ -45,7 +45,9 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
   const bodyRef = useRef(null);
 
   const actionId = remaining?.[0] || null;
-  const total = run.progress?.doorsTotal || run.counts?.doorsTargeted || 0;
+  // Steps, not doors: each step is one entry, and a door two canvassers recorded comes up twice (code review
+  // of 12b56fa: "Door 1 of 2" with three steps to go).
+  const total = run.counts?.entriesTargeted || run.progress?.doorsTotal || run.counts?.doorsTargeted || 0;
   const done = remaining === null ? 0 : total - remaining.length;
 
   // Belt-and-braces: if we were handed a run without its queue (an older client, a shape change),
@@ -198,7 +200,7 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
     return (
       <Modal onClose={onDone} title={finish.isPending ? 'Finishing…' : 'Desk entry finished'} size="md" footer={<Button onClick={onDone} disabled={finish.isPending}>Close</Button>}>
         <p className="text-sm text-fg">
-          All {total.toLocaleString()} doors done. You can undo the whole session from the run card.
+          All {(run.counts?.doorsTargeted || total).toLocaleString()} {(run.counts?.doorsTargeted || total) === 1 ? 'door' : 'doors'} done. You can undo the whole session from the run card.
         </p>
       </Modal>
     );
@@ -208,7 +210,7 @@ export default function QueueWalkthrough({ campaignId, run, template, onDone, on
     <Modal
       onClose={onCancel}
       title={door ? door.address : 'Loading door…'}
-      subtitle={`Door ${done + 1} of ${total.toLocaleString()}`}
+      subtitle={`Entry ${(done + 1).toLocaleString()} of ${total.toLocaleString()}`}
       size="lg"
       bodyRef={bodyRef}
       footer={

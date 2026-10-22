@@ -45,7 +45,7 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
         {run.status === 'failed' && <Badge variant="danger">Stopped</Badge>}
         {run.status === 'revert_failed' && <Badge variant="danger">Undo stopped</Badge>}
         {run.status === 'open' && <Badge variant="neutral">Unfinished</Badge>}
-        {running && <Badge variant="neutral">{run.status === 'reverting' ? 'Undoing' : 'Working'}</Badge>}
+        {running && <Badge variant="neutral">{run.status === 'reverting' ? 'Undoing' : run.status === 'pending' ? 'Waiting' : 'Working'}</Badge>}
       </div>
 
       {running && (
@@ -57,16 +57,17 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
             />
           </div>
           <div className="mt-1 text-xs text-fg-muted">
-            {/* An undo counts the people whose answers it has put back; going forward it counts doors
-                (2026-10-21: an undo's bar sat at the start, reading 0 doors, until it finished). */}
-            {run.progress?.phase === 'recomputing'
-              ? 'Updating campaign totals…'
-              : run.status === 'reverting'
-                ? run.progress?.peopleTotal
-                  ? `Putting answers back · ${(run.progress.peopleDone || 0).toLocaleString()} of ${run.progress.peopleTotal.toLocaleString()} people`
-                  : 'Undoing…'
-                : run.status === 'pending'
-                  ? 'Waiting to start…'
+            {/* Going forward it counts doors; an undo of a Surveyed → outcome change counts the people it has
+                gone through, a page of them at a time (2026-10-21: an undo's bar sat at the start, reading 0
+                doors, until it finished). Waiting first: a run queued again can carry an older phase. */}
+            {run.status === 'pending'
+              ? 'Waiting to start…'
+              : run.progress?.phase === 'recomputing'
+                ? 'Updating campaign totals…'
+                : run.status === 'reverting'
+                  ? run.progress?.peopleTotal
+                    ? `Undoing · ${(run.progress.peopleDone || 0).toLocaleString()} of ${run.progress.peopleTotal.toLocaleString()} people`
+                    : 'Undoing…'
                   : `${(run.progress?.doorsDone || 0).toLocaleString()} of ${(run.progress?.doorsTotal || 0).toLocaleString()} doors`}
           </div>
         </div>
@@ -135,8 +136,9 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
         {!stopped && run.status === 'failed' && (
           <Button size="sm" onClick={onResume} disabled={busy}>Pick up where it stopped</Button>
         )}
-        {/* An open door-by-door session is undone once it's closed (the server refuses before). */}
-        {!stopped && !run.revertedAt && !running && run.status !== 'open' && (
+        {/* An open door-by-door session is undone once it's closed (the server refuses before); one still
+            queued can be undone — it cancels it — but not one at work. */}
+        {!stopped && !run.revertedAt && (!running || run.status === 'pending') && run.status !== 'open' && (
           <Button variant="secondary" size="sm" onClick={onRevert} disabled={busy}>
             {run.status === 'revert_failed' ? 'Retry undo' : 'Undo this change'}
           </Button>

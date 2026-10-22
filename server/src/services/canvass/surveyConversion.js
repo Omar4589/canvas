@@ -758,14 +758,19 @@ async function executeRun({ run, campaign, onProgress }) {
       : null;
   if (run.direction === 'to_survey' && !template) throw new Error('Survey template no longer exists');
 
-  const pending = await CanvassActivity.find(
-    {
-      ...convertibleMatch(campaign._id, null, CONVERTIBLE_SOURCES),
-      actionType: { $in: SOURCES_FOR(run.direction) },
-      _id: { $in: run.selection.actionIds },
-    },
-    { householdId: 1, actionType: 1, userId: 1, passId: 1, turfId: 1, effortId: 1, coordinatorId: 1, location: 1, distanceFromHouseMeters: 1, timestamp: 1, wasOfflineSubmission: 1, voterId: 1 }
-  ).lean();
+  const pending = (
+    await CanvassActivity.find(
+      {
+        ...convertibleMatch(campaign._id, null, CONVERTIBLE_SOURCES),
+        actionType: { $in: SOURCES_FOR(run.direction) },
+        _id: { $in: run.selection.actionIds },
+      },
+      { householdId: 1, actionType: 1, userId: 1, passId: 1, turfId: 1, effortId: 1, coordinatorId: 1, location: 1, distanceFromHouseMeters: 1, timestamp: 1, wasOfflineSubmission: 1, voterId: 1 }
+    ).lean()
+  // A door's entries together, so doors finish as the run goes rather than all at its end (the progress
+  // below counts a door once its last entry is through — code review of 12b56fa: in the read's own order the
+  // bar sat at 0 doors for most of a run).
+  ).sort((a, b) => (String(a.householdId) < String(b.householdId) ? -1 : String(a.householdId) > String(b.householdId) ? 1 : 0));
 
   const ctx = newCtx({ campaign, template, run });
   const answersFor = () => ({ answers: run.answers, note: run.note });
@@ -780,6 +785,10 @@ async function executeRun({ run, campaign, onProgress }) {
   const doneBefore = Math.max(0, total - lastEntryAt.size);
   let through = 0;
   let done = Math.min(total, doneBefore);
+  // Where it starts, before its first batch: a Pick up read whatever an earlier attempt — or an Undo claimed and
+  // given back — left there until its first batch landed (code review of 12b56fa).
+  run.progress = { phase: 'converting', pct: total ? Math.min(99, Math.round((done / total) * 100)) : 0, doorsDone: done, doorsTotal: total };
+  await run.save();
 
   for (let i = 0; i < pending.length; i += CHUNK) {
     if (await deletionRequested(tenantOf(run))) {
@@ -869,11 +878,13 @@ async function applyDoor({ run, campaign, actionId, voterPlans = {} }) {
 
   mergeCounts(run, ctx.acc);
   if (!run.sources.includes(row.actionType)) run.sources.push(row.actionType);
+  // A door-by-door step is one entry — the walkthrough goes entry by entry, and a door two canvassers
+  // recorded comes up twice — so a session counts the entries it has done of the entries it holds (code
+  // review of 12b56fa: counted against its doors, it read "3 of 2 done"). `doorsDone` here is steps.
+  const steps = run.counts?.entriesTargeted || run.progress?.doorsTotal || 1;
   run.progress = {
     phase: 'converting',
-    pct: run.progress?.doorsTotal
-      ? Math.min(99, Math.round(((run.progress.doorsDone + 1) / run.progress.doorsTotal) * 100))
-      : 0,
+    pct: Math.min(99, Math.round((((run.progress?.doorsDone || 0) + 1) / steps) * 100)),
     doorsDone: (run.progress?.doorsDone || 0) + 1,
     doorsTotal: run.progress?.doorsTotal || 1,
   };
@@ -1050,17 +1061,25 @@ const entriesOnFile = async (run, { surveyed = false } = {}) => {
  * settle: those doors and voters kept reading the conversion. Stamped-but-flipped rows are out of
  * every correction's scope (convertibleMatch) until the retry finishes, which is the safe direction.
  */
-// An undo's progress, on its own run doc (the forward run saves its progress the same way).
-const undoProgress = async (run, { phase = 'reverting', pct, peopleDone, peopleTotal }) => {
-  run.progress = {
-    phase,
-    pct,
-    doorsDone: run.progress?.doorsDone || 0,
-    doorsTotal: run.progress?.doorsTotal || 0,
-    ...(peopleTotal ? { peopleDone, peopleTotal } : {}),
-  };
-  await run.save();
-};
+// An undo's progress, written beside the run — never through run.save(), which also wrote the skip lines
+// and counts this attempt had gathered so far, so a retry, which gathers them again, listed each voter whose
+// answers couldn't go back twice (code review of 12b56fa). With its timestamp: the undo's `updatedAt` still
+// moves as it goes, its sign of life to settleStalledConversion.
+const undoProgress = (run, { phase = 'reverting', pct, peopleDone, peopleTotal }) =>
+  SurveyConversionRun.updateOne(
+    { _id: run._id },
+    {
+      $set: {
+        progress: {
+          phase,
+          pct,
+          doorsDone: run.progress?.doorsDone || 0,
+          doorsTotal: run.progress?.doorsTotal || 0,
+          ...(peopleTotal ? { peopleDone, peopleTotal } : {}),
+        },
+      },
+    }
+  );
 
 async function revertRun({ run, campaign }) {
   if (await deletionRequested(tenantOf(run))) {
@@ -1127,9 +1146,10 @@ async function revertRun({ run, campaign }) {
     // thing, and every retry died the same way).
     const copyVoters = await SurveyResponseArchive.distinct('voterId', { conversionRunId: run._id });
     for (let page = 0; page < copyVoters.length; page += UNDO_VOTER_PAGE()) {
-      // Where it has got to, for its card: the people whose answers it has put back (2026-10-21 — the bar
-      // sat at the start until the undo finished).
-      if (page > 0) await undoProgress(run, { pct: Math.min(90, Math.round((page / copyVoters.length) * 90)), peopleDone: page, peopleTotal: copyVoters.length });
+      // Where it has got to, for its card: the people it has gone through, from the first page — "0 of 900"
+      // before it begins (2026-10-21: the bar sat at the start until the undo finished; code review of
+      // 12b56fa: an undo of one page never said how many).
+      await undoProgress(run, { pct: Math.min(90, Math.round((page / copyVoters.length) * 90)), peopleDone: page, peopleTotal: copyVoters.length });
       const archived = await SurveyResponseArchive.find({ conversionRunId: run._id, voterId: { $in: copyVoters.slice(page, page + UNDO_VOTER_PAGE()) } }).lean();
       const promoted = [];
       // Whether the slot is free is decided by an explicit READ, not by whether the unique index

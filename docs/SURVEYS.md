@@ -2008,12 +2008,15 @@ differs is a field answer and stays, counted not restored. A stopped undo reads
 reads `failed`), the inline path (≤ `INLINE_REVERT_MAX_ENTRIES`, 500) sets it in a catch and answers
 **500 `REVERT_FAILED`** with the run, and an inline undo still `reverting` 10 minutes after its last
 write — one that died with its request — is settled into `revert_failed` (below). **Progress**
-(2026-10-21): going forward a run counts **doors**, never entries — a door is through once its last
-pending entry is, and one with none pending (finished by an earlier delivery, or nothing to change)
-counts from the start (`executeRun`; counting entries read "12 of 9 doors"); an undo writes, per page
-of voters, `progress.peopleDone/peopleTotal` (the people whose answers it has put back, up to 90%), then
-`phase: 'recomputing'` (95%) before its flip and settle — it wrote only 0% and 100%, so its bar sat at
-the start until it finished. Its only remedy is
+(2026-10-21): going forward a bulk run counts **doors**, never entries — its work set sorted by door, a
+door is through once its last pending entry is, and one with none pending (finished by an earlier
+delivery, or nothing to change) counts from the start (`executeRun`; counting entries read "12 of 9
+doors"); a door-by-door session counts its **steps**, the entries it holds (`counts.entriesTargeted` —
+a door two canvassers recorded is two). An Undo's claim resets the progress (the reply to a queued one
+carried the change's 100%); the undo then writes, before each page of voters, `progress.peopleDone /
+peopleTotal` (the people it has gone through, from 0, up to 90%), then `phase: 'recomputing'` (95%)
+before its flip and settle — beside the run (`updateOne`, never `run.save()`, which also wrote the skip
+lines the attempt had gathered, so a retry listed a voter twice). Its only remedy is
 **Retry undo** (the revert route); **resume refuses it**
 (409 `NOT_RESUMABLE`), because resume runs the conversion forward — when a stopped undo read
 `failed`, *Pick up where it stopped* re-applied the change it was taking back. A large undo that

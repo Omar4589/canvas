@@ -260,3 +260,11 @@ export const answerText = (a) => {
 /** Has a run settled (nothing for a worker to do until the admin acts)? The poll stops there. */
 export const isAnswerEditSettled = (run) =>
   !!run && !['pending', 'running'].includes(run.status) && !['pending', 'running'].includes(run.undo?.status);
+
+/**
+ * Unsettled, but waiting on someone rather than moving: the server's flags for a change (or its undo) the
+ * worker hasn't taken in ten minutes, or one that stopped responding — it moves again only when the worker
+ * comes back, or on Start again. Polled slowly, never every second (code review of 12b56fa).
+ */
+export const isAnswerEditWaiting = (run) =>
+  !!run && !isAnswerEditSettled(run) && !!(run.waitingForWorker || run.stalled || run.undo?.waitingForWorker || run.undo?.stalled);
