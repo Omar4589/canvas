@@ -320,10 +320,14 @@ async function strikeFrozen({ campaign, run, frozen, frozenAt, ids, doorIds, byU
   // batch's voters settled as it goes, so a strike that stops part-way leaves nothing stale behind it
   // (round 5: their doors and voters read surveyed until an Undo).
   const surveyed = frozen.filter((r) => r.actionType === 'survey_submitted');
+  // Where it has got to, with each beat: the answers' batches, then the entries' (the campaign's own
+  // numbers take the last few percent).
+  const steps = surveyed.length + ids.length || 1;
+  const at = (n) => ({ progress: { phase: 'removing', pct: Math.min(95, Math.floor((n / steps) * 95)) } });
   let responsesArchived = 0;
   const archivedVoterIds = [];
   for (let i = 0; i < surveyed.length; i += STRIKE_BATCH) {
-    if (i > 0) await beat(run._id);
+    if (i > 0) await beat(run._id, at(i));
     const responses = await atVisits(SurveyResponse, surveyed.slice(i, i + STRIKE_BATCH));
     if (!responses.length) continue;
     await archiveOverwrittenResponses(responses, { byUserId, via: 'unknock', unknockRunId: run._id });
@@ -339,7 +343,7 @@ async function strikeFrozen({ campaign, run, frozen, frozenAt, ids, doorIds, byU
   // 3. DELETE, each batch's doors settled as it goes.
   let entriesRemoved = 0;
   for (let i = 0; i < ids.length; i += STRIKE_BATCH) {
-    await beat(run._id);
+    await beat(run._id, at(surveyed.length + i));
     const batch = ids.slice(i, i + STRIKE_BATCH);
     const del = await CanvassActivity.deleteMany({ _id: { $in: batch } });
     entriesRemoved += del.deletedCount || 0;
@@ -467,6 +471,11 @@ const holdersOf = async (copies) => {
   return out;
 };
 
+// An undo's progress for its row — beside the run, never through it: `updatedAt` stays the run's own
+// (the page reads it as when the run last changed).
+const undoProgress = (run, pct) =>
+  UnknockRun.updateOne({ _id: run._id }, { $set: { progress: { phase: 'undoing', pct } } }, { timestamps: false });
+
 async function revertStrike({ campaign, run, byUserId }) {
   const chunks = await UnknockRunChunk.find({ runId: run._id }).sort({ seq: 1 }).lean();
   const frozen = chunks.flatMap((c) => c.rows || []);
@@ -570,6 +579,7 @@ async function revertStrike({ campaign, run, byUserId }) {
   // them among its own (round 7: Retry undo dropped them from the count).
   let handedNow = 0;
   for (let page = 0; page < copyVoters.length; page += UNDO_VOTER_PAGE()) {
+    await undoProgress(run, 10 + Math.floor((page / copyVoters.length) * 80));
     const archived = await SurveyResponseArchive.find({ unknockRunId: run._id, voterId: { $in: copyVoters.slice(page, page + UNDO_VOTER_PAGE()) } }).lean();
     const handOff = new Map(); // later run id -> copy ids
     for (const d of archived) {
@@ -669,6 +679,7 @@ async function revertStrike({ campaign, run, byUserId }) {
   // dies in between is retried — the row is written once, and the doors and voters it put back settle
   // — instead of leaving an undone run nothing will ever settle (round 5).
   await historyRow(campaign, byUserId, run._id, { swap: true });
+  await undoProgress(run, 95);
   await settle({
     campaign,
     doorIds: frozen.map((r) => r.householdId),

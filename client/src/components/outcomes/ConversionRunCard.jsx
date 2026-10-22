@@ -45,7 +45,7 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
         {run.status === 'failed' && <Badge variant="danger">Stopped</Badge>}
         {run.status === 'revert_failed' && <Badge variant="danger">Undo stopped</Badge>}
         {run.status === 'open' && <Badge variant="neutral">Unfinished</Badge>}
-        {running && <Badge variant="neutral">{run.progress?.phase === 'reverting' ? 'Undoing' : 'Working'}</Badge>}
+        {running && <Badge variant="neutral">{run.status === 'reverting' ? 'Undoing' : 'Working'}</Badge>}
       </div>
 
       {running && (
@@ -57,9 +57,17 @@ export default function ConversionRunCard({ run, onRevert, onResume, onDismiss, 
             />
           </div>
           <div className="mt-1 text-xs text-fg-muted">
+            {/* An undo counts the people whose answers it has put back; going forward it counts doors
+                (2026-10-21: an undo's bar sat at the start, reading 0 doors, until it finished). */}
             {run.progress?.phase === 'recomputing'
               ? 'Updating campaign totals…'
-              : `${(run.progress?.doorsDone || 0).toLocaleString()} of ${(run.progress?.doorsTotal || 0).toLocaleString()} doors`}
+              : run.status === 'reverting'
+                ? run.progress?.peopleTotal
+                  ? `Putting answers back · ${(run.progress.peopleDone || 0).toLocaleString()} of ${run.progress.peopleTotal.toLocaleString()} people`
+                  : 'Undoing…'
+                : run.status === 'pending'
+                  ? 'Waiting to start…'
+                  : `${(run.progress?.doorsDone || 0).toLocaleString()} of ${(run.progress?.doorsTotal || 0).toLocaleString()} doors`}
           </div>
         </div>
       )}

@@ -74,6 +74,10 @@ const surveyConversionRunSchema = new mongoose.Schema(
       pct: { type: Number, default: 0 },
       doorsDone: { type: Number, default: 0 },
       doorsTotal: { type: Number, default: 0 },
+      // A Surveyed → outcome undo's own count while it puts answers back, a page of voters at a time
+      // (surveyConversion.js revertRun): the people done so far, of the people it has answers for.
+      peopleDone: { type: Number, default: undefined },
+      peopleTotal: { type: Number, default: undefined },
     },
 
     // Every number the result card shows. The skip buckets are separate on purpose: "we didn't

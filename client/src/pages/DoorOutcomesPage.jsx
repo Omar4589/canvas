@@ -59,6 +59,8 @@ const OUTCOMES = ['not_home', 'wrong_address', 'refused', 'not_target', 'no_soli
 const SOURCES = [...OUTCOMES, 'survey_submitted'];
 const SURVEYED = 'survey_submitted';
 const PAGE = 50;
+// A conversion still at work: queued, converting, or being undone (a door-by-door session is `open`).
+const convBusy = (r) => ['pending', 'running', 'reverting'].includes(r?.status);
 
 const Dot = ({ k }) => (
   <span className="mr-1.5 inline-block h-2 w-2 shrink-0 rounded-full align-middle" style={{ backgroundColor: STATUS_COLORS[k] }} aria-hidden />
@@ -433,11 +435,14 @@ export default function DoorOutcomesPage() {
     ...extra,
   });
 
-  // Conversion runs live beside the reclassify runs in "Past changes".
+  // Conversion runs live beside the reclassify runs in "Past changes". One still running — this admin's,
+  // another's, or one left running when the page was closed — is watched until it lands, so its row moves
+  // on its own (2026-10-21: the list never polled, and its row stayed as the page loaded it).
   const convRunsQ = useQuery({
     queryKey: ['admin', 'campaigns', campaignId, 'survey-conversions'],
     queryFn: () => api(`/admin/campaigns/${campaignId}/survey-conversions`),
     enabled: !!campaignId && isOrgAdmin,
+    refetchInterval: (q) => (!gaveUp(q) && (q.state.data?.runs || []).some(convBusy) ? 3000 : false),
   });
   const convRuns = convRunsQ.data?.runs || [];
   const { run: liveRun, stopped: convPollStopped } = useConversionRunPoll({ campaignId, runId: activeRunId });
@@ -453,6 +458,30 @@ export default function DoorOutcomesPage() {
     // Re-running it on an unchanged status is the bug to avoid.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevStatus]);
+  // The list's own watch: a run it saw at work that has landed — card or no card — refetches what it moved
+  // and closes reviews priced before it, as the card's landing does; and one still at work with no card up
+  // gets its card back — a change left running when the page was closed, or another admin's (2026-10-21:
+  // neither came back, and the row kept the state the page loaded with). A card dismissed stays dismissed.
+  const busyConvs = useRef({ cid: null, ids: new Set() });
+  const dismissedConvs = useRef(new Set());
+  useEffect(() => {
+    const now = new Set(convRuns.filter(convBusy).map((r) => r.id));
+    const was = busyConvs.current;
+    busyConvs.current = { cid: campaignId, ids: now };
+    if (was.cid === campaignId) {
+      const landed = convRuns.filter((r) => was.ids.has(r.id) && !now.has(r.id));
+      if (landed.length) {
+        refetchAfterWrite(campaignId);
+        closeStaleReviews(Math.max(...landed.map(finishedAt)));
+      }
+    }
+    if (!activeRunId && !walking) {
+      const atWork = convRuns.find((r) => convBusy(r) && !dismissedConvs.current.has(r.id));
+      if (atWork) followConvRun(atWork);
+    }
+    // Reads this render's campaign, card and reviews; re-running on every list change is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convRunsQ.data, campaignId]);
 
   const convBody = (extra = {}) => ({
     direction,
@@ -604,7 +633,11 @@ export default function DoorOutcomesPage() {
   const convResume = useMutation({
     mutationFn: ({ campaignId: cid, runId }) =>
       api(`/admin/campaigns/${cid}/survey-conversions/${runId}/resume`, { method: 'POST' }),
-    onSuccess: (d) => followConvRun(d.run),
+    onSuccess: (d, v) => {
+      followConvRun(d.run);
+      // Its row reads Working again now, not Stopped (it offers Pick up too since 2026-10-21).
+      qc.invalidateQueries({ queryKey: ['admin', 'campaigns', v.campaignId, 'survey-conversions'] });
+    },
     onError: (e, v) => stillOn(v.campaignId) && setError(e.message),
   });
 
@@ -615,6 +648,8 @@ export default function DoorOutcomesPage() {
     queryKey: ['admin', 'campaigns', campaignId, 'answer-edits'],
     queryFn: () => api(`/admin/campaigns/${campaignId}/answer-edits`),
     enabled: !!campaignId && isOrgAdmin,
+    // Watched while one is still moving, as the conversions are (above).
+    refetchInterval: (q) => (!gaveUp(q) && (q.state.data?.runs || []).some((r) => !isAnswerEditSettled(r)) ? 3000 : false),
   });
   const editRuns = editRunsQ.data?.runs || [];
   const { run: liveEditRun, settled: editSettled, stopped: editPollStopped } = useAnswerEditRunPoll({ campaignId, runId: activeEditRunId });
@@ -638,6 +673,21 @@ export default function DoorOutcomesPage() {
     if (isAnswerEditSettled(run)) qc.invalidateQueries({ queryKey: key });
     setActiveEditRunId(run.id);
   };
+  // The list's own watch, as the conversions' (above): a change it saw moving that has settled refetches what
+  // it moved, and one still moving with no card up gets its card back.
+  const busyEdits = useRef({ cid: null, ids: new Set() });
+  const dismissedEdits = useRef(new Set());
+  useEffect(() => {
+    const now = new Set(editRuns.filter((r) => !isAnswerEditSettled(r)).map((r) => r.id));
+    const was = busyEdits.current;
+    busyEdits.current = { cid: campaignId, ids: now };
+    if (was.cid === campaignId && [...was.ids].some((id) => !now.has(id))) afterEdit(campaignId);
+    if (!activeEditRunId && !editWalk) {
+      const atWork = editRuns.find((r) => !isAnswerEditSettled(r) && !dismissedEdits.current.has(r.id));
+      if (atWork) followEditRun(atWork);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRunsQ.data, campaignId]);
   const editSettledKey = liveEditRun ? `${liveEditRun.id}:${liveEditRun.status}:${liveEditRun.undo?.status}:${editSettled}` : null;
   useEffect(() => {
     if (editSettledKey && editSettled) afterEdit();
@@ -1330,6 +1380,34 @@ export default function DoorOutcomesPage() {
         <div ref={errorRef} className="mb-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</div>
       )}
 
+      {/* The change at work, or the last one's result, above the table: seen the moment it's confirmed,
+          not below every list on the page (2026-10-21). */}
+      {((liveEditRun && !editWalk) || (liveRun && !walking)) && (
+        <div className="mb-4">
+          {/* An answer edit in flight, or the result of the last one. */}
+          {liveEditRun && !editWalk && (
+            <AnswerEditRunCard
+              run={liveEditRun}
+              busy={editBusy}
+              stopped={editPollStopped}
+              onAction={onEditAction}
+              onDismiss={() => { dismissedEdits.current.add(liveEditRun.id); setActiveEditRunId(null); }}
+            />
+          )}
+          {/* A run in flight, or the result of the last one. */}
+          {liveRun && !walking && (
+            <ConversionRunCard
+              run={liveRun}
+              stopped={convPollStopped}
+              busy={convRevert.isPending || convResume.isPending}
+              onRevert={() => { setError(null); convRevert.mutate({ campaignId, runId: liveRun.id }); }}
+              onResume={() => { setError(null); convResume.mutate({ campaignId, runId: liveRun.id }); }}
+              onDismiss={() => { dismissedConvs.current.add(liveRun.id); setActiveRunId(null); }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Entries */}
       {entriesQ.isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -1527,6 +1605,36 @@ export default function DoorOutcomesPage() {
                   <Badge variant="neutral">Undone</Badge>
                 ) : r.status === 'reverting' ? (
                   <Badge variant="neutral">Undoing…</Badge>
+                ) : r.status === 'pending' || r.status === 'running' ? (
+                  // Still at work: where it has got to, and no Undo the server would refuse while it runs
+                  // (2026-10-21). The list watches it until it lands.
+                  <Badge variant="info">
+                    {r.status === 'pending'
+                      ? 'Waiting to start'
+                      : r.progress?.phase === 'recomputing'
+                        ? 'Updating totals…'
+                        : `Working · ${(r.progress?.doorsDone || 0).toLocaleString()} of ${(r.progress?.doorsTotal || 0).toLocaleString()} doors`}
+                  </Badge>
+                ) : r.status === 'failed' ? (
+                  // Stopped part-way: what landed is correct — pick up where it stopped, or undo it, as its card offers.
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="danger">Stopped</Badge>
+                    <Button
+                      size="sm"
+                      disabled={convResume.isPending}
+                      onClick={() => { setError(null); convResume.mutate({ campaignId, runId: r.id }); }}
+                    >
+                      Pick up where it stopped
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={convRevert.isPending}
+                      onClick={() => { setError(null); convRevert.mutate({ campaignId, runId: r.id }); }}
+                    >
+                      Undo
+                    </Button>
+                  </div>
                 ) : r.status === 'revert_failed' ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="danger">Undo stopped</Badge>
@@ -1626,9 +1734,10 @@ export default function DoorOutcomesPage() {
                   {r.status === 'reverted' ? (
                     <Badge variant="neutral">Undone</Badge>
                   ) : r.undoing ? (
-                    <Badge variant="info">Undoing…</Badge>
+                    <Badge variant="info">{`Undoing…${r.progress?.phase === 'undoing' ? ` ${r.progress.pct}%` : ''}`}</Badge>
                   ) : r.removing ? (
-                    <Badge variant="info">Removing…</Badge>
+                    // How far it has got (2026-10-21): a large one runs for minutes.
+                    <Badge variant="info">{`Removing…${r.progress?.phase === 'removing' ? ` ${r.progress.pct}%` : ''}`}</Badge>
                   ) : r.status === 'pending' && !r.stoppedPartWay ? (
                     <Badge variant="neutral">Did not finish — nothing was removed</Badge>
                   ) : (
@@ -1646,7 +1755,8 @@ export default function DoorOutcomesPage() {
                       disabled={unknockRevert.isPending}
                       onClick={() => { setError(null); unknockRevert.mutate({ campaignId, runId: r.id }); }}
                     >
-                      {unknockRevert.isPending ? 'Undoing…' : r.undoStopped ? 'Retry undo' : 'Undo'}
+                      {/* Only the row pressed reads Undoing… (2026-10-21: every row did). */}
+                      {unknockRevert.isPending && unknockRevert.variables?.runId === r.id ? 'Undoing…' : r.undoStopped ? 'Retry undo' : 'Undo'}
                     </Button>
                     </>
                   )}
@@ -1902,11 +2012,6 @@ export default function DoorOutcomesPage() {
         </Modal>
       )}
 
-      {/* An answer edit in flight, or the result of the last one. */}
-      {liveEditRun && !editWalk && (
-        <AnswerEditRunCard run={liveEditRun} busy={editBusy} stopped={editPollStopped} onAction={onEditAction} onDismiss={() => setActiveEditRunId(null)} />
-      )}
-
       {editDry && !editPreview && (
         <AnswerEditForm
           dry={editDry}
@@ -1944,18 +2049,6 @@ export default function DoorOutcomesPage() {
           onFinishLater={() => { setEditWalk(null); afterEdit(); }}
           onStopped={(r) => { setEditWalk(null); followEditRun(r); afterEdit(); }}
           onClosedElsewhere={(message) => { setEditWalk(null); afterEdit(); setError(message); }}
-        />
-      )}
-
-      {/* A run in flight, or the result of the last one. */}
-      {liveRun && !walking && (
-        <ConversionRunCard
-          run={liveRun}
-          stopped={convPollStopped}
-          busy={convRevert.isPending || convResume.isPending}
-          onRevert={() => { setError(null); convRevert.mutate({ campaignId, runId: liveRun.id }); }}
-          onResume={() => { setError(null); convResume.mutate({ campaignId, runId: liveRun.id }); }}
-          onDismiss={() => setActiveRunId(null)}
         />
       )}
 

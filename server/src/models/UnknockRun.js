@@ -91,6 +91,13 @@ const unknockRunSchema = new mongoose.Schema(
     // beat (code review round 6: round 5 set the heartbeat to the epoch instead, and the hold ended in
     // 1970, so struck answers came free and a Restore put them over a real later survey).
     stoppedAt: { type: Date, default: null },
+    // How far the strike or its undo has got, for its row while it runs ("Removing… 40%"): written with
+    // the strike's beats and between the undo's pages (2026-10-21 — the row said only "Removing…" for the
+    // minutes a large one takes). For people only; nothing decides by it.
+    progress: {
+      phase: { type: String, default: null }, // 'removing' | 'undoing'
+      pct: { type: Number, default: 0 },
+    },
   },
   { timestamps: true }
 );

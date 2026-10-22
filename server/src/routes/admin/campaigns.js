@@ -922,6 +922,11 @@ const unknockWire = (r) => ({
   stoppedPartWay: r.status === 'pending' && !!r.deletingAt && !unknockRemoving(r),
   // How many entries it set out to remove — what an unfinished run's row counts (round 5).
   frozenRows: r.frozenRows ?? null,
+  // How far a strike or an undo still running has got ("Removing… 40%"); null once neither runs.
+  progress: (unknockRemoving(r) && r.progress?.phase === 'removing') ||
+    (!r.revertedAt && !!r.revertingAt && Date.now() - new Date(r.revertingAt).getTime() < UNKNOCK_STALE_MS && r.progress?.phase === 'undoing')
+    ? { phase: r.progress.phase, pct: r.progress.pct || 0 }
+    : null,
   // Null on one that never finished — stopped part-way, undone or not (its row counts what it selected).
   completedAt: r.completedAt || null,
   // Did its strike finish? `completedAt` says so from 2026-10-19; an undone run from before then that

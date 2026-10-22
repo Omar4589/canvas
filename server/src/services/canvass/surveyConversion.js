@@ -770,8 +770,16 @@ async function executeRun({ run, campaign, onProgress }) {
   const ctx = newCtx({ campaign, template, run });
   const answersFor = () => ({ answers: run.answers, note: run.note });
 
-  const total = run.progress?.doorsTotal || pending.length;
-  let done = run.progress?.doorsDone || 0;
+  // Doors done, never entries: a door holds an entry per round and canvasser, and counting entries read
+  // "12 of 9 doors" (2026-10-21). A door is through once its last pending entry is; one with none
+  // pending — finished by an earlier delivery, or with nothing to change — counts from the start.
+  const lastEntryAt = new Map();
+  pending.forEach((e, k) => lastEntryAt.set(String(e.householdId), k));
+  const lastAts = [...lastEntryAt.values()].sort((a, b) => a - b);
+  const total = run.progress?.doorsTotal || lastEntryAt.size;
+  const doneBefore = Math.max(0, total - lastEntryAt.size);
+  let through = 0;
+  let done = Math.min(total, doneBefore);
 
   for (let i = 0; i < pending.length; i += CHUNK) {
     if (await deletionRequested(tenantOf(run))) {
@@ -784,7 +792,8 @@ async function executeRun({ run, campaign, onProgress }) {
     if (run.direction === 'to_survey') await convertChunkToSurvey(ctx, chunk, answersFor);
     else await convertChunkFromSurvey(ctx, chunk, run.to);
 
-    done += chunk.length;
+    while (through < lastAts.length && lastAts[through] < i + chunk.length) through += 1;
+    done = Math.min(total, doneBefore + through);
     mergeCounts(run, ctx.acc);
     ctx.acc = freshAcc();
 
@@ -1041,6 +1050,18 @@ const entriesOnFile = async (run, { surveyed = false } = {}) => {
  * settle: those doors and voters kept reading the conversion. Stamped-but-flipped rows are out of
  * every correction's scope (convertibleMatch) until the retry finishes, which is the safe direction.
  */
+// An undo's progress, on its own run doc (the forward run saves its progress the same way).
+const undoProgress = async (run, { phase = 'reverting', pct, peopleDone, peopleTotal }) => {
+  run.progress = {
+    phase,
+    pct,
+    doorsDone: run.progress?.doorsDone || 0,
+    doorsTotal: run.progress?.doorsTotal || 0,
+    ...(peopleTotal ? { peopleDone, peopleTotal } : {}),
+  };
+  await run.save();
+};
+
 async function revertRun({ run, campaign }) {
   if (await deletionRequested(tenantOf(run))) {
     run.status = 'revert_failed';
@@ -1106,6 +1127,9 @@ async function revertRun({ run, campaign }) {
     // thing, and every retry died the same way).
     const copyVoters = await SurveyResponseArchive.distinct('voterId', { conversionRunId: run._id });
     for (let page = 0; page < copyVoters.length; page += UNDO_VOTER_PAGE()) {
+      // Where it has got to, for its card: the people whose answers it has put back (2026-10-21 — the bar
+      // sat at the start until the undo finished).
+      if (page > 0) await undoProgress(run, { pct: Math.min(90, Math.round((page / copyVoters.length) * 90)), peopleDone: page, peopleTotal: copyVoters.length });
       const archived = await SurveyResponseArchive.find({ conversionRunId: run._id, voterId: { $in: copyVoters.slice(page, page + UNDO_VOTER_PAGE()) } }).lean();
       const promoted = [];
       // Whether the slot is free is decided by an explicit READ, not by whether the unique index
@@ -1186,7 +1210,9 @@ async function revertRun({ run, campaign }) {
     run.counts.responsesNotRestored = notRestored;
   }
 
-  // Flip the entries back, KEEPING the stamp — it comes off only after the settle (see above).
+  // Flip the entries back, KEEPING the stamp — it comes off only after the settle (see above). The doors
+  // and campaign numbers settle from here: its card says so.
+  await undoProgress(run, { phase: 'recomputing', pct: 95 });
   await CanvassActivity.updateMany(stamp, [
     { $set: { actionType: '$reclassified.from', voterId: '$reclassified.voterIdWas' } },
   ]);

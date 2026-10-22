@@ -907,3 +907,90 @@ test('an older unknock\'s Undo never puts its entry back beside one a snapshot r
   assert.deepStrictEqual(await caraEntriesAt(p, d), [String(e0._id)], 'one entry at the visit, never two');
   assert.strictEqual(undone.json.run.counts.rowsNotRestored, 1, 'its own entry counted not put back');
 });
+
+// ── a change at work says where it has got to (2026-10-21) ────────────────────────────────────────
+
+test('a conversion counts doors, never entries — two canvassers at one door are one door', { skip }, async () => {
+  // Door 62: Cara surveys its voter, Otto its second voter — two entries, one door. Door 64: Cara alone.
+  assert.strictEqual((await survey(ctx.caraTok, ctx.voters[62], 62, FAKE())).status, 201);
+  assert.strictEqual((await survey(ctx.ottoTok, ctx.housemates[62], 62, [undecidedRow()])).status, 201);
+  assert.strictEqual((await survey(ctx.caraTok, ctx.voters[64], 64, FAKE())).status, 201);
+  const ids = [await visitEntry(62, ctx.cara._id), await visitEntry(62, ctx.otto._id), await visitEntry(64, ctx.cara._id)].map((e) => String(e._id));
+  const unstub = stubQueue(QUEUE_NAMES.OUTCOME_CONVERT);
+  const created = await call('POST', conv(), asAdmin({ direction: 'from_survey', to: 'not_home', mode: 'bulk', actionIds: ids }));
+  unstub();
+  assert.strictEqual(created.status, 201, JSON.stringify(created.json));
+  const runId = created.json.run.id;
+  assert.strictEqual(created.json.run.progress.doorsTotal, 2);
+  const forward = await processConversionJob({ id: created.json.run.queueJobId ?? (await SurveyConversionRun.findById(runId).lean()).queueJobId, name: 'convert', data: { runId }, updateProgress: async () => {} });
+  assert.strictEqual(forward.status, 'completed');
+  const run = await SurveyConversionRun.findById(runId).lean();
+  assert.deepStrictEqual([run.progress.doorsDone, run.progress.doorsTotal], [2, 2], 'never "3 of 2 doors"');
+
+  // Its undo, on the worker, says where it is too: the people whose answers it has put back, then the totals.
+  await SurveyConversionRun.updateOne({ _id: runId }, { $set: { status: 'reverting', 'counts.entriesConverted': 501, queueJobId: 'fu-undo-1', revertClaimedAt: null } });
+  const seen = [];
+  hookProto(mongoose.Query.prototype, 'exec', function (real, args) {
+    const isPage = this.model?.modelName === 'SurveyResponseArchive' && this.op === 'find' && this.getFilter()?.conversionRunId;
+    // The flip back (a pipeline update), not the stamps' removal after it.
+    const isFlip = this.model?.modelName === 'CanvassActivity' && this.op === 'updateMany' && this.getFilter()?.['reclassified.runId'] && Array.isArray(this.getUpdate());
+    if (!isPage && !isFlip) return real(...args);
+    return SurveyConversionRun.collection.findOne({ _id: oid(runId) }).then((r) => {
+      seen.push({ phase: r.progress.phase, people: r.progress.peopleDone ?? null, of: r.progress.peopleTotal ?? null });
+      return real(...args);
+    });
+  });
+  const back = await withEnv({ UNDO_VOTER_PAGE: '1' }, () => processConversionJob({ id: 'fu-undo-1', name: 'revert', data: { runId }, updateProgress: async () => {} }));
+  while (pending.length) pending.pop()();
+  assert.strictEqual(back.status, 'reverted');
+  assert.deepStrictEqual(seen, [
+    { phase: 'reverting', people: null, of: null },
+    { phase: 'reverting', people: 1, of: 3 },
+    { phase: 'reverting', people: 2, of: 3 },
+    { phase: 'recomputing', people: null, of: null },
+  ], 'its bar moves as it goes, never only at the end');
+});
+
+test('an unknock says how far it has got on its row — removing, and being undone', { skip }, async () => {
+  for (const d of [65, 66]) assert.strictEqual((await survey(ctx.caraTok, ctx.voters[d], d, FAKE())).status, 201);
+  const ids = [await visitEntry(65, ctx.cara._id), await visitEntry(66, ctx.cara._id)].map((e) => e._id);
+  const rowsSeen = [];
+  let peeked = false;
+  hookProto(mongoose.Query.prototype, 'exec', function (real, args) {
+    if (!peeked && this.model?.modelName === 'CanvassActivity' && this.op === 'deleteMany') {
+      peeked = true;
+      // Mid-strike: the answers are off, the entries about to go — the list says so.
+      return call('GET', unknocks(), asAdmin()).then((list) => {
+        rowsSeen.push(list.json.runs[0]);
+        return real(...args);
+      });
+    }
+    return real(...args);
+  });
+  const u = await unknockIds(ids);
+  while (pending.length) pending.pop()();
+  assert.strictEqual(u.status, 201, JSON.stringify(u.json));
+  assert.strictEqual(rowsSeen.length, 1);
+  assert.strictEqual(rowsSeen[0].removing, true);
+  assert.deepStrictEqual(rowsSeen[0].progress, { phase: 'removing', pct: 47 }, 'two answers done of four steps');
+  assert.strictEqual((await call('GET', unknocks(), asAdmin())).json.runs[0].progress, null, 'finished: no progress shown');
+
+  const undoSeen = [];
+  hookProto(mongoose.Query.prototype, 'exec', function (real, args) {
+    if (this.model?.modelName === 'SurveyResponseArchive' && this.op === 'find' && this.getFilter()?.unknockRunId) {
+      return call('GET', unknocks(), asAdmin()).then((list) => {
+        const row = list.json.runs.find((r) => r.id === u.json.run.id);
+        undoSeen.push({ undoing: row.undoing, progress: row.progress });
+        return real(...args);
+      });
+    }
+    return real(...args);
+  });
+  const undone = await withEnv({ UNDO_VOTER_PAGE: '1' }, () => undoUnknock(u.json.run.id));
+  while (pending.length) pending.pop()();
+  assert.strictEqual(undone.status, 200, JSON.stringify(undone.json));
+  assert.deepStrictEqual(undoSeen, [
+    { undoing: true, progress: { phase: 'undoing', pct: 10 } },
+    { undoing: true, progress: { phase: 'undoing', pct: 50 } },
+  ], 'a page of people at a time');
+});

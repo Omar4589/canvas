@@ -180,3 +180,91 @@ test('DoorOutcomesPage: the Not a target voter chip only where used, and the Off
     rmSync(dir2, { recursive: true, force: true });
   }
 });
+
+// A change at work, seen from the page (2026-10-21): its row says where it has got to and offers no Undo the
+// server would refuse; a stopped conversion offers Pick up; an unknock still removing says how far it has
+// got; and the live cards sit ABOVE the entries table — below every list, nobody saw them after Confirm.
+test('DoorOutcomesPage: changes at work say where they are, and the live cards sit above the table', async () => {
+  const dir3 = mkdtempSync(join(here, '../../.smoke-'));
+  writeFileSync(
+    join(dir3, 'authStub.jsx'),
+    `export const useAuth = () => ({ homePath: '/', isOrgAdmin: true, isSuperAdmin: false, user: { id: 'u1' } });
+     export const useOrgTimeZone = () => 'America/Chicago';`
+  );
+  writeFileSync(
+    join(dir3, 'entry.jsx'),
+    `import React from 'react';
+     import { renderToString } from 'react-dom/server';
+     import { MemoryRouter, Routes, Route } from 'react-router-dom';
+     import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+     import DoorOutcomesPage from '${join(here, '../pages/DoorOutcomesPage.jsx')}';
+     globalThis.fetch = () => new Promise(() => {});
+     const CID = '6a0000000000000000000001';
+     const at = '2026-10-21T15:00:00Z';
+     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+     qc.setQueryData(['admin', 'campaigns'], {
+       campaigns: [{ _id: CID, name: 'Ward 3', type: 'survey', state: 'FL', isActive: true, timeZone: 'America/New_York' }],
+     });
+     qc.setQueryDefaults(['admin', 'outcome-entries'], {
+       staleTime: Infinity,
+       initialData: {
+         entries: [{ id: 'e1', householdId: 'h1', address: '12 Elm St', city: 'Tampa', actionType: 'not_home', userId: 'u9', passId: null, timestamp: at }],
+         total: 1, doors: 1, facets: { not_home: 1 }, sources: ['not_home'],
+       },
+     });
+     qc.setQueryData(['admin', 'campaigns', CID, 'survey-conversions'], { runs: [
+       { id: 'c1', campaignId: CID, direction: 'from_survey', to: 'not_home', status: 'running', counts: {}, progress: { phase: 'converting', pct: 66, doorsDone: 2, doorsTotal: 3 }, createdAt: at },
+       { id: 'c2', campaignId: CID, direction: 'from_survey', to: 'not_home', status: 'failed', counts: { entriesConverted: 4 }, progress: {}, createdAt: at },
+     ] });
+     qc.setQueryData(['admin', 'campaigns', CID, 'answer-edits'], { runs: [
+       { id: 'a1', campaignId: CID, mode: 'bulk', status: 'running', progress: { done: 120, total: 500 }, counts: {}, createdAt: at },
+     ] });
+     qc.setQueryData(['admin', 'campaigns', CID, 'unknock'], { runs: [
+       { id: 'u1', status: 'pending', removing: true, undoing: false, progress: { phase: 'removing', pct: 47 }, frozenRows: 10, counts: { doorsAffected: 4 }, createdAt: at },
+     ] });
+     export const html = renderToString(
+       <QueryClientProvider client={qc}>
+         <MemoryRouter initialEntries={['/campaigns/' + CID + '/outcomes']}>
+           <Routes>
+             <Route path="/campaigns/:campaignId/outcomes" element={<DoorOutcomesPage />} />
+           </Routes>
+         </MemoryRouter>
+       </QueryClientProvider>
+     );`
+  );
+  const out = join(dir3, 'bundle.mjs');
+  await esbuild.build({
+    entryPoints: [join(dir3, 'entry.jsx')],
+    bundle: true, format: 'esm', platform: 'node', outfile: out, jsx: 'automatic', logLevel: 'silent',
+    packages: 'external',
+    plugins: [
+      {
+        name: 'stub-auth',
+        setup(b) {
+          b.onResolve({ filter: /auth\/AuthContext\.jsx$/ }, () => ({ path: join(dir3, 'authStub.jsx') }));
+        },
+      },
+    ],
+  });
+  try {
+    const { html } = await import(pathToFileURL(out).href);
+    assert.match(html, /12 Elm St/, 'the page reached its full render');
+    assert.match(html, /Working · 2 of 3 doors/, 'a conversion at work says where it is');
+    assert.match(html, /Pick up where it stopped/, 'a stopped conversion can be picked up from its row');
+    assert.match(html, /Working · 120 of 500 surveys/, 'an answer edit at work says where it is');
+    assert.match(html, /Removing… 47%/, 'an unknock still removing says how far it has got');
+    // The running conversion's row offers no Undo: between its title and the next row there is none.
+    const row = html.slice(html.indexOf('Working · 2 of 3 doors') - 1500, html.indexOf('Working · 2 of 3 doors') + 300);
+    assert.ok(!/>Undo</.test(row.slice(row.lastIndexOf('<li'))), 'no Undo while it runs');
+  } finally {
+    rmSync(dir3, { recursive: true, force: true });
+  }
+  // The live cards render above the entries table (their state comes from a click, so SSR can't show
+  // them — the page's own order is what is pinned).
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(join(here, '../pages/DoorOutcomesPage.jsx'), 'utf8');
+  const table = page.indexOf('{/* Entries */}');
+  assert.ok(table > 0);
+  assert.ok(page.indexOf('<AnswerEditRunCard') < table, 'the answer-edit card is above the table');
+  assert.ok(page.indexOf('<ConversionRunCard') < table, 'the conversion card is above the table');
+});

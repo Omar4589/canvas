@@ -570,9 +570,13 @@ could not restore, which persist and are listed as such.
 
 Both directions are priced like everything else on this page, always in red (recording or removing
 answers always moves the survey rate at minimum), and both are **undoable in one click** — a
-door-by-door session undoes as a single unit. A large run happens in the background with a progress
-bar; if it stops part-way, everything that landed is correct and you can either undo it or pick up
-where it stopped. **An undo can stop part-way too** (the server restarts, or the database drops out
+door-by-door session undoes as a single unit. A bulk run happens in the background, whatever its size:
+a card at the top of the page shows it at work with a progress bar (so many doors; an undo, the people
+whose answers it has put back so far) and turns into its result when it lands, and the page refreshes
+its numbers then. Leave the page and come back, and a change still running shows its card again; its
+row under *Survey answer changes* updates on its own too (since 2026-10-21 — the card sat below every
+list, and neither it nor the row came back after a reload). If it stops part-way, everything that
+landed is correct and you can either undo it or pick up where it stopped, from its card or its row. **An undo can stop part-way too** (the server restarts, or the database drops out
 mid-undo): the run then reads **Undo stopped**, everything it already put back is correct, and its
 only button is **Retry undo**, which finishes putting the rest back. It never offers *Pick up where it
 stopped* — that would make the change again. An undo that dies along with its page request shows
@@ -1208,7 +1212,10 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   [unknockLease.js](../server/src/services/canvass/unknockLease.js)): the strike beats between every
   step, each beat a compare-and-swap on no undo having begun, and completes the same way. One that
   beat within ten minutes reads *Removing…* on the list (the wire's `removing`, polled until it
-  finishes) and its Undo is refused (`409 RUN_BUSY`); one silent longer stopped. Stopped before
+  finishes), with how far it has got — `UnknockRun.progress` `{ phase: 'removing' | 'undoing', pct }`,
+  written with the strike's beats (answers' batches, then entries', to 95%) and between the undo's pages
+  of people (10–90%, then 95% before its settle), sent on the wire as `progress` only while it runs
+  ("Removing… 40%", 2026-10-21) — and its Undo is refused (`409 RUN_BUSY`); one silent longer stopped. Stopped before
   `deletingAt`, its revert is refused (`409 RUN_NOT_COMPLETED` — nothing was removed); stopped after
   it began removing, it reads *Stopped part-way* (the wire's `stoppedPartWay`), is held as a strike by
   Restore and the replay tombstone like a completed run, and can be undone — an entry it never got
@@ -1742,6 +1749,22 @@ The label used to be a fixed "add on Users →", which also sat on the Pin Fixes
   conversion rows, cards and Details say *surveys recorded / removed* — "answer" now means one reply.
   Pinned by [answerEditPlan.test.js](../client/src/lib/answerEditPlan.test.js) and
   [answerEditRender.smoke.test.js](../client/src/lib/answerEditRender.smoke.test.js).
+  **A change at work (2026-10-21).** The two live cards (`AnswerEditRunCard`, `ConversionRunCard`)
+  render **above the entries table**, under the filter card and the banner — they sat below every list,
+  and after Confirm nobody saw them. The *Survey answer changes* lists poll every 3 s while one of their
+  runs is still moving (`convBusy` — `pending | running | reverting` — for a conversion,
+  `!isAnswerEditSettled` for an edit; the unknock list's rule), so a row moves on its own; each list
+  watches its runs as the unknock list does — one it saw moving that has landed refetches what it moved
+  (conversions: `refetchAfterWrite` and `closeStaleReviews` at its finish time; edits: `afterEdit`) — and
+  one still moving with no card up gets its card back (`followConvRun` / `followEditRun`): a change left
+  running when the page was closed, or another admin's. A card dismissed stays dismissed
+  (`dismissedConvs` / `dismissedEdits`). A conversion row at work reads *Waiting to start* or
+  *Working · N of M doors* with no Undo (the server refuses one while it runs); a stopped one reads
+  *Stopped* with *Pick up where it stopped* and *Undo*, as its card does. The conversion card's undo
+  reads *Putting answers back · N of M people* (`progress.peopleDone/peopleTotal`, SURVEYS.md §K) and
+  its badge reads *Undoing* by status. An unknock row at work reads *Removing… 40%* / *Undoing… 40%*
+  (`progress`, Part 2 above), and only the row whose Undo was pressed reads *Undoing…* on its button.
+  Pinned by [doorOutcomesRender.smoke.test.js](../client/src/lib/doorOutcomesRender.smoke.test.js).
 - **Door goal:** the server owns every number
   ([goalProgress.js](../server/src/services/reports/goalProgress.js)); the clients only pick words
   and colors, from [goalPace.js](../client/src/lib/goalPace.js) and its hand-mirrored twin
