@@ -1,6 +1,11 @@
 import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { SurveyResponse } from '../../models/SurveyResponse.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
+import { CampaignManager } from '../../models/CampaignManager.js';
 import { resolveDeletedIdentities } from '../users/deleteAccount.js';
+import { NOT_BULK } from './aggregations.js';
 
 // Who a canvasser IS, for a report that already knows what they DID.
 //
@@ -31,6 +36,50 @@ export function canvasserStanding(user, membership) {
   if (!membership.isActive || !user.isActive) return 'deactivated';
   return 'active';
 }
+
+// Does this organization carry this person: a membership here in any status, or a knock or survey
+// of theirs on this org's ledger? The per-canvasser report drills answer only for people the org
+// carries. They used to look the account up by id alone, which handed any admin or team lead who
+// held another organization's user id that person's name, email, phone and last sign-in.
+//
+// Removal from the org hard-deletes the membership, so a departed canvasser is carried by their
+// ledger rows instead. Their drill has to keep working; it is how an admin audits them. Desk marks
+// (via: 'bulk') don't count: their userId is whoever pressed the button, which can be Doorline staff
+// under a support grant, and no per-canvasser report ever shows a bulk-only person anyway.
+//
+// The ledger half filters on userId and NOT_BULK only, and compares the org in code. Adding
+// organizationId to the filter hands the planner the organizationId index as a candidate, and a
+// reviewer watched it take that index (on an $ne org probe) and walk 100,000 rows of other orgs'
+// knocks. Without it, only a userId-prefixed index fits, and the query reads just this person's rows.
+export const orgCarriesUser = async (userId, organizationId) => {
+  if (await Membership.exists({ userId, organizationId })) return true;
+  const [doorOrgs, surveyOrgs] = await Promise.all([
+    CanvassActivity.distinct('organizationId', { userId, ...NOT_BULK }),
+    SurveyResponse.distinct('organizationId', { userId }),
+  ]);
+  const org = String(organizationId);
+  return [...doorOrgs, ...surveyOrgs].some((id) => String(id) === org);
+};
+
+// The same question for a team lead, whose view is their campaigns, not the whole org. A lead can be
+// the paying client, so their per-person drills keep to the Users list's wall (leadVisibleUserIds in
+// routes/admin/memberships.js): people on a campaign the lead manages. "On" means rostered there,
+// granted to run it, coordinating a crew there, or with their own knocks or surveys there. It has to
+// be ANY managed campaign, not just the one in ?campaignId: the phone's Users hub opens people from
+// a lead's other campaigns with the currently selected campaign's id.
+export const campaignsCarryUser = async (userId, campaignIds) => {
+  if (!campaignIds.length) return false;
+  const inCampaigns = { campaignId: { $in: campaignIds } };
+  if (await CampaignAssignment.exists({ ...inCampaigns, userId })) return true;
+  if (await CampaignManager.exists({ ...inCampaigns, userId })) return true;
+  if (await CampaignAssignment.exists({ ...inCampaigns, coordinatorId: userId })) return true;
+  const [doorCampaigns, surveyCampaigns] = await Promise.all([
+    CanvassActivity.distinct('campaignId', { userId, ...NOT_BULK }),
+    SurveyResponse.distinct('campaignId', { userId }),
+  ]);
+  const managed = new Set(campaignIds.map(String));
+  return [...doorCampaigns, ...surveyCampaigns].some((id) => managed.has(String(id)));
+};
 
 // userIds -> Map(id -> { firstName, lastName, email, phone, status, isActive }).
 // A user id with no User doc still gets an entry, so a caller mapping over the LEDGER's ids can

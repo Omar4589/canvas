@@ -1453,7 +1453,8 @@ progress key. Pinned by the loading-fallback case in
 **Deactivated members are LABELLED, never reclassified.** `GET /turfs/assignments` sets an additive
 `user.inactive` from `deactivatedMemberIdSet` ([campaignRoster.js](../server/src/services/campaignRoster.js)),
 which fires only on POSITIVE evidence — an `isActive:false` membership or user — never on the absence of a
-roster row, or a superadmin doing cross-org oversight would render as "deactivated". Deactivation
+roster row, or staff working an internal org (who hold no membership row there) would render as
+"deactivated". Deactivation
 deliberately keeps books (`memberships.js` skips `releaseAssignedWork`), so `crewCounts` returns
 `inactiveCanvassers` / `booksAllInactive` for display alongside counts that do not move. Both clients read
 it: the web strip's amber note and book-list initials, and the mobile Books row's "(deactivated)" suffix.
@@ -1469,4 +1470,6 @@ user's live rows but never touches `TurfSnapshot.assignments`. That gate is deli
 merely absent from the campaign roster — a book-holder is put on that roster by
 `ensureCampaignAssignments` and nothing re-checks it, so inverting it strips books from people who never
 left (it broke `effortClaim.int.test.js`'s undo case the moment it was tried). Refused rows restore
-unassigned and are reported as `assignmentsDropped`.
+unassigned and are reported as `assignmentsDropped`. Staff are exempt from that gate only in an internal
+org; in a customer org a staffer with no live membership counts as gone, so a restore can't hand back a
+book the assign endpoints would refuse them (2026-10-24, PRIVACY_VERIFICATION item 36).

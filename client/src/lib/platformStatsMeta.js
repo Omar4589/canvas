@@ -20,7 +20,7 @@ export const PLATFORM_TOTALS = [
     key: 'doorsKnocked',
     label: 'Doors knocked',
     help:
-      'Raw field records: every not-home, wrong-address, refused, no-soliciting, not-a-target, survey, and lit-drop a canvasser logged, one per record (admin bulk marks excluded). This is a DIFFERENT unit from the billing and report “knocks”, which count a household once per round — so this number reads higher than billing, on purpose: it’s lifetime field effort, not billable coverage. Deleted orgs’ records stay banked in.',
+      'Raw field records: the not-home, wrong-address, refused, no-soliciting, not-a-target, survey, and lit-drop results canvassers logged, one per canvasser, per door, per round (marking a door again in the same round replaces that canvasser’s earlier result; admin bulk marks excluded). This is a DIFFERENT unit from the billing and report “knocks”, which count a household once per round — so this number usually reads higher than billing, on purpose: it’s lifetime field effort, not billable coverage. Billing can also count what this never does: admin bulk marks, and restricted doors on campaigns that bill them. Deleted orgs’ records stay banked in.',
   },
   {
     key: 'surveyResponses',

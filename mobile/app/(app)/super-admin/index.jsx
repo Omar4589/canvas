@@ -350,7 +350,7 @@ export default function SuperAdminHome() {
           {PLATFORM_TOTALS.map(({ key, label, help }) => (
             <View key={key} style={styles.totalsTile}>
               <StatTile
-                value={(statsQ.data?.total?.[key] ?? 0).toLocaleString()}
+                value={statsQ.data?.total?.[key]?.toLocaleString() ?? '—'}
                 label={label}
                 help={help}
               />

@@ -2,8 +2,9 @@ import mongoose from 'mongoose';
 
 // The per-day series behind the Control Room's trend sparklines: how many of each lifetime metric
 // happened on each UTC day, computed from the DATES of surviving rows (Organization/Campaign/Voter
-// createdAt, CanvassActivity timestamp, SurveyResponse submittedAt) with the SAME filter set as the
-// lifetime `live` bucket (internal orgs excluded, knocks are KNOCK_ACTIONS and never via:'bulk').
+// createdAt, CanvassActivity timestamp, SurveyResponse submittedAt) with the SAME filter as the
+// lifetime `live` bucket (one shared liveMatches: internal orgs and anything already banked excluded,
+// knocks are KNOCK_ACTIONS and never via:'bulk').
 //
 // Rebuilt in FULL by recomputeDaily() (services/platform/platformStats.js) — nightly beside the
 // live-bucket reconcile, and by the manual backfill/Reconcile-now. Full rebuild is the point: when an

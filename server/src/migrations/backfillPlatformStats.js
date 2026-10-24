@@ -6,7 +6,8 @@ import { recomputeLive, recomputeDaily, computeLiveCounts, getPlatformStats } fr
 // Seed the platform lifetime marketing counters from current data.
 //
 // This computes the LIVE bucket (contribution of organizations that still exist) from actual rows,
-// excluding internal/demo orgs, and SETs it. It is idempotent AND safe to re-run at any time: it only
+// excluding internal/demo orgs and any org or campaign whose deletion has banked it but not yet
+// finished destroying its rows, and SETs it. It is idempotent AND safe to re-run at any time: it only
 // ever SETs `live` from the current rows and never touches the `deleted` bucket, so running it twice
 // yields the same result, and running it after some orgs have been deleted correctly recomputes `live`
 // while the captured `deleted` contributions stay intact (total = live + deleted is preserved). That

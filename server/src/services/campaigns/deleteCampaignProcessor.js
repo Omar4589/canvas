@@ -52,9 +52,11 @@ export async function processCampaignDeleteJob(job) {
   //      ORG_SCOPED sweep — so parking one AFTER that sweep passed leaves a real person's state
   //      voter id, held precisely because they asked never to be contacted, surviving the
   //      deletion of the organization that held it.
-  //   2. The platform counters. captureOrgBeforeDelete has already banked this campaign's rows
-  //      into the permanent `deleted` bucket; captureCampaignBeforeDelete would bank them a
-  //      second time, and the nightly reconcile only ever recomputes `live`.
+  //   2. The platform counters — a backstop now, not the guard. captureOrgBeforeDelete banks
+  //      this campaign's rows into the permanent `deleted` bucket (the nightly reconcile only
+  //      ever recomputes `live`); captureCampaignBeforeDelete itself stands down once its org is
+  //      banked, and the two captures' shared bank ledger never banks the same rows twice
+  //      (services/platform/platformStats.js). Standing down here just skips the work.
   // This is the only window that matters: a job enqueued before the org stamp landed. The route
   // is already unreachable by then — middleware/orgContext.js walls the whole tenant.
   if (await Organization.exists({ _id: claimed.organizationId, 'deletion.requestedAt': { $ne: null } })) {

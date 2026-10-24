@@ -18,6 +18,8 @@ const { PlatformStats, PLATFORM_METRICS } = await import('../src/models/Platform
 const { PlatformDaily } = await import('../src/models/PlatformDaily.js');
 const { recomputeLive, recomputeDaily, computeLiveCounts, captureOrgBeforeDelete, captureCampaignBeforeDelete, getPlatformStats, STATS_JOB } = await import('../src/services/platform/platformStats.js');
 const { deleteOrganization } = await import('../src/services/platform/deleteOrganization.js');
+const { deleteCampaignCascade } = await import('../src/services/campaigns/deleteCampaign.js');
+const { sweepIfDeleting } = await import('../src/services/platform/lateWriteSweep.js');
 const { idleZeroDollarOrgs } = await import('../src/services/billing/idleOrgs.js');
 // Safe to import (bullmq never connects until registerMaintenanceJobs) — retentionTriggers.int
 // does the same.
@@ -59,6 +61,30 @@ async function seedOrg({ slug, status, knocks = 0, bulk = 0, surveys = 0, voters
   }
   return { org, camp };
 }
+
+// A further never-walked (so deletable) campaign in `org`, one voter per state voter id given.
+const seedCampaign = async (org, name, svids) => {
+  const camp = await Campaign.create({ organizationId: org._id, name, type: 'survey', state: 'KY', isActive: true });
+  const hh = await Household.create({
+    organizationId: org._id, campaignId: camp._id, addressLine1: '2 B St', city: 'X', state: 'KY',
+    zipCode: '40000', normalizedAddress: `${name}-addr`,
+  });
+  for (const svid of svids) {
+    await Voter.create({ organizationId: org._id, campaignId: camp._id, householdId: hh._id, firstName: 'W', lastName: svid, fullName: `W ${svid}`, stateVoterId: svid });
+  }
+  return camp;
+};
+
+// Where a campaign delete job is left when its cascade stops right after the capture: stamped, banked,
+// failed — its rows still on file until someone presses Retry.
+const bankThenStop = async (camp) => {
+  await Campaign.updateOne({ _id: camp._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running' } });
+  const captured = await captureCampaignBeforeDelete(await Campaign.findById(camp._id));
+  await Campaign.updateOne({ _id: camp._id }, { $set: { 'deletion.status': 'failed' } });
+  return captured;
+};
+
+const totals = async () => (await getPlatformStats()).total;
 
 before(async () => {
   if (!URI) return;
@@ -165,6 +191,419 @@ test('INTERNAL orgs are excluded from capture — deleting Meridian never moves 
   const after = await getPlatformStats();
   assert.deepStrictEqual(after.total, before.total, 'internal activity never enters the marketing numbers');
   assert.strictEqual(after.total.doorsKnocked, 0);
+});
+
+// ── Deletes that stop partway, or overlap: every row and every person banked exactly once, never lost. ──
+
+// Holds the first call of `Model.method` until `release()` — a capture parked mid-count while
+// something else runs. `entered` resolves once it is parked.
+const parkFirstCall = (t, Model, method) => {
+  const real = Model[method].bind(Model);
+  let entered;
+  let release;
+  const parked = new Promise((r) => { entered = r; });
+  const gate = new Promise((r) => { release = r; });
+  let held = false;
+  t.mock.method(Model, method, (...args) => {
+    if (held) return real(...args);
+    held = true;
+    entered();
+    return gate.then(() => real(...args));
+  });
+  return { parked, release };
+};
+
+test('a capture that dies while counting banks nothing — the retry banks the org, it is never lost', { skip }, async (t) => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 7, voters: 2 });
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 10, surveys: 3, voters: 5 });
+  await recomputeLive();
+  const before = await totals();
+
+  // Attempt 1 dies inside the count — a database blip, or the worker killed on a deploy mid-aggregation.
+  const boom = t.mock.method(CanvassActivity, 'countDocuments', () => { throw new Error('mongo hiccup'); });
+  await assert.rejects(() => deleteOrganization(org._id), /mongo hiccup/);
+  boom.mock.restore();
+  assert.strictEqual((await Organization.findById(org._id).lean()).platformStatsCaptured, false, 'no mark without a bank');
+  assert.deepStrictEqual((await PlatformStats.findOne({ key: 'singleton' }).lean()).bank.orgs, [], 'and nothing in the ledger');
+  assert.deepStrictEqual(await totals(), before);
+
+  // The queue's retry runs the whole cascade.
+  await deleteOrganization(org._id);
+  const s = await getPlatformStats();
+  assert.strictEqual(s.deleted.organizations, 1, 'banked on the retry');
+  assert.strictEqual(s.deleted.doorsKnocked, 10);
+  assert.strictEqual(s.deleted.surveyResponses, 3);
+  assert.strictEqual(s.deleted.votersProcessed, 5);
+  assert.deepStrictEqual(s.total, before, 'the lifetime totals survive the failed attempt');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'and the next reconcile agrees');
+});
+
+test('a bank write that fails banks nothing — the retry banks the org once', { skip }, async (t) => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 2, voters: 1 });
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 4, voters: 2 });
+  await recomputeLive();
+  const before = await totals();
+
+  // The write that moves the counts fails (a database blip) — it is the claim too, so nothing is claimed.
+  const real = PlatformStats.updateOne.bind(PlatformStats);
+  const blip = t.mock.method(PlatformStats, 'updateOne', (filter, update, ...rest) =>
+    Array.isArray(update) ? Promise.reject(new Error('blip on the bank')) : real(filter, update, ...rest)
+  );
+  await assert.rejects(() => deleteOrganization(org._id), /blip on the bank/);
+  blip.mock.restore();
+  assert.strictEqual((await Organization.findById(org._id).lean()).platformStatsCaptured, false);
+
+  await deleteOrganization(org._id); // the queue's retry
+  const s = await getPlatformStats();
+  assert.strictEqual(s.deleted.organizations, 1, 'banked once, on the retry');
+  assert.deepStrictEqual(s.total, before);
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before);
+});
+
+test('a crash between the bank and its mark never banks twice, and no reconcile counts it twice', { skip }, async (t) => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 2, voters: 1 });
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 4, voters: 2 });
+  await recomputeLive();
+  const before = await totals();
+
+  // The bank lands; the worker dies before the org's mark (platformStatsCaptured) goes on.
+  const real = Organization.updateOne.bind(Organization);
+  const boom = t.mock.method(Organization, 'updateOne', (filter, update, ...rest) =>
+    update?.$set?.platformStatsCaptured ? Promise.reject(new Error('worker killed')) : real(filter, update, ...rest)
+  );
+  await assert.rejects(() => deleteOrganization(org._id), /worker killed/);
+  boom.mock.restore();
+  assert.strictEqual((await getPlatformStats()).deleted.organizations, 1, 'the bank landed');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'the ledger keeps the banked org out of live without its mark');
+
+  await deleteOrganization(org._id); // the retry reads the ledger: banked already
+  const s = await getPlatformStats();
+  assert.strictEqual(s.deleted.organizations, 1, 'still banked once');
+  assert.deepStrictEqual(s.total, before);
+});
+
+test('a delete still in the queue, or stopped before its capture, keeps its org in the totals', { skip }, async () => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 7, voters: 2 });
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 10, surveys: 3, voters: 5 });
+  await recomputeLive();
+  const before = await totals();
+
+  // Stamped and queued (what every delete path does first), and the reconcile — nightly or Reconcile
+  // now — lands before the worker picks it up.
+  await Organization.updateOne({ _id: org._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'pending' } });
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'a queued delete has banked nothing, so it still counts');
+
+  // The job expired unclaimed (worker off): failed, nothing banked, every row intact.
+  await Organization.updateOne({ _id: org._id }, { $set: { 'deletion.status': 'failed' } });
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'and so does a delete that failed before its capture');
+
+  await deleteOrganization(org._id); // Retry runs the cascade
+  assert.deepStrictEqual(await totals(), before, 'the delete moves the org into the bank, subtracting it once');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'and the next reconcile agrees');
+});
+
+test('a campaign delete that stops after banking is counted once — by the reconcile, the trend and a later org delete', { skip }, async () => {
+  const { org } = await seedOrg({ slug: 'real', status: 'active', knocks: 3, voters: 2 });
+  const doomed = await seedCampaign(org, 'doomed', ['only-1', 'only-2', 'only-3']);
+  await recomputeLive();
+  const before = await totals();
+  assert.strictEqual(before.campaigns, 2);
+  assert.strictEqual(before.votersProcessed, 5);
+
+  const captured = await bankThenStop(doomed);
+  assert.strictEqual(captured.votersProcessed, 3);
+  assert.deepStrictEqual(await totals(), before, 'the capture moves the counts, it does not add them');
+
+  // Every nightly reconcile until someone presses Retry: the banked rows are still on file, not live.
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'banked rows are never counted in live as well');
+
+  // The trend reads the same filter, so its invariant holds with the banked rows still on file.
+  const { undated } = await recomputeDaily();
+  const live = await computeLiveCounts();
+  const rows = await PlatformDaily.find({}).lean();
+  for (const m of PLATFORM_METRICS) {
+    const sum = rows.reduce((s, r) => s + (r[m] || 0), 0);
+    assert.strictEqual(sum + undated[m], live[m], `Σ(series.${m}) + undated.${m} === live.${m}`);
+  }
+
+  // The whole org is deleted before anyone retries: its capture skips the campaign that banked itself.
+  await deleteOrganization(org._id);
+  const s = await getPlatformStats();
+  assert.deepStrictEqual(s.total, before, 'the org delete does not bank the campaign a second time');
+  assert.strictEqual(s.deleted.campaigns, 2);
+  assert.strictEqual(s.deleted.votersProcessed, 5);
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before);
+});
+
+test('a campaign capture still counting when its org is captured stands down — the org banks it once', { skip }, async (t) => {
+  await seedOrg({ slug: 'other', status: 'active', knocks: 2, voters: 1 });
+  const { org } = await seedOrg({ slug: 'real', status: 'active', knocks: 4, voters: 2 });
+  const doomed = await seedCampaign(org, 'doomed', ['d-1', 'd-2', 'd-3']);
+  await recomputeLive();
+  const before = await totals();
+
+  // The campaign's delete job passed its processor's org check before the org was stamped; its
+  // capture is parked mid-count while the org's capture runs start to finish.
+  const { parked, release } = parkFirstCall(t, SurveyResponse, 'countDocuments');
+  const campaignCapture = bankThenStop(doomed);
+  await parked;
+  const o = await captureOrgBeforeDelete(org._id);
+  assert.strictEqual(o.campaigns, 2, 'the org counts the still-unbanked campaign in');
+  release();
+  assert.strictEqual(await campaignCapture, null, 'the campaign finds its org banked and stands down');
+  t.mock.restoreAll();
+
+  await deleteOrganization(org._id);
+  await recomputeLive();
+  const s = await getPlatformStats();
+  assert.deepStrictEqual(s.total, before, 'banked once — by the org');
+  assert.strictEqual(s.deleted.campaigns, 2);
+  assert.strictEqual(s.deleted.votersProcessed, 5);
+});
+
+test('a campaign that banks while its org is counted is left out of the org’s bank', { skip }, async (t) => {
+  const { org } = await seedOrg({ slug: 'real', status: 'active', knocks: 3, voters: 2 });
+  const doomed = await seedCampaign(org, 'doomed', ['d-1', 'd-2', 'd-3']);
+  await recomputeLive();
+  const before = await totals();
+
+  // The org's capture is parked mid-count while the campaign's own delete banks it.
+  const { parked, release } = parkFirstCall(t, SurveyResponse, 'countDocuments');
+  const orgCapture = captureOrgBeforeDelete(org._id);
+  await parked;
+  assert.strictEqual((await bankThenStop(doomed)).votersProcessed, 3, 'the campaign banks its own people');
+  release();
+  const o = await orgCapture;
+  t.mock.restoreAll();
+  assert.strictEqual(o.campaigns, 1, 'the org counted again, without the campaign that banked meanwhile');
+  assert.strictEqual(o.votersProcessed, 2);
+  const s = await getPlatformStats();
+  assert.deepStrictEqual(s.total, before);
+  assert.strictEqual(s.deleted.campaigns, 2);
+  assert.strictEqual(s.deleted.votersProcessed, 5);
+});
+
+test('a person whose only rows are in two deleted campaigns is banked once, by the last capture', { skip }, async () => {
+  const { org } = await seedOrg({ slug: 'real', status: 'active', voters: 1 });
+  const first = await seedCampaign(org, 'first', ['shared', 'first-only']);
+  const second = await seedCampaign(org, 'second', ['shared']);
+  await recomputeLive();
+  const before = await totals();
+  assert.strictEqual(before.votersProcessed, 3, 'real-0, shared and first-only, each once');
+
+  const a = await bankThenStop(first);
+  assert.strictEqual(a.votersProcessed, 1, 'shared lives on in the second campaign; only first-only leaves');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before);
+
+  const b = await bankThenStop(second);
+  assert.strictEqual(b.votersProcessed, 1, 'shared is banked here: its other row is in a campaign already banked');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'nobody is lost between the two deletes');
+});
+
+test('two campaign captures counting at once still bank a shared person once', { skip }, async (t) => {
+  const { org } = await seedOrg({ slug: 'real', status: 'active', voters: 1 });
+  const first = await seedCampaign(org, 'first', ['shared', 'first-only']);
+  const second = await seedCampaign(org, 'second', ['shared']);
+  await recomputeLive();
+  const before = await totals();
+
+  // The first capture is parked mid-count while the second banks start to finish.
+  const { parked, release } = parkFirstCall(t, SurveyResponse, 'countDocuments');
+  const firstCapture = bankThenStop(first);
+  await parked;
+  assert.strictEqual((await bankThenStop(second)).votersProcessed, 0, 'shared still lives on in the first, unbanked');
+  release();
+  const a = await firstCapture;
+  t.mock.restoreAll();
+  assert.strictEqual(a.votersProcessed, 2, 'counted again once the second banked: shared leaves with the first');
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'shared is banked exactly once');
+});
+
+test('a bank in another org landing mid-count leaves the count standing — banked without counting again', { skip }, async (t) => {
+  const { org: other } = await seedOrg({ slug: 'other', status: 'active', voters: 1 });
+  const elsewhere = await seedCampaign(other, 'elsewhere', ['e-1', 'e-2']);
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 4, voters: 2 });
+  await recomputeLive();
+  const before = await totals();
+
+  // Count this org's counts, and park the first while another org's campaign delete banks.
+  const real = SurveyResponse.countDocuments.bind(SurveyResponse);
+  let counts = 0;
+  let entered;
+  let release;
+  const parked = new Promise((r) => { entered = r; });
+  const gate = new Promise((r) => { release = r; });
+  t.mock.method(SurveyResponse, 'countDocuments', (filter, ...rest) => {
+    if (String(filter?.organizationId) !== String(org._id)) return real(filter, ...rest);
+    counts += 1;
+    if (counts > 1) return real(filter, ...rest);
+    entered();
+    return gate.then(() => real(filter, ...rest));
+  });
+  const orgCapture = captureOrgBeforeDelete(org._id);
+  await parked;
+  await bankThenStop(elsewhere);
+  release();
+  const o = await orgCapture;
+  t.mock.restoreAll();
+  assert.strictEqual(counts, 1, 'counted once: a bank in another org cannot touch these rows');
+  assert.strictEqual(o.doorsKnocked, 4);
+  assert.deepStrictEqual(await totals(), before);
+});
+
+test('a campaign whose org document is missing banks as usual — its rows were live', { skip }, async () => {
+  const { org } = await seedOrg({ slug: 'drift', status: 'active', voters: 1 });
+  const orphan = await seedCampaign(org, 'orphan', ['o-1', 'o-2', 'o-3']);
+  await Organization.deleteOne({ _id: org._id }); // data drift: the org's document is gone, its rows are not
+  await recomputeLive();
+  const before = await totals();
+  assert.strictEqual(before.votersProcessed, 4, 'the orphaned rows count in live');
+
+  assert.strictEqual((await bankThenStop(orphan))?.votersProcessed, 3, 'banked, not stood down');
+  await Voter.deleteMany({ campaignId: orphan._id }); // what its cascade then destroys
+  await Campaign.deleteOne({ _id: orphan._id });
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before);
+});
+
+test('an internal org stays out of the numbers through its whole delete, after its Subscription is swept too', { skip }, async () => {
+  await seedOrg({ slug: 'real', status: 'active', knocks: 5, voters: 1 });
+  const { org: demo } = await seedOrg({ slug: 'demo', status: 'internal', knocks: 9, surveys: 9, voters: 9 });
+  await recomputeLive();
+  const before = await totals();
+
+  await Organization.updateOne({ _id: demo._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running' } });
+  assert.strictEqual(await captureOrgBeforeDelete(demo._id), null, 'nothing banked');
+  // The cascade sweeps the org's Subscription long before its voters (ORG_SCOPED order), so for most
+  // of the delete nothing says 'internal' any more except the mark the capture left.
+  await Subscription.deleteMany({ organizationId: demo._id });
+  await recomputeLive();
+  assert.deepStrictEqual(await totals(), before, 'demo data never leaks into live mid-delete');
+  assert.strictEqual(await captureOrgBeforeDelete(demo._id), null, 'a retry after the sweep still banks nothing');
+  assert.strictEqual((await getPlatformStats()).deleted.doorsKnocked, 0);
+});
+
+test('an org created internal stays out of the numbers even when its billing status drifted', { skip }, async () => {
+  await seedOrg({ slug: 'real', status: 'active', knocks: 5, voters: 1 });
+  const { org: sandbox } = await seedOrg({ slug: 'sandbox', status: 'active', knocks: 9, voters: 9 });
+  // The born-immutable flag, set the way the migrations set it (a raw write), with billing left 'active'.
+  await Organization.collection.updateOne({ _id: sandbox._id }, { $set: { isInternal: true } });
+  await recomputeLive();
+  const before = await totals();
+  assert.strictEqual(before.organizations, 1, 'the flag alone excludes it, as billing reads it');
+  assert.strictEqual(before.doorsKnocked, 5);
+  assert.strictEqual(await captureOrgBeforeDelete(sandbox._id), null, 'and its capture banks nothing');
+  assert.deepStrictEqual(await totals(), before);
+});
+
+test('the bank is one write that clamps live at zero, even on a brand-new singleton', { skip }, async () => {
+  // No PlatformStats document yet (beforeEach wiped it): the move must create it, not fail.
+  const { org: first } = await seedOrg({ slug: 'first', status: 'active', knocks: 4, surveys: 1, voters: 2 });
+  const captured = await captureOrgBeforeDelete(first._id);
+  assert.deepStrictEqual(captured, { organizations: 1, campaigns: 1, doorsKnocked: 4, surveyResponses: 1, votersProcessed: 2 });
+  let s = await getPlatformStats();
+  assert.deepStrictEqual(s.deleted, captured, 'banked from rows on the document the move itself created');
+  assert.deepStrictEqual(s.live, { organizations: 0, campaigns: 0, doorsKnocked: 0, surveyResponses: 0, votersProcessed: 0 }, 'live clamped at 0, never negative');
+
+  // A live tally that lags the rows (a missed bump) is clamped the same way, never driven negative.
+  const { org: second } = await seedOrg({ slug: 'second', status: 'active', knocks: 10 });
+  await PlatformStats.updateOne({ key: 'singleton' }, { $set: { 'live.doorsKnocked': 3 } });
+  await captureOrgBeforeDelete(second._id);
+  s = await getPlatformStats();
+  assert.strictEqual(s.live.doorsKnocked, 0);
+  assert.strictEqual(s.deleted.doorsKnocked, 14);
+});
+
+test('a reconcile that counts while a capture banks counts again instead of writing over the bank', { skip }, async (t) => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 7, voters: 2 });
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 10, surveys: 3, voters: 5 });
+  await recomputeLive();
+  const before = await totals();
+
+  // The delete job banks the org while the reconcile is mid-count, after it read the org as live.
+  const real = SurveyResponse.countDocuments.bind(SurveyResponse);
+  let fired = false;
+  t.mock.method(SurveyResponse, 'countDocuments', async (...args) => {
+    if (!fired) {
+      fired = true;
+      await captureOrgBeforeDelete(org._id);
+    }
+    return real(...args);
+  });
+  await recomputeLive();
+  t.mock.restoreAll();
+  assert.strictEqual((await getPlatformStats()).deleted.organizations, 1, 'the org banked mid-reconcile');
+  assert.deepStrictEqual(await totals(), before, 'and is never counted in live as well');
+});
+
+test('a reconcile that keeps missing gives up after counting twice, and says to run it again', { skip }, async (t) => {
+  await seedOrg({ slug: 'keep', status: 'active', knocks: 2, voters: 1 });
+  const { org: a } = await seedOrg({ slug: 'a', status: 'active', knocks: 3, voters: 1 });
+  const { org: b } = await seedOrg({ slug: 'b', status: 'active', knocks: 4, voters: 1 });
+  await recomputeLive();
+  const before = await totals();
+
+  // A delete banks during each of the reconcile's counts.
+  const real = SurveyResponse.countDocuments.bind(SurveyResponse);
+  const doomed = [a._id, b._id];
+  let capturing = false;
+  t.mock.method(SurveyResponse, 'countDocuments', async (...args) => {
+    if (!capturing && doomed.length) {
+      capturing = true;
+      await captureOrgBeforeDelete(doomed.shift());
+      capturing = false;
+    }
+    return real(...args);
+  });
+  await assert.rejects(() => recomputeLive(), /run the reconcile again/);
+  t.mock.restoreAll();
+  assert.strictEqual((await getPlatformStats()).deleted.organizations, 2);
+  assert.deepStrictEqual(await totals(), before, 'and it wrote nothing over either bank');
+});
+
+test('a Door Outcomes writer finishing during the capture sweeps nothing — the late sweep waits for the mark', { skip }, async () => {
+  const { org, camp } = await seedOrg({ slug: 'real', status: 'active', knocks: 4, surveys: 2, voters: 2 });
+  await Organization.updateOne({ _id: org._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running' } });
+  const tenant = { organizationId: org._id, campaignId: camp._id };
+  assert.strictEqual(await sweepIfDeleting(tenant), false, 'running, but its capture has not banked yet');
+  assert.strictEqual(await CanvassActivity.countDocuments({ organizationId: org._id }), 4);
+
+  await captureOrgBeforeDelete(org._id);
+  assert.strictEqual((await getPlatformStats()).deleted.doorsKnocked, 4, 'the capture counted every knock');
+  assert.strictEqual(await sweepIfDeleting(tenant), true, 'once it has, a late write is swept');
+  assert.strictEqual(await CanvassActivity.countDocuments({ organizationId: org._id }), 0);
+});
+
+test('the bank ledger lets go of an org or a campaign once it is gone, and never reaches the page', { skip }, async () => {
+  const { org } = await seedOrg({ slug: 'gone', status: 'active', knocks: 2, voters: 1 });
+  const { org: kept } = await seedOrg({ slug: 'kept', status: 'active', voters: 1 });
+  const doomed = await seedCampaign(kept, 'doomed', ['d-1']);
+  await recomputeLive();
+
+  await deleteOrganization(org._id);
+  await Campaign.updateOne({ _id: doomed._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running' } });
+  await deleteCampaignCascade(await Campaign.findById(doomed._id));
+  let { bank } = await PlatformStats.findOne({ key: 'singleton' }).lean();
+  assert.strictEqual(bank.seq, 2, 'two banks');
+  assert.deepStrictEqual([bank.orgs, bank.campaigns], [[], []], 'each id left with its org or campaign');
+
+  // A crash between a cascade's last delete and its prune leaves an id behind: the reconcile drops it.
+  await PlatformStats.updateOne({ key: 'singleton' }, { $push: { 'bank.orgs': oid() } });
+  await recomputeLive();
+  ({ bank } = await PlatformStats.findOne({ key: 'singleton' }).lean());
+  assert.deepStrictEqual(bank.orgs, []);
+  assert.ok(!('bank' in (await getPlatformStats())), 'the ledger is never served');
 });
 
 test('the nightly reconcile is scheduled OUTSIDE the retention list, and its handler re-syncs live only', { skip }, async () => {

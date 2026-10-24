@@ -2700,7 +2700,10 @@ undo — sweeps after itself, however it ends, while its tenant's cascade is run
 ([lateWriteSweep.js](../server/src/services/platform/lateWriteSweep.js), round 3: a conversion batch
 that stalled past the wait wrote three surveys into an organization already deleted). Only a running
 cascade counts, or a tenant already gone: a deletion still `pending` is undone when its job can't be
-queued, and sweeping then would destroy a tenant nobody deleted. A chunk whose
+queued, and sweeping then would destroy a tenant nobody deleted. For an organization, running means
+its cascade has also banked the org's lifetime platform numbers (its `platformStatsCaptured` mark,
+set before its first sweep), so a writer finishing while those are being counted never sweeps the
+rows out from under the count ([PLATFORM.md](PLATFORM.md), 2026-10-22). A chunk whose
 round holds a re-cut lock throws, so the retry backoff waits it out (past it, the run stops and says to
 press Pick up). The `failed` listener acts only after the last attempt, and only on the failing job's own
 id: an apply → `status: 'failed'` plus the History row for what landed so far, an undo → `undo.status:

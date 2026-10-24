@@ -29,11 +29,15 @@ import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 // always followed by a check that sees one or the other — and then sweeps what the cascade would have.
 // Only a cascade that has BEGUN (or a tenant already gone) counts, never the bare request: a deletion
 // still `pending` is undone when its job can't be queued (the routes clear the stamp), and sweeping
-// then destroyed a tenant nobody deleted. Begun means `running` for an organization (its processor
-// refuses nothing once it claims) and `running` with `cascadeAt` for a campaign, whose processor can
-// still refuse after it claims — canvassing started, or the organization is being deleted — and a
-// sweep in that gap removed Door Outcomes work from a campaign that then stayed (round 4). A cascade
-// that failed leaves its leftovers to its Retry, which sweeps them with the rest.
+// then destroyed a tenant nobody deleted. Begun means `running` with `platformStatsCaptured` for an
+// organization — its processor refuses nothing once it claims, but its cascade opens by COUNTING the
+// org's knocks and surveys into the lifetime platform totals (captureOrgBeforeDelete) and sets that
+// mark only once the count is banked, so a writer finishing during the count must not sweep the rows
+// out from under it (2026-10-22: that sweep could bank an org with its knocks already gone) — and
+// `running` with `cascadeAt` for a campaign, whose processor can still refuse after it claims —
+// canvassing started, or the organization is being deleted — and a sweep in that gap removed Door
+// Outcomes work from a campaign that then stayed (round 4). Either mark goes on before its cascade's
+// first sweep. A cascade that failed leaves its leftovers to its Retry, which sweeps them with the rest.
 
 // What a Door Outcomes write can add to, and what both cascades sweep last.
 export const LATE_WRITE_MODELS = [
@@ -45,9 +49,9 @@ export const LATE_WRITE_MODELS = [
 export const deletingTenant = async ({ campaignId, organizationId }) => {
   const [campaign, org] = await Promise.all([
     Campaign.findById(campaignId, { deletion: 1 }).lean(),
-    Organization.findById(organizationId, { deletion: 1 }).lean(),
+    Organization.findById(organizationId, { deletion: 1, platformStatsCaptured: 1 }).lean(),
   ]);
-  if (!org || org.deletion?.status === 'running') return { organizationId };
+  if (!org || (org.deletion?.status === 'running' && org.platformStatsCaptured)) return { organizationId };
   if (!campaign || (campaign.deletion?.status === 'running' && campaign.deletion?.cascadeAt)) return { campaignId };
   return null;
 };

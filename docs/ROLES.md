@@ -288,9 +288,23 @@ the real workflow fails even when each router gate is individually correct.
 That parity extends past the router gate into the **assignability** check those routers share:
 `partitionAssignable` ([services/campaignRoster.js](../server/src/services/campaignRoster.js)) allows
 anyone on the campaign roster, **any active org `admin`**, **a lead holding a `CampaignManager` grant on
-_this_ campaign**, or a super admin — the lead arm scoped to the campaign, never "is a lead somewhere".
-Without it a lead could cut turf and hand out every book except their own: the check matched role
-`'admin'` only, so self-assignment 409'd as *not on the team*.
+_this_ campaign**, or Doorline staff **in an internal org only** — the lead arm scoped to the campaign,
+never "is a lead somewhere". Without it a lead could cut turf and hand out every book except their own:
+the check matched role `'admin'` only, so self-assignment 409'd as *not on the team*.
+
+**Staff are not assignable in a customer org without a membership** (`internalStaffIdSet`, 2026-10-24,
+[PRIVACY_VERIFICATION](PRIVACY_VERIFICATION.md) item 36). The staff arm used to apply in every org, so
+a customer's admin or lead could put any Doorline staff account on a book or a walk-list crew. The 201,
+where anyone else's id earns a 409, confirmed the id was staff. The book and crew lists then served the
+staffer's name and email (the Team list their phone and last sign-in too), and
+`ensureCampaignAssignments` put them on the customer's team without the customer adding them. Now a staffer in a customer org needs an active membership like anyone else, and
+support access can't mint one (`vendorGuards.js` refuses a grant-holder write that targets a staff
+account). The one other way a staff account gets a membership is break-glass org creation, which can
+seat the org's first admin. In an internal org, where `orgContext` seats staff as members with no row,
+a live staff account still passes. `departedMemberIdSet` (the snapshot-restore gate) applies the same
+rule, and the web pickers offer staff "You" only in an internal org (`useCampaignTeam`). Pinned by
+[staffRosterScope.int.test.js](../server/test/staffRosterScope.int.test.js) and
+[partitionAssignable.int.test.js](../server/test/partitionAssignable.int.test.js).
 
 **Campaign-targeted org routers** — role `('admin','lead')` at the router, then a per-request check:
 
@@ -320,6 +334,20 @@ Without it a lead could cut turf and hand out every book except their own: the c
   a pre-existing gap where `baseFilter` trusted any `campaignId`. The one exception is
   **`/campaign-rollup`** (the multi-campaign list, e.g. the mobile admin landing): it's exempt from the
   gate and instead self-scopes its list to `managedCampaignIds`.
+  - **The per-person drills** (`/canvassers/:userId/*`) answer only for someone this request may see,
+    checked once on the router's `:userId` param. Anyone else gets the same 404 as an id that doesn't
+    exist.
+    - **An org admin:** anyone the org carries, meaning a membership in any status, or their own
+      knocks (desk marks excluded) or surveys on its ledger (`orgCarriesUser`).
+    - **A lead:** only people on a campaign they manage, meaning rostered, granted, coordinating a crew,
+      or with their own work there (`campaignsCarryUser`). That is the same wall as the Users list, and
+      any managed campaign counts, not just `?campaignId`.
+  - **The canvasser CSV's crew stamp** (`?coordinatorId=`) names a coordinator only when the same
+    check passes, or when they are stamped on the doors in the export's scope. Anyone else prints
+    "unknown coordinator".
+  - **Why:** until this fix deployed (PRIVACY_VERIFICATION item 35 records when), `/summary` and
+    `/responses` returned any account's name, email, phone and last sign-in by id, to admins and leads
+    of any org, and let a lead open anyone in their own org.
 - **`client-reports`** ([clientReports.js](../server/src/routes/admin/clientReports.js)) — every handler
   authorizes on the report/share/campaign's `campaignId` via `manages()`; the list scopes to
   `managedCampaignIds`.

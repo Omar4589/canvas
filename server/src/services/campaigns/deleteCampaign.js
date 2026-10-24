@@ -37,7 +37,7 @@ import { LATE_WRITE_MODELS } from '../platform/lateWriteSweep.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { AnswerEditRun } from '../../models/AnswerEditRun.js';
 import { AnswerEditRunChunk } from '../../models/AnswerEditRunChunk.js';
-import { captureCampaignBeforeDelete } from '../platform/platformStats.js';
+import { captureCampaignBeforeDelete, pruneBank } from '../platform/platformStats.js';
 
 const CHUNK = 5000;
 
@@ -54,7 +54,7 @@ const CHUNK = 5000;
 //
 // Sequential (no transaction), matching the rest of the app. Returns delete counts.
 // Safe to RE-RUN after a partial failure: every step is a deleteMany/upsert that
-// converges, and the platform-stats bank is claim-guarded (platformStatsCaptured).
+// converges, and the platform-stats bank is its own claim (the bank ledger, platformStats.js).
 //
 // `heartbeat` (optional, fire-and-forget) is called between stages and inside chunk
 // loops so the background delete job (deleteCampaignProcessor.js) can stamp liveness;
@@ -67,6 +67,9 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   // Bank this campaign's lifetime contribution into the platform marketing counters BEFORE its rows
   // are destroyed (no-op for internal orgs). A deletable campaign is never-walked, so this is mostly
   // its campaign count and never-walked voters — but capturing keeps the numbers whole either way.
+  // Unlike the org cascade, this may count AHEAD of the Door Outcomes wait below: a late writer's
+  // sweep (lateWriteSweep.js) removes knocks, surveys and Door Outcomes records, never voters, and a
+  // deletable campaign has no knocks or surveys, so nothing counted here can be swept from under it.
   await captureCampaignBeforeDelete(campaign);
   heartbeat();
 
@@ -211,5 +214,8 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   }
 
   await Campaign.deleteOne({ _id: campaignId });
+  // The bank ledger lets go of this campaign's id now that it is gone; a miss here (a crash) is
+  // pruned by the next reconcile.
+  await pruneBank().catch((err) => console.error('[platform-stats] ledger prune failed:', err?.message || err));
   return counts;
 }

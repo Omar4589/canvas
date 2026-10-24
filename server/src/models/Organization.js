@@ -33,10 +33,13 @@ const organizationSchema = new mongoose.Schema(
     // bug. repair:team-stamps backfills the orgs that predate this.
     teamAttributionReadyAt: { type: Date, default: () => new Date() },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // Set once, atomically, when this org's lifetime contribution has been banked into the platform
-    // marketing counters (services/platform/platformStats.js), so a RETRIED deletion — the retention
-    // sweep re-runs a partially-failed delete — can't capture the same org's counts twice. Deleted with
-    // the org, so it never lingers.
+    // Set once this org's lifetime contribution has been banked into the platform marketing counters
+    // (services/platform/platformStats.js) — or, for an internal org, once its capture found nothing to
+    // bank. A RETRIED deletion (the retention sweep re-runs a partially-failed delete) reads it as
+    // "captured already"; the bank ledger on PlatformStats is what guarantees the bank lands once. It
+    // also keeps the org's surviving rows out of the live counts while its cascade runs (or waits for
+    // Retry), and tells late Door Outcomes writers that the cascade has begun (lateWriteSweep.js).
+    // Deleted with the org, so it never lingers.
     platformStatsCaptured: { type: Boolean, default: false },
     // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
     // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.

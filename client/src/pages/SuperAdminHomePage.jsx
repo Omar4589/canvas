@@ -144,6 +144,8 @@ export default function SuperAdminHomePage() {
       setReconcileMsg('Recomputed from live rows.');
       setTimeout(() => setReconcileMsg(null), 4000);
       qc.invalidateQueries({ queryKey: ['super-admin', 'platform-stats'] });
+      // The reconcile rebuilds the trend series too — refresh the sparklines with the totals.
+      qc.invalidateQueries({ queryKey: ['super-admin', 'platform-trends'] });
     },
     onError: (err) => setReconcileMsg(err.message),
   });
@@ -536,7 +538,7 @@ export default function SuperAdminHomePage() {
               <StatCard
                 key={key}
                 label={label}
-                value={(statsQ.data?.total?.[key] ?? 0).toLocaleString()}
+                value={statsQ.data?.total?.[key]?.toLocaleString() ?? '—'}
                 compact
                 help={
                   help +

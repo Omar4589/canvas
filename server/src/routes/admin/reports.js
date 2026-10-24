@@ -49,7 +49,7 @@ import {
 } from '../../services/reports/hoursSource.js';
 import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
-import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
+import { hydrateCanvassers, orgCarriesUser, campaignsCarryUser } from '../../services/reports/canvasserIdentity.js';
 import { buildKnocksByPassData } from '../../services/reports/knocksByPass.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
 import { computeFarKpi, farKpiForRows } from '../../services/audit/farKpi.js';
@@ -69,10 +69,32 @@ router.use(requireAuth, orgContext, requireOrgRole('admin', 'lead'));
 
 // Record-level audit tag: the /canvassers/:userId drills + export read ONE person's performance
 // data — a staff read under a support grant logs whose (see routes/admin/voters.js).
-router.param('userId', (req, res, next, userId) => {
-  if (mongoose.isValidObjectId(userId)) addAuditSubjects(res, 'user', userId);
-  next();
+//
+// The drills also answer only for people this request may see (scopeCarriesUser): anyone else gets
+// the same 404 as an id that doesn't exist. /summary and /responses used to look the account up by
+// id alone and return another organization's member's name, email, phone and last sign-in to any
+// admin or team lead who held the id. Checked here, on the param, so every drill (and any drill
+// added later) inherits it. A malformed id falls through to the route's own 400.
+router.param('userId', async (req, res, next, userId) => {
+  try {
+    if (!mongoose.isValidObjectId(userId)) return next();
+    if (activeOrgId(req) && !(await scopeCarriesUser(req, userId))) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    addAuditSubjects(res, 'user', userId);
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
+
+// Whose per-person reports may this request open? An org admin (super admins included): anyone the
+// org carries. A team lead, who can be the paying client: only people on a campaign they manage, the
+// same wall the Users list keeps. See services/reports/canvasserIdentity.js.
+const scopeCarriesUser = async (req, userId) =>
+  isOrgAdmin(req)
+    ? orgCarriesUser(userId, activeOrgId(req))
+    : campaignsCarryUser(userId, await managedCampaignIds(req));
 
 // Shared "far knock" threshold — the legacy far-counts/flagged feeds and the new GPS audit
 // all key off ONE number (services/audit/flagThresholds.js), so "far" means one thing.
@@ -317,14 +339,26 @@ async function crewFilter(req) {
 // The human-readable crew scope for a frozen export's stamp. Empty string (falsy, so it drops
 // out of the preamble) when no crew filter was applied — an unfiltered file should not carry a
 // row saying so, since that is the normal case and every export would grow noise.
-async function crewStampLabel(raw) {
+//
+// ?coordinatorId is whatever the client sent, and this used to print the name of ANY account by
+// id, another organization's people included. Now it names only a coordinator this request may see
+// (scopeCarriesUser: anyone the org carries for an admin, people on their campaigns for a lead), or
+// a coordinator stamped on the doors in this export's scope (a departed crew lead who never knocked
+// here themselves still prints as a person). Anyone else reads as an unknown coordinator. The stamp
+// check runs last because it scans the scope's rows.
+const crewStampLabel = async (raw, req) => {
   if (!raw) return '';
   if (raw === 'none') return 'Crew: no coordinator';
   if (!mongoose.isValidObjectId(raw)) return '';
-  const u = await User.findById(raw, 'firstName lastName').lean();
+  const scope = baseFilter(req);
+  const carried =
+    (await scopeCarriesUser(req, raw)) ||
+    (await CanvassActivity.exists({ ...scope, coordinatorId: raw })) ||
+    (await SurveyResponse.exists({ ...scope, coordinatorId: raw }));
+  const u = carried ? await User.findById(raw, 'firstName lastName').lean() : null;
   const name = u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : '';
   return `Crew: ${name || 'unknown coordinator'}`;
-}
+};
 
 // KNOCK_ACTIONS, knocksPipeline, connectionRate, coverageBucketExpr, teamMatch, withTeam now
 // live in services/reports/aggregations.js (shared with the client report builder and the
@@ -3365,9 +3399,9 @@ router.get('/canvassers.csv', async (req, res, next) => {
     // The crew scope joins the stamp for the same reason the range and the as-of time are
     // there: a file holding one crew's rows and a file holding the whole campaign look
     // identical once they are on someone's desktop. Named, so the reader does not have to
-    // recognise a 24-hex id — and resolved through the same User lookup the report rows use,
-    // so a departed coordinator still prints as a person.
-    const crewLabel = await crewStampLabel(req.query.coordinatorId);
+    // recognise a 24-hex id. Named only for a coordinator this org carries (crewStampLabel), so a
+    // departed coordinator still prints as a person and someone else's id prints as unknown.
+    const crewLabel = await crewStampLabel(req.query.coordinatorId, req);
     const preamble = [
       ['Canvasser export', rangeLabel, `hours as of ${new Date().toISOString()}`, crewLabel]
         .filter(Boolean)
@@ -3872,7 +3906,9 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         email: user.email,
         phone: user.phone || null,
         isActive: user.isActive,
-        lastLoginAt: user.lastLoginAt,
+        // Only while they're a member here. Someone this org carries only through old knocks may
+        // be signing in for another organization now, and that clock is not this org's to read.
+        lastLoginAt: memberships.length ? user.lastLoginAt : null,
       },
       memberships: memberships.map((m) => ({
         role: m.role,

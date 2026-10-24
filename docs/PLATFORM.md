@@ -58,11 +58,15 @@ so "signed out then in" and "session expired then in" landed in different places
   re-engage vs terminate, and each row's **Manage billing →** deep-links to that org's Account tab
   (`/organizations?billing=<orgId>`) — and the lifetime **Platform totals** (organizations,
   campaigns, doors knocked, surveys, voters), which exclude internal/demo orgs and survive customer
-  deletion. **Every number on the page carries an ⓘ** explaining exactly what it counts (copy in
+  deletion (a deletion moves a customer's numbers into a kept bank as it starts, so a deletion that
+  is queued, running or stopped partway never moves the totals, and nothing is counted twice).
+  **Every number on the page carries an ⓘ** explaining exactly what it counts (copy in
   `client/src/lib/platformStatsMeta.js`, mirrored to mobile); the one worth memorizing: lifetime
-  "Doors knocked" counts **raw field records**, a deliberately different unit from the billable
-  "knocks" in reports (one per household per round — see [METRICS.md](METRICS.md)), so it always
-  reads higher. Both door counts — today's and the lifetime total — include every door result that
+  "Doors knocked" counts **raw field records** (one per canvasser, per door, per round: marking a
+  door again in the same round replaces that canvasser's earlier result), a deliberately different
+  unit from the billable "knocks" in reports (one per household per round — see
+  [METRICS.md](METRICS.md)), so it usually reads higher. Billing can also count what it never does:
+  admin bulk marks, and restricted doors on campaigns that bill them. Both door counts — today's and the lifetime total — include every door result that
   counts as a knock, No soliciting and **Not a target voter** among them (the off-by-default
   outcome, so only campaigns that turned it on contribute), and their ⓘ copy names both; Restricted
   marks are never knocks. A muted "Recomputed nightly · last reconciled …" line shows the totals'
@@ -397,8 +401,9 @@ customer owns.
   `dotColors`, and label from the shared `ACTION_LABELS`), newest first, with org / canvasser /
   campaign / household populated; supports `?since=` for polling and `?limit=`.
 - **The trend series (`PlatformDaily` + `platform-trends`)** — one row per UTC day, the five
-  lifetime metrics counted from the DATES of surviving rows with the **same filter set as the live
-  bucket** (internal excluded, `KNOCK_ACTIONS`, never `via:'bulk'`). Rebuilt in FULL by
+  lifetime metrics counted from the DATES of surviving rows with the **same filter as the live
+  bucket** (one shared `liveMatches`: internal orgs and anything already banked excluded,
+  `KNOCK_ACTIONS`, never `via:'bulk'`). Rebuilt in FULL by
   `recomputeDaily()` ([platformStats.js](../server/src/services/platform/platformStats.js)) inside
   the existing nightly `STATS_JOB` (no new cron), the manual backfill, and Reconcile-now — full
   rebuild is the point: an org hard-delete removes its bars retroactively while the `deleted` bank
@@ -418,7 +423,40 @@ customer owns.
   `platform-stats-reconcile` job (03:47 UTC, `recomputeLive({stampBackfill:true})`; manual runner
   `npm run migrate:platform-stats -- --apply` → [backfillPlatformStats.js](../server/src/migrations/backfillPlatformStats.js)).
   `deleted` is banked from **true row counts captured the instant before an org/campaign is deleted**
-  and is never recomputed. Internal orgs (Subscription `status:'internal'`) are excluded everywhere.
+  and is never recomputed. **A capture counts, then banks — and the bank is its own claim.** The
+  singleton carries a small **bank ledger** (`bank.seq`, `bank.orgs`, `bank.campaigns`): one
+  conditional pipeline update moves the counts (`deleted += c`, `live = max(0, live − c)`), adds the
+  org's or campaign's id to the ledger and bumps `seq`, landing only if `seq` hasn't moved since the
+  capture read it and the id isn't there yet. So a bank lands whole or not at all: a count or a bank
+  write that dies partway (a database blip, the worker killed on a deploy) leaves nothing, and the
+  retry counts again; a crash right after the bank is caught by the ledger, which the retry reads
+  first. And two captures can never bank the same rows: if any bank lands while a capture counts,
+  `seq` has moved and its bank misses; it then looks at what changed. A bank elsewhere leaves its
+  count standing, so it banks under the new `seq`; one of its own org's campaigns banked or gone
+  sends it to count again under the new ledger. A campaign capture that finds its org already banked
+  stands down (that org counted it), while a campaign whose org document is merely missing banks as
+  usual (its rows were live). A reconcile's SET is conditional on `seq` the same way, so it never
+  writes a count over a bank that landed mid-count: it counts once more, and a second miss fails it
+  with a message to run it again, so Reconcile now can't run past the request limit. Until 2026-10-22
+  the claim was the `platformStatsCaptured` flag, set before the count: an org whose count failed was skipped by every
+  retry and vanished from the totals for good, and overlapping captures could bank one campaign
+  twice. The flag is now the **mark** set after the bank — the cheap "done" a retry checks, and the
+  sign the Door Outcomes late sweep waits for before it treats an org's cascade as begun
+  ([lateWriteSweep.js](../server/src/services/platform/lateWriteSweep.js)), so a writer finishing
+  during the count can no longer sweep the rows being counted. That is also why the org capture runs
+  AFTER the cascade's Door Outcomes wait: it counts settled rows. **The live bucket excludes what is
+  banked** — `liveMatches`, shared by the live counts and the trend series: a row is live unless its
+  org is internal or banked (ledger or mark), or its campaign is banked. Never keyed on
+  `deletion.requestedAt`: a delete still in the queue, or failed before its capture, has banked
+  nothing and stays counted (keying on the request made the total dip at the next reconcile, and the
+  capture then subtracted the org a second time). An org capture skips campaigns their own delete
+  already banked, and a campaign capture treats a person as surviving only through a row in a
+  campaign that is still live, so every person is banked by exactly one capture. Ledger ids are
+  **pruned** once their org or campaign is gone — at the end of each cascade, and by every reconcile
+  for anything a crash left — and are never served (`getPlatformStats` returns the sums alone).
+  Pinned by [platformStats.int.test.js](../server/test/platformStats.int.test.js).
+  Internal orgs are excluded everywhere — by `Organization.isInternal` or Subscription
+  `status:'internal'`, the same either-or billing reads; the flag outlives the whole delete cascade.
   `backfilledAt` drives the Control Room's "last reconciled" line. The reconcile job is registered in
   `MAINTENANCE_JOBS` ([scheduler.js](../server/src/services/retention/scheduler.js)) **deliberately
   outside `REPEATABLE_JOBS`** — the retention health banner reports on that list, and a stats hiccup

@@ -57,7 +57,7 @@ import { VotedUpload } from '../../models/VotedUpload.js';
 import { VotedVoter } from '../../models/VotedVoter.js';
 import { Voter } from '../../models/Voter.js';
 import { VoterNote } from '../../models/VoterNote.js';
-import { captureOrgBeforeDelete } from './platformStats.js';
+import { captureOrgBeforeDelete, pruneBank } from './platformStats.js';
 
 // Chunk size for the Person purge below. Env-readable ONLY so the integration test can set it to
 // 2 and prove multi-chunk correctness without seeding 5001 Person docs.
@@ -110,19 +110,25 @@ export async function deleteOrganization(orgId, { heartbeat = () => {} } = {}) {
     throw err;
   }
 
-  // BEFORE destroying anything: bank this org's lifetime contribution into the platform marketing
-  // counters, so "N doors knocked" survives the customer being deleted. No-op for internal orgs. Safe
-  // on a retry — captureOrgBeforeDelete atomically claims the org (platformStatsCaptured) the first
-  // time and returns null on any re-entry, so a retried delete never double-counts. See
-  // services/platform/platformStats.js.
-  await captureOrgBeforeDelete(org._id);
-  heartbeat();
-
   // A Door Outcomes change already mid-batch when the deletion began stops at its next batch; wait
   // out the batch in flight (bounded) BEFORE anything is swept, so no sweep below runs ahead of its
   // last write. The late sweep after ORG_SCOPED catches a write that outlasts the wait (code review
   // 2026-10-19, rounds 2 and 3).
   await waitForDoorOutcomesToStop({ organizationId: org._id }, { heartbeat });
+
+  // BEFORE destroying anything: bank this org's lifetime contribution into the platform marketing
+  // counters, so "N doors knocked" survives the customer being deleted. No-op for internal orgs. Safe
+  // on a retry — captureOrgBeforeDelete's bank is its own claim (one write moves the counts and enters
+  // the org in the bank ledger, or nothing lands), so a retried delete never double-counts, and an
+  // attempt that failed before its bank left nothing, so the retry counts again. See
+  // services/platform/platformStats.js.
+  //
+  // AFTER the wait above, so it counts settled rows: a batch still in flight has landed by now (or the
+  // bounded wait gave up on it). And no writer can sweep the org's knocks and surveys out from under the
+  // count — the late sweep counts this cascade as begun only once the capture's mark is on
+  // (lateWriteSweep.js), which happens here, before the first sweep below.
+  await captureOrgBeforeDelete(org._id);
+  heartbeat();
 
   // The raw uploaded spreadsheets, BEFORE the ImportJob rows that name them are swept away.
   //
@@ -247,6 +253,9 @@ export async function deleteOrganization(orgId, { heartbeat = () => {} } = {}) {
   );
 
   await Organization.deleteOne({ _id: org._id });
+  // The bank ledger lets go of this org's id now that the org is gone; a miss here (a crash) is
+  // pruned by the next reconcile.
+  await pruneBank().catch((err) => console.error('[platform-stats] ledger prune failed:', err?.message || err));
 
   return {
     organization: { id: String(org._id), name: org.name, slug: org.slug },

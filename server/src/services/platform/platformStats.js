@@ -18,22 +18,94 @@ const KEY = { key: 'singleton' };
 // it names, mirroring JOB_NAME in retention/purgeDeletedIdentities.js.
 export const STATS_JOB = 'platform-stats-reconcile';
 
-// The org ids that must be excluded everywhere: Doorline's own demo/internal orgs, PLUS any org
-// currently being deleted. The second half matters because captureOrgBeforeDelete banks a
-// condemned org into the permanent `deleted` bucket at the START of its cascade, while its rows
-// (and the Organization doc) still exist — so counting it in `live` too would double it in the
-// total. That window used to be seconds; since the cascade moved to the worker it is minutes to
-// hours, long enough to span the nightly reconcile and PERSIST the inflated number.
-async function excludedOrgIds() {
-  const [subs, deleting] = await Promise.all([
-    Subscription.find({ status: 'internal' }, 'organizationId').lean(),
-    Organization.find({ 'deletion.requestedAt': { $ne: null } }, '_id').lean(),
-  ]);
-  return [...subs.map((s) => s.organizationId), ...deleting.map((o) => o._id)];
-}
+// How many times a capture counts before it gives up — it counts again only when one of its own org's
+// campaigns is banked or goes away while it counts — and how many banks it tries per count, when other
+// banks land in between (each try is one read and one write). A reconcile counts the whole platform,
+// so any bank is its business; it counts again once, then gives up rather than hold Reconcile now
+// past Heroku's 30-second request limit.
+const CAPTURE_COUNTS = 3;
+const BANK_TRIES = 10;
+const RECONCILE_COUNTS = 2;
 
+// The per-metric row filters for the orgs `org` matches (a filter on organizationId), leaving out the
+// rows of the `banked` campaigns: the one definition of a counted row. The live bucket, the trend
+// series and both captures build from it, so a capture banks exactly the rows `live` counted.
+const metricMatches = (org, banked) => {
+  const notBanked = banked.length ? { campaignId: { $nin: banked } } : {};
+  return {
+    organizations: { _id: org },
+    campaigns: { organizationId: org, ...(banked.length ? { _id: { $nin: banked } } : {}) },
+    doorsKnocked: { organizationId: org, ...notBanked, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK },
+    surveyResponses: { organizationId: org, ...notBanked },
+    votersProcessed: { organizationId: org, ...notBanked },
+  };
+};
+
+// The bank ledger as one snapshot (models/PlatformStats.js): `seq`, bumped by every bank, and the ids
+// banked while their deletion runs. Read in ONE query, so a capture counts under exactly the ledger its
+// bank is then conditional on.
+const readBank = async () => {
+  const doc = await PlatformStats.findOne(KEY, { bank: 1 }).lean();
+  return { seq: doc?.bank?.seq ?? 0, orgs: doc?.bank?.orgs ?? [], campaigns: doc?.bank?.campaigns ?? [] };
+};
+
+// `seq` still reading as it did: 0 also matches a singleton written before the ledger existed.
+const seqIs = (seq) => ({ 'bank.seq': seq || { $in: [0, null] } });
+
+const hasId = (ids, id) => ids.some((x) => String(x) === String(id));
+
+// A conditional write on the singleton must not upsert — on a no-match it would try to insert a second
+// singleton and hit the unique `key` — so the document is made sure of first.
+const ensureSingleton = () => PlatformStats.updateOne(KEY, { $setOnInsert: KEY }, { upsert: true });
+
+// The filter behind every LIVE number; the bucket (computeLiveCounts) and the trend series
+// (computeDailySeries) both apply it. A row is live unless its org is one of Doorline's own
+// demo/internal orgs, or its org or campaign is already BANKED — in the ledger, or marked
+// platformStatsCaptured (everything banked before the ledger existed carries only the mark). A capture
+// moves a condemned org's or campaign's counts into the permanent `deleted` bucket at the START of its
+// cascade, while its rows still exist — minutes to hours on the worker, and indefinitely if the cascade
+// fails and waits for Retry — so counting those rows in `live` too would double them in the total.
+//
+// Keyed on the bank, NEVER on deletion.requestedAt. A delete still waiting in the queue, or one that
+// failed before its capture ran, has banked nothing: excluding it made the total dip at the next
+// reconcile, and its capture then subtracted it from `live` a second time. Pass the `ledger` snapshot
+// a caller's write will be conditional on, so the count and the condition read the same bank.
+const liveMatches = async (ledger) => {
+  const [bankNow, internal, orgs, campaigns] = await Promise.all([
+    ledger || readBank(),
+    Subscription.find({ status: 'internal' }, 'organizationId').lean(),
+    Organization.find({ $or: [{ isInternal: true }, { platformStatsCaptured: true }] }, '_id').lean(),
+    Campaign.find({ platformStatsCaptured: true }, '_id').lean(),
+  ]);
+  const excluded = [...internal.map((s) => s.organizationId), ...orgs.map((o) => o._id), ...bankNow.orgs];
+  const banked = [...campaigns.map((c) => c._id), ...bankNow.campaigns];
+  return metricMatches(excluded.length ? { $nin: excluded } : { $exists: true }, banked);
+};
+
+// One org's campaigns as a capture sees them under `ledger`: the banked ones (marked, or in the
+// ledger), whose rows it leaves out, and a fingerprint of the ones it counts — live and unbanked. A
+// bank that missed compares fingerprints to tell whether its count still stands.
+const campaignsOf = async (organizationId, ledger) => {
+  const rows = await Campaign.find({ organizationId }, { platformStatsCaptured: 1 }).lean();
+  const inLedger = new Set(ledger.campaigns.map(String));
+  return {
+    banked: [...rows.filter((c) => c.platformStatsCaptured).map((c) => c._id), ...ledger.campaigns],
+    counted: rows
+      .filter((c) => !c.platformStatsCaptured && !inLedger.has(String(c._id)))
+      .map((c) => String(c._id))
+      .sort()
+      .join(),
+  };
+};
+
+// Doorline's own demo/internal orgs: the born-immutable flag, which outlives the whole delete cascade,
+// or the billing status coupled to it — the same either-or billing reads (services/billing/invoicing.js).
 async function isInternalOrg(orgId) {
-  return !!(await Subscription.exists({ organizationId: orgId, status: 'internal' }));
+  const [flagged, billed] = await Promise.all([
+    Organization.exists({ _id: orgId, isInternal: true }),
+    Subscription.exists({ organizationId: orgId, status: 'internal' }),
+  ]);
+  return !!(flagged || billed);
 }
 
 // Distinct PEOPLE — {organizationId, stateVoterId} pairs — under `match`. Voter rows are
@@ -66,74 +138,138 @@ export async function bumpLive(metric, n = 1, { isInternal, orgId } = {}) {
   }
 }
 
-// Capture a set of counts into the `deleted` bucket and remove them from `live`, so the total is
-// unchanged but the contribution survives the destruction of the rows. live is clamped at 0 (a missed
-// live increment must never make a counter negative; the next backfill re-syncs live exactly).
-async function moveLiveToDeleted(captured) {
-  const doc = (await PlatformStats.findOne(KEY).lean()) || {};
-  const live = doc.live || {};
-  const inc = {};
-  const set = {};
+// Mark an org or campaign captured (platformStatsCaptured): banked, or with nothing to bank. It is the
+// cheap "already done" a retry checks first, and the sign the late-write sweep waits for before it
+// counts a cascade as begun (lateWriteSweep.js). Set only AFTER the bank, so it never stands for a bank
+// that didn't land; a crash between the two is covered by the ledger, which a retry also reads.
+const mark = (Model, _id) => Model.updateOne({ _id }, { $set: { platformStatsCaptured: true } });
+
+// Bank one org's or campaign's counts: move them from `live` to `deleted`, add its id to the ledger and
+// bump `seq`, in ONE conditional pipeline update on the singleton — so the bank is its own claim, and
+// it lands whole or not at all. It lands only if no other bank landed since the caller read `seq` (the
+// caller counted under the ledger as it still is) and this id isn't banked already. live is clamped at
+// 0 (a missed live increment must never make a counter negative; the next reconcile re-syncs live
+// exactly). Resolves true when it landed. The singleton must exist already (ensureSingleton).
+const bank = async (captured, seq, ledger, id) => {
+  const ids = `bank.${ledger}`;
+  const set = { 'bank.seq': seq + 1, [ids]: { $concatArrays: [{ $ifNull: [`$${ids}`, []] }, [id]] } };
   for (const m of PLATFORM_METRICS) {
     const c = captured[m] || 0;
-    if (c) inc[`deleted.${m}`] = c;
-    set[`live.${m}`] = Math.max(0, (live[m] || 0) - c);
+    set[`deleted.${m}`] = { $add: [{ $ifNull: [`$deleted.${m}`, 0] }, c] };
+    set[`live.${m}`] = { $max: [0, { $subtract: [{ $ifNull: [`$live.${m}`, 0] }, c] }] };
   }
-  const update = { $set: set };
-  if (Object.keys(inc).length) update.$inc = inc;
-  await PlatformStats.updateOne(KEY, update, { upsert: true });
-}
+  const res = await PlatformStats.updateOne({ ...KEY, ...seqIs(seq), [ids]: { $ne: id } }, [{ $set: set }]);
+  return res.matchedCount === 1;
+};
+
+/**
+ * Drop the ledger ids whose org or campaign is gone. An entry only has to outlive the captures that
+ * could still bank its id, and every capture reads its document first, so once the document is gone
+ * the entry has no job left — and the ledger must not keep a deleted customer's ids past their
+ * deletion. Called at the end of both cascades and by every reconcile, which catches what a crash left.
+ */
+export const pruneBank = async () => {
+  const { orgs, campaigns } = await readBank();
+  if (!orgs.length && !campaigns.length) return;
+  const [orgsLeft, campaignsLeft] = await Promise.all([
+    orgs.length ? Organization.distinct('_id', { _id: { $in: orgs } }) : [],
+    campaigns.length ? Campaign.distinct('_id', { _id: { $in: campaigns } }) : [],
+  ]);
+  const goneOrgs = orgs.filter((id) => !hasId(orgsLeft, id));
+  const goneCampaigns = campaigns.filter((id) => !hasId(campaignsLeft, id));
+  if (!goneOrgs.length && !goneCampaigns.length) return;
+  await PlatformStats.updateOne(KEY, { $pull: { 'bank.orgs': { $in: goneOrgs }, 'bank.campaigns': { $in: goneCampaigns } } });
+};
+
+// The protocol both captures share: count under a snapshot of the bank ledger, then bank against it.
+// A bank that misses because another bank landed meanwhile looks at what changed. Banks elsewhere
+// leave the count standing, so it banks again under the new `seq`; but if one of this org's
+// campaigns was banked or went away meanwhile, the count is stale and runs again. (A pruned
+// campaign's document is gone, so pruning can never hide that change.) `settle(ledger)` says, before
+// each count and after each miss, whether there is nothing to do: 'done' (the document is gone or
+// already marked) or 'mark' (banked already, or nothing to bank — mark it and stop).
+const captureWithBank = async ({ Model, id, organizationId, ledger: key, settle, count }) => {
+  await ensureSingleton(); // bank's conditional write must not upsert
+  const stop = async (ledger) => {
+    const verdict = await settle(ledger);
+    if (verdict === 'mark') await mark(Model, id);
+    return !!verdict;
+  };
+  for (let counting = 1; counting <= CAPTURE_COUNTS; counting += 1) {
+    let ledger = await readBank();
+    if (await stop(ledger)) return null;
+    const { banked, counted } = await campaignsOf(organizationId, ledger);
+    const captured = await count(banked);
+    for (let tries = 1; tries <= BANK_TRIES; tries += 1) {
+      if (await bank(captured, ledger.seq, key, id)) {
+        await mark(Model, id);
+        return captured;
+      }
+      ledger = await readBank();
+      if (await stop(ledger)) return null;
+      if ((await campaignsOf(organizationId, ledger)).counted !== counted) break; // stale: count again
+    }
+  }
+  throw new Error('Other deletions kept banking while this was counted — retry the delete.');
+};
 
 /**
  * Capture an organization's lifetime contribution the instant BEFORE its rows are destroyed. Call this
  * at the top of the org-deletion cascade. Returns the captured counts (or null for an internal org,
- * which is excluded). Counts actual rows — the source of truth — never a running tally.
+ * which is excluded, and for one an earlier attempt already banked). Counts actual rows — the source
+ * of truth — never a running tally.
+ *
+ * COUNT, THEN BANK — and the bank is its own claim. The add is not idempotent on its own (organizations
+ * += 1 every call) and the delete queue retries a failed cascade, so something must say "banked
+ * already". That used to be the platformStatsCaptured flag, set BEFORE the count: a count that died
+ * partway (a database blip, or the worker killed on a deploy, both inside the minutes an org-wide count
+ * takes) left the org marked banked with nothing banked, every retry skipped it, and the org was gone
+ * from the lifetime totals for good. Now the ledger entry and the counts land in one write or not at
+ * all, so a failed attempt leaves nothing and its retry counts again. And the bank lands only against
+ * the ledger this count read: a campaign capture banking meanwhile sends this round to count again,
+ * instead of banking that campaign twice.
  */
 export async function captureOrgBeforeDelete(orgId) {
-  // Atomically claim the capture. deleteOrganization is retried by the retention sweep, and this add is
-  // not idempotent on its own (organizations += 1 every call) — so we mark the org exactly once and skip
-  // on any re-entry. `platformStatsCaptured` dies with the org, so it never lingers.
-  const claimed = await Organization.findOneAndUpdate(
-    { _id: orgId, platformStatsCaptured: { $ne: true } },
-    { $set: { platformStatsCaptured: true } }
-  );
-  if (!claimed) return null; // already captured on a prior (failed) attempt, or the org is gone
-  if (await isInternalOrg(orgId)) return null;
-  const [campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
-    Campaign.countDocuments({ organizationId: orgId }),
-    CanvassActivity.countDocuments({ organizationId: orgId, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
-    SurveyResponse.countDocuments({ organizationId: orgId }),
-    countPeople({ organizationId: orgId }),
-  ]);
-  const captured = { organizations: 1, campaigns, doorsKnocked, surveyResponses, votersProcessed };
-  await moveLiveToDeleted(captured);
-  return captured;
+  return captureWithBank({
+    Model: Organization,
+    id: orgId,
+    organizationId: orgId,
+    ledger: 'orgs',
+    settle: async (ledger) => {
+      const org = await Organization.findById(orgId, { platformStatsCaptured: 1 }).lean();
+      if (!org || org.platformStatsCaptured) return 'done'; // gone, or captured by an earlier attempt
+      // Banked by an earlier attempt that died before its mark — or internal, which banks nothing but
+      // still takes the mark, since the late-write sweep waits for it.
+      if (hasId(ledger.orgs, orgId) || (await isInternalOrg(orgId))) return 'mark';
+      return null;
+    },
+    // `banked` holds any campaign whose own hard-delete banked it and then stopped partway: it is
+    // already in `deleted`, so this cascade destroys its rows but must not bank them a second time.
+    count: async (banked) => {
+      const match = metricMatches(orgId, banked);
+      const [campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
+        Campaign.countDocuments(match.campaigns),
+        CanvassActivity.countDocuments(match.doorsKnocked),
+        SurveyResponse.countDocuments(match.surveyResponses),
+        countPeople(match.votersProcessed),
+      ]);
+      return { organizations: 1, campaigns, doorsKnocked, surveyResponses, votersProcessed };
+    },
+  });
 }
 
-/**
- * Capture a single campaign's contribution before a standalone campaign delete destroys its rows. (Org
- * deletion uses captureOrgBeforeDelete instead — the two never both fire for the same rows, because a
- * row is destroyed by exactly one of the two cascades.) `organizations` is 0 here — the org lives on.
- */
-export async function captureCampaignBeforeDelete(campaign) {
-  // Atomically claim the capture — deleteCampaignCascade is sequential and non-transactional, so a
-  // partial failure + admin retry would otherwise re-add campaigns:1 and the surviving voters into the
-  // permanent `deleted` bucket (which the backfill never recomputes). Same guard as the org path.
-  const claimed = await Campaign.findOneAndUpdate(
-    { _id: campaign._id, platformStatsCaptured: { $ne: true } },
-    { $set: { platformStatsCaptured: true } }
-  );
-  if (!claimed) return null; // already captured on a prior (failed) attempt
-  if (await isInternalOrg(campaign.organizationId)) return null;
-  const campaignId = campaign._id;
-  // People this delete actually removes from the org's universe: distinct ids in this
-  // campaign with NO sibling row in another campaign. A person shared with a sibling
-  // campaign lives on there — banking them into `deleted` while their surviving row still
-  // counts in `live` would double them in the total.
-  // Aggregation cursor, NOT distinct(): distinct returns one BSON document hard-capped at
-  // 16MB, which ~600k stateVoterIds would blow — making a huge campaign permanently
-  // undeletable. The $group rides the unique {campaignId, stateVoterId} index; batches of
-  // 5000 keep each sibling distinct() far under the cap.
+// The people a campaign's delete actually removes from its org's live universe: distinct ids in
+// the campaign with NO row in another campaign that is still live. A person shared with a live
+// sibling lives on there — banking them into `deleted` while that row still counts in `live`
+// would double them in the total. A row in one of the `banked` campaigns (its delete stopped
+// partway) does NOT keep a person alive: it is out of `live` already and goes with its own
+// cascade, so a person whose every row is in deleted campaigns is banked by the last of those
+// captures instead of by none.
+// Aggregation cursor, NOT distinct(): distinct returns one BSON document hard-capped at
+// 16MB, which ~600k stateVoterIds would blow — making a huge campaign permanently
+// undeletable. The $group rides the unique {campaignId, stateVoterId} index; batches of
+// 5000 keep each sibling distinct() far under the cap.
+const peopleLeaving = async (campaignId, organizationId, banked) => {
   const cursor = Voter.aggregate([{ $match: { campaignId } }, { $group: { _id: '$stateVoterId' } }])
     .allowDiskUse(true)
     .cursor();
@@ -143,9 +279,9 @@ export async function captureCampaignBeforeDelete(campaign) {
   const flushBatch = async () => {
     if (!batch.length) return;
     const s = await Voter.find({
-      organizationId: campaign.organizationId,
+      organizationId,
       stateVoterId: { $in: batch },
-      campaignId: { $ne: campaignId },
+      campaignId: { $nin: [campaignId, ...banked] },
     }).distinct('stateVoterId');
     survivors += s.length;
     batch = [];
@@ -156,45 +292,96 @@ export async function captureCampaignBeforeDelete(campaign) {
     if (batch.length >= 5000) await flushBatch();
   }
   await flushBatch();
-  const [doorsKnocked, surveyResponses] = await Promise.all([
-    CanvassActivity.countDocuments({ campaignId, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
-    SurveyResponse.countDocuments({ campaignId }),
-  ]);
-  const votersProcessed = Math.max(0, total - survivors);
-  const captured = { organizations: 0, campaigns: 1, doorsKnocked, surveyResponses, votersProcessed };
-  await moveLiveToDeleted(captured);
-  return captured;
+  return Math.max(0, total - survivors);
+};
+
+/**
+ * Capture a single campaign's contribution before a standalone campaign delete destroys its rows. (Org
+ * deletion uses captureOrgBeforeDelete instead, which skips a campaign this already banked, so every
+ * row is banked by exactly one of the two.) `organizations` is 0 here — the org lives on.
+ *
+ * Count, then bank, the org capture's way and for its reasons: deleteCampaignCascade is sequential and
+ * non-transactional and its job is retried, so the bank (campaigns:1 plus its voters, into the
+ * permanent `deleted` bucket the backfill never recomputes) is its own claim. It stands down when its
+ * org's capture got there first — that capture counted this campaign while it was still unbanked — and
+ * counts again when its org or a sibling campaign banks while it counts.
+ */
+export async function captureCampaignBeforeDelete(campaign) {
+  const campaignId = campaign._id;
+  const orgId = campaign.organizationId;
+  return captureWithBank({
+    Model: Campaign,
+    id: campaignId,
+    organizationId: orgId,
+    ledger: 'campaigns',
+    settle: async (ledger) => {
+      const [current, org] = await Promise.all([
+        Campaign.findById(campaignId, { platformStatsCaptured: 1 }).lean(),
+        Organization.findById(orgId, { platformStatsCaptured: 1 }).lean(),
+      ]);
+      if (!current || current.platformStatsCaptured) return 'done'; // gone, or captured by an earlier attempt
+      // Banked by an earlier attempt that died before its mark; or its org's capture banked first,
+      // counting this campaign in, so banking it too would double it; or internal, which banks
+      // nothing. (An org that is merely missing banked nothing — its campaign's rows still count in
+      // `live` — so that campaign banks as usual.)
+      const orgBanked = hasId(ledger.orgs, orgId) || !!org?.platformStatsCaptured;
+      if (hasId(ledger.campaigns, campaignId) || orgBanked || (await isInternalOrg(orgId))) return 'mark';
+      return null;
+    },
+    count: async (banked) => {
+      const scoped = metricMatches(orgId, []);
+      const [votersProcessed, doorsKnocked, surveyResponses] = await Promise.all([
+        peopleLeaving(campaignId, orgId, banked),
+        CanvassActivity.countDocuments({ ...scoped.doorsKnocked, campaignId }),
+        SurveyResponse.countDocuments({ ...scoped.surveyResponses, campaignId }),
+      ]);
+      return { organizations: 0, campaigns: 1, doorsKnocked, surveyResponses, votersProcessed };
+    },
+  });
 }
 
 /**
- * Recompute the LIVE bucket from the current rows of all non-internal orgs, and SET it (idempotent —
- * running twice yields the same result, and the `deleted` bucket is never touched). This is the backfill
- * body, and it doubles as the drift-corrector: any live increment ever missed is made exact here.
+ * The current live counts from real rows — liveMatches' filter: internal orgs and anything already
+ * banked are excluded. READ-ONLY — used both by the backfill dry run (to preview without writing) and
+ * by recomputeLive (to persist), which passes the bank `ledger` its write will be conditional on.
  */
-/**
- * The current live counts from real rows, excluding internal orgs. READ-ONLY — used both by the backfill
- * dry run (to preview without writing) and by recomputeLive (to persist).
- */
-export async function computeLiveCounts() {
-  const internal = await excludedOrgIds();
-  const orgNin = internal.length ? { $nin: internal } : { $exists: true };
+export async function computeLiveCounts(ledger) {
+  const match = await liveMatches(ledger);
   const [organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed] = await Promise.all([
-    Organization.countDocuments({ _id: orgNin }),
-    Campaign.countDocuments({ organizationId: orgNin }),
-    CanvassActivity.countDocuments({ organizationId: orgNin, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }),
-    SurveyResponse.countDocuments({ organizationId: orgNin }),
-    countPeople({ organizationId: orgNin }),
+    Organization.countDocuments(match.organizations),
+    Campaign.countDocuments(match.campaigns),
+    CanvassActivity.countDocuments(match.doorsKnocked),
+    SurveyResponse.countDocuments(match.surveyResponses),
+    countPeople(match.votersProcessed),
   ]);
   return { organizations, campaigns, doorsKnocked, surveyResponses, votersProcessed };
 }
 
+/**
+ * Recompute the LIVE bucket from the current rows (computeLiveCounts), and SET it (idempotent —
+ * running twice yields the same result, and the `deleted` bucket is never touched). This is the backfill
+ * body, and it doubles as the drift-corrector: any live increment ever missed is made exact here. It
+ * also prunes the bank ledger of orgs and campaigns already gone.
+ *
+ * The SET waits on the bank. A capture that banks while this counts has already taken its rows out of
+ * `live` — rows this count may have read as live a moment earlier — so writing the count over it would
+ * hold them in both buckets until the next reconcile. The write lands only if the ledger's `seq` still
+ * reads as it did when the count began; if it doesn't, the count runs once more, and a second miss
+ * fails the reconcile (run it again) rather than hold Reconcile now past the request limit.
+ */
 export async function recomputeLive({ stampBackfill = false } = {}) {
-  const live = await computeLiveCounts();
-  const set = {};
-  for (const m of PLATFORM_METRICS) set[`live.${m}`] = live[m];
-  if (stampBackfill) set.backfilledAt = new Date();
-  await PlatformStats.updateOne(KEY, { $set: set }, { upsert: true });
-  return live;
+  await pruneBank();
+  await ensureSingleton(); // the conditional SET below must not upsert
+  for (let counting = 1; counting <= RECONCILE_COUNTS; counting += 1) {
+    const ledger = await readBank();
+    const live = await computeLiveCounts(ledger);
+    const set = {};
+    for (const m of PLATFORM_METRICS) set[`live.${m}`] = live[m];
+    if (stampBackfill) set.backfilledAt = new Date();
+    const res = await PlatformStats.updateOne({ ...KEY, ...seqIs(ledger.seq) }, { $set: set });
+    if (res.matchedCount) return live;
+  }
+  throw new Error('Deletions kept banking while the platform stats were recounted — run the reconcile again.');
 }
 
 // ── The per-day trend series (PlatformDaily) ─────────────────────────────────────────────────────
@@ -214,19 +401,19 @@ const DAILY_SOURCES = {
 /**
  * The full per-day series from real rows, plus the per-metric count of rows that carry NO date
  * (and so can never appear in any bucket). READ-ONLY — same role computeLiveCounts plays for the
- * live bucket, over the SAME filter set (internal orgs excluded; knocks = KNOCK_ACTIONS, never
- * via:'bulk'), so `Σ(days[m]) + undated[m] === computeLiveCounts()[m]` when the data is quiescent.
+ * live bucket, over the SAME filter (liveMatches: internal orgs and anything already banked
+ * excluded; knocks = KNOCK_ACTIONS, never via:'bulk'), so `Σ(days[m]) + undated[m] ===
+ * computeLiveCounts()[m]` when the data is quiescent.
  * Days are UTC ('%Y-%m-%d' with no timezone) — a platform series has no campaign anchor tz.
  */
 export async function computeDailySeries() {
-  const internal = await excludedOrgIds();
-  const orgNin = internal.length ? { $nin: internal } : { $exists: true };
+  const live = await liveMatches();
   const matches = {
-    organizations: [Organization, { _id: orgNin }],
-    campaigns: [Campaign, { organizationId: orgNin }],
-    doorsKnocked: [CanvassActivity, { organizationId: orgNin, actionType: { $in: KNOCK_ACTIONS }, ...NOT_BULK }],
-    surveyResponses: [SurveyResponse, { organizationId: orgNin }],
-    votersProcessed: [Voter, { organizationId: orgNin }],
+    organizations: [Organization, live.organizations],
+    campaigns: [Campaign, live.campaigns],
+    doorsKnocked: [CanvassActivity, live.doorsKnocked],
+    surveyResponses: [SurveyResponse, live.surveyResponses],
+    votersProcessed: [Voter, live.votersProcessed],
   };
 
   const byDay = new Map();

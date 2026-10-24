@@ -112,9 +112,11 @@ const campaignSchema = new mongoose.Schema(
     // (services/billing/statement.js). Legacy archived campaigns have null —
     // migrate:billing backfills updatedAt.
     archivedAt: { type: Date, default: null },
-    // Set once, atomically, when this campaign's contribution has been banked into the platform
-    // marketing counters (services/platform/platformStats.js), so a RETRIED hard-delete can't capture
-    // its counts twice into the permanent `deleted` bucket. Deleted with the campaign.
+    // Set once this campaign's contribution has been banked into the platform marketing counters
+    // (services/platform/platformStats.js) — or once its capture stood down (an internal org, or its
+    // org's own capture already counted it). A RETRIED hard-delete reads it as "captured already"; the
+    // bank ledger on PlatformStats is what guarantees the bank lands once. It also keeps the campaign's
+    // surviving rows out of the live counts and out of a later org capture. Deleted with the campaign.
     platformStatsCaptured: { type: Boolean, default: false },
     // Hard-delete runs as a background job on the worker dyno (a 107k-door cascade blows Heroku's
     // 30s router limit inline), and the campaign doc itself is the job record — success is the row

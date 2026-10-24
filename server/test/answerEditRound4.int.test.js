@@ -976,7 +976,9 @@ test('G2: a conversion job whose campaign is gone takes its run with it', { skip
 test('G2: a relabel that writes while its organization is being deleted is swept with it', { skip }, async () => {
   const d = await doomedOrg('r4-g2-relabel');
   const campaign = await Campaign.findById(d.campaign._id).lean();
-  await Organization.updateOne({ _id: d.org._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running' } });
+  // Its cascade has begun: running, and its capture has banked the org's lifetime numbers — the mark
+  // the late sweep waits for (lateWriteSweep.js).
+  await Organization.updateOne({ _id: d.org._id }, { $set: { 'deletion.requestedAt': new Date(), 'deletion.status': 'running', platformStatsCaptured: true } });
   await CanvassActivity.updateMany({ campaignId: campaign._id }, { $set: { actionType: 'not_home', voterId: null } });
   await runReclassify({ campaign, from: 'not_home', to: 'wrong_address', byUserId: ctx.admin._id });
   assert.strictEqual(await ReclassifyRun.countDocuments({ organizationId: d.org._id }), 0);

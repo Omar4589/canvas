@@ -252,12 +252,17 @@ equivalent:
 3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
 
 Because assignment is now **team-only**, the everyday flow is: add people on the Team page first, then
-assign their books. **Admins, super-admins and a campaign's team leads are the exception** — they can be
+assign their books. **Admins and a campaign's team leads are the exception** — they can be
 assigned (including themselves) on the fly and are added to the team at that moment, so whoever is
 running the campaign can always self-assign a book without a separate step. (A lead's exception is
 scoped to the campaigns they were granted, and it is new: they used to be refused, so a lead cutting
 turf had to ask an admin to roster them onto their own campaign.) Everyone appears in these lists,
 including you — there's no "hide myself."
+
+**Doorline staff can't be handed work in your organization unless they're a member of it.** Staff get
+the on-the-fly exception only in Doorline's own internal demo organizations. In yours, a staff account
+can be given a book or a walk-list place only if it holds a membership there, which shows on your
+Users page, the same as anyone else.
 
 ## Passwords & lockouts
 
@@ -1077,7 +1082,10 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
   ([campaignRoster.js](../server/src/services/campaignRoster.js)) returns `{ allowed, notOnTeam }`:
   allowed = already on the roster, **or** an org admin, **or** a team lead holding a `CampaignManager`
   grant on **this** campaign (never "is a lead somewhere" — a grant elsewhere must not open this
-  campaign), each only if currently activated; super admins always. The lead branch is new: the check
+  campaign), each only if currently activated; super admins only in an internal org, with a live
+  account and no membership needed (`internalStaffIdSet`). In a customer org staff need an active
+  membership like anyone else (2026-10-24, PRIVACY_VERIFICATION item 36; see ROLES.md for why). The
+  lead branch is new: the check
   matched `role: 'admin'` only, so a lead running a campaign could not put themselves on a book without
   asking an admin to roster them first. Both assign paths use it —
   single-book [turfAssignments.js](../server/src/routes/admin/turfAssignments.js) `POST /` and bulk
@@ -1088,7 +1096,9 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
   mobile visibility.
 - **Client** — the three book pickers and the walk-list RosterPanel source their candidate list from
   the shared [useCampaignTeam(campaignId)](../client/src/lib/useCampaignTeam.js) hook (roster + the
-  current admin, so self-assign always works) instead of the org-wide `GET /admin/memberships`. Each
+  current admin, so self-assign always works; staff count as the current admin only in an internal
+  org, read off the org switcher's cached `/super-admin/organizations` list) instead of the org-wide
+  `GET /admin/memberships`. Each
   offers a "＋ Add someone to the team →" link to the Team page ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx)).
 
 ## In-app "added to org" notice

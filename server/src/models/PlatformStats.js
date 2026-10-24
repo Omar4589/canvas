@@ -23,7 +23,10 @@ import mongoose from 'mongoose';
 // them.
 //
 // COUNTERS ONLY. No per-voter, per-address, per-answer, or per-area data may ever live here — this
-// document is safe to expose publicly precisely because it is nothing but sums.
+// document is safe to expose publicly precisely because it is nothing but sums. The one exception is
+// the `bank` ledger below: the bare ids of orgs and campaigns whose counts are banked while their
+// deletion is still running, each dropped once its org or campaign is gone — never a name or any
+// customer data, and never served (getPlatformStats returns the sums alone).
 const metricFields = () => ({
   organizations: { type: Number, default: 0, min: 0 },
   campaigns: { type: Number, default: 0, min: 0 },
@@ -44,6 +47,16 @@ const platformStatsSchema = new mongoose.Schema(
     //   Σ(series) + undated === live
     // is a real cross-check of the bucketing, not a residual defined into truth. Expected all-zero.
     undated: metricFields(),
+    // The bank ledger, which makes every bank its own claim (services/platform/platformStats.js). A
+    // capture moves counts into `deleted` with ONE conditional write on this document that also adds
+    // the org's or campaign's id here and bumps `seq` — landing only if `seq` hasn't moved since the
+    // capture read it, so two captures can never bank the same rows, and a retry can see that an
+    // earlier attempt banked before it died. An id is pruned once its org or campaign is gone.
+    bank: {
+      seq: { type: Number, default: 0 },
+      orgs: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+      campaigns: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+    },
     // Stamped by the backfill so it can be a one-time, idempotent operation.
     backfilledAt: { type: Date, default: null },
   },

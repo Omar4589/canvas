@@ -1076,6 +1076,21 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   line, the v6 stamp under *THINGS YOU DID NOT ASK ABOUT* §1, privacy.html's offline-copy paragraph and
   its "until a connection is available" sentence (privacy.html:94, an owner item in gap 29) on any
   change to extension, the cap, the prompt, or what a sign-out clears.
+- *(v6 2026-10-24)* **Tenant isolation: privacy.html:105 ("not … visible to other customer
+  organizations"), privacy.html:115 ("access controls that limit each user to the information of their
+  own organization") and DPA §4 ("tenant isolation").** A per-person report drill never answers for
+  someone outside the requester's organization, and, for a team lead, never for someone off the
+  campaigns they manage.
+  - It is checked on the report router's `:userId` param (`orgCarriesUser`, `campaignsCarryUser`), and
+    pinned by `test/reportsUserScope.int.test.js` (item 35).
+  - Re-verify on any new route that takes a person's id from the client. A user id is not a secret.
+    `User.findById` on a client-supplied id, without asking whether this organization (or this lead)
+    carries the person, is the exact shape of the leak this closed.
+  - The other direction (item 36): a customer's admin or lead can't put Doorline staff on a book, a
+    crew or their team unless the staffer holds a membership there (`internalStaffIdSet`,
+    `services/campaignRoster.js`), pinned by `test/staffRosterScope.int.test.js`. Re-verify on any new
+    assign path and on any new "staff skip the membership check" rule: staff skip it only in an internal
+    org.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -2978,6 +2993,175 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     subprocessor, no export; DPA §6 untouched, no customer notice. **Policy text:** no privacy.html, Terms
     or DPA sentence becomes false — privacy.html `:128` ("we aim to remove your name") is now true of the
     run lines too; nothing published promises that a deleted round's snapshots are kept.
+33. **[v6 2026-10-22 — Lifetime platform totals: while a deletion runs, the platform counters hold the
+    bare id of the org or campaign being deleted, and drop it once it is gone. Nothing new collected, no
+    recipient, no export, no subprocessor.]** The Control Room's lifetime totals (`PlatformStats`,
+    [platformStats.js](../server/src/services/platform/platformStats.js)) bank a customer's counts into
+    a kept bucket at the start of its deletion — the sums privacy.html `:122` calls "aggregate,
+    non-identifying usage statistics". So that each bank lands exactly once, the same document now holds
+    a small ledger (`bank.orgs`, `bank.campaigns`, `bank.seq`): the ids of the orgs and campaigns banked
+    while their deletion is still running. Ids only — never a name, a voter, an answer or any other
+    customer data — and never served: `GET /super-admin/access/platform-stats` returns the sums alone.
+    Each id is pruned once its org or campaign is gone, at the end of its cascade, and by the nightly
+    reconcile for one a crash left behind, so an id outlives its deletion by a day at most. Also from
+    this change: a Door Outcomes writer that finishes during an organization delete sweeps the tenant's
+    rows only once that delete has banked the org's counts (its `platformStatsCaptured` mark, set before
+    the cascade's first sweep) — the cascade's own sweeps still remove everything, so "deletion removes
+    the organization's … canvassing records" holds unchanged. Pinned by
+    [platformStats.int.test.js](../server/test/platformStats.int.test.js). **Policy text:** no
+    privacy.html, Terms or DPA sentence becomes false — what is kept after a deletion is still sums only;
+    the transient id is internal bookkeeping of the deletion itself. Flagged for the owner all the same,
+    since it touches what a deletion leaves while it runs.
+34. **[v6 2026-10-23 — Client report visibility switches are not enforced on the wire. Audit finding;
+    NOT fixed yet.]** Verified by driving the real admin and share endpoints against a throwaway
+    database. (a) With **Show the coverage map** off, publish still freezes every reached door's street
+    line, coordinates, status and selected answers (`clientReports.js:697-704`), and
+    `GET /share/:token/reports/:id/map` (`share.js:166-173`) serves them to anyone holding the link and
+    its password; the switch only hides the map in the browser. (b) A survey question unticked from the
+    report's visible list still ships its option counts in the report's `survey` field, and its answers
+    on every map point, whenever it stays in `mapAnswerKeys` — which is seeded with every choice question
+    at create, has no tie to the visible list, and whose checklist the builder hides while the map is off
+    (`mapFilterSurvey`, `clientReportView.js:114-127`; an empty `mapAnswerKeys` also means every question
+    there). (c) An operator-set link password may be one character (`shareUpdateSchema`,
+    `clientReports.js:251`); the unlock limiter counts per IP + token only. (d) *[2026-10-24, review
+    round 1, verified]* Two more fields carry hidden question keys to link holders:
+    `visibility.mapAnswerKeys` is sent raw, and `supportQuestionKey` is sent even when that question is
+    hidden (`clientReportView.js:68, 88-91`). Keys are slugs of the question's title
+    (`SurveyBuilder.jsx:107-110`), so a key gives away the hidden question's wording. No client screen
+    reads `visibility.mapAnswerKeys`. **Policy text:** privacy.html
+    `:101` says the map shows door statuses "and, where the customer chooses, responses to selected
+    survey questions, shown at the address level" — (a) means a customer who chose no map still has
+    address-level points served behind the link; (b) and (c) are control gaps, not false sentences. The
+    proposed fixes ([PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md) §F) make the
+    sentence true as written, with no policy, Terms or DPA edit. Until they ship, treat that sentence as
+    at risk. Separately, the same line says links expire "after 90 days by default, or a period of up to
+    one year chosen by an administrator": the API accepts it, the share panel offers no way to choose it.
+
+35. **[v6 2026-10-24 — Per-person report drills returned other organizations' people, and let a team
+    lead open anyone in their own organization. FIXED 2026-10-24; deploy pending (stamp the deploy
+    date here when it ships).]**
+    - **Found** by plan review (PROPOSAL_ADMIN_ACCOUNT_DELETION.md, rounds 3 and 4) and reproduced over
+      HTTP, as an admin and as a campaign-scoped team lead.
+    - **The leak:**
+      - `GET /admin/reports/canvassers/:userId/summary` looked the account up by id alone
+        (`User.findById(userId, 'firstName lastName email phone isActive lastLoginAt')`) and returned it
+        for **any** valid user id. `parseUserIdParam` checked the format only, and the route answered
+        404 only when no account existed at all.
+      - `/canvassers/:userId/responses` did the same with name and email.
+      - The canvasser CSV's `?coordinatorId=` crew stamp (`crewStampLabel`) printed any account's name.
+      - So any admin, or any team lead (who can be the paying client), holding another organization's
+        user id could read that person's name, email, phone, active flag and last sign-in. Inside their
+        own organization, a lead could do the same for anyone, admins included, though the Users list
+        walls leads to their managed campaigns (`leadVisibleUserIds`, `memberships.js`). Help Center
+        `guides/roles-and-team.md` promises that wall ("a lead works inside the campaigns you grant
+        them"; "admins and fellow leads are entirely out of their reach").
+      - User ids are not secrets: an ObjectId encodes its creation time and a per-process counter.
+      - The other eight drills scope their data by `organizationId` and leaked nothing beyond an empty
+        result.
+    - **Policy text that was untrue for these fields until the fix deploys:**
+      - privacy.html `:105`: customer data "is not shared with, or visible to, other customer
+        organizations";
+      - privacy.html `:115`: "access controls that limit each user to the information of their own
+        organization";
+      - the signed DPA §4 (`DPA.md:41`): "tenant isolation limiting each customer's users to that
+        customer's data".
+    - **The fix**, checked on the report router's `:userId` param, so all ten `/canvassers/:userId/*`
+      drills and any future one answer anyone else with the same 404 as an id that doesn't exist:
+      - **An org admin** (super admins included) sees anyone the org carries: `orgCarriesUser` in
+        `services/reports/canvasserIdentity.js`, meaning a membership here in any status, or the
+        person's own knocks (desk marks excluded) or surveys on this org's ledger. Desk marks are left
+        out because their `userId` is whoever pressed the button, which can be Doorline staff under a
+        grant.
+      - **A team lead** sees only people on a campaign they manage: `campaignsCarryUser`, meaning
+        rostered there, granted to run it, coordinating a crew there, or with their own knocks or
+        surveys there. Any managed campaign counts, because the phone's Users hub opens people from a
+        lead's other campaigns.
+      - **`crewStampLabel`** names a coordinator only if the same check passes, or the coordinator is
+        stamped on the doors in the export's scope. Anyone else prints "unknown coordinator".
+      - **`/summary` returns `lastLoginAt` only for a current member**, so a person carried only by old
+        knocks doesn't reveal that they sign in somewhere else now.
+    - **Pinned by** `test/reportsUserScope.int.test.js` (6 tests). For an admin and for a lead, every
+      drill answers another org's live or deleted member identically to a non-existent id. Also pinned:
+      - a lead is refused someone on a campaign they don't manage, and an org admin who is on none of
+        their campaigns, but still sees their other campaigns' people;
+      - this org's members in any status, departed members, and someone with only a survey still
+        resolve;
+      - a staffer with only desk marks stays hidden;
+      - a removed member's `lastLoginAt` comes back null;
+      - the crew stamp for an admin and for a lead;
+      - the malformed-id 400.
+
+      15 related suites stay green: reports, crews, team attribution and leads (211 tests in all).
+    - **No policy, Terms or DPA text change:** the fix makes those three sentences true as written.
+    - **For the owner and counsel:** DPA §5 requires notice "after confirming a breach of security
+      leading to … unauthorized disclosure of or access to Personal Information". Whether anyone used
+      this can't be read from a durable record:
+      - `AccessLog` covers staff access only;
+      - production's request log (`morgan('combined')`, `app.js:86`) records each request's path, which
+        carries the drilled id, plus its status and IP address, but not who made the request;
+      - those lines survive only as far back as Heroku's log retention, or any log drain if one exists.
+
+      That is a fact for counsel's assessment, not a conclusion that nothing is owed.
+    - **Owner decision (2026-10-24):** not referred to counsel, and no DPA §5 notice. The basis: review
+      found it, and no record shows it was used. The record limits above stand, so nothing proves it
+      wasn't used either.
+    - **Watchlist:** see the 2026-10-24 bullet in *New policy sentences to keep true*.
+36. **[v6 2026-10-24 — A customer's admin or team lead could put a Doorline staff account on a book or a
+    walk-list crew, and read the staffer's contact details back. FIXED 2026-10-24; deploy pending (stamp
+    the deploy date here when it ships).]**
+    - **Found** by plan review (PROPOSAL_ADMIN_ACCOUNT_DELETION.md, round 4, R4B-3) and reproduced over
+      HTTP on the old code, as a customer's team lead.
+    - **The gap:**
+      - `partitionAssignable` (`services/campaignRoster.js`) is the check behind all three assign paths:
+        one book, `assign-bulk`, and a walk list's `POST /efforts/:id/members`. It let any super-admin id
+        through in every org, with no membership needed. The exemption was meant for staff working
+        Doorline's own orgs ("cross-org oversight + self-assign").
+      - So a staff id earned a 201 (200 from `assign-bulk`) where any other outsider's id earns a 409,
+        which confirmed the id belonged to staff.
+      - The assignment also put the staffer on the customer's campaign team (`ensureCampaignAssignments`)
+        without the customer adding them.
+      - The book list and the crew list then returned the staffer's name and email. The Team list
+        (`GET /admin/campaigns/:id/assignments`) also returned their phone, last sign-in time and
+        `isSuperAdmin: true`.
+      - A customer can come by a staff id: a row a staffer writes under a support grant carries it, for
+        example `assignedBy` on a book assignment, which the book list returns as-is (read from the
+        code). Ids are not secrets anyway (item 35).
+      - **What it did not do:** let anyone into customer data. A roster row is not a membership, so the
+        staffer gained no entry to the org (`orgContext` still requires a membership or a grant), and the
+        customer read nothing but the staffer's own account fields.
+    - **Whose data:** Doorline staff accounts' contact details, not customer data. The closest policy
+      sentence is privacy.html `:115`, "access controls that limit each user to the information of their
+      own organization", which was untrue for staff identities. No sentence about customer data was
+      false. The DPA's notice clause (§5) covers customer Personal Information; this exposed staff
+      identities only.
+    - **The fix:**
+      - `internalStaffIdSet` (`services/campaignRoster.js`) counts staff as members without a membership
+        row only in an internal org (`Organization.isInternal`, the one place `orgContext` seats them as
+        members), and only with a live account.
+      - In a customer org a staffer needs an active membership like anyone else, and support access can't
+        mint one (`vendorGuards.js`).
+      - `partitionAssignable` and `departedMemberIdSet` (the snapshot-restore gate) both use it, so a
+        restore can't hand back a book the assign paths now refuse.
+      - The web book pickers (`useCampaignTeam`) offer staff "You" only in an internal org. The phone is
+        unchanged: in a customer org its self-assign already stopped at the Team add, which needs a
+        membership.
+      - Also new: a switched-off staff account is refused in an internal org too. It used to pass.
+    - **Rows made before the fix stay.** Nothing removes a staff account already on a customer's book,
+      crew or team. Removing it from that book or the Team page works as for anyone. Removal deletes a
+      member's roster rows (`releaseAssignedWork`), so a team row with no membership behind it can only
+      have come from this gap or a race.
+    - **Pinned by** `test/staffRosterScope.int.test.js` (4 tests, over HTTP) and three new tests in
+      `test/partitionAssignable.int.test.js`.
+      - In a customer org, a staff id on all three assign paths, from an admin and from a lead, gets the
+        same 409 as an id that doesn't exist, and no book, crew or team row is written.
+      - Kept: a staffer the customer made a member is assignable, and staff in an internal org still
+        assign themselves a book.
+      - On the old code the 5 tests of the refusal fail and the 5 that pin kept behavior pass.
+      - 23 related suites stay green (298 tests).
+    - **No policy, Terms or DPA text change:** the fix makes privacy.html `:115` true for staff
+      identities as written.
+    - **Watchlist:** the 2026-10-24 bullet in *New policy sentences to keep true* covers this direction
+      too.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -3694,6 +3878,10 @@ item 25) on campaigns that turned that outcome on. For this outcome the point ga
 value — never the door note; the share map offers its filter chip only on a report that has such a
 door. Within `privacy.html:101`'s "door statuses" sentence either way.]*
 
+*[v6 2026-10-23: these points are frozen and served even on a report whose **Show the coverage map**
+switch is off, and a question hidden from the report's charts still reaches the points and the map
+filters unless it is also unticked there. Verified; not fixed yet. See gap 34.]*
+
 The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReportMapPoint.js:33`). **That is not an accurate description of its precision.** What it excludes is the unit/apartment line (`addressLine2`) and the ZIP.
 
 > **[v4 2026-08-08 — building grouping on the client report map: RE-VERIFIED, nothing new is exposed.]**
@@ -4032,6 +4220,13 @@ I looked for voter PII and did **not** find any rendered: job payloads are ids (
 
 **PARTIAL. No customer can read another customer's voter data. But five things cross the tenant boundary, and one of them is the platform staff console.**
 
+> **(v6 stamp 2026-10-24) A sixth crossing, found and fixed.** The per-person report drills
+> (`/admin/reports/canvassers/:userId/summary` and `/responses`) and the canvasser CSV's crew stamp
+> returned **any** account's name, email, phone and last sign-in by user id. Any admin or team lead of
+> any organization could read another organization's people that way, so "no customer can read
+> another customer's data" did not hold for those fields. Fixed 2026-10-24, deploy pending: see
+> numbered item 35 and the 2026-10-24 watchlist bullet.
+
 ### What is correctly isolated (VERIFIED — I traced it)
 
 `orgContext` requires an **active Membership** in the org named by `X-Org-Id` on every request, else 403 (`orgContext.js:58-67`, `:101-103`). Every content-bearing admin router **and the query itself** scopes to `activeOrgId`: reports `baseFilter` always ANDs `organizationId` (`reports.js:123-136`, so a foreign `?campaignId` returns zero rows); voters (`admin/voters.js:47`, `:196`, `:256`, `:291`, `:309`); campaign-nested routers each re-verify campaign ownership against the active org before touching sub-resources (`turfs.js:33-47`, `efforts.js:26-46`, `walklists.js:27-42`, `passes.js:24-39`, `voted.js:20-35`, `campaignHouseholds.js:33-38`, and six more). Mobile 404s a household from another org (`mobile/canvass.js:55-68`). All seven `/super-admin` routers require `requireSuperAdmin`.
@@ -4066,6 +4261,12 @@ No `organizationId`. If org A geocodes an address and org B later imports the sa
 One human has **one** `User` row (name, email, phone, password hash) with a **globally unique email** (`models/User.js:4-60`), and holds a separate `Membership` per organization (`models/Membership.js:41`). A user can be an active member of multiple customer organizations simultaneously.
 
 **What such a user can SEE is correctly gated** — one org at a time, only orgs they are a member of. No union view, no cross-org query surface for them.
+
+> **(v6 stamp 2026-10-24) There was one cross-org query surface, now closed.** The per-person report
+> drills looked a `User` up by id alone, so the global record was readable by any other organization's
+> admins and leads who held the id: name, email, phone and last sign-in. They now answer only for
+> someone the organization carries, and for a team lead only someone on their campaigns. See numbered
+> item 35.
 
 **But two things cross the boundary:**
 
